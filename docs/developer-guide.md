@@ -288,6 +288,13 @@ the repository's root and index key. A device installs from the built repository
 trusted for `repositories`: copy each blob from the builder's cache to `blobs/<ab>/<sha256>`
 beside `repository.json`.
 
+`tools/package-repository/live-check.py BUILD-DIR` checks the live repository at
+packages.oscairn.org from a user's side, with a desktop build (`OSCAIRN_STANDALONE`, for HTTPS)
+and a throwaway data folder: trusting its root key and the publisher's, installing Analog, FM and
+the effects with their asset libraries, and playing a factory preset of each instrument offline,
+in the engine and in a worker, through `oscairn-installed-play`. It needs the network, so it is
+not part of ctest; run it after publishing.
+
 ### Planned
 
 A managed package installer and repository are planned

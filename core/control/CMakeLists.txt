@@ -241,6 +241,10 @@ set_tests_properties(control-shared-parts PROPERTIES TIMEOUT ${switch_timeout})
 add_executable(oscairn-sound-presets-test tests/sound_presets.cpp)
 target_link_libraries(oscairn-sound-presets-test PRIVATE oscairn_control_json)
 add_test(NAME control-sound-presets COMMAND oscairn-sound-presets-test $<TARGET_FILE:oscairn_basic_synth>)
+# Plays an installed plugin offline, for tools/package-repository/live-check.py; no test, as that needs the network.
+add_executable(oscairn-installed-play tests/installed_play.cpp)
+target_link_libraries(oscairn-installed-play PRIVATE oscairn_control_json)
+target_compile_options(oscairn-installed-play PRIVATE -Wall -Wextra)
 
 # Sessions, native sounds and effects and Performances again with every CLAP plugin in a worker (RFC 0010 step 5).
 set(control_worker_tests

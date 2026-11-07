@@ -23,7 +23,9 @@ unless it says otherwise.
    text and accurate stepped and hidden flags. Oscairn draws editors from the parameters
    everywhere ([Editing without the plugin's window](#editing-without-the-plugins-window));
    the plugin's own window opens on the desktop only ([The plugin's window](#the-plugins-window)).
-5. **Add `oscairn.ui` hints and roles** so the right parameters land on the physical knobs.
+5. **Add `oscairn.ui` hints and roles** so the right parameters land on the physical knobs,
+   and views for envelopes, key maps and FM operators so they are drawn to drag
+   ([Rich views](#rich-views-what-each-engine-should-declare)).
 6. **Declare memory with `oscairn.memory`** if activating allocates a lot (delay lines, sample
    pools, reverb tables).
 7. **Be real-time safe and say when you are silent:** no allocation, locks or file access in
@@ -144,7 +146,7 @@ the current headers.
 
 | Extension | Why | Example |
 | --- | --- | --- |
-| Editor hints (`ui.h`, `oscairn.ui/draft-4`, [RFC 0019](rfcs/0019-adaptive-ui.md)) | Puts the right parameters first on small screens and on the physical knobs. Details [below](#editor-hints-and-roles). | Basic Synth (cutoff and level), Delay (Wet is its `mix`) |
+| Editor hints (`ui.h`, `oscairn.ui/draft-4`, [RFC 0019](rfcs/0019-adaptive-ui.md)) | Puts the right parameters first on small screens and on the physical knobs, and draws envelopes, key maps and FM operator views to drag. Details [below](#editor-hints-and-roles). | Basic Synth (cutoff and level, its envelope as an ADSR view), Delay (Wet is its `mix`) |
 | Declared memory (`memory.h`, `oscairn.memory/draft`, [RFC 0025](rfcs/0025-resource-budgets.md#declarations)) | Lets a device near its memory limit refuse the plugin before its large allocation, and sets a tighter worker memory limit. Details [below](#declared-memory). | KICK memory test fixture |
 | Native sound contexts (`sound-contexts.h`, [RFC 0005](rfcs/0005-sound-contexts.md)) | Multitimbral playing: up to 8 prepared sounds in one instance, each MIDI channel choosing one, held notes keeping theirs, without an extra instance per sound. New native Oscairn instruments implement it. | Basic Synth, Legacy Sampler |
 | Snapshots prepared beside (`sound-contexts.h`, `oscairn.sound-snapshots/draft-4`, [RFC 0005](rfcs/0005-sound-contexts.md#preparing-a-snapshot-beside)) | Instant Performance changes: the next Performance's sounds for an instrument already playing are prepared in that instance, beside the playing ones, and selected at the cue, instead of loading its whole snapshot into an instance. Without it a native instrument is taken over whole, its snapshot loaded (for a sampler, its samples again). With its optional `ring_out` and `choke_retiring`, the outgoing sounds ring out through the outgoing Performance's effects and level instead of the incoming one's. Details [below](#instant-performance-changes). | Basic Synth |
@@ -378,9 +380,187 @@ A plugin that declares no role gets roles from its parameters' names: exact name
 as "Cutoff", "Resonance", "Attack" (a filter module's "Attack" is the filter envelope's),
 "Level", "Wet" or "Mix". That misses most spellings, so declare roles. Declaring any role
 turns the guessing off for the plugin's other parameters, so declare every role it has.
-Every parameter stays reachable whatever its hint. Describing whole editors (a module grid, a
-sample map) comes later. Draft 3 added the role, so the struct grew: a plugin built against
-draft 2 must rebuild.
+Every parameter stays reachable whatever its hint. A module grid and a waveform with markers
+come later. Draft 3 added the role and draft 4 a view (below), so the struct grew each time: a
+plugin built against draft 2 must rebuild; one built against draft 3 still gets its hints and
+roles, without views, until it rebuilds against draft 4.
+
+### Rich views: what each engine should declare
+
+Draft 4 lets a plugin say which of its parameters make an envelope, a key or velocity map, or
+an FM operator view; Desktop and Panel then draw that view above the parameters' tiles, from
+their values, and dragging it sets them, undone as any parameter edit
+([RFC 0019](rfcs/0019-adaptive-ui.md#step-5-status)). Three more fields at the end of the hint:
+
+- **`view`:** any nonzero number, the same for every parameter of one view, and stable across
+  info rescans. A view may span modules (an FM view's operators are on their own pages).
+- **`field`** (`enum oscairn_field`): the parameter's place in it.
+- **`index`:** whose field it is, 1 to 8 (an operator's, an element's, a zone's), or 0 for the
+  view's own (the algorithm).
+
+What a view is follows from its fields:
+
+| View | Fields | Drawn |
+| --- | --- | --- |
+| Envelope, named stages | `DELAY`, `ATTACK`, `HOLD`, `DECAY`, `SUSTAIN`, `RELEASE` (attack and release needed) | From zero: delay, attack to full, hold, decay to the sustain level, held, release to zero |
+| Envelope, points | `LEVEL_0`…`LEVEL_8`, `TIME_1`…`TIME_8` or `RATE_1`…`RATE_8` (a rate: faster when higher) | Segment k reaches `LEVEL_k`; without one it holds, and the last falls to zero. From `LEVEL_0`, else the last segment's level. Holds before the last segment, which is the release |
+| Key or velocity map | `KEY_LOW`, `KEY_HIGH`, `VELOCITY_LOW`, `VELOCITY_HIGH` per index (a zone); `BREAKPOINT`, `LEFT_DEPTH`, `RIGHT_DEPTH`, `LEFT_CURVE`, `RIGHT_CURVE`, `VELOCITY_DEPTH`, `VELOCITY_CURVE` | Every index's zone over a keyboard, the page's own in the accent; level scaling around the breakpoint, a curve's value text saying its sign and shape (`-Linear`, `+EXP`); velocity's effect |
+| FM operator view | `ALGORITHM` (stepped, up to 128 values; index 0) and `FEEDBACK`; per operator `OPERATOR_LEVEL`, `RATIO` (or its coarse part), `FINE`, `DETUNE`, `FIXED`, and its envelope and scaling fields with its index | Where the algorithm is: the routing, and a column per operator (level, ratio, envelope); an operator's page draws its envelope and scaling |
+
+An envelope is drawn per view and index, a map per view and index (with all the view's zones),
+each where its parameters' tiles are. Rules:
+
+- `param_hint` must return true for **every** parameter in a view, also those with no role or
+  widget (`OSCAIRN_WIDGET_AUTO`, priority 0, `CLAP_INVALID_ID`, group 0, their role or none).
+  A plugin that returns false for parameters without a role, as the forks do today, must change
+  that.
+- Fill `algorithm` in `oscairn_plugin_ui_t` (or leave it null): the routing of each algorithm
+  value, `inputs[n]` the mask of operators modulating operator n + 1, `carriers` the mask
+  heard, `feedback_from` and `feedback_to` (0: none). The host asks for every value of the
+  parameter when it reads the hints, and drops all routings if one is missing.
+- The host keeps a field only where it knows it, on an index up to 8, and an algorithm only on
+  a stepped parameter of at most 128 values; anything else leaves its view and is a tile.
+- Positions are by each parameter's range (0 at the left or bottom); value texts label them.
+  A pitch envelope's levels are drawn from the bottom, not about a center, for now.
+- Views never replace tiles or physical controls; the knobs bind to the parameters.
+
+**Oscairn FM** (IDs from `source/oscairn/Parameters.cpp`): the Classic voice as view 1, the
+Extended voice as view 2, the pitch EG as view 3. `OperatorGraph` already has
+`oscairn_fm_algorithm_t`'s layout.
+
+```cpp
+// Draft 4 (vendor the new ui.h): a view field for every parameter in a view.
+uint32_t fmField(clap_id id, uint32_t &view, uint32_t &index)
+{
+    const uint32_t n = id / 1000, k = id % 1000;
+    index = 0;
+    if (id == 1 || id == 2) { view = 1; return id == 1 ? OSCAIRN_FIELD_ALGORITHM : OSCAIRN_FIELD_FEEDBACK; }
+    if (id == 40 || id == 41) { view = 2; return id == 40 ? OSCAIRN_FIELD_ALGORITHM : OSCAIRN_FIELD_FEEDBACK; }
+    if (id >= 20 && id <= 27) { view = 3; return id < 24 ? OSCAIRN_FIELD_RATE_1 + (id - 20) : OSCAIRN_FIELD_LEVEL_0 + 1 + (id - 24); }
+    if (n < 1 || n > 8) return OSCAIRN_FIELD_NONE;
+    index = n;
+    if (k < 30 && n <= 6) { // Classic operator n: Rate 1-4, Level 1-4 (it starts at level 4)
+        view = 1;
+        if (k >= 1 && k <= 4) return OSCAIRN_FIELD_RATE_1 + (k - 1);
+        if (k >= 5 && k <= 8) return OSCAIRN_FIELD_LEVEL_0 + (k - 4);
+        switch (k) {
+        case 9: return OSCAIRN_FIELD_BREAKPOINT;   case 10: return OSCAIRN_FIELD_LEFT_DEPTH;
+        case 11: return OSCAIRN_FIELD_RIGHT_DEPTH; case 12: return OSCAIRN_FIELD_LEFT_CURVE;
+        case 13: return OSCAIRN_FIELD_RIGHT_CURVE; case 16: return OSCAIRN_FIELD_VELOCITY_DEPTH;
+        case 17: return OSCAIRN_FIELD_OPERATOR_LEVEL; case 18: return OSCAIRN_FIELD_FIXED;
+        case 19: return OSCAIRN_FIELD_RATIO;      case 20: return OSCAIRN_FIELD_FINE;
+        case 21: return OSCAIRN_FIELD_DETUNE;
+        }
+        return OSCAIRN_FIELD_NONE;
+    }
+    view = 2; // Extended operator n: Hold, then Attack, Decay 1, Decay 2 and Release, back to
+              // the Release (Hold) Level, which it starts at (no LEVEL_0)
+    if (k == 49) return OSCAIRN_FIELD_TIME_1;
+    if (k >= 45 && k <= 48) return OSCAIRN_FIELD_TIME_1 + 1 + (k - 45);
+    if (k >= 41 && k <= 44) return OSCAIRN_FIELD_LEVEL_0 + 2 + (k - 41);
+    switch (k) {
+    case 31: return OSCAIRN_FIELD_FIXED;      case 32: return OSCAIRN_FIELD_RATIO;
+    case 33: return OSCAIRN_FIELD_FINE;       case 34: return OSCAIRN_FIELD_DETUNE;
+    case 51: return OSCAIRN_FIELD_OPERATOR_LEVEL; case 52: return OSCAIRN_FIELD_BREAKPOINT;
+    case 53: return OSCAIRN_FIELD_LEFT_DEPTH; case 54: return OSCAIRN_FIELD_RIGHT_DEPTH;
+    case 55: return OSCAIRN_FIELD_LEFT_CURVE; case 56: return OSCAIRN_FIELD_RIGHT_CURVE;
+    case 57: return OSCAIRN_FIELD_VELOCITY_DEPTH;
+    }
+    return OSCAIRN_FIELD_NONE;
+}
+
+bool paramHint(const clap_plugin_t *, clap_id id, oscairn_param_hint_t *hint)
+{
+    uint32_t view = 0, index = 0;
+    const uint32_t field = fmField(id, view, index), role = roleOf(id); // roleOf: the roles paramHint declares today
+    if ((role == OSCAIRN_ROLE_NONE && field == OSCAIRN_FIELD_NONE) || indexOf(id) < 0)
+        return false;
+    *hint = { id == outputBusParam ? (uint32_t)OSCAIRN_WIDGET_LIST : (uint32_t)OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, role,
+              field ? view : 0, field, index };
+    return true;
+}
+
+bool algorithm(const clap_plugin_t *, clap_id id, uint32_t value, oscairn_fm_algorithm_t *out)
+{
+    const OperatorGraph *g = id == 1 && value >= 1 && value <= 32 ? &dx7Algorithms[value - 1]
+                           : id == 40 && value >= 1 && value <= 88 ? &extAlgorithms[value - 1] : nullptr;
+    if (!g) return false;
+    std::memcpy(out->inputs, g->inputs, 8);
+    out->carriers = g->carriers; out->feedback_from = g->feedbackFrom; out->feedback_to = g->feedbackTo;
+    return true;
+}
+
+const oscairn_plugin_ui_t uiExt = { paramHint, algorithm }; // returned for OSCAIRN_EXT_UI ("oscairn.ui/draft-4")
+```
+
+The Extended operators' pitch EGs (37 to 40) can be views of their own the same way
+(`LEVEL_0`, `TIME_1` with `LEVEL_1`, `TIME_2`); the profile's hidden parameters drop out of the
+views as they drop out of the pages.
+
+**Oscairn Analog** (Surge, `src/oscairn-clap/OscairnAnalog.cpp`): its two ADSRs, scene A's as
+its roles are, as views 1 (Amp Envelope) and 2 (Filter Envelope). The stages' shapes and the
+envelope's mode stay tiles.
+
+```cpp
+// The view and field of an ADSR stage, beside roleOf; 0: in no view.
+uint32_t viewOf(const Parameter &p, uint32_t &field) const
+{
+    auto &sc = synth->storage.getPatch().scene[0];
+    for (uint32_t e = 0; e < 2; ++e) {
+        const std::pair<const Parameter *, uint32_t> stages[] = {
+            {&sc.adsr[e].a, OSCAIRN_FIELD_ATTACK}, {&sc.adsr[e].d, OSCAIRN_FIELD_DECAY},
+            {&sc.adsr[e].s, OSCAIRN_FIELD_SUSTAIN}, {&sc.adsr[e].r, OSCAIRN_FIELD_RELEASE}};
+        for (auto &[q, f] : stages)
+            if (q == &p) { field = f; return e + 1; }
+    }
+    return 0;
+}
+
+bool uiParamHint(const clap_plugin_t *p, clap_id id, oscairn_param_hint_t *hint)
+{
+    auto pi = self(p).find(id, nullptr);
+    uint32_t field = OSCAIRN_FIELD_NONE;
+    const uint32_t view = pi && pi->p ? self(p).viewOf(*pi->p, field) : 0;
+    if (!pi || (pi->role == OSCAIRN_ROLE_NONE && !view))
+        return false;
+    *hint = {pi->bus ? (uint32_t)OSCAIRN_WIDGET_LIST : (uint32_t)OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, pi->role, view, field, 0};
+    return true;
+}
+const oscairn_plugin_ui_t uiExt{uiParamHint, nullptr};
+```
+
+**An AWM2 element** (the sfizz-based Oscairn Sampler, once its elements are parameters; it has
+only Output bus and the Assign Switches today): every element n (1 to 8) in one view, index n,
+so each element's page draws its envelope and one map of all the elements' zones, its own in the
+accent. With element n's parameters on page `Element n`:
+
+| Parameter | Field | Index |
+| --- | --- | --- |
+| Note Limit Low, Note Limit High (MIDI notes, note-named value texts) | `KEY_LOW`, `KEY_HIGH` | n |
+| Velocity Limit Low, Velocity Limit High | `VELOCITY_LOW`, `VELOCITY_HIGH` | n |
+| Level Velocity Sensitivity | `VELOCITY_DEPTH` | n |
+| AEG Initial Level | `LEVEL_0` | n |
+| AEG Hold Time | `TIME_1` (no level: it holds the initial level) | n |
+| AEG Attack Time, Attack Level | `TIME_2`, `LEVEL_2` | n |
+| AEG Decay 1 Time, Decay 1 Level | `TIME_3`, `LEVEL_3` | n |
+| AEG Decay 2 Time, Decay 2 Level (held while the key is down) | `TIME_4`, `LEVEL_4` | n |
+| AEG Release Time (to silence) | `TIME_5` | n |
+
+```cpp
+// Element n's parameters, in this order from element n's first ID; one view (1) for all.
+static const uint32_t elementFields[] = {
+    OSCAIRN_FIELD_KEY_LOW, OSCAIRN_FIELD_KEY_HIGH, OSCAIRN_FIELD_VELOCITY_LOW, OSCAIRN_FIELD_VELOCITY_HIGH,
+    OSCAIRN_FIELD_VELOCITY_DEPTH, OSCAIRN_FIELD_LEVEL_0, OSCAIRN_FIELD_TIME_1,
+    OSCAIRN_FIELD_TIME_1 + 1, OSCAIRN_FIELD_LEVEL_0 + 2, OSCAIRN_FIELD_TIME_1 + 2, OSCAIRN_FIELD_LEVEL_0 + 3,
+    OSCAIRN_FIELD_TIME_1 + 3, OSCAIRN_FIELD_LEVEL_0 + 4, OSCAIRN_FIELD_TIME_1 + 4 };
+// in paramHint, for element n's k-th parameter:
+*hint = {OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, OSCAIRN_ROLE_NONE, 1, elementFields[k], n};
+```
+
+The element's level takes `OSCAIRN_ROLE_LEVEL_1 + n - 1` as today. Its filter EG, with a
+release level, is a second view per element (`LEVEL_0` to `LEVEL_5`), drawn from the bottom
+until a centered field exists. The test plugin `hosts/standalone/tests/views_plugin.cpp`
+declares all three kinds and is what `desktop-gaps` edits.
 
 ### Declared memory
 
@@ -477,13 +657,15 @@ stepped, hidden and read-only flags. How the editors use them:
   device reaches first;
 - a device's screen knobs follow the editor page shown, taking its first parameters by
   priority;
-- an envelope's, LFO's or filter's parameters recognized by name (below) are linked into
-  one group of tiles, as a hint's group would;
-- an envelope is drawn as a curve you can drag when one module holds its parameters under
-  one of these sets of names: `Attack`, `Decay`, `Sustain`, `Release` (optionally `Delay`
-  and `Hold`); `Rate 1`–`4` with `Level 1`–`4` (DX7); or `Attack Time`, `Attack Level`,
-  `Decay 1 Time` and so on with `Release Time` (FM-X). A stopgap until plugins can describe
-  their editors;
+- an envelope's parameters (described, or recognized by name below), and an LFO's or
+  filter's recognized by name, are linked into one group of tiles, as a hint's group would;
+- an envelope, a key or velocity map and an FM operator view are drawn from a plugin's
+  `oscairn.ui` views ([above](#rich-views-what-each-engine-should-declare)), and dragged to
+  edit them. For parameters in no view, an envelope is still drawn as a curve you can drag
+  when one module holds its parameters under one of these sets of names: `Attack`, `Decay`,
+  `Sustain`, `Release` (optionally `Delay` and `Hold`); `Rate 1`–`4` with `Level 1`–`4`
+  (DX7); or `Attack Time`, `Attack Level`, `Decay 1 Time` and so on with `Release Time`
+  (FM-X);
 - an LFO's waveform is previewed when one module has a `Wave` (or `Type`, `Shape`) with a
   `Speed` (or `Rate`, `Frequency`), and optionally `Delay`, `Fade In`, `Phase` and
   `User Step 1`… The wave's value text picks the drawing (sine, triangle, square, saw up or

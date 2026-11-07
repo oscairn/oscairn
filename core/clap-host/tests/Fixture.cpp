@@ -336,7 +336,8 @@ struct Plugin {
             *a = {}; a->inputs[0] = value % 2 ? 2 : 0; a->carriers = value % 2 ? 1 : 3; a->feedback_from = a->feedback_to = 2;
             return true;
         }};
-        if (!std::strcmp(id, OSCAIRN_EXT_UI)) return get(plugin).kind == 8 ? &ui : nullptr;
+        // KICK_FIXTURE_UI_DRAFT_3: offered as draft 3, as a plugin built before views; its hints' prefix is the same.
+        if (!std::strcmp(id, std::getenv("KICK_FIXTURE_UI_DRAFT_3") ? OSCAIRN_EXT_UI_DRAFT_3 : OSCAIRN_EXT_UI)) return get(plugin).kind == 8 ? &ui : nullptr;
         if (!std::strcmp(id, CLAP_EXT_STATE)) return get(plugin).kind == 9 ? nullptr : &state;
         if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &latency;
         if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &timers;

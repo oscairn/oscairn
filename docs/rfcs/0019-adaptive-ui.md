@@ -434,8 +434,8 @@ ends and the velocity line drag. Every drag sets parameters as the tiles do, wit
 each change is undone as theirs are. Name recognition stays for parameters in no view.
 
 **Checked:** `kick-clap-host` reads the fixture's views (an unknown field, an operator past the
-eighth and a continuous algorithm are dropped) and its routings; `worker-host` that they cross a
-worker. `desktop-gaps` reads ADSR, DX7 and AWM2 envelopes and DX7 algorithm 1's layout without
+eighth and a continuous algorithm are dropped) and its routings, and the same fixture offered as
+draft 3 gives its hints and roles without views; `worker-host` that they cross a worker. `desktop-gaps` reads ADSR, DX7 and AWM2 envelopes and DX7 algorithm 1's layout without
 drawing, then loads a test plugin (`tests/views_plugin.cpp`: an FM view with DX7's 32 routings,
 six operators' envelopes and key scaling, two AWM2-style elements' zones and envelopes) on the
 Panel's screen at 1,024 × 600: every parameter still has its tile; a tap on the routing steps the

@@ -135,6 +135,15 @@ int main(int argc, char** argv) {
               "an info rescan hides the toggle and keeps its hint and the values");
         check(render(hinted, out, 64, nullptr, 0), "and the plugin plays on");
         hinted.unload();
+        // A plugin built against draft 3: its hints and roles, and no views.
+        setenv("KICK_FIXTURE_UI_DRAFT_3", "1", 1);
+        Host older;
+        check(older.load(catalog.plugins[8], 48000, 128), "load the stepped fixture offering draft 3");
+        auto old = [&](clap_id id) { for (const auto& p : older.parameters()) if (p.id == id) return p; return Parameter{}; };
+        check(old(7).widget == OSCAIRN_WIDGET_RANGE && old(7).role == OSCAIRN_ROLE_CUTOFF && old(8).group == 5 && old(8).view == 0 && old(9).field == 0 && old(9).algorithms.empty(),
+              "draft 3 is still read: its hints and roles, without views");
+        older.unload();
+        unsetenv("KICK_FIXTURE_UI_DRAFT_3");
     }
     {
         setenv("KICK_FIXTURE_LATE_FUNCTIONS", "1", 1);

@@ -50,8 +50,9 @@ Oscairn sets out to solve both. How, and how much of it is built today:
   ([RFC 0006](docs/rfcs/0006-packages-and-portability.md)). Device profiles describe each
   product's screen, controls, audio, CPU and memory, which the app and engine follow in part
   ([RFC 0024](docs/rfcs/0024-device-profiles.md)). A plugin still needs a build for each
-  device's CPU and operating system; LV2 plugins are not carried, and a package repository is
-  planned ([RFC 0031](docs/rfcs/0031-package-repository-and-distribution.md)).
+  device's CPU and operating system; LV2 plugins are not carried. Packages install from
+  signed repositories, such as [the official one](#the-package-repository)
+  ([RFC 0031](docs/rfcs/0031-package-repository-and-distribution.md)).
 - **Knowing before loading whether it fits.** Oscairn measures each plugin's CPU and memory
   on the device, and refuses a Performance or plugin that would not fit, saying why, instead
   of failing while it plays ([RFC 0025](docs/rfcs/0025-resource-budgets.md), in progress).
@@ -132,6 +133,19 @@ It defaults to OFF so CLAP-only builds keep their existing dependency set.
 See [LV2 hosting](core/lv2-host/README.md) for loading bundles, supported extensions,
 limits and examples. The desktop's default demo and layouts still use the three CLAP
 plugins; there is no graphical plugin browser yet.
+
+### The package repository
+
+Oscairn's official package repository is at https://packages.oscairn.org. Its root key's
+fingerprint is **`6a2d d1ac f4d4 e23c`** (the key itself is
+`6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841`). Trust a repository at
+that address only if it shows this fingerprint. Oscairn's own packages are signed by the
+publisher `org.oscairn`, key **`b284 be6b ea2f adb1`** (public key
+`db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69`, also published at
+https://oscairn.org/.well-known/oscairn-publisher.json). The engine lists and installs from it
+through the control API (`packages.list`, `packages.install`; see the
+[control protocol](docs/control-protocol.md)). For now, the desktop app's Library opens only a
+repository in a folder.
 
 ### The desktop app's screens
 

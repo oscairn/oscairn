@@ -108,7 +108,7 @@ try:
     raw('!render')
     assert rpc('transport.get')['result']['tempo'] == 120  # rejected transport list changed nothing
     meta = rpc('params.list', {'node': 'synth'})['result']
-    assert meta['node'] == 1 and len(meta['parameters']) == 10
+    assert meta['node'] == 1 and len(meta['parameters']) == 14
     assert meta['parameters'][2]['name'] == 'Pressure' and meta['parameters'][2]['defaultValue'] == 0.5
     # The Basic Synth's oscairn.ui hints: knobs, the oscillator as buttons, brightness first.
     hints = {p['name']: (p['widget'], p['priority']) for p in meta['parameters']}
@@ -117,7 +117,11 @@ try:
     groups = {p['name']: p['group'] for p in meta['parameters']}
     assert groups['Pitch LFO rate'] == groups['Pitch LFO depth'] == 1 and groups['Brightness'] == 0, groups
     roles = {p['name']: p['role'] for p in meta['parameters'] if 'role' in p}
-    assert roles == {'Brightness': 'cutoff', 'Level': 'level', 'Output bus': 'outputBus'}, roles  # its declared roles, and none for the rest
+    assert roles == {'Brightness': 'cutoff', 'Level': 'level', 'Output bus': 'outputBus', 'Attack': 'attack', 'Decay': 'decay', 'Sustain': 'sustain', 'Release': 'release'}, roles  # its declared roles, and none for the rest
+    # Its envelope is a view (oscairn.ui draft 4): an ADSR on a page of its own.
+    views = {p['name']: (p['view'], p['field'], p['index'], p['module']) for p in meta['parameters'] if 'view' in p}
+    assert views == {'Attack': (1, 'attack', 0, 'Envelope'), 'Decay': (1, 'decay', 0, 'Envelope'), 'Sustain': (1, 'sustain', 0, 'Envelope'), 'Release': (1, 'release', 0, 'Envelope')}, views
+    assert all('algorithms' not in p for p in meta['parameters'])
     assert rpc('params.text', {'node': 1, 'param': 3, 'value': 0.5})['result']['text'] == '50%'
     original = value(1)
     error(rpc('params.set', {'values': [{'node': 1, 'param': 1, 'value': 0.91}, {'node': 1, 'param': 999, 'value': 1}]}), -32002)

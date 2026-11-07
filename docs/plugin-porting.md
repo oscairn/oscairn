@@ -694,7 +694,7 @@ The bundled plugins are working references ([plugins](../plugins/README.md)):
   `sound-contexts-plugin.hpp`. Native sound contexts with their snapshot as its state, factory
   presets through CLAP preset discovery prepared as contexts (`preset-discovery-plugin.hpp`), CLAP
   and MIDI note dialects, `oscairn.ui` hints with roles (Brightness is its cutoff, Level its
-  level), pitch bend and the mod wheel through `followControls`, choke fades through
+  level, the envelope's stages attack to release) and its envelope as an ADSR view, pitch bend and the mod wheel through `followControls`, choke fades through
   `amplitude`.
 - **Delay** (`plugins/delay/delay.cpp`): an effect with native effect contexts (`create` and
   `resources` with its tail), the state extension, and Wet declared as its `mix` role.

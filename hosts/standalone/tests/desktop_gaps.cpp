@@ -1132,6 +1132,65 @@ int main(int argc, char** argv)
         }
         std::filesystem::remove(path);
     }
+    // The Basic Synth describes its envelope (an ADSR view): its Envelope page draws the curve on
+    // the Panel's screen, and dragging a point sets that point's parameters, undone as any edit.
+    {
+        const auto path = socket.string() + "-envelope";
+        NodeId node = 0;
+        Served served(path, [&](Session& s) { node = s.add("Synth", (std::filesystem::path(argv[1]) / "oscairn-basic-synth.clap").string()); s.connectNotes(graphInput, node); s.connectAudio(node, graphOutput); s.commit(); });
+        {
+            standalone::Engine engine(argv[1], path);
+            const auto configuration = juce::File::createTempFile("oscairn-gaps-config");
+            standalone::Theme theme(configuration, juce::File(argv[3]));
+            juce::LookAndFeel::setDefaultLookAndFeel(&theme);
+            theme.apply("oscairn-dark");
+            auto wait = [](auto done) { for(int i = 0; i < 1000 && !done(); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); return done(); };
+            check(wait([&] { return engine.graph().names.count(node) && !engine.parameters(node).empty(); }), "the Basic Synth is in the graph");
+            auto id = [&](const std::string& name) { for(const auto& p : engine.parameters(node)) if(p.name == name) return p.id; return 0u; };
+            const auto attack = id("Attack"), decay = id("Decay"), sustain = id("Sustain"), release = id("Release");
+            auto value = [&](uint32_t param) { return engine.param("Synth", param); };
+            juce::Component holder; standalone::setDesktopMode(holder, 2); holder.setSize(1024, 600);
+            standalone::ParameterGrid grid(engine, node, "Synth");
+            holder.addAndMakeVisible(grid); grid.setBounds(holder.getLocalBounds());
+            size_t page = grid.pages();
+            for(size_t i = 0; i < grid.pages(); ++i) if(grid.pageName(i) == "Envelope") page = i;
+            grid.showPage(page);
+            juce::Component* curve = nullptr;
+            std::function<void(juce::Component&)> look = [&](juce::Component& c) { for(auto* child : c.getChildren()) { if(child->getName() == "Envelope") curve = child; look(*child); } };
+            look(grid);
+            const auto names = grid.namesShown();
+            check(page < grid.pages() && curve && names == std::vector<std::string>{"Attack", "Decay", "Sustain", "Release"} && grid.linkedShown() == 1,
+                  "its Envelope page: the curve, and the four stages' tiles linked in order");
+            for(int i = 0; i < 30; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+            grid.showPage(page); look(grid); // again, with the value texts the engine has sent since
+            for(int i = 0; i < 10; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+            if(argc >= 5) { const juce::File out{juce::String(argv[4]) + "-basic-synth-panel-envelope.png"}; out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(holder.createComponentSnapshot(holder.getLocalBounds()), stream); }
+            if(curve)
+            {
+                auto drag = [&](juce::Point<float> from, juce::Point<float> to) {
+                    auto mouse = juce::Desktop::getInstance().getMainMouseSource();
+                    const auto now = juce::Time::getCurrentTime();
+                    auto event = [&](juce::Point<float> at, bool dragged) { return juce::MouseEvent(mouse, at, juce::ModifierKeys::leftButtonModifier, 1, 0, 0, 0, 0, curve, curve, now, from, now, 1, dragged); };
+                    curve->mouseDown(event(from, false)); curve->mouseDrag(event(to, true)); curve->mouseUp(event(to, true));
+                };
+                // The curve's geometry: three timed segments sharing what the sustain's width leaves.
+                const float width = curve->getWidth() - 28.f, segment = (width - width * .14f) / 3, top = 28, height = curve->getHeight() - 38.f;
+                const double was = value(attack), d = value(decay), s = value(sustain), r = value(release);
+                // The attack point (a 2 ms attack: at the top left), dragged right.
+                drag({14 + segment * float(was / 2), top}, {14 + segment / 2, top});
+                check(wait([&] { return value(attack) > .8; }) && value(decay) == d && value(sustain) == s && value(release) == r,
+                      "dragging the attack point lengthens the attack, and only that: " + std::to_string(value(attack)));
+                // The decay point, where the attack ends and the decay reaches the sustain level, dragged down.
+                const float x = 14 + segment * float(value(attack) / 2) + segment * float(d / 2), y = top + height - height * float(s);
+                drag({x, y}, {x, top + height * .9f});
+                check(wait([&] { return value(sustain) < .2; }) && std::abs(value(decay) - d) < .02 && value(release) == r,
+                      "dragging the decay point down lowers the sustain level: " + std::to_string(value(sustain)));
+                engine.edit([](Control& c) { c.undo(); });
+                check(wait([&] { return std::abs(value(sustain) - s) < 1e-9; }), "and undo puts it back: " + std::to_string(value(sustain)));
+            }
+        }
+        std::filesystem::remove(path);
+    }
     // A plugin's presets still being listed (the engine answers at once and lists them meanwhile):
     // the picker says so, and a later refresh shows the presets and drops the message.
     {

@@ -71,7 +71,7 @@ namespace
         auto& control = session.control();
         const auto id = instrument( session, synth );
         check( control.nodeId( "synth" ) == id, "named and numeric node addressing agree" );
-        check( control.parameters( id ).size() == 10, "all synth parameters, including oscillators, pitch LFO and wheels, are exposed" );
+        check( control.parameters( id ).size() == 14, "all synth parameters, including oscillators, pitch LFO, wheels and envelope, are exposed" );
         const auto pressure = control.parameterInfo( id, 3 );
         check( pressure.name == "Pressure" && pressure.defaultValue == 0.5 && pressure.maximum == 1,
                "parameter metadata crosses the interface" );

@@ -54,15 +54,20 @@ namespace
 
     // Stable parameter IDs are the table index + 1. Each with the control it wants, its
     // priority (oscairn.ui): the most played first, so physical knobs take them in that order,
-    // and its role: Brightness is the filter's cutoff, Level the output level.
-    struct Parameter { const char* name; double maximum, initial; const char* unit; bool stepped=false; uint32_t widget=OSCAIRN_WIDGET_KNOB, priority=0, group=0, role=OSCAIRN_ROLE_NONE; };
-    constexpr std::array<Parameter,10> parameters{{
+    // and its role: Brightness is the filter's cutoff, Level the output level. The envelope's
+    // stages are its view (an ADSR), on a page of their own.
+    struct Parameter { const char* name; double maximum, initial; const char* unit; bool stepped=false; uint32_t widget=OSCAIRN_WIDGET_KNOB, priority=0, group=0, role=OSCAIRN_ROLE_NONE; const char* module=""; uint32_t field=OSCAIRN_FIELD_NONE; };
+    constexpr std::array<Parameter,14> parameters{{
         {"Brightness",1,1,"%",false,OSCAIRN_WIDGET_KNOB,1,0,OSCAIRN_ROLE_CUTOFF}, {"Level",1,1,"%",false,OSCAIRN_WIDGET_KNOB,2,0,OSCAIRN_ROLE_LEVEL}, {"Pressure",1,.5,"%",false,OSCAIRN_WIDGET_KNOB,5},
         {"Oscillator",2,0,"",true,OSCAIRN_WIDGET_BUTTONS,3}, {"Detune",50,7,"cents",false,OSCAIRN_WIDGET_KNOB,4},
         {"Pitch LFO rate",40,0,"Hz",false,OSCAIRN_WIDGET_KNOB,6,1}, {"Pitch LFO depth",200,0,"cents",false,OSCAIRN_WIDGET_KNOB,7,1}, // one LFO: drawn joined
         {"Output bus",8,0,"",true,OSCAIRN_WIDGET_LIST,0,0,OSCAIRN_ROLE_OUTPUT_BUS},
-        {"Pitch bend range",24,2,"semitones"}, {"Mod wheel",1,0,"",true,OSCAIRN_WIDGET_BUTTONS,0}
+        {"Pitch bend range",24,2,"semitones"}, {"Mod wheel",1,0,"",true,OSCAIRN_WIDGET_BUTTONS,0},
+        // The envelope as it was when fixed: a 2 ms attack, decaying toward 35% over 250 ms, released over 120 ms (time constants).
+        {"Attack",2,.002,"s",false,OSCAIRN_WIDGET_KNOB,0,2,OSCAIRN_ROLE_ATTACK,"Envelope",OSCAIRN_FIELD_ATTACK}, {"Decay",2,.25,"s",false,OSCAIRN_WIDGET_KNOB,0,2,OSCAIRN_ROLE_DECAY,"Envelope",OSCAIRN_FIELD_DECAY},
+        {"Sustain",1,.35,"%",false,OSCAIRN_WIDGET_KNOB,0,2,OSCAIRN_ROLE_SUSTAIN,"Envelope",OSCAIRN_FIELD_SUSTAIN}, {"Release",2,.12,"s",false,OSCAIRN_WIDGET_KNOB,0,2,OSCAIRN_ROLE_RELEASE,"Envelope",OSCAIRN_FIELD_RELEASE}
     }};
+    constexpr size_t envelopeParams = 4; // the last four; a sound saved before they existed has the rest
     constexpr auto defaults=[] {std::array<double,parameters.size()> v{};for(size_t i=0;i<v.size();++i)v[i]=parameters[i].initial;return v;}();
     constexpr std::array<const char*,3> oscillators{"Saw","Detuned saws","Square"};
     constexpr std::array<const char*,2> wheelTargets{"Vibrato","Off"};
@@ -112,8 +117,6 @@ namespace
     struct Synth : oscairn::contexts::Engine<Synth,Voice,Patch>
     {
         double                 sampleRate = 48000.0;
-        double                 attackStep = 0.0, decayCoefficient = 0.0, releaseCoefficient = 0.0;
-        static constexpr double sustain = 0.35;
 
         // Values are atomic: the main thread reads them (get_value) while audio runs.
         std::array<std::atomic<double>,parameters.size()> values{};
@@ -133,12 +136,13 @@ namespace
         bool writePatch(std::ostream& out,const Patch& patch){for(double value:patch.values)out<<' '<<value;return true;}
         bool readPatch(std::istream& in,Patch& patch)
         {
-            // The rest of the slot's line: every value.
+            // The rest of the slot's line: every value, or all but the envelope's (saved before it
+            // had parameters: it keeps their defaults, the envelope it had).
             std::string line;std::getline(in,line);std::istringstream values(line);values.imbue(std::locale::classic());
             size_t i=0;
             for(double v;i<parameters.size() && values>>v;++i){if(!std::isfinite(v) || v<0 || v>parameters[i].maximum || (parameters[i].stepped && v!=std::round(v)))return false;patch.values[i]=v;}
             values>>std::ws;
-            return i==parameters.size() && values.eof();
+            return (i==parameters.size() || i==parameters.size()-envelopeParams) && values.eof();
         }
         bool readPreset(uint32_t kind,const char*,const char* key,Patch& patch,std::string& error)
         {
@@ -204,7 +208,7 @@ namespace
         // Snapshot only contexts pinned by active voices. After a voice finishes,
         // the control thread may reclaim its slot; the rest of this span uses copies.
         std::array<std::array<double,parameters.size()>,Synth::contextCapacity> settings{};
-        std::array<double,Synth::contextCapacity> detune{};
+        std::array<double,Synth::contextCapacity> detune{},attackStep{},decayCoefficient{},sustain{},releaseCoefficient{};
         std::array<bool,Synth::contextCapacity> copied{};
         std::array<float* const*,Synth::contextCapacity> ring{}; // the ring-out channels its main output goes to, or null
         for(const auto& v:s.voices)if(v.active && !copied[v.context])
@@ -212,6 +216,12 @@ namespace
             copied[v.context]=true;ring[v.context]=s.retiring(v.context);const auto& c=s.contexts[v.context].patch;
             for(size_t p=0;p<parameters.size();++p)settings[v.context][p]=std::clamp(c.values[p]+c.modulation[p],0.0,parameters[p].maximum);
             detune[v.context]=settings[v.context][3]==1?std::pow(2.0,settings[v.context][4]/1200.0):1;
+            // The envelope's stages: a linear attack, exponential decay and release (time constants); zero is at once.
+            const auto& e=settings[v.context];
+            attackStep[v.context]=e[10]>0?1.0/(e[10]*s.sampleRate):2.0;
+            decayCoefficient[v.context]=e[11]>0?std::exp(-1.0/(e[11]*s.sampleRate)):0.0;
+            sustain[v.context]=e[12];
+            releaseCoefficient[v.context]=e[13]>0?std::exp(-1.0/(e[13]*s.sampleRate)):0.0;
         }
         for( uint32_t i = from; i < to; ++i )
         {
@@ -226,7 +236,7 @@ namespace
                 switch( v.stage )
                 {
                     case Stage::Attack:
-                        v.level += s.attackStep;
+                        v.level += attackStep[v.context];
                         if( v.level >= 1.0 )
                         {
                             v.level = 1.0;
@@ -234,10 +244,10 @@ namespace
                         }
                         break;
                     case Stage::Decay:
-                        v.level = Synth::sustain + ( v.level - Synth::sustain ) * s.decayCoefficient;
+                        v.level = sustain[v.context] + ( v.level - sustain[v.context] ) * decayCoefficient[v.context];
                         break;
                     case Stage::Release:
-                        v.level *= s.releaseCoefficient;
+                        v.level *= releaseCoefficient[v.context];
                         if( v.level < 1e-4 )
                         {
                             s.finishVoice(v);
@@ -340,6 +350,7 @@ namespace
         info->flags=CLAP_PARAM_IS_AUTOMATABLE | (parameter.stepped?CLAP_PARAM_IS_STEPPED | CLAP_PARAM_IS_ENUM:CLAP_PARAM_IS_MODULATABLE);
         info->max_value=parameter.maximum;info->default_value=parameter.initial;
         std::snprintf(info->name,sizeof(info->name),"%s",parameter.name);
+        std::snprintf(info->module,sizeof(info->module),"%s",parameter.module);
         return true;
     }
 
@@ -355,7 +366,8 @@ namespace
         value=std::clamp(value,0.0,parameters[id-1].maximum);
         if(id==4)std::snprintf(text,size,"%s",oscillators[static_cast<size_t>(std::round(value))]);
         else if(id==10)std::snprintf(text,size,"%s",wheelTargets[static_cast<size_t>(std::round(value))]);
-        else if(id<=3)std::snprintf(text,size,"%.0f%%",value*100);
+        else if(id<=3 || id==13)std::snprintf(text,size,"%.0f%%",value*100);
+        else if(id>=11)std::snprintf(text,size,"%.3f s",value);
         else std::snprintf(text,size,"%.1f %s",value,parameters[id-1].unit);
         return true;
     }
@@ -369,7 +381,7 @@ namespace
         if(end==text || !std::isfinite(parsed))return false;
         while(*end==' ')++end;
         if(*end && std::strcmp(end,parameters[id-1].unit)!=0)return false;
-        if(id<=3)parsed/=100;
+        if(id<=3 || id==13)parsed/=100;
         if(parsed<0 || parsed>parameters[id-1].maximum || (parameters[id-1].stepped && parsed!=std::round(parsed)))return false;
         *value=parsed;return true;
     }
@@ -384,9 +396,10 @@ namespace
     const clap_plugin_params_t      params     = { paramsCount, paramsInfo, paramsValue, paramsToText, paramsFromText, paramsFlush };
     const oscairn_plugin_ui_t       ui         = { []( const clap_plugin_t*, clap_id id, oscairn_param_hint_t* hint ) {
         if( id < 1 || id > parameters.size() ) return false;
-        *hint = { parameters[id - 1].widget, parameters[id - 1].priority, CLAP_INVALID_ID, parameters[id - 1].group, parameters[id - 1].role };
+        const auto& p = parameters[id - 1];
+        *hint = { p.widget, p.priority, CLAP_INVALID_ID, p.group, p.role, p.field ? 1u : 0u, p.field, 0 };
         return true;
-    } };
+    }, nullptr };
     const clap_plugin_audio_ports_t audioPorts = { audioPortsCount, audioPortsGet };
     const clap_plugin_note_ports_t  notePorts  = { notePortsCount, notePortsGet };
 
@@ -422,9 +435,6 @@ namespace
             auto& s              = self( p );
             s.sampleRate         = rate;
             s.setSampleRate( rate );
-            s.attackStep         = 1.0 / ( 0.002 * rate );
-            s.decayCoefficient   = std::exp( -1.0 / ( 0.25 * rate ) );
-            s.releaseCoefficient = std::exp( -1.0 / ( 0.12 * rate ) );
             s.resetVoices();
             return true;
         };

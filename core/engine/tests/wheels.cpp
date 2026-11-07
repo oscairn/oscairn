@@ -9,6 +9,8 @@
 // - the mod wheel at full adds vibrato (the period varies); at 0, or with the Mod wheel
 //   parameter Off, none.
 // The two parameters are saved with the sound; a state saved before them still loads.
+// The envelope's parameters shape the note: a 1 s attack is quiet at first, full sustain
+// stays loud; a sound saved before they existed loads with the envelope it had.
 
 #include "oscairn/graph.h"
 #include "oscairn/midi_input.h"
@@ -28,7 +30,7 @@ namespace
 {
     constexpr double   rate  = 48000.0;
     constexpr uint32_t block = 256;
-    constexpr clap_id  bendRangeParam = 9, wheelParam = 10;
+    constexpr clap_id  bendRangeParam = 9, wheelParam = 10, attackParam = 11, sustainParam = 13;
 
     // Renders 0.5 s of key 57 held (or released at 0.25 s), with `midi` sent at 0.25 s.
     std::vector<float> render( const char* synth, std::vector<uint8_t> midi, clap_id param = 0, double value = 0, bool release = false )
@@ -140,6 +142,18 @@ int main( int argc, char** argv )
     check( sw > 1.04, "the mod wheel at full adds vibrato" );
     check( s0 < 1.002 && sz < 1.002, "no vibrato without the wheel" );
     check( so < 1.002, "no vibrato with the Mod wheel parameter Off" );
+    {
+        // The loudest sample in a span of the note, from and to seconds.
+        auto peak = []( const std::vector<float>& x, double from, double to ) {
+            float p = 0;
+            for( size_t i = (size_t)( rate * from ); i < (size_t)( rate * to ) && i < x.size(); ++i ) p = std::max( p, std::abs( x[i] ) );
+            return p;
+        };
+        const auto slow = render( synth, {}, attackParam, 1.0 ), held = render( synth, {}, sustainParam, 1.0 );
+        std::printf( "envelope: first 50 ms peak %.3f, with a 1 s attack %.3f; last 100 ms %.3f, with full sustain %.3f\n", peak( none, 0, .05 ), peak( slow, 0, .05 ), peak( none, .4, .5 ), peak( held, .4, .5 ) );
+        check( !slow.empty() && peak( slow, 0, .05 ) < peak( none, 0, .05 ) / 4, "a 1 s attack is quiet in its first 50 ms" );
+        check( !held.empty() && peak( held, .4, .5 ) > peak( none, .4, .5 ) * 1.5, "full sustain stays louder than the default 35%" );
+    }
 
     {
         oscairn::Graph g( rate, block );
@@ -157,7 +171,9 @@ int main( int argc, char** argv )
             std::ofstream( dir / "state.clap", std::ios::binary ) << version << "\n1 \"Default\"" << values << "\n0\n0\n0\n0\n0\n0\n0\n0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
             try { restored.loadState( dir.string() ); return true; } catch( const std::runtime_error& ) { return false; }
         };
-        check( state( "oscairn-synth-2", " 0.5 1 0.5 0 7 0 0 0 4 1" ) && restored.parameterValue( bendRangeParam ) == 4, "a version 2 state loads" );
+        check( state( "oscairn-synth-2", " 0.5 1 0.5 0 7 0 0 0 4 1 0.5 1 0.5 0.3" ) && restored.parameterValue( bendRangeParam ) == 4 && restored.parameterValue( attackParam ) == .5, "a version 2 state loads" );
+        check( state( "oscairn-synth-2", " 0.5 1 0.5 0 7 0 0 0 4 1" ) && restored.parameterValue( bendRangeParam ) == 4 && restored.parameterValue( attackParam ) == .002 &&
+               restored.parameterValue( sustainParam ) == .35, "a sound saved before the envelope's parameters loads with the envelope it had" );
         check( !state( "oscairn-synth-1", " 0.5 1 0.5 0 7 0 0 0" ), "a version 1 state is refused" );
         check( !state( "oscairn-synth-2", " 0.5 1 0.5 0 7 0 0 0" ), "a sound with eight values is refused" );
         std::filesystem::remove_all( dir );

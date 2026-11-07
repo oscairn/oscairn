@@ -442,21 +442,23 @@ namespace
         s.insertIntoPart(keys, 0, synth); s.insertIntoPart(keys, 1, fx); s.insertIntoPart(other, 0, plain); s.commit();
         run(s);
         auto info = [&](NodeId n, const char* name) { for(const auto& p : s.parameters(n)) if(p.name == name) return p; throw std::runtime_error(std::string("no ") + name); };
-        check(info(synth, "Brightness").role == OSCAIRN_ROLE_CUTOFF && info(synth, "Level").role == OSCAIRN_ROLE_LEVEL && info(synth, "Detune").role == 0 && info(fx, "Wet").role == OSCAIRN_ROLE_MIX,
-              "the Basic Synth and the Delay declare their roles");
+        check(info(synth, "Brightness").role == OSCAIRN_ROLE_CUTOFF && info(synth, "Level").role == OSCAIRN_ROLE_LEVEL && info(synth, "Detune").role == 0 && info(synth, "Attack").role == OSCAIRN_ROLE_ATTACK &&
+              info(synth, "Release").role == OSCAIRN_ROLE_RELEASE && info(fx, "Wet").role == OSCAIRN_ROLE_MIX, "the Basic Synth and the Delay declare their roles");
         auto source = [&](std::function<void(NodeId, std::vector<Control::ParamInfo>&)> change = {}) {
             return assignmentSource(s.graphState(), s.assignments(), [&](NodeId n) { auto p = s.parameters(n); if(change) change(n, p); return p; });
         };
         // Four wide: Filter with its cutoff, the rest blank (no resonance, envelope or key tracking);
-        // Amp EG's only role, level, is its eighth, so it is left out; the Delay's Wet in Effects.
+        // Amp EG with its envelope's four stages (its level, the eighth, left out); the Delay's Wet in Effects.
         auto banks = knobBanks(source(), keys, 4);
-        check(banks.size() == 2 && banks[0].name == "Filter" && banks[0].layer == AssignmentLayer::Role && banks[0].slots[0] == parameter(synth, info(synth, "Brightness").id) &&
+        auto stages = [&](const Bank& b) { return b.name == "Amp EG" && b.slots[0] == parameter(synth, info(synth, "Attack").id) && b.slots[1] == parameter(synth, info(synth, "Decay").id) &&
+                                                      b.slots[2] == parameter(synth, info(synth, "Sustain").id) && b.slots[3] == parameter(synth, info(synth, "Release").id); };
+        check(banks.size() == 3 && banks[0].name == "Filter" && banks[0].layer == AssignmentLayer::Role && banks[0].slots[0] == parameter(synth, info(synth, "Brightness").id) &&
               banks[0].labels[0] == "synth: Brightness" && banks[0].slots[1].kind == Assignment::Kind::None && banks[0].slots[3].kind == Assignment::Kind::None &&
-              banks[1].layer == AssignmentLayer::Effects && banks[1].slots[0] == parameter(fx, info(fx, "Wet").id),
-              "Basic Synth, four wide: Filter (cutoff, then blanks), and the Delay's Wet: " + (banks.empty() ? std::string() : banks[0].name));
+              stages(banks[1]) && banks[2].layer == AssignmentLayer::Effects && banks[2].slots[0] == parameter(fx, info(fx, "Wet").id),
+              "Basic Synth, four wide: Filter (cutoff, then blanks), Amp EG's stages, and the Delay's Wet: " + (banks.empty() ? std::string() : banks[0].name));
         banks = knobBanks(source(), keys, 8);
-        check(banks.size() == 3 && banks[1].name == "Amp EG" && banks[1].slots[7] == parameter(synth, info(synth, "Level").id) && banks[1].slots[0].kind == Assignment::Kind::None,
-              "eight wide: Amp EG with its level, attack to ampKeyTracking blank");
+        check(banks.size() == 3 && stages(banks[1]) && banks[1].slots[7] == parameter(synth, info(synth, "Level").id) && banks[1].slots[4].kind == Assignment::Kind::None,
+              "eight wide: Amp EG with its stages and its level, hold to ampKeyTracking blank");
         // A plugin declaring no roles gets them from its names; a plugin declaring any keeps only those.
         auto renamed = [&](NodeId n, std::vector<Control::ParamInfo>& p) { if(n == plain) p[0].name = "Cutoff"; };
         banks = knobBanks(source(renamed), other, 4);

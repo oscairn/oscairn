@@ -37,7 +37,7 @@ pinned in [CMakeLists.txt](CMakeLists.txt), and its tests stay here, in
 ## Basic Synth sounds
 
 One instance shares 16 voices across up to eight prepared sound contexts (including
-Default) and 16 MIDI channel assignments. Each context owns all ten parameters;
+Default) and 16 MIDI channel assignments. Each context owns all fourteen parameters;
 held voices retain their context when new notes switch to another sound. Oscillator
 and sine pitch-LFO phases are per voice and restart at note-on.
 
@@ -53,6 +53,10 @@ and sine pitch-LFO phases are per voice and restart at note-on.
 | 8 | Output bus | 0 = Main, 1–8 = separate stereo sound buses; captured at note-on |
 | 9 | Pitch bend range | 0–24 semitones either way at full bend; default 2 |
 | 10 | Mod wheel | 0 = vibrato (default), 1 = off |
+| 11 | Attack | 0–2 s, linear; default 0.002 |
+| 12 | Decay | 0–2 s time constant, exponential toward the sustain level; default 0.25 |
+| 13 | Sustain | 0–1; default 0.35 |
+| 14 | Release | 0–2 s time constant; default 0.12 |
 
 The saw and square edges use PolyBLEP correction; the saw pair is averaged to keep
 its level comparable to a single saw. A zero LFO rate or depth disables vibrato.
@@ -60,10 +64,12 @@ Pitch bend applies per MIDI channel to held and released voices, smoothed over a
 The mod wheel adds vibrato through the pitch LFO: at full wheel, as much depth again as
 Pitch LFO depth, or 50 cents when that is 0, at the LFO's rate, or 5 Hz when that is 0.
 Its state is `oscairn-synth-2`; version 1 states, saved before parameters 9 and 10 existed,
-are refused.
+are refused. A sound saved before parameters 11 to 14 existed loads with their defaults, the
+envelope it had.
 Continuous parameters support sample-timed automation/modulation; oscillator mode is
-stepped. The envelope remains fixed: 2 ms attack, 250 ms exponential decay toward
-0.35 sustain, and a 120 ms release time constant. Stereo outputs carry the same signal.
+stepped. The envelope's four stages are on an Envelope page, described to Oscairn's editors as
+an ADSR view (`oscairn.ui` draft 4), which draws its curve to drag; their defaults are the
+envelope it had when fixed. Stereo outputs carry the same signal.
 
 Its factory presets, published through CLAP preset discovery and prepared as sound contexts
 ([RFC 0005](../docs/rfcs/0005-sound-contexts.md#presets)), include **Detuned saws** (±7 cents)
@@ -71,7 +77,7 @@ and **Square vibrato** (18 Hz, ±70 cents), alongside Warm, Bright and Pressure 
 desktop picker lists them after Default. Choose a prepared sound
 and press **Use sound**. Per-channel assignments are available through `sounds.select`;
 the picker switches all channels together. These sounds still share the basic filter
-and envelope; there is no general modulation matrix, sample playback or FM synthesis.
+and envelope shape; there is no general modulation matrix, sample playback or FM synthesis.
 
 The proposed [native portability and DAW delivery contract](../docs/rfcs/0006-packages-and-portability.md)
 adds manifest/lock-based installation, shared dependencies and standard-format desktop

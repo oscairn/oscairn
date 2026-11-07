@@ -145,7 +145,7 @@ int main(int argc,char** argv){try{
         Instrument one(argv[1]),reference(argv[1]);
         const auto id=one.host().prepareSound("Bright",{{1,.95},{4,2},{8,3}}); // on bus 3
         const auto values=one.host().soundValues(id);
-        check(values.size()==10 && values[0].id==1 && values[0].value==.95 && values[3].value==2 && values[7].value==3,"an unselected sound's values");
+        check(values.size()==14 && values[0].id==1 && values[0].value==.95 && values[3].value==2 && values[7].value==3,"an unselected sound's values");
         check(one.host().selectSound(id),"selected");one.run();
         check(one.host().soundValues(id).empty(),"none while a channel selects it");
         state_files::TemporaryDirectory temp;const auto saved=(temp.path/"alone").string();

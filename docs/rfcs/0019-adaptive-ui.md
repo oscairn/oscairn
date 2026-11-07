@@ -444,6 +444,14 @@ dragging the breakpoint moves only it; dragging element 2's zone's left edge low
 lowest key; and the Desktop at 1,180 × 820 draws the same views. Given a path, it writes
 `SNAPSHOTS-views-*.png`.
 
+**The Basic Synth** declares its envelope this way: four new parameters (Attack, Decay, Sustain,
+Release, defaulting to the envelope it had fixed) on an Envelope page, an ADSR view with the
+stages' roles. `desktop-gaps` finds the curve and the stages' tiles linked in order on that page
+on the Panel, drags the attack point (only Attack changes) and the decay point down (Sustain
+falls, Decay stays), and undoes that; `control-json-protocol` checks the view in `params.list`;
+`wheels` that a long attack and full sustain change the note, and that a sound saved before the
+four parameters loads with the envelope it had.
+
 Not yet: the real engines' declarations (their forks declare draft 3 roles; what each should
 declare is in the [porting guide](../plugin-porting.md#rich-views-what-each-engine-should-declare));
 a pitch envelope's levels around a center; Compact draws no views (it lists their parameters).

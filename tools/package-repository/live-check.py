@@ -34,7 +34,7 @@ from pathlib import Path
 # publishers/org.oscairn.json), as a user would be given them.
 ROOT_KEY = '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841'
 PUBLISHER_KEY = 'db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69'
-# Each instrument, its asset library and how many presets that library gives it.
+# Each instrument, its asset library and how many presets it lists, every one from that library.
 INSTRUMENTS = {'org.oscairn.analog': ('org.oscairn.analog-factory', 641), 'org.oscairn.fm': ('org.oscairn.fm-cartridges', 1056)}
 EFFECTS = 'org.oscairn.effects'
 
@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
             out = subprocess.run([play, build_path, plugin, '', '3'], capture_output=True, text=True, timeout=600,
                                  env={**env, 'OSCAIRN_PLUGIN_WORKER': worker_path, 'OSCAIRN_PLUGIN_SCAN': str(scan)})
             result = json.loads(out.stdout) if out.stdout.strip() else {}
-            check(out.returncode == 0 and result.get('fromLibraries') == presets and result.get('workers') == (1 if worker_path else 0),
+            check(out.returncode == 0 and result.get('presets') == result.get('fromLibraries') == presets and result.get('workers') == (1 if worker_path else 0),
                   f"{plugin} {placement}: {result.get('presets')} presets, {result.get('fromLibraries')} of them from {library} (want {presets}); "
                   f"'{result.get('preset')}' held for 3 s, RMS {result.get('rms')}, peak {result.get('peak')}, finite {result.get('finite')} {out.stderr.strip()[-300:]}")
 

@@ -728,7 +728,7 @@ namespace oscairn
                 std::vector<std::string> chosen;
                 if(install && member(p,"items"))for(auto t:array(member(p,"items"),65536,0))chosen.push_back(std::string(string(t)));
                 auto signer=[](const Control::Signer& s){return "{\"kind\":"+quote(s.kind)+",\"name\":"+quote(s.name)+",\"version\":"+quote(s.version)+",\"platform\":"+quote(s.platform)+
-                                                              ",\"status\":"+quote(s.status)+",\"key\":"+quote(s.key)+",\"keyName\":"+quote(s.keyName)+'}';};
+                                                              ",\"status\":"+quote(s.status)+",\"key\":"+quote(s.key)+",\"keyName\":"+quote(s.keyName)+",\"publicKey\":"+quote(s.publicKey)+'}';};
                 auto code=[&](const std::vector<Control::Signer>& list){std::vector<std::string> out;for(const auto& s:list)out.push_back(signer(s));return join(out);};
                 try{
                     if(!install){
@@ -828,7 +828,7 @@ namespace oscairn
                 }
                 for(const auto& n:j.installed.notes)notes.push_back(quote(n));
                 for(const auto& s:j.installed.code)code.push_back("{\"kind\":"+quote(s.kind)+",\"name\":"+quote(s.name)+",\"version\":"+quote(s.version)+",\"platform\":"+quote(s.platform)+
-                                                                  ",\"status\":"+quote(s.status)+",\"key\":"+quote(s.key)+",\"keyName\":"+quote(s.keyName)+'}');
+                                                                  ",\"status\":"+quote(s.status)+",\"key\":"+quote(s.key)+",\"keyName\":"+quote(s.keyName)+",\"publicKey\":"+quote(s.publicKey)+'}');
                 return "{\"job\":"+std::to_string(j.id)+",\"state\":"+quote(j.state)+",\"error\":"+quote(j.error)+",\"repository\":"+quote(j.repository)+",\"name\":"+quote(j.name)+
                        ",\"rootKey\":"+quote(j.rootKey)+",\"serial\":"+std::to_string(j.serial)+",\"packages\":"+join(packages)+",\"package\":"+quote(j.package)+",\"version\":"+quote(j.version)+
                        ",\"installed\":{\"added\":"+std::to_string(j.installed.added)+",\"skipped\":"+std::to_string(j.installed.skipped)+",\"notes\":"+join(notes)+",\"code\":"+join(code)+"}}";

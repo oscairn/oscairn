@@ -61,10 +61,10 @@ Control::Signer Session::judge(const std::string& kind,const std::vector<signing
     if(signatures.empty())return out;
     const auto scope=kind=="plugin"?"plugins":kind=="app"?"apps":"content";
     const auto keys=readTrust();
-    out.key=signing::keyId(signatures.front().key);
+    out.key=signing::keyId(signatures.front().key);out.publicKey=signatures.front().key;
     for(const auto& s:signatures)for(const auto& k:keys)if(k.key==s.key){
-        if(k.revoked){out.status="revoked";out.key=k.id;out.keyName=k.name;return out;}
-        if(out.status!="trusted" && std::find(k.scope.begin(),k.scope.end(),scope)!=k.scope.end()){out.status="trusted";out.key=k.id;out.keyName=k.name;}
+        if(k.revoked){out.status="revoked";out.key=k.id;out.keyName=k.name;out.publicKey=k.key;return out;}
+        if(out.status!="trusted" && std::find(k.scope.begin(),k.scope.end(),scope)!=k.scope.end()){out.status="trusted";out.key=k.id;out.keyName=k.name;out.publicKey=k.key;}
     }
     return out;
 }

@@ -356,6 +356,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(state['state'] == 'failed' and 'unknown source' in state['error'] and store() == [] and leftovers() == [],
               'code by an unknown key is refused without a yes, leaving nothing: ' + state['error'])
         check(state['error'].startswith('it runs code from an unknown source'), 'the refusal reads as said to the user: ' + state['error'])
+        refused = state['installed']['code']
+        check(len(refused) == 1 and refused[0]['status'] == 'unknown' and refused[0]['key'] == keys['publisher'][0] and refused[0]['publicKey'] == keys['publisher'][1],
+              'the refusal names the public key the code is signed by, to trust: ' + json.dumps(refused))
         # Refused code installs none of what it needs either: the asset library stays out.
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.analog'})
         check(state['state'] == 'failed' and 'unknown source' in state['error'] and state['installed']['added'] == 0 and

@@ -1093,12 +1093,12 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
 
 - `library.contents` takes `{file}` (an archive, or an unpacked package folder) and returns `{id,name,kind,items,code,signer,license,source}`, each item's `kind`,
   `id` and `name`. `code` is each plugin build it would add to the store (not one already
-  there), and `signer` the whole archive's, each `{kind,name,version,platform,status,key,keyName}`
+  there), and `signer` the whole archive's, each `{kind,name,version,platform,status,key,keyName,publicKey}`
   ([RFC 0006](rfcs/0006-packages-and-portability.md#signatures)): `kind` `plugin` (`app` once
   archives carry apps) or `archive`; `status` `trusted` (signed by a key the trust store trusts
   for it: `plugins`, `apps`, or `content` for the archive), `unknown` (signed by no such
-  key), `unsigned` or `revoked`; `key` the deciding key's ID (empty when unsigned) and `keyName`
-  its trust store name. An archive with a signature that does not verify is refused. `license`
+  key), `unsigned` or `revoked`; `key` the deciding key's ID (empty when unsigned), `keyName`
+  its trust store name and `publicKey` the key itself in hex, as `trust.set` takes it. An archive with a signature that does not verify is refused. `license`
   is its SPDX expression (empty when it names none) and `source` `{url,revision}`, where its
   source is and the exact commit or tag, or `null`
   ([license and source](library-archive.md#license-and-source)).
@@ -1177,8 +1177,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   size,installed}`: `incompatible` says why this device cannot install it (empty when it can),
   and `size` and `installed` are this platform's download and installed bytes. An install's
   `package` and `version` say what it chose and `installed` is what `library.install`
-  returns. An install unpacks off the control thread; asking about it once it has unpacked
-  moves it into place.
+  returns. An install refused for code from an unknown source has `installed.code` too: each
+  build's signer, with the `publicKey` to show the user and trust with `trust.set`. A listing's
+  `publisherKey` is the key's ID only, as the index carries no public keys; the public key is
+  in the package's signatures, which a listing does not fetch. An install unpacks off the
+  control thread; asking about it once it has unpacked moves it into place.
 - `library.uninstall` takes `{library}`; `library.delete` takes `{id}`, any item's.
 - `library.query` items carry `library`: the installed library holding them, locked, or empty
   for the user's own. Saving over a locked item, a Performance by `library.save` or a part's

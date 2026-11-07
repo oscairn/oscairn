@@ -197,7 +197,9 @@ Control::PackageJob Session::packageJob(uint64_t id){
         auto packages=std::move(w.packages);w.packages.clear();
         PackageJob done;done.state="done";
         // The package's code is acceptable before anything goes in: a refusal installs none of the libraries it needs either.
-        try{installUnpacked(packages.back().first,packages.back().second,true,{},w.acceptUnsignedCode,true,true);}catch(const std::exception& e){done.state="failed";done.error=e.what();}
+        try{installUnpacked(packages.back().first,packages.back().second,true,{},w.acceptUnsignedCode,true,true);}
+        catch(const CodeRefused& e){done.state="failed";done.error=e.what();done.installed.code=e.code;} // its signers' keys, to trust
+        catch(const std::exception& e){done.state="failed";done.error=e.what();}
         // Each asset library it needs, then the package; installUnpacked removes each folder either way.
         for(auto& [package,into]:packages){
             if(done.state=="failed"){std::error_code e;fs::remove_all(into,e);continue;}

@@ -517,7 +517,7 @@ namespace oscairn
         std::vector<std::string> strings(V v){std::vector<std::string> out;for(auto e:array(v))out.push_back(string(e));return out;}
         std::string quoted(const std::vector<std::string>& values){std::string out="[";for(const auto& v:values){if(out.size()>1)out+=',';out+=quote(v);}return out+']';}
         // An export's sign member, when it signs anything.
-        Control::Signer signer(V s){return {string(field(s,"kind")),string(field(s,"name")),string(field(s,"version")),string(field(s,"platform")),string(field(s,"status")),string(field(s,"key")),string(field(s,"keyName"))};}
+        Control::Signer signer(V s){return {string(field(s,"kind")),string(field(s,"name")),string(field(s,"version")),string(field(s,"platform")),string(field(s,"status")),string(field(s,"key")),string(field(s,"keyName")),string(field(s,"publicKey"))};}
         std::vector<Control::Signer> signers(V list){std::vector<Control::Signer> out;for(auto s:array(list))out.push_back(signer(s));return out;}
         std::string signing(const Control::ExportSigning& s){return s.items || s.archive?",\"sign\":{\"key\":"+quote(s.key)+",\"items\":"+(s.items?"true":"false")+",\"archive\":"+(s.archive?"true":"false")+'}':std::string();}
     }

@@ -647,6 +647,7 @@ namespace oscairn
         std::vector<std::string> exportArchive(const std::string& file, const std::string& kind, const std::function<std::vector<PartSource>(const std::filesystem::path&, Package&)>& write, bool editedSounds, const ExportSigning& sign);
         static signing::Key signingKey(const std::string& name); // Keys/<name>.key in the data folder
         static Signer judge(const std::string& kind, const std::vector<signing::Signature>& signatures); // against the trust store
+        struct CodeRefused : std::runtime_error { std::vector<Signer> code; CodeRefused(const std::string& why, std::vector<Signer> signers) : std::runtime_error(why), code(std::move(signers)) {} }; // installUnpacked's refusal, with the signers it judged
         Installed installUnpacked(const Package& package, const std::filesystem::path& into, bool asLibrary, const std::vector<std::string>& items, bool acceptUnsignedCode, bool thisPlatformOnly, bool checkOnly = false); // checkOnly: refuse as it would, installing nothing
         struct PackageWork;                        // the package job off the control thread (packages.cpp)
         std::shared_ptr<PackageWork> packageWork_; // joins its thread when it goes

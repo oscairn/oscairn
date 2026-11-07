@@ -244,9 +244,9 @@ namespace oscairn
         // Who signed a part of an archive (RFC 0006), as this device's trust store sees it: kind
         // "plugin" (name, version and platform: its build's), "app" or "archive"; status "trusted"
         // (by a key trusted for it), "unknown" (signed, by no key trusted for it), "unsigned" or
-        // "revoked"; key: the ID of the key that decided it (empty when unsigned) and keyName
-        // its name in the trust store.
-        struct Signer { std::string kind, name, version, platform, status, key, keyName; };
+        // "revoked"; key: the ID of the key that decided it (empty when unsigned), keyName
+        // its name in the trust store and publicKey the key itself (hex), to trust.
+        struct Signer { std::string kind, name, version, platform, status, key, keyName, publicKey; };
         // code: each plugin build's signer (each app's, when archives carry apps); signer: the
         // whole archive's. Signatures that do not verify refuse the archive. license: its SPDX
         // expression; sourceUrl and sourceRevision: where its source is, the commit or tag (empty

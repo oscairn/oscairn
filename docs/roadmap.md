@@ -211,7 +211,9 @@ in the others.
      for the desktop and the device panel (done), a desktop shell like Gig Performer's with a
      keyboard-and-mouse or touch input mode (started), described plugin editors covering
      step 5's knob pages (done for every plugin's parameters on Desktop, Panel and the
-     Compact test layout; modulation shown on knobs and the Modular grid remain)
+     Compact test layout; modulation shown on knobs and the Modular grid remain), and the
+     rich views plugins describe (`oscairn.ui` draft 4: envelopes, key and velocity maps and FM
+     operator views, drawn and edited on Desktop and Panel; the engines' declarations remain)
    - [ ] plugin windows (built on macOS: a worker shows the plugin's own window beside the app's,
      [RFC 0019 step 4](rfcs/0019-adaptive-ui.md#step-4-status); editing it while audio plays
      not yet checked), then step 6's physical controls (default layers, banks as wide as

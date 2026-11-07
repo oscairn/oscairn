@@ -108,6 +108,134 @@ namespace oscairn::standalone
         return e;
     }
 
+    EnvelopeShape envelopeOf(const std::vector<uint32_t>& fields)
+    {
+        auto find = [&](uint32_t field) { for(size_t i = 0; i < fields.size(); ++i) if(fields[i] == field) return int(i); return -1; };
+        EnvelopeShape e;
+        // Named stages: as an ADSR recognized by name.
+        const int attack = find(OSCAIRN_FIELD_ATTACK), decay = find(OSCAIRN_FIELD_DECAY), sustain = find(OSCAIRN_FIELD_SUSTAIN), release = find(OSCAIRN_FIELD_RELEASE);
+        if(attack >= 0 && release >= 0)
+        {
+            if(const int delay = find(OSCAIRN_FIELD_DELAY); delay >= 0) e.points.push_back({delay, -1, 0});
+            e.points.push_back({attack, decay < 0 ? sustain : -1, 1});
+            if(const int hold = find(OSCAIRN_FIELD_HOLD); hold >= 0) e.points.push_back({hold, e.points.back().level, 1});
+            if(decay >= 0) e.points.push_back({decay, sustain, sustain >= 0 ? 0.0 : 1.0});
+            e.points.back().sustain = true;
+            e.points.push_back({release, -1, 0});
+            return e;
+        }
+        // Points: segment k reaches level k after its time or rate; one without a level holds,
+        // except the last, which falls to zero. From level 0, or the last segment's level.
+        int segments = 0;
+        for(int k = 1; k <= 8; ++k) if(find(OSCAIRN_FIELD_TIME_1 + uint32_t(k) - 1) >= 0 || find(OSCAIRN_FIELD_RATE_1 + uint32_t(k) - 1) >= 0) segments = k;
+        if(segments == 0) return e;
+        e.start = find(OSCAIRN_FIELD_LEVEL_0);
+        for(int k = 1; k <= segments; ++k)
+        {
+            const int time = find(OSCAIRN_FIELD_TIME_1 + uint32_t(k) - 1), rate = find(OSCAIRN_FIELD_RATE_1 + uint32_t(k) - 1);
+            EnvelopeShape::Point p{time >= 0 ? time : rate, find(OSCAIRN_FIELD_LEVEL_0 + uint32_t(k)), 0, time < 0 && rate >= 0};
+            e.points.push_back(p);
+        }
+        if(e.start < 0) e.start = e.points.back().level;
+        for(size_t k = 0; k + 1 < e.points.size(); ++k)
+            if(e.points[k].level < 0) { e.points[k].level = k ? e.points[k - 1].level : e.start; e.points[k].fixed = k ? e.points[k - 1].fixed : e.fixedStart; }
+        if(e.points.size() > 1) e.points[e.points.size() - 2].sustain = true;
+        return e;
+    }
+
+    MapShape mapOf(const std::vector<Engine::ParamInfo>& params, uint32_t view, uint32_t index)
+    {
+        MapShape m;
+        for(size_t i = 0; i < params.size(); ++i)
+        {
+            const auto& p = params[i];
+            if(p.view != view || !view) continue;
+            if(p.field >= OSCAIRN_FIELD_KEY_LOW && p.field <= OSCAIRN_FIELD_VELOCITY_HIGH)
+            {
+                auto zone = std::find_if(m.zones.begin(), m.zones.end(), [&](const MapShape::Zone& z) { return z.index == p.index; });
+                if(zone == m.zones.end()) { m.zones.push_back({p.index}); zone = m.zones.end() - 1; }
+                (p.field == OSCAIRN_FIELD_KEY_LOW ? zone->keyLow : p.field == OSCAIRN_FIELD_KEY_HIGH ? zone->keyHigh : p.field == OSCAIRN_FIELD_VELOCITY_LOW ? zone->velocityLow : zone->velocityHigh) = int(i);
+            }
+            if(p.index != index) continue;
+            switch(p.field)
+            {
+            case OSCAIRN_FIELD_BREAKPOINT: m.breakpoint = int(i); break;
+            case OSCAIRN_FIELD_LEFT_DEPTH: m.leftDepth = int(i); break;
+            case OSCAIRN_FIELD_RIGHT_DEPTH: m.rightDepth = int(i); break;
+            case OSCAIRN_FIELD_LEFT_CURVE: m.leftCurve = int(i); break;
+            case OSCAIRN_FIELD_RIGHT_CURVE: m.rightCurve = int(i); break;
+            case OSCAIRN_FIELD_VELOCITY_DEPTH: m.velocityDepth = int(i); break;
+            case OSCAIRN_FIELD_VELOCITY_CURVE: m.velocityCurve = int(i); break;
+            default: break;
+            }
+        }
+        std::stable_sort(m.zones.begin(), m.zones.end(), [](const MapShape::Zone& a, const MapShape::Zone& b) { return a.index < b.index; });
+        return m;
+    }
+
+    FmShape fmOf(const std::vector<Engine::ParamInfo>& params, uint32_t view)
+    {
+        FmShape f;
+        for(size_t i = 0; i < params.size(); ++i)
+        {
+            const auto& p = params[i];
+            if(p.view != view || !view) continue;
+            if(p.field == OSCAIRN_FIELD_ALGORITHM) f.algorithm = int(i);
+            if(p.field == OSCAIRN_FIELD_FEEDBACK) f.feedback = int(i);
+            if(p.index == 0) continue;
+            if(f.operators.size() < p.index) f.operators.resize(p.index);
+            auto& op = f.operators[p.index - 1];
+            switch(p.field)
+            {
+            case OSCAIRN_FIELD_OPERATOR_LEVEL: op.level = int(i); break;
+            case OSCAIRN_FIELD_RATIO: op.ratio = int(i); break;
+            case OSCAIRN_FIELD_FINE: op.fine = int(i); break;
+            case OSCAIRN_FIELD_DETUNE: op.detune = int(i); break;
+            case OSCAIRN_FIELD_FIXED: op.fixed = int(i); break;
+            default: if((p.field >= OSCAIRN_FIELD_DELAY && p.field <= OSCAIRN_FIELD_RELEASE) || (p.field >= OSCAIRN_FIELD_LEVEL_0 && p.field <= OSCAIRN_FIELD_RATE_8)) op.envelope.push_back(i);
+            }
+        }
+        return f;
+    }
+
+    std::vector<OperatorPlace> algorithmLayout(const std::array<uint8_t, 11>& routing, size_t count)
+    {
+        // A carrier's row is 0; a modulator's one above the highest of the operators it
+        // modulates (a loop is cut after eight passes). Feedback is not an input: drawn apart.
+        count = std::min<size_t>(count, 8);
+        std::vector<int> row(count, -1);
+        for(size_t n = 0; n < count; ++n) if(routing[8] & (1u << n)) row[n] = 0;
+        for(int pass = 0; pass < 8; ++pass)
+            for(size_t target = 0; target < count; ++target)
+                for(size_t m = 0; m < count; ++m)
+                    if(row[target] >= 0 && (routing[target] & (1u << m)) && m != target && row[m] < row[target] + 1)
+                        row[m] = std::min(row[target] + 1, 7);
+        std::vector<OperatorPlace> places(count);
+        int rows = 0;
+        for(size_t n = 0; n < count; ++n) { places[n].row = std::max(row[n], 0); rows = std::max(rows, places[n].row + 1); }
+        // Row by row from the carriers up: each over the middle of what it modulates (a carrier, or
+        // an operator nothing reaches, in number order), then pushed right until none overlap.
+        float next = 0;
+        for(int r = 0; r < rows; ++r)
+        {
+            std::vector<size_t> in;
+            for(size_t n = 0; n < count; ++n)
+            {
+                if(places[n].row != r) continue;
+                float sum = 0; int targets = 0;
+                for(size_t t = 0; t < count; ++t) if(t != n && (routing[t] & (1u << n)) && places[t].row < r) { sum += places[t].x; ++targets; }
+                places[n].x = targets ? sum / float(targets) : next++;
+                in.push_back(n);
+            }
+            std::stable_sort(in.begin(), in.end(), [&](size_t a, size_t b) { return places[a].x < places[b].x; });
+            for(size_t k = 1; k < in.size(); ++k) places[in[k]].x = std::max(places[in[k]].x, places[in[k - 1]].x + 1);
+        }
+        float low = 0, high = 0;
+        for(size_t n = 0; n < count; ++n) { low = std::min(low, places[n].x); high = std::max(high, places[n].x); }
+        for(auto& p : places) p.x -= (low + high) / 2;
+        return places;
+    }
+
     LfoShape lfoOf(const std::vector<std::string>& names)
     {
         auto either = [&](std::initializer_list<const char*> options) {
@@ -385,6 +513,343 @@ namespace oscairn::standalone
         int dragging_ = -1;
     };
 
+    namespace
+    {
+        // A handle drawn as the envelope's are: white, ringed in the accent, larger while held.
+        void drawHandle(juce::Graphics& g, juce::Point<float> at, bool held)
+        {
+            const float r = held ? 6.f : 4.5f;
+            g.setColour(juce::Colours::white); g.fillEllipse(juce::Rectangle<float>(r * 2, r * 2).withCentre(at));
+            g.setColour(ink(Ink::Accent)); g.drawEllipse(juce::Rectangle<float>(r * 2, r * 2).withCentre(at), 1.5f);
+        }
+        float reach(const juce::Component& c) { return desktopMode(c) == 2 ? 24.f : 14.f; } // how near a press must be to take a handle
+    }
+
+    /// A key or velocity map a plugin describes: its zones as rectangles over the keys (across)
+    /// and velocities (up), the one this index owns in the accent; its level scaling across the
+    /// keys from the breakpoint; and velocity's effect on level, in a box at the right. Drag a
+    /// zone's edge, the breakpoint, a scaling end or the velocity line to set its parameter.
+    class ParameterGrid::KeyMap : public juce::Component
+    {
+    public:
+        KeyMap(ParameterGrid& grid, MapShape shape, uint32_t index) : grid_(grid), shape_(std::move(shape)), index_(index) {}
+        void paint(juce::Graphics& g) override
+        {
+            layout();
+            const int mode = std::max(1, desktopMode(*this));
+            g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(textSize(TextRole::Small, mode), juce::Font::bold));
+            g.drawText(getName(), getLocalBounds().reduced(10, 8).removeFromTop(16), juce::Justification::topLeft);
+            // The keys under the plane, an octave's black keys where a keyboard has them.
+            g.setColour(ink(Ink::Text).withAlpha(.75f)); g.fillRect(keys_);
+            g.setColour(ink(Ink::Background));
+            for(int note = 0; note < 128; ++note)
+                if(const int n = note % 12; n == 1 || n == 3 || n == 6 || n == 8 || n == 10)
+                    g.fillRect(juce::Rectangle<float>(keys_.getX() + keys_.getWidth() * float(note) / 128, keys_.getY(), keys_.getWidth() / 128, keys_.getHeight() * .6f));
+            g.setColour(ink(Ink::Border).withAlpha(.35f)); g.drawRect(plane_, 1.f);
+            for(const auto& z : shape_.zones)
+            {
+                const auto r = zone(z);
+                const bool mine = z.index == index_;
+                g.setColour((mine ? ink(Ink::Accent) : ink(Ink::Muted)).withAlpha(mine ? .22f : .1f)); g.fillRect(r);
+                g.setColour(mine ? ink(Ink::Accent) : ink(Ink::Muted)); g.drawRect(r, mine ? 1.5f : 1.f);
+                if(shape_.zones.size() > 1) { g.setFont(juce::FontOptions(textSize(TextRole::Small, mode))); g.drawText(juce::String(z.index), r.reduced(4, 2), juce::Justification::topLeft, false); }
+            }
+            if(shape_.breakpoint >= 0)
+            {
+                g.setColour(ink(Ink::Border)); g.drawVerticalLine(int(at(shape_.breakpoint)), plane_.getY(), plane_.getBottom());
+                juce::Path line; line.startNewSubPath(plane_.getX(), scaled(plane_.getX()));
+                for(float x = plane_.getX(); x <= plane_.getRight(); x += 2) line.lineTo(x, scaled(x));
+                g.setColour(ink(Ink::Accent)); g.strokePath(line, juce::PathStrokeType(2.f));
+                g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(textSize(TextRole::Small, mode)));
+                g.drawText(text(shape_.breakpoint), juce::Rectangle<float>(at(shape_.breakpoint) + 4, plane_.getY() + 2, 80, 14), juce::Justification::left, false);
+            }
+            if(shape_.velocityDepth >= 0)
+            {
+                g.setColour(ink(Ink::Border).withAlpha(.35f)); g.drawRect(velocity_, 1.f);
+                g.setColour(ink(Ink::Accent)); g.drawLine(velocity_.getX(), quiet(), velocity_.getRight(), velocity_.getY(), 2.f);
+                g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(textSize(TextRole::Small, mode)));
+                g.drawText("Velocity", velocity_.withY(keys_.getY()).withHeight(keys_.getHeight()), juce::Justification::centred, false);
+            }
+            for(size_t i = 0; i < handles_.size(); ++i) drawHandle(g, handles_[i].at, int(i) == dragging_);
+        }
+        void mouseDown(const juce::MouseEvent& e) override
+        {
+            layout(); dragging_ = -1;
+            float best = reach(*this);
+            for(size_t i = 0; i < handles_.size(); ++i) if(const float d = handles_[i].at.getDistanceFrom(e.position); d < best) { best = d; dragging_ = int(i); }
+            if(dragging_ >= 0) grid_.engine_.paramGesture(grid_.name_, grid_.params_[size_t(handles_[size_t(dragging_)].param)].id, true);
+            repaint();
+        }
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            if(dragging_ < 0) return;
+            const auto& h = handles_[size_t(dragging_)];
+            const float across = std::clamp((e.position.x - plane_.getX()) / plane_.getWidth(), 0.f, 1.f), up = std::clamp((plane_.getBottom() - e.position.y) / plane_.getHeight(), 0.f, 1.f);
+            double v = 0;
+            switch(h.kind)
+            {
+            case Kind::Across: v = across; break;
+            case Kind::Up: v = up; break;
+            case Kind::Depth: v = std::clamp(std::abs(e.position.y - plane_.getCentreY()) / (plane_.getHeight() / 2), 0.f, 1.f); break;
+            case Kind::Velocity: v = std::clamp((e.position.y - velocity_.getY()) / velocity_.getHeight(), 0.f, 1.f); break;
+            }
+            grid_.setNormal(size_t(h.param), v);
+            repaint();
+        }
+        void mouseUp(const juce::MouseEvent&) override
+        {
+            if(dragging_ >= 0) grid_.engine_.paramGesture(grid_.name_, grid_.params_[size_t(handles_[size_t(dragging_)].param)].id, false);
+            dragging_ = -1; repaint();
+        }
+    private:
+        enum class Kind { Across, Up, Depth, Velocity }; // what dragging a handle sets: a key, a velocity, a scaling depth, velocity's depth
+        struct Handle { juce::Point<float> at; int param; Kind kind; };
+        double value(int param, double otherwise) const { return param >= 0 ? grid_.normal(size_t(param)) : otherwise; }
+        float at(int param) const { return plane_.getX() + float(value(param, 0)) * plane_.getWidth(); }
+        juce::String text(int param) const { const auto& p = grid_.params_[size_t(param)]; return juce::String::fromUTF8(grid_.engine_.paramText(grid_.name_, p.id, grid_.engine_.param(grid_.name_, p.id)).c_str()); }
+        juce::Rectangle<float> zone(const MapShape::Zone& z) const
+        {
+            const float left = plane_.getX() + float(value(z.keyLow, 0)) * plane_.getWidth(), right = plane_.getX() + float(value(z.keyHigh, 1)) * plane_.getWidth();
+            const float top = plane_.getBottom() - float(value(z.velocityHigh, 1)) * plane_.getHeight(), bottom = plane_.getBottom() - float(value(z.velocityLow, 0)) * plane_.getHeight();
+            return juce::Rectangle<float>::leftTopRightBottom(std::min(left, right), std::min(top, bottom), std::max(left, right), std::max(top, bottom));
+        }
+        // The scaled level at x, from the middle: up or down by each side's depth, straight or
+        // curved as its curve's value text says ("-LIN", "+EXP"; a minus lowers it).
+        float scaled(float x) const
+        {
+            const float b = at(shape_.breakpoint);
+            const bool left = x < b;
+            const int depth = left ? shape_.leftDepth : shape_.rightDepth, curve = left ? shape_.leftCurve : shape_.rightCurve;
+            const float span = left ? b - plane_.getX() : plane_.getRight() - b;
+            float t = span > 0 ? std::abs(x - b) / span : 0;
+            const auto shape = curve >= 0 ? text(curve).toUpperCase() : juce::String();
+            if(shape.contains("EXP")) t = t * t;
+            const float sign = shape.startsWith("-") ? -1.f : 1.f;
+            return plane_.getCentreY() - sign * t * float(value(depth, 0)) * plane_.getHeight() / 2;
+        }
+        float quiet() const { return velocity_.getY() + float(value(shape_.velocityDepth, 0)) * velocity_.getHeight(); } // the level at the softest velocity
+        void layout()
+        {
+            auto area = getLocalBounds().toFloat().reduced(14, 10).withTrimmedTop(18);
+            keys_ = area.removeFromBottom(14);
+            velocity_ = shape_.velocityDepth >= 0 ? area.removeFromRight(std::min(90.f, area.getWidth() / 4)).withTrimmedLeft(12) : juce::Rectangle<float>();
+            if(!velocity_.isEmpty()) keys_.setRight(velocity_.getX() - 12);
+            plane_ = area;
+            handles_.clear();
+            for(const auto& z : shape_.zones)
+            {
+                if(z.index != index_) continue;
+                const auto r = zone(z);
+                if(z.keyLow >= 0) handles_.push_back({{r.getX(), r.getCentreY()}, z.keyLow, Kind::Across});
+                if(z.keyHigh >= 0) handles_.push_back({{r.getRight(), r.getCentreY()}, z.keyHigh, Kind::Across});
+                if(z.velocityHigh >= 0) handles_.push_back({{r.getCentreX(), r.getY()}, z.velocityHigh, Kind::Up});
+                if(z.velocityLow >= 0) handles_.push_back({{r.getCentreX(), r.getBottom()}, z.velocityLow, Kind::Up});
+            }
+            if(shape_.breakpoint >= 0)
+            {
+                handles_.push_back({{at(shape_.breakpoint), plane_.getCentreY()}, shape_.breakpoint, Kind::Across});
+                if(shape_.leftDepth >= 0) handles_.push_back({{plane_.getX(), scaled(plane_.getX())}, shape_.leftDepth, Kind::Depth});
+                if(shape_.rightDepth >= 0) handles_.push_back({{plane_.getRight(), scaled(plane_.getRight())}, shape_.rightDepth, Kind::Depth});
+            }
+            if(shape_.velocityDepth >= 0) handles_.push_back({{velocity_.getX(), quiet()}, shape_.velocityDepth, Kind::Velocity});
+        }
+        ParameterGrid& grid_;
+        MapShape shape_;
+        uint32_t index_;
+        juce::Rectangle<float> plane_, keys_, velocity_;
+        std::vector<Handle> handles_;
+        int dragging_ = -1;
+    };
+
+    /// An FM operator view a plugin describes: its algorithm's routing on the left (carriers on
+    /// the bottom row, filled; each modulator above what it modulates; feedback as a loop), and a
+    /// column per operator with its level as a bar, its ratio and its envelope's shape. Drag
+    /// across the routing (or tap either half) to choose the algorithm, a level bar to set the
+    /// level, a ratio up or down to step it.
+    class ParameterGrid::Operators : public juce::Component
+    {
+    public:
+        Operators(ParameterGrid& grid, FmShape shape) : grid_(grid), shape_(std::move(shape)) {}
+        void paint(juce::Graphics& g) override
+        {
+            layout();
+            const int mode = std::max(1, desktopMode(*this));
+            juce::String title = "Algorithm " + text(shape_.algorithm);
+            if(shape_.feedback >= 0) title << juce::String::fromUTF8("  ·  Feedback ") << text(shape_.feedback);
+            g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(textSize(TextRole::Small, mode), juce::Font::bold));
+            g.drawText(title, getLocalBounds().reduced(10, 8).removeFromTop(16), juce::Justification::topLeft);
+            g.setColour(ink(Ink::Border).withAlpha(.35f)); g.drawRect(routing_, 1.f);
+            // The routing: lines first, then the operators over them.
+            const auto& boxes = boxes_;
+            const auto* r = route();
+            g.setColour(ink(Ink::Muted));
+            if(r)
+                for(size_t t = 0; t < boxes.size(); ++t)
+                {
+                    for(size_t m = 0; m < boxes.size(); ++m)
+                        if(((*r)[t] & (1u << m)) && m != t) g.drawLine(boxes[m].getCentreX(), boxes[m].getBottom(), boxes[t].getCentreX(), boxes[t].getY(), 1.5f);
+                    if((*r)[8] & (1u << t)) g.drawLine(boxes[t].getCentreX(), boxes[t].getBottom(), boxes[t].getCentreX(), output_, 1.5f);
+                }
+            if(r && (*r)[9] && size_t((*r)[9]) <= boxes.size() && size_t((*r)[10]) <= boxes.size())
+            {
+                // Feedback: out of its operator's right side, up and over into the operator it feeds.
+                const auto from = boxes[size_t((*r)[9]) - 1], to = boxes[size_t((*r)[10]) - 1];
+                const float side = std::max(from.getRight(), to.getRight()) + 6, top = std::min(from.getY(), to.getY()) - 6;
+                juce::Path loop; loop.startNewSubPath(from.getRight(), from.getCentreY()); loop.lineTo(side, from.getCentreY());
+                loop.lineTo(side, top); loop.lineTo(to.getCentreX(), top); loop.lineTo(to.getCentreX(), to.getY());
+                g.setColour(ink(Ink::Accent)); g.strokePath(loop, juce::PathStrokeType(1.5f));
+            }
+            if(r) { g.setColour(ink(Ink::Muted)); g.drawHorizontalLine(int(output_), routing_.getX() + 12, routing_.getRight() - 12); }
+            g.setFont(juce::FontOptions(textSize(TextRole::Small, mode), juce::Font::bold));
+            for(size_t n = 0; n < boxes.size(); ++n)
+            {
+                const bool carrier = r && ((*r)[8] & (1u << n));
+                g.setColour(carrier ? ink(Ink::Accent) : ink(Ink::Raised)); g.fillRoundedRectangle(boxes[n], 4);
+                g.setColour(ink(Ink::Border)); g.drawRoundedRectangle(boxes[n], 4, 1);
+                g.setColour(carrier ? ink(Ink::Accent).contrasting() : ink(Ink::Text)); g.drawText(juce::String(n + 1), boxes[n], juce::Justification::centred, false);
+            }
+            // A column per operator: its number, its level as a bar and text, its ratio, and its envelope.
+            for(size_t n = 0; n < columns_.size(); ++n)
+            {
+                const auto& c = columns_[n]; const auto& op = shape_.operators[n];
+                const bool carrier = r && ((*r)[8] & (1u << n));
+                g.setColour(carrier ? ink(Ink::Accent) : ink(Ink::Text)); g.setFont(juce::FontOptions(textSize(TextRole::Small, mode), juce::Font::bold));
+                g.drawText("Op " + juce::String(n + 1), c.name, juce::Justification::centred, false);
+                g.setColour(ink(Ink::Raised)); g.fillRoundedRectangle(c.level, 3);
+                if(op.level >= 0)
+                {
+                    const float v = float(grid_.normal(size_t(op.level)));
+                    g.setColour(ink(Ink::Accent)); g.fillRoundedRectangle(c.level.withTop(c.level.getBottom() - v * c.level.getHeight()), 3);
+                    g.setColour(ink(Ink::Text)); g.setFont(juce::FontOptions(textSize(TextRole::Small, mode)));
+                    g.drawText(text(op.level), c.levelText, juce::Justification::centred, false);
+                }
+                g.setColour(ink(Ink::Raised)); g.fillRoundedRectangle(c.ratio, 3);
+                g.setColour(ink(Ink::Text)); g.setFont(juce::FontOptions(textSize(TextRole::Small, mode)));
+                juce::String ratio = op.ratio >= 0 ? text(op.ratio) : juce::String();
+                if(op.fine >= 0) ratio << " " << text(op.fine);
+                if(op.fixed >= 0 && grid_.normal(size_t(op.fixed)) > .5) ratio = text(op.fixed) + " " + ratio;
+                g.drawFittedText(ratio, c.ratio.reduced(2).toNearestInt(), juce::Justification::centred, 1, .7f);
+                if(!op.envelope.empty())
+                {
+                    std::vector<uint32_t> fields;
+                    for(const auto i : op.envelope) fields.push_back(grid_.params_[i].field);
+                    const auto e = envelopeOf(fields);
+                    auto level = [&](int k, double fixed) { return c.envelope.getBottom() - float(k >= 0 ? grid_.normal(op.envelope[size_t(k)]) : fixed) * c.envelope.getHeight(); };
+                    const float segment = c.envelope.getWidth() * .8f / float(std::max<size_t>(1, e.points.size())), hold = c.envelope.getWidth() * .2f;
+                    juce::Path line; float x = c.envelope.getX(); line.startNewSubPath(x, level(e.start, e.fixedStart));
+                    for(const auto& p : e.points)
+                    {
+                        const double t = p.time >= 0 ? grid_.normal(op.envelope[size_t(p.time)]) : 0;
+                        x += float(p.rate ? 1 - t : t) * segment; line.lineTo(x, level(p.level, p.fixed));
+                        if(p.sustain) { x += hold; line.lineTo(x, level(p.level, p.fixed)); }
+                    }
+                    g.setColour(ink(Ink::Border).withAlpha(.35f)); g.drawRect(c.envelope, 1.f);
+                    g.setColour(ink(Ink::Accent)); g.strokePath(line, juce::PathStrokeType(1.5f));
+                }
+            }
+        }
+        void mouseDown(const juce::MouseEvent& e) override
+        {
+            layout(); held_ = {}; from_ = e.position;
+            if(routing_.contains(e.position) && shape_.algorithm >= 0) { held_ = {Held::Algorithm, shape_.algorithm}; start_ = grid_.engine_.param(grid_.name_, grid_.params_[size_t(shape_.algorithm)].id); }
+            for(size_t n = 0; n < columns_.size(); ++n)
+            {
+                const auto& op = shape_.operators[n];
+                if(columns_[n].level.expanded(4).contains(e.position) && op.level >= 0) held_ = {Held::Level, op.level};
+                if(columns_[n].ratio.expanded(4).contains(e.position) && op.ratio >= 0) { held_ = {Held::Ratio, op.ratio}; start_ = grid_.engine_.param(grid_.name_, grid_.params_[size_t(op.ratio)].id); }
+            }
+            if(held_.param < 0) return;
+            grid_.engine_.paramGesture(grid_.name_, grid_.params_[size_t(held_.param)].id, true);
+            if(held_.kind == Held::Level) mouseDrag(e);
+        }
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            if(held_.param < 0) return;
+            const auto& p = grid_.params_[size_t(held_.param)];
+            if(held_.kind == Held::Level)
+            {
+                const auto& bar = columns_[size_t(std::find_if(shape_.operators.begin(), shape_.operators.end(), [&](const FmShape::Operator& o) { return o.level == held_.param; }) - shape_.operators.begin())].level;
+                grid_.setNormal(size_t(held_.param), std::clamp((bar.getBottom() - e.position.y) / bar.getHeight(), 0.f, 1.f));
+            }
+            else
+            {
+                // A step per 24 pixels across the routing, or up a ratio; a continuous ratio by its range.
+                const double steps = held_.kind == Held::Algorithm ? (e.position.x - from_.x) / 24.0 : (from_.y - e.position.y) / 12.0;
+                const double v = p.stepped ? start_ + std::trunc(steps) : start_ + steps / 100 * (p.maximum - p.minimum);
+                grid_.engine_.setParam(grid_.name_, p.id, std::clamp(v, p.minimum, p.maximum));
+            }
+            repaint();
+        }
+        void mouseUp(const juce::MouseEvent& e) override
+        {
+            if(held_.param < 0) return;
+            const auto& p = grid_.params_[size_t(held_.param)];
+            // A tap on the routing steps the algorithm: back on its left half, on on its right.
+            if(held_.kind == Held::Algorithm && e.position.getDistanceFrom(from_) < 4)
+                grid_.engine_.setParam(grid_.name_, p.id, std::clamp(start_ + (e.position.x < routing_.getCentreX() ? -1 : 1), p.minimum, p.maximum));
+            grid_.engine_.paramGesture(grid_.name_, p.id, false);
+            held_ = {}; repaint();
+        }
+    private:
+        struct Column { juce::Rectangle<float> name, level, levelText, ratio, envelope; };
+        struct Held { enum Kind { None, Algorithm, Level, Ratio } kind = None; int param = -1; };
+        juce::String text(int param) const { const auto& p = grid_.params_[size_t(param)]; return juce::String::fromUTF8(grid_.engine_.paramText(grid_.name_, p.id, grid_.engine_.param(grid_.name_, p.id)).c_str()); }
+        // The algorithm's routing at its value, when the plugin gives one.
+        const std::array<uint8_t, 11>* route() const
+        {
+            const auto& a = grid_.params_[size_t(shape_.algorithm)];
+            const auto at = std::lround(grid_.engine_.param(grid_.name_, a.id) - a.minimum);
+            return at >= 0 && size_t(at) < a.algorithms.size() ? &a.algorithms[size_t(at)] : nullptr;
+        }
+        void layout()
+        {
+            const int mode = std::max(1, desktopMode(*this));
+            auto area = getLocalBounds().toFloat().reduced(14, 10).withTrimmedTop(20);
+            routing_ = area.removeFromLeft(std::min(area.getWidth() * .36f, 360.f));
+            area.removeFromLeft(14);
+            const size_t count = shape_.operators.size();
+            // The routing's operators: rows from the bottom, each row centered.
+            boxes_.assign(count, {});
+            std::vector<OperatorPlace> places(count);
+            for(size_t n = 0; n < count; ++n) places[n].x = float(n) - float(count - 1) / 2; // no routing: one row
+            if(const auto* r = route()) places = algorithmLayout(*r, count);
+            int rows = 1; float span = 1;
+            for(const auto& p : places) { rows = std::max(rows, p.row + 1); span = std::max(span, std::abs(p.x) * 2 + 1); }
+            output_ = routing_.getBottom() - 10;
+            const float rowHeight = std::min(46.f, (routing_.getHeight() - 24) / float(rows)), side = std::min(rowHeight - 12, mode == 2 ? 30.f : 26.f);
+            const float columnWidth = std::min(48.f, (routing_.getWidth() - 24) / span);
+            for(size_t n = 0; n < count; ++n)
+            {
+                const float x = routing_.getCentreX() + places[n].x * columnWidth;
+                const float y = output_ - 12 - rowHeight * float(places[n].row) - side / 2;
+                boxes_[n] = juce::Rectangle<float>(side, side).withCentre({x, y});
+            }
+            columns_.assign(count, {});
+            const float width = count ? area.getWidth() / float(count) : 0;
+            for(size_t n = 0; n < count; ++n)
+            {
+                auto c = juce::Rectangle<float>(area.getX() + width * float(n), area.getY(), width, area.getHeight()).reduced(4, 0);
+                auto& col = columns_[n];
+                col.name = c.removeFromTop(18);
+                col.envelope = c.removeFromBottom(c.getHeight() * .26f);
+                c.removeFromBottom(6);
+                col.ratio = c.removeFromBottom(mode == 2 ? 30.f : 24.f);
+                c.removeFromBottom(6);
+                col.levelText = c.removeFromBottom(16);
+                col.level = c.withSizeKeepingCentre(std::min(c.getWidth(), mode == 2 ? 36.f : 24.f), c.getHeight());
+            }
+        }
+        ParameterGrid& grid_;
+        FmShape shape_;
+        juce::Rectangle<float> routing_;
+        float output_ = 0;
+        std::vector<juce::Rectangle<float>> boxes_;
+        std::vector<Column> columns_;
+        Held held_;
+        juce::Point<float> from_;
+        double start_ = 0;
+    };
+
     std::vector<Engine::ParamInfo> editorParameters(std::vector<Engine::ParamInfo> params)
     {
         std::erase_if(params, [](const Engine::ParamInfo& p) { return (p.flags & CLAP_PARAM_IS_HIDDEN) != 0; });
@@ -577,7 +1042,7 @@ namespace oscairn::standalone
 
     bool sameParameters(const std::vector<Engine::ParamInfo>& a, const std::vector<Engine::ParamInfo>& b)
     {
-        auto key = [](const Engine::ParamInfo& p) { return std::tie(p.id, p.name, p.minimum, p.maximum, p.defaultValue, p.stepped, p.flags, p.module, p.widget, p.priority, p.rangeHigh, p.group); };
+        auto key = [](const Engine::ParamInfo& p) { return std::tie(p.id, p.name, p.minimum, p.maximum, p.defaultValue, p.stepped, p.flags, p.module, p.widget, p.priority, p.rangeHigh, p.group, p.view, p.field, p.index, p.algorithms); };
         return std::equal(a.begin(), a.end(), b.begin(), b.end(), [&](const auto& x, const auto& y) { return key(x) == key(y); });
     }
 
@@ -792,14 +1257,53 @@ namespace oscairn::standalone
         for(const auto& [heading, members] : groups)
         {
             if(!heading.empty()) { headings_.push_back({text(heading).replace("/", juce::String::fromUTF8(" › ")), {0, y, width, 28}}); y += 30; }
-            // An LFO or an envelope among them: drawn first, across the row.
+            // The rich views the plugin describes among them (oscairn.ui), each drawn first, across
+            // the row: an FM operator view where its algorithm is, then an envelope per view and
+            // index, then a key or velocity map per view and index.
+            std::vector<std::vector<size_t>> described; // each described envelope's parameters, in its tiles' order
+            {
+                auto panel = [&](std::unique_ptr<juce::Component> view, const juce::String& name, int high) {
+                    const juce::Rectangle<int> bounds(0, y, width, high);
+                    view->setName(name); view->setTitle(name);
+                    view->setBounds(bounds); content_->addAndMakeVisible(*view); controls_.push_back(std::move(view));
+                    panels_.push_back(bounds);
+                    y += bounds.getHeight() + gap;
+                };
+                auto isEnvelope = [](uint32_t f) { return (f >= OSCAIRN_FIELD_DELAY && f <= OSCAIRN_FIELD_RELEASE) || (f >= OSCAIRN_FIELD_LEVEL_0 && f <= OSCAIRN_FIELD_RATE_8); };
+                auto isMap = [](uint32_t f) { return f >= OSCAIRN_FIELD_KEY_LOW && f <= OSCAIRN_FIELD_VELOCITY_CURVE; };
+                std::vector<std::pair<uint32_t, uint32_t>> envelopes, maps; // view and index, in the plugin's order
+                for(const auto i : members)
+                {
+                    const auto& p = params_[i];
+                    if(!p.view) continue;
+                    if(p.field == OSCAIRN_FIELD_ALGORITHM) panel(std::make_unique<Operators>(*this, fmOf(params_, p.view)), "FM operators", mode == 2 ? 300 : 240);
+                    auto& list = isEnvelope(p.field) ? envelopes : maps;
+                    if((isEnvelope(p.field) || isMap(p.field)) && std::find(list.begin(), list.end(), std::pair{p.view, p.index}) == list.end()) list.push_back({p.view, p.index});
+                }
+                for(const auto& [view, index] : envelopes)
+                {
+                    std::vector<size_t> list; std::vector<uint32_t> fields;
+                    for(const auto i : members) if(params_[i].view == view && params_[i].index == index && isEnvelope(params_[i].field)) { list.push_back(i); fields.push_back(params_[i].field); }
+                    auto shape = envelopeOf(fields);
+                    if(shape.empty()) continue;
+                    std::vector<size_t> order;
+                    for(const int k : linkedOrder(shape)) order.push_back(list[size_t(k)]);
+                    described.push_back(order);
+                    panel(std::make_unique<Envelope>(*this, std::move(shape), list), "Envelope", mode == 2 ? 180 : 150);
+                }
+                for(const auto& [view, index] : maps)
+                    if(auto shape = mapOf(params_, view, index); !shape.empty()) panel(std::make_unique<KeyMap>(*this, std::move(shape), index), "Key map", mode == 2 ? 180 : 150);
+            }
+            // Among the rest, an LFO, a filter or an envelope recognized by name: drawn first, across the row.
+            std::vector<size_t> plain; // the parameters in no described view
+            for(const auto i : members) if(!params_[i].view) plain.push_back(i);
             {
                 std::vector<std::string> names;
-                for(const auto i : members) names.push_back(params_[i].name);
+                for(const auto i : plain) names.push_back(params_[i].name);
                 if(auto shape = filterOf(names); !shape.empty())
                 {
                     const juce::Rectangle<int> bounds(0, y, width, mode == 2 ? 160 : 130);
-                    auto view = std::make_unique<Filter>(*this, shape, members);
+                    auto view = std::make_unique<Filter>(*this, shape, plain);
                     view->setBounds(bounds); content_->addAndMakeVisible(*view); controls_.push_back(std::move(view));
                     panels_.push_back(bounds);
                     y += bounds.getHeight() + gap;
@@ -807,7 +1311,7 @@ namespace oscairn::standalone
                 if(auto shape = lfoOf(names); !shape.empty())
                 {
                     const juce::Rectangle<int> bounds(0, y, width, mode == 2 ? 140 : 110);
-                    auto view = std::make_unique<Lfo>(*this, std::move(shape), members);
+                    auto view = std::make_unique<Lfo>(*this, std::move(shape), plain);
                     view->setBounds(bounds); content_->addAndMakeVisible(*view); controls_.push_back(std::move(view));
                     panels_.push_back(bounds);
                     y += bounds.getHeight() + gap;
@@ -815,7 +1319,7 @@ namespace oscairn::standalone
                 if(auto shape = envelopeOf(names); !shape.empty())
                 {
                     const juce::Rectangle<int> bounds(0, y, width, mode == 2 ? 180 : 150);
-                    auto view = std::make_unique<Envelope>(*this, std::move(shape), members);
+                    auto view = std::make_unique<Envelope>(*this, std::move(shape), plain);
                     view->setBounds(bounds); content_->addAndMakeVisible(*view); controls_.push_back(std::move(view));
                     panels_.push_back(bounds);
                     y += bounds.getHeight() + gap;
@@ -835,12 +1339,14 @@ namespace oscairn::standalone
                         linked[at->second].push_back(i);
                     }
                 std::vector<std::string> names;
-                for(const auto i : members) names.push_back(params_[i].name);
-                auto recognized = [&](const std::vector<int>& order) {
-                    std::vector<size_t> run;
-                    for(const int k : order) if(params_[members[size_t(k)]].group == 0) run.push_back(members[size_t(k)]);
-                    if(run.size() > 1) linked.push_back(run);
+                for(const auto i : plain) names.push_back(params_[i].name);
+                auto run = [&](const std::vector<size_t>& order) {
+                    std::vector<size_t> next;
+                    for(const auto i : order) if(params_[i].group == 0) next.push_back(i);
+                    if(next.size() > 1) linked.push_back(next);
                 };
+                auto recognized = [&](const std::vector<int>& order) { std::vector<size_t> r; for(const int k : order) r.push_back(plain[size_t(k)]); run(r); };
+                for(const auto& order : described) run(order);
                 if(auto e = envelopeOf(names); !e.empty()) recognized(linkedOrder(e));
                 if(auto l = lfoOf(names); !l.empty()) recognized(linkedOrder(l));
                 if(auto f = filterOf(names); !f.empty()) recognized(linkedOrder(f));

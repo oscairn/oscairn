@@ -7,11 +7,13 @@
 // - Signing an export, its signer, and the keys in Settings (RFC 0006).
 // - Choosing a controller's profile (RFC 0024).
 // - Asking before an app opens (RFC 0025).
+// - The rich views a plugin describes, on the Panel and the Desktop (RFC 0019).
 //   oscairn_desktop_gaps_test PLUGIN_DIR SCANNER THEMES [SNAPSHOTS]
 #include "../DesktopShell.h"
 #include "../Launcher.h"
 #include "../LibraryPane.h"
 #include "../Panel.h"
+#include "../ParameterGrid.h"
 #include "../PartsView.h"
 #include "../Settings.h"
 #include "../Setlist.h"
@@ -1012,6 +1014,123 @@ int main(int argc, char** argv)
         served.reset();
         std::filesystem::remove_all(runtime);
         ::unsetenv("OSCAIRN_RUNTIME_DIR");
+    }
+    // RFC 0019 step 5: the rich views a plugin describes (oscairn.ui draft 4), drawn from the
+    // description and the values, and edited by dragging them, on the Panel's screen (1024 × 600,
+    // touch) and on the Desktop. The test plugin describes an FM operator view with DX7's
+    // routings, each operator's envelope and key scaling, and two elements' key and velocity map.
+    if(const char* views = std::getenv("OSCAIRN_TEST_VIEWS"))
+    {
+        const auto path = socket.string() + "-views";
+        NodeId node = 0;
+        Served served(path, [&](Session& s) { node = s.add("Views", views); s.connectNotes(graphInput, node); s.connectAudio(node, graphOutput); s.commit(); });
+        {
+            standalone::Engine engine(argv[1], path);
+            const auto configuration = juce::File::createTempFile("oscairn-gaps-config");
+            standalone::Theme theme(configuration, juce::File(argv[3]));
+            juce::LookAndFeel::setDefaultLookAndFeel(&theme);
+            theme.apply("oscairn-dark");
+            auto wait = [](auto done) { for(int i = 0; i < 1000 && !done(); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); return done(); };
+            check(wait([&] { return engine.graph().names.count(node) && !engine.parameters(node).empty(); }), "the views plugin is in the graph");
+            auto id = [&](const std::string& module, const std::string& name) { for(const auto& p : engine.parameters(node)) if(p.module == module && p.name == name) return p.id; return 0u; };
+            auto value = [&](uint32_t param) { return engine.param("Views", param); };
+            juce::Component holder; standalone::setDesktopMode(holder, 2); holder.setSize(1024, 600);
+            standalone::ParameterGrid grid(engine, node, "Views");
+            holder.addAndMakeVisible(grid); grid.setBounds(holder.getLocalBounds());
+            auto page = [&](const std::string& name) { for(size_t i = 0; i < grid.pages(); ++i) if(grid.pageName(i) == name) { grid.showPage(i); return true; } return false; };
+            auto find = [&](const juce::String& name) {
+                juce::Component* found = nullptr;
+                std::function<void(juce::Component&)> look = [&](juce::Component& c) { for(auto* child : c.getChildren()) { if(child->getName() == name && !found) found = child; look(*child); } };
+                look(grid);
+                return found;
+            };
+            auto settle = [] { for(int i = 0; i < 30; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); };
+            auto save = [&](const juce::String& name) {
+                settle();
+                if(argc < 5) return;
+                const juce::File out{juce::String(argv[4]) + "-" + name + ".png"};
+                out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(holder.createComponentSnapshot(holder.getLocalBounds()), stream);
+            };
+            auto drag = [](juce::Component* c, juce::Point<float> from, juce::Point<float> to) {
+                auto mouse = juce::Desktop::getInstance().getMainMouseSource();
+                const auto now = juce::Time::getCurrentTime();
+                auto event = [&](juce::Point<float> at, bool dragged) { return juce::MouseEvent(mouse, at, juce::ModifierKeys::leftButtonModifier, 1, 0, 0, 0, 0, c, c, now, from, now, 1, dragged); };
+                c->mouseDown(event(from, false)); if(to != from) c->mouseDrag(event(to, true)); c->mouseUp(event(to, to != from));
+            };
+            // The descriptions, read without drawing: an ADSR, a DX7 envelope, an AWM2 envelope
+            // from a hold, and DX7 algorithm 1's routing (2 over 1; 6 over 5 over 4 over 3).
+            {
+                const auto adsr = standalone::envelopeOf(std::vector<uint32_t>{OSCAIRN_FIELD_ATTACK, OSCAIRN_FIELD_DECAY, OSCAIRN_FIELD_SUSTAIN, OSCAIRN_FIELD_RELEASE});
+                check(adsr.points.size() == 3 && adsr.points[0].time == 0 && adsr.points[0].fixed == 1 && adsr.points[1].level == 2 && adsr.points[1].sustain && adsr.points[2].time == 3, "an ADSR from its fields");
+                std::vector<uint32_t> dx7;
+                for(uint32_t k = 0; k < 4; ++k) dx7.push_back(OSCAIRN_FIELD_RATE_1 + k);
+                for(uint32_t k = 1; k <= 4; ++k) dx7.push_back(OSCAIRN_FIELD_LEVEL_0 + k);
+                const auto e = standalone::envelopeOf(dx7);
+                check(e.points.size() == 4 && e.points[0].rate && e.start == 7 && e.points[3].level == 7 && e.points[2].sustain && !e.points[3].sustain, "a DX7 envelope: rates, from level 4, holding at level 3");
+                const auto awm = standalone::envelopeOf(std::vector<uint32_t>{OSCAIRN_FIELD_TIME_1, OSCAIRN_FIELD_TIME_1 + 1, OSCAIRN_FIELD_TIME_1 + 2, OSCAIRN_FIELD_LEVEL_0, OSCAIRN_FIELD_LEVEL_0 + 2});
+                check(awm.points.size() == 3 && awm.start == 3 && awm.points[0].level == 3 && awm.points[1].level == 4 && awm.points[1].sustain && awm.points[2].level < 0 && awm.points[2].fixed == 0,
+                      "an AWM2 envelope: a hold at its initial level, the attack, a release to zero");
+                const std::array<uint8_t, 11> one{2, 0, 8, 16, 32, 0, 0, 0, 1 | 4, 6, 6};
+                const auto places = standalone::algorithmLayout(one, 6);
+                check(places[0].row == 0 && places[2].row == 0 && places[1].row == 1 && places[3].row == 1 && places[4].row == 2 && places[5].row == 3 &&
+                      places[1].x == places[0].x && places[5].x == places[2].x && places[2].x > places[0].x, "algorithm 1: two stacks, each modulator over what it modulates");
+            }
+            // Every parameter keeps its tile beside the views.
+            size_t tiles = 0;
+            for(size_t i = 0; i < grid.pages(); ++i) { grid.showPage(i); tiles += grid.tilesShown(); }
+            check(tiles == engine.parameters(node).size(), "every parameter has its tile beside the views: " + std::to_string(tiles));
+            // Common: the operator view, its routing that of the algorithm the plugin gives.
+            check(page("Common") && find("FM operators") != nullptr, "the FM operator view where its algorithm is");
+            save("views-panel-fm");
+            const auto algorithm = id("Common", "Algorithm");
+            const double before = value(algorithm);
+            if(auto* fm = find("FM operators"))
+            {
+                // A tap on the routing's right half steps the algorithm on; undo steps it back.
+                const juce::Point<float> right(14 + std::min((fm->getWidth() - 28) * .36f, 360.f) * .8f, fm->getHeight() / 2.f);
+                drag(fm, right, right);
+                check(wait([&] { return value(algorithm) == before + 1; }), "a tap on the routing steps the algorithm on: " + std::to_string(value(algorithm)));
+                engine.edit([](Control& c) { c.undo(); });
+                check(wait([&] { return value(algorithm) == before; }), "and undo steps it back");
+                engine.setParam("Views", algorithm, 1);
+                save("views-panel-fm-algorithm-1");
+                // Operator 2's level, dragged to the top of its bar.
+                const auto level = id("Operator 2", "Level");
+                const float routing = std::min((fm->getWidth() - 28) * .36f, 360.f), columns = (fm->getWidth() - 28) - routing - 14, x = 14 + routing + 14 + columns / 6 * 1.5f;
+                drag(fm, {x, fm->getHeight() / 2.f}, {x, 0.f});
+                check(wait([&] { return value(level) == 99; }), "dragging operator 2's level bar to its top sets its level: " + std::to_string(value(level)));
+            }
+            // An operator's page: its envelope (DX7 rates and levels) and its key scaling.
+            check(page("Operator 1") && find("Envelope") != nullptr && find("Key map") != nullptr, "an operator's envelope and key scaling");
+            save("views-panel-operator");
+            if(auto* map = find("Key map"))
+            {
+                const auto breakpoint = id("Operator 1", "Break Point"), left = id("Operator 1", "Left Depth");
+                const double was = value(breakpoint), depth = value(left);
+                const float plane = map->getWidth() - 28.f, x = 14 + plane * float(was / 99), y = 28 + (map->getHeight() - 38 - 14) / 2.f;
+                drag(map, {x, y}, {x + plane / 4, y});
+                check(wait([&] { return value(breakpoint) > was + 15; }) && value(left) == depth, "dragging the breakpoint moves it, and only it: " + std::to_string(value(breakpoint)));
+            }
+            // An element's page: both elements' zones in one map, its own in the accent.
+            check(page("Element 2") && find("Key map") != nullptr && find("Envelope") != nullptr, "an element's map and envelope");
+            save("views-panel-element");
+            if(auto* map = find("Key map"))
+            {
+                const auto low = id("Element 2", "Note Low"), high = id("Element 2", "Note High");
+                const double was = value(low), top = value(high);
+                const float plane = map->getWidth() - 28.f - std::min(90.f, (map->getWidth() - 28.f) / 4), x = 14 + plane * float(was / 127);
+                const float height = map->getHeight() - 38.f - 14, y = 28 + height - height * float((value(id("Element 2", "Velocity Low")) + value(id("Element 2", "Velocity High"))) / 127 / 2); // the zone's middle
+                drag(map, {x, y}, {x - plane / 4, y});
+                check(wait([&] { return value(low) < was - 20; }) && value(high) == top, "dragging the zone's left edge lowers its lowest key, and only that: " + std::to_string(value(low)));
+            }
+            // The Desktop draws the same views.
+            standalone::setDesktopMode(holder, 1); holder.setSize(1180, 820); grid.setBounds(holder.getLocalBounds().reduced(16));
+            check(page("Common") && find("FM operators") != nullptr, "the Desktop draws the operator view too");
+            save("views-desktop-fm");
+            check(page("Operator 3") && find("Envelope") != nullptr && find("Key map") != nullptr, "and an operator's envelope and key scaling");
+            save("views-desktop-operator");
+        }
+        std::filesystem::remove(path);
     }
     // A plugin's presets still being listed (the engine answers at once and lists them meanwhile):
     // the picker says so, and a later refresh shows the presets and drops the message.

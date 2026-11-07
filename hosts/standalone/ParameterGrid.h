@@ -18,8 +18,43 @@ namespace oscairn::standalone
         std::vector<Point> points;
         bool empty() const { return points.empty(); }
     };
-    // shortcut: recognized by name only (ADSR; DX7 rates and levels; FM-X times and levels), case-insensitive; replace with the plugins' own descriptions once oscairn.ui exists (RFC 0019).
+    // Recognized by name (ADSR; DX7 rates and levels; FM-X times and levels), case-insensitive,
+    // for plugins that describe no envelope.
     EnvelopeShape envelopeOf(const std::vector<std::string>& names);
+    // An envelope a plugin describes (oscairn.ui's view fields, enum oscairn_field, one per
+    // position): named stages, or a multi-point envelope's levels with times or rates.
+    EnvelopeShape envelopeOf(const std::vector<uint32_t>& fields);
+
+    /// A key or velocity map a plugin describes: its zones' key and velocity ranges (one per
+    /// index), and one index's level scaling across the keys and by velocity. Indices are into the
+    /// parameters given; -1 is none.
+    struct MapShape
+    {
+        struct Zone { uint32_t index = 0; int keyLow = -1, keyHigh = -1, velocityLow = -1, velocityHigh = -1; };
+        std::vector<Zone> zones;
+        int breakpoint = -1, leftDepth = -1, rightDepth = -1, leftCurve = -1, rightCurve = -1, velocityDepth = -1, velocityCurve = -1;
+        bool empty() const { return zones.empty() && breakpoint < 0 && velocityDepth < 0; }
+    };
+    // The map of `view` as `index` sees it: every index's zone, and that index's scaling.
+    MapShape mapOf(const std::vector<Engine::ParamInfo>& params, uint32_t view, uint32_t index);
+
+    /// An FM operator view a plugin describes: the algorithm, feedback, and each operator's
+    /// parameters (operators 1 to 8, as the view's indexes; -1 is none). Indices are into the
+    /// parameters given.
+    struct FmShape
+    {
+        struct Operator { int level = -1, ratio = -1, fine = -1, detune = -1, fixed = -1; std::vector<size_t> envelope; };
+        int algorithm = -1, feedback = -1;
+        std::vector<Operator> operators; // operator n at n - 1
+        bool empty() const { return algorithm < 0; }
+    };
+    FmShape fmOf(const std::vector<Engine::ParamInfo>& params, uint32_t view);
+    /// Where each operator of a routing sits in its diagram: its row (0 the carriers', at the
+    /// bottom) and across, in operators' widths from the diagram's middle: above what it
+    /// modulates where it can, and a width at least from its neighbors. Operators past `count`
+    /// are left out.
+    struct OperatorPlace { int row = 0; float x = 0; };
+    std::vector<OperatorPlace> algorithmLayout(const std::array<uint8_t, 11>& routing, size_t count);
 
     /// An LFO recognized from its parameters' names: its wave and its speed, and a delay, fade-in,
     /// phase and user steps when it has them. Indices as for EnvelopeShape.
@@ -80,7 +115,7 @@ namespace oscairn::standalone
         size_t tabs() const { return tabNames_.size(); }
         size_t tilesShown() const { return tiles_.size(); }
         std::vector<std::string> namesShown() const { std::vector<std::string> n; for(const auto& t : tiles_) n.push_back(params_[t.param].name); return n; }
-        size_t panelsShown() const { return panels_.size(); } // envelopes and LFOs
+        size_t panelsShown() const { return panels_.size(); } // rich views: envelopes, maps, FM operators, LFOs and filters
         // Any page's parameters whose name or module has the text; empty: the page again.
         void search(const juce::String& text) { search_.setText(text, false); search_.onTextChange(); }
 
@@ -121,6 +156,8 @@ namespace oscairn::standalone
         class Envelope;
         class Lfo;
         class Filter;
+        class KeyMap;
+        class Operators;
         double normal(size_t param) const;               // its value, 0 to 1 over its range
         void setNormal(size_t param, double value);      // from 0 to 1, rounded when stepped
         void timerCallback() override;

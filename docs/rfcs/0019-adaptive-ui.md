@@ -19,8 +19,10 @@ Checked when built and tested; the sections below say how.
 - [ ] 4. Plugin windows: built on macOS, from workers, reopened after a restart
       ([status](#step-4-status)); the gate's editing while audio plays, Linux and an engine-placed
       plugin remain
-- [ ] 5. Rich widgets: envelope, LFO preview, key and velocity map done; waveform, step lane
-      and the Modular grid remain
+- [ ] 5. Rich widgets: envelopes, key and velocity maps and FM operator views that plugins
+      describe (`oscairn.ui` draft 4), drawn and edited on Desktop and Panel, done, with LFO
+      previews and filter responses by name ([status](#step-5-status)); waveform, step lane, the
+      Modular grid and the gate (the Sampler's zones and envelope, once it declares them) remain
 - [ ] 6. Front panels
 
 ## Problem
@@ -171,9 +173,12 @@ generates one.
     and use the right widget;
   - an optional **widget hint**: knob, slider, switch, choice, or a field in a rich widget.
 - **Rich widgets,** a small fixed set the host draws on every surface that has the room, each
-  bound to parameters or to plugin operations:
-  - an envelope (attack, decay, sustain, release, with optional more segments);
-  - a keyboard and velocity map (sample zones, splits);
+  bound to parameters or to plugin operations (draft 4 describes the first three over
+  parameters, [Step 5 status](#step-5-status)):
+  - an envelope (attack, decay, sustain, release, with optional more segments, or the rates or
+    times and levels of a DX7, AWM2 or FM-X envelope);
+  - a keyboard and velocity map (sample zones, splits, key level scaling);
+  - an FM operator view (the algorithm's routing, each operator's level, ratio and envelope);
   - a step lane;
   - a module grid ([chillbeast's Modular](../modular-engine-evaluation.md));
   - a waveform with markers (sample start, loop).
@@ -395,6 +400,53 @@ rescans on yet.
 Not yet: the Mixer and Routing views' layout is still in `PartsView`, and the device's chain
 row, tabs and header are the older ones; Compact's real renderer waits for a device (by
 design).
+
+## Step 5 status
+
+Started 2026-11-07. **The description** is `oscairn.ui` draft 4 (`oscairn-clap/ui.h`): a
+parameter's hint names the view it is part of, its field there and whose field it is (an
+operator, element or zone, 1 to 8). What a view is follows from its fields:
+- *an envelope:* named stages (delay, attack, hold, decay, sustain, release: an ADSR or
+  DAHDSR) or a multi-point envelope's levels 0 to 8 with each segment's time or rate (DX7,
+  AWM2, FM-X), holding before its last segment, one envelope per index;
+- *a key or velocity map:* each index's zone (key and velocity low and high), and an index's
+  breakpoint, left and right depths and curves, velocity depth and curve;
+- *an FM operator view:* an algorithm (stepped, up to 128 values) and feedback, and each
+  operator's level, ratio, fine, detune and fixed mode, with its envelope and key scaling as
+  envelope and map fields of its index. A call gives each algorithm's routing (the operators
+  modulating each operator, the carriers, feedback from and to), so the host draws any
+  engine's algorithms without knowing them.
+
+The host keeps only fields it knows, operators up to the eighth and a stepped algorithm, reads
+the routings with the hints, carries them through workers, and `params.list` writes them
+(`view`, `field`, `index`, `algorithms`). Draft 3 is still read, without views.
+
+**Drawn** by `ParameterGrid` on Desktop and Panel, where the view's parameters' tiles are, above
+them; every parameter keeps its tile, and the device's knobs still bind to parameters, never to
+a view. An FM operator view shows where its algorithm is: the routing (carriers on the bottom
+row, each modulator over what it modulates, feedback as a loop) and a column per operator with
+its level bar, its ratio and its envelope's shape; a tap on the routing's half steps the
+algorithm back or on, a drag across it runs through them, a level bar drags, a ratio drags up or
+down. An envelope is the curve drawn before, now from its fields. A key map draws its zones over
+a keyboard (the index's own in the accent), the scaling around the breakpoint by its curves'
+value texts (`-LIN`, `+EXP`), and velocity's effect; each edge, the breakpoint, the scaling's
+ends and the velocity line drag. Every drag sets parameters as the tiles do, with a gesture, so
+each change is undone as theirs are. Name recognition stays for parameters in no view.
+
+**Checked:** `kick-clap-host` reads the fixture's views (an unknown field, an operator past the
+eighth and a continuous algorithm are dropped) and its routings; `worker-host` that they cross a
+worker. `desktop-gaps` reads ADSR, DX7 and AWM2 envelopes and DX7 algorithm 1's layout without
+drawing, then loads a test plugin (`tests/views_plugin.cpp`: an FM view with DX7's 32 routings,
+six operators' envelopes and key scaling, two AWM2-style elements' zones and envelopes) on the
+Panel's screen at 1,024 × 600: every parameter still has its tile; a tap on the routing steps the
+algorithm and undo steps it back; dragging operator 2's level bar to its top sets it to 99;
+dragging the breakpoint moves only it; dragging element 2's zone's left edge lowers only its
+lowest key; and the Desktop at 1,180 × 820 draws the same views. Given a path, it writes
+`SNAPSHOTS-views-*.png`.
+
+Not yet: the real engines' declarations (their forks declare draft 3 roles; what each should
+declare is in the [porting guide](../plugin-porting.md#rich-views-what-each-engine-should-declare));
+a pitch envelope's levels around a center; Compact draws no views (it lists their parameters).
 
 ## Step 4 status
 

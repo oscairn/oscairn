@@ -259,7 +259,7 @@ namespace
             // Its role (oscairn.ui): Wet is its main control, its knob in the Effects bank.
             static const oscairn_plugin_ui_t ui{[](const clap_plugin_t*,clap_id param,oscairn_param_hint_t* hint){
                 if(param!=3)return false;
-                *hint={OSCAIRN_WIDGET_AUTO,0,CLAP_INVALID_ID,0,OSCAIRN_ROLE_MIX};return true;}};
+                *hint={OSCAIRN_WIDGET_AUTO,0,CLAP_INVALID_ID,0,OSCAIRN_ROLE_MIX,0,OSCAIRN_FIELD_NONE,0};return true;},nullptr};
             if(!std::strcmp(id,OSCAIRN_EXT_UI))return &ui;
             return nullptr;
         };

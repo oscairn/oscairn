@@ -156,7 +156,12 @@ namespace oscairn::worker
         {
             if(params.size() > maxParameters) throw std::runtime_error("Plugin has too many parameters for a worker");
             w.u32(uint32_t(params.size()));
-            for(const auto& q : params) w.u32(q.id).str(q.name).str(q.module).f64(q.minimum).f64(q.maximum).f64(q.defaultValue).u32(q.flags).u32(q.widget).u32(q.priority).u32(q.rangeHigh).u32(q.group).u32(q.role);
+            for(const auto& q : params)
+            {
+                w.u32(q.id).str(q.name).str(q.module).f64(q.minimum).f64(q.maximum).f64(q.defaultValue).u32(q.flags).u32(q.widget).u32(q.priority).u32(q.rangeHigh).u32(q.group).u32(q.role).u32(q.view).u32(q.field).u32(q.index);
+                w.u32(uint32_t(q.algorithms.size()));
+                for(const auto& a : q.algorithms) for(const auto b : a) w.u8(b);
+            }
         }
 
         // What the engine needs to know about a plugin node; WorkerHost reads it in this order.

@@ -9,6 +9,7 @@
 #include "oscairn/transport.h"
 #include <oscairn-clap/ui.h>
 
+#include <array>
 #include <string>
 #include <map>
 #include <optional>
@@ -44,6 +45,27 @@ namespace oscairn
         return OSCAIRN_ROLE_NONE;
     }
 
+    // oscairn.ui's view fields by name, as the control protocol writes them ("attack", "level0",
+    // "rate1", "keyLow", "algorithm"); none or unknown: empty.
+    inline std::string fieldName(uint32_t field)
+    {
+        static const char* const stages[] = {"delay", "attack", "hold", "decay", "sustain", "release"};
+        static const char* const maps[] = {"keyLow", "keyHigh", "velocityLow", "velocityHigh", "breakpoint", "leftDepth", "rightDepth", "leftCurve", "rightCurve", "velocityDepth", "velocityCurve"};
+        static const char* const fm[] = {"algorithm", "feedback", "operatorLevel", "ratio", "fine", "detune", "fixed"};
+        if(field >= OSCAIRN_FIELD_DELAY && field <= OSCAIRN_FIELD_RELEASE) return stages[field - OSCAIRN_FIELD_DELAY];
+        if(field >= OSCAIRN_FIELD_LEVEL_0 && field <= OSCAIRN_FIELD_LEVEL_8) return "level" + std::to_string(field - OSCAIRN_FIELD_LEVEL_0);
+        if(field >= OSCAIRN_FIELD_TIME_1 && field <= OSCAIRN_FIELD_TIME_8) return "time" + std::to_string(field - OSCAIRN_FIELD_TIME_1 + 1);
+        if(field >= OSCAIRN_FIELD_RATE_1 && field <= OSCAIRN_FIELD_RATE_8) return "rate" + std::to_string(field - OSCAIRN_FIELD_RATE_1 + 1);
+        if(field >= OSCAIRN_FIELD_KEY_LOW && field <= OSCAIRN_FIELD_VELOCITY_CURVE) return maps[field - OSCAIRN_FIELD_KEY_LOW];
+        if(field >= OSCAIRN_FIELD_ALGORITHM && field <= OSCAIRN_FIELD_FIXED) return fm[field - OSCAIRN_FIELD_ALGORITHM];
+        return {};
+    }
+    inline uint32_t fieldNamed(const std::string& name)
+    {
+        for(uint32_t f = 1; f <= OSCAIRN_FIELD_FIXED; ++f) if(!name.empty() && name == fieldName(f)) return f;
+        return OSCAIRN_FIELD_NONE;
+    }
+
     /// In-process control boundary. All calls belong to one control/main thread;
     /// audio and hardware input do not call this interface. No device or plugin handles
     /// escape it. The socket/JSON adapter will implement the same control operations.
@@ -65,6 +87,12 @@ namespace oscairn
             uint32_t widget = 0, priority = 0, rangeHigh = CLAP_INVALID_ID;
             uint32_t group = 0; // drawn joined with the module's other parameters of this group
             uint32_t role = 0;  // enum oscairn_role (roleName); 0: none declared
+            // Its rich view: the view (0: none), its enum oscairn_field (fieldName) and whose
+            // field (an operator's, element's or zone's, 1 to 8; 0: the view's own).
+            uint32_t view = 0, field = 0, index = 0;
+            // An algorithm's routing per value from its minimum: inputs (8 operator masks),
+            // carriers, feedback from and to (operators from 1; 0 none), as oscairn_fm_algorithm_t.
+            std::vector<std::array<uint8_t, 11>> algorithms{};
         };
         struct TransportState
         {

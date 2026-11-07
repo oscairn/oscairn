@@ -5,6 +5,7 @@
 // in the worker reaches the engine.
 //   oscairn-worker-host-test WORKER PLUGIN.clap [PLUGIN.clap...]
 #include <oscairn/plugin_host.h>
+#include <oscairn-clap/ui.h>
 #include <cmath>
 #include <cstring>
 #include <cstdio>
@@ -62,7 +63,8 @@ namespace
         for(size_t i = 0; i < local->parameters().size() && i < remote->parameters().size(); ++i)
         {
             const auto& a = local->parameters()[i]; const auto& b = remote->parameters()[i];
-            check(a.id == b.id && a.name == b.name && a.module == b.module && a.widget == b.widget && a.priority == b.priority && a.rangeHigh == b.rangeHigh && a.group == b.group && a.role == b.role,
+            check(a.id == b.id && a.name == b.name && a.module == b.module && a.widget == b.widget && a.priority == b.priority && a.rangeHigh == b.rangeHigh && a.group == b.group && a.role == b.role &&
+                  a.view == b.view && a.field == b.field && a.index == b.index && a.algorithms == b.algorithms,
                   name + ": parameter " + a.name + " and its hints cross the worker");
         }
         check(channels(local->inputPorts()) == channels(remote->inputPorts()) && channels(local->outputPorts()) == channels(remote->outputPorts()), name + ": ports");
@@ -153,6 +155,9 @@ void rescan(const std::string& worker, const std::string& fixture)
     auto toggle = [&] { for(const auto& p : remote->parameters()) if(p.id == 8) return p; return kick::clap::Parameter{}; };
     const auto revision = remote->parameterRevision();
     check(toggle().id == 8 && !(toggle().flags & CLAP_PARAM_IS_HIDDEN), "the Toggle shows at first");
+    auto mode = [&] { for(const auto& p : remote->parameters()) if(p.id == 9) return p; return kick::clap::Parameter{}; };
+    check(toggle().view == 1 && toggle().field == OSCAIRN_FIELD_OPERATOR_LEVEL && toggle().index == 2 && mode().field == OSCAIRN_FIELD_ALGORITHM &&
+          mode().algorithms.size() == 5 && mode().algorithms[1][0] == 2, "its view and the algorithm's routings cross the worker");
     std::vector<float> l(frames), r(frames); float* out[]{l.data(), r.data()};
     check(remote->setParameter(9, 3) && remote->process(nullptr, 0, out, 2, frames, nullptr, 0, nullptr), "choose mode 3");
     for(int i = 0; i < 50 && remote->parameterRevision() == revision; ++i) { remote->service(); usleep(2000); }

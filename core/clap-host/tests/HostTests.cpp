@@ -120,6 +120,12 @@ int main(int argc, char** argv) {
         check(hint(9).widget == OSCAIRN_WIDGET_AUTO && hint(9).priority == 3, "a switch on five values is the host's choice; its priority stays");
         check(hint(99).widget == OSCAIRN_WIDGET_AUTO, "an unknown widget is the host's choice");
         check(hint(7).role == OSCAIRN_ROLE_CUTOFF && hint(8).role == OSCAIRN_ROLE_NONE && hint(99).role == OSCAIRN_ROLE_NONE, "a declared role; an unknown one is none");
+        check(hint(8).view == 1 && hint(8).field == OSCAIRN_FIELD_OPERATOR_LEVEL && hint(8).index == 2 && hint(9).view == 1 && hint(9).field == OSCAIRN_FIELD_ALGORITHM,
+              "views: an operator's level and the algorithm");
+        check(hint(7).view == 0 && hint(7).field == 0 && hint(99).view == 0 && hint(99).field == 0 && hint(99).index == 0,
+              "an unknown field, an operator past the eighth or a continuous algorithm leaves the view");
+        check(hint(9).algorithms.size() == 5 && hint(9).algorithms[1][0] == 2 && hint(9).algorithms[1][8] == 1 && hint(9).algorithms[0][8] == 3 &&
+              hint(9).algorithms[0][9] == 2 && hint(9).algorithms[0][10] == 2 && hint(8).algorithms.empty(), "the algorithm's routing for each of its values");
         // A mode that hides a parameter: an info rescan, taken in place.
         const auto revision = hinted.metadataRevision();
         std::array<float, 64> l{}, r{}; float* out[]{l.data(), r.data()};

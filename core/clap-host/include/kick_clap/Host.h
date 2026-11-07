@@ -38,6 +38,12 @@ struct Parameter {
     clap_id rangeHigh = CLAP_INVALID_ID;
     uint32_t group = 0; // drawn joined with the module's other parameters of this group; 0: none
     uint32_t role = 0;  // enum oscairn_role: what it does on every instrument (cutoff, attack); 0: none
+    // Its rich view (oscairn.ui draft 4): the view's number (0: none), its enum oscairn_field
+    // there, and whose field (an operator, element or zone, 1 to 8; 0: the view's own).
+    uint32_t view = 0, field = 0, index = 0;
+    // An algorithm parameter's routings, one per value from its minimum: oscairn_fm_algorithm_t's
+    // inputs[8], carriers, feedback_from and feedback_to.
+    std::vector<std::array<uint8_t, 11>> algorithms{};
 };
 
 struct Port {

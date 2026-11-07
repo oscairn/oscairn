@@ -385,6 +385,17 @@ namespace oscairn
                     if(param.widget==OSCAIRN_WIDGET_RANGE)param.rangeHigh=static_cast<uint32_t>(integer(field(p,"rangeHigh")));
                     param.group=static_cast<uint32_t>(integer(field(p,"group")));
                     if(V role=detail::member(p,"role"))param.role=roleNamed(string(role));
+                    if(V view=detail::member(p,"view"))
+                    {
+                        param.view=static_cast<uint32_t>(integer(view));param.field=fieldNamed(std::string(string(field(p,"field"))));param.index=static_cast<uint32_t>(integer(field(p,"index")));
+                        if(V routings=detail::member(p,"algorithms"))for(auto a:array(routings))
+                        {
+                            std::array<uint8_t,11> r{};size_t k=0;
+                            for(auto i:array(field(a,"inputs")))if(k<8)r[k++]=static_cast<uint8_t>(integer(i));
+                            r[8]=static_cast<uint8_t>(integer(field(a,"carriers")));r[9]=static_cast<uint8_t>(integer(field(a,"feedbackFrom")));r[10]=static_cast<uint8_t>(integer(field(a,"feedbackTo")));
+                            param.algorithms.push_back(r);
+                        }
+                    }
                     list.push_back(param);r.value(node,param.id);
                 }
                 if(r.listed==r.nodes.size())r.values();

@@ -164,6 +164,7 @@ struct Host::Impl {
     const clap_plugin_t* plugin = nullptr;
     const clap_plugin_params_t* params = nullptr;
     const oscairn_plugin_ui_t* ui = nullptr;
+    bool uiViews = false; // draft 4: views, and algorithm() may be read
     const clap_plugin_state_t* state = nullptr;
     bool exclusiveState=false;
     const oscairn_plugin_sound_contexts_t* sounds = nullptr;
@@ -533,6 +534,8 @@ struct Host::Impl {
             throw std::runtime_error("Incomplete CLAP plugin interface");
         s.params = static_cast<const clap_plugin_params_t*>(s.plugin->get_extension(s.plugin, CLAP_EXT_PARAMS));
         s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI));
+        s.uiViews = s.ui != nullptr;
+        if (!s.ui) s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI_DRAFT_3)); // its prefix: no views
         if (s.ui && !s.ui->param_hint) s.ui = nullptr;
         if (s.params && (!s.params->count || !s.params->get_info || !s.params->get_value || !s.params->flush))
             throw std::runtime_error("Incomplete CLAP parameter interface");
@@ -610,11 +613,12 @@ struct Host::Impl {
     }
     // Hints from oscairn.ui, each kept only where it fits its parameter: a control for stepped
     // values on a stepped parameter, a switch on two values, a range whose high end is another
-    // parameter. Anything else is drawn as the host decides. A role it does not know is none.
+    // parameter. Anything else is drawn as the host decides. A role it does not know is none; so
+    // is a field, which also leaves its view (an algorithm must be stepped, of at most 128 values).
     void applyHints(std::vector<Parameter>& list) {
         if (!ui) return;
         for (auto& p : list) {
-            oscairn_param_hint_t hint{OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, OSCAIRN_ROLE_NONE};
+            oscairn_param_hint_t hint{OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, OSCAIRN_ROLE_NONE, 0, OSCAIRN_FIELD_NONE, 0};
             if (!ui->param_hint(plugin, p.id, &hint)) continue;
             const bool stepped = (p.flags & CLAP_PARAM_IS_STEPPED) != 0;
             const auto values = stepped ? std::llround(p.maximum - p.minimum) + 1 : 0;
@@ -627,6 +631,23 @@ struct Host::Impl {
             p.priority = hint.priority;
             p.group = hint.group;
             p.role = hint.role <= OSCAIRN_ROLE_OUTPUT_BUS ? hint.role : OSCAIRN_ROLE_NONE; // the last role this host knows
+            if (!uiViews) continue;
+            const auto f = hint.field;
+            const bool field = (f >= OSCAIRN_FIELD_DELAY && f <= OSCAIRN_FIELD_RELEASE) || (f >= OSCAIRN_FIELD_LEVEL_0 && f <= OSCAIRN_FIELD_LEVEL_8) ||
+                               (f >= OSCAIRN_FIELD_TIME_1 && f <= OSCAIRN_FIELD_RATE_8) || (f >= OSCAIRN_FIELD_KEY_LOW && f <= OSCAIRN_FIELD_VELOCITY_CURVE) ||
+                               (f >= OSCAIRN_FIELD_ALGORITHM && f <= OSCAIRN_FIELD_FIXED);
+            const bool inView = hint.view && field && hint.index <= 8 && (f != OSCAIRN_FIELD_ALGORITHM || (stepped && values >= 1 && values <= 128));
+            p.view = inView ? hint.view : 0; p.field = inView ? f : 0; p.index = inView ? hint.index : 0;
+            if (p.field != OSCAIRN_FIELD_ALGORITHM || !ui->algorithm) continue;
+            // Its routings, all or none; operators past the eighth are dropped.
+            for (long long v = 0; v < values; ++v) {
+                oscairn_fm_algorithm_t a{};
+                if (!ui->algorithm(plugin, p.id, uint32_t(std::llround(p.minimum) + v), &a)) { p.algorithms.clear(); break; }
+                std::array<uint8_t, 11> r{};
+                std::copy(std::begin(a.inputs), std::end(a.inputs), r.begin());
+                r[8] = a.carriers; r[9] = a.feedback_from <= 8 ? a.feedback_from : 0; r[10] = a.feedback_to <= 8 && r[9] ? a.feedback_to : 0;
+                p.algorithms.push_back(r);
+            }
         }
     }
     // CLAP_PARAM_RESCAN_INFO: names, modules, the hidden and periodic flags and the editor hints,
@@ -646,6 +667,7 @@ struct Host::Impl {
             info.module.assign(p.module, strnlen(p.module, CLAP_PATH_SIZE));
             info.flags = (info.flags & ~changeable) | (p.flags & changeable);
             info.widget = OSCAIRN_WIDGET_AUTO; info.priority = 0; info.rangeHigh = CLAP_INVALID_ID; info.group = 0; info.role = 0;
+            info.view = info.field = info.index = 0; info.algorithms.clear();
         }
         applyHints(next);
         Gate guard(gate);

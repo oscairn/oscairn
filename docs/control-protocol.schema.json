@@ -391,6 +391,44 @@
                    "lowGain", "midGain", "highGain", "midFrequency", "lowFrequency", "highFrequency", "midQ", "eqOutput",
                    "level1", "level2", "level3", "level4", "level5", "level6", "level7", "level8", "mix", "pan", "outputBus"],
           "description": "The role the plugin declares (oscairn.ui), as the role banks name it; missing when it declares none"
+        },
+        "view": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295,
+          "description": "The rich view (oscairn.ui draft 4: an envelope, a key or velocity map, an FM operator view) the parameter is part of, with every parameter of the same view; missing when none"
+        },
+        "field": {
+          "enum": ["delay", "attack", "hold", "decay", "sustain", "release", "level0", "level1", "level2", "level3", "level4", "level5", "level6", "level7", "level8", "time1", "time2", "time3", "time4", "time5", "time6", "time7", "time8", "rate1", "rate2", "rate3", "rate4", "rate5", "rate6", "rate7", "rate8", "keyLow", "keyHigh", "velocityLow", "velocityHigh", "breakpoint", "leftDepth", "rightDepth", "leftCurve", "rightCurve", "velocityDepth", "velocityCurve", "algorithm", "feedback", "operatorLevel", "ratio", "fine", "detune", "fixed"],
+          "description": "With view: the parameter's place in it"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8,
+          "description": "With view: whose field it is (an operator, element or zone, from 1); 0 the view's own"
+        },
+        "algorithms": {
+          "type": "array",
+          "maxItems": 128,
+          "description": "An algorithm field's routing at each of its values, from its minimum, when the plugin gives them",
+          "items": {
+            "type": "object",
+            "properties": {
+              "inputs": {
+                "type": "array",
+                "minItems": 8,
+                "maxItems": 8,
+                "items": {"type": "integer", "minimum": 0, "maximum": 255},
+                "description": "Per operator, from operator 1: the operators modulating it, bit k for operator k + 1"
+              },
+              "carriers": {"type": "integer", "minimum": 0, "maximum": 255, "description": "The operators heard, bit k for operator k + 1"},
+              "feedbackFrom": {"type": "integer", "minimum": 0, "maximum": 8, "description": "Feedback runs from this operator; 0 none"},
+              "feedbackTo": {"type": "integer", "minimum": 0, "maximum": 8, "description": "back into this one; the same: self feedback"}
+            },
+            "required": ["inputs", "carriers", "feedbackFrom", "feedbackTo"],
+            "additionalProperties": false
+          }
         }
       },
       "required": [

@@ -1418,6 +1418,20 @@ namespace oscairn
             }
             if( method == "params.list" )
             {
+                // A rich view's fields, and an algorithm's routings, when it is part of one.
+                auto view = [](const Control::ParamInfo& v) {
+                    if(!v.view) return std::string();
+                    std::string text = ",\"view\":" + std::to_string(v.view) + ",\"field\":" + quote(fieldName(v.field)) + ",\"index\":" + std::to_string(v.index);
+                    if(v.algorithms.empty()) return text;
+                    std::vector<std::string> routings;
+                    for(const auto& a : v.algorithms)
+                    {
+                        std::vector<std::string> inputs;
+                        for(size_t k = 0; k < 8; ++k) inputs.push_back(std::to_string(a[k]));
+                        routings.push_back("{\"inputs\":" + join(inputs) + ",\"carriers\":" + std::to_string(a[8]) + ",\"feedbackFrom\":" + std::to_string(a[9]) + ",\"feedbackTo\":" + std::to_string(a[10]) + '}');
+                    }
+                    return text + ",\"algorithms\":" + join(routings);
+                };
                 fields(p, {"node"});
                 const auto n = node(c, member(p,"node"));
                 std::vector<std::string> values;
@@ -1428,7 +1442,7 @@ namespace oscairn
                         ",\"flags\":" + std::to_string(v.flags) + ",\"module\":" + quote(v.module) +
                         ",\"widget\":" + quote(widgetName(v.widget)) + ",\"priority\":" + std::to_string(v.priority) + ",\"group\":" + std::to_string(v.group) +
                         (v.widget == OSCAIRN_WIDGET_RANGE ? ",\"rangeHigh\":" + std::to_string(v.rangeHigh) : std::string()) +
-                        (v.role ? ",\"role\":" + quote(roleName(v.role)) : std::string()) + '}' );
+                        (v.role ? ",\"role\":" + quote(roleName(v.role)) : std::string()) + view(v) + '}' );
                 return "{\"node\":" + std::to_string(n) + ",\"parameters\":" + join(values) + '}';
             }
             if( method == "params.get" || method == "params.set" )

@@ -320,15 +320,21 @@ struct Plugin {
         if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &notes;
         if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &params;
         // The stepped fixture's editor hints, some that fit their parameters and some that do
-        // not, which the host must replace with "the host decides".
+        // not, which the host must replace with "the host decides". Its Mode is an FM view's
+        // algorithm, whose routing has operator 2 modulate operator 1 at odd values, and its
+        // Toggle operator 2's level.
         static const oscairn_plugin_ui_t ui{[](const clap_plugin_t*, clap_id id, oscairn_param_hint_t* hint) {
             switch (id) {
-            case 7: *hint = {OSCAIRN_WIDGET_RANGE, 1, 99, 0, OSCAIRN_ROLE_CUTOFF}; return true; // a range up to "Read only": fits; the cutoff
-            case 8: *hint = {OSCAIRN_WIDGET_SWITCH, 2, CLAP_INVALID_ID, 5, 0}; return true; // two values: fits; grouped
-            case 9: *hint = {OSCAIRN_WIDGET_SWITCH, 3, CLAP_INVALID_ID, 5, 0}; return true; // five values: no switch
-            case 99: *hint = {42, 0, CLAP_INVALID_ID, 0, 4242}; return true;       // no such widget or role
+            case 7: *hint = {OSCAIRN_WIDGET_RANGE, 1, 99, 0, OSCAIRN_ROLE_CUTOFF, 2, 4242, 0}; return true; // a range up to "Read only": fits; the cutoff; no such field
+            case 8: *hint = {OSCAIRN_WIDGET_SWITCH, 2, CLAP_INVALID_ID, 5, 0, 1, OSCAIRN_FIELD_OPERATOR_LEVEL, 2}; return true; // two values: fits; grouped
+            case 9: *hint = {OSCAIRN_WIDGET_SWITCH, 3, CLAP_INVALID_ID, 5, 0, 1, OSCAIRN_FIELD_ALGORITHM, 0}; return true; // five values: no switch
+            case 99: *hint = {42, 0, CLAP_INVALID_ID, 0, 4242, 1, OSCAIRN_FIELD_ALGORITHM, 9}; return true; // no such widget, role or operator; not stepped
             default: return false;
             }
+        }, [](const clap_plugin_t*, clap_id id, uint32_t value, oscairn_fm_algorithm_t* a) {
+            if (id != 9 || value > 4) return false;
+            *a = {}; a->inputs[0] = value % 2 ? 2 : 0; a->carriers = value % 2 ? 1 : 3; a->feedback_from = a->feedback_to = 2;
+            return true;
         }};
         if (!std::strcmp(id, OSCAIRN_EXT_UI)) return get(plugin).kind == 8 ? &ui : nullptr;
         if (!std::strcmp(id, CLAP_EXT_STATE)) return get(plugin).kind == 9 ? nullptr : &state;

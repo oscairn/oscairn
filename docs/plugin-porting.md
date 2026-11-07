@@ -640,7 +640,8 @@ What changes for the plugin:
   --license-file COPYING --source <url> <commit-or-tag> MyPlugin.olib clap <id> <version>
   <name> <platform>=MyPlugin.clap...` packs your signed builds into a
   [plugin package](library-archive.md#plugin-packages), which installs them into the store,
-  with its license texts and notices and where its source is; a GPL, LGPL or AGPL plugin
+  with its license texts and notices and where its source is (the store records the license
+  expression, which `plugins.list` gives as `license`); a GPL, LGPL or AGPL plugin
   package is refused without its source and a license text
   ([license and source](library-archive.md#license-and-source)).
   A bundle holding several plugins is signed for all of them at once (`oscairn-sign build`

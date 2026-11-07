@@ -765,7 +765,7 @@ namespace oscairn
                     for(const auto& s:x.platforms)platforms.push_back(quote(s));
                     for(const auto& s:x.usedBy)used.push_back(quote(s));
                     out.push_back("{\"format\":"+quote(x.format)+",\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"name\":"+quote(x.name)+",\"platforms\":"+join(platforms)+
-                                  ",\"bytes\":"+std::to_string(x.bytes)+",\"usedBy\":"+join(used)+",\"open\":"+(x.open?"true":"false")+'}');
+                                  ",\"bytes\":"+std::to_string(x.bytes)+",\"usedBy\":"+join(used)+",\"open\":"+(x.open?"true":"false")+",\"license\":"+quote(x.license)+'}');
                 }
                 return "{\"plugins\":"+join(out)+'}';
             }

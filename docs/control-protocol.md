@@ -1118,9 +1118,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   no `items` and adds none (`added` is 0), whatever `asLibrary` says.
 - `library.libraries` (`{}`) returns `{libraries}`, each `{id,name,items}`.
 - `plugins.list` (`{}`) returns `{plugins}`: the plugin store ([RFC 0006](rfcs/0006-packages-and-portability.md)),
-  each `{format,id,version,name,platforms,bytes,usedBy,open}`: the platforms it has builds for,
-  their size on disk, the names of the library items that use it, and whether the open
-  Performance plays this device's build from the store.
+  each `{format,id,version,name,platforms,bytes,usedBy,open,license}`: the platforms it has builds for,
+  their size on disk, the names of the library items that use it, whether the open
+  Performance plays this device's build from the store, and the SPDX license expression of the
+  plugin package it was installed from (empty when unknown, as for a build installed before the
+  store recorded it or one from a library archive).
 - `plugins.remove` takes `{format,id,version}` and optional `platform` (absent or empty: every
   build) and returns `{"accepted":true}`. A `platform` is one of those `plugins.addBuild` takes.
   It is refused while the open Performance plays the build; items that use it open with a stand-in until it is installed again.

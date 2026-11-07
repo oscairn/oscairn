@@ -176,14 +176,14 @@ fs::path storedPlugin(const std::string& format,const std::string& id,const std:
     return here==builds.end()?fs::path():here->second;
 }
 // A store entry's plugin.json: the plugin's format, ID, version and name, as the folder's name
-// cannot say them exactly. Empty ID when it cannot be read.
+// cannot say them exactly, and its plugin package's license. Empty ID when it cannot be read.
 Control::InstalledPlugin storedIdentity(const fs::path& folder){
     Control::InstalledPlugin p;
     try{
         const auto bytes=state_files::read(folder/"plugin.json",64*1024);
         const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
         if(!doc)return p;
-        p.format=text(field(doc.get(),"format"));p.id=text(field(doc.get(),"id"));p.version=text(field(doc.get(),"version"));p.name=text(field(doc.get(),"name"));
+        p.format=text(field(doc.get(),"format"));p.id=text(field(doc.get(),"id"));p.version=text(field(doc.get(),"version"));p.name=text(field(doc.get(),"name"));p.license=text(field(doc.get(),"license"));
     }catch(const std::exception&){p.id.clear();}
     return p;
 }
@@ -199,10 +199,12 @@ void moveInto(const fs::path& from,const fs::path& to){
 }
 // Puts one platform's build into the store, whole or not at all, replacing that platform's, with
 // its publishers' signatures beside it as <bundle>.sig (RFC 0006); moved when `move`, else copied.
-void storeBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& name,const std::string& forPlatform,const fs::path& build,const std::vector<signing::Signature>& signatures={},bool move=false){
+// An empty license keeps the one recorded.
+void storeBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& name,const std::string& forPlatform,const fs::path& build,const std::vector<signing::Signature>& signatures={},bool move=false,std::string license={}){
     const auto folder=storeFolder(format,id,version);
     fs::create_directories(folder);
-    const auto identity="{\"format\":"+quote(format)+",\"id\":"+quote(id)+",\"version\":"+quote(version)+",\"name\":"+quote(name)+"}\n";
+    if(license.empty())license=storedIdentity(folder).license;
+    const auto identity="{\"format\":"+quote(format)+",\"id\":"+quote(id)+",\"version\":"+quote(version)+",\"name\":"+quote(name)+",\"license\":"+quote(license)+"}\n";
     state_files::write(folder/"plugin.json",identity.data(),identity.size());
     const auto partial=folder/("."+forPlatform+".partial");
     std::error_code e;fs::remove_all(partial,e);fs::create_directories(partial);
@@ -1983,7 +1985,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 if(revoked.count({plugin.id,build.path}))continue;
                 // A bundle that holds several plugins is copied for each but the last, which takes it.
                 const bool later=std::any_of(p.plugins.begin(),p.plugins.end(),[&](const auto& q){return &q>&plugin && std::any_of(q.builds.begin(),q.builds.end(),[&](const auto& b){return b.path==build.path;});});
-                storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later);
+                storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later,pluginPackage?p.license:std::string());
             }
             // A plugin package's license texts and notices stay beside its plugins' builds.
             std::error_code e;

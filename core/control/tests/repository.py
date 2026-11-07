@@ -370,6 +370,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(state['state'] == 'done' and state['version'] == '1.0.0' and state['installed']['code'][0]['status'] == 'trusted' and leftovers() == [],
               'the newest version this device can install installs: ' + json.dumps(state)[:300])
         check(len(plugins) == 1 and plugins[0]['id'] == 'org.kick.test.synth' and plugins[0]['platforms'] == [here], 'its build is in the store: ' + json.dumps(plugins))
+        check(plugins[0].get('license') == 'MIT', 'the store keeps its license: ' + json.dumps(plugins))
 
         # Refused, each with its reason, installing nothing.
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.other'})

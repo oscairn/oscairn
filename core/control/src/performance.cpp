@@ -1904,7 +1904,7 @@ Control::Installed Session::installArchive(const std::string& file,bool asLibrar
 
 // What readPackage unpacked into `into`, moved into place by renames in the data folder (RFC
 // 0031: an install needs room for what it installs, not twice that); `into` goes either way.
-Control::Installed Session::installUnpacked(const Package& p,const fs::path& into,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode,bool thisPlatformOnly) {
+Control::Installed Session::installUnpacked(const Package& p,const fs::path& into,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode,bool thisPlatformOnly,bool checkOnly) {
     auto& l=library();
     Installed out;
     std::vector<fs::path> created; // item folders this call copies, undone if it fails
@@ -1916,7 +1916,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         const bool pluginPackage=p.kind=="plugin"; // its plugins and nothing else, whatever asLibrary says
         if(pluginPackage || p.kind=="asset")asLibrary=false;
         // An asset package: its library into the asset store by hash, and its tree (RFC 0009).
-        if(p.kind=="asset"){
+        if(p.kind=="asset" && !checkOnly){
             std::vector<assets::Store::LibraryFile> files;
             for(const auto& a:p.assets)files.push_back({a.path,a.sha256,into/"Assets"/a.path});
             assets_.installLibrary(p.id,p.assetVersion,p.name,files);
@@ -1959,6 +1959,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         }
         if(!unknown.empty() && !acceptUnsignedCode)
             bad("it runs code from an unknown source: "+unknown+"; install it accepting unsigned code to go ahead");
+        if(checkOnly)return out; // `into` stays for the install
         // The samples they use, into the user's samples by their hash, so they stay when a library goes.
         for(const auto& i:items)for(const auto& ref:assetsOf(manifest(i))){
             const auto folder=into/"Assets"/ref.sha256.substr(0,16);

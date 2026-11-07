@@ -355,6 +355,11 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         check(state['state'] == 'failed' and 'unknown source' in state['error'] and store() == [] and leftovers() == [],
               'code by an unknown key is refused without a yes, leaving nothing: ' + state['error'])
+        # Refused code installs none of what it needs either: the asset library stays out.
+        state = job('packages.install', {'source': str(good), 'id': 'org.kick.analog'})
+        check(state['state'] == 'failed' and 'unknown source' in state['error'] and state['installed']['added'] == 0 and
+              not (home / 'AssetLibraries' / 'org.kick.factory').exists() and store() == [] and leftovers() == [],
+              'refused code leaves out the asset library it needs: ' + json.dumps(state)[:400])
         rpc('trust.set', {'key': keys['publisher'][1], 'name': 'KICK', 'scope': ['plugins']})
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         plugins = store()

@@ -144,8 +144,10 @@ publisher `org.oscairn`, key **`b284 be6b ea2f adb1`** (public key
 `db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69`, also published at
 https://oscairn.org/.well-known/oscairn-publisher.json). The engine lists and installs from it
 through the control API (`packages.list`, `packages.install`; see the
-[control protocol](docs/control-protocol.md)). For now, the desktop app's Library opens only a
-repository in a folder.
+[control protocol](docs/control-protocol.md)). In the desktop app, the Library's **Install from
+a repository...** opens one by its https:// address (this one's is offered first) or its folder.
+The first time, it shows the repository's root key fingerprint and asks whether to trust it;
+nothing is trusted until you say so.
 
 ### The desktop app's screens
 

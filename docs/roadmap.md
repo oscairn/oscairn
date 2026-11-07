@@ -622,7 +622,8 @@ Each starts as an RFC:
   device's profile; updates that never move a Performance's lock on their own; revocation and
   takedown; fetching for an offline instrument from a desktop, USB or a paired computer
   (built: installing from a repository folder or USB drive, every signature and hash checked,
-  from the API and the desktop Library; unpacked package folders; fetching over HTTP(S) with
+  from the API and the desktop Library, which opens a repository's https:// address too;
+  unpacked package folders; fetching over HTTP(S) with
   deltas, mirrors and resumed downloads; HTTPS through the system on macOS and libcurl with Mbed
   TLS on Linux)
 - [ ] **Keeping plugins loaded:** a memory budget, unloading the least recently used, setlist

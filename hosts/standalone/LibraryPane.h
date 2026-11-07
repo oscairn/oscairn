@@ -139,9 +139,11 @@ namespace oscairn::standalone
         void librariesMenu();
         void removePlugin(const Control::InstalledPlugin& plugin);
         void addPluginBuild(const Control::InstalledPlugin& plugin);
-        // A package repository in a folder (RFC 0031): what it offers, listed and installed by jobs
-        // in the engine, asked about every 100 ms until each ends.
+        // A package repository, at an https:// address or in a folder (RFC 0031): what it offers,
+        // listed and installed by jobs in the engine, asked about every 100 ms until each ends.
+        // installFromRepository asks for its address; openRepository refuses one not https://.
         void installFromRepository();
+        void openRepository(const juce::String& address);
         void listRepository(const std::string& folder);
         void installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode);
         void awaitPackageJob(uint64_t job, std::function<void(const Control::PackageJob&)> then);

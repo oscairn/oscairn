@@ -886,7 +886,7 @@ namespace oscairn::standalone
     {
         juce::PopupMenu menu;
         menu.addItem(1, "Install from a file...");
-        menu.addItem(999, "Install from a repository folder...");
+        menu.addItem(999, "Install from a repository...");
         // Tags hidden from the tag list, to show again.
         juce::PopupMenu hidden;
         const auto hiddenTags = result_.hiddenTags;
@@ -1031,12 +1031,35 @@ namespace oscairn::standalone
         });
     }
 
+    // Its address, the official repository's to start with, or its folder. Its root key is
+    // trusted only when the user says so (listRepository), never shipped here.
     void LibraryPane::installFromRepository()
     {
-        chooser_ = std::make_unique<juce::FileChooser>("A package repository: the folder holding repository.json", juce::File());
-        chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [safe = juce::Component::SafePointer<LibraryPane>(this)](const juce::FileChooser& fc) {
-            if(safe && fc.getResult() != juce::File()) safe->listRepository(fc.getResult().getFullPathName().toStdString());
-        });
+        editor_ = std::make_unique<juce::AlertWindow>("Install from a repository", "Its https:// address, or the folder holding its repository.json.", juce::MessageBoxIconType::NoIcon, this);
+        editor_->addTextEditor("address", "https://packages.oscairn.org", "Address");
+        editor_->addButton("Open", 1, juce::KeyPress(juce::KeyPress::returnKey));
+        editor_->addButton("Choose folder...", 2);
+        editor_->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        editor_->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<LibraryPane>(this)](int chosen) {
+            if(!safe || !safe->editor_) return;
+            const auto window = std::move(safe->editor_);
+            if(chosen == 1) safe->openRepository(window->getTextEditorContents("address").trim());
+            if(chosen != 2) return;
+            safe->chooser_ = std::make_unique<juce::FileChooser>("A package repository: the folder holding repository.json", juce::File());
+            safe->chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [safe](const juce::FileChooser& fc) {
+                if(safe && fc.getResult() != juce::File()) safe->listRepository(fc.getResult().getFullPathName().toStdString());
+            });
+        }), false);
+    }
+
+    // The engine takes http:// too, for a local test server; the Library asks for https://, so
+    // no one on the way sees what is fetched (signatures already catch a changed file).
+    void LibraryPane::openRepository(const juce::String& address)
+    {
+        if(address.startsWith("https://") || (!address.contains("://") && juce::File::isAbsolutePath(address))) { listRepository(address.toStdString()); return; }
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not an https address",
+            "A repository on the web opens by its https:// address, such as https://packages.oscairn.org. A folder opens by its full path, or with Choose folder.",
+            {}, nullptr, juce::ModalCallbackFunction::create([](int) {})); // a callback keeps it asynchronous where modal loops are permitted (the tests)
     }
 
     void LibraryPane::awaitPackageJob(uint64_t job, std::function<void(const Control::PackageJob&)> then)
@@ -1070,7 +1093,7 @@ namespace oscairn::standalone
                 });
                 return;
             }
-            if(listing.state == "failed") { safe->tell(""); juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not read", text(listing.error)); return; }
+            if(listing.state == "failed") { safe->tell(""); juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not read", text(listing.error), {}, nullptr, juce::ModalCallbackFunction::create([](int) {})); return; }
             safe->tell(juce::String(int(listing.packages.size())) + (listing.packages.size() == 1 ? " package in " : " packages in ") + text(listing.name) + ".");
             auto* content = new RepositoryChoices(listing);
             juce::DialogWindow::LaunchOptions options;

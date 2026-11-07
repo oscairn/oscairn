@@ -8,6 +8,7 @@
 // - Choosing a controller's profile (RFC 0024).
 // - Asking before an app opens (RFC 0025).
 // - The rich views a plugin describes, on the Panel and the Desktop (RFC 0019).
+// - Installing from a repository by its https:// address, or its folder (RFC 0031).
 //   oscairn_desktop_gaps_test PLUGIN_DIR SCANNER THEMES [SNAPSHOTS]
 #include "../DesktopShell.h"
 #include "../Launcher.h"
@@ -20,7 +21,9 @@
 #include "EngineProcess.h"
 #include "oscairn/local_socket.h"
 #include "oscairn/package.h"
+#include "oscairn/repository.h"
 #include "oscairn/session.h"
+#include "oscairn/signing.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <atomic>
 #include <chrono>
@@ -696,6 +699,100 @@ int main(int argc, char** argv)
                 tap.reset();
                 juce::MessageManager::getInstance()->runDispatchLoopUntil(700);
                 check(tap.count("library.query") == 0, "the Library is not read again after a refresh: " + std::to_string(tap.count("library.query")));
+            }
+            // Install from a repository (RFC 0031): its https:// address, the official one offered
+            // first, or a folder's path; any other address refused before the engine is asked. The
+            // web here is a stand-in transport serving a folder, so nothing touches the network: a
+            // root whose key is not trusted asks to trust it by its fingerprint, and once trusted is
+            // read again from the same address (and refused, as its index key is not signed).
+            {
+                const auto rootKey = std::string(64, 'a');
+                const auto repo = data.getChildFile("repository-stand-in");
+                repo.createDirectory();
+                repo.getChildFile("repository.json").replaceWithText("{\"format\":\"oscairn.repository\",\"version\":1,\"repository\":\"org.example.test\",\"name\":\"Test repository\",\"serial\":1,\"rootKey\":\"" + rootKey +
+                                                                     "\",\"indexKey\":{\"key\":\"" + std::string(64, 'b') + "\",\"signature\":\"" + std::string(128, 'c') + "\"}}");
+                std::mutex fetchedMutex;
+                std::vector<std::string> fetched;
+                repository::setTransport([&](const std::string& url, uint64_t, const std::function<bool(int, const char*, size_t)>& sink) {
+                    { std::lock_guard lock(fetchedMutex); fetched.push_back(url); }
+                    const std::string base = "https://packages.example.test/";
+                    const auto file = repo.getChildFile(url.rfind(base, 0) == 0 ? url.substr(base.size()) : "missing");
+                    if(!file.existsAsFile()) return 404;
+                    const auto bytes = file.loadFileAsString().toStdString();
+                    sink(200, bytes.data(), bytes.size());
+                    return 200;
+                });
+                auto fetches = [&] { std::lock_guard lock(fetchedMutex); return fetched.size(); };
+                auto modal = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
+                auto said = [](juce::AlertWindow* w) { juce::String out; for(auto* c : w->getChildren()) if(auto* l = dynamic_cast<juce::Label*>(c)) out << l->getText(); return out; };
+                // A dialog answered, and gone before the next is looked for.
+                auto close = [&](juce::AlertWindow* w, int answer) {
+                    if(!w) return;
+                    juce::Component::SafePointer<juce::Component> gone(w);
+                    w->exitModalState(answer);
+                    wait([&] { return modal() != gone.getComponent() || !gone; });
+                };
+                auto ask = [&](const juce::String& address) {
+                    auto* w = modal();
+                    if(!w || !w->getTextEditor("address")) return;
+                    w->getTextEditor("address")->setText(address);
+                    close(w, 1);
+                };
+                standalone::Actions actions;
+                standalone::LibraryPane pane(engine, actions, standalone::LibraryPane::Mode::Play);
+                standalone::setDesktopMode(pane, 2); pane.setSize(1024, 600);
+                wait([&] { return !engine.jobRunning(); });
+                pane.installFromRepository();
+                auto* asked = modal();
+                check(asked && asked->getName() == "Install from a repository" && asked->getTextEditorContents("address") == "https://packages.oscairn.org" && asked->getButton("Choose folder...") != nullptr,
+                      "Install from a repository offers the official repository's address, and a folder");
+                if(asked && argc >= 5)
+                {
+                    // On the Panel, over the Library at 1024 x 600, centered as it shows.
+                    juce::Image screen = pane.createComponentSnapshot(pane.getLocalBounds());
+                    const auto dialog = asked->createComponentSnapshot(asked->getLocalBounds());
+                    juce::Graphics(screen).drawImageAt(dialog, (screen.getWidth() - dialog.getWidth()) / 2, (screen.getHeight() - dialog.getHeight()) / 2);
+                    const juce::File out{juce::String(argv[4]) + "-repository-address.png"};
+                    out.deleteFile();
+                    juce::FileOutputStream stream(out);
+                    juce::PNGImageFormat().writeImageToStream(screen, stream);
+                }
+                tap.reset();
+                for(const auto* refused : {"http://packages.example.test/", "packages.oscairn.org", "ftp://packages.example.test/"})
+                {
+                    if(!modal()) pane.installFromRepository();
+                    ask(refused);
+                    wait([&] { auto* w = modal(); return w && w->getName() == "Not an https address"; });
+                    auto* w = modal();
+                    check(w && w->getName() == "Not an https address" && said(w).contains("https://"),
+                          std::string("an address not https:// is refused, and why: ") + refused + " (" + (w ? w->getName() + ": " + said(w) : juce::String("no dialog")).toStdString() + ")");
+                    close(w, 0);
+                }
+                check(tap.count("packages.list") == 0 && fetches() == 0, "a refused address never reaches the engine");
+                pane.installFromRepository();
+                ask("https://packages.example.test");
+                check(wait([&] { auto* w = modal(); return w && w->getName() == "Trust this repository?"; }) && tap.count("packages.list") == 1,
+                      "an https:// repository is listed by the engine, and its untrusted root asks to be trusted");
+                if(auto* w = modal(); w && w->getName() == "Trust this repository?")
+                {
+                    check(said(w).contains(standalone::fingerprint(signing::keyId(rootKey))), "it shows the root key's fingerprint: " + said(w).toStdString());
+                    { std::lock_guard lock(fetchedMutex); check(!fetched.empty() && fetched[0] == "https://packages.example.test/repository.json", "its root fetched from its address"); }
+                    const auto before = fetches();
+                    close(w, 1);
+                    check(wait([&] { auto* n = modal(); return n && n->getName() == "Not read"; }) && fetches() > before && tap.count("packages.list") == 2,
+                          "trusted, it is read again from the same address");
+                    if(auto* n = modal(); n && n->getName() == "Not read") { check(said(n).contains("index key is not signed"), "and refused past the trust check: " + said(n).toStdString()); close(n, 0); }
+                }
+                std::vector<Control::TrustedKey> keys;
+                engine.packages([&](Control& c) { keys = c.trustedKeys(); });
+                check(std::any_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == rootKey && k.scope == std::vector<std::string>{"repositories"}; }), "its root key trusted for repositories only");
+                // A folder's full path opens it as a folder, not through the web.
+                const auto before = fetches();
+                pane.installFromRepository();
+                ask(repo.getFullPathName());
+                check(wait([&] { auto* n = modal(); return n && n->getName() == "Not read"; }) && tap.count("packages.list") == 3 && fetches() == before, "a folder's path is read from the folder");
+                close(modal(), 0);
+                repository::setTransport({});
             }
             // A Parts view not on screen (the one under Play, a background app's) polls nothing:
             // on the Mixer, shown, it would read the meters twenty times a second.

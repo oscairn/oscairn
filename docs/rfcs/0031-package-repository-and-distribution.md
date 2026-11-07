@@ -34,7 +34,7 @@ Checked when built and tested; the sections below say how.
       not installed, only this device's builds installed; `packages.list`, `packages.install` and
       `packages.job`, reading, checking and unpacking off the control thread; unpacked package
       folders and archives read in place, a free-space check before writing, items and builds
-      moved into place by renames; in the desktop Library, Install from a repository folder;
+      moved into place by renames; in the desktop Library, Install from a repository (a folder);
       `control-repository`, `desktop-gaps`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
       (step 2), a device's list of repositories and `.orepo` files, recording each installed
@@ -47,9 +47,12 @@ Checked when built and tested; the sections below say how.
       root published last (`--previous-site`); blobs from the mirrors, the blob base and the
       repository's own address in turn, a bad copy refused and the next tried; a download cut
       short resumed with a range request; `control-repository-web` against a local HTTP server.
+      2026-11-07: the desktop Library opens a repository's https:// address (the official one
+      offered, its key not trusted until the user says so; any other scheme refused);
+      `desktop-gaps` drives it through a stand-in transport, up to the trust prompt and a second
+      read, not an install from the web.
       Not yet: fetching the root from a mirror when the repository's own address
-      is down, per-platform fetches (releases are still whole archives), the desktop installing
-      from an address)
+      is down, per-platform fetches (releases are still whole archives))
 - [ ] 3. Publishing: the `oscairn publish` command, checks, immutable versions and yanking
 - [ ] 4. Revocation lists and the takedown process
 - [ ] 5. Discovery: Get more in the Library, the Store app, compatibility filters
@@ -769,9 +772,9 @@ waits on them. What remains, in order:
    `JUCE_USE_CURL` on); the core's `Transport` did not change. A device with no clock still fails
    on certificate dates until RFC 0039's time floor is built.
 3. A device's list of repositories (`packages.repositories`, `addRepository`,
-   `removeRepository`, `.orepo` files), each installed package recording its repository, the
-   root fetched from a mirror when the repository's own address is down, and the desktop
-   installing from an address.
+   `removeRepository`, `.orepo` files), each installed package recording its repository, and the
+   root fetched from a mirror when the repository's own address is down. (The desktop installing
+   from an address: done 2026-11-07, see Progress.)
 4. Tests for the free-space refusal and a drive pulled midway.
 5. Step 3's `oscairn publish`: pack (or take) the release, run the checks the submissions
    repository's `check.yml` runs (`build-index.py --check` with `--previous` against the

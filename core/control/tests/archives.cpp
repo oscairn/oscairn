@@ -641,6 +641,11 @@ int main(int argc, char** argv)
                   l.installArchive((temp.path / "Presets.olib").string(), false).added == 1, "an asset library of presets installs");
             const auto found = presets();
             check(found == "Quiet;Bright;Warm;", "with it, the provider's location from library_root is indexed: " + found);
+            // The same through a node's presets, which without a scan helper index in this process.
+            const auto node = l.add("presets", fixture, "org.kick.test.midi");
+            std::string listed;
+            for(const auto& p : l.presets(node)) listed += p.name + ";";
+            check(listed == "Quiet;Bright;Warm;", "a node's presets come from the installed library too: " + listed);
         }
         // A build path without its .clap or .lv2: the store keeps bundles by extension, so such a
         // build installs into the store and is never found again. readPackage refuses it.

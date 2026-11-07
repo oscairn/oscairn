@@ -1086,7 +1086,7 @@ bool Host::loadState(const std::vector<uint8_t>& bytes) {
 std::vector<Preset> Host::presets() {
     auto& s = *impl;
     if (!s.main() || !s.library || !s.library->entry) return {};
-    return indexPresets(s.library->entry, {s.info.id}).presets[s.info.id];
+    return indexPresets(s.library->entry, {s.info.id}, 10000, s.assets).presets[s.info.id]; // providers find asset libraries through library_root
 }
 
 bool Host::loadPreset(const Preset& preset) {

@@ -1958,7 +1958,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             }
         }
         if(!unknown.empty() && !acceptUnsignedCode)
-            bad("it runs code from an unknown source: "+unknown+"; install it accepting unsigned code to go ahead");
+            throw std::runtime_error("it runs code from an unknown source: "+unknown+"; install it accepting unsigned code to go ahead"); // said to the user as it is: no "Performance: "
         if(checkOnly)return out; // `into` stays for the install
         // The samples they use, into the user's samples by their hash, so they stay when a library goes.
         for(const auto& i:items)for(const auto& ref:assetsOf(manifest(i))){

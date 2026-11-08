@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EngineProcess.h"
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -83,6 +84,57 @@ namespace oscairn::host
             std::ostringstream out;out<<std::hex<<std::setw(16)<<std::setfill('0')<<hash;return out.str();
         }
     }
+    pid_t spawnChild(const std::vector<std::string>& arguments,int output,const std::vector<std::string>& environment,int inherit)
+    {
+        posix_spawn_file_actions_t actions;
+        int result=posix_spawn_file_actions_init(&actions);
+        if(result)throw std::system_error(result,std::generic_category(),"initialize helper launch");
+        struct Actions{posix_spawn_file_actions_t* value;~Actions(){posix_spawn_file_actions_destroy(value);}}cleanup{&actions};
+        auto checked=[](int code){if(code)throw std::system_error(code,std::generic_category(),"configure helper launch");};
+        // Descriptor 3 first, from a copy above the ones being replaced, so neither overwrites the other.
+        Descriptor kept(inherit>=0?::fcntl(inherit,F_DUPFD_CLOEXEC,10):-1);
+        if(inherit>=0 && kept.fd<0)error("keep the helper's connection");
+        Descriptor out(::fcntl(output,F_DUPFD_CLOEXEC,10));
+        if(out.fd<0)error("keep the helper's output");
+        checked(posix_spawn_file_actions_addopen(&actions,STDIN_FILENO,"/dev/null",O_RDONLY,0));
+        checked(posix_spawn_file_actions_adddup2(&actions,out.fd,STDOUT_FILENO));
+        checked(posix_spawn_file_actions_adddup2(&actions,out.fd,STDERR_FILENO));
+        if(kept.fd>=0)checked(posix_spawn_file_actions_adddup2(&actions,kept.fd,3));
+        posix_spawnattr_t attributes;
+        checked(posix_spawnattr_init(&attributes));
+        struct Attributes{posix_spawnattr_t* value;~Attributes(){posix_spawnattr_destroy(value);}}attributeCleanup{&attributes};
+        checked(posix_spawnattr_setflags(&attributes,POSIX_SPAWN_SETPGROUP));
+        checked(posix_spawnattr_setpgroup(&attributes,0));
+        std::vector<std::string> strings(arguments);
+        std::vector<char*> args;
+        for(auto& str:strings)args.push_back(str.data());
+        args.push_back(nullptr);
+        std::vector<std::string> variables(environment);
+        std::vector<char*> env;
+        for(auto& v:variables)env.push_back(v.data());
+        for(char** e=environ;*e;++e)
+        {
+            const std::string_view name(*e,std::string_view(*e).find('='));
+            if(std::none_of(environment.begin(),environment.end(),[&](const std::string& v){return v.compare(0,name.size()+1,std::string(name)+'=')==0;}))env.push_back(*e);
+        }
+        env.push_back(nullptr);
+        pid_t child=-1;
+        checked(::posix_spawn(&child,strings.front().c_str(),&actions,&attributes,args.data(),env.data()));
+        return child;
+    }
+    void stopChild(pid_t child,unsigned graceMs)
+    {
+        if(child<=0)return;
+        if(::waitpid(child,nullptr,WNOHANG)!=0)return; // gone already, or not ours
+        ::kill(child,SIGTERM);
+        for(unsigned waited=0;waited<graceMs;waited+=10)
+        {
+            if(::waitpid(child,nullptr,WNOHANG)!=0)return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        ::kill(child,SIGKILL);
+        while(::waitpid(child,nullptr,0)<0 && errno==EINTR){}
+    }
     EngineLease::EngineLease(const std::string& path)
     {
         privateDirectory(fs::path(path).parent_path().string(),false);
@@ -119,48 +171,16 @@ namespace oscairn::host
         void stopFailedStartup()
         {
             if(child<=0)return;
-            // Only our unreaped child can be stopped, never a PID read from disk.
-            const auto state=::waitpid(child,nullptr,WNOHANG);
-            if(state!=0){child=-1;return;}
-            ::kill(child,SIGTERM);
-            for(int i=0;i<20;++i)
-            {
-                if(::waitpid(child,nullptr,WNOHANG)!=0){child=-1;return;}
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-            ::kill(child,SIGKILL);
-            while(::waitpid(child,nullptr,0)<0 && errno==EINTR){}
-            child=-1;
+            stopChild(child);child=-1;
         }
         void spawn()
         {
             reap();
             Descriptor output(privateFile(log,O_WRONLY|O_APPEND));
-            posix_spawn_file_actions_t actions;
-            int result=posix_spawn_file_actions_init(&actions);
-            if(result)throw std::system_error(result,std::generic_category(),"initialize engine launch");
-            struct Actions{posix_spawn_file_actions_t* value;~Actions(){posix_spawn_file_actions_destroy(value);}}cleanup{&actions};
-            auto checked=[](int code){if(code)throw std::system_error(code,std::generic_category(),"configure engine launch");};
-            checked(posix_spawn_file_actions_addopen(&actions,STDIN_FILENO,"/dev/null",O_RDONLY,0));
-            checked(posix_spawn_file_actions_adddup2(&actions,output.fd,STDOUT_FILENO));
-            checked(posix_spawn_file_actions_adddup2(&actions,output.fd,STDERR_FILENO));
-            posix_spawnattr_t attributes;
-            checked(posix_spawnattr_init(&attributes));
-            struct Attributes{posix_spawnattr_t* value;~Attributes(){posix_spawnattr_destroy(value);}}attributeCleanup{&attributes};
-            checked(posix_spawnattr_setflags(&attributes,POSIX_SPAWN_SETPGROUP));
-            checked(posix_spawnattr_setpgroup(&attributes,0));
-            std::vector<std::string> argStrings = {
-                executable,
-                "--socket", socket,
-                "--plugins", plugins,
-                "--managed"
-            };
+            std::vector<std::string> arguments={executable,"--socket",socket,"--plugins",plugins,"--managed"};
             const auto audioArgs=audio.arguments();
-            argStrings.insert(argStrings.end(),audioArgs.begin(),audioArgs.end());
-            std::vector<char*> args;
-            for(auto& str : argStrings) args.push_back(str.data());
-            args.push_back(nullptr);
-            checked(::posix_spawn(&child,executable.c_str(),&actions,&attributes,args.data(),environ));
+            arguments.insert(arguments.end(),audioArgs.begin(),audioArgs.end());
+            child=spawnChild(arguments,output.fd);
         }
     };
     EngineProcess::EngineProcess(std::string executable,std::string plugins,std::string directory,const AudioConfiguration& audio):impl_(std::make_unique<Impl>())

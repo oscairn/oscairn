@@ -883,6 +883,10 @@ namespace oscairn::standalone
                     }
                 }
                 engine_->edit( [budget, always]( Control& c ) { c.setBudget( budget ); if( !always.empty() ) c.setAlwaysAvailable( always ); } );
+                // RFC 0031: the package repositories its image ships, and whether it hides the official one.
+                std::vector<Control::Repository> shipped;
+                for( const auto& r : profile.repositories ) shipped.push_back( { r.address, r.name, r.key, "device" } );
+                engine_->edit( [shipped, hide = profile.hideOfficial]( Control& c ) { c.setDeviceRepositories( shipped, hide ); } );
                 // RFC 0020: the retroactive buffer Capture saves from, as long as was chosen (not for a snapshot).
                 if( !args.contains( "--snapshot" ) )
                     if( const auto error = engine_->setCapture( readCaptureSeconds( theme_->configuration(), profile ) ); !error.empty() )

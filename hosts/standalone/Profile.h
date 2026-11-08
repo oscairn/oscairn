@@ -67,6 +67,12 @@ namespace oscairn::standalone
         // RFC 0025: the apps reserved whether they run or not, each in apps; absent from the file,
         // oscairn.performance and oscairn.library where apps lists them.
         std::vector<std::string> alwaysAvailable;
+        // RFC 0031: the package repositories its image ships (each https:// address, root key and
+        // name), beside the official one; hideOfficial, heavily discouraged, turns the official one
+        // off by default without removing it.
+        struct Repository { std::string address, key, name; };
+        std::vector<Repository> repositories;
+        bool hideOfficial = false;
         std::vector<std::string> estimated;  // sections whose values are estimates, not measured on a unit
 
         bool offers(const std::string& app) const;

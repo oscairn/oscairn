@@ -94,6 +94,18 @@ int main()
             check(!refused(fewer) && Profile::parse(fewer).alwaysAvailable.size() == 1, "fitting with only the Performance app always available (600 + 1200 + 150)");
             check(refused(replaced(kickJson, "\"apps\":", "\"alwaysAvailable\": [\"oscairn.recorder\"], \"apps\":")), "an always-available app it does not have");
         }
+        // Package repositories its image ships (RFC 0031), and hiding the official one.
+        {
+            const std::string key(64, 'a');
+            const auto shipped = replaced(kickJson, "\"apps\":", "\"repositories\": { \"list\": [{ \"address\": \"https://packages.kick.example\", \"key\": \"" + key + "\", \"name\": \"KICK\" }], \"hideOfficial\": true }, \"apps\":");
+            const auto p = Profile::parse(shipped);
+            check(p.repositories.size() == 1 && p.repositories[0].address == "https://packages.kick.example" && p.repositories[0].key == key && p.repositories[0].name == "KICK" && p.hideOfficial,
+                  "a profile names the repositories its image ships, and may hide the official one");
+            check(kick.repositories.empty() && !kick.hideOfficial, "none, and the official one shown, by default");
+            check(refused(replaced(shipped, "https://packages.kick.example", "http://packages.kick.example")), "a repository not over https");
+            check(refused(replaced(shipped, key, "abc")), "a repository's key that is not a root key");
+            check(refused(replaced(shipped, "\"hideOfficial\": true", "\"hideOfficial\": true, \"removeOfficial\": true")), "no field removes the official repository");
+        }
         check(refused(replaced(kickJson, "\"role\": \"notes\"", "\"role\": \"assign\"")), "pads that do not play notes");
         check(refused(replaced(kickJson, paged, paged + ", \"modes\": [\"part\"]")), "modes on knobs");
         check(refused(replaced(kickJson, "[\"volume\", \"master\", \"recGain\"]", "[\"volume\"]")), "fewer functions than controls");

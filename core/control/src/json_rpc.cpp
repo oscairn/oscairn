@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/json_rpc.h"
+#include "oscairn/signing.h"
 #include "JsonInput.h"
 #include "CurveJson.h"
 #include "PropertyWire.h"
@@ -507,7 +508,7 @@ namespace oscairn
             if( method == "session.hello" )
             {
                 fields(p, {});
-                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.export","budget.set","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","session.status","engine.attach","engine.release","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","keys.list","keys.make","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
+                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.export","budget.set","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","session.status","engine.attach","engine.release","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
             }
             if( method == "engine.attach" || method == "engine.release" )
             {
@@ -812,6 +813,30 @@ namespace oscairn
                 }catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
                 catch(const std::logic_error& e){throw Failure{-32007,e.what(),R"({"reason":"busy"})"};}
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
+            }
+            // The repositories this device knows (RFC 0031).
+            if(method=="packages.repositories") {
+                fields(p,{});std::vector<std::string> out;
+                try{for(const auto& r:c.repositories())out.push_back("{\"address\":"+quote(r.address)+",\"name\":"+quote(r.name)+",\"key\":"+quote(r.key)+",\"id\":"+quote(signing::keyId(r.key))+
+                                                                 ",\"origin\":"+quote(r.origin)+",\"enabled\":"+(r.enabled?"true":"false")+'}');}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
+                return "{\"repositories\":"+join(out)+'}';
+            }
+            if(method=="packages.addRepository" || method=="packages.removeRepository" || method=="packages.enableRepository" || method=="packages.setDeviceRepositories") {
+                auto repository=[&](Value r){fields(r,{"address","key","name"});
+                    return Control::Repository{std::string(string(member(r,"address"))),member(r,"name")?std::string(string(member(r,"name"))):std::string(),std::string(string(member(r,"key"))),{}};};
+                try{
+                    if(method=="packages.addRepository")c.addRepository(repository(p));
+                    else if(method=="packages.removeRepository"){fields(p,{"address"});c.removeRepository(std::string(string(member(p,"address"))));}
+                    else if(method=="packages.enableRepository"){fields(p,{"address","enabled"});c.setRepositoryEnabled(std::string(string(member(p,"address"))),boolean(member(p,"enabled")));}
+                    else{
+                        fields(p,{"repositories","hideOfficial"});std::vector<Control::Repository> list;
+                        for(auto r:array(member(p,"repositories"),64,0))list.push_back(repository(r));
+                        c.setDeviceRepositories(list,member(p,"hideOfficial") && boolean(member(p,"hideOfficial")));
+                    }
+                }catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
+                return R"({"accepted":true})";
             }
             if(method=="packages.job") {
                 fields(p,{"job"});

@@ -52,7 +52,14 @@ void writeTrust(const std::vector<Control::TrustedKey>& keys){
 }
 }
 
-std::vector<Control::TrustedKey> Session::trustedKeys(){return readTrust();}
+// trust.json's, then the root keys of the repositories this device ships, trusted for
+// repositories only, unless trust.json has an entry for the key (such as one revoking it).
+std::vector<Control::TrustedKey> Session::trustedKeys(){
+    auto keys=readTrust();
+    for(const auto& r:shipped())
+        if(std::none_of(keys.begin(),keys.end(),[&](const auto& k){return k.key==r.key;}))keys.push_back({signing::keyId(r.key),r.key,r.name,{"repositories"},false});
+    return keys;
+}
 
 // Revoked by any of its signers' keys wins; then trusted by a key trusted for this kind (plugins,
 // apps, or content for an archive); else unknown, or unsigned. Signatures are already verified.

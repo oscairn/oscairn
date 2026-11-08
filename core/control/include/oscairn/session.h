@@ -76,6 +76,11 @@ namespace oscairn
         uint64_t listRepository(const std::string& source) override;
         uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false) override;
         PackageJob packageJob(uint64_t id) override;
+        std::vector<Repository> repositories() override;
+        void addRepository(const Repository& repository) override;
+        void removeRepository(const std::string& address) override;
+        void setRepositoryEnabled(const std::string& address, bool enabled) override;
+        void setDeviceRepositories(const std::vector<Repository>& repositories, bool hideOfficial) override;
         std::vector<TrustedKey> trustedKeys() override;
         void setTrustedKey(const TrustedKey& key) override;
         void removeTrustedKey(const std::string& id) override;
@@ -652,6 +657,9 @@ namespace oscairn
         struct PackageWork;                        // the package job off the control thread (packages.cpp)
         std::shared_ptr<PackageWork> packageWork_; // joins its thread when it goes
         uint64_t packageJobs_ = 0;
+        std::vector<Repository> deviceRepositories_; // the profile's, set by the app; control thread only
+        bool hideOfficial_ = false;
+        std::vector<Repository> shipped() const;     // the official repository and the device's: their root keys trusted for repositories without trust.json
         uint64_t revision_ = 0, sequence_ = 0;
         using Address = std::pair<NodeId,uint32_t>;
         struct Command { ChangeKind kind; double value; };

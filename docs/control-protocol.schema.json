@@ -3962,6 +3962,209 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "packages.repositories",
+              "description": "The package repositories this device knows: the official one, its image's and the user's"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "packages.addRepository",
+              "description": "Adds a repository by its address and root key, trusting the key for repositories"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "key": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "address",
+                "key"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "packages.removeRepository",
+              "description": "Removes a repository the user added"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "address"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "packages.enableRepository",
+              "description": "Turns a repository on or off: what the Library offers to install comes from those on"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "address",
+                "enabled"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "packages.setDeviceRepositories",
+              "description": "The repositories the device's image ships and whether it hides the official one, from its profile"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "repositories": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "address": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "address",
+                      "key"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "hideOfficial": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "repositories"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "keys.list",
               "description": "The signing keys in the data folder: names, IDs and public keys, never a private key"
             },

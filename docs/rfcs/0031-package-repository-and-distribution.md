@@ -35,9 +35,15 @@ Checked when built and tested; the sections below say how.
       `packages.job`, reading, checking and unpacking off the control thread; unpacked package
       folders and archives read in place, a free-space check before writing, items and builds
       moved into place by renames; in the desktop Library, Install from a repository (a folder);
-      `control-repository`, `desktop-gaps`. Not yet: releases stored in pieces (items, samples
+      `control-repository`, `desktop-gaps`. 2026-11-07: a device's list of repositories
+      (`packages.repositories`, `addRepository`, `removeRepository`, `enableRepository`,
+      `setDeviceRepositories`): the official one always listed, its root key trusted for
+      repositories only and built in, never for plugins; a profile's `repositories` and its
+      discouraged `hideOfficial`, which turns the official one off without removing it; the
+      user's, added by address and root key; each on or off; `control-repository`,
+      `desktop-profile`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
-      (step 2), a device's list of repositories and `.orepo` files, recording each installed
+      (step 2), `.orepo` files, recording each installed
       package's repository; the free-space refusal and a drive pulled midway are not tested)
 - [ ] 2. Fetching over HTTPS: refresh, incremental index updates, mirrors, resumable downloads
       (built 2026-11-06: fetching through the host's transport, JUCE's URL streams: the system's
@@ -48,7 +54,8 @@ Checked when built and tested; the sections below say how.
       repository's own address in turn, a bad copy refused and the next tried; a download cut
       short resumed with a range request; `control-repository-web` against a local HTTP server.
       2026-11-07: the desktop Library opens a repository's https:// address (the official one
-      offered, its key not trusted until the user says so; any other scheme refused);
+      offered; its key was not trusted until the user said so, and is built in since step 1's list
+      of repositories; any other scheme refused);
       `desktop-gaps` drives it through a stand-in transport, up to the trust prompt and a second
       read, not an install from the web.
       Not yet: fetching the root from a mirror when the repository's own address
@@ -472,7 +479,8 @@ What does not fit is shown grayed with the reason, never hidden without saying s
 ### Control API
 
 A `packages` namespace: `packages.repositories`, `packages.addRepository`,
-`packages.removeRepository`, `packages.refresh`, `packages.search`, `packages.get`,
+`packages.removeRepository`, `packages.enableRepository` (on or off), `packages.setDeviceRepositories`
+(the app's, from its profile), `packages.refresh`, `packages.search`, `packages.get`,
 `packages.install` and `packages.updates`, with notifications for progress. Searching and
 installing content need the Library permission (RFC 0026); adding a repository or installing
 plugin and app code needs System.
@@ -771,10 +779,9 @@ waits on them. What remains, in order:
 2. HTTPS on Linux devices: done by RFC 0039's step 1 (libcurl with Mbed TLS in the image,
    `JUCE_USE_CURL` on); the core's `Transport` did not change. A device with no clock still fails
    on certificate dates until RFC 0039's time floor is built.
-3. A device's list of repositories (`packages.repositories`, `addRepository`,
-   `removeRepository`, `.orepo` files), each installed package recording its repository, and the
-   root fetched from a mirror when the repository's own address is down. (The desktop installing
-   from an address: done 2026-11-07, see Progress.)
+3. `.orepo` files, each installed package recording its repository, and the root fetched from a
+   mirror when the repository's own address is down. (The desktop installing from an address and
+   a device's list of repositories: done 2026-11-07, see Progress.)
 4. Tests for the free-space refusal and a drive pulled midway.
 5. Step 3's `oscairn publish`: pack (or take) the release, run the checks the submissions
    repository's `check.yml` runs (`build-index.py --check` with `--previous` against the

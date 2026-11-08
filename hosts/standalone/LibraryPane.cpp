@@ -1031,8 +1031,9 @@ namespace oscairn::standalone
         });
     }
 
-    // Its address, the official repository's to start with, or its folder. Its root key is
-    // trusted only when the user says so (listRepository), never shipped here.
+    // Its address, the official repository's to start with, or its folder. Another repository's
+    // root key is trusted only when the user says so (listRepository); the engine knows the
+    // official one's and the device's own.
     void LibraryPane::installFromRepository()
     {
         editor_ = std::make_unique<juce::AlertWindow>("Install from a repository", "Its https:// address, or the folder holding its repository.json.", juce::MessageBoxIconType::NoIcon, this);

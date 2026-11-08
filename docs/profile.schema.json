@@ -665,6 +665,47 @@
         "maxLength": 128
       }
     },
+    "repositories": {
+      "type": "object",
+      "description": "RFC 0031: the package repositories the device's image ships, listed beside the official one and those the user adds, each by its address, its root key (trusted for repositories) and name",
+      "properties": {
+        "list": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^https://"
+              },
+              "key": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "address",
+              "key",
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "hideOfficial": {
+          "type": "boolean",
+          "description": "Heavily discouraged (RFC 0031): the official repository off by default. It is never removed: Settings keeps it one switch away, and no profile can take that switch out"
+        }
+      },
+      "additionalProperties": false
+    },
     "estimated": {
       "type": "array",
       "items": {
@@ -803,6 +844,11 @@
             {
               "required": [
                 "alwaysAvailable"
+              ]
+            },
+            {
+              "required": [
+                "repositories"
               ]
             }
           ]

@@ -1184,6 +1184,33 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `publisherKey` is the key's ID only, as the index carries no public keys; the public key is
   in the package's signatures, which a listing does not fetch. An install unpacks off the
   control thread; asking about it once it has unpacked moves it into place.
+- `packages.repositories` (`{}`) returns `{repositories}`: the package repositories this device
+  knows ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
+  `{address,name,key,id,origin,enabled}`: its address (a folder's full path, or https://, kept
+  without a `/` at the end), name, root key (hex) and that key's ID, where it comes from
+  (`official`, `device` or `user`) and whether it is on. The official repository,
+  `https://packages.oscairn.org` (root key `6a7eceba…0841`, ID `6a2dd1acf4d4e23c`), is always
+  listed first; `device` ones are those the device's image ships (its profile's `repositories`),
+  then the user's. The official and device repositories' root keys are trusted for
+  `repositories` only, built in: `trust.list` lists them without their being in `trust.json`, and
+  a `trust.set` entry for the same key (one revoking it) takes their place. Neither trusts a
+  publisher's key for `plugins`; that stays the user's decision.
+- `packages.addRepository` takes `{address,key}` and optional `name` (default: `Repository` and
+  the key's ID): an https:// (or http://) address or a folder's full path, and its root key,
+  which the user has been shown by its fingerprint (as `packages.job` gives a refused listing's
+  `rootKey`). It trusts the key for `repositories`, beside anything else it is trusted for (a
+  revoked key is refused), and lists the repository, on; adding an address again replaces it.
+  An address the device ships is refused. Nothing adds a repository but this call.
+- `packages.removeRepository` takes `{address}`: only a `user` one. The official and device
+  ones are refused (they can be turned off, not removed). Its root key's trust for
+  `repositories` goes with it, unless another listed repository has the same key.
+- `packages.enableRepository` takes `{address,enabled}`: turns any listed repository on or off.
+  What the Library offers to install comes from those on. Kept by address in
+  `repositories.json` in the data folder, with the repositories added and the serials seen.
+- `packages.setDeviceRepositories` takes `{repositories}` (each `{address,key,name}`) and optional
+  `hideOfficial`: the app sets them from its profile at each start; they are not kept. With
+  `hideOfficial` (heavily discouraged) the official repository is off until turned on; it is
+  never removed. Each of these four returns `{"accepted":true}`.
 - `library.uninstall` takes `{library}`; `library.delete` takes `{id}`, any item's.
 - `library.query` items carry `library`: the installed library holding them, locked, or empty
   for the user's own. Saving over a locked item, a Performance by `library.save` or a part's

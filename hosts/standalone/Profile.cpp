@@ -88,13 +88,13 @@ namespace oscairn::standalone
         juce::var value;
         require(juce::JSON::parse(juce::String::fromUTF8(json.data(), int(json.size())), value).wasOk(), "not valid JSON");
         const auto& root = object(value, "a profile");
-        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "reliability", "apps", "alwaysAvailable", "estimated"}, "the profile");
+        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "reliability", "apps", "alwaysAvailable", "repositories", "estimated"}, "the profile");
         require(text(root, "format") == "oscairn.profile", "format must be oscairn.profile");
         require(root.getProperty("version").isInt() && int(root.getProperty("version")) == 2, "version must be 2");
         Profile p;
         // A controller's profile (it names ports) holds its controls and ports only.
         if(const auto m = root.getProperty("midi"); m.getDynamicObject() && m.getDynamicObject()->hasProperty("ports"))
-            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "reliability", "apps", "alwaysAvailable"})
+            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "reliability", "apps", "alwaysAvailable", "repositories"})
                 require(!root.hasProperty(key), std::string("a controller's profile has no ") + key);
         const bool controller = root.getProperty("midi").getDynamicObject() && root.getProperty("midi").getDynamicObject()->hasProperty("ports");
         p.id = text(root, "id"); p.name = text(root, "name");
@@ -298,6 +298,26 @@ namespace oscairn::standalone
             for(const auto& a : p.alwaysAvailable) need += appMemory(a);
             require(need <= p.compute.memory, "osMemory, performanceMemory and the always-available apps' reservations (" + std::to_string(need) +
                                               " MiB) exceed memory (" + std::to_string(p.compute.memory) + " MiB)");
+        }
+        if(const auto v = root.getProperty("repositories"); !v.isVoid())
+        {
+            const auto& o = object(v, "repositories"); fields(o, {"list", "hideOfficial"}, "repositories");
+            p.hideOfficial = flag(o, "hideOfficial");
+            if(const auto list = o.getProperty("list"); !list.isVoid())
+            {
+                require(list.isArray() && list.size() <= 64, "repositories.list must be a list");
+                for(const auto& e : *list.getArray())
+                {
+                    const auto& r = object(e, "a repository"); fields(r, {"address", "key", "name"}, "a repository");
+                    const auto address = r.getProperty("address").toString();
+                    require(r.getProperty("address").isString() && address.startsWith("https://") && address.length() > 8 && address.length() <= 4096 &&
+                                !address.containsAnyOf(juce::String::charToString(0) + " \t\r\n"), "a repository's address is https://");
+                    p.repositories.push_back({address.toStdString(), text(r, "key"), text(r, "name")});
+                    require(p.repositories.back().key.size() == 64 && std::all_of(p.repositories.back().key.begin(), p.repositories.back().key.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) || (c >= 'a' && c <= 'f'); }),
+                            "a repository's key is its root key, 64 lowercase hex digits");
+                    require(!p.repositories.back().name.empty(), "a repository needs a name");
+                }
+            }
         }
         p.estimated = names(root, "estimated");
         for(const auto& s : p.estimated) require(sections.contains(juce::String(s)), "estimated names a section: " + s);

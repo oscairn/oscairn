@@ -337,6 +337,22 @@ namespace oscairn
         virtual uint64_t listRepository(const std::string& source) = 0;
         virtual uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false) = 0;
         virtual PackageJob packageJob(uint64_t id) = 0;
+        // The repositories this device knows (RFC 0031), each by its address (a folder, or
+        // https://, with no '/' at the end), its root key (hex) and name. origin: "official" (built
+        // in, its root key trusted for repositories only), "device" (its image's, from its profile)
+        // or "user". The official and device ones' keys are listed by trustedKeys without being in
+        // trust.json. enabled: offered by the Library's Install...; the official one is on unless the profile hides
+        // it. Adding takes the address and root key (shown to the user by its fingerprint first),
+        // trusts the key for repositories and lists it enabled; only the user's can be removed,
+        // which takes its key's trust for repositories with it unless another listed one uses it.
+        // Enabled or not is kept by address in the data folder (repositories.json). The device
+        // ones and hideOfficial are set by the app from its profile at each start.
+        struct Repository { std::string address, name, key, origin; bool enabled = true; };
+        virtual std::vector<Repository> repositories() = 0;
+        virtual void addRepository(const Repository& repository) = 0;
+        virtual void removeRepository(const std::string& address) = 0;
+        virtual void setRepositoryEnabled(const std::string& address, bool enabled) = 0;
+        virtual void setDeviceRepositories(const std::vector<Repository>& repositories, bool hideOfficial) = 0;
         // Sounds (RFC 0021): a part saved to the library, without its seat. Wires that cross the
         // part's edge are not saved and are listed in `left`. Save writes a new revision of the
         // Sound the part came from (renamed when name is given); asNew, or a part from no Sound,

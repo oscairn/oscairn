@@ -433,6 +433,53 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(state['state'] == 'done' and state['installed']['notes'] == [] and sorted(e.name for e in library.iterdir()) == ['1.1.0'] and
               (library / '1.1.0' / 'patches' / 'Pad.fxp').read_bytes() == b'another patch' and any(p['id'] == 'org.kick.analog' for p in store()) and leftovers() == [],
               'a plugin package installs with the asset library it needs: ' + json.dumps(state)[:400])
+
+        # The repositories this device knows (RFC 0031): the official one, built in, its root key
+        # trusted for repositories only; the image's, from its profile; and the user's.
+        official = 'https://packages.oscairn.org'
+        official_key = '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841'
+        known = rpc('packages.repositories')['repositories']
+        check(known == [{'address': official, 'name': 'Oscairn', 'key': official_key, 'id': '6a2dd1acf4d4e23c', 'origin': 'official', 'enabled': True}],
+              'a device knows the official repository, on: ' + json.dumps(known))
+        trusted = {k['key']: k for k in rpc('trust.list')['keys']}
+        check(trusted.get(official_key, {}).get('scope') == ['repositories'] and not trusted[official_key]['revoked'] and official_key not in (home / 'trust.json').read_text(),
+              'its root key is trusted for repositories only, built in rather than written to trust.json: ' + json.dumps(trusted.get(official_key)))
+        error = rpc('packages.removeRepository', {'address': official}, expect_error=True)
+        check('not removed' in error['message'], 'the official repository cannot be removed: ' + error['message'])
+        # The image's repositories, and hiding the official one (discouraged): off by default, still listed.
+        device = {'address': 'https://packages.kick.example/', 'key': keys['other'][1], 'name': 'KICK'}
+        rpc('packages.setDeviceRepositories', {'repositories': [device], 'hideOfficial': True})
+        known = {r['address']: r for r in rpc('packages.repositories')['repositories']}
+        check(known[official]['enabled'] is False and known['https://packages.kick.example'] == {**device, 'address': 'https://packages.kick.example', 'id': keys['other'][0], 'origin': 'device', 'enabled': True},
+              'the image\'s repository is listed, and a hidden official one is off but still there: ' + json.dumps(known))
+        trusted = {k['key']: k for k in rpc('trust.list')['keys']}
+        check(trusted.get(keys['other'][1], {}).get('scope') == ['repositories'], 'the image\'s root key is trusted for repositories')
+        error = rpc('packages.removeRepository', {'address': 'https://packages.kick.example'}, expect_error=True)
+        check('not removed' in error['message'], 'nor can the image\'s: ' + error['message'])
+        rpc('packages.enableRepository', {'address': official, 'enabled': True})
+        rpc('packages.enableRepository', {'address': 'https://packages.kick.example', 'enabled': False})
+        known = {r['address']: r['enabled'] for r in rpc('packages.repositories')['repositories']}
+        check(known == {official: True, 'https://packages.kick.example': False}, 'one switch turns each on or off: ' + json.dumps(known))
+        check(json.loads((home / 'repositories.json').read_text())['enabled'] == {official: True, 'https://packages.kick.example': False} and
+              json.loads((home / 'repositories.json').read_text())['seen'].get('org.example.test') == 7, 'kept by address beside the serials seen')
+        rpc('packages.setDeviceRepositories', {'repositories': []})
+        # The user's: by address and root key, which is trusted for repositories with it and
+        # taken away with it.
+        rpc('trust.remove', {'id': keys['root'][0]})
+        check(job('packages.list', {'source': str(good)})['state'] == 'failed', 'a repository whose key is not trusted is not read')
+        for bad, why in (({'address': 'relative/folder', 'key': keys['root'][1]}, 'address'), ({'address': str(good), 'key': 'abc'}, 'root key')):
+            error = rpc('packages.addRepository', bad, expect_error=True)
+            check(error['code'] == -32602 and why in error['message'], 'a malformed repository is refused: ' + error['message'])
+        rpc('packages.addRepository', {'address': str(good), 'key': keys['root'][1], 'name': 'Test repository'})
+        known = rpc('packages.repositories')['repositories']
+        trusted = {k['key']: k for k in rpc('trust.list')['keys']}
+        check(known[-1] == {'address': str(good), 'name': 'Test repository', 'key': keys['root'][1], 'id': keys['root'][0], 'origin': 'user', 'enabled': True} and
+              trusted.get(keys['root'][1], {}).get('scope') == ['repositories'] and job('packages.list', {'source': str(good)})['state'] == 'done',
+              'a repository added is listed, its root key trusted for repositories, and it reads: ' + json.dumps(known[-1]))
+        rpc('packages.removeRepository', {'address': str(good)})
+        known = rpc('packages.repositories')['repositories']
+        check(len(known) == 1 and keys['root'][1] not in {k['key'] for k in rpc('trust.list')['keys']} and job('packages.list', {'source': str(good)})['state'] == 'failed',
+              'removed, its root key is no longer trusted and it does not read: ' + json.dumps(known))
     finally:
         p.stdin.close()
         p.wait(timeout=30)

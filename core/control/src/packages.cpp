@@ -5,6 +5,8 @@
 #include "oscairn/session.h"
 #include "oscairn/package.h"
 #include "oscairn/repository.h"
+#include "oscairn/library.h"
+#include "oscairn/signing.h"
 #include "JsonInput.h"
 #include "sheredom/json.h"
 #include <fstream>
@@ -15,38 +17,73 @@
 namespace oscairn {
 namespace {
 namespace fs=std::filesystem;
-fs::path seenFile(){return dataHome()/"repositories.json";}
-std::mutex seenMutex; // the file of serials seen, written by job threads
+fs::path knownFile(){return dataHome()/"repositories.json";}
+std::mutex knownMutex; // repositories.json: written by job threads (serials seen) and the control thread (the list)
 
-// The highest serial seen of each repository, so an older root (from a stale or hostile mirror)
-// is refused: {"format":"oscairn.repositories","version":1,"seen":{"<repository>":<serial>}}.
-std::map<std::string,uint64_t> readSeen(){
-    std::map<std::string,uint64_t> out;
+// repositories.json: the highest serial seen of each repository, so an older root (from a stale
+// or hostile mirror) is refused; the repositories the user added; and which are turned on or off,
+// by address: {"format":"oscairn.repositories","version":1,"seen":{"<repository>":<serial>},
+// "added":[{"address","name","key"}],"enabled":{"<address>":true|false}}.
+struct Known { std::map<std::string,uint64_t> seen; std::vector<Control::Repository> added; std::map<std::string,bool> enabled; };
+std::string str(const json_value_s* v){if(!v || v->type!=json_type_string)return {};const auto* s=static_cast<const json_string_s*>(v->payload);return {s->string,s->string_size};}
+Known readKnown(){
+    Known out;
     std::error_code e;
-    if(!fs::is_regular_file(seenFile(),e) || fs::file_size(seenFile(),e)>1024*1024)return out;
-    std::ifstream in(seenFile(),std::ios::binary);
+    if(!fs::is_regular_file(knownFile(),e) || fs::file_size(knownFile(),e)>1024*1024)return out;
+    std::ifstream in(knownFile(),std::ios::binary);
     const std::string bytes((std::istreambuf_iterator<char>(in)),std::istreambuf_iterator<char>());
     if(!detail::jsonPreflight(bytes,4).empty())return out;
     const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
     const auto* seen=detail::member(doc.get(),"seen");
     if(seen && seen->type==json_type_object)for(auto* m=static_cast<const json_object_s*>(seen->payload)->start;m;m=m->next)
-        if(m->value->type==json_type_number){const auto* n=static_cast<const json_number_s*>(m->value->payload);try{out[std::string(m->name->string,m->name->string_size)]=std::stoull(std::string(n->number,n->number_size));}catch(const std::exception&){}}
+        if(m->value->type==json_type_number){const auto* n=static_cast<const json_number_s*>(m->value->payload);try{out.seen[std::string(m->name->string,m->name->string_size)]=std::stoull(std::string(n->number,n->number_size));}catch(const std::exception&){}}
+    const auto* added=detail::member(doc.get(),"added");
+    if(added && added->type==json_type_array)for(auto* a=static_cast<const json_array_s*>(added->payload)->start;a;a=a->next){
+        Control::Repository r{str(detail::member(a->value,"address")),str(detail::member(a->value,"name")),str(detail::member(a->value,"key")),"user"};
+        if(!r.address.empty() && !signing::keyId(r.key).empty())out.added.push_back(std::move(r));
+    }
+    const auto* enabled=detail::member(doc.get(),"enabled");
+    if(enabled && enabled->type==json_type_object)for(auto* m=static_cast<const json_object_s*>(enabled->payload)->start;m;m=m->next)
+        if(m->value->type==json_type_true || m->value->type==json_type_false)out.enabled[std::string(m->name->string,m->name->string_size)]=m->value->type==json_type_true;
     return out;
+}
+void writeKnown(const Known& k){
+    std::string out="{\"format\":\"oscairn.repositories\",\"version\":1,\"seen\":{";
+    bool first=true;for(const auto& [id,n]:k.seen){out+=(first?"":",")+detail::quote(id)+":"+std::to_string(n);first=false;}
+    out+="},\"added\":[";
+    first=true;for(const auto& r:k.added){out+=(first?"":",")+std::string("{\"address\":")+detail::quote(r.address)+",\"name\":"+detail::quote(r.name)+",\"key\":"+detail::quote(r.key)+'}';first=false;}
+    out+="],\"enabled\":{";
+    first=true;for(const auto& [address,on]:k.enabled){out+=(first?"":",")+detail::quote(address)+":"+(on?"true":"false");first=false;}
+    out+="}}\n";
+    writeAtomically(knownFile(),out);
 }
 // Refuses a root older than one seen, and remembers this one.
 void see(const std::string& repository,uint64_t serial){
-    std::lock_guard lock(seenMutex);
-    auto seen=readSeen();
-    if(seen.count(repository) && serial<seen[repository])
-        throw std::runtime_error("not a usable repository: its index (serial "+std::to_string(serial)+") is older than one this device has seen ("+std::to_string(seen[repository])+"); a mirror may be out of date or replaying an old index");
-    seen[repository]=serial;
-    std::string out="{\"format\":\"oscairn.repositories\",\"version\":1,\"seen\":{";
-    bool first=true;for(const auto& [id,n]:seen){out+=(first?"":",")+detail::quote(id)+":"+std::to_string(n);first=false;}
-    out+="}}\n";
-    fs::create_directories(dataHome());
-    const auto partial=dataHome()/".repositories.json.partial";
-    {std::ofstream o(partial,std::ios::binary|std::ios::trunc);o<<out;if(!o)throw std::runtime_error("cannot write repositories.json");}
-    fs::rename(partial,seenFile());
+    std::lock_guard lock(knownMutex);
+    auto known=readKnown();
+    if(known.seen.count(repository) && serial<known.seen[repository])
+        throw std::runtime_error("not a usable repository: its index (serial "+std::to_string(serial)+") is older than one this device has seen ("+std::to_string(known.seen[repository])+"); a mirror may be out of date or replaying an old index");
+    known.seen[repository]=serial;
+    writeKnown(known);
+}
+// Oscairn's own repository: known to every device, its root key trusted for repositories only.
+const Control::Repository official{"https://packages.oscairn.org","Oscairn","6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841","official",true};
+bool web(const std::string& a){return a.rfind("https://",0)==0 || a.rfind("http://",0)==0;}
+// An address as it is kept: a web address without '/' at its end.
+std::string addressOf(std::string a){
+    if(web(a))while(!a.empty() && a.back()=='/')a.pop_back();
+    return a;
+}
+// A repository's address, root key and name, checked as they come in; the name defaults to its fingerprint.
+Control::Repository checked(const Control::Repository& in,const std::string& origin){
+    Control::Repository r{addressOf(in.address),in.name,in.key,origin,true};
+    if(r.address.empty() || r.address.size()>4096 || std::any_of(r.address.begin(),r.address.end(),[](char c){return static_cast<unsigned char>(c)<0x20;}) ||
+       (web(r.address) ? r.address.find("://")+3>=r.address.size() : !fs::path(r.address).is_absolute()))
+        throw std::invalid_argument("a repository's address is its https:// (or http://) address, or a folder's full path");
+    if(signing::keyId(r.key).empty())throw std::invalid_argument("a repository's root key is 64 lowercase hex digits");
+    if(r.name.size()>256)throw std::invalid_argument("a repository's name is at most 256 bytes");
+    if(r.name.empty())r.name="Repository "+signing::keyId(r.key);
+    return r;
 }
 // A repository on the web (https:// or http://), or in a folder.
 std::unique_ptr<repository::Source> sourceFor(const std::string& source,const std::atomic<bool>* cancel){
@@ -78,6 +115,87 @@ void keys(const std::vector<Control::TrustedKey>& all,std::vector<std::string>& 
         else if(std::find(k.scope.begin(),k.scope.end(),"repositories")!=k.scope.end())trusted.push_back(k.key);
     }
 }
+}
+
+std::vector<Control::Repository> Session::shipped() const{
+    auto out=deviceRepositories_;
+    out.insert(out.begin(),official);
+    return out;
+}
+
+std::vector<Control::Repository> Session::repositories(){
+    Known known;
+    {std::lock_guard lock(knownMutex);known=readKnown();}
+    auto out=shipped();
+    out.front().enabled=!hideOfficial_;
+    out.insert(out.end(),known.added.begin(),known.added.end());
+    for(auto& r:out)if(const auto e=known.enabled.find(r.address);e!=known.enabled.end())r.enabled=e->second;
+    return out;
+}
+
+void Session::addRepository(const Repository& in){
+    auto r=checked(in,"user");
+    const auto ships=shipped();
+    if(std::any_of(ships.begin(),ships.end(),[&](const auto& s){return s.address==r.address;}))throw std::invalid_argument(r.address+" is listed already, as this device ships it");
+    // Its root key, trusted for repositories beside whatever else it is trusted for; a revoked one is refused.
+    if(std::none_of(ships.begin(),ships.end(),[&](const auto& s){return s.key==r.key;})){
+        TrustedKey k{"",r.key,r.name,{"repositories"}};
+        for(const auto& t:trustedKeys())if(t.key==r.key){
+            if(t.revoked)throw std::invalid_argument("the repository's root key "+t.id+" is revoked on this device");
+            k=t;k.scope.push_back("repositories");
+        }
+        setTrustedKey(k);
+    }
+    std::lock_guard lock(knownMutex);
+    auto known=readKnown();
+    std::erase_if(known.added,[&](const auto& a){return a.address==r.address;});
+    known.added.push_back(r);
+    known.enabled.erase(r.address);
+    writeKnown(known);
+}
+
+void Session::removeRepository(const std::string& address){
+    const auto at=addressOf(address);
+    const auto ships=shipped();
+    if(std::any_of(ships.begin(),ships.end(),[&](const auto& s){return s.address==at;}))
+        throw std::invalid_argument(at==official.address?"the official repository can be turned off but not removed":"a repository this device ships can be turned off but not removed");
+    std::string key;
+    bool shared=false;
+    {
+        std::lock_guard lock(knownMutex);
+        auto known=readKnown();
+        const auto gone=std::find_if(known.added.begin(),known.added.end(),[&](const auto& a){return a.address==at;});
+        if(gone==known.added.end())throw std::invalid_argument("no repository "+at+" on this device");
+        key=gone->key;
+        known.added.erase(gone);
+        known.enabled.erase(at);
+        writeKnown(known);
+        shared=std::any_of(known.added.begin(),known.added.end(),[&](const auto& a){return a.key==key;}) || std::any_of(ships.begin(),ships.end(),[&](const auto& s){return s.key==key;});
+    }
+    // Its root key is no longer trusted for repositories, unless another listed repository has it.
+    if(!shared)for(auto t:trustedKeys())if(t.key==key && std::erase(t.scope,std::string("repositories"))){
+        if(t.scope.empty() && !t.revoked)removeTrustedKey(t.id);else setTrustedKey(t);
+    }
+}
+
+void Session::setRepositoryEnabled(const std::string& address,bool enabled){
+    const auto at=addressOf(address);
+    const auto all=repositories();
+    if(std::none_of(all.begin(),all.end(),[&](const auto& r){return r.address==at;}))throw std::invalid_argument("no repository "+at+" on this device");
+    std::lock_guard lock(knownMutex);
+    auto known=readKnown();
+    known.enabled[at]=enabled;
+    writeKnown(known);
+}
+
+void Session::setDeviceRepositories(const std::vector<Repository>& list,bool hideOfficial){
+    std::vector<Repository> out;
+    for(const auto& in:list){
+        auto r=checked(in,"device");
+        if(r.address==official.address || std::any_of(out.begin(),out.end(),[&](const auto& o){return o.address==r.address;}))throw std::invalid_argument(r.address+" is listed twice");
+        out.push_back(std::move(r));
+    }
+    deviceRepositories_=std::move(out);hideOfficial_=hideOfficial;
 }
 
 uint64_t Session::listRepository(const std::string& source){

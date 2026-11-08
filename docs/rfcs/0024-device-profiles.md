@@ -131,6 +131,12 @@ An illustrative profile (the values are an example, not a real product's):
   reserved whether they run or not, so they always open; each must be in `apps`. It is the
   default of a setting the musician can change. Absent: `oscairn.performance` and
   `oscairn.library`, where `apps` lists them.
+- **`repositories`** (optional, built 2026-11-07 with
+  [RFC 0031](0031-package-repository-and-distribution.md#several-repositories)): `list`, the
+  package repositories its image ships, each `{address, key, name}` (an https:// address, the
+  root key, trusted for repositories only), listed beside the official one and the user's; and
+  `hideOfficial`, **heavily discouraged**, which turns the official repository off by default.
+  Hidden is never removed: Settings keeps it one switch away, and no field takes that away.
 
 ### Control groups
 

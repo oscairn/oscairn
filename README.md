@@ -139,15 +139,19 @@ plugins; there is no graphical plugin browser yet.
 Oscairn's official package repository is at https://packages.oscairn.org. Its root key's
 fingerprint is **`6a2d d1ac f4d4 e23c`** (the key itself is
 `6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841`). Trust a repository at
-that address only if it shows this fingerprint. Oscairn's own packages are signed by the
+that address only if it shows this fingerprint. Every Oscairn device knows this repository: its
+root key is built in, trusted to vouch for the repository's listing only, never for running a
+publisher's plugins, which still ask the first time. A product may ship other repositories in
+its profile; hiding the official one is possible but discouraged, and it always stays one switch
+away. Oscairn's own packages are signed by the
 publisher `org.oscairn`, key **`b284 be6b ea2f adb1`** (public key
 `db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69`, also published at
 https://oscairn.org/.well-known/oscairn-publisher.json). The engine lists and installs from it
 through the control API (`packages.list`, `packages.install`; see the
 [control protocol](docs/control-protocol.md)). In the desktop app, the Library's **Install from
 a repository...** opens one by its https:// address (this one's is offered first) or its folder.
-The first time, it shows the repository's root key fingerprint and asks whether to trust it;
-nothing is trusted until you say so.
+For any other repository, the first time, it shows the repository's root key fingerprint and
+asks whether to trust it; nothing else is trusted until you say so.
 
 ### The desktop app's screens
 

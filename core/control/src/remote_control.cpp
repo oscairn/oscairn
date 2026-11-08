@@ -605,6 +605,21 @@ namespace oscairn
         auto d=impl_->call("packages.install","{\"source\":"+quote(source)+",\"id\":"+quote(id)+(version.empty()?std::string():",\"version\":"+quote(version))+",\"acceptUnsignedCode\":"+(acceptUnsignedCode?"true":"false")+'}');
         return uint64_t(integer(field(field(d.get(),"result"),"job")));
     }
+    std::vector<Control::Repository> RemoteControl::repositories() {
+        auto d=impl_->call("packages.repositories","{}");std::vector<Repository> out;
+        for(auto r:array(field(field(d.get(),"result"),"repositories")))out.push_back({string(field(r,"address")),string(field(r,"name")),string(field(r,"key")),string(field(r,"origin")),boolean(field(r,"enabled"))});
+        return out;
+    }
+    namespace { std::string repositoryJson(const Control::Repository& r){return "{\"address\":"+quote(r.address)+",\"key\":"+quote(r.key)+(r.name.empty()?std::string():",\"name\":"+quote(r.name))+'}';} }
+    void RemoteControl::addRepository(const Repository& r) { impl_->call("packages.addRepository",repositoryJson(r)); }
+    void RemoteControl::removeRepository(const std::string& address) { impl_->call("packages.removeRepository","{\"address\":"+quote(address)+'}'); }
+    void RemoteControl::setRepositoryEnabled(const std::string& address,bool enabled) {
+        impl_->call("packages.enableRepository","{\"address\":"+quote(address)+",\"enabled\":"+(enabled?"true":"false")+'}');
+    }
+    void RemoteControl::setDeviceRepositories(const std::vector<Repository>& list,bool hideOfficial) {
+        std::string out;for(const auto& r:list)out+=(out.empty()?"":",")+repositoryJson(r);
+        impl_->call("packages.setDeviceRepositories","{\"repositories\":["+out+"],\"hideOfficial\":"+(hideOfficial?"true":"false")+'}');
+    }
     // Asking about an install that has unpacked moves it into place, which takes a moment for a large one.
     Control::PackageJob RemoteControl::packageJob(uint64_t id) {
         auto d=impl_->call("packages.job","{\"job\":"+std::to_string(id)+'}',120000);auto r=field(d.get(),"result");

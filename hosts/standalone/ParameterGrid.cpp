@@ -1611,8 +1611,11 @@ namespace oscairn::standalone
         publishScreen(); // shown or hidden with the app around it
         if(!panels_.empty()) content_->repaint(); // envelopes follow their parameters too
         if(!strip_.isEmpty()) repaint(strip_);
-        // Values change from automation, scenes, controls and other clients: follow them.
+        // Values change from automation, scenes, controls and other clients: follow them, and
+        // the texts that arrived since a tile showed its value's number in their place.
+        const bool texts = std::exchange(texts_, engine_.textsArrived()) != texts_;
         for(auto& t : tiles_)
-            if(const double v = engine_.param(name_, params_[t.param].id); v != t.shown || (t.range && engine_.param(name_, params_[t.high].id) != t.shownHigh)) show(t, v);
+            if(const double v = engine_.param(name_, params_[t.param].id);
+               v != t.shown || (t.range && engine_.param(name_, params_[t.high].id) != t.shownHigh) || (texts && engine_.textKnown(name_, params_[t.param].id, v))) show(t, v);
     }
 }

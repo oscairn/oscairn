@@ -152,6 +152,11 @@ namespace oscairn::standalone
         if(tidy.back()=='.')tidy.pop_back();
         return tidy=="-0"?"0":tidy;
     }
+    bool Engine::textKnown(const std::string& n,uint32_t p,double v)const
+    {
+        const auto it=textCache_.find(std::make_pair(n,p));
+        return it!=textCache_.end() && it->second.contains(std::bit_cast<uint64_t>(v));
+    }
     std::string Engine::paramText(const std::string& n,uint32_t p,double v)const
     {
         // One entry per (node, param, value): an editor asks for every value of a stepped
@@ -183,7 +188,7 @@ namespace oscairn::standalone
         remote_->fetchParameterText(control_->nodeId(key.first),key.second,v,[this,key,v](std::string text){
             auto& values=textCache_[key];
             if(values.size()>=256)values.clear(); // a continuous knob dragged asks for a new value every move
-            textShown_[key]=values[std::bit_cast<uint64_t>(v)]=tidyNumber(text);textArrived_=true;
+            textShown_[key]=values[std::bit_cast<uint64_t>(v)]=tidyNumber(text);textArrived_=true;++textsArrived_;
             // Moved on while this was out: the latest value's text next (one out per parameter).
             if(const auto w=textWanted_.find(key);w!=textWanted_.end() && !values.contains(std::bit_cast<uint64_t>(w->second)))
                 try{askText(key,w->second);}catch(const std::exception&){}

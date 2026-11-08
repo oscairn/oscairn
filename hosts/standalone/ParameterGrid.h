@@ -182,6 +182,7 @@ namespace oscairn::standalone
         std::vector<EditorPage> pages_;
         size_t page_ = 0, tab_ = 0;
         bool stale_ = false; // built while the engine was busy: value texts were placeholders
+        uint64_t texts_ = 0; // the engine's textsArrived() the tiles' texts were read at
         unsigned ticks_ = 0;
         std::vector<std::string> tabNames_;
         std::vector<std::unique_ptr<juce::Button>> pageButtons_, tabButtons_;

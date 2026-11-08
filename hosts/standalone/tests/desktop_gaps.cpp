@@ -1284,6 +1284,16 @@ int main(int argc, char** argv)
                 auto event = [&](juce::Point<float> at, bool dragged) { return juce::MouseEvent(mouse, at, juce::ModifierKeys::leftButtonModifier, 1, 0, 0, 0, 0, c, c, now, from, now, 1, dragged); };
                 c->mouseDown(event(from, false)); if(to != from) c->mouseDrag(event(to, true)); c->mouseUp(event(to, to != from));
             };
+            // A page shown once: its tiles show the plugin's value texts once they arrive, not the
+            // values' numbers shown meanwhile ("-8.00", not "-8").
+            {
+                check(page("Amp"), "the ADSR's page");
+                settle();
+                bool written = false;
+                std::function<void(juce::Component&)> look = [&](juce::Component& c) { for(auto* child : c.getChildren()) { if(auto* l = dynamic_cast<juce::Label*>(child); l && l->getText() == "-8.00") written = true; look(*child); } };
+                look(grid);
+                check(written, "a page shown once shows the plugin's value texts as they arrive");
+            }
             // The descriptions, read without drawing: an ADSR, a DX7 envelope, an AWM2 envelope
             // from a hold, and DX7 algorithm 1's routing (2 over 1; 6 over 5 over 4 over 3).
             {

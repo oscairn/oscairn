@@ -30,6 +30,10 @@ namespace oscairn::standalone
         ParamInfo paramInfo(const std::string& node,uint32_t param)const;
         double param(const std::string& node,uint32_t param)const;
         std::string paramText(const std::string& node,uint32_t param,double value)const;
+        // Counts value texts arriving from the engine: a text shown before its own arrived (the
+        // value's number meanwhile) is out of date once this changes and textKnown is true.
+        uint64_t textsArrived()const{return textsArrived_;}
+        bool textKnown(const std::string& node,uint32_t param,double value)const; // paramText would answer without asking
         void setParam(const std::string& node,uint32_t param,double value);
         void paramGesture(const std::string& node,uint32_t param,bool begin);
         void setPlaying(bool playing);
@@ -283,6 +287,7 @@ namespace oscairn::standalone
         mutable std::map<std::pair<std::string,uint32_t>,double> textWanted_;
         mutable std::map<std::pair<std::string,uint32_t>,std::string> textShown_;
         mutable bool textArrived_=false;
+        mutable uint64_t textsArrived_=0;
         void askText(const std::pair<std::string,uint32_t>& key,double value)const;
         mutable std::vector<AssignmentOverride> assignments_; mutable uint32_t assignmentsRead_=0;
         mutable std::optional<Control::Audition> audition_; mutable uint32_t auditionRead_=0;

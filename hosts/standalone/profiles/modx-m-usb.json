@@ -4,10 +4,9 @@
   "id": "modx-m-usb",
   "name": "Yamaha MODX M over USB (DAW Remote, Plugin mode)",
   "controls": [
-    { "kind": "keys", "count": 61, "role": "notes", "sensing": "velocity, channel aftertouch", "midi": { "channel": 1 } },
+    { "kind": "keys", "count": 61, "role": "notes", "sensing": "velocity; no aftertouch", "midi": { "channel": 1 } },
     { "kind": "wheels", "count": 1, "role": "assign", "functions": ["pitchBend"], "midi": { "channel": 1, "pitchBend": true } },
     { "kind": "wheels", "count": 1, "role": "assign", "functions": ["modulation"], "midi": { "channel": 1, "cc": [1] } },
-    { "kind": "aftertouch", "count": 1, "role": "assign", "functions": ["aftertouch"], "sensing": "the keys' channel aftertouch", "midi": { "channel": 1, "pressure": true } },
     { "kind": "knobs", "count": 6, "role": "screen", "sensing": "display knobs", "midi": { "channel": 1, "cc": [78, 79, 80, 81, 82, 83] } },
     { "kind": "encoders", "count": 4, "role": "assign", "target": "banks", "sensing": "endless encoders sending absolute values; [ASSIGN] picks knobs 1 to 4 or 5 to 8",
       "rows": [ { "name": "Assign 1", "bank": "assign" }, { "name": "Assign 2", "bank": "assign" } ],

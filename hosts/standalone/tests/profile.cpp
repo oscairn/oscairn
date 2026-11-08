@@ -130,8 +130,8 @@ int main()
         check(smk.controls[2].midi.pitchBend && smk.controls[3].midi.cc == std::vector<int>{1} && smk.controls[5].target == "partLevels" && smk.controls[1].midi.notes.size() == 16 && smk.controls[1].midi.channel == 2,
               "its wheels, faders and pads");
         const auto& usb = controllers[0];
-        check(usb.midi.ports.size() == 2 && usb.midi.ports[1].protocol == "mackie" && usb.controls[5].rows.size() == 2 && usb.controls[5].midi.cc.size() == 8 &&
-              usb.controls[7].target == "scenes", "the MODX M over USB: a Mackie port declared, knobs sending a number per row, scene buttons");
+        check(usb.midi.ports.size() == 2 && usb.midi.ports[1].protocol == "mackie" && usb.controls[4].rows.size() == 2 && usb.controls[4].midi.cc.size() == 8 &&
+              usb.controls[6].target == "scenes", "the MODX M over USB: a Mackie port declared, knobs sending a number per row, scene buttons");
         bool controllerRefused = false; try { loadProfile("smk37-elite"); } catch(const std::invalid_argument&) { controllerRefused = true; }
         check(controllerRefused, "a controller's profile is not a device's");
         // The SMK-37 Elite's inputs as macOS lists them (read 2026-11-01 with oscairn-midi-monitor --list).
@@ -227,23 +227,28 @@ int main()
         {
             std::string modx; for(const auto& [id, text] : builtInProfiles()) if(id == "modx-m-usb") modx = text;
             const auto latching = Profile::parse(replaced(modx, "\"cc\": [88] }", "\"cc\": [88], \"button\": \"latch\" }"));
-            check(latching.controls[14].kind == "footswitches" && latching.controls[14].midi.button == "latch", "a footswitch that latches");
+            check(latching.controls[13].kind == "footswitches" && latching.controls[13].midi.button == "latch", "a footswitch that latches");
         }
         // Values back and a display: on what can take them.
         std::string usbJson; for(const auto& [id, text] : builtInProfiles()) if(id == "modx-m-usb") usbJson = text;
         const auto encoders = "\"cc\": [17, 18, 19, 20, 21, 22, 23, 24] }";
         const auto back = Profile::parse(replaced(usbJson, encoders, "\"cc\": [17, 18, 19, 20, 21, 22, 23, 24], \"feedback\": true }"));
-        check(back.controls[5].midi.feedback && !back.controls[6].midi.feedback, "the MODX M's knobs told to take their values back");
-        // Aftertouch as channel pressure, and the ASSIGN switches (RFC 0024's control identities).
-        check(usb.controls[3].kind == "aftertouch" && usb.controls[3].midi.pressure && usb.controls[3].functions == std::vector<std::string>{"aftertouch"},
-              "the MODX M's aftertouch is channel pressure");
-        check(usb.controls[9].target == "switches" && usb.controls[9].count == 2 && usb.controls[7].target == "scenes", "its ASSIGN 1 and 2 are switches, beside the scene buttons");
-        check(refused(replaced(usbJson, "\"pressure\": true", "\"pitchBend\": true")), "pitch bend from an aftertouch group");
+        check(back.controls[4].midi.feedback && !back.controls[5].midi.feedback, "the MODX M's knobs told to take their values back");
+        // Aftertouch as channel pressure (the MODX M's keys have none: a controller's added here),
+        // and the ASSIGN switches (RFC 0024's control identities).
+        const auto pressureJson = replaced(usbJson, "{ \"kind\": \"knobs\", \"count\": 6,",
+            "{ \"kind\": \"aftertouch\", \"count\": 1, \"role\": \"assign\", \"functions\": [\"aftertouch\"], \"midi\": { \"channel\": 1, \"pressure\": true } },\n    { \"kind\": \"knobs\", \"count\": 6,");
+        const auto pressure = Profile::parse(pressureJson);
+        check(pressure.controls[3].kind == "aftertouch" && pressure.controls[3].midi.pressure && pressure.controls[3].functions == std::vector<std::string>{"aftertouch"},
+              "aftertouch is channel pressure");
+        check(std::none_of(usb.controls.begin(), usb.controls.end(), [](const auto& c) { return c.kind == "aftertouch"; }), "the MODX M's keys have no aftertouch");
+        check(usb.controls[8].target == "switches" && usb.controls[8].count == 2 && usb.controls[6].target == "scenes", "its ASSIGN 1 and 2 are switches, beside the scene buttons");
+        check(refused(replaced(pressureJson, "\"pressure\": true", "\"pitchBend\": true")), "pitch bend from an aftertouch group");
         check(refused(replaced(smkJson, "\"pitchBend\": true }", "\"pressure\": true }")), "pressure from a wheel");
         check(refused(replaced(usbJson, "\"target\": \"switches\"", "\"target\": \"banks\"")), "a buttons group's target is never banks");
         {
             const auto panic = Profile::parse(replaced(usbJson, "\"target\": \"switches\"", "\"target\": \"panic\""));
-            check(panic.controls[9].target == "panic", "a buttons group may play Panic by default");
+            check(panic.controls[8].target == "panic", "a buttons group may play Panic by default");
             check(refused(replaced(usbJson, "\"target\": \"partLevels\"", "\"target\": \"panic\"")), "faders cannot play Panic");
         }
         check(refused(replaced(smkJson, "{ \"increment\": 69, \"decrement\": 1 }] }", "{ \"increment\": 69, \"decrement\": 1 }], \"feedback\": true }")), "feedback on knobs that step");

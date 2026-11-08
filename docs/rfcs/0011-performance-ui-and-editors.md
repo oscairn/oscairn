@@ -1286,6 +1286,7 @@ breath passing through with nothing assigned, switches numbered `button:1` and `
 scene buttons from `button:101`, a device without switches having no `button:1`, channel pressure
 (two bytes), CC 2 and a switch playing their overrides, and those overrides round-tripping. The
 `modx-m` and `modx-m-usb` profiles gain the keys' aftertouch and the ASSIGN 1 and 2 switches.
+(Corrected 2026-11-08: the MODX M's keys have no aftertouch, so both profiles drop it.)
 
 **Panic on a button**, 2026-11-05 (decided by Jacob): `panic` is an assignment kind
 (`Assignment::Kind::Panic`), all notes off (`Control::allNotesOff`, as `notes.panic`), which also

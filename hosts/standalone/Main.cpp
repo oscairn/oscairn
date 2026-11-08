@@ -338,7 +338,7 @@ namespace oscairn::standalone
             if(id==8003){showHome();return;}
             if(id==8004){openPerformance();return;}
             if(id==8005){showRecordings();return;}
-            if(id==8006){showApp(settings_,"Settings",[this]{return settingsPane();},640,560);
+            if(id==8006){showApp(settings_,"Settings",[this]{return settingsPane();},1000,640);
                 if(auto* s=dynamic_cast<Settings*>(settings_->getContentComponent()))s->refresh();return;} // the ports and keys now
             if(id==5002 || id==5003){saveToLibrary(id==5003);return;}
             if(id==5004){importPerformance();return;}

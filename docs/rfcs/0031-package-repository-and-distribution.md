@@ -41,7 +41,12 @@ Checked when built and tested; the sections below say how.
       repositories only and built in, never for plugins; a profile's `repositories` and its
       discouraged `hideOfficial`, which turns the official one off without removing it; the
       user's, added by address and root key; each on or off; `control-repository`,
-      `desktop-profile`. Not yet: releases stored in pieces (items, samples
+      `desktop-profile`. In the desktop's Settings (until Settings is its
+      own app, RFC 0022): the repositories by name, address and root key fingerprint, each with
+      a switch, Remove for the user's, and Add a repository..., which reads the repository
+      first, asks to trust its root key by fingerprint, and keeps neither the repository nor the
+      key if it then does not verify; it replaces the Library's Install from a repository...;
+      `desktop-gaps`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
       (step 2), `.orepo` files, recording each installed
       package's repository; the free-space refusal and a drive pulled midway are not tested)
@@ -53,7 +58,8 @@ Checked when built and tested; the sections below say how.
       root published last (`--previous-site`); blobs from the mirrors, the blob base and the
       repository's own address in turn, a bad copy refused and the next tried; a download cut
       short resumed with a range request; `control-repository-web` against a local HTTP server.
-      2026-11-07: the desktop Library opens a repository's https:// address (the official one
+      2026-11-07: the desktop Library opens a repository's https:// address (since moved to
+      Settings' Add a repository..., step 1; the official one
       offered; its key was not trusted until the user said so, and is built in since step 1's list
       of repositories; any other scheme refused);
       `desktop-gaps` drives it through a stand-in transport, up to the trust prompt and a second

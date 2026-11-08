@@ -64,27 +64,6 @@ namespace oscairn::standalone
         int codeLines_ = 0;
         int aboutRows_ = 0; // license and source rows in list
     };
-    /// What a package repository offers (RFC 0031): a row per package with the newest version this
-    /// device can install and its Install button, or, grayed, why it cannot install any. The rows
-    /// scroll; Close stays in view.
-    class RepositoryChoices : public juce::Component
-    {
-    public:
-        explicit RepositoryChoices(const Control::PackageJob& listing);
-        juce::Viewport view; // holds list
-        juce::Component list;
-        juce::OwnedArray<juce::Label> rows;
-        juce::OwnedArray<juce::TextButton> installs;           // one per row, disabled where it cannot install
-        std::vector<std::pair<std::string, std::string>> picks; // each row's package and version
-        juce::TextButton close{"Close"};
-        std::function<void(const std::string& id, const std::string& version)> onInstall;
-        void paint(juce::Graphics&) override;
-        void resized() override;
-
-    private:
-        juce::String heading_;
-        juce::Rectangle<int> headingArea_;
-    };
     /// Who signed an archive (RFC 0006), as the install dialog says it.
     juce::String describeSigner(const Control::Signer& signer);
     /// Another Performance's parts and scenes to import (RFC 0021), all ticked, under headings.
@@ -147,12 +126,8 @@ namespace oscairn::standalone
         void librariesMenu();
         void removePlugin(const Control::InstalledPlugin& plugin);
         void addPluginBuild(const Control::InstalledPlugin& plugin);
-        // A package repository, at an https:// address or in a folder (RFC 0031): what it offers,
-        // listed and installed by jobs in the engine, asked about every 100 ms until each ends.
-        // installFromRepository asks for its address; openRepository refuses one not https://.
-        void installFromRepository();
-        void openRepository(const juce::String& address);
-        void listRepository(const std::string& folder);
+        // A package from a repository (RFC 0031), at an https:// address or in a folder, installed
+        // by a job in the engine, asked about every 100 ms until it ends.
         // Code from a publisher not trusted for plugins asks first: trust the publisher (its name,
         // fingerprint and full key shown; `publisher` names it when known) and try again, install
         // anyway this once, or cancel. Nothing is trusted unless the user says so.

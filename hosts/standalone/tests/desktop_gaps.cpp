@@ -377,25 +377,6 @@ int main(int argc, char** argv)
                           "a plugin package under the GPL shows its license and a link to its source: " + licensed.source.getButtonText().toStdString());
                     snapshot(licensed, "install-plugin-license");
                 }
-                // A package repository's listing (RFC 0031): each package's newest version this
-                // device can install with its Install button, or, disabled, why it cannot.
-                {
-                    Control::PackageJob listing; listing.name = "Test repository"; listing.repository = "org.example.test";
-                    listing.packages.push_back({"org.example.organ", "Organ", "A tonewheel organ", "MIT", "Example", "0123456789abcdef", {},
-                                                {{"1.0.0", "stable", "", "", 1000, 2048}, {"1.2.0", "stable", "", "", 1000, 4096}, {"2.0.0", "stable", "", "it needs a system update: Oscairn 9 or later", 1000, 4096}, {"1.3.0", "stable", "bad", "", 1, 1}}});
-                    listing.packages.push_back({"org.example.other", "Other", "", "MIT", "Example", "0123456789abcdef", {}, {{"1.0.0", "stable", "", "it has no build for this device (macos-arm64)", 1, 1}}});
-                    standalone::RepositoryChoices choices(listing);
-                    standalone::setDesktopMode(choices, 1); choices.resized();
-                    std::string installed;
-                    choices.onInstall = [&](const std::string& id, const std::string& version) { installed = id + " " + version; };
-                    choices.installs[0]->triggerClick();
-                    juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
-                    check(choices.rows.size() == 2 && choices.rows[0]->getText().startsWith("Organ 1.2.0, ") && choices.installs[0]->isEnabled() && installed == "org.example.organ 1.2.0",
-                          "a package offers its newest version this device can install, not a yanked or incompatible one: " + choices.rows[0]->getText().toStdString() + ", " + installed);
-                    check(choices.rows[1]->getText() == "Other: cannot be installed here, it has no build for this device (macos-arm64)" && !choices.installs[1]->isEnabled(),
-                          "one it cannot install says why, its button disabled: " + choices.rows[1]->getText().toStdString());
-                    snapshot(choices, "repository-choices");
-                }
                 // An archive of both kinds, mixed: its Performances under one heading, then its
                 // Sounds under another, in the archive's order, no kind after a name; still all ticked.
                 {
@@ -700,11 +681,11 @@ int main(int argc, char** argv)
                 juce::MessageManager::getInstance()->runDispatchLoopUntil(700);
                 check(tap.count("library.query") == 0, "the Library is not read again after a refresh: " + std::to_string(tap.count("library.query")));
             }
-            // Install from a repository (RFC 0031): its https:// address, the official one offered
-            // first, or a folder's path; any other address refused before the engine is asked. The
-            // web here is a stand-in transport serving a folder, so nothing touches the network: a
-            // root whose key is not trusted asks to trust it by its fingerprint, and once trusted is
-            // read again from the same address (and refused, as its index key is not signed).
+            // Adding a repository in Settings (RFC 0031): its https:// address or a folder's path;
+            // any other address refused before the engine is asked. The web here is a stand-in
+            // transport serving a folder, so nothing touches the network: a root whose key is not
+            // trusted asks to trust it by its fingerprint, and once trusted is read again from the
+            // same address; refused there (its index key is not signed), it is not kept, nor its key.
             {
                 const auto rootKey = std::string(64, 'a');
                 const auto repo = data.getChildFile("repository-stand-in");
@@ -724,6 +705,7 @@ int main(int argc, char** argv)
                 });
                 auto fetches = [&] { std::lock_guard lock(fetchedMutex); return fetched.size(); };
                 auto modal = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
+                auto asking = [] { auto* d = dynamic_cast<juce::DialogWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); return d ? dynamic_cast<standalone::RepositoryAddress*>(d->getContentComponent()) : nullptr; };
                 auto said = [](juce::AlertWindow* w) { juce::String out; for(auto* c : w->getChildren()) if(auto* l = dynamic_cast<juce::Label*>(c)) out << l->getText(); return out; };
                 // A dialog answered, and gone before the next is looked for.
                 auto close = [&](juce::AlertWindow* w, int answer) {
@@ -732,24 +714,25 @@ int main(int argc, char** argv)
                     w->exitModalState(answer);
                     wait([&] { return modal() != gone.getComponent() || !gone; });
                 };
+                standalone::Settings settings(engine);
+                standalone::setDesktopMode(settings, 2); settings.setSize(1024, 600);
                 auto ask = [&](const juce::String& address) {
-                    auto* w = modal();
-                    if(!w || !w->getTextEditor("address")) return;
-                    w->getTextEditor("address")->setText(address);
-                    close(w, 1);
+                    settings.addRepository();
+                    auto* a = asking();
+                    if(!a) return;
+                    a->address.setText(address);
+                    a->add.triggerClick();
+                    wait([&] { return asking() == nullptr; });
                 };
-                standalone::Actions actions;
-                standalone::LibraryPane pane(engine, actions, standalone::LibraryPane::Mode::Play);
-                standalone::setDesktopMode(pane, 2); pane.setSize(1024, 600);
                 wait([&] { return !engine.jobRunning(); });
-                pane.installFromRepository();
-                auto* asked = modal();
-                check(asked && asked->getName() == "Install from a repository" && asked->getTextEditorContents("address") == "https://packages.oscairn.org" && asked->getButton("Choose folder...") != nullptr,
-                      "Install from a repository offers the official repository's address, and a folder");
+                settings.addRepository();
+                auto* asked = asking();
+                check(asked && asked->address.getText().isEmpty() && asked->folder.isVisible() && asked->address.getHeight() == 44,
+                      "Add a repository asks for its address, touch-sized, or a folder");
                 if(asked && argc >= 5)
                 {
-                    // On the Panel, over the Library at 1024 x 600, centered as it shows.
-                    juce::Image screen = pane.createComponentSnapshot(pane.getLocalBounds());
+                    // On the Panel, over Settings at 1024 x 600, centered as it shows.
+                    juce::Image screen = settings.createComponentSnapshot(settings.getLocalBounds());
                     const auto dialog = asked->createComponentSnapshot(asked->getLocalBounds());
                     juce::Graphics(screen).drawImageAt(dialog, (screen.getWidth() - dialog.getWidth()) / 2, (screen.getHeight() - dialog.getHeight()) / 2);
                     const juce::File out{juce::String(argv[4]) + "-repository-address.png"};
@@ -757,10 +740,11 @@ int main(int argc, char** argv)
                     juce::FileOutputStream stream(out);
                     juce::PNGImageFormat().writeImageToStream(screen, stream);
                 }
+                if(asked) asked->cancel.triggerClick();
+                wait([&] { return asking() == nullptr; });
                 tap.reset();
                 for(const auto* refused : {"http://packages.example.test/", "packages.oscairn.org", "ftp://packages.example.test/"})
                 {
-                    if(!modal()) pane.installFromRepository();
                     ask(refused);
                     wait([&] { auto* w = modal(); return w && w->getName() == "Not an https address"; });
                     auto* w = modal();
@@ -769,7 +753,6 @@ int main(int argc, char** argv)
                     close(w, 0);
                 }
                 check(tap.count("packages.list") == 0 && fetches() == 0, "a refused address never reaches the engine");
-                pane.installFromRepository();
                 ask("https://packages.example.test");
                 check(wait([&] { auto* w = modal(); return w && w->getName() == "Trust this repository?"; }) && tap.count("packages.list") == 1,
                       "an https:// repository is listed by the engine, and its untrusted root asks to be trusted");
@@ -785,12 +768,13 @@ int main(int argc, char** argv)
                 }
                 std::vector<Control::TrustedKey> keys;
                 engine.packages([&](Control& c) { keys = c.trustedKeys(); });
-                check(std::any_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == rootKey && k.scope == std::vector<std::string>{"repositories"}; }), "its root key trusted for repositories only");
-                // A folder's full path opens it as a folder, not through the web.
+                check(std::none_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == rootKey; }) &&
+                          std::none_of(settings.repositories().begin(), settings.repositories().end(), [](const auto& r) { return r.address == "https://packages.example.test"; }),
+                      "one that does not verify is not kept, nor its key trusted");
+                // A folder's full path is read from the folder, not through the web; its key asks again.
                 const auto before = fetches();
-                pane.installFromRepository();
                 ask(repo.getFullPathName());
-                check(wait([&] { auto* n = modal(); return n && n->getName() == "Not read"; }) && tap.count("packages.list") == 3 && fetches() == before, "a folder's path is read from the folder");
+                check(wait([&] { auto* n = modal(); return n && n->getName() == "Trust this repository?"; }) && tap.count("packages.list") == 3 && fetches() == before, "a folder's path is read from the folder");
                 close(modal(), 0);
                 repository::setTransport({});
             }
@@ -817,16 +801,42 @@ int main(int argc, char** argv)
                 const auto site = made.getChildFile("site").getFullPathName().toStdString();
                 std::atomic<int> fetched = 0;
                 repository::setTransport([&](const std::string&, uint64_t, const std::function<bool(int, const char*, size_t)>&) { ++fetched; return 404; });
-                const auto listed = engine.packages([&](Control& c) {
-                    c.setRepositoryEnabled("https://packages.oscairn.org", false);
-                    c.addRepository({site, "Test repository", rootKey, ""});
-                });
-                check(listed.empty(), "the test repository added and the official one turned off: " + listed);
+                auto modalAlert = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
+                auto answer = [&](juce::AlertWindow* w, int chosen) {
+                    if(!w) return;
+                    juce::Component::SafePointer<juce::Component> gone(w);
+                    w->exitModalState(chosen);
+                    wait([&] { return modalAlert() != gone.getComponent() || !gone; });
+                };
+                // In Settings: the official repository, on, which can be turned off but not removed;
+                // the test repository added by its folder once its root key is trusted.
+                {
+                    standalone::Settings settings(engine);
+                    standalone::setDesktopMode(settings, 2); settings.setSize(1024, 600);
+                    check(!settings.repositories().empty() && settings.repositories()[0].origin == "official" && settings.repositories()[0].enabled &&
+                              settings.repositorySwitch(0) && settings.repositorySwitch(0)->getToggleState() && settings.removeButton(0) == nullptr,
+                          "Settings lists the official repository, on, with no Remove");
+                    settings.openRepository(juce::String(site));
+                    check(wait([&] { auto* w = modalAlert(); return w && w->getName() == "Trust this repository?"; }), "a repository's untrusted root asks to be trusted");
+                    answer(modalAlert(), 1);
+                    auto listedSite = [&] { const auto& all = settings.repositories(); return all.size() == 2 && all[1].address == site && all[1].name == "Test repository" && all[1].origin == "user"; };
+                    check(wait(listedSite) && settings.removeButton(1) != nullptr && settings.repositorySwitch(1)->getToggleState(), "trusted, it is read, and listed by its name with Remove");
+                    if(auto* off = settings.repositorySwitch(0)) off->triggerClick();
+                    check(wait([&] { return !settings.repositories().empty() && !settings.repositories()[0].enabled; }), "the official repository turned off by its switch");
+                    std::vector<Control::Repository> known;
+                    engine.packages([&](Control& c) { known = c.repositories(); });
+                    check(known.size() == 2 && !known[0].enabled && known[1].enabled, "and so in the engine");
+                    settings.refresh(); settle();
+                    snapshot(settings, "settings-repositories-panel");
+                    standalone::setDesktopMode(settings, 1); settings.setSize(1000, 640); settings.resized(); settle();
+                    snapshot(settings, "settings-repositories");
+                    settings.setSize(640, 900); settings.resized(); settle();
+                    snapshot(settings, "settings-narrow");
+                }
                 standalone::Actions actions;
                 standalone::LibraryPane pane(engine, actions, standalone::LibraryPane::Mode::Play);
                 standalone::setDesktopMode(pane, 2); pane.setSize(1024, 600);
                 wait([&] { return !engine.jobRunning(); });
-                auto modalAlert = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
                 auto alertText = [](juce::AlertWindow* w) { juce::String out; for(auto* c : w->getChildren()) if(auto* l = dynamic_cast<juce::Label*>(c)) out << l->getText(); if(auto* t = w->getTextEditor({})) out << t->getText(); return out; };
                 // Over the Library at 1024 x 600, centered as it shows.
                 auto over = [&](juce::Component& c, const juce::String& name) {
@@ -898,6 +908,18 @@ int main(int argc, char** argv)
                     standalone::setDesktopMode(*catalog, 1); catalog->setSize(820, 560); settle();
                     snapshot(*catalog, "catalog-desktop");
                     if(auto* dialog = catalog->findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
+                }
+                // Removed in Settings, asked first: no longer listed, its root key no longer trusted.
+                {
+                    standalone::Settings settings(engine);
+                    if(auto* remove = settings.removeButton(1)) remove->triggerClick();
+                    check(wait([&] { auto* w = modalAlert(); return w && w->getName() == "Remove Test repository?"; }), "Remove asks first");
+                    answer(modalAlert(), 1);
+                    std::vector<Control::TrustedKey> trusted;
+                    check(wait([&] { return settings.repositories().size() == 1; }), "removed from the list");
+                    engine.packages([&](Control& c) { trusted = c.trustedKeys(); });
+                    check(std::none_of(trusted.begin(), trusted.end(), [&](const auto& k) { return k.key == rootKey; }), "with its root key's trust");
+                    if(auto* on = settings.repositorySwitch(0)) on->triggerClick();
                 }
                 repository::setTransport({});
             }

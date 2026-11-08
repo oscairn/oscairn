@@ -629,7 +629,8 @@ Each starts as an RFC:
   for repositories only, those its profile ships, and the user's, each on or off; the desktop
   Library's Install… with Catalog and File, the Catalog an interim view of the repositories'
   packages not installed, grayed with the reason where they cannot install, with details,
-  Install and trusting a publisher from the install question)
+  Install and trusting a publisher from the install question; the repositories in the desktop's
+  Settings, each with a switch, Remove for the user's and Add a repository...)
 - [ ] **Keeping plugins loaded:** a memory budget, unloading the least recently used, setlist
   preparation options and a setlist check; CPU, memory and storage meters. Loaded items beyond
   the open Performance are opportunistic memory ([RFC 0025](rfcs/0025-resource-budgets.md#the-order-of-eviction)).

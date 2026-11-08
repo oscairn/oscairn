@@ -211,63 +211,6 @@ namespace oscairn::standalone
         return out;
     }
 
-    RepositoryChoices::RepositoryChoices(const Control::PackageJob& listing)
-    {
-        heading_ = text(listing.name) + " (" + text(listing.repository) + ")";
-        for(const auto& p : listing.packages)
-        {
-            // The newest stable version it can install, as the engine picks; else why the newest cannot.
-            const Control::RepositoryVersion* pick = nullptr;
-            const Control::RepositoryVersion* newest = nullptr;
-            for(const auto& v : p.versions)
-            {
-                if(!newest || repository::older(newest->version, v.version)) newest = &v;
-                if(v.incompatible.empty() && v.yanked.empty() && (v.channel.empty() || v.channel == "stable") && (!pick || repository::older(pick->version, v.version))) pick = &v;
-            }
-            juce::String line = text(p.name.empty() ? p.id : p.name);
-            if(pick) line << " " << text(pick->version) << ", " << juce::File::descriptionOfSizeInBytes(int64_t(pick->installed)) << ", by " << text(p.publisher) << (p.summary.empty() ? juce::String() : ": " + text(p.summary));
-            else line << ": cannot be installed here" << (newest && !newest->incompatible.empty() ? ", " + text(newest->incompatible) : juce::String());
-            auto* row = rows.add(new juce::Label({}, line));
-            row->setTooltip(line);
-            auto* go = installs.add(new juce::TextButton("Install"));
-            go->setEnabled(pick != nullptr);
-            if(!pick) row->setColour(juce::Label::textColourId, ink(Ink::Muted));
-            picks.push_back({p.id, pick ? pick->version : std::string()});
-            const auto index = picks.size() - 1;
-            go->onClick = [this, index] { if(onInstall) onInstall(picks[index].first, picks[index].second); };
-            list.addAndMakeVisible(row); list.addAndMakeVisible(go);
-        }
-        view.setViewedComponent(&list, false);
-        view.setScrollBarsShown(true, false);
-        addAndMakeVisible(view); addAndMakeVisible(close);
-        setSize(560, std::min(600, int(rows.size()) * 34 + 110));
-    }
-
-    void RepositoryChoices::resized()
-    {
-        auto area = getLocalBounds().reduced(16, 12);
-        headingArea_ = area.removeFromTop(30);
-        close.setBounds(area.removeFromBottom(30).removeFromRight(100));
-        area.removeFromBottom(8);
-        view.setBounds(area);
-        const int tall = rows.size() * 34;
-        list.setSize(area.getWidth() - (tall > area.getHeight() ? view.getScrollBarThickness() : 0), tall);
-        auto lines = list.getLocalBounds();
-        for(int i = 0; i < rows.size(); ++i)
-        {
-            auto line = lines.removeFromTop(34).reduced(0, 2);
-            installs[i]->setBounds(line.removeFromRight(90));
-            rows[i]->setBounds(line);
-        }
-    }
-
-    void RepositoryChoices::paint(juce::Graphics& g)
-    {
-        g.fillAll(ink(Ink::Background));
-        g.setColour(ink(Ink::Text));
-        drawInked(g, heading_, headingArea_, juce::Font(juce::FontOptions(textSize(TextRole::Body, std::max(1, desktopMode(*this))), juce::Font::bold)));
-    }
-
     juce::String describeSigner(const Control::Signer& s)
     {
         const auto who = s.keyName.empty() ? "key " + fingerprint(s.key) : text(s.keyName) + " (" + fingerprint(s.key) + ")";
@@ -888,7 +831,6 @@ namespace oscairn::standalone
     void LibraryPane::librariesMenu()
     {
         juce::PopupMenu menu;
-        menu.addItem(999, "Install from a repository...");
         // Tags hidden from the tag list, to show again.
         juce::PopupMenu hidden;
         const auto hiddenTags = result_.hiddenTags;
@@ -932,7 +874,6 @@ namespace oscairn::standalone
             menu.addItem(int(i) + 2, "Uninstall " + text(installed[i].name) + " (" + juce::String(int(installed[i].items)) + (installed[i].items == 1 ? " item)" : " items)"));
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraries_), [safe = juce::Component::SafePointer<LibraryPane>(this), installed, hiddenTags, plugins](int chosen) {
             if(!safe || chosen <= 0) return;
-            if(chosen == 999) { safe->installFromRepository(); return; }
             if(chosen >= 100000)
             {
                 const auto& plugin = plugins[size_t((chosen - 100000) / 2)];
@@ -1074,38 +1015,6 @@ namespace oscairn::standalone
         content->read();
     }
 
-    // Its address, the official repository's to start with, or its folder. Another repository's
-    // root key is trusted only when the user says so (listRepository); the engine knows the
-    // official one's and the device's own.
-    void LibraryPane::installFromRepository()
-    {
-        editor_ = std::make_unique<juce::AlertWindow>("Install from a repository", "Its https:// address, or the folder holding its repository.json.", juce::MessageBoxIconType::NoIcon, this);
-        editor_->addTextEditor("address", "https://packages.oscairn.org", "Address");
-        editor_->addButton("Open", 1, juce::KeyPress(juce::KeyPress::returnKey));
-        editor_->addButton("Choose folder...", 2);
-        editor_->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
-        editor_->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<LibraryPane>(this)](int chosen) {
-            if(!safe || !safe->editor_) return;
-            const auto window = std::move(safe->editor_);
-            if(chosen == 1) safe->openRepository(window->getTextEditorContents("address").trim());
-            if(chosen != 2) return;
-            safe->chooser_ = std::make_unique<juce::FileChooser>("A package repository: the folder holding repository.json", juce::File());
-            safe->chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [safe](const juce::FileChooser& fc) {
-                if(safe && fc.getResult() != juce::File()) safe->listRepository(fc.getResult().getFullPathName().toStdString());
-            });
-        }), false);
-    }
-
-    // The engine takes http:// too, for a local test server; the Library asks for https://, so
-    // no one on the way sees what is fetched (signatures already catch a changed file).
-    void LibraryPane::openRepository(const juce::String& address)
-    {
-        if(address.startsWith("https://") || (!address.contains("://") && juce::File::isAbsolutePath(address))) { listRepository(address.toStdString()); return; }
-        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not an https address",
-            "A repository on the web opens by its https:// address, such as https://packages.oscairn.org. A folder opens by its full path, or with Choose folder.",
-            {}, nullptr, juce::ModalCallbackFunction::create([](int) {})); // a callback keeps it asynchronous where modal loops are permitted (the tests)
-    }
-
     void LibraryPane::awaitPackageJob(uint64_t job, std::function<void(const Control::PackageJob&)> then)
     {
         juce::Timer::callAfterDelay(100, [safe = juce::Component::SafePointer<LibraryPane>(this), job, then = std::move(then)]() mutable {
@@ -1114,44 +1023,6 @@ namespace oscairn::standalone
             if(const auto error = safe->engine_.packages([&](Control& c) { state = c.packageJob(job); }); !error.empty()) { safe->tell(text(error)); return; }
             if(state.state == "running") { safe->awaitPackageJob(job, std::move(then)); return; }
             then(state);
-        });
-    }
-
-    // What it offers, once its root, index key and index verify; a root key not trusted yet is
-    // offered by its fingerprint, and trusted for repositories only when the user says so.
-    void LibraryPane::listRepository(const std::string& folder)
-    {
-        uint64_t job = 0;
-        if(const auto error = engine_.packages([&](Control& c) { job = c.listRepository(folder); }); !error.empty()) { tell(text(error)); return; }
-        tell("Reading the repository...");
-        awaitPackageJob(job, [safe = juce::Component::SafePointer<LibraryPane>(this), folder](const Control::PackageJob& listing) {
-            if(!safe) return;
-            if(listing.state == "failed" && !listing.rootKey.empty() && listing.error.find("not a repository this device trusts") != std::string::npos)
-            {
-                auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::QuestionIcon, "Trust this repository?",
-                    "Its root key's fingerprint is " + fingerprint(signing::keyId(listing.rootKey)) + ". Trust it only if its publisher gave you that fingerprint.", "Trust", "Cancel", safe.getComponent());
-                juce::AlertWindow::showAsync(options, [safe, folder, key = listing.rootKey](int chosen) {
-                    if(!safe || chosen != 1) return;
-                    const auto error = safe->engine_.packages([&](Control& c) { c.setTrustedKey({"", key, "Repository " + fingerprint(signing::keyId(key)).toStdString(), {"repositories"}}); });
-                    if(error.empty()) safe->listRepository(folder); else safe->tell(text(error));
-                });
-                return;
-            }
-            if(listing.state == "failed") { safe->tell(""); juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not read", text(listing.error), {}, nullptr, juce::ModalCallbackFunction::create([](int) {})); return; }
-            safe->tell(juce::String(int(listing.packages.size())) + (listing.packages.size() == 1 ? " package in " : " packages in ") + text(listing.name) + ".");
-            auto* content = new RepositoryChoices(listing);
-            juce::DialogWindow::LaunchOptions options;
-            options.dialogTitle = "Install from " + text(listing.name);
-            options.content.setOwned(content); options.componentToCentreAround = safe.getComponent(); options.useNativeTitleBar = true; options.resizable = false;
-            options.dialogBackgroundColour = ink(Ink::Background);
-            auto* dialog = options.launchAsync();
-            content->close.onClick = [dialog] { dialog->exitModalState(0); };
-            content->onInstall = [safe, dialog, folder, listing](const std::string& id, const std::string& version) {
-                dialog->exitModalState(0);
-                std::string publisher;
-                for(const auto& p : listing.packages) if(p.id == id) publisher = p.publisher;
-                if(safe) safe->installPackage(folder, id, version, false, publisher);
-            };
         });
     }
 

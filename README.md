@@ -151,10 +151,11 @@ through the control API (`packages.list`, `packages.install`; see the
 [control protocol](docs/control-protocol.md)). In the desktop app, the Library's **Install…**
 offers the **Catalog**, the packages of the repositories turned on that are not installed, each
 with its details and Install, and a **File**. A plugin from a publisher you have not trusted asks
-first, showing the publisher's key, and can trust it. **Install from a repository...** under
-Libraries opens a repository by its https:// address (this one's is offered first) or its folder.
-For any other repository, the first time, it shows the repository's root key fingerprint and
-asks whether to trust it; nothing else is trusted until you say so.
+first, showing the publisher's key, and can trust it. **Settings** lists the repositories, each
+by its name, address and root key fingerprint, with a switch; the official one can be turned off
+but not removed. **Add a repository...** there takes an https:// address or a folder, shows the
+repository's root key fingerprint and asks whether to trust it; nothing else is trusted until you
+say so.
 
 ### The desktop app's screens
 

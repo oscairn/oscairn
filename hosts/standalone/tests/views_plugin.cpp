@@ -3,8 +3,10 @@
 // A silent instrument for the desktop's tests that describes every rich view oscairn.ui draft 4
 // has, as the engines will: an FM operator view (Common: Algorithm 1-32 with DX7's routings and
 // Feedback; Operator 1-6: Level, Coarse, Fine, a DX7 envelope of rates and levels, and keyboard
-// level scaling), and two AWM2-style elements (Element 1-2: key and velocity limits in one map
-// across both, velocity depth, and an envelope of times and levels from a hold).
+// level scaling), two AWM2-style elements (Element 1-2: key and velocity limits in one map
+// across both, velocity depth, and an envelope of times and levels from a hold), and an ADSR as
+// Surge's (Amp: stages in log2 seconds, -8 to 5, whose value texts carry no unit). seconds()
+// gives every stage's time (draft 5): 2^value for the ADSR, MSFA's for DX7's rates.
 #include <clap/clap.h>
 #include <oscairn-clap/ui.h>
 
@@ -18,7 +20,7 @@
 
 namespace
 {
-    struct Param { std::string module, name; double maximum, initial; uint32_t view, field, index; bool stepped = true; };
+    struct Param { std::string module, name; double maximum, initial; uint32_t view, field, index; bool stepped = true; double minimum = 0; };
 
     const char* const curves[] = {"-LIN", "-EXP", "+EXP", "+LIN"};
 
@@ -61,6 +63,11 @@ namespace
             t.push_back({m, "Decay 1 Level", 127, 100, eg, OSCAIRN_FIELD_LEVEL_0 + 3, 0});
             t.push_back({m, "Decay 2 Level", 127, 80, eg, OSCAIRN_FIELD_LEVEL_0 + 4, 0});
         }
+        // A 4 ms attack, a 1 s decay to half, a 31 ms release.
+        t.push_back({"Amp", "Attack", 5, -8, 5, OSCAIRN_FIELD_ATTACK, 0, false, -8});
+        t.push_back({"Amp", "Decay", 5, 0, 5, OSCAIRN_FIELD_DECAY, 0, false, -8});
+        t.push_back({"Amp", "Sustain", 1, .5, 5, OSCAIRN_FIELD_SUSTAIN, 0, false});
+        t.push_back({"Amp", "Release", 5, -5, 5, OSCAIRN_FIELD_RELEASE, 0, false, -8});
         return t;
     }
     const std::vector<Param>& params() { static const auto t = table(); return t; }
@@ -119,7 +126,7 @@ namespace
             if(i >= params().size()) return false;
             const auto& p = params()[i];
             *out = {}; out->id = i + 1; out->flags = CLAP_PARAM_IS_AUTOMATABLE | (p.stepped ? CLAP_PARAM_IS_STEPPED : 0);
-            out->min_value = p.field == OSCAIRN_FIELD_ALGORITHM ? 1 : 0; out->max_value = p.maximum; out->default_value = p.initial;
+            out->min_value = p.field == OSCAIRN_FIELD_ALGORITHM ? 1 : p.minimum; out->max_value = p.maximum; out->default_value = p.initial;
             std::snprintf(out->name, sizeof out->name, "%s", p.name.c_str()); std::snprintf(out->module, sizeof out->module, "%s", p.module.c_str());
             return true;
         },
@@ -132,6 +139,7 @@ namespace
             else if(p.field == OSCAIRN_FIELD_BREAKPOINT) std::snprintf(out, size, "%s", note(n + 21).c_str()); // DX7's: 0 is A-1
             else if(p.field == OSCAIRN_FIELD_KEY_LOW || p.field == OSCAIRN_FIELD_KEY_HIGH) std::snprintf(out, size, "%s", note(n).c_str());
             else if(p.field == OSCAIRN_FIELD_RATIO) std::snprintf(out, size, "x%.2f", n == 0 ? .5 : double(n));
+            else if(!p.stepped) std::snprintf(out, size, "%.2f", v);
             else std::snprintf(out, size, "%d", n);
             return true;
         },
@@ -154,6 +162,20 @@ namespace
         [](const clap_plugin_t*, clap_id id, uint32_t value, oscairn_fm_algorithm_t* out) {
             if(id != 1 || value < 1 || value > 32) return false;
             *out = dx7[value - 1];
+            return true;
+        },
+        [](const clap_plugin_t*, clap_id id, double value, double* seconds) {
+            if(id < 1 || id > params().size()) return false;
+            const auto f = params()[id - 1].field;
+            if(f >= OSCAIRN_FIELD_RATE_1 && f <= OSCAIRN_FIELD_RATE_8)
+            {
+                // MSFA: a decay across the whole range at this rate (rises are quicker), at 44.1 kHz.
+                const int q = std::min(63, int(std::lround(value)) * 41 / 64);
+                *seconds = 3824.0 * 65536 * 64 / ((4 + (q & 3)) * std::ldexp(1.0, 8 + (q >> 2)) * 44100);
+            }
+            else if(f >= OSCAIRN_FIELD_TIME_1 && f <= OSCAIRN_FIELD_TIME_8) *seconds = value > 0 ? .001 * std::exp2(value / 9) : 0; // up to 18 s
+            else if(f >= OSCAIRN_FIELD_DELAY && f <= OSCAIRN_FIELD_RELEASE && f != OSCAIRN_FIELD_SUSTAIN) *seconds = std::exp2(value);
+            else return false;
             return true;
         }};
     const clap_plugin_audio_ports_t audio{

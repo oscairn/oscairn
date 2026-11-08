@@ -146,7 +146,7 @@ the current headers.
 
 | Extension | Why | Example |
 | --- | --- | --- |
-| Editor hints (`ui.h`, `oscairn.ui/draft-4`, [RFC 0019](rfcs/0019-adaptive-ui.md)) | Puts the right parameters first on small screens and on the physical knobs, and draws envelopes, key maps and FM operator views to drag. Details [below](#editor-hints-and-roles). | Basic Synth (cutoff and level, its envelope as an ADSR view), Delay (Wet is its `mix`) |
+| Editor hints (`ui.h`, `oscairn.ui/draft-5`, [RFC 0019](rfcs/0019-adaptive-ui.md)) | Puts the right parameters first on small screens and on the physical knobs, and draws envelopes, key maps and FM operator views to drag. Details [below](#editor-hints-and-roles). | Basic Synth (cutoff and level, its envelope as an ADSR view), Delay (Wet is its `mix`) |
 | Declared memory (`memory.h`, `oscairn.memory/draft`, [RFC 0025](rfcs/0025-resource-budgets.md#declarations)) | Lets a device near its memory limit refuse the plugin before its large allocation, and sets a tighter worker memory limit. Details [below](#declared-memory). | KICK memory test fixture |
 | Native sound contexts (`sound-contexts.h`, [RFC 0005](rfcs/0005-sound-contexts.md)) | Multitimbral playing: up to 8 prepared sounds in one instance, each MIDI channel choosing one, held notes keeping theirs, without an extra instance per sound. New native Oscairn instruments implement it. | Basic Synth, Legacy Sampler |
 | Snapshots prepared beside (`sound-contexts.h`, `oscairn.sound-snapshots/draft-4`, [RFC 0005](rfcs/0005-sound-contexts.md#preparing-a-snapshot-beside)) | Instant Performance changes: the next Performance's sounds for an instrument already playing are prepared in that instance, beside the playing ones, and selected at the cue, instead of loading its whole snapshot into an instance. Without it a native instrument is taken over whole, its snapshot loaded (for a sampler, its samples again). With its optional `ring_out` and `choke_retiring`, the outgoing sounds ring out through the outgoing Performance's effects and level instead of the incoming one's. Details [below](#instant-performance-changes). | Basic Synth |
@@ -381,9 +381,10 @@ as "Cutoff", "Resonance", "Attack" (a filter module's "Attack" is the filter env
 "Level", "Wet" or "Mix". That misses most spellings, so declare roles. Declaring any role
 turns the guessing off for the plugin's other parameters, so declare every role it has.
 Every parameter stays reachable whatever its hint. A module grid and a waveform with markers
-come later. Draft 3 added the role and draft 4 a view (below), so the struct grew each time: a
-plugin built against draft 2 must rebuild; one built against draft 3 still gets its hints and
-roles, without views, until it rebuilds against draft 4.
+come later. Draft 3 added the role, draft 4 a view and draft 5 `seconds` (below), so the
+structs grew each time: a plugin built against draft 2 must rebuild; one built against draft 3
+still gets its hints and roles, without views, and one built against draft 4 its views, its
+envelopes' times read from value texts with units, until it rebuilds against draft 5.
 
 ### Rich views: what each engine should declare
 
@@ -420,8 +421,21 @@ each where its parameters' tiles are. Rules:
   parameter when it reads the hints, and drops all routings if one is missing.
 - The host keeps a field only where it knows it, on an index up to 8, and an algorithm only on
   a stepped parameter of at most 128 values; anything else leaves its view and is a tile.
-- Positions are by each parameter's range (0 at the left or bottom); value texts label them.
-  A pitch envelope's levels are drawn from the bottom, not about a center, for now.
+- An envelope's stages are drawn by time: each segment has the same room, filled on a log
+  scale (about even below 50 ms) up to the longest any of its stages can take, past a least
+  width that keeps an instant stage's point apart to grab. Dragging a point maps back through
+  the same scale. The times come from `seconds` (draft 5): fill it in `oscairn_plugin_ui_t`
+  (or leave it null) to give how long a `DELAY`, `ATTACK`, `HOLD`, `DECAY`, `RELEASE`, `TIME_n`
+  or `RATE_n` parameter's stage takes at a value, and for a rate the time a segment across the
+  envelope's whole range takes; approximate is enough. The host asks at each value of a stepped
+  parameter of at most 128 values, else at 33 evenly spaced values, when it reads the hints,
+  and drops them all if one is missing. Without `seconds` it reads the value texts at those
+  values, when every one is a number with `ms`, `s` or `sec` ("31.2 ms", "1.20 s"). When any of
+  an envelope's stages has neither, the envelope is drawn by its parameters' ranges, a rate
+  reversed.
+- Levels and other positions are by each parameter's range (0 at the left or bottom); value
+  texts label them. A pitch envelope's levels are drawn from the bottom, not about a center,
+  for now.
 - Views never replace tiles or physical controls; the knobs bind to the parameters.
 
 **Oscairn FM** (IDs from `source/oscairn/Parameters.cpp`): the Classic voice as view 1, the
@@ -493,6 +507,28 @@ bool algorithm(const clap_plugin_t *, clap_id id, uint32_t value, oscairn_fm_alg
 const oscairn_plugin_ui_t uiExt = { paramHint, algorithm }; // returned for OSCAIRN_EXT_UI ("oscairn.ui/draft-4")
 ```
 
+Its rates' value texts are bare numbers, so draft 5's `seconds` is what draws the Classic
+envelopes by time. MSFA's rate to time, as a full-range decay (its rises are quicker, and
+keyboard rate scaling is left out; close enough to draw by). The Extended voice's times and
+the pitch EG return false, and are drawn by their ranges, until their own tables are added:
+
+```cpp
+// Draft 5 (vendor the new ui.h): a Classic operator rate's time, as MSFA's Env runs it at 44.1 kHz.
+bool seconds(const clap_plugin_t *, clap_id id, double value, double *out)
+{
+    uint32_t view = 0, index = 0;
+    const uint32_t field = fmField(id, view, index);
+    if (view != 1 || field < OSCAIRN_FIELD_RATE_1 || field > OSCAIRN_FIELD_RATE_8)
+        return false;
+    const int qrate = std::min(63, (int)std::lround(value) * 41 / 64);                  // Env::advance
+    const double inc = (4 + (qrate & 3)) * std::ldexp(1.0, 2 + LG_N + (qrate >> 2)); // per 64-sample block
+    *out = 3824.0 * 65536 * 64 / (inc * 44100);                                       // the whole level range
+    return true;
+}
+
+const oscairn_plugin_ui_t uiExt = { paramHint, algorithm, seconds }; // OSCAIRN_EXT_UI is now "oscairn.ui/draft-5"
+```
+
 The Extended operators' pitch EGs (37 to 40) can be views of their own the same way
 (`LEVEL_0`, `TIME_1` with `LEVEL_1`, `TIME_2`); the profile's hidden parameters drop out of the
 views as they drop out of the pages.
@@ -529,6 +565,23 @@ bool uiParamHint(const clap_plugin_t *p, clap_id id, oscairn_param_hint_t *hint)
 const oscairn_plugin_ui_t uiExt{uiParamHint, nullptr};
 ```
 
+Its stages' value texts carry units ("250.0 ms"), so its envelopes are drawn by time without
+more. Draft 5's `seconds` gives the times exactly; the stages are log2 seconds (`ct_envtime`):
+
+```cpp
+// Draft 5 (vendor the new ui.h): an ADSR stage's time; the sustain is a level.
+bool uiSeconds(const clap_plugin_t *p, clap_id id, double value, double *seconds)
+{
+    auto pi = self(p).find(id, nullptr);
+    uint32_t field = OSCAIRN_FIELD_NONE;
+    if (!pi || !pi->p || !self(p).viewOf(*pi->p, field) || field == OSCAIRN_FIELD_SUSTAIN)
+        return false;
+    *seconds = std::exp2(value);
+    return true;
+}
+const oscairn_plugin_ui_t uiExt{uiParamHint, nullptr, uiSeconds}; // OSCAIRN_EXT_UI is now "oscairn.ui/draft-5"
+```
+
 **An AWM2 element** (the sfizz-based Oscairn Sampler, once its elements are parameters; it has
 only Output bus and the Assign Switches today): every element n (1 to 8) in one view, index n,
 so each element's page draws its envelope and one map of all the elements' zones, its own in the
@@ -556,6 +609,23 @@ static const uint32_t elementFields[] = {
     OSCAIRN_FIELD_TIME_1 + 2, OSCAIRN_FIELD_LEVEL_0 + 3, OSCAIRN_FIELD_TIME_1 + 3 };
 // in paramHint, for element n's k-th parameter:
 *hint = {OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, OSCAIRN_ROLE_NONE, 1, elementFields[k], n};
+```
+
+Its times draw by time with no code when they are seconds whose value texts say so
+("0.25 s"). If they are AWM2's 0 to 127 instead, `seconds` gives each value's time from the
+engine's own table (AWM2's is Yamaha's and not published; the test plugin's stand-in is
+1 ms × 2^(value / 9)):
+
+```cpp
+// Draft 5: an element's AEG time; awm2Seconds is the engine's table of 128 times.
+bool seconds(const clap_plugin_t *, clap_id id, double value, double *out)
+{
+    const uint32_t k = elementParameter(id); // its place in elementFields, as paramHint finds it
+    if (k >= std::size(elementFields) || elementFields[k] < OSCAIRN_FIELD_TIME_1 || elementFields[k] > OSCAIRN_FIELD_TIME_8)
+        return false;
+    *out = awm2Seconds[std::clamp((int)std::lround(value), 0, 127)];
+    return true;
+}
 ```
 
 The element's level takes `OSCAIRN_ROLE_LEVEL_1 + n - 1` as today. Its filter EG, with a

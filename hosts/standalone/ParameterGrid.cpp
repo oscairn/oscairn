@@ -60,6 +60,54 @@ namespace oscairn::standalone
             for(size_t i = 0; i < n; ++i) { const auto slash = module.find('/', from); if(slash == std::string::npos) return {}; from = slash + 1; }
             return module.substr(from);
         }
+        // A time field's seconds at `normal` (0 to 1 over its range), between the seconds the plugin
+        // gave at evenly spaced values (at least two): geometric where both are above zero, as most
+        // envelope times are exponential; and back, in the first interval holding it (times rise
+        // with the value, rates fall), else at the nearer end.
+        double secondsAt(const std::vector<double>& s, double normal)
+        {
+            const double at = std::clamp(normal, 0.0, 1.0) * double(s.size() - 1);
+            const size_t k = std::min(size_t(at), s.size() - 2);
+            const double f = at - double(k), a = s[k], b = s[k + 1];
+            return a > 0 && b > 0 ? a * std::pow(b / a, f) : a + (b - a) * f;
+        }
+        double normalAt(const std::vector<double>& s, double seconds)
+        {
+            for(size_t k = 0; k + 1 < s.size(); ++k)
+            {
+                const double a = s[k], b = s[k + 1];
+                if((seconds - a) * (seconds - b) > 0) continue;
+                const double f = a == b ? 0 : a > 0 && b > 0 && seconds > 0 ? std::log(seconds / a) / std::log(b / a) : (seconds - a) / (b - a);
+                return (double(k) + f) / double(s.size() - 1);
+            }
+            return std::abs(seconds - s.front()) <= std::abs(seconds - s.back()) ? 0.0 : 1.0;
+        }
+        // An envelope's time axis: about even below 50 ms and logarithmic past it, so a 30 ms
+        // release, a 250 ms decay and a 5 s pad all read, from 0 (no time) to 1 (`longest` seconds).
+        constexpr double shortStage = .05;
+        double timeAcross(double seconds, double longest) { return std::log1p(seconds / shortStage) / std::log1p(longest / shortStage); }
+        double secondsAcross(double across, double longest) { return shortStage * std::expm1(across * std::log1p(longest / shortStage)); }
+    }
+
+    double ParameterGrid::longestStage(const std::vector<size_t>& params) const
+    {
+        double longest = 0;
+        for(const auto i : params)
+        {
+            const auto& s = params_[i].seconds;
+            if(s.size() < 2) return 0;
+            longest = std::max(longest, *std::max_element(s.begin(), s.end()));
+        }
+        return longest;
+    }
+    double ParameterGrid::stageAcross(size_t param, bool rate, double longest) const
+    {
+        const double v = normal(param);
+        return longest > 0 ? timeAcross(secondsAt(params_[param].seconds, v), longest) : rate ? 1 - v : v;
+    }
+    void ParameterGrid::setStageAcross(size_t param, bool rate, double longest, double across)
+    {
+        setNormal(param, longest > 0 ? normalAt(params_[param].seconds, secondsAcross(across, longest)) : rate ? 1 - across : across);
     }
 
     EnvelopeShape envelopeOf(const std::vector<std::string>& names)
@@ -425,12 +473,14 @@ namespace oscairn::standalone
     };
 
     /// An envelope's curve, drawn from its parameters; drag a point to change the time (across)
-    /// and the level (up and down) it is reached at. The parameters keep their own tiles.
+    /// and the level (up and down) it is reached at. The parameters keep their own tiles. Stages
+    /// are drawn by time when the plugin gives their seconds, else by their parameters' ranges.
     class ParameterGrid::Envelope : public juce::Component
     {
     public:
         // shape's indices are into `params`, the grid's parameter indices of its group.
         Envelope(ParameterGrid& grid, EnvelopeShape shape, std::vector<size_t> params) : grid_(grid), shape_(std::move(shape)), params_(std::move(params)) {}
+        std::vector<juce::Point<float>> points() { layout(); std::vector<juce::Point<float>> at; for(const auto& h : handles_) at.push_back(h.at); return at; }
         void paint(juce::Graphics& g) override
         {
             layout();
@@ -469,8 +519,8 @@ namespace oscairn::standalone
             const auto& h = handles_[size_t(dragging_)];
             if(point.time >= 0)
             {
-                const double across = std::clamp((e.position.x - h.from) / segment_, 0.f, 1.f);
-                grid_.setNormal(params_[size_t(point.time)], point.rate ? 1 - across : across);
+                const double across = std::clamp((e.position.x - h.from - least_) / (segment_ - least_), 0.f, 1.f);
+                grid_.setStageAcross(params_[size_t(point.time)], point.rate, longest_, across);
             }
             if(point.level >= 0) grid_.setNormal(params_[size_t(point.level)], std::clamp((area_.getBottom() - e.position.y) / area_.getHeight(), 0.f, 1.f));
             repaint();
@@ -486,18 +536,23 @@ namespace oscairn::standalone
         float level(int param, double fixed) const { const double v = param >= 0 ? grid_.normal(params_[size_t(param)]) : fixed; return area_.getBottom() - float(v) * area_.getHeight(); }
         void layout()
         {
-            // Each timed segment has the same room, scaled by its time; the sustain a fixed width.
+            // Each timed segment has the same room, filled as far as its time reaches on the time
+            // axis past a least width (an instant stage's point stays apart, to grab); the sustain
+            // a fixed width.
             area_ = getLocalBounds().toFloat().reduced(14, 10).withTrimmedTop(18);
             const float hold = area_.getWidth() * .14f;
             segment_ = (area_.getWidth() - hold) / float(std::max<size_t>(1, shape_.points.size()));
+            least_ = std::min(desktopMode(*this) == 2 ? 20.f : 10.f, segment_ / 4);
+            std::vector<size_t> times;
+            for(const auto& p : shape_.points) if(p.time >= 0) times.push_back(params_[size_t(p.time)]);
+            longest_ = grid_.longestStage(times);
             start_ = {area_.getX(), level(shape_.start, shape_.fixedStart)};
             handles_.clear();
             float x = start_.x;
             for(const auto& p : shape_.points)
             {
-                const double t = p.time >= 0 ? grid_.normal(params_[size_t(p.time)]) : 0;
                 Handle h; h.from = x;
-                x += float(p.rate ? 1 - t : t) * segment_;
+                if(p.time >= 0) x += least_ + float(grid_.stageAcross(params_[size_t(p.time)], p.rate, longest_)) * (segment_ - least_);
                 h.at = {x, level(p.level, p.fixed)};
                 if(p.sustain) { x += hold; h.holdTo = x; }
                 handles_.push_back(h);
@@ -508,10 +563,17 @@ namespace oscairn::standalone
         std::vector<size_t> params_;
         juce::Rectangle<float> area_;
         juce::Point<float> start_;
-        float segment_ = 1;
+        float segment_ = 1, least_ = 0;
+        double longest_ = 0; // seconds, the longest any stage can take; 0: drawn by the parameters' ranges
         std::vector<Handle> handles_;
         int dragging_ = -1;
     };
+
+    std::vector<juce::Point<float>> ParameterGrid::envelopePoints(juce::Component& c)
+    {
+        auto* e = dynamic_cast<Envelope*>(&c);
+        return e ? e->points() : std::vector<juce::Point<float>>{};
+    }
 
     namespace
     {
@@ -736,11 +798,14 @@ namespace oscairn::standalone
                     const auto e = envelopeOf(fields);
                     auto level = [&](int k, double fixed) { return c.envelope.getBottom() - float(k >= 0 ? grid_.normal(op.envelope[size_t(k)]) : fixed) * c.envelope.getHeight(); };
                     const float segment = c.envelope.getWidth() * .8f / float(std::max<size_t>(1, e.points.size())), hold = c.envelope.getWidth() * .2f;
+                    std::vector<size_t> times;
+                    for(const auto& p : e.points) if(p.time >= 0) times.push_back(op.envelope[size_t(p.time)]);
+                    const double longest = grid_.longestStage(times);
                     juce::Path line; float x = c.envelope.getX(); line.startNewSubPath(x, level(e.start, e.fixedStart));
                     for(const auto& p : e.points)
                     {
-                        const double t = p.time >= 0 ? grid_.normal(op.envelope[size_t(p.time)]) : 0;
-                        x += float(p.rate ? 1 - t : t) * segment; line.lineTo(x, level(p.level, p.fixed));
+                        if(p.time >= 0) x += float(grid_.stageAcross(op.envelope[size_t(p.time)], p.rate, longest)) * segment;
+                        line.lineTo(x, level(p.level, p.fixed));
                         if(p.sustain) { x += hold; line.lineTo(x, level(p.level, p.fixed)); }
                     }
                     g.setColour(ink(Ink::Border).withAlpha(.35f)); g.drawRect(c.envelope, 1.f);

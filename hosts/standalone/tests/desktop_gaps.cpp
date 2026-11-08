@@ -1306,6 +1306,9 @@ int main(int argc, char** argv)
             size_t tiles = 0;
             for(size_t i = 0; i < grid.pages(); ++i) { grid.showPage(i); tiles += grid.tilesShown(); }
             check(tiles == engine.parameters(node).size(), "every parameter has its tile beside the views: " + std::to_string(tiles));
+            // Each page with an envelope, as the plugin starts (for a real engine's, given its path).
+            for(size_t i = 0; i < grid.pages(); ++i)
+                if(grid.showPage(i), find("Envelope")) save("views-panel-envelope-" + juce::String(grid.pageName(i)).retainCharacters("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"));
             // Common: the operator view, its routing that of the algorithm the plugin gives.
             check(page("Common") && find("FM operators") != nullptr, "the FM operator view where its algorithm is");
             save("views-panel-fm");
@@ -1349,6 +1352,55 @@ int main(int argc, char** argv)
                 const float height = map->getHeight() - 38.f - 14, y = 28 + height - height * float((value(id("Element 2", "Velocity Low")) + value(id("Element 2", "Velocity High"))) / 127 / 2); // the zone's middle
                 drag(map, {x, y}, {x - plane / 4, y});
                 check(wait([&] { return value(low) < was - 20; }) && value(high) == top, "dragging the zone's left edge lowers its lowest key, and only that: " + std::to_string(value(low)));
+            }
+            // Stages drawn by time, from the seconds the plugin gives: Amp's 4 ms attack narrower
+            // than its 31 ms release, narrower than its 1 s decay, and still apart to grab.
+            // Dragging the release point sets the release, and only it, where the scale puts the
+            // point; undo puts it back.
+            check(page("Amp") && find("Envelope") != nullptr, "the ADSR's envelope");
+            save("views-panel-adsr");
+            if(auto* curve = find("Envelope"))
+            {
+                const float hold = (curve->getWidth() - 28.f) * .14f;
+                const auto at = standalone::ParameterGrid::envelopePoints(*curve);
+                check(at.size() == 3, "an ADSR's three points");
+                if(at.size() == 3)
+                {
+                    const float attack = at[0].x - 14, decay = at[1].x - at[0].x, release = at[2].x - at[1].x - hold;
+                    check(attack >= 10 && attack < release && release < decay,
+                          "a shorter stage draws narrower: attack " + std::to_string(attack) + ", release " + std::to_string(release) + ", decay " + std::to_string(decay));
+                    const auto a = id("Amp", "Attack"), d = id("Amp", "Decay"), s = id("Amp", "Sustain"), r = id("Amp", "Release");
+                    const double was = value(r), da = value(a), dd = value(d), ds = value(s);
+                    const juce::Point<float> to(at[2].x + 40, at[2].y);
+                    drag(curve, at[2], to);
+                    check(wait([&] { return value(r) > was + .5; }) && value(a) == da && value(d) == dd && value(s) == ds,
+                          "dragging the release point lengthens the release, and only that: " + std::to_string(value(r)));
+                    const auto moved = standalone::ParameterGrid::envelopePoints(*curve);
+                    check(moved.size() == 3 && std::abs(moved[2].x - to.x) < 2, "and the point lands where it was dropped: " + std::to_string(moved.size() == 3 ? moved[2].x : 0) + " for " + std::to_string(to.x));
+                    engine.edit([](Control& c) { c.undo(); });
+                    check(wait([&] { return value(r) == was; }), "and undo puts it back: " + std::to_string(value(r)));
+                }
+            }
+            // A DX7 envelope's rates: 80, 60, 40 and 60, a higher rate a shorter, narrower segment.
+            check(page("Operator 1") && find("Envelope") != nullptr, "operator 1's envelope");
+            if(auto* curve = find("Envelope"))
+            {
+                const float hold = (curve->getWidth() - 28.f) * .14f;
+                const auto at = standalone::ParameterGrid::envelopePoints(*curve);
+                check(at.size() == 4, "a DX7 envelope's four points");
+                if(at.size() == 4)
+                {
+                    const float one = at[0].x - 14, two = at[1].x - at[0].x, three = at[2].x - at[1].x, four = at[3].x - at[2].x - hold;
+                    check(one < two && two < three && std::abs(four - two) < 1,
+                          "a faster rate draws narrower: " + std::to_string(one) + ", " + std::to_string(two) + ", " + std::to_string(three) + ", " + std::to_string(four));
+                    const auto rate = id("Operator 1", "Rate 1"), level = id("Operator 1", "Level 1"), rate2 = id("Operator 1", "Rate 2");
+                    const double was = value(rate), l = value(level), r2 = value(rate2);
+                    drag(curve, at[0], {at[0].x + 30, at[0].y});
+                    check(wait([&] { return value(rate) < was; }) && value(level) == l && value(rate2) == r2,
+                          "dragging the first point right slows rate 1, and only it: " + std::to_string(value(rate)));
+                    engine.edit([](Control& c) { c.undo(); });
+                    check(wait([&] { return value(rate) == was; }), "and undo puts it back: " + std::to_string(value(rate)));
+                }
             }
             // The Desktop draws the same views.
             standalone::setDesktopMode(holder, 1); holder.setSize(1180, 820); grid.setBounds(holder.getLocalBounds().reduced(16));
@@ -1400,15 +1452,19 @@ int main(int argc, char** argv)
                     auto event = [&](juce::Point<float> at, bool dragged) { return juce::MouseEvent(mouse, at, juce::ModifierKeys::leftButtonModifier, 1, 0, 0, 0, 0, curve, curve, now, from, now, 1, dragged); };
                     curve->mouseDown(event(from, false)); curve->mouseDrag(event(to, true)); curve->mouseUp(event(to, true));
                 };
-                // The curve's geometry: three timed segments sharing what the sustain's width leaves.
+                // The curve's geometry: three timed segments sharing what the sustain's width leaves,
+                // each by its time (its value texts' seconds).
                 const float width = curve->getWidth() - 28.f, segment = (width - width * .14f) / 3, top = 28, height = curve->getHeight() - 38.f;
-                const double was = value(attack), d = value(decay), s = value(sustain), r = value(release);
-                // The attack point (a 2 ms attack: at the top left), dragged right.
-                drag({14 + segment * float(was / 2), top}, {14 + segment / 2, top});
+                const double d = value(decay), s = value(sustain), r = value(release);
+                auto points = standalone::ParameterGrid::envelopePoints(*curve);
+                check(points.size() == 3 && points[0].x - 14 < points[1].x - points[0].x, "the 2 ms attack draws narrower than the 250 ms decay");
+                // The attack point (at the top left), dragged right, near the end of its room.
+                if(points.size() == 3) drag(points[0], {14 + segment - 2, top});
                 check(wait([&] { return value(attack) > .8; }) && value(decay) == d && value(sustain) == s && value(release) == r,
                       "dragging the attack point lengthens the attack, and only that: " + std::to_string(value(attack)));
                 // The decay point, where the attack ends and the decay reaches the sustain level, dragged down.
-                const float x = 14 + segment * float(value(attack) / 2) + segment * float(d / 2), y = top + height - height * float(s);
+                points = standalone::ParameterGrid::envelopePoints(*curve);
+                const float x = points.size() == 3 ? points[1].x : 0, y = top + height - height * float(s);
                 drag({x, y}, {x, top + height * .9f});
                 check(wait([&] { return value(sustain) < .2; }) && std::abs(value(decay) - d) < .02 && value(release) == r,
                       "dragging the decay point down lowers the sustain level: " + std::to_string(value(sustain)));

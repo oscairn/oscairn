@@ -116,6 +116,8 @@ namespace oscairn::standalone
         size_t tilesShown() const { return tiles_.size(); }
         std::vector<std::string> namesShown() const { std::vector<std::string> n; for(const auto& t : tiles_) n.push_back(params_[t.param].name); return n; }
         size_t panelsShown() const { return panels_.size(); } // rich views: envelopes, maps, FM operators, LFOs and filters
+        // An envelope view's points where it draws them, in its coordinates (none for another component).
+        static std::vector<juce::Point<float>> envelopePoints(juce::Component& envelope);
         // Any page's parameters whose name or module has the text; empty: the page again.
         void search(const juce::String& text) { search_.setText(text, false); search_.onTextChange(); }
 
@@ -160,6 +162,12 @@ namespace oscairn::standalone
         class Operators;
         double normal(size_t param) const;               // its value, 0 to 1 over its range
         void setNormal(size_t param, double value);      // from 0 to 1, rounded when stepped
+        // An envelope's time axis: how far across its room (0 to 1) the stage of a time or rate
+        // parameter reaches, by its seconds on a log scale up to `longest` (the longest any of the
+        // envelope's stages can take, longestStage), or by its range when that is 0; and back.
+        double longestStage(const std::vector<size_t>& params) const; // 0: one without seconds
+        double stageAcross(size_t param, bool rate, double longest) const;
+        void setStageAcross(size_t param, bool rate, double longest, double across);
         void timerCallback() override;
         std::vector<std::string> tabsFor(size_t page) const; // second-level modules, when a page needs them
         void load(std::vector<Engine::ParamInfo> params); // the parameters, their pages and the page list

@@ -419,7 +419,11 @@ operator, element or zone, 1 to 8). What a view is follows from its fields:
 
 The host keeps only fields it knows, operators up to the eighth and a stepped algorithm, reads
 the routings with the hints, carries them through workers, and `params.list` writes them
-(`view`, `field`, `index`, `algorithms`). Draft 3 is still read, without views.
+(`view`, `field`, `index`, `algorithms`). Draft 5 adds a call giving how long an envelope stage
+takes at a value (`seconds`), which the host reads with the hints for each time or rate field
+at its values (every value of a stepped one up to 128, else 33) and carries the same way;
+without it, the times come from value texts with units ("31.2 ms", "1.20 s"). Drafts 3 and 4
+are still read, without views and without `seconds`.
 
 **Drawn** by `ParameterGrid` on Desktop and Panel, where the view's parameters' tiles are, above
 them; every parameter keeps its tile, and the device's knobs still bind to parameters, never to
@@ -427,7 +431,11 @@ a view. An FM operator view shows where its algorithm is: the routing (carriers 
 row, each modulator over what it modulates, feedback as a loop) and a column per operator with
 its level bar, its ratio and its envelope's shape; a tap on the routing's half steps the
 algorithm back or on, a drag across it runs through them, a level bar drags, a ratio drags up or
-down. An envelope is the curve drawn before, now from its fields. A key map draws its zones over
+down. An envelope is the curve drawn before, now from its fields, its stages by time where the
+plugin gives their seconds: each segment's room filled on a log scale (about even below 50 ms)
+up to the longest any of its stages can take, past a least width that keeps an instant stage's
+point apart to grab, a drag mapped back through the same scale; else by the parameters' ranges,
+a rate reversed. A key map draws its zones over
 a keyboard (the index's own in the accent), the scaling around the breakpoint by its curves'
 value texts (`-LIN`, `+EXP`), and velocity's effect; each edge, the breakpoint, the scaling's
 ends and the velocity line drag. Every drag sets parameters as the tiles do, with a gesture, so
@@ -435,19 +443,28 @@ each change is undone as theirs are. Name recognition stays for parameters in no
 
 **Checked:** `kick-clap-host` reads the fixture's views (an unknown field, an operator past the
 eighth and a continuous algorithm are dropped) and its routings, and the same fixture offered as
-draft 3 gives its hints and roles without views; `worker-host` that they cross a worker. `desktop-gaps` reads ADSR, DX7 and AWM2 envelopes and DX7 algorithm 1's layout without
+draft 3 gives its hints and roles without views, and as draft 4 its views with its times from
+its value texts, where draft 5's `seconds` gives them otherwise; `worker-host` that they cross a
+worker. `desktop-gaps` reads ADSR, DX7 and AWM2 envelopes and DX7 algorithm 1's layout without
 drawing, then loads a test plugin (`tests/views_plugin.cpp`: an FM view with DX7's 32 routings,
 six operators' envelopes and key scaling, two AWM2-style elements' zones and envelopes) on the
 Panel's screen at 1,024 × 600: every parameter still has its tile; a tap on the routing steps the
 algorithm and undo steps it back; dragging operator 2's level bar to its top sets it to 99;
 dragging the breakpoint moves only it; dragging element 2's zone's left edge lowers only its
-lowest key; and the Desktop at 1,180 × 820 draws the same views. Given a path, it writes
-`SNAPSHOTS-views-*.png`.
+lowest key; stages are drawn by time (an ADSR in log2 seconds, as Surge's: its 4 ms attack
+narrower than its 31 ms release, narrower than its 1 s decay, the attack still apart; a DX7
+envelope's rates 80, 60, 40, 60 narrower the faster), dragging the release point sets only the
+release, the point landing where it was dropped, and dragging a DX7 envelope's first point
+slows only rate 1, each undone; and the Desktop at 1,180 × 820 draws the same views. Given a
+path, it writes `SNAPSHOTS-views-*.png`, with each page that has an envelope as the plugin
+starts, also for a real engine named by `OSCAIRN_TEST_VIEWS` (its test plugin's own checks then
+fail).
 
 **The Basic Synth** declares its envelope this way: four new parameters (Attack, Decay, Sustain,
 Release, defaulting to the envelope it had fixed) on an Envelope page, an ADSR view with the
 stages' roles. `desktop-gaps` finds the curve and the stages' tiles linked in order on that page
-on the Panel, drags the attack point (only Attack changes) and the decay point down (Sustain
+on the Panel, its 2 ms attack drawn narrower than its 250 ms decay (times from its value texts,
+"0.002 s"), drags the attack point (only Attack changes) and the decay point down (Sustain
 falls, Decay stays), and undoes that; `control-json-protocol` checks the view in `params.list`;
 `wheels` that a long attack and full sustain change the note, and that a sound saved before the
 four parameters loads with the envelope it had.

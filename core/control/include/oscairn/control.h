@@ -328,7 +328,9 @@ namespace oscairn
         // Install: one package, as a locked library (a plugin package's builds into the store), at
         // `version` or the newest stable one this device can install that is not yanked; only this
         // device's plugin builds are installed, under installArchive's rules for code.
-        struct RepositoryVersion { std::string version, channel, yanked, incompatible; uint64_t size = 0, installed = 0; };
+        // types: how many items of each type (oscairn.sound, oscairn.performance...) and plugins of
+        // each format (clap, lv2) it holds; dependencies: the packages it needs, each ID and least version.
+        struct RepositoryVersion { std::string version, channel, yanked, incompatible; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; };
         struct RepositoryPackage { std::string id, name, summary, license, publisher, publisherKey; std::vector<std::string> tags; std::vector<RepositoryVersion> versions; };
         // state: "running", "done" or "failed" (error says why). rootKey: the repository's root key
         // once read, so a refusal for an untrusted one can offer to trust it. packages: a listing's;

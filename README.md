@@ -148,8 +148,11 @@ publisher `org.oscairn`, key **`b284 be6b ea2f adb1`** (public key
 `db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69`, also published at
 https://oscairn.org/.well-known/oscairn-publisher.json). The engine lists and installs from it
 through the control API (`packages.list`, `packages.install`; see the
-[control protocol](docs/control-protocol.md)). In the desktop app, the Library's **Install from
-a repository...** opens one by its https:// address (this one's is offered first) or its folder.
+[control protocol](docs/control-protocol.md)). In the desktop app, the Library's **Install…**
+offers the **Catalog**, the packages of the repositories turned on that are not installed, each
+with its details and Install, and a **File**. A plugin from a publisher you have not trusted asks
+first, showing the publisher's key, and can trust it. **Install from a repository...** under
+Libraries opens a repository by its https:// address (this one's is offered first) or its folder.
 For any other repository, the first time, it shows the repository's root key fingerprint and
 asks whether to trust it; nothing else is trusted until you say so.
 

@@ -626,7 +626,10 @@ Each starts as an RFC:
   unpacked package folders; fetching over HTTP(S) with
   deltas, mirrors and resumed downloads; HTTPS through the system on macOS and libcurl with Mbed
   TLS on Linux; a device's list of repositories: the official one known and its root key trusted
-  for repositories only, those its profile ships, and the user's, each on or off)
+  for repositories only, those its profile ships, and the user's, each on or off; the desktop
+  Library's Install… with Catalog and File, the Catalog an interim view of the repositories'
+  packages not installed, grayed with the reason where they cannot install, with details,
+  Install and trusting a publisher from the install question)
 - [ ] **Keeping plugins loaded:** a memory budget, unloading the least recently used, setlist
   preparation options and a setlist check; CPU, memory and storage meters. Loaded items beyond
   the open Performance are opportunistic memory ([RFC 0025](rfcs/0025-resource-budgets.md#the-order-of-eviction)).

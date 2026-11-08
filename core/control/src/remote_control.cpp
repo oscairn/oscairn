@@ -626,7 +626,13 @@ namespace oscairn
         PackageJob j{uint64_t(integer(field(r,"job"))),string(field(r,"state")),string(field(r,"error")),string(field(r,"repository")),string(field(r,"name")),string(field(r,"rootKey")),uint64_t(integer(field(r,"serial"))),{},string(field(r,"package")),string(field(r,"version")),{}};
         for(auto x:array(field(r,"packages"))){
             RepositoryPackage p{string(field(x,"id")),string(field(x,"name")),string(field(x,"summary")),string(field(x,"license")),string(field(x,"publisher")),string(field(x,"publisherKey")),strings(field(x,"tags")),{}};
-            for(auto v:array(field(x,"versions")))p.versions.push_back({string(field(v,"version")),string(field(v,"channel")),string(field(v,"yanked")),string(field(v,"incompatible")),uint64_t(integer(field(v,"size"))),uint64_t(integer(field(v,"installed")))});
+            for(auto v:array(field(x,"versions"))){
+                RepositoryVersion version{string(field(v,"version")),string(field(v,"channel")),string(field(v,"yanked")),string(field(v,"incompatible")),uint64_t(integer(field(v,"size"))),uint64_t(integer(field(v,"installed"))),{},{}};
+                if(V types=field(v,"types");types && types->type==json_type_object)
+                    for(auto* m=static_cast<const json_object_s*>(types->payload)->start;m;m=m->next)version.types.push_back({std::string(m->name->string,m->name->string_size),integer(m->value)});
+                for(auto d:array(field(v,"dependencies")))version.dependencies.push_back({string(field(d,"id")),string(field(d,"version"))});
+                p.versions.push_back(std::move(version));
+            }
             j.packages.push_back(std::move(p));
         }
         const auto installed=field(r,"installed");

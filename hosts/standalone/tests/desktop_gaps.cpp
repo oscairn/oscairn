@@ -794,6 +794,114 @@ int main(int argc, char** argv)
                 close(modal(), 0);
                 repository::setTransport({});
             }
+            // Install... (RFC 0031): exactly the Catalog and a File. The Catalog lists the enabled
+            // repositories' packages of a kind that are not installed, grayed with the reason where
+            // this device cannot install them; a package's details; Install, and for a publisher
+            // not trusted for plugins, trusting it by its name, fingerprint and full key, then
+            // trying again. The repository is a signed folder made by the index builder; the
+            // official one is turned off and the web is a stand-in, so nothing touches the network.
+            if(const char* maker = std::getenv("OSCAIRN_TEST_MAKE_REPOSITORY"))
+            {
+                std::vector<std::string> options;
+                const auto menu = standalone::LibraryPane::installOptions();
+                for(juce::PopupMenu::MenuItemIterator i(menu); i.next();) options.push_back(i.getItem().text.toStdString());
+                check(options == std::vector<std::string>{"Catalog", "File"}, "Install... offers exactly Catalog and File");
+                const auto tools = juce::StringArray::fromTokens(maker, "|", "");
+                const auto made = data.getChildFile("catalog-repository");
+                juce::ChildProcess process;
+                const bool started = tools.size() == 5 && process.start(juce::StringArray{tools[0], "-I", tools[1], made.getFullPathName(), tools[2], tools[3], tools[4], data.getChildFile("Plain.olib").getFullPathName()});
+                const auto said = started ? process.readAllProcessOutput() : juce::String("not started");
+                check(started && process.getExitCode() == 0 && made.getChildFile("keys.json").existsAsFile(), "a signed repository made: " + said.toStdString());
+                const auto made_keys = juce::JSON::parse(made.getChildFile("keys.json"));
+                const auto rootKey = made_keys["root"].toString().toStdString(), publisherKey = made_keys["publisher"].toString().toStdString();
+                const auto site = made.getChildFile("site").getFullPathName().toStdString();
+                std::atomic<int> fetched = 0;
+                repository::setTransport([&](const std::string&, uint64_t, const std::function<bool(int, const char*, size_t)>&) { ++fetched; return 404; });
+                const auto listed = engine.packages([&](Control& c) {
+                    c.setRepositoryEnabled("https://packages.oscairn.org", false);
+                    c.addRepository({site, "Test repository", rootKey, ""});
+                });
+                check(listed.empty(), "the test repository added and the official one turned off: " + listed);
+                standalone::Actions actions;
+                standalone::LibraryPane pane(engine, actions, standalone::LibraryPane::Mode::Play);
+                standalone::setDesktopMode(pane, 2); pane.setSize(1024, 600);
+                wait([&] { return !engine.jobRunning(); });
+                auto modalAlert = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
+                auto alertText = [](juce::AlertWindow* w) { juce::String out; for(auto* c : w->getChildren()) if(auto* l = dynamic_cast<juce::Label*>(c)) out << l->getText(); if(auto* t = w->getTextEditor({})) out << t->getText(); return out; };
+                // Over the Library at 1024 x 600, centered as it shows.
+                auto over = [&](juce::Component& c, const juce::String& name) {
+                    if(argc < 5) return;
+                    juce::Image screen = pane.createComponentSnapshot(pane.getLocalBounds());
+                    const auto shown = c.createComponentSnapshot(c.getLocalBounds());
+                    juce::Graphics(screen).drawImageAt(shown, (screen.getWidth() - shown.getWidth()) / 2, (screen.getHeight() - shown.getHeight()) / 2);
+                    const juce::File out{juce::String(argv[4]) + "-" + name + ".png"};
+                    out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(screen, stream);
+                };
+                pane.showCatalog("plugin");
+                auto* catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }), "the Catalog opens and reads the repositories that are on");
+                if(catalog)
+                {
+                    std::vector<std::string> names;
+                    for(const auto& o : catalog->shown()) names.push_back(o.package.name + (o.installable ? "" : " (" + o.version.incompatible + ")"));
+                    check(names.size() == 2 && names[0].rfind("Other Synth (it has no build for this device", 0) == 0 && names[1] == "Test Synth" && catalog->plugins.getToggleState(),
+                          "under Plugins, each not installed; one for another device grayed with why: " + (names.empty() ? std::string() : names[0]));
+                    check(catalog->status() == "From Test repository." && fetched == 0, "it says where they are from, and the official one, off, is not fetched: " + catalog->status().toStdString());
+                    catalog->search.setText("tonewheel organ", true); settle();
+                    check(catalog->shown().empty(), "searched like the rest: nothing matches");
+                    catalog->search.setText("other", true); settle();
+                    check(catalog->shown().size() == 1 && catalog->shown()[0].package.id == "org.kick.other", "a word of its name finds it");
+                    catalog->search.setText("", true);
+                    settle();
+                    over(*catalog, "catalog-panel");
+                    catalog->performances.triggerClick(); settle();
+                    check(catalog->shown().size() == 1 && catalog->shown()[0].package.name == "Test Set" && catalog->shown()[0].installable, "under Performances, the Performance package");
+                    catalog->plugins.triggerClick(); settle();
+                    catalog->open(1);
+                    const auto facts = catalog->facts();
+                    std::map<juce::String, juce::String> fact(facts.begin(), facts.end());
+                    check(catalog->opened() && fact["Publisher"] == "KICK, key " + standalone::fingerprint(signing::keyId(publisherKey)) && fact["License"] == "MIT" && fact["Version"] == "1.0.0" &&
+                              fact["Summary"] == "A test synth" && fact["Repository"] == "Test repository" && fact["Needs"] == "Nothing else" && fact["Size"].contains("installed") && catalog->install.isEnabled(),
+                          "its details: summary, version, license, publisher and key fingerprint, repository, size and what it needs: " + fact["Publisher"].toStdString());
+                    settle();
+                    over(*catalog, "catalog-details");
+                    catalog->install.triggerClick();
+                }
+                // Code from a publisher not trusted for plugins: trust it, shown by its key, and try again.
+                check(wait([&] { auto* w = modalAlert(); return w && w->getName() == "Install anyway?"; }), "an install of code by an unknown publisher asks first");
+                if(auto* w = modalAlert(); w && w->getName() == "Install anyway?")
+                {
+                    const auto text = alertText(w);
+                    check(w->getNumButtons() == 3 && w->getButton(0)->getButtonText() == "Trust KICK" && w->getButton(1)->getButtonText() == "Install anyway" && w->getButton(2)->getButtonText() == "Cancel",
+                          "it offers to trust the publisher, to install anyway, or not");
+                    check(text.contains("Publisher: KICK") && text.contains(standalone::fingerprint(signing::keyId(publisherKey))) && text.contains(publisherKey),
+                          "naming the publisher, its key's fingerprint and the full key: " + text.toStdString());
+                    std::vector<Control::TrustedKey> keys;
+                    engine.packages([&](Control& c) { keys = c.trustedKeys(); });
+                    check(std::none_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == publisherKey; }), "nothing is trusted before the user says so");
+                    over(*w, "catalog-trust-publisher");
+                    w->getButton(0)->triggerClick();
+                }
+                check(wait([&] { return pane.message().contains("installed."); }), "trusted, it is installed: " + pane.message().toStdString());
+                std::vector<Control::TrustedKey> keys;
+                engine.packages([&](Control& c) { keys = c.trustedKeys(); });
+                check(std::any_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == publisherKey && k.name == "KICK" && k.scope == std::vector<std::string>{"plugins"}; }),
+                      "the publisher's key trusted for plugins, by its name");
+                const auto plugins = engine.installedPlugins();
+                check(std::any_of(plugins.begin(), plugins.end(), [](const auto& p) { return p.id == "org.kick.test.synth"; }), "its plugin in the store");
+                // Installed, it is no longer offered; the Desktop's Catalog, the same.
+                pane.showCatalog("plugin");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && catalog->shown().size() == 1 && catalog->shown()[0].package.id == "org.kick.other", "what is installed is not offered");
+                if(catalog)
+                {
+                    standalone::setDesktopMode(*catalog, 1); catalog->setSize(820, 560); settle();
+                    snapshot(*catalog, "catalog-desktop");
+                    if(auto* dialog = catalog->findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
+                }
+                repository::setTransport({});
+            }
+            else std::printf("OSCAIRN_TEST_MAKE_REPOSITORY not set; the Catalog not checked\n");
             // A Parts view not on screen (the one under Play, a background app's) polls nothing:
             // on the Mixer, shown, it would read the meters twenty times a second.
             {

@@ -1176,8 +1176,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   saying why. `rootKey` is the repository's root key once read, so a refusal for an untrusted
   one can offer to trust it. A listing's `packages` are each `{id,name,summary,license,
   publisher,publisherKey,tags,versions}`, each version `{version,channel,yanked,incompatible,
-  size,installed}`: `incompatible` says why this device cannot install it (empty when it can),
-  and `size` and `installed` are this platform's download and installed bytes. An install's
+  size,installed,types,dependencies}`: `incompatible` says why this device cannot install it (empty when it can),
+  `size` and `installed` are this platform's download and installed bytes, `types` how many
+  items of each type (`oscairn.performance`, `oscairn.sound`, `oscairn.asset`) and plugins of each
+  format (`clap`) it holds, and `dependencies` the packages it needs, each `{id,version}` (the
+  least version), as the index's `requires.packages` names them. An install's
   `package` and `version` say what it chose and `installed` is what `library.install`
   returns. An install refused for code from an unknown source has `installed.code` too: each
   build's signer, with the `publicKey` to show the user and trust with `trust.set`. A listing's

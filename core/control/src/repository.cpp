@@ -358,7 +358,8 @@ namespace oscairn::repository
                 version.archiveSha256 = text(detail::member(archive, "sha256"), "archive.sha256");
                 version.archiveSize = number(detail::member(archive, "size"), "archive.size");
                 if(!hex(version.manifestSha256, 64) || !hex(version.archiveSha256, 64) || version.archiveSize > maxBlob) bad("a version's files are named wrongly: " + package.id + " " + version.version);
-                members(detail::member(v, "types"), [&](const std::string& type, V n) { if((type == "clap" || type == "lv2") && number(n, "types")) version.code = true; });
+                members(detail::member(v, "types"), [&](const std::string& type, V n) { version.types.push_back({type, number(n, "types")}); if((type == "clap" || type == "lv2") && version.types.back().second) version.code = true; });
+                each(detail::member(detail::member(v, "requires"), "packages"), [&](V d) { version.dependencies.push_back({text(detail::member(d, "id"), "requires.packages.id"), text(detail::member(d, "version"), "requires.packages.version")}); });
                 auto sizes = [&](V s) { version.size += number(detail::member(s, "size"), "size"); version.installed += number(detail::member(s, "installed"), "installed"); };
                 members(detail::member(v, "platforms"), [&](const std::string& name, V s) { version.platforms.push_back(name); if(name == platform()) sizes(s); });
                 if(const V common = detail::member(v, "common")) sizes(common);

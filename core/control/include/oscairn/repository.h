@@ -54,6 +54,8 @@ namespace oscairn::repository
         bool code = false;                              // it brings plugin builds
         std::vector<std::string> platforms;             // those it has builds for
         uint64_t size = 0, installed = 0;               // on this platform: download, and installed
+        std::vector<std::pair<std::string, uint64_t>> types;          // items of each type and plugins by format, as the index counts them
+        std::vector<std::pair<std::string, std::string>> dependencies; // requires.packages: each package ID and the least version
     };
     struct Package { std::string id, name, summary, license, publisherId, publisherName, publisherKey; std::vector<std::string> tags; std::vector<Version> versions; };
     struct Index { std::string repository, name, rootKey, indexKey, blobBase; uint64_t serial = 0; std::vector<std::string> mirrors; std::vector<Package> packages; };

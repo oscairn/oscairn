@@ -833,7 +833,10 @@ What changes for the plugin:
   [Publishing a package](developer-guide.md#publishing-a-package).
 - **Installing code:** a device installs a build signed by a key its trust store trusts for
   plugins without asking. A build that is unsigned or signed by an unknown key is installed
-  only after the user agrees (`acceptUnsignedCode`; the desktop's Install anyway). A build
+  only after the user agrees (`acceptUnsignedCode`; the desktop's Install anyway). Installing
+  from a repository, the desktop also offers to trust the publisher for plugins, showing its
+  name, key fingerprint and full key; once trusted, its later builds install without asking.
+  Nothing trusts a publisher on its own: the repository listing a package does not. A build
   signed by a revoked key is never installed.
 - **A plugin that is not here,** in another version, or that fails to load opens as a
   stand-in: silent, its ports and parameters as saved, its state written back unchanged, so

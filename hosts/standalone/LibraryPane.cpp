@@ -307,11 +307,13 @@ namespace oscairn::standalone
         options_.onClick = [this] { itemMenu(list_.getSelectedRow()); };
         options_.setTooltip("Everything for the selected item: edit, color, copy, delete. A right click or a long press on a row does the same");
         libraries_.onClick = [this] { librariesMenu(); };
-        libraries_.setTooltip("Install a library or an exported Performance, uninstall a library, or show a hidden tag");
+        libraries_.setTooltip("The installed libraries and plugins, to uninstall one, or show a hidden tag");
+        install_.onClick = [this] { installMenu(); };
+        install_.setTooltip("Install from the Catalog, or from a file");
         for(auto* c : std::initializer_list<juce::Component*>{&search_, &favorites_, &recent_, &compactButton_, &sideView_, &list_, &options_, &audition_, &status_}) addAndMakeVisible(c);
         addChildComponent(keep_);
-        for(auto* c : std::initializer_list<juce::Component*>{&send_, &part_, &cancel_, &pick_, &performances_, &sounds_, &libraries_}) addChildComponent(c);
-        performances_.setVisible(mode_ == Mode::Play); sounds_.setVisible(mode_ == Mode::Play); libraries_.setVisible(mode_ == Mode::Play);
+        for(auto* c : std::initializer_list<juce::Component*>{&send_, &part_, &cancel_, &pick_, &performances_, &sounds_, &libraries_, &install_}) addChildComponent(c);
+        performances_.setVisible(mode_ == Mode::Play); sounds_.setVisible(mode_ == Mode::Play); libraries_.setVisible(mode_ == Mode::Play); install_.setVisible(mode_ == Mode::Play);
         cancel_.setVisible(mode_ == Mode::Pick); pick_.setVisible(mode_ == Mode::Pick);
         if(const auto f = viewPreference(); f.existsAsFile())
         {
@@ -738,6 +740,7 @@ namespace oscairn::standalone
             if(send_.isVisible()) send_.setBounds(bottom.removeFromRight(touch ? 170 : 140));
             else if(part_.isVisible()) part_.setBounds(bottom.removeFromRight(touch ? 150 : 120));
             bottom.removeFromRight(gap); libraries_.setBounds(bottom.removeFromRight(touch ? 140 : 110));
+            bottom.removeFromRight(gap); install_.setBounds(bottom.removeFromRight(touch ? 120 : 90));
             bottom.removeFromRight(gap);
         }
         options_.setBounds(bottom.removeFromRight(touch ? 130 : 100)); bottom.removeFromRight(gap);
@@ -885,7 +888,6 @@ namespace oscairn::standalone
     void LibraryPane::librariesMenu()
     {
         juce::PopupMenu menu;
-        menu.addItem(1, "Install from a file...");
         menu.addItem(999, "Install from a repository...");
         // Tags hidden from the tag list, to show again.
         juce::PopupMenu hidden;
@@ -930,7 +932,6 @@ namespace oscairn::standalone
             menu.addItem(int(i) + 2, "Uninstall " + text(installed[i].name) + " (" + juce::String(int(installed[i].items)) + (installed[i].items == 1 ? " item)" : " items)"));
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraries_), [safe = juce::Component::SafePointer<LibraryPane>(this), installed, hiddenTags, plugins](int chosen) {
             if(!safe || chosen <= 0) return;
-            if(chosen == 1) { safe->install(); return; }
             if(chosen == 999) { safe->installFromRepository(); return; }
             if(chosen >= 100000)
             {
@@ -1031,6 +1032,48 @@ namespace oscairn::standalone
         });
     }
 
+    // Exactly two ways to install, nothing urging more: the Catalog, and an archive file.
+    juce::PopupMenu LibraryPane::installOptions()
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Catalog");
+        menu.addItem(2, "File");
+        return menu;
+    }
+
+    void LibraryPane::installMenu()
+    {
+        installOptions().showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&install_), [safe = juce::Component::SafePointer<LibraryPane>(this)](int chosen) {
+            if(!safe) return;
+            if(chosen == 1) safe->showCatalog(safe->query_.kind);
+            if(chosen == 2) safe->install();
+        });
+    }
+
+    // The Catalog over the Library, as large as the screen allows; what is installed already is
+    // left out: libraries by ID, plugin packages by their plugin's.
+    void LibraryPane::showCatalog(const std::string& kind)
+    {
+        std::set<std::string> installed;
+        for(const auto& l : engine_.libraries()) installed.insert(l.id);
+        for(const auto& p : engine_.installedPlugins()) installed.insert(p.id);
+        auto* content = new Catalog(engine_, kind, std::move(installed));
+        setDesktopMode(*content, mode());
+        if(mode() == 2) content->setSize(std::min(984, std::max(600, getWidth() - 40)), std::min(560, std::max(400, getHeight() - 40)));
+        juce::DialogWindow::LaunchOptions options;
+        options.dialogTitle = "Catalog";
+        options.content.setOwned(content); options.componentToCentreAround = this; options.useNativeTitleBar = true; options.resizable = false;
+        options.dialogBackgroundColour = ink(Ink::Background);
+        auto* dialog = options.launchAsync();
+        catalog_ = content;
+        content->close.onClick = [dialog] { dialog->exitModalState(0); };
+        content->onInstall = [safe = juce::Component::SafePointer<LibraryPane>(this), dialog](const Offer& o) {
+            dialog->exitModalState(0);
+            if(safe) safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher);
+        };
+        content->read();
+    }
+
     // Its address, the official repository's to start with, or its folder. Another repository's
     // root key is trusted only when the user says so (listRepository); the engine knows the
     // official one's and the device's own.
@@ -1103,25 +1146,57 @@ namespace oscairn::standalone
             options.dialogBackgroundColour = ink(Ink::Background);
             auto* dialog = options.launchAsync();
             content->close.onClick = [dialog] { dialog->exitModalState(0); };
-            content->onInstall = [safe, dialog, folder](const std::string& id, const std::string& version) {
+            content->onInstall = [safe, dialog, folder, listing](const std::string& id, const std::string& version) {
                 dialog->exitModalState(0);
-                if(safe) safe->installPackage(folder, id, version, false);
+                std::string publisher;
+                for(const auto& p : listing.packages) if(p.id == id) publisher = p.publisher;
+                if(safe) safe->installPackage(folder, id, version, false, publisher);
             };
         });
     }
 
-    void LibraryPane::installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode)
+    void LibraryPane::installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher)
     {
         uint64_t job = 0;
         if(const auto error = engine_.packages([&](Control& c) { job = c.installFromRepository(folder, id, version, acceptCode); }); !error.empty()) { tell(text(error)); return; }
         tell("Installing " + text(id) + " " + text(version) + "...");
-        awaitPackageJob(job, [safe = juce::Component::SafePointer<LibraryPane>(this), folder, id, version](const Control::PackageJob& done) {
+        awaitPackageJob(job, [safe = juce::Component::SafePointer<LibraryPane>(this), folder, id, version, publisher](const Control::PackageJob& done) {
             if(!safe) return;
-            // Code from an unknown source asks first, as installing an archive does.
+            // Code from an unknown source asks first, as installing an archive does; signed code
+            // can instead have its publisher trusted for plugins, shown by name, fingerprint and
+            // full key, and the install tried again.
             if(done.state == "failed" && done.error.find("unknown source") != std::string::npos)
             {
-                auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::WarningIcon, "Install anyway?", text(done.error), "Install anyway", "Cancel", safe.getComponent());
-                juce::AlertWindow::showAsync(options, [safe, folder, id, version](int chosen) { if(safe && chosen == 1) safe->installPackage(folder, id, version, true); });
+                std::vector<std::string> keys;
+                for(const auto& c : done.installed.code)
+                    if(c.status == "unknown" && !c.publicKey.empty() && std::find(keys.begin(), keys.end(), c.publicKey) == keys.end()) keys.push_back(c.publicKey);
+                const auto who = publisher.empty() ? juce::String("this publisher") : text(publisher);
+                juce::String said = text(done.error);
+                for(const auto& k : keys) said << "\n\nPublisher: " << who << "\nKey fingerprint: " << fingerprint(signing::keyId(k)) << "\nFull key: " << text(k);
+                if(keys.empty())
+                {
+                    auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::WarningIcon, "Install anyway?", said, "Install anyway", "Cancel", safe.getComponent());
+                    juce::AlertWindow::showAsync(options, [safe, folder, id, version](int chosen) { if(safe && chosen == 1) safe->installPackage(folder, id, version, true); });
+                }
+                else
+                {
+                    said << "\n\nTrust " << who << " to run its plugins on this device only if you know that key is theirs.";
+                    auto options = juce::MessageBoxOptions::makeOptionsYesNoCancel(juce::MessageBoxIconType::WarningIcon, "Install anyway?", said, "Trust " + who, "Install anyway", "Cancel", safe.getComponent());
+                    juce::AlertWindow::showAsync(options, [safe, folder, id, version, publisher, keys](int chosen) {
+                        if(!safe) return;
+                        if(chosen == 2) { safe->installPackage(folder, id, version, true, publisher); return; }
+                        if(chosen != 1) return;
+                        for(const auto& k : keys)
+                            if(const auto error = safe->engine_.packages([&](Control& c) {
+                                   // For plugins, beside whatever else the key is trusted for.
+                                   Control::TrustedKey t{"", k, publisher.empty() ? "Publisher " + signing::keyId(k) : publisher, {"plugins"}};
+                                   for(const auto& had : c.trustedKeys()) if(had.key == k) { t.name = had.name; t.scope = had.scope; t.scope.push_back("plugins"); }
+                                   c.setTrustedKey(t);
+                               }); !error.empty())
+                                { safe->tell(text(error)); return; }
+                        safe->installPackage(folder, id, version, false, publisher);
+                    });
+                }
                 safe->tell("");
                 return;
             }

@@ -58,7 +58,7 @@ juce_add_binary_data(oscairn_standalone_icons HEADER_NAME IconData.h NAMESPACE I
     ../../branding/mark-hills-on-light.svg
     ../../branding/mark-hills-mono.svg)
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Setlist.cpp Profile.cpp Launcher.cpp PlayView.cpp Controllers.cpp Splash.cpp Recording.cpp Settings.cpp)
+target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp Profile.cpp Launcher.cpp PlayView.cpp Controllers.cpp Splash.cpp Recording.cpp Settings.cpp)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"
@@ -124,7 +124,7 @@ target_compile_definitions(oscairn_pad_editor_test PRIVATE JUCE_WEB_BROWSER=0 JU
 add_dependencies(oscairn_pad_editor_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_splitters oscairn-plugin-scan oscairn-plugin-worker)
 if(BUILD_TESTING) # the Legacy Sampler
     juce_add_console_app(oscairn_desktop_shell_test PRODUCT_NAME "Oscairn Desktop Shell Test")
-    target_sources(oscairn_desktop_shell_test PRIVATE tests/desktop_shell.cpp DesktopShell.cpp PlayView.cpp Profile.cpp LibraryPane.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+    target_sources(oscairn_desktop_shell_test PRIVATE tests/desktop_shell.cpp DesktopShell.cpp PlayView.cpp Profile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
     target_link_libraries(oscairn_desktop_shell_test PRIVATE oscairn_standalone_icons oscairn_standalone_profiles oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
     target_compile_definitions(oscairn_desktop_shell_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
     add_dependencies(oscairn_desktop_shell_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_transpose oscairn_sampler oscairn_splitters oscairn-plugin-scan kick-clap-fixture-normal oscairn-plugin-worker)
@@ -147,7 +147,7 @@ if(BUILD_TESTING) # the Legacy Sampler
 endif()
 # Desktop controls for features the control API had first, against a socket session; no MIDI device is opened.
 juce_add_console_app(oscairn_desktop_gaps_test PRODUCT_NAME "Oscairn Desktop Gaps Test")
-target_sources(oscairn_desktop_gaps_test PRIVATE tests/desktop_gaps.cpp DesktopShell.cpp PlayView.cpp Profile.cpp LibraryPane.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_gaps_test PRIVATE tests/desktop_gaps.cpp DesktopShell.cpp PlayView.cpp Profile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_desktop_gaps_test PRIVATE oscairn_standalone_icons oscairn_standalone_profiles oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_gaps_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 # A silent instrument describing every oscairn.ui rich view (an FM operator view, envelopes, key maps), for the editors' tests; not installed.
@@ -156,7 +156,14 @@ target_link_libraries(oscairn_views_test_plugin PRIVATE oscairn_clap_headers)
 set_target_properties(oscairn_views_test_plugin PROPERTIES PREFIX "" SUFFIX ".clap" OUTPUT_NAME oscairn-views-test CXX_VISIBILITY_PRESET hidden)
 add_dependencies(oscairn_desktop_gaps_test oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker oscairn_views_test_plugin)
 add_test(NAME desktop-gaps COMMAND oscairn_desktop_gaps_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
-set_tests_properties(desktop-gaps PROPERTIES TIMEOUT 60 ENVIRONMENT "${worker_environment};OSCAIRN_TEST_VIEWS=$<TARGET_FILE:oscairn_views_test_plugin>")
+set(gaps_environment "${worker_environment};OSCAIRN_TEST_VIEWS=$<TARGET_FILE:oscairn_views_test_plugin>")
+# The Catalog's test reads a signed repository in a folder, made by the package repository template's index builder.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_dependencies(oscairn_desktop_gaps_test oscairn-sign kick-clap-fixture-normal)
+    list(APPEND gaps_environment "OSCAIRN_TEST_MAKE_REPOSITORY=${Python3_EXECUTABLE}|${CMAKE_CURRENT_SOURCE_DIR}/tests/make_repository.py|$<TARGET_FILE:oscairn-sign>|$<TARGET_FILE:kick-clap-fixture-normal>|${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py")
+endif()
+set_tests_properties(desktop-gaps PROPERTIES TIMEOUT 120 ENVIRONMENT "${gaps_environment}")
 # The message thread never waits on the engine's socket for a mute, a fader drag, the views' polls or opening a Performance, which shows soon after the engine's load.
 juce_add_console_app(oscairn_ui_waits_test PRODUCT_NAME "Oscairn UI Waits Test")
 target_sources(oscairn_ui_waits_test PRIVATE tests/ui_waits.cpp PartsModel.cpp Engine.cpp SoundPickerModel.cpp)

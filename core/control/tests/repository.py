@@ -350,6 +350,10 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
               'each version says whether it fits this device: ' + json.dumps(versions))
         check('no build for this device' in listed['org.kick.other']['versions'][0]['incompatible'] and listed['org.kick.other']['publisherKey'] == keys['publisher'][0],
               'a package without a build for this device says so')
+        analog = listed['org.kick.analog']['versions'][0]
+        check(analog['types'] == {'clap': 1} and analog['dependencies'] == [{'id': 'org.kick.factory', 'version': '1.1.0'}] and
+              listed['org.kick.factory']['versions'][0]['types'] == {'oscairn.asset': 1} and listed['org.kick.factory']['versions'][0]['dependencies'] == [],
+              'each version lists what it holds by type and the packages it needs: ' + json.dumps(analog))
 
         # Code from a publisher not trusted for plugins needs a yes, as an archive's does.
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})

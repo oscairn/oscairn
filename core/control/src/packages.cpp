@@ -214,7 +214,7 @@ uint64_t Session::listRepository(const std::string& source){
             out.repository=index.repository;out.name=index.name;out.serial=index.serial;
             for(const auto& p:index.packages){
                 RepositoryPackage listed{p.id,p.name,p.summary,p.license,p.publisherName,p.publisherKey,p.tags,{}};
-                for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.size,v.installed});
+                for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.size,v.installed,v.types,v.dependencies});
                 out.packages.push_back(std::move(listed));
             }
             out.state="done";

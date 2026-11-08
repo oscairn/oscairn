@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include "Apps.h"
+#include "Catalog.h"
 #include "Engine.h"
 #include "Icons.h"
 #include "Theme.h"
@@ -135,6 +136,13 @@ namespace oscairn::standalone
         // Libraries (RFC 0021): install an archive file, chosen and asked about; delete the item
         // at row, asked first; the installed libraries, to install another or uninstall one.
         void install();
+        // Install... (RFC 0031): exactly two ways, the Catalog (the enabled repositories' packages)
+        // and File (an archive, install()). showCatalog opens the Catalog over the Library, on the
+        // kind shown ("plugin" for plugins).
+        void installMenu();
+        static juce::PopupMenu installOptions(); // Catalog (1) and File (2)
+        void showCatalog(const std::string& kind);
+        Catalog* catalog() const { return catalog_.getComponent(); }
         void deleteItem(int row);
         void librariesMenu();
         void removePlugin(const Control::InstalledPlugin& plugin);
@@ -145,7 +153,10 @@ namespace oscairn::standalone
         void installFromRepository();
         void openRepository(const juce::String& address);
         void listRepository(const std::string& folder);
-        void installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode);
+        // Code from a publisher not trusted for plugins asks first: trust the publisher (its name,
+        // fingerprint and full key shown; `publisher` names it when known) and try again, install
+        // anyway this once, or cancel. Nothing is trusted unless the user says so.
+        void installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher = {});
         void awaitPackageJob(uint64_t job, std::function<void(const Control::PackageJob&)> then);
         void itemMenu(int row);                             // everything that can be done with it
         void editItem(int row);                              // its name, description and tags, asked for
@@ -209,9 +220,10 @@ namespace oscairn::standalone
         Sidebar sidebar_{*this};
         juce::Viewport sideView_;
         juce::ListBox list_{"Performances", this};
-        juce::TextButton send_{"Add to setlist"}, part_{"New part"}, cancel_{"Cancel"}, pick_{"Choose"}, options_{"Options..."}, libraries_{"Libraries..."}, audition_{"Audition"}, keep_{"Keep"};
+        juce::TextButton send_{"Add to setlist"}, part_{"New part"}, cancel_{"Cancel"}, pick_{"Choose"}, options_{"Options..."}, libraries_{"Libraries..."}, install_{juce::String::fromUTF8("Install…")}, audition_{"Audition"}, keep_{"Keep"};
         std::unique_ptr<juce::FileChooser> chooser_;
         std::unique_ptr<juce::AlertWindow> editor_;
         juce::Label status_;
+        juce::Component::SafePointer<Catalog> catalog_;
     };
 }

@@ -63,6 +63,18 @@ Checked when built and tested; the sections below say how.
 - [ ] 3. Publishing: the `oscairn publish` command, checks, immutable versions and yanking
 - [ ] 4. Revocation lists and the takedown process
 - [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters
+      (built 2026-11-07 on the desktop, [interim](#in-the-library) until the Catalog app:
+      Install… with Catalog and File; the Catalog listing the enabled repositories' packages of
+      the kind shown that are not installed, searched, grayed with the reason where this device
+      cannot install them (its platform and system version), a package's details and Install,
+      and trusting an unknown publisher for plugins from the install question; each version's
+      `types` and the packages it needs (`requires.packages`, which the index builder now
+      writes from the archive's asset libraries) in `packages.job`'s listing; `desktop-gaps`
+      against a signed folder repository, `control-repository`. Not yet: the Catalog app and
+      its actions, `packages.search` and `packages.get`, the index in the library's database,
+      estimates and surfaces as filters, Show all, the Panel's own Catalog screen (the desktop
+      dialog is drawn at touch sizes there); the gate's search on an instrument with no network
+      is not tested: listing still fetches the root)
 - [ ] 6. Updates: packages, Performances' locks moved on explicitly, apps
 - [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source
 - [ ] 8. The official repository goes public: hosting, mirrors, policy
@@ -446,9 +458,23 @@ publisher, and any package newly bringing plugin or app code, also needs a maint
 
 ### In the Library
 
-Each type's list in the Library app has **Install…**: the repositories' packages holding items
-of that type that are not installed, searched and filtered like the rest, from the local index.
-Opening one shows its page from the Catalog app's action (below).
+The Library's **Install…** offers exactly two things (decided 2026-11-07): **Catalog** and
+**File**. File installs an archive (`.olib`) chosen from the file browser, as the Library always
+has. Catalog opens the catalog on the kind of list shown: the enabled repositories' packages
+holding items of that type (Performances, Sounds) or plugins that are not installed, searched
+like the rest, from each repository's index as `packages.list` reads it. Opening one shows its
+page from the Catalog app's action (below). Opening a repository by its address or folder is not
+on Install…; it belongs with the repositories in Settings.
+
+**Interim, until the Catalog app exists (built 2026-11-07):** the Catalog is a view in the
+desktop Library, labeled Catalog. Its rows name each package, its version, publisher and
+summary; what this device cannot install is grayed with the reason. A package's details are its
+summary, version, license, publisher and key fingerprint, repository, download and installed
+size, and the packages it needs, with Install, which runs the install job and its questions. A
+plugin by a publisher not trusted for plugins asks first: **Trust** the publisher (its name, key
+fingerprint and full key shown, trusted for plugins only when the user says so) and try again,
+**Install anyway** this once, or Cancel. No Show all yet, and no audio previews or screenshots
+(`details/` is not read yet). The Catalog app replaces the view and keeps its behavior.
 
 ### The Catalog app
 
@@ -812,6 +838,8 @@ Jacob's decisions on six of the open questions:
 - **No pressure to install more:** the Library's entry is **Install…**, not "Get more"; the
   Catalog has no featured or promoted packages, no counts or badges urging installs, and its
   only card on Home is for updates to what is installed (decided 2026-11-07).
+- **Install… in the Library** offers exactly Catalog and File (decided 2026-11-07,
+  [in the Library](#in-the-library)).
 - **Large sample libraries:** the official repository may host a few. Others are hosted by their
   publishers through the blob base ([package files](#package-files)).
 - **A manufacturer replacing or hiding the official repository:** allowed, but heavily

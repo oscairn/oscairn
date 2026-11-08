@@ -186,6 +186,9 @@ The plugin never knows which. What it does:
   reaches, and orders a lane's targets after the plugin. Events beyond a block's event limit are
   dropped and counted.
 
+A plugin whose only outputs are its lanes, with no audio or note port, loads and runs as any
+node; the Oscairn LFO is one.
+
 
 ### Voice budget
 
@@ -992,6 +995,8 @@ The bundled plugins are working references ([plugins](../plugins/README.md)):
   `resources` with its tail), the state extension, and Wet declared as its `mix` role.
 - **Step Sequencer** (`plugins/step-sequencer/step_sequencer.cpp`): a note-only plugin with
   parameter-target lanes.
+- **LFO** (`plugins/lfo/lfo.cpp`): a modulator with no audio or note output, a MODULATE lane
+  sent every 32 samples, transport sync, and `oscairn.ui` hints.
 
 ## Known limits
 

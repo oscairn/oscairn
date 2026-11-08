@@ -74,6 +74,7 @@ struct Plugin {
     // Atomic: CLAP lets the main thread (state save, get_value) read these while
     // the audio thread writes them in process().
     std::atomic<double> gain{.5}, toggle{0}, mode{0};
+    double modulation = 0; // audio thread: the gain's CLAP modulation, added to it in the output
     double shownMode = 0; // main thread: the mode the parameters' info last described
     clap_id timerId = CLAP_INVALID_ID;
     uint32_t maxFrames = 0, tailFrames=0;
@@ -170,6 +171,8 @@ struct Plugin {
             if (kind==0xb0 && m->data[1]==120) gate=held=false;
             if (kind==0xb0 && m->data[1]==123) {held=false;if(!sustain)gate=false;}
         }
+        if (e->type == CLAP_EVENT_PARAM_MOD && reinterpret_cast<const clap_event_param_mod_t*>(e)->param_id == 7)
+            modulation = reinterpret_cast<const clap_event_param_mod_t*>(e)->amount;
         if (e->type == CLAP_EVENT_PARAM_VALUE) {
             const auto* value = reinterpret_cast<const clap_event_param_value_t*>(e);
             if (value->param_id == 8) toggle = value->value;
@@ -216,7 +219,7 @@ struct Plugin {
                 ++event;
             }
             for (uint32_t c = 0; c < b->audio_outputs[0].channel_count; ++c) {
-                float value = s.gate || s.down>0 ? static_cast<float>(s.gain) : static_cast<float>(s.gain)*s.tailFrames/1024.f;
+                float value = s.gate || s.down>0 ? static_cast<float>(s.gain + s.modulation) : static_cast<float>(s.gain + s.modulation)*s.tailFrames/1024.f;
                 if (s.kind == 1) value = b->audio_inputs[0].data32[c][i] * static_cast<float>(s.gain);
                 if (s.kind == 3) value = std::numeric_limits<float>::quiet_NaN();
                 b->audio_outputs[0].data32[c][i] = value;
@@ -264,7 +267,7 @@ struct Plugin {
                 std::strcpy(out->name, index ? "Read only" : "Gain");
                 out->min_value = 0; out->max_value = 1; out->default_value = .5;
                 if (std::getenv("KICK_FIXTURE_BAD_DEFAULT")) out->default_value = index ? 1e34 : std::numeric_limits<double>::quiet_NaN();
-                out->flags = index ? CLAP_PARAM_IS_READONLY : CLAP_PARAM_IS_AUTOMATABLE;
+                out->flags = index ? CLAP_PARAM_IS_READONLY : CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_MODULATABLE;
                 return true;
             },
             [](const clap_plugin_t* p, clap_id id, double* value) { get(p).main(); if (id == 8) *value = get(p).toggle; else if (id == 9) *value = get(p).mode; else if (id == 7 || id == 99) *value = get(p).gain; else return false; return true; },

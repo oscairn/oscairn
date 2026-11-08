@@ -147,8 +147,8 @@ endif()
 # RFC 0011's controls driven by plugin lanes, flattened into the graph; again with every plugin in a worker.
 add_executable(oscairn-control-source-test tests/control_source.cpp)
 target_link_libraries(oscairn-control-source-test PRIVATE oscairn_control)
-add_test(NAME control-source COMMAND oscairn-control-source-test $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:kick-clap-fixture-normal>)
-add_test(NAME control-source-workers COMMAND oscairn-control-source-test $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:kick-clap-fixture-normal>)
+add_test(NAME control-source COMMAND oscairn-control-source-test $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_lfo> $<TARGET_FILE:oscairn_basic_synth>)
+add_test(NAME control-source-workers COMMAND oscairn-control-source-test $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_lfo> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-source control-source-workers PROPERTIES TIMEOUT 120)
 set_tests_properties(control-source-workers PROPERTIES ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
 

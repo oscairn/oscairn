@@ -9,6 +9,7 @@ for build commands and the contracts for a new plugin.
 | Basic Synth | [basic_synth.cpp](basic-synth/basic_synth.cpp) | Polyphonic instrument, sample-timed parameters/expression, native sound contexts, channel parts and per-voice output buses, pitch bend and the mod wheel, `oscairn.ui` hints with roles |
 | Step Sequencer | [step_sequencer.cpp](step-sequencer/step_sequencer.cpp) | Note-only source, transport timing, editable steps and parameter-lock lanes |
 | Delay | [delay.cpp](delay/delay.cpp) | Independent native effect contexts, parameter/state APIs, tails and tempo glide, a `mix` role |
+| LFO | [lfo.cpp](lfo/lfo.cpp) | A modulator with no sound: a MODULATE param-target lane to parameters and controls, free or transport-synced rate, `oscairn.ui` hints |
 | Legacy Sampler | [oscairn/sampler](https://github.com/oscairn/sampler), its own repository, fetched at a pinned commit for the tests; not bundled | One-region SFZ patches over preloaded WAV audio shared between sound contexts, with portable saved assets |
 | Modular | [modular.cpp](modular/src/modular.cpp), [README](modular/README.md) | chillbeast's patchable grid synth (imported engine) wrapped as a CLAP instrument; links JUCE, built with `OSCAIRN_MODULAR` or the desktop |
 | Split / Join | [splitters.cpp](splitters/splitters.cpp) | The nodes at either end of a part's left/right, mid/side and band lanes (RFC 0011 step 3): two plugins in one bundle, fixed ports, the mode a parameter; Linkwitz-Riley crossovers whose bands sum flat |
@@ -142,3 +143,31 @@ context, they share its patch edits; select distinct contexts for independent lo
 inactive edits, launch cancellation and exact 3/4 and 4/4 boundaries across 37/512-frame
 blocks with allocation guards. Performance and sound-picker tests cover persistence and
 channel-specific sound/mapping selection. Audible acceptance is tracked separately.
+
+## LFO
+
+`org.oscairn.lfo` (`oscairn-lfo.clap`, 0.1.0) has no audio output and no sound: it sends on one
+param-target lane, **LFO** (lane 0, [RFC 0002](../docs/rfcs/0002-param-target.md)), which the
+user maps to a parameter or makes a control's source ([RFC 0011](../docs/rfcs/0011-performance-ui-and-editors.md#the-control-tree)).
+It sends a point every 32 samples of its own count (1.5 kHz at 48 kHz), whatever the host's
+block size, and one at each note that restarts it, each the shape's value at that sample.
+
+| Parameter ID | Control | Plain values |
+| --- | --- | --- |
+| 1 | Rate | 0.01–40 Hz, free; default 1 |
+| 2 | Sync | 0 = free, 1 = synced to the transport's beat |
+| 3 | Synced rate | a cycle of 0 = 4 bars, 1 = 2 bars, 2 = 1 bar, 3 = 1/2, 4 = 1/4 (default), 5 = 1/8, 6 = 1/16, 7 = 1/32 |
+| 4 | Shape | 0 = sine, 1 = triangle, 2 = saw, 3 = square, 4 = sample and hold |
+| 5 | Depth | 0–1; default 1 |
+| 6 | Phase | 0–1 of a cycle where it starts (and restarts); default 0 |
+| 7 | Retrigger | 0 = off, 1 = each note on its note input restarts it at Phase |
+| 8 | Polarity | 0 = bipolar (−Depth to +Depth), 1 = unipolar (0 to Depth) |
+| 9 | Mode | 0 = MODULATE (default), 1 = SET |
+
+MODULATE sends the amount; through a control it is added to the control's value, so a bipolar
+LFO swings around the knob. SET sends a position, 0.5 ± Depth/2 bipolar or 0 to Depth unipolar.
+Synced while the transport plays, its phase follows the song position; stopped, or free,
+it runs on. Sample and hold draws a new value at each cycle
+from a fixed seed, so a render repeats. `control-source` checks its sine and triangle at every point through a control's
+relative targets, in the engine and in a worker; its other shapes, Sync, Retrigger and SET
+are not checked by a test yet.

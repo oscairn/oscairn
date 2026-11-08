@@ -743,7 +743,10 @@ struct Host::Impl {
                 }
             }
         }
-        if (outputs.empty() && noteOutputs.empty()) throw std::runtime_error("Plugin has neither audio nor note outputs");
+        // A modulator may send only on parameter-target lanes (RFC 0002): those are its outputs.
+        const auto* lanes = static_cast<const oscairn_plugin_param_target_lanes_t*>(plugin->get_extension(plugin, OSCAIRN_EXT_PARAM_TARGET_LANES));
+        if (outputs.empty() && noteOutputs.empty() && !(lanes && lanes->count && lanes->count(plugin) > 0))
+            throw std::runtime_error("Plugin has neither audio nor note outputs");
         size_t ni = 0, no = 0;
         for (const auto& p : inputs) ni += p.channels;
         for (const auto& p : outputs) no += p.channels;

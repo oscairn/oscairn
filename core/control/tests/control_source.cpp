@@ -4,11 +4,16 @@
 // into the graph at commit, so the lane's events reach every parameter under the control at
 // their sample, in the audio thread. The test fixture's instrument plays exactly its gain while
 // a note is held, so its output is the parameter's value at every sample.
-//   oscairn-control-source-test SEQUENCER.clap FIXTURE.clap
+// The Oscairn LFO, the first first-party MODULATE sender, drives a control's relative targets as
+// CLAP modulation (the fixture adds its gain's modulation to its gain).
+//   oscairn-control-source-test SEQUENCER.clap FIXTURE.clap LFO.clap BASIC_SYNTH.clap
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
 
+#include <algorithm>
 #include <array>
+#include <map>
+#include <span>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -47,17 +52,19 @@ namespace
     }
 
     // Each output's left channel over `seconds`, in blocks of `block`, from sample `start` of the
-    // transport (it plays from 0 at the first block).
+    // transport (it plays from 0 at the first block); `note`: a key down at the first sample.
     struct Take { size_t start = 0; std::array<std::vector<float>, 2> out; float at(int o, size_t sample) const { return out[size_t(o)][sample - start]; } };
-    Take render(Session& s, uint32_t block, size_t& position, double seconds = 1)
+    Take render(Session& s, uint32_t block, size_t& position, double seconds = 1, bool note = false)
     {
         std::vector<float> l(maxFrames), r(maxFrames), bl(maxFrames), br(maxFrames);
         float* out[] = {l.data(), r.data(), bl.data(), br.data()};
         Take got{position, {}};
+        const auto down = kick::clap::Event::midi(0x90, 60, 100);
         for(size_t at = 0; at < size_t(seconds * rate); at += block)
         {
             s.service();
-            check(s.process(nullptr, 0, out, 4, block), "render");
+            const bool first = note && at == 0;
+            check(s.process(nullptr, 0, out, 4, block, first ? std::span<const kick::clap::Event>(&down, 1) : std::span<const kick::clap::Event>()), "render");
             got.out[0].insert(got.out[0].end(), l.begin(), l.begin() + block);
             got.out[1].insert(got.out[1].end(), bl.begin(), bl.begin() + block);
             position += block;
@@ -146,15 +153,117 @@ namespace
         const auto got = render(s, 256, position, .2);
         check(near(got.at(0, 0), .5) && near(got.at(1, 0), .5), "undone, the lane drives nothing: " + std::to_string(got.at(0, 0)));
     }
+    // The LFO's parameters (plugins/lfo/lfo.cpp) and its points: every 32 samples of its own count.
+    enum : clap_id { lfoRate = 1, lfoShape = 4, lfoDepth = 5, lfoMode = 9 };
+    constexpr uint32_t interval = 32;
+
+    // The LFO with its parameters set, two fixtures playing a held key to Main and B, and a control at
+    // `value` with the LFO's lane as its source and targets a and b.
+    struct LfoRig { NodeId lfo, a, b; uint32_t control; };
+    LfoRig lfoRig(Session& s, const char* lfo, const char* fixture, double shape, double value, const MacroTarget& a, const MacroTarget& b)
+    {
+        LfoRig r{s.add("lfo", lfo), s.add("a", fixture), s.add("b", fixture), 0};
+        s.setParameter(r.lfo, lfoRate, 3); s.setParameter(r.lfo, lfoShape, shape); s.setParameter(r.lfo, lfoDepth, .5);
+        s.connectNotes(graphInput, r.a); s.connectNotes(graphInput, r.b);
+        s.connectAudio(AudioConnection{{r.a, 0, 0}, {graphOutput, 0, 0}, 1});
+        s.connectAudio(AudioConnection{{r.b, 0, 0}, {graphOutput, 1, 0}, 1});
+        r.control = s.addMacro("LFO");
+        auto ta = a, tb = b; ta.node = r.a; tb.node = r.b; ta.param = tb.param = gain;
+        s.setMacroTargets(r.control, {ta, tb});
+        s.setMacroSource(r.control, r.lfo, 0);
+        s.commit();
+        s.setMacro(r.control, value);
+        return r;
+    }
+
+    // The LFO's shape at each of its points, as it computes it: sine or triangle, -1..1.
+    std::vector<double> shapeAt(int shape, size_t samples)
+    {
+        std::vector<double> w;
+        double phase = 0;
+        for(size_t n = 0; n < samples; ++n)
+        {
+            if(n % interval == 0) w.push_back(shape == 1 ? (phase < .5 ? 4 * phase - 1 : 3 - 4 * phase) : std::sin(2 * 3.14159265358979323846 * phase));
+            phase += 3.0 / rate;
+            if(phase >= 1) phase -= std::floor(phase);
+        }
+        return w;
+    }
+
+    // Piece 2: the LFO's MODULATE lane through a control at 0.5 to two relative targets (0.3 to 0.7,
+    // and reversed) is CLAP modulation on each fixture's gain, from each point to the next; the
+    // gains' own values stay at 0.5.
+    void lfoModulates(const char* lfo, const char* fixture)
+    {
+        for(const int shape : {0, 1})
+            for(const uint32_t block : {256u, 37u})
+            {
+                Session s(rate, maxFrames, {}, twoOutputs);
+                const auto r = lfoRig(s, lfo, fixture, shape, .5, MacroTarget{.start = .3, .end = .7, .relative = true}, MacroTarget{.start = .7, .end = .3, .relative = true});
+                size_t position = 0;
+                const auto got = render(s, block, position, .5, true);
+                const auto w = shapeAt(shape, got.out[0].size());
+                const std::string what = std::string(shape ? "triangle" : "sine") + ", blocks of " + std::to_string(block);
+                size_t bad = 0; double peak = 0;
+                for(size_t k = 0; k < w.size() && (k + 1) * interval <= got.out[0].size(); ++k)
+                {
+                    const double x = std::clamp(.5 + .5 * w[k], 0.0, 1.0);
+                    const double a = .5 + (.3 + .4 * x - .5), b = .5 + (.7 - .4 * x - .5);
+                    const size_t at = k * interval, last = at + interval - 1;
+                    if(!near(got.at(0, at), a) || !near(got.at(1, at), b) || !near(got.at(0, last), a) || !near(got.at(1, last), b))
+                    {
+                        if(!bad++) std::fprintf(stderr, "FAIL: %s: point %zu (sample %zu): A %f, B %f; expected %f, %f\n", what.c_str(), k, at, got.at(0, at), got.at(1, at), a, b);
+                    }
+                    peak = std::max(peak, std::abs(got.at(0, at) - .5));
+                }
+                check(!bad, what + ": the targets follow the LFO at its points (" + std::to_string(bad) + " wrong)");
+                check(near(peak, .2), what + ": a depth of 0.5 swings the control 0.5 either way, its whole travel, each gain 0.2: " + std::to_string(peak));
+                check(near(s.parameter(r.a, gain), .5) && near(s.parameter(r.b, gain), .5), what + ": modulation leaves the gains' values at 0.5");
+                check(near(s.graphState().macros.front().value, .5), what + ": the control keeps its own value");
+            }
+    }
+
+    // The Basic Synth's Brightness modulated through a relative target: the sound changes, the
+    // parameter does not.
+    void synthBrightness(const char* lfo, const char* synth)
+    {
+        auto play = [&](bool driven) {
+            Session s(rate, maxFrames);
+            const auto l = s.add("lfo", lfo), v = s.add("synth", synth);
+            s.setParameter(l, lfoRate, 5); s.setParameter(v, 1, .5);
+            s.connectNotes(graphInput, v); s.connectAudio(v, graphOutput);
+            const auto c = s.addMacro("Bright");
+            s.setMacroTargets(c, {MacroTarget{.node = v, .param = 1, .start = 0, .end = 1, .relative = true}});
+            if(driven) s.setMacroSource(c, l, 0);
+            s.commit(); s.setMacro(c, .5);
+            std::vector<float> left(maxFrames), right(maxFrames), all;
+            float* out[] = {left.data(), right.data()};
+            const auto down = kick::clap::Event::midi(0x90, 48, 127);
+            for(size_t at = 0; at < size_t(rate / 2); at += maxFrames)
+            {
+                s.service();
+                check(s.process(out, maxFrames, at ? std::span<const kick::clap::Event>() : std::span<const kick::clap::Event>(&down, 1)), "render the synth");
+                all.insert(all.end(), left.begin(), left.end());
+            }
+            check(near(s.parameter(v, 1), .5), "Brightness keeps its value under modulation");
+            return all;
+        };
+        const auto still = play(false), moved = play(true);
+        double difference = 0, level = 0;
+        for(size_t i = 0; i < still.size(); ++i) { difference += std::abs(still[i] - moved[i]); level += std::abs(still[i]); }
+        check(level > 0 && difference > .05 * level, "the LFO on Brightness changes the sound: " + std::to_string(difference / std::max(level, 1e-9)));
+    }
 }
 
 int main(int argc, char** argv)
 {
-    if(argc < 3) { std::fprintf(stderr, "usage: %s SEQUENCER FIXTURE\n", argv[0]); return 2; }
+    if(argc < 5) { std::fprintf(stderr, "usage: %s SEQUENCER FIXTURE LFO BASIC_SYNTH\n", argv[0]); return 2; }
     try
     {
         state_files::TemporaryDirectory temp;
         setLane(argv[1], argv[2], temp.path);
+        lfoModulates(argv[3], argv[2]);
+        synthBrightness(argv[3], argv[4]);
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(failures) return 1;

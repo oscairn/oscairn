@@ -101,7 +101,9 @@ drives: the sequencer's locks use it.
 - `core/engine` (`Graph`): mappings in the graph, as dependencies in the processing order;
   conversion to CLAP parameter events for the target in the same block.
 - `plugins/step-sequencer`: one lane per track, a lock value per step, sent at the step's sample before
-  its note. `plugins/basic-synth` has parameters to lock (Brightness, Level).
+  its note. `plugins/lfo`: one MODULATE (or SET) lane, a point every 32 samples.
+- The host loads a plugin whose only outputs are its lanes (`oscairn.param-target-lanes` with a
+  lane): a modulator needs no audio or note output. `plugins/basic-synth` has parameters to lock (Brightness, Level).
 - `oscairn-render --map SRC.LANE=DST.PARAM`.
 - `core/control` (`Session::setMacroSource`, `flattenControls`): a control's `source`, saved in
   the Performance and Sound, undoable, `controls.source` and each control's `source` in the
@@ -125,8 +127,16 @@ and load, and is undone.
 
 `note-routing` checks explicit per-note lane ID remapping and ordering after same-sample
 notes. Not yet verified by a test: the ordering of global locks before notes at the same sample (the test
-instruments read parameters every sample, so the order does not change their output), and
-the `MODULATE` path (no first-party plugin sends it yet).
+instruments read parameters every sample, so the order does not change their output).
+
+The `MODULATE` path has its first first-party sender, the Oscairn LFO (`plugins/lfo`).
+`control-source` drives a control at 0.5 with its lane (sine and triangle, 3 Hz, depth 0.5), the
+control's two relative targets the gains of two test instruments (0.3 to 0.7, and reversed),
+which add their gain's CLAP modulation to their gain: at each of the LFO's points (every 32
+samples) and up to the next, each output equals 0.5 plus that target's offset at the LFO's
+value there, with 256- and 37-sample blocks and with every plugin in a worker; the swing is
+±0.2, and the gains' own values stay at 0.5. The LFO on the Basic Synth's Brightness through a
+relative target changes its sound while Brightness keeps its value.
 
 ## Open questions
 

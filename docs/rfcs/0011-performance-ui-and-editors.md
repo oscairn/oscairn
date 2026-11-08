@@ -35,7 +35,7 @@ Checked when built and tested; the sections below say how.
   - [x] the desktop's controls for it
   - [x] transitions: a glide per scene along a curve, launching on the beat or bar, and a control morphing between two scenes ([status](#scenes-status))
   - [x] the mappings' scenes laid out as one table ([status](#scenes-status))
-- [ ] Plugins as control sources ([the control tree](#the-control-tree)): a plugin's lane drives a control, the tree flattened into the graph at commit (done); a first-party LFO; control lines in the Routing view
+- [ ] Plugins as control sources ([the control tree](#the-control-tree)): a plugin's lane drives a control, the tree flattened into the graph at commit (done); a first-party LFO (done, `plugins/lfo`); control lines in the Routing view
 
 ## Problem
 

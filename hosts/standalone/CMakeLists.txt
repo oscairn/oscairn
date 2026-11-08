@@ -105,7 +105,7 @@ target_link_libraries(oscairn_standalone PRIVATE
     juce::juce_gui_extra
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
-set(bundled_plugins oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_transpose oscairn_midi_delay oscairn_splitters)
+set(bundled_plugins oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn_lfo oscairn_transpose oscairn_midi_delay oscairn_splitters)
 if(TARGET oscairn_modular)
     list(APPEND bundled_plugins oscairn_modular)
 endif()

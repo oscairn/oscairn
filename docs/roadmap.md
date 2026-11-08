@@ -253,8 +253,8 @@ Decided 2026-11-08, from what the milestone test found:
      ([RFC 0011](rfcs/0011-performance-ui-and-editors.md))
    - [ ] plugins as control sources: a plugin's param-target lane drives a control, its tree
      flattened into the graph at commit so the lane's events reach every target at their sample
-     (done, [RFC 0002](rfcs/0002-param-target.md#lanes-driving-controls)); a first-party LFO;
-     control lines in the Routing view
+     (done, [RFC 0002](rfcs/0002-param-target.md#lanes-driving-controls)); a first-party LFO
+     (done, [plugins](../plugins/README.md#lfo)); control lines in the Routing view
 2. **Native sample patches** ([sample players and formats](sample-players-and-formats.md),
    [ESP observations](yamaha-esp-samples-research.md)). The Legacy Sampler lives in its own
    repository, [oscairn/sampler](https://github.com/oscairn/sampler), since October 31, 2026

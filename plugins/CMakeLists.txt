@@ -16,6 +16,8 @@ endfunction()
 oscairn_add_plugin(oscairn_step_sequencer oscairn-step-sequencer step-sequencer/step_sequencer.cpp)
 oscairn_add_plugin(oscairn_basic_synth oscairn-basic-synth basic-synth/basic_synth.cpp)
 oscairn_add_plugin(oscairn_delay oscairn-delay delay/delay.cpp)
+# A modulator with no sound: sends on a param-target lane (RFC 0002) to parameters and controls.
+oscairn_add_plugin(oscairn_lfo oscairn-lfo lfo/lfo.cpp)
 # Split and Join, the nodes at either end of a part's left/right, mid/side and band lanes.
 oscairn_add_plugin(oscairn_splitters oscairn-splitters splitters/splitters.cpp)
 

@@ -186,6 +186,11 @@ The plugin never knows which. What it does:
   host converts each event at the same sample, in the same block, for every parameter the lane
   reaches, and orders a lane's targets after the plugin. Events beyond a block's event limit are
   dropped and counted.
+- A point reaches the target at its sample, but what happens between points is the target's:
+  one that applies parameter events once per block steps once per block however many points
+  arrive; read them at their sample for smooth modulation. Parameter events are not an audio
+  signal: audio-rate modulation such as FM needs an audio-rate path, which Oscairn does not have
+  yet (see the roadmap).
 
 A plugin whose only outputs are its lanes, with no audio or note port, loads and runs as any
 node; the Oscairn LFO is one.
@@ -997,7 +1002,8 @@ The bundled plugins are working references ([plugins](../plugins/README.md)):
 - **Step Sequencer** (`plugins/step-sequencer/step_sequencer.cpp`): a note-only plugin with
   parameter-target lanes.
 - **LFO** (`plugins/lfo/lfo.cpp`): a modulator with no audio or note output, a MODULATE lane
-  sent every 32 samples, transport sync, and `oscairn.ui` hints.
+  sent every 32 samples or closer at high rates (to 1,357 Hz), a log-scaled rate with value texts
+  in Hz, transport sync, and `oscairn.ui` hints.
 
 ## Known limits
 

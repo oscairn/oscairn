@@ -255,7 +255,11 @@ Decided 2026-11-08, from what the milestone test found:
      flattened into the graph at commit so the lane's events reach every target at their sample
      ([RFC 0002](rfcs/0002-param-target.md#lanes-driving-controls)); a first-party LFO
      ([plugins](../plugins/README.md#lfo)); control lines in the Routing view, in a color of
-     their own ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#step-4-status))
+     their own ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#step-4-status)); the LFO
+     reaches 1,357 Hz, its points closer at high rates
+   - [ ] audio-rate modulation: a modulation port or sidechain carrying an audio-rate signal
+     from a modulator to a target, for FM and the like, which parameter events cannot carry (a
+     target holds each point until the next, or reads them once per block)
 2. **Native sample patches** ([sample players and formats](sample-players-and-formats.md),
    [ESP observations](yamaha-esp-samples-research.md)). The Legacy Sampler lives in its own
    repository, [oscairn/sampler](https://github.com/oscairn/sampler), since October 31, 2026

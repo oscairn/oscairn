@@ -7,8 +7,11 @@
 // Retrigger is on; bipolar or unipolar. It sends MODULATE events (an amount around where the
 // target is) by default, or SET events (a position).
 //
-// It sends a point every `interval` samples of its own running count, whatever the host's block
-// size, and one at each note that restarts it, each the shape's value at that exact sample.
+// Rate runs 0.01 Hz to 1,357 Hz (Yamaha's Extended LFO) on a log scale: the parameter is the
+// knob's position, 0..1, and its value text is in Hz. It sends a point every 32 samples of its own
+// running count, whatever the host's block size, closer at high rates to keep at least 16 a cycle
+// (down to every sample), and one at each note that restarts it, each the shape's value at that
+// exact sample. Saw and square are band-limited with polyBLEP once the points come closer.
 
 #include <clap/clap.h>
 #include <oscairn-clap/param-target.h>
@@ -25,7 +28,11 @@
 namespace
 {
     constexpr double pi = 3.14159265358979323846;
-    constexpr uint32_t interval = 32; // samples between points: 1.5 kHz at 48 kHz, smooth for any rate it has
+    constexpr uint32_t interval = 32; // most samples between points: 1.5 kHz at 48 kHz, smooth for low rates
+    constexpr double perCycle = 16;   // fewest points a cycle, up to a point every sample
+    constexpr double lowest = .01, highest = 1357; // Hz, the rate's ends
+    double hertz( double position ) { return lowest * std::pow( highest / lowest, position ); }
+    double position( double hz ) { return std::log( hz / lowest ) / std::log( highest / lowest ); }
 
     const char* const features[] = { CLAP_PLUGIN_FEATURE_NOTE_EFFECT, CLAP_PLUGIN_FEATURE_UTILITY, nullptr };
     const clap_plugin_descriptor_t descriptor = {
@@ -51,8 +58,8 @@ namespace
 
     // The most played first (oscairn.ui), rate and its sync drawn joined.
     struct Parameter { const char* name; double minimum, maximum, initial; bool stepped; uint32_t widget, priority, group; };
-    constexpr std::array<Parameter, Count> parameters{{
-        { "Rate", .01, 40, 1, false, OSCAIRN_WIDGET_KNOB, 1, 1 },
+    const std::array<Parameter, Count> parameters{{
+        { "Rate", 0, 1, position( 1 ), false, OSCAIRN_WIDGET_KNOB, 1, 1 }, // a position: hertz() gives Hz
         { "Sync", 0, 1, 0, true, OSCAIRN_WIDGET_SWITCH, 4, 1 },
         { "Synced rate", 0, 7, 4, true, OSCAIRN_WIDGET_LIST, 5, 1 },
         { "Shape", 0, 4, 0, true, OSCAIRN_WIDGET_BUTTONS, 3, 0 },
@@ -72,24 +79,32 @@ namespace
         double sampleRate = 48000;
         std::array<std::atomic<double>, Count> values{}; // the main thread reads them while audio runs
         double phase = 0;        // audio thread: where in its cycle, 0..1, at the next sample
-        uint64_t count = 0;      // samples since it started, for the points' times
+        uint32_t wait = 0;       // samples until its next point, on its own count
         double held = 0;         // sample and hold: this cycle's value
         uint32_t random = 0x9e3779b9u;
         Lfo() { for(size_t i = 0; i < values.size(); ++i) values[i] = parameters[i].initial; }
         double value( Id id ) const { return values[id - 1].load( std::memory_order_relaxed ); }
-        void start() { phase = value( Phase ); count = 0; random = 0x9e3779b9u; hold(); }
+        void start() { phase = value( Phase ); wait = 0; random = 0x9e3779b9u; hold(); }
         void hold() { random ^= random << 13; random ^= random >> 17; random ^= random << 5; held = random / 2147483647.5 - 1; }
     };
     Lfo& self( const clap_plugin_t* p ) { return *static_cast<Lfo*>( p->plugin_data ); }
 
-    // The shape at phase p, -1..1.
-    double wave( const Lfo& s, double p )
+    // polyBLEP: the correction near a step of 2 at phase 0, for points `dt` of a cycle apart.
+    double blep( double p, double dt )
+    {
+        if( p < dt ) { p /= dt; return p + p - p * p - 1; }
+        if( p > 1 - dt ) { p = ( p - 1 ) / dt; return p * p + p + p + 1; }
+        return 0;
+    }
+
+    // The shape at phase p, -1..1, its steps smoothed over `dt` of a cycle (0: sharp).
+    double wave( const Lfo& s, double p, double dt )
     {
         switch( int( s.value( Shape ) ) )
         {
         case Triangle: return p < .5 ? 4 * p - 1 : 3 - 4 * p;
-        case Saw: return 2 * p - 1;
-        case Square: return p < .5 ? 1 : -1;
+        case Saw: return 2 * p - 1 - ( dt > 0 ? blep( p, dt ) : 0 );
+        case Square: return ( p < .5 ? 1 : -1 ) + ( dt > 0 ? blep( p, dt ) - blep( p < .5 ? p + .5 : p - .5, dt ) : 0 );
         case SampleHold: return s.held;
         default: return std::sin( 2 * pi * p );
         }
@@ -109,9 +124,9 @@ namespace
         s.values[e.param_id - 1] = v;
     }
 
-    bool send( const Lfo& s, const clap_output_events_t* out, uint32_t time )
+    bool send( const Lfo& s, const clap_output_events_t* out, uint32_t time, double dt )
     {
-        const double w = wave( s, s.phase ), depth = s.value( Depth );
+        const double w = wave( s, s.phase, dt ), depth = s.value( Depth );
         const bool unipolar = s.value( Polarity ) != 0, set = s.value( Mode ) != 0;
         oscairn_event_param_target_t e{};
         e.header  = { sizeof( e ), time, s.space, OSCAIRN_EVENT_PARAM_TARGET, 0 };
@@ -160,10 +175,14 @@ namespace
                 const double next = at / cycleBeats + s.value( Phase );
                 s.phase = next - std::floor( next );
             }
-            if( s.canSend && ( restart || s.count % interval == 0 ) && !send( s, block->out_events, i ) )
-                return CLAP_PROCESS_CONTINUE; // the host's queue is full: the next point comes
-            ++s.count;
-            const double rate = synced ? tempo / 60 / cycleBeats : s.value( Rate );
+            const double rate = synced ? tempo / 60 / cycleBeats : hertz( s.value( Rate ) );
+            const auto spacing = uint32_t( std::clamp( std::floor( s.sampleRate / ( rate * perCycle ) + 1e-6 ), 1.0, double( interval ) ) ); // 1e-6: a round rate from its position, a hair over, keeps its spacing
+            const bool point = !s.wait;
+            if( point )
+                s.wait = spacing;
+            if( s.canSend && ( restart || point ) )
+                send( s, block->out_events, i, spacing < interval ? rate * spacing / s.sampleRate : 0 ); // a full queue counts the point as dropped
+            --s.wait;
             s.phase += rate / s.sampleRate;
             if( s.phase >= 1 )
             {
@@ -211,7 +230,10 @@ namespace
         if( const auto* list = names( id, count ) )
             std::snprintf( text, size, "%s", list[std::min( count - 1, size_t( std::max( 0.0, std::round( value ) ) ) )] );
         else if( id == Rate )
-            std::snprintf( text, size, "%.2f Hz", value );
+        {
+            const double hz = hertz( value );
+            std::snprintf( text, size, hz < 10 ? "%.2f Hz" : hz < 100 ? "%.1f Hz" : "%.0f Hz", hz );
+        }
         else if( id == Phase )
             std::snprintf( text, size, "%.0f°", value * 360 );
         else
@@ -236,7 +258,8 @@ namespace
             return false;
         while( *end == ' ' ) ++end;
         if( id == Phase ) v /= 360;
-        else if( id != Rate ) v /= 100;
+        else if( id == Rate ) v = v >= lowest && v <= highest ? std::clamp( position( v ), 0.0, 1.0 ) : -1;
+        else v /= 100;
         const auto& p = parameters[id - 1];
         if( v < p.minimum || v > p.maximum )
             return false;

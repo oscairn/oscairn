@@ -150,11 +150,14 @@ channel-specific sound/mapping selection. Audible acceptance is tracked separate
 param-target lane, **LFO** (lane 0, [RFC 0002](../docs/rfcs/0002-param-target.md)), which the
 user maps to a parameter or makes a control's source ([RFC 0011](../docs/rfcs/0011-performance-ui-and-editors.md#the-control-tree)).
 It sends a point every 32 samples of its own count (1.5 kHz at 48 kHz), whatever the host's
-block size, and one at each note that restarts it, each the shape's value at that sample.
+block size, and one at each note that restarts it, each the shape's value at that sample. Above
+about 94 Hz (at 48 kHz) the points come closer, to keep at least 16 a cycle, down to one every
+sample: every 3 samples at 1,000 Hz, every 2 at the top, 1,357 Hz (64 points in a 128-sample
+block).
 
 | Parameter ID | Control | Plain values |
 | --- | --- | --- |
-| 1 | Rate | 0.01–40 Hz, free; default 1 |
+| 1 | Rate | 0–1, a position on a log scale from 0.01 Hz to 1,357 Hz (Yamaha's Extended LFO), free; value texts in Hz; default 1 Hz (0.39) |
 | 2 | Sync | 0 = free, 1 = synced to the transport's beat |
 | 3 | Synced rate | a cycle of 0 = 4 bars, 1 = 2 bars, 2 = 1 bar, 3 = 1/2, 4 = 1/4 (default), 5 = 1/8, 6 = 1/16, 7 = 1/32 |
 | 4 | Shape | 0 = sine, 1 = triangle, 2 = saw, 3 = square, 4 = sample and hold |
@@ -170,5 +173,16 @@ Synced while the transport plays, its phase follows the song position; stopped, 
 it runs on. Sample and hold draws a new value at each cycle
 from a fixed seed, so a render repeats. It has no state extension: the host saves its
 parameters. `control-source` checks its sine and triangle at every point through a control's
-relative targets, in the engine and in a worker; its other shapes, Sync, Retrigger and SET
-are not checked by a test yet.
+relative targets, in the engine and in a worker, at 3 Hz and at 1,000 Hz (four targets, every
+point, nothing dropped); its other shapes, Sync, Retrigger and SET are not checked by a test yet.
+
+Its limits at high rates:
+
+- Saw and square are band-limited with polyBLEP once the points come closer than 32 samples, so
+  their steps alias less; triangle is not, and sample and hold is a new random step each cycle,
+  which at hundreds of Hz is noise that aliases as it is.
+- A point is a parameter event. A target that applies parameter events once per block, rather
+  than at their sample, steps once per block however many points arrive.
+- It is modulation by parameter events, not an audio signal: the target holds each point until
+  the next. True audio-rate modulation, FM above all, needs an audio-rate signal path, which
+  CLAP's parameter events are not ([roadmap](../docs/roadmap.md)).

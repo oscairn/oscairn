@@ -103,7 +103,8 @@ drives: the sequencer's locks use it.
 - `core/engine` (`Graph`): mappings in the graph, as dependencies in the processing order;
   conversion to CLAP parameter events for the target in the same block.
 - `plugins/step-sequencer`: one lane per track, a lock value per step, sent at the step's sample before
-  its note. `plugins/lfo`: one MODULATE (or SET) lane, a point every 32 samples.
+  its note. `plugins/lfo`: one MODULATE (or SET) lane, a point every 32 samples, closer at high rates
+  (at least 16 a cycle, to 1,357 Hz).
 - The host loads a plugin whose only outputs are its lanes (`oscairn.param-target-lanes` with a
   lane): a modulator needs no audio or note output. `plugins/basic-synth` has parameters to lock (Brightness, Level).
 - `oscairn-render --map SRC.LANE=DST.PARAM`.
@@ -138,7 +139,8 @@ which add their gain's CLAP modulation to their gain: at each of the LFO's point
 samples) and up to the next, each output equals 0.5 plus that target's offset at the LFO's
 value there, with 256- and 37-sample blocks and with every plugin in a worker; the swing is
 ±0.2, and the gains' own values stay at 0.5. The LFO on the Basic Synth's Brightness through a
-relative target changes its sound while Brightness keeps its value.
+relative target changes its sound while Brightness keeps its value. At 1,000 Hz (a point every
+3 samples) four relative targets get every point, every sample checked, with nothing dropped.
 
 ## Open questions
 

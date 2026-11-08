@@ -6,7 +6,8 @@
 // a note is held, so its output is the parameter's value at every sample.
 // The Oscairn LFO, the first first-party MODULATE sender, drives a control's relative targets as
 // CLAP modulation (the fixture adds its gain's modulation to its gain) and absolute ones as values;
-// saving never captures what it drives.
+// saving never captures what it drives. At 1,000 Hz it still sends every point, four targets
+// receive every one, and nothing is dropped; at high rates its square is band-limited.
 //   oscairn-control-source-test SEQUENCER.clap FIXTURE.clap LFO.clap BASIC_SYNTH.clap
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
@@ -54,10 +55,10 @@ namespace
 
     // Each output's left channel over `seconds`, in blocks of `block`, from sample `start` of the
     // transport (it plays from 0 at the first block); `note`: a key down at the first sample.
-    struct Take { size_t start = 0; std::array<std::vector<float>, 2> out; float at(int o, size_t sample) const { return out[size_t(o)][sample - start]; } };
+    struct Take { size_t start = 0; std::array<std::vector<float>, 4> out; /* Main and B, left then right */ float at(int o, size_t sample) const { return out[size_t(o)][sample - start]; } };
     Take render(Session& s, uint32_t block, size_t& position, double seconds = 1, bool note = false)
     {
-        std::vector<float> l(maxFrames), r(maxFrames), bl(maxFrames), br(maxFrames);
+        std::vector<float> l(block), r(block), bl(block), br(block);
         float* out[] = {l.data(), r.data(), bl.data(), br.data()};
         Take got{position, {}};
         const auto down = kick::clap::Event::midi(0x90, 60, 100);
@@ -68,6 +69,8 @@ namespace
             check(s.process(nullptr, 0, out, 4, block, first ? std::span<const kick::clap::Event>(&down, 1) : std::span<const kick::clap::Event>()), "render");
             got.out[0].insert(got.out[0].end(), l.begin(), l.begin() + block);
             got.out[1].insert(got.out[1].end(), bl.begin(), bl.begin() + block);
+            got.out[2].insert(got.out[2].end(), r.begin(), r.begin() + block);
+            got.out[3].insert(got.out[3].end(), br.begin(), br.begin() + block);
             position += block;
         }
         return got;
@@ -154,70 +157,89 @@ namespace
         const auto got = render(s, 256, position, .2);
         check(near(got.at(0, 0), .5) && near(got.at(1, 0), .5), "undone, the lane drives nothing: " + std::to_string(got.at(0, 0)));
     }
-    // The LFO's parameters (plugins/lfo/lfo.cpp) and its points: every 32 samples of its own count.
+    // The LFO's parameters (plugins/lfo/lfo.cpp). Rate is a position on its log scale, 0.01 Hz to
+    // 1,357 Hz, as the LFO maps it; its points come every 32 samples of its own count, closer to
+    // keep 16 a cycle at high rates.
     enum : clap_id { lfoRate = 1, lfoShape = 4, lfoDepth = 5, lfoMode = 9 };
-    constexpr uint32_t interval = 32;
+    double ratePosition(double hz) { return std::log(hz / .01) / std::log(1357 / .01); }
+    double rateHz(double position) { return .01 * std::pow(1357 / .01, position); }
+    size_t spacingAt(double hz) { return size_t(std::clamp(std::floor(rate / (hz * 16) + 1e-6), 1.0, 32.0)); }
 
-    // The LFO with its parameters set, two fixtures playing a held key to Main and B, and a control at
-    // `value` with the LFO's lane as its source and targets a and b.
+    // The LFO with its parameters set, two fixtures (four with `four`: C and D on Main's and B's right)
+    // playing a held key to Main and B, and a control at `value` with the LFO's lane as its source and
+    // targets a and b (c as a, d as b).
     struct LfoRig { NodeId lfo, a, b; uint32_t control; };
-    LfoRig lfoRig(Session& s, const char* lfo, const char* fixture, double shape, double value, const MacroTarget& a, const MacroTarget& b)
+    LfoRig lfoRig(Session& s, const char* lfo, const char* fixture, double shape, double value, const MacroTarget& a, const MacroTarget& b, double hz = 3, bool four = false)
     {
         LfoRig r{s.add("lfo", lfo), s.add("a", fixture), s.add("b", fixture), 0};
-        s.setParameter(r.lfo, lfoRate, 3); s.setParameter(r.lfo, lfoShape, shape); s.setParameter(r.lfo, lfoDepth, .5);
-        s.connectNotes(graphInput, r.a); s.connectNotes(graphInput, r.b);
-        s.connectAudio(AudioConnection{{r.a, 0, 0}, {graphOutput, 0, 0}, 1});
-        s.connectAudio(AudioConnection{{r.b, 0, 0}, {graphOutput, 1, 0}, 1});
+        s.setParameter(r.lfo, lfoRate, ratePosition(hz)); s.setParameter(r.lfo, lfoShape, shape); s.setParameter(r.lfo, lfoDepth, .5);
+        std::vector<NodeId> nodes{r.a, r.b};
+        if(four) { nodes.push_back(s.add("c", fixture)); nodes.push_back(s.add("d", fixture)); }
+        std::vector<MacroTarget> targets;
+        for(size_t i = 0; i < nodes.size(); ++i)
+        {
+            s.connectNotes(graphInput, nodes[i]);
+            s.connectAudio(AudioConnection{{nodes[i], 0, 0}, {graphOutput, uint32_t(i % 2), uint32_t(i / 2)}, 1});
+            auto t = i % 2 ? b : a; t.node = nodes[i]; t.param = gain;
+            targets.push_back(t);
+        }
         r.control = s.addMacro("LFO");
-        auto ta = a, tb = b; ta.node = r.a; tb.node = r.b; ta.param = tb.param = gain;
-        s.setMacroTargets(r.control, {ta, tb});
+        s.setMacroTargets(r.control, targets);
         s.setMacroSource(r.control, r.lfo, 0);
         s.commit();
         s.setMacro(r.control, value);
         return r;
     }
 
-    // The LFO's shape at each of its points, as it computes it: sine or triangle, -1..1.
-    std::vector<double> shapeAt(int shape, size_t samples)
+    // The LFO's points, as it computes them: each one's sample and the shape there, sine or
+    // triangle, -1..1.
+    struct Point { size_t at; double w; };
+    std::vector<Point> pointsOf(int shape, double hz, size_t samples)
     {
-        std::vector<double> w;
+        std::vector<Point> points;
+        const double step = rateHz(ratePosition(hz)) / rate;
+        const size_t spacing = spacingAt(rateHz(ratePosition(hz)));
         double phase = 0;
         for(size_t n = 0; n < samples; ++n)
         {
-            if(n % interval == 0) w.push_back(shape == 1 ? (phase < .5 ? 4 * phase - 1 : 3 - 4 * phase) : std::sin(2 * 3.14159265358979323846 * phase));
-            phase += 3.0 / rate;
+            if(n % spacing == 0) points.push_back({n, shape == 1 ? (phase < .5 ? 4 * phase - 1 : 3 - 4 * phase) : std::sin(2 * 3.14159265358979323846 * phase)});
+            phase += step;
             if(phase >= 1) phase -= std::floor(phase);
         }
-        return w;
+        return points;
     }
 
     // Piece 2: the LFO's MODULATE lane through a control at 0.5 to two relative targets (0.3 to 0.7,
     // and reversed) is CLAP modulation on each fixture's gain, from each point to the next; the
-    // gains' own values stay at 0.5.
+    // gains' own values stay at 0.5. At 3 Hz its points are 32 samples apart; at 1,000 Hz, 3 (16 a
+    // cycle), each reaching four targets, every sample of each checked, with nothing dropped.
     void lfoModulates(const char* lfo, const char* fixture)
     {
-        for(const int shape : {0, 1})
+        struct Case { int shape; double hz; bool four; };
+        for(const auto c : {Case{0, 3, false}, Case{1, 3, false}, Case{0, 1000, true}})
             for(const uint32_t block : {256u, 37u})
             {
                 Session s(rate, maxFrames, {}, twoOutputs);
-                const auto r = lfoRig(s, lfo, fixture, shape, .5, MacroTarget{.start = .3, .end = .7, .relative = true}, MacroTarget{.start = .7, .end = .3, .relative = true});
+                const auto r = lfoRig(s, lfo, fixture, c.shape, .5, MacroTarget{.start = .3, .end = .7, .relative = true}, MacroTarget{.start = .7, .end = .3, .relative = true}, c.hz, c.four);
                 size_t position = 0;
                 const auto got = render(s, block, position, .5, true);
-                const auto w = shapeAt(shape, got.out[0].size());
-                const std::string what = std::string(shape ? "triangle" : "sine") + ", blocks of " + std::to_string(block);
-                size_t bad = 0; double peak = 0;
-                for(size_t k = 0; k < w.size() && (k + 1) * interval <= got.out[0].size(); ++k)
+                const auto points = pointsOf(c.shape, c.hz, got.out[0].size());
+                const std::string what = std::string(c.shape ? "triangle" : "sine") + " at " + std::to_string(int(c.hz)) + " Hz, blocks of " + std::to_string(block);
+                check(spacingAt(rateHz(ratePosition(c.hz))) == (c.hz < 100 ? 32u : 3u), what + ": points " + std::to_string(spacingAt(rateHz(ratePosition(c.hz)))) + " samples apart");
+                size_t bad = 0, checked = 0; double peak = 0;
+                for(size_t k = 0; k + 1 < points.size(); ++k)
                 {
-                    const double x = std::clamp(.5 + .5 * w[k], 0.0, 1.0);
+                    const double x = std::clamp(.5 + .5 * points[k].w, 0.0, 1.0);
                     const double a = .5 + (.3 + .4 * x - .5), b = .5 + (.7 - .4 * x - .5);
-                    const size_t at = k * interval, last = at + interval - 1;
-                    if(!near(got.at(0, at), a) || !near(got.at(1, at), b) || !near(got.at(0, last), a) || !near(got.at(1, last), b))
-                    {
-                        if(!bad++) std::fprintf(stderr, "FAIL: %s: point %zu (sample %zu): A %f, B %f; expected %f, %f\n", what.c_str(), k, at, got.at(0, at), got.at(1, at), a, b);
-                    }
-                    peak = std::max(peak, std::abs(got.at(0, at) - .5));
+                    for(size_t at = points[k].at; at < points[k + 1].at; ++at)
+                        for(int o = 0; o < (c.four ? 4 : 2); ++o)
+                            if(!near(got.at(o, at), o % 2 ? b : a) && !bad++)
+                                std::fprintf(stderr, "FAIL: %s: point %zu (sample %zu), output %d: %f; expected %f\n", what.c_str(), k, at, o, got.at(o, at), o % 2 ? b : a);
+                    ++checked;
+                    peak = std::max(peak, std::abs(got.at(0, points[k].at) - .5));
                 }
-                check(!bad, what + ": the targets follow the LFO at its points (" + std::to_string(bad) + " wrong)");
+                check(!bad && checked >= (c.hz < 100 ? 700u : 7900u), what + ": the targets follow the LFO from each of its points to the next (" + std::to_string(bad) + " wrong of " + std::to_string(checked) + ")");
+                check(s.sessionStatus().graphEventDrops == 0, what + ": no events dropped: " + std::to_string(s.sessionStatus().graphEventDrops));
                 check(near(peak, .2), what + ": a depth of 0.5 swings the control 0.5 either way, its whole travel, each gain 0.2: " + std::to_string(peak));
                 check(near(s.parameter(r.a, gain), .5) && near(s.parameter(r.b, gain), .5), what + ": modulation leaves the gains' values at 0.5");
                 check(near(s.graphState().macros.front().value, .5), what + ": the control keeps its own value");
@@ -227,6 +249,21 @@ namespace
             }
     }
 
+    // A square at 3 Hz takes its two values only; at 1,000 Hz polyBLEP puts points between them at
+    // each step.
+    void lfoBandLimited(const char* lfo, const char* fixture)
+    {
+        for(const double hz : {3.0, 1000.0})
+        {
+            Session s(rate, maxFrames, {}, twoOutputs);
+            lfoRig(s, lfo, fixture, 3, .5, MacroTarget{.start = .3, .end = .7, .relative = true}, MacroTarget{.start = .7, .end = .3, .relative = true}, hz);
+            size_t position = 0;
+            const auto got = render(s, 256, position, .1, true);
+            const auto between = std::count_if(got.out[0].begin(), got.out[0].end(), [](float v) { return std::abs(v - .3f) > 1e-6 && std::abs(v - .7f) > 1e-6; });
+            check(hz < 100 ? between == 0 : between > 100, "a square at " + std::to_string(int(hz)) + " Hz: " + std::to_string(between) + " samples between its two values");
+        }
+    }
+
     // The Basic Synth's Brightness modulated through a relative target: the sound changes, the
     // parameter does not.
     void synthBrightness(const char* lfo, const char* synth)
@@ -234,7 +271,7 @@ namespace
         auto play = [&](bool driven) {
             Session s(rate, maxFrames);
             const auto l = s.add("lfo", lfo), v = s.add("synth", synth);
-            s.setParameter(l, lfoRate, 5); s.setParameter(v, 1, .5);
+            s.setParameter(l, lfoRate, ratePosition(5)); s.setParameter(v, 1, .5);
             s.connectNotes(graphInput, v); s.connectAudio(v, graphOutput);
             const auto c = s.addMacro("Bright");
             s.setMacroTargets(c, {MacroTarget{.node = v, .param = 1, .start = 0, .end = 1, .relative = true}});
@@ -285,7 +322,7 @@ namespace
         const auto swing = loaded("swing"), still = loaded("still");
         check(near(swing.at("a"), .4) && near(swing.at("b"), .5), "saved mid-swing, loaded unmodulated: a " + std::to_string(swing.at("a")) + ", b " + std::to_string(swing.at("b")));
         check(near(swing.at("control"), .5), "the LFO's control loads at its own value");
-        check(near(loadedRate, 3), "the LFO's parameters are saved: rate " + std::to_string(loadedRate));
+        check(near(loadedRate, ratePosition(3)), "the LFO's parameters are saved: rate " + std::to_string(rateHz(loadedRate)));
         check(swing == still, "loaded the same as when saved with the LFO removed");
     }
 
@@ -299,6 +336,7 @@ int main(int argc, char** argv)
         state_files::TemporaryDirectory temp;
         setLane(argv[1], argv[2], temp.path);
         lfoModulates(argv[3], argv[2]);
+        lfoBandLimited(argv[3], argv[2]);
         synthBrightness(argv[3], argv[4]);
         savedUnmodulated(argv[3], argv[2], temp.path);
     }

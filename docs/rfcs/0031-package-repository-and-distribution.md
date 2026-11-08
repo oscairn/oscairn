@@ -55,7 +55,7 @@ Checked when built and tested; the sections below say how.
       is down, per-platform fetches (releases are still whole archives))
 - [ ] 3. Publishing: the `oscairn publish` command, checks, immutable versions and yanking
 - [ ] 4. Revocation lists and the takedown process
-- [ ] 5. Discovery: Get more in the Library, the Store app, compatibility filters
+- [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters
 - [ ] 6. Updates: packages, Performances' locks moved on explicitly, apps
 - [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source
 - [ ] 8. The official repository goes public: hosting, mirrors, policy
@@ -82,7 +82,7 @@ gets any of it.
 - A **publisher** runs one command to check, sign and submit a release. Every package in a
   repository is signed by its publisher. Versions never change once published; a bad one is
   yanked, not overwritten.
-- Musicians **browse and search** in the Library and in a Store app, filtered by what runs on
+- Musicians **browse and search** in the Library and in a Catalog app, filtered by what runs on
   their device. Updates never change a Performance's sound without the musician saying so.
 - An instrument with no internet gets the same packages from a USB drive or a paired computer,
   checking the same signatures.
@@ -439,13 +439,13 @@ publisher, and any package newly bringing plugin or app code, also needs a maint
 
 ### In the Library
 
-Each type's list in the Library app has **Get more**: the repositories' packages holding items
+Each type's list in the Library app has **Install…**: the repositories' packages holding items
 of that type that are not installed, searched and filtered like the rest, from the local index.
-Opening one shows its page from the Store app's action (below).
+Opening one shows its page from the Catalog app's action (below).
 
-### The Store app
+### The Catalog app
 
-- An app (RFC 0022), `oscairn.store`, in a package, replaceable like any other. It offers
+- An app (RFC 0022), `oscairn.catalog`, in a package, replaceable like any other. It offers
   `oscairn.open.package` (open a package's page) and `oscairn.install.package`, which the
   Library, Settings' Installed content and the missing-content repair flow use.
 - A tile on Home, and a card when there are updates (RFC 0030).
@@ -659,8 +659,8 @@ GitHub's limits, as its documentation gives them (read 2026-11-01):
   [current Pages limits](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)
   rather than treating that figure as fixed. Pages is not for running an online business,
   e-commerce or SaaS, and for a site over quota GitHub suggests a CDN in front, Releases, or
-  another host. The index is small (the target is under 2 MB) and fits. Paid content, if ever
-  added ([decided](#decided-2026-11-01)), could not be sold through Pages.
+  another host. The index is small (the target is under 2 MB) and fits. Nothing in it is
+  sold ([decided](#decided-2026-11-01)).
 - **Releases:** each file must be under 2 GiB, with no limit on a release's total size or
   bandwidth, and at most 1000 assets in a release
   ([About releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases),
@@ -756,7 +756,7 @@ serial than one it has seen ([freshness](#signatures-and-freshness)).
 | 2. HTTPS | Refresh with deltas, mirrors, resumable downloads, per-platform fetch | A refresh with one changed package downloads the root and one delta; a mirror serving a tampered blob is refused and the next mirror used; an interrupted download resumes |
 | 3. Publishing | `oscairn publish`, the submissions repository, CI checks, immutable versions, yanking | A signed release published through a pull request installs on a device; an unsigned one, a re-used version and a missing claimed platform build each fail in CI; a yanked version is not offered but its lock still fetches it |
 | 4. Revocation and takedown | Revocation lists, the takedown policy | A build revoked in the list stops loading on refresh and its Performance opens with a stand-in; the same from a system image on an offline device |
-| 5. Discovery | Get more, the Store app and its actions, compatibility filters, `packages.*` | A search by type on an instrument answers from the local index with no network; a package without a build for the device is grayed with the reason |
+| 5. Discovery | Install…, the Catalog app and its actions, compatibility filters, `packages.*` | A search by type on an instrument answers from the local index with no network; a package without a build for the device is grayed with the reason |
 | 6. Updates | Update lists, explicit lock updates, app updates | Installing a new version leaves every Performance's lock as it was until **Use version** is chosen; an app update applies only once the app is closed |
 | 7. Offline and multi-device | Fetch for a device, USB subsets, a paired computer as source | A desktop queues packages for a KICK profile and writes a USB drive with only its builds; the device installs them; the same through a paired connection |
 | 8. Public | Hosting, CDN, mirrors, the policy, the root key ceremony | The official repository serves from two mirrors, and a device survives one going away |
@@ -785,7 +785,7 @@ waits on them. What remains, in order:
    <reason>`, which changes only `yanked`.
 
 Steps 1 and 3 need RFC 0006's signatures built. Step 5 needs RFC 0022 step 2 (apps in their own
-processes) for the Store app, and RFC 0023 step 2 for types in queries. Step 4 comes before
+processes) for the Catalog app, and RFC 0023 step 2 for types in queries. Step 4 comes before
 step 8: nothing public without a way to stop it.
 
 ## Decided 2026-11-01
@@ -799,9 +799,12 @@ Jacob's decisions on six of the open questions:
   code; automated checks after that; a verified publisher badge for publishers who prove their
   domain ([proposal](#proposal)).
 
-- **Paid content:** the official repository does not include paid content, for now. If it is
-  ever added, paid packages must be marked as paid in the index, and search must offer a filter
-  that excludes them. The filter's default is decided then.
+- **Paid content:** the official repository carries no paid, paywalled or DRM-protected
+  packages, and nothing is sold through it (decided 2026-11-07, replacing "for now"). So the
+  app that browses it is the **Catalog**, not a store.
+- **No pressure to install more:** the Library's entry is **Install…**, not "Get more"; the
+  Catalog has no featured or promoted packages, no counts or badges urging installs, and its
+  only card on Home is for updates to what is installed (decided 2026-11-07).
 - **Large sample libraries:** the official repository may host a few. Others are hosted by their
   publishers through the blob base ([package files](#package-files)).
 - **A manufacturer replacing or hiding the official repository:** allowed, but heavily

@@ -482,7 +482,7 @@ A product without a radio carries none of the stack:
   device or unavailable (RFC 0012's handling of a selector matching nothing) and play everything
   else; saving keeps what they named.
 - **App manifests** (RFC 0022) say `"bluetooth": { "midi": "required" | "optional",
-  "audio": "required" | "optional" }`. A required one is not offered by the Store on, and does not
+  "audio": "required" | "optional" }`. A required one is not offered by the Catalog on, and does not
   install on, a device whose profile lacks it (as RFC 0022 treats a platform without a build); an
   optional one installs and checks the capability.
 

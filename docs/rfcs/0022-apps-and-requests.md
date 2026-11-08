@@ -65,7 +65,7 @@ So an app is a whole program with its own UI:
 
 - **Oscairn's own:** Performance (the Play view and the sound editor), the Library, the Setlist,
   the Groovebox, Recordings, the launcher ([RFC 0030](0030-system-shell-launcher-and-navigation.md)),
-  the Store ([RFC 0031](0031-package-repository-and-distribution.md#the-store-app)) and a
+  the Catalog ([RFC 0031](0031-package-repository-and-distribution.md#the-catalog-app)) and a
   Settings app to come;
 - **third parties':** ported DAWs, and other groovebox and sequencer interfaces.
 
@@ -179,12 +179,12 @@ what only apps do:
 | `play` | RFC 0026's Play: notes, transport, scenes, controls, setlist movement | a setlist app |
 | `edit` | RFC 0026's Edit: the graph, parts, parameters, scenes, undo | a sound editor, a DAW |
 | `library` | RFC 0026's Library: the library, Performances, assets | the Library, a setlist app |
-| `system` | RFC 0026's System: updates, network, pairing, profiles, trust, installing code | Settings, the Store |
+| `system` | RFC 0026's System: updates, network, pairing, profiles, trust, installing code | Settings, the Catalog |
 | `controls` | The device's and controllers' knobs, buttons and pads while in front | the Groovebox |
 | `midi` | MIDI in from the engine's inputs and out to its outputs | a sequencer, a DAW |
 | `audio` | An audio node in the graph (below) | a ported DAW |
 | `background` | `controls`, `midi` and `audio` while not in front | a sequencer played from pads while the Library is open |
-| `network` | Network sockets in its sandbox | the Store, a cloud library |
+| `network` | Network sockets in its sandbox | the Catalog, a cloud library |
 | `files` | The library's files read-only, and raw read access to removable drives and folders the user chooses (write access granted separately); decided 2026-11-07 ([RFC 0037](0037-storage-and-file-transfer.md#open-questions)) | a DAW, a DJ deck, a sample browser |
 
 - **Every app** may read the session's state it needs to draw (`session.hello`, `session.status`,
@@ -286,7 +286,7 @@ An app is a kind of package ([RFC 0006](0006-packages-and-portability.md), [RFC 
 
 - **They become ordinary apps,** each its own executable with a manifest, signed by the project's
   key, shipped in the system image's read-only partition (RFC 0028). They ask for permissions
-  like any app: Settings and the Store hold `system`, the Library `library`, and so on. Their
+  like any app: Settings and the Catalog hold `system`, the Library `library`, and so on. Their
   placeholder reservations (`Profile::appMemory`) become manifest figures, measured per profile.
 - **They already reach the engine only through the control API:** the desktop app runs the
   engine as a separate helper by default ([hosts](../../hosts/README.md)). What holds them in

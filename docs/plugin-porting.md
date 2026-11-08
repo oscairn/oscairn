@@ -540,19 +540,20 @@ accent. With element n's parameters on page `Element n`:
 | Velocity Limit Low, Velocity Limit High | `VELOCITY_LOW`, `VELOCITY_HIGH` | n |
 | Level Velocity Sensitivity | `VELOCITY_DEPTH` | n |
 | AEG Initial Level | `LEVEL_0` | n |
-| AEG Hold Time | `TIME_1` (no level: it holds the initial level) | n |
-| AEG Attack Time, Attack Level | `TIME_2`, `LEVEL_2` | n |
-| AEG Decay 1 Time, Decay 1 Level | `TIME_3`, `LEVEL_3` | n |
-| AEG Decay 2 Time, Decay 2 Level (held while the key is down) | `TIME_4`, `LEVEL_4` | n |
-| AEG Release Time (to silence) | `TIME_5` | n |
+| AEG Attack Time, Attack Level | `TIME_1`, `LEVEL_1` | n |
+| AEG Decay 1 Time, Decay 1 Level | `TIME_2`, `LEVEL_2` | n |
+| AEG Decay 2 Time, Decay 2 Level (held while the key is down) | `TIME_3`, `LEVEL_3` | n |
+| AEG Release Time (to silence) | `TIME_4` | n |
+
+The element amp EG has no hold stage; only the pitch and filter EGs do.
 
 ```cpp
 // Element n's parameters, in this order from element n's first ID; one view (1) for all.
 static const uint32_t elementFields[] = {
     OSCAIRN_FIELD_KEY_LOW, OSCAIRN_FIELD_KEY_HIGH, OSCAIRN_FIELD_VELOCITY_LOW, OSCAIRN_FIELD_VELOCITY_HIGH,
-    OSCAIRN_FIELD_VELOCITY_DEPTH, OSCAIRN_FIELD_LEVEL_0, OSCAIRN_FIELD_TIME_1,
-    OSCAIRN_FIELD_TIME_1 + 1, OSCAIRN_FIELD_LEVEL_0 + 2, OSCAIRN_FIELD_TIME_1 + 2, OSCAIRN_FIELD_LEVEL_0 + 3,
-    OSCAIRN_FIELD_TIME_1 + 3, OSCAIRN_FIELD_LEVEL_0 + 4, OSCAIRN_FIELD_TIME_1 + 4 };
+    OSCAIRN_FIELD_VELOCITY_DEPTH, OSCAIRN_FIELD_LEVEL_0,
+    OSCAIRN_FIELD_TIME_1, OSCAIRN_FIELD_LEVEL_0 + 1, OSCAIRN_FIELD_TIME_1 + 1, OSCAIRN_FIELD_LEVEL_0 + 2,
+    OSCAIRN_FIELD_TIME_1 + 2, OSCAIRN_FIELD_LEVEL_0 + 3, OSCAIRN_FIELD_TIME_1 + 3 };
 // in paramHint, for element n's k-th parameter:
 *hint = {OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, OSCAIRN_ROLE_NONE, 1, elementFields[k], n};
 ```

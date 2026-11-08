@@ -92,6 +92,15 @@ if(OSCAIRN_STANDALONE OR OSCAIRN_ENGINE)
         GIT_TAG 9.0.4
         GIT_SHALLOW ON)
     FetchContent_MakeAvailable(JUCE)
+    # HTTPS on Linux is libcurl (JUCE_USE_CURL, RFC 0039). JUCE goes on without it and the build
+    # fails later at curl/curl.h, so say what is missing here.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(OSCAIRN_LIBCURL QUIET libcurl)
+        if(NOT OSCAIRN_LIBCURL_FOUND)
+            message(FATAL_ERROR "The desktop app and engine need libcurl's development files on Linux, for HTTPS to package repositories (Debian and Ubuntu: sudo apt-get install libcurl4-openssl-dev)")
+        endif()
+    endif()
     add_subdirectory(audio)
     add_subdirectory(engine)
     # A MIDI monitor, to read what a controller sends (RFC 0024's controller profiles).

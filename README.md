@@ -100,7 +100,8 @@ Needs CMake 3.21+, Ninja and a C++20 compiler (on macOS: Xcode command line tool
 
 Builds the app and starts it at Home: tap Performance to play and edit the open Performance,
 or the Library, Setlist or Groovebox. The first build downloads JUCE 9.0.4 and takes a
-few minutes. Tested on macOS; the Linux build is untested so far.
+few minutes. Tested on macOS; the Linux build is untested so far. On Linux it needs libcurl's
+development files (Debian and Ubuntu: `libcurl4-openssl-dev`).
 
 ```bash
 cmake -S . -B build-app -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOSCAIRN_STANDALONE=ON

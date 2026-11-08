@@ -207,6 +207,9 @@ app opens there.
 `-DOSCAIRN_STANDALONE=ON` builds both the desktop and helper. To build only the live
 engine, use `-DOSCAIRN_ENGINE=ON`. Both options default to OFF. JUCE is downloaded for
 these hosts, while core and renderer builds need no JUCE. Linux and macOS are supported.
+On Linux they also need libcurl's development files, for HTTPS to package repositories
+(Debian and Ubuntu: `libcurl4-openssl-dev`), besides JUCE's own Linux dependencies; configuring
+stops and says so when they are missing.
 
 Opening the built app normally starts the helper automatically. The macOS bundle
 contains the helper beside the UI executable and the demo plugins in `plugins/`.

@@ -184,8 +184,11 @@ The plugin never knows which. What it does:
   modulator to reach them without moving them.
 - Send at every point that matters (each step, or every few samples for a smooth shape): the
   host converts each event at the same sample, in the same block, for every parameter the lane
-  reaches, and orders a lane's targets after the plugin. Events beyond a block's event limit are
-  dropped and counted.
+  reaches, and orders a lane's targets after the plugin. A plugin sends at most 512 events other
+  than parameter changes a block (`kick::clap::Host::maxBlockEvents`); past that they are
+  dropped and counted. A target takes at most 512 converted events a block from all the lanes
+  reaching it; past that the graph thins them, the newest replacing the last one waiting for the
+  same parameter, and counts each point lost in its dropped events, without resetting the target.
 - A point reaches the target at its sample, but what happens between points is the target's:
   one that applies parameter events once per block steps once per block however many points
   arrive; read them at their sample for smooth modulation. Parameter events are not an audio

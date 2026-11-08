@@ -43,7 +43,10 @@ A small CLAP extension, defined in `core/clap-ext/include/oscairn-clap/param-tar
   the source in every block, so the converted events arrive in the block they were sent, at
   their exact sample. Global/channel/key locks are ordered before notes at the same sample,
   so a step's lock applies to that step's note. Explicit per-note events follow same-sample
-  notes so the destination ID exists before the event is delivered.
+  notes so the destination ID exists before the event is delivered. A target takes at most
+  512 converted events a block (`maxBlockEvents`) from every lane reaching it; past that the
+  newest replaces the last one waiting for the same parameter, each point lost counted in the
+  graph's dropped events, and the target is not reset.
 - **Discovered through CLAP's own mechanisms.** The event space is obtained with the stable
   `clap.event-registry` extension (name `oscairn.param-target`); the Oscairn host returns
   space 1000. A host that does not know it returns false and the plugin sends nothing.

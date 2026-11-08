@@ -186,3 +186,8 @@ Its limits at high rates:
 - It is modulation by parameter events, not an audio signal: the target holds each point until
   the next. True audio-rate modulation, FM above all, needs an audio-rate signal path, which
   CLAP's parameter events are not ([roadmap](../docs/roadmap.md)).
+- A target takes 512 points a block from all the lanes reaching it. At the top rate a lane
+  brings it 64 in a 128-sample block, 256 in a 512-sample one; past 512 the graph thins them,
+  each newest point replacing the last one waiting for the same parameter, and counts each point
+  lost in its dropped events. `control-source` reaches that with three controls on one gain in
+  512-sample blocks: the points are thinned and counted, and the target is not reset.

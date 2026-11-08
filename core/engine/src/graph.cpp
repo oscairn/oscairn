@@ -78,7 +78,6 @@ namespace oscairn
             std::vector<NoteRoute*> paramNotes;
             std::vector<kick::clap::Event> paramIn; // converted events waiting for this step this block
             uint32_t                       paramCount = 0;
-            uint64_t paramDrops = 0;
             // This block's events in (RFC 0034: each step its own, as steps render at the same time),
             // and how its rendering went.
             std::vector<kick::clap::Event> merged;
@@ -1185,8 +1184,8 @@ namespace oscairn
                 const auto& h=plan->harmonies[(size_t)step.harmony];
                 for(uint32_t i=0;i<h.count;++i)plan->keys.push_back({h.events[i].header()->time,order++,&h.events[i]});
             }
-            uint64_t totalEvents=step.paramCount+step.paramDrops+step.releaseCount;
-            bool overflow=step.paramDrops!=0 || step.releaseOverflow || inputRecovery;
+            uint64_t totalEvents=step.paramCount+step.releaseCount;
+            bool overflow=step.releaseOverflow || inputRecovery;
             // The beat and the part's harmony ride with the notes in their own room (see
             // maxProcessEvents): a block that fills all maxBlockEvents note slots still fits.
             for(uint32_t i=0;i<step.releaseCount;++i)plan->keys.push_back({0,order++,&step.releases[i]});
@@ -1368,7 +1367,7 @@ namespace oscairn
                     }
                 }
             }
-            step.paramCount = 0;step.paramDrops=0;step.releaseCount=0;step.releaseOverflow=false;
+            step.paramCount = 0;step.releaseCount=0;step.releaseOverflow=false;
             uint32_t endedCount=0;const auto* ended=step.host->outputEvents(endedCount);
             for(uint32_t i=0;i<endedCount;++i)for(auto& source:step.noteSources){auto e=ended[i];if(endedOn(e,source.channel))source.route->ended(e);}
 
@@ -1390,11 +1389,32 @@ namespace oscairn
                             continue;
                         const auto* route = &r;
                         auto& target = plan->steps[(size_t)route->target];
-                        if( target.paramCount == target.paramIn.size() )
-                        {++target.paramDrops;continue;}
                         // Per-note lane addresses belong to the source's corresponding note route.
                         if(e.note_id>=0 && !route->notes){eventDrops_.fetch_add(1,std::memory_order_relaxed);continue;}
-                        target.paramNotes[target.paramCount]=e.note_id>=0?route->notes:nullptr;
+                        auto* const notes = e.note_id>=0?route->notes:nullptr;
+                        // A target's block full of lane points (maxBlockEvents): the newest replaces the last
+                        // one waiting for the same parameter, so its stream thins but ends at its latest
+                        // value; each point lost is counted, and the target is never reset for it.
+                        auto place = [&]( const kick::clap::Event& event ) {
+                            if( target.paramCount < target.paramIn.size() )
+                            {
+                                target.paramNotes[target.paramCount] = notes;
+                                target.paramIn[target.paramCount++] = event;
+                                return;
+                            }
+                            const auto& a = *reinterpret_cast<const clap_event_param_value_t*>( event.header() ); // a value and a modulation alike up to their number
+                            for( uint32_t k = target.paramCount; k-- > 0; )
+                            {
+                                const auto& b = *reinterpret_cast<const clap_event_param_value_t*>( target.paramIn[k].header() );
+                                if( b.header.type == a.header.type && b.param_id == a.param_id && b.note_id == a.note_id && b.port_index == a.port_index && b.channel == a.channel && b.key == a.key )
+                                {
+                                    target.paramIn[k] = event;
+                                    target.paramNotes[k] = notes;
+                                    break;
+                                }
+                            }
+                            eventDrops_.fetch_add( 1, std::memory_order_relaxed );
+                        };
                         const double range = route->maximum - route->minimum;
                         // Through a control: the path from the control's value to the parameter's fraction.
                         const auto* control = route->control >= 0 ? &plan->controls[(size_t)route->control] : nullptr;
@@ -1418,7 +1438,7 @@ namespace oscairn
                             v.value      = route->minimum + ( control ? follow( x ) : std::clamp( e.value, 0.0, 1.0 ) ) * range;
                             if( route->stepped )
                                 v.value = std::round( v.value );
-                            target.paramIn[target.paramCount++] = kick::clap::Event::from( v );
+                            place( kick::clap::Event::from( v ) );
                         }
                         else
                         {
@@ -1430,7 +1450,7 @@ namespace oscairn
                             m.channel    = route->channel >= 0 ? route->channel : e.channel;
                             m.key        = e.key;
                             m.amount     = ( control ? follow( x ) : std::clamp( e.value, -1.0, 1.0 ) ) * range;
-                            target.paramIn[target.paramCount++] = kick::clap::Event::from( m );
+                            place( kick::clap::Event::from( m ) );
                         }
                     }
                 }

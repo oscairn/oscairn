@@ -7,7 +7,8 @@
 // The Oscairn LFO, the first first-party MODULATE sender, drives a control's relative targets as
 // CLAP modulation (the fixture adds its gain's modulation to its gain) and absolute ones as values;
 // saving never captures what it drives. At 1,000 Hz it still sends every point, four targets
-// receive every one, and nothing is dropped; at high rates its square is band-limited.
+// receive every one, and nothing is dropped; at high rates its square is band-limited. A target
+// fuller than its block holds thins the points, counted, without being reset.
 //   oscairn-control-source-test SEQUENCER.clap FIXTURE.clap LFO.clap BASIC_SYNTH.clap
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
@@ -264,6 +265,29 @@ namespace
         }
     }
 
+    // At the top rate, 1,357 Hz (a point every 2 samples), in blocks of 512, three controls on the
+    // LFO's lane all reaching A's gain bring it 768 points a block, past the 512 a target's block
+    // holds: the newest replace the last ones waiting, each counted, and A is never reset (its held
+    // note keeps sounding).
+    void lfoThinned(const char* lfo, const char* fixture)
+    {
+        constexpr uint32_t block = 512;
+        Session s(rate, block, {}, twoOutputs);
+        const auto r = lfoRig(s, lfo, fixture, 0, .5, MacroTarget{.start = .3, .end = .7, .relative = true}, MacroTarget{.start = .7, .end = .3, .relative = true}, 1357);
+        for(int i = 0; i < 2; ++i)
+        {
+            const auto c = s.addMacro("More");
+            s.setMacroTargets(c, {MacroTarget{.node = r.a, .param = gain, .start = .3, .end = .7, .relative = true}});
+            s.setMacroSource(c, r.lfo, 0);
+        }
+        s.commit();
+        size_t position = 0;
+        const auto got = render(s, block, position, .5, true);
+        const uint64_t blocks = got.out[0].size() / block, drops = s.sessionStatus().graphEventDrops;
+        check(drops > 0 && drops <= 256 * blocks, "a target's full block thins the points, counted: " + std::to_string(drops) + " in " + std::to_string(blocks) + " blocks");
+        check(std::none_of(got.out[0].begin(), got.out[0].end(), [](float v) { return v == 0; }), "the full target is never reset: its note sounds throughout");
+    }
+
     // The Basic Synth's Brightness modulated through a relative target: the sound changes, the
     // parameter does not.
     void synthBrightness(const char* lfo, const char* synth)
@@ -337,6 +361,7 @@ int main(int argc, char** argv)
         setLane(argv[1], argv[2], temp.path);
         lfoModulates(argv[3], argv[2]);
         lfoBandLimited(argv[3], argv[2]);
+        lfoThinned(argv[3], argv[2]);
         synthBrightness(argv[3], argv[4]);
         savedUnmodulated(argv[3], argv[2], temp.path);
     }

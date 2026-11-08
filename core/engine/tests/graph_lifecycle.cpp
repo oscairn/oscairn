@@ -20,7 +20,7 @@ int main(int argc,char** argv){try{
         g.host(late).setParameter(1,1);check(a.run(g) && a.left[0]==1,"held note before overflow");
         g.host(early).setParameter(1,parameters?-512:512);g.host(early2).setParameter(1,parameters?-512:512);g.host(early3).setParameter(1,parameters?-512:512);g.host(late).setParameter(1,-1);
         check(a.run(g) && a.left[0]==0,"late note-off survives saturated earlier sources via emergency release");
-        check(g.eventDrops()==1537,"discarded burst is counted"); // three full sources and the late release: past maxProcessEvents
+        check(g.eventDrops()==(parameters?1024u:1537u),"discarded burst is counted"); // notes: three full sources and the late release, past maxProcessEvents; parameters: the 1,024 lane points past the target's 512, thinned
         g.host(late).setParameter(1,1);check(a.run(g) && a.left[0]==1,"new notes play after overflow");
     }
     {

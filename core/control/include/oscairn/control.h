@@ -641,4 +641,10 @@ namespace oscairn
         virtual void recordRename( uint32_t take, const std::string& name ) = 0;
         virtual void recordPlay( uint32_t take ) = 0;
     };
+
+    // RFC 0011's target editor: target `target` of control `macro` starts (or ends) where its
+    // destination is now, the other controls where they are, so with the control at that end the
+    // destination stays put. An ordinary setMacroTargets edit. std::invalid_argument for no such
+    // target or a morph.
+    void setRangeToPresent( Control& c, uint32_t macro, size_t target, bool end );
 }

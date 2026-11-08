@@ -598,6 +598,24 @@ int main(int argc, char** argv)
                 auto near = [&](NodeId n, const Control::ParamInfo& p) { return std::abs(engine.param(nodeName(n), p.id) - at(p)) <= (p.maximum - p.minimum) * .02; };
                 check(wait([&] { return near(fm, fmTarget) && near(analog, analogTarget); }), "Control 1 moved back to " + num(was) + " moves both with it: FM's " + fmTarget.name + " " +
                       num(engine.param(nodeName(fm), fmTarget.id)) + ", Analog's " + analogTarget.name + " " + num(engine.param(nodeName(analog), analogTarget.id)));
+                // FM's parameter set by hand, then Control 2's End = now on it: the end is that value,
+                // so Control 2 at its top leaves it there; an edit Undo names and takes back.
+                const double hand = fmTarget.minimum + .3 * (fmTarget.maximum - fmTarget.minimum);
+                engine.edit([fm, id = fmTarget.id, hand](Control& c) { c.setParameter(fm, id, hand); });
+                check(wait([&] { return std::abs(engine.param(nodeName(fm), fmTarget.id) - hand) < 1e-6; }), "FM's " + fmTarget.name + " set by hand to " + num(hand));
+                auto nows = all<juce::Button>(view, [](juce::Button& b) { return b.getButtonText() == "Now..."; });
+                std::sort(nows.begin(), nows.end(), [](auto* a, auto* b) { return a->getY() < b->getY(); });
+                tap(nows.size() > 1 ? nows[1] : nullptr, "Now... on Control 2's FM target");
+                check(pick({"End = now"}), "Now... offers End = now");
+                check(wait([&] { const auto m = graph().macros; return m.size() > 1 && !m[1].targets.empty() && std::abs(m[1].targets[0].end - .3) < 1e-6; }), "End = now stores FM's value, .3 of its range: " + num(graph().macros[1].targets[0].end));
+                check(undoName() == "Control Control 2", "Undo names it: \"" + undoName() + "\"");
+                snapshot(view, "3-controls-end-now");
+                const auto control2 = graph().macros[1].id;
+                engine.edit([control2](Control& c) { c.setMacro(control2, 1); });
+                pump(300);
+                check(std::abs(engine.param(nodeName(fm), fmTarget.id) - hand) < 1e-6, "Control 2 at its top leaves FM's " + fmTarget.name + " at " + num(hand) + ": " + num(engine.param(nodeName(fm), fmTarget.id)));
+                undo();
+                check(wait([&] { return std::abs(graph().macros[1].targets[0].end - 1) < 1e-9; }), "Undo puts the end back at 1: " + num(graph().macros[1].targets[0].end));
             }
             // Play: the Performance's controls on its knob row, as the stage shows them.
             {

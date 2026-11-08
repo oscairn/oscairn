@@ -201,7 +201,8 @@ Decided 2026-11-08, from what the milestone test found:
 - Switching scenes and moving controls stay outside undo; Undo names the edit it would take
   back, on its button too ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#undo-status)).
 - A new control target maps the control's whole travel through its own range and curve, 0 to
-  1 by default; adding it can move its parameter, as modulation does
+  1 by default; adding it can move its parameter, as modulation does, and its editor sets
+  either end to the parameter's present value
   ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree)).
 - Notes held when a plugin's worker crashes are not replayed after its restart
   ([RFC 0010](rfcs/0010-plugin-worker-isolation.md#failure-handling)).

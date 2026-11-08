@@ -1875,6 +1875,70 @@ namespace
         check(s.graphState().macros[0].targets[0].base == s.graphState().macros[1].targets[0].base, "one base per destination");
     }
 
+    // RFC 0011's target editor: either end of a target's range set to its destination's present
+    // value (setRangeToPresent), so with the control at that end it stays where it is; an edit.
+    void presentEnds(const char* fixture)
+    {
+        Session s(48000, frames);
+        const auto a = s.add("a", fixture, "org.kick.test.synth");
+        s.setParameter(a, 7, .4);
+        const auto pa = s.addPart("A");
+        s.insertIntoPart(pa, 0, a); s.commit();
+        const auto knob = s.addMacro("Knob"), wheel = s.addMacro("Wheel");
+        const auto info = s.parameterInfo(a, 7);
+        auto gain = [&] { return s.parameter(a, 7); };
+        auto fraction = [&] { return (gain() - info.minimum) / (info.maximum - info.minimum); };
+        auto close = [](double v, double e) { return std::abs(v - e) < 1e-9; };
+        auto range = [&](size_t control) { const auto t = s.graphState().macros[control].targets[0]; return std::pair{t.start, t.end}; };
+        MacroTarget set; set.node = a; set.param = 7; // absolute, 0 to 1
+        s.setMacroTargets(knob, {set}); s.service();
+        // The knob at its top and the parameter then set by hand: End = now keeps it there.
+        s.setMacro(knob, 1);
+        s.setParameter(a, 7, .7); s.service();
+        const double top = gain();
+        setRangeToPresent(s, knob, 0, true); s.service();
+        check(close(range(0).second, fraction()) && close(range(0).first, 0), "End = now stores the parameter's value .7: " + std::to_string(range(0).second));
+        s.setMacro(knob, 1);
+        check(close(gain(), top), "the knob at its top leaves it at .7: " + std::to_string(gain()));
+        check(s.history().undo == "Control Knob", "an edit Undo names: " + s.history().undo);
+        s.undo(); s.service();
+        check(range(0) == std::pair{0.0, 1.0}, "undone, the range is 0 to 1 again: " + std::to_string(range(0).second));
+        // At its bottom, a relative wheel adding +.2 beside it: Start = now keeps it, the wheel's offset left out.
+        MacroTarget up = set; up.relative = true; up.start = .5; up.end = .7;
+        s.setMacroTargets(wheel, {up}); s.setMacro(wheel, 1);
+        s.setMacro(knob, 0);
+        check(close(gain(), .2), "the knob at 0 and the wheel's +.2: " + std::to_string(gain()));
+        s.setParameter(a, 7, .3); s.service();
+        const double bottom = gain();
+        setRangeToPresent(s, knob, 0, false); s.service();
+        check(close(range(0).first, .1), "Start = now stores .3 less the wheel's +.2: " + std::to_string(range(0).first));
+        s.setMacro(knob, 0);
+        check(close(gain(), bottom), "the knob at its bottom leaves it at .3: " + std::to_string(gain()));
+        s.setMacro(knob, 1);
+        check(gain() > bottom + .5, "and the knob still moves it: " + std::to_string(gain()));
+        s.setMacro(knob, 0);
+        // A relative target: its end becomes the offset that gives the value now.
+        s.setParameter(a, 7, .45); s.service();
+        setRangeToPresent(s, wheel, 0, true); s.service();
+        check(close(range(1).second, .85), "the wheel's End = now: .5 + .45 less the knob's .1: " + std::to_string(range(1).second));
+        s.setMacro(wheel, 1);
+        check(close(gain(), .45), "the wheel at its top leaves it at .45: " + std::to_string(gain()));
+        // With no absolute target the base counts and takes the edit, so the end stays as it is.
+        s.setMacroTargets(knob, {});
+        s.setParameter(a, 7, .5); s.service();
+        setRangeToPresent(s, wheel, 0, true); s.service();
+        s.setMacro(wheel, 1);
+        check(close(range(1).second, .85) && close(gain(), .5), "relative alone, End = now leaves it at .5: end " + std::to_string(range(1).second) + ", " + std::to_string(gain()));
+        // A part's level, by the same rule.
+        MacroTarget level; level.kind = MacroTarget::Kind::PartLevel; level.part = pa;
+        s.setMacroTargets(knob, {level}); s.setMacro(knob, 0);
+        s.setPartLevel(pa, .6, false); s.service();
+        setRangeToPresent(s, knob, 0, false); s.service();
+        s.setMacro(knob, 0);
+        auto partLevel = [&] { for(const auto& p : s.graphState().parts) if(p.id == pa) return p.level; return -1.0; };
+        check(close(range(0).first, .6) && close(partLevel(), .6), "a part level's Start = now: " + std::to_string(range(0).first) + ", " + std::to_string(partLevel()));
+    }
+
     // The Performance's level and pan on its main output: after every part, stored by scenes,
     // undone, saved and loaded.
     void master(const char* fixture, const fs::path& root)
@@ -2261,6 +2325,7 @@ int main(int argc, char** argv)
         memoryClasses(argv[1], temp.path);
         controls(argv[1], temp.path);
         summing(argv[1]);
+        presentEnds(argv[1]);
         master(argv[1], temp.path);
         roles(argv[1], temp.path);
         optionalAssets(argv[1], temp.path);

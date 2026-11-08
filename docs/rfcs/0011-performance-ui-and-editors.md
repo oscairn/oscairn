@@ -833,7 +833,15 @@ exponential curve) that drives a gain and a reversed part level, a relative targ
 scenes and saving. The summing rule, 2026-11-01 (`Session::driveMacro`, Performance format
 version 11): `control-parts` checks two controls on one parameter adding up, the sum clamped,
 the base surviving the clamp, a direct edit moving the base under the offsets, and an absolute
-target beside a relative one. Not yet: flattening the tree for sample-accurate sequencer lanes,
+target beside a relative one. Either end to the present value, 2026-11-08 (`setRangeToPresent`
+in `control.h`, each target row's **Now...** on the Controls page, an ordinary undoable edit):
+the end becomes the point that puts the destination where it is now with the other controls
+where they are, so the control at that end leaves it there. With exactly one absolute target on
+the destination the base does not count, and that point is the value less the other targets'
+offsets (a relative target's plus a half); with none or several the base takes up any edit
+since the controls last moved, so the target's point now already gives the value. A stepped
+parameter's is rounded to a step; a morph has none. `control-parts` and `desktop-phase3b`
+check it. Not yet: flattening the tree for sample-accurate sequencer lanes,
 default Assign controls from each sound, MIDI CC learn, and part faders as direct gain
 updates rather than a new graph plan per move.
 

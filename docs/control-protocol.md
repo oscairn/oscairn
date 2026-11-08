@@ -363,7 +363,11 @@ its `value` and `targets`). Several controls on one parameter, part level or mut
 ([RFC 0011's summing rule](rfcs/0011-performance-ui-and-editors.md#the-control-tree)): each
 target adds an offset to the destination's `base`, the same on all its targets (a relative
 target its point in its range less a half, an absolute one its point less the base), clamped
-to the range; `base` is the host's and is ignored in `controls.targets`. Setting a control sets its
+to the range; `base` is the host's and is ignored in `controls.targets`. An editor sets either
+end of a target to its destination's present value with no call of its own: from `graph.get`
+and `params.get` it works out the point that gives that value with the other targets where
+they are (RFC 0011's "either end to the present value"), and sends it in `controls.targets`, as
+the C++ `setRangeToPresent` does over any `Control`. Setting a control sets its
 targets as parameter events or part faders; a control target is set in turn, the one moved last
 setting it. Assignments
 that would loop are refused. Scenes store control values (`controls` in each scene).

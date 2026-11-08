@@ -606,6 +606,11 @@ namespace oscairn::standalone
                         curve->setSelectedId(int(t.curve) + 1, juce::dontSendNotification);
                         curve->onChange = [this, id, i, raw = curve.get()] { const auto c = MacroTarget::Curve(raw->getSelectedId() - 1); setTargets(id, [i, c](auto& ts) { ts[i].curve = c; }); };
                         curve->setBounds(r.removeFromRight(130).withSizeKeepingCentre(126, buttonHeight)); addAndMakeVisible(*curve); controls_.push_back(std::move(curve));
+                        auto* now = button(r.removeFromRight(80).withSizeKeepingCentre(76, buttonHeight), "Now...", {});
+                        const bool morph = t.kind == MacroTarget::Kind::Morph;
+                        now->setEnabled(!morph);
+                        now->setTooltip(morph ? "A morph's ends are its two scenes" : "Set the start or the end to where the target is now, so the control at that end leaves it there");
+                        now->onClick = [this, id, i, now] { presentMenu(id, i, *now); };
                         const int half = r.getWidth() / 2;
                         auto rangeEnd = [this, id, i](bool end) {
                             return [this, id, i, end] { for(const auto& x : macros_) if(x.id == id && i < x.targets.size()) return end ? x.targets[i].end : x.targets[i].start; return 0.0; };
@@ -1085,6 +1090,19 @@ namespace oscairn::standalone
                 auto& off = ts[target].offIn;
                 if(const auto it = std::find(off.begin(), off.end(), scene); it != off.end()) off.erase(it); else off.push_back(scene);
             });
+        });
+    }
+
+    // Either end of a target's range to where its destination is now (RFC 0011), worked out where
+    // the edit runs, so it reads the values the engine has.
+    void PartsView::presentMenu(uint32_t macro, size_t target, juce::Component& at)
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Start = now");
+        menu.addItem(2, "End = now");
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&at), [safe = juce::Component::SafePointer<PartsView>(this), macro, target](int chosen) {
+            if(!safe || chosen <= 0) return;
+            safe->edit([macro, target, end = chosen == 2](Control& c) { setRangeToPresent(c, macro, target, end); });
         });
     }
 

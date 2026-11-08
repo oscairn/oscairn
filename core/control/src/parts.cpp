@@ -1169,6 +1169,53 @@ namespace oscairn
 
     double MacroTarget::map(double value) const { return std::clamp(base + offset(value), 0.0, 1.0); }
 
+    // The point that puts the destination where it is now, every other target where it is (RFC
+    // 0011's summing rule: the destination is the base plus each target's offset). With exactly one
+    // absolute target the base does not count, so the point is the value less the other offsets.
+    // With none or several the base counts, and Session::setMacroTargets takes any edit since the
+    // controls last moved into it, so the target's point now already gives the value.
+    void setRangeToPresent(Control& c, uint32_t macro, size_t target, bool end)
+    {
+        const auto state = c.graphState();
+        const auto m = std::find_if(state.macros.begin(), state.macros.end(), [&](const Macro& x) { return x.id == macro; });
+        if(m == state.macros.end() || target >= m->targets.size()) throw std::invalid_argument("no such control target");
+        auto targets = m->targets;
+        const auto& t = targets[target];
+        Control::ParamInfo info;
+        double now = 0;
+        switch(t.kind)
+        {
+        case MacroTarget::Kind::Parameter:
+            info = c.parameterInfo(t.node, t.param);
+            now = info.maximum > info.minimum ? (c.parameter(t.node, t.param) - info.minimum) / (info.maximum - info.minimum) : 0;
+            break;
+        case MacroTarget::Kind::PartLevel: for(const auto& p : state.parts) if(p.id == t.part) now = p.level; break;
+        case MacroTarget::Kind::PartMute: for(const auto& p : state.parts) if(p.id == t.part) now = p.mute ? 1 : 0; break;
+        case MacroTarget::Kind::Macro: for(const auto& x : state.macros) if(x.id == t.macro) now = x.value; break;
+        case MacroTarget::Kind::Morph: throw std::invalid_argument("a morph's ends are its scenes");
+        }
+        now = std::clamp(now, 0.0, 1.0);
+        auto point = [](const MacroTarget& o, double x) { return o.start + (o.end - o.start) * o.shape(x); };
+        double others = 0;
+        int absolute = 0;
+        // shortcut: targets off in the scene last selected are counted; the session does not say which scene set the mappings.
+        if(t.sums())
+            for(const auto& x : state.macros)
+                for(size_t i = 0; i < x.targets.size(); ++i)
+                    if(const auto& o = x.targets[i]; o.sameDestination(t))
+                    {
+                        absolute += !o.relative;
+                        if(!(x.id == macro && i == target)) others += o.relative ? point(o, x.value) - .5 : point(o, x.value);
+                    }
+        double v = !t.sums() ? (t.relative ? now - t.base + .5 : now)
+                 : absolute == 1 ? now - others + (t.relative ? .5 : 0)
+                 : point(t, m->value);
+        if(t.kind == MacroTarget::Kind::Parameter && info.stepped && info.maximum > info.minimum)
+            v = (std::round(info.minimum + v * (info.maximum - info.minimum)) - info.minimum) / (info.maximum - info.minimum);
+        (end ? targets[target].end : targets[target].start) = std::clamp(v, 0.0, 1.0);
+        c.setMacroTargets(macro, targets);
+    }
+
     Macro& Session::findMacro(uint32_t id)
     {
         const auto it = std::find_if(macros_.begin(), macros_.end(), [&](const Macro& m) { return m.id == id; });

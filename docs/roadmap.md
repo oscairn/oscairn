@@ -567,7 +567,10 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
 - [ ] USB audio and MIDI in both directions, as a USB device to a computer and as a host for
   interfaces and controllers, on every device whose hardware allows it.
 - [ ] An RK3588 board, once the target hardware is known: real-time kernel, audio on isolated
-  cores, measured latency.
+  cores, measured latency. The real-time kernel is a build option now
+  (`BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL`, [RFC 0035](rfcs/0035-system-base.md#progress)), built
+  and booted in QEMU with `cyclictest` in a test variant; the hardware measurement is
+  [written down](kick.md#measuring-latency), not run.
 
 ## Phase 5: the rest of the architecture
 

@@ -7,6 +7,7 @@ Buildroot itself stays unmodified and easy to upgrade.
 | Image | Defconfig | Status |
 | --- | --- | --- |
 | QEMU, generic ARM64 machine | `oscairn_qemu_aarch64_defconfig` | Builds and boots; Oscairn starts and plays |
+| The same, real-time test variant | `oscairn_qemu_aarch64_rt_defconfig` | See [real-time kernel](#real-time-kernel) |
 
 QEMU has no model of the RK3588 or the KICK's i.MX8M Mini, so the QEMU image uses the
 generic `virt` machine with a Cortex-A76 CPU (code is built for the RK3588's
@@ -95,6 +96,27 @@ nothing dropped or repeated), not whether the VM kept up in real time.
 
 Other Buildroot targets go after the defconfig, for example
 `os/build.sh oscairn_qemu_aarch64_defconfig oscairn-rebuild all`.
+
+## Real-time kernel
+
+`BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL` (in the `oscairn` package's options) builds the kernel with
+`PREEMPT_RT`: it sets `CONFIG_EXPERT` and `CONFIG_PREEMPT_RT` through the package's kernel
+config fixups, so any product defconfig turns it on with one line. Linux 6.18 has it in mainline
+on ARM64; no patch is needed ([RFC 0035](../docs/rfcs/0035-system-base.md#the-kernel)).
+`oscairn_qemu_aarch64_rt_defconfig` is the QEMU image with it and `rt-tests` (`cyclictest`,
+`hackbench`), a test variant; the product image stays as it is until a board has been measured.
+
+```sh
+os/build.sh oscairn_qemu_aarch64_rt_defconfig
+# in the build container, as os/build.sh runs it: boot it and run cyclictest for 60 s
+python3 /src/os/scripts/cyclictest-qemu.py /work/output/oscairn_qemu_aarch64_rt_defconfig/images /out/cyclictest 60
+```
+
+Built and booted on 2026-11-07: the kernel reports `SMP PREEMPT_RT`, `boot-test.py` passes on
+it (Oscairn running, audio opened, Home on screen), and a 60 s `cyclictest` run beside the
+playing app reported maxima of 3.5 to 4.5 ms per core. QEMU's figures mean nothing for
+hardware (its guest cores are host threads); `compare-audio.py` was not run on it. The
+procedure for a device is in [running on a KICK](../docs/kick.md#measuring-latency).
 
 ## Next
 

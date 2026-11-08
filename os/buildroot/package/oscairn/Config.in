@@ -44,6 +44,16 @@ config BR2_PACKAGE_OSCAIRN_STANDALONE
 comment "the desktop app needs X.org and a glibc toolchain"
 	depends on !BR2_PACKAGE_XORG7 || !BR2_TOOLCHAIN_USES_GLIBC
 
+config BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL
+	bool "real-time kernel (PREEMPT_RT)"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Builds the image's kernel with PREEMPT_RT (and EXPERT, which
+	  it depends on): interrupts threaded, spinlocks preemptible,
+	  for a bounded worst-case latency (RFC 0035). Mainline since
+	  Linux 6.12 on ARM64, so no patch. For instrument and
+	  pass-through products; measure with cyclictest (rt-tests).
+
 endif
 
 comment "oscairn needs a toolchain w/ C++, threads, gcc >= 12"

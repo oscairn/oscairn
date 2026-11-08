@@ -42,6 +42,14 @@ OSCAIRN_CONF_OPTS += \
 	-DFETCHCONTENT_SOURCE_DIR_JUCE=$(OSCAIRN_JUCE_SRCDIR)
 endif
 
+# RFC 0035 step 2: the product's kernel made real-time; nothing in Oscairn changes with it.
+ifeq ($(BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL),y)
+define OSCAIRN_LINUX_CONFIG_FIXUPS
+	$(call KCONFIG_ENABLE_OPT,CONFIG_EXPERT)
+	$(call KCONFIG_ENABLE_OPT,CONFIG_PREEMPT_RT)
+endef
+endif
+
 # JUCE's modules compile as a few very large translation units, over a gigabyte of memory
 # each; a job per core can run out of memory on an 8 GB build machine.
 OSCAIRN_MAKE_OPTS = -j4

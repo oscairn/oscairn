@@ -82,6 +82,52 @@ Two things to change for an emulator of the KICK's hardware, neither tried yet:
 - **The kernel:** the image's kernel is configured for QEMU's `virt` machine. An emulator that
   models the i.MX8M Mini needs a kernel and device tree for that SoC.
 
+## Measuring latency
+
+For the owner to run on hardware ([RFC 0035](rfcs/0035-system-base.md#measuring), steps 1 and 2).
+Nothing here has been run on a device yet.
+
+**The image.** A product defconfig gets a real-time kernel with
+`BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL=y` (it turns on `CONFIG_EXPERT` and `CONFIG_PREEMPT_RT`;
+mainline since Linux 6.12, no patch), and `cyclictest` with `BR2_PACKAGE_RT_TESTS=y`, which
+belongs in a test image, not the product. `oscairn_qemu_aarch64_rt_defconfig` is the QEMU image
+with both; a board image adds the same two lines. On a board running its own Linux, install
+`rt-tests` from its distribution and check the kernel the same way.
+
+**Check the kernel** first: `uname -v` shows `PREEMPT_RT` (as on the QEMU variant:
+`#1 SMP PREEMPT_RT ...`). Without it, the numbers below measure the wrong kernel. The image's 6.18
+kernel has no `/sys/kernel/realtime` to check instead (seen on the QEMU variant).
+
+**Run**, as root, with Oscairn playing (the image starts it with `--play`) and a load beside it:
+
+```sh
+# load: scheduler and memory traffic, and storage writes, for the whole run
+while true; do hackbench -g 4 -l 10000 > /dev/null; done &
+while true; do dd if=/dev/zero of=/root/load bs=1M count=256 conv=fsync 2> /dev/null; done &
+# one thread per core at SCHED_FIFO 80 (the engine's audio thread's priority), memory locked,
+# 1 ms interval, a histogram to 400 µs; 10 minutes first, then the 12-hour run
+cyclictest -m -S -p 80 -i 1000 -d 0 -h 400 -D 10m -q > cyclictest-10m.txt
+cyclictest -m -S -p 80 -i 1000 -d 0 -h 400 -D 12h -q > cyclictest-12h.txt
+kill %1 %2; rm -f /root/load
+```
+
+Run the same on the board's non-real-time kernel (`CONFIG_PREEMPT`, the option off) for the
+baseline step 1 asks for. Watch the engine meanwhile: `session.status`'s `audioUnderruns` should
+not move ([control API](control-protocol.md)).
+
+**What to accept.** The figure is each thread's `Max:` line, in microseconds. RFC 0035's proposed
+gate is a maximum below 100 µs over 12 hours under load, and lower than the non-real-time
+kernel's on the same board; the figure is to be set from these first measurements. A maximum
+over 100 µs is worth reporting with the histogram (which cores, how often); one in the
+milliseconds means the real-time kernel is not in effect or a driver holds the CPU. QEMU's
+figures (`os/scripts/cyclictest-qemu.py`) mean nothing for hardware: QEMU runs the guest's
+cores as host threads.
+
+**Report:** the board and image (`uname -a`, `/etc/os-release` or the image's commit), the
+kernel's preemption (both checks above), the load, the duration, each thread's Min, Avg and Max,
+the histogram files, `audioUnderruns` before and after, and the room's temperature if the board
+throttles.
+
 ## What to report
 
 The session logs to `/var/log/oscairn.log` (the app and engine) and `/var/log/oscairn-xorg.log`.

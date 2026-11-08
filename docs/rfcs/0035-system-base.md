@@ -35,6 +35,15 @@ Checked when built and tested; the sections below say how.
 - [ ] 9. The SDK: a sysroot and toolchain per image, a CMake toolchain file, a CI template for every platform
 - [ ] 10. Optional hardware built per product: build options, profile consistency, capabilities reported, a test that a feature left out leaves nothing behind
 
+Steps 1 and 2, partly built: `BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL` gives a defconfig the
+`PREEMPT_RT` kernel (`CONFIG_EXPERT` and `CONFIG_PREEMPT_RT`, no patch on 6.18), and the test
+variant `oscairn_qemu_aarch64_rt_defconfig` adds `rt-tests`. It builds, boots with
+`SMP PREEMPT_RT`, passes `boot-test.py`, and `os/scripts/cyclictest-qemu.py` runs `cyclictest`
+on it beside the playing app (QEMU's figures meaningless). Not done: the script does not report
+`audioUnderruns` beside `cyclictest`, `compare-audio.py` has not run on the variant, the product
+QEMU image is still `CONFIG_PREEMPT`, `NO_HZ_FULL` is not set, and nothing has run on a device
+(the procedure is in [docs/kick.md](../kick.md#measuring-latency)).
+
 ## Problem
 
 The image boots into Oscairn and plays (os/README.md), and RFC 0028 says how it updates, stores

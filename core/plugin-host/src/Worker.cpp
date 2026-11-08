@@ -161,6 +161,8 @@ namespace oscairn::worker
                 w.u32(q.id).str(q.name).str(q.module).f64(q.minimum).f64(q.maximum).f64(q.defaultValue).u32(q.flags).u32(q.widget).u32(q.priority).u32(q.rangeHigh).u32(q.group).u32(q.role).u32(q.view).u32(q.field).u32(q.index);
                 w.u32(uint32_t(q.algorithms.size()));
                 for(const auto& a : q.algorithms) for(const auto b : a) w.u8(b);
+                w.u32(uint32_t(q.seconds.size()));
+                for(const auto s : q.seconds) w.f64(s);
             }
         }
 

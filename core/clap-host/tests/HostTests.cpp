@@ -120,8 +120,9 @@ int main(int argc, char** argv) {
         check(hint(9).widget == OSCAIRN_WIDGET_AUTO && hint(9).priority == 3, "a switch on five values is the host's choice; its priority stays");
         check(hint(99).widget == OSCAIRN_WIDGET_AUTO, "an unknown widget is the host's choice");
         check(hint(7).role == OSCAIRN_ROLE_CUTOFF && hint(8).role == OSCAIRN_ROLE_NONE && hint(99).role == OSCAIRN_ROLE_NONE, "a declared role; an unknown one is none");
-        check(hint(8).view == 1 && hint(8).field == OSCAIRN_FIELD_OPERATOR_LEVEL && hint(8).index == 2 && hint(9).view == 1 && hint(9).field == OSCAIRN_FIELD_ALGORITHM,
-              "views: an operator's level and the algorithm");
+        check(hint(8).view == 1 && hint(8).field == OSCAIRN_FIELD_TIME_1 && hint(8).index == 2 && hint(9).view == 1 && hint(9).field == OSCAIRN_FIELD_ALGORITHM,
+              "views: an operator's envelope time and the algorithm");
+        check(hint(8).seconds == std::vector<double>{.25, 2} && hint(9).seconds.empty() && hint(7).seconds.empty(), "a time field's seconds at each of its values, from seconds()");
         check(hint(7).view == 0 && hint(7).field == 0 && hint(99).view == 0 && hint(99).field == 0 && hint(99).index == 0,
               "an unknown field, an operator past the eighth or a continuous algorithm leaves the view");
         check(hint(9).algorithms.size() == 5 && hint(9).algorithms[1][0] == 2 && hint(9).algorithms[1][8] == 1 && hint(9).algorithms[0][8] == 3 &&
@@ -144,6 +145,15 @@ int main(int argc, char** argv) {
               "draft 3 is still read: its hints and roles, without views");
         older.unload();
         unsetenv("KICK_FIXTURE_UI_DRAFT_3");
+        // Built against draft 4: views, and no seconds(); the times from its value texts' units.
+        setenv("KICK_FIXTURE_UI_DRAFT_4", "1", 1);
+        Host four;
+        check(four.load(catalog.plugins[8], 48000, 128), "load the stepped fixture offering draft 4");
+        auto in4 = [&](clap_id id) { for (const auto& p : four.parameters()) if (p.id == id) return p; return Parameter{}; };
+        check(in4(8).field == OSCAIRN_FIELD_TIME_1 && in4(9).algorithms.size() == 5 && in4(8).seconds == std::vector<double>{.25, 1.5},
+              "draft 4 is still read: its views, and its times from value texts with units");
+        four.unload();
+        unsetenv("KICK_FIXTURE_UI_DRAFT_4");
     }
     {
         setenv("KICK_FIXTURE_LATE_FUNCTIONS", "1", 1);

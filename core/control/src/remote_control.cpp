@@ -388,6 +388,7 @@ namespace oscairn
                     if(V view=detail::member(p,"view"))
                     {
                         param.view=static_cast<uint32_t>(integer(view));param.field=fieldNamed(std::string(string(field(p,"field"))));param.index=static_cast<uint32_t>(integer(field(p,"index")));
+                        if(V seconds=detail::member(p,"seconds"))for(auto s:array(seconds))param.seconds.push_back(number(s));
                         if(V routings=detail::member(p,"algorithms"))for(auto a:array(routings))
                         {
                             std::array<uint8_t,11> r{};size_t k=0;

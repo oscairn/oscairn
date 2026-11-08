@@ -44,6 +44,10 @@ struct Parameter {
     // An algorithm parameter's routings, one per value from its minimum: oscairn_fm_algorithm_t's
     // inputs[8], carriers, feedback_from and feedback_to.
     std::vector<std::array<uint8_t, 11>> algorithms{};
+    // A time or rate field's seconds at evenly spaced values from its minimum to its maximum (each
+    // value of a stepped one of at most 128 values, else 33), from oscairn.ui's seconds() or value
+    // texts with units; empty: none.
+    std::vector<double> seconds{};
 };
 
 struct Port {

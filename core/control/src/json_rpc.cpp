@@ -1449,10 +1449,16 @@ namespace oscairn
             }
             if( method == "params.list" )
             {
-                // A rich view's fields, and an algorithm's routings, when it is part of one.
+                // A rich view's fields, a time field's seconds and an algorithm's routings, when it is part of one.
                 auto view = [](const Control::ParamInfo& v) {
                     if(!v.view) return std::string();
                     std::string text = ",\"view\":" + std::to_string(v.view) + ",\"field\":" + quote(fieldName(v.field)) + ",\"index\":" + std::to_string(v.index);
+                    if(!v.seconds.empty())
+                    {
+                        std::vector<std::string> seconds;
+                        for(const auto s : v.seconds) seconds.push_back(encode(s));
+                        text += ",\"seconds\":" + join(seconds);
+                    }
                     if(v.algorithms.empty()) return text;
                     std::vector<std::string> routings;
                     for(const auto& a : v.algorithms)

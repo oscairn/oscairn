@@ -165,6 +165,7 @@ struct Host::Impl {
     const clap_plugin_params_t* params = nullptr;
     const oscairn_plugin_ui_t* ui = nullptr;
     bool uiViews = false; // draft 4: views, and algorithm() may be read
+    bool uiSeconds = false; // draft 5: seconds() may be read
     const clap_plugin_state_t* state = nullptr;
     bool exclusiveState=false;
     const oscairn_plugin_sound_contexts_t* sounds = nullptr;
@@ -534,6 +535,8 @@ struct Host::Impl {
             throw std::runtime_error("Incomplete CLAP plugin interface");
         s.params = static_cast<const clap_plugin_params_t*>(s.plugin->get_extension(s.plugin, CLAP_EXT_PARAMS));
         s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI));
+        s.uiSeconds = s.ui != nullptr;
+        if (!s.ui) s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI_DRAFT_4)); // its prefix: no seconds()
         s.uiViews = s.ui != nullptr;
         if (!s.ui) s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI_DRAFT_3)); // its prefix: no views
         if (s.ui && !s.ui->param_hint) s.ui = nullptr;
@@ -638,6 +641,7 @@ struct Host::Impl {
                                (f >= OSCAIRN_FIELD_ALGORITHM && f <= OSCAIRN_FIELD_FIXED);
             const bool inView = hint.view && field && hint.index <= 8 && (f != OSCAIRN_FIELD_ALGORITHM || (stepped && values >= 1 && values <= 128));
             p.view = inView ? hint.view : 0; p.field = inView ? f : 0; p.index = inView ? hint.index : 0;
+            readSeconds(p, values);
             if (p.field != OSCAIRN_FIELD_ALGORITHM || !ui->algorithm) continue;
             // Its routings, all or none; operators past the eighth are dropped.
             for (long long v = 0; v < values; ++v) {
@@ -648,6 +652,31 @@ struct Host::Impl {
                 r[8] = a.carriers; r[9] = a.feedback_from <= 8 ? a.feedback_from : 0; r[10] = a.feedback_to <= 8 && r[9] ? a.feedback_to : 0;
                 p.algorithms.push_back(r);
             }
+        }
+    }
+    // A time or rate field's seconds at each value of a stepped parameter of at most 128, else at
+    // 33 evenly spaced values: from seconds() (draft 5), else from value texts with units ("31 ms",
+    // "1.2 s"); all or none.
+    void readSeconds(Parameter& p, long long values) {
+        const auto f = p.field;
+        if (!((f >= OSCAIRN_FIELD_DELAY && f <= OSCAIRN_FIELD_RELEASE && f != OSCAIRN_FIELD_SUSTAIN) || (f >= OSCAIRN_FIELD_TIME_1 && f <= OSCAIRN_FIELD_RATE_8))) return;
+        const bool asked = uiSeconds && ui->seconds;
+        if (!asked && !(params && params->value_to_text)) return;
+        const long long n = values >= 2 && values <= 128 ? values : 33;
+        for (long long k = 0; k < n; ++k) {
+            const double value = p.minimum + (p.maximum - p.minimum) * double(k) / double(n - 1);
+            double seconds = -1;
+            if (asked) { if (!ui->seconds(plugin, p.id, value, &seconds)) seconds = -1; }
+            else if (char text[256]{}; params->value_to_text(plugin, p.id, value, text, sizeof(text) - 1)) {
+                char* end = nullptr;
+                seconds = std::strtod(text, &end);
+                while (*end == ' ') ++end;
+                if (end == text) seconds = -1;
+                else if (!std::strcmp(end, "ms")) seconds /= 1000;
+                else if (std::strcmp(end, "s") && std::strcmp(end, "sec")) seconds = -1;
+            }
+            if (!std::isfinite(seconds) || seconds < 0) { p.seconds.clear(); return; }
+            p.seconds.push_back(seconds);
         }
     }
     // CLAP_PARAM_RESCAN_INFO: names, modules, the hidden and periodic flags and the editor hints,
@@ -667,7 +696,7 @@ struct Host::Impl {
             info.module.assign(p.module, strnlen(p.module, CLAP_PATH_SIZE));
             info.flags = (info.flags & ~changeable) | (p.flags & changeable);
             info.widget = OSCAIRN_WIDGET_AUTO; info.priority = 0; info.rangeHigh = CLAP_INVALID_ID; info.group = 0; info.role = 0;
-            info.view = info.field = info.index = 0; info.algorithms.clear();
+            info.view = info.field = info.index = 0; info.algorithms.clear(); info.seconds.clear();
         }
         applyHints(next);
         Gate guard(gate);

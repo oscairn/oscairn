@@ -267,7 +267,11 @@ struct Plugin {
                 return true;
             },
             [](const clap_plugin_t* p, clap_id id, double* value) { get(p).main(); if (id == 8) *value = get(p).toggle; else if (id == 9) *value = get(p).mode; else if (id == 7 || id == 99) *value = get(p).gain; else return false; return true; },
-            [](const clap_plugin_t*, clap_id, double value, char* out, uint32_t size) { std::snprintf(out, size, "%.2f", value); return true; },
+            [](const clap_plugin_t* p, clap_id id, double value, char* out, uint32_t size) {
+                if (id == 8 && get(p).kind == 8) std::snprintf(out, size, "%s", value > .5 ? "1.5 s" : "250 ms"); // its stage's time, with units
+                else std::snprintf(out, size, "%.2f", value);
+                return true;
+            },
             [](const clap_plugin_t*, clap_id, const char* text, double* value) { *value = std::atof(text); return true; },
             [](const clap_plugin_t* p, const clap_input_events_t* in, const clap_output_events_t*) {
                 get(p).audio(); for (uint32_t i = 0; i < in->size(in); ++i) get(p).event(in->get(in, i));
@@ -322,11 +326,12 @@ struct Plugin {
         // The stepped fixture's editor hints, some that fit their parameters and some that do
         // not, which the host must replace with "the host decides". Its Mode is an FM view's
         // algorithm, whose routing has operator 2 modulate operator 1 at odd values, and its
-        // Toggle operator 2's level.
+        // Toggle the time of operator 2's first envelope stage: 250 ms off and 2 s on (its value
+        // text says 1.5 s, so a host reading seconds() and one reading the texts differ).
         static const oscairn_plugin_ui_t ui{[](const clap_plugin_t*, clap_id id, oscairn_param_hint_t* hint) {
             switch (id) {
             case 7: *hint = {OSCAIRN_WIDGET_RANGE, 1, 99, 0, OSCAIRN_ROLE_CUTOFF, 2, 4242, 0}; return true; // a range up to "Read only": fits; the cutoff; no such field
-            case 8: *hint = {OSCAIRN_WIDGET_SWITCH, 2, CLAP_INVALID_ID, 5, 0, 1, OSCAIRN_FIELD_OPERATOR_LEVEL, 2}; return true; // two values: fits; grouped
+            case 8: *hint = {OSCAIRN_WIDGET_SWITCH, 2, CLAP_INVALID_ID, 5, 0, 1, OSCAIRN_FIELD_TIME_1, 2}; return true; // two values: fits; grouped
             case 9: *hint = {OSCAIRN_WIDGET_SWITCH, 3, CLAP_INVALID_ID, 5, 0, 1, OSCAIRN_FIELD_ALGORITHM, 0}; return true; // five values: no switch
             case 99: *hint = {42, 0, CLAP_INVALID_ID, 0, 4242, 1, OSCAIRN_FIELD_ALGORITHM, 9}; return true; // no such widget, role or operator; not stepped
             default: return false;
@@ -335,9 +340,15 @@ struct Plugin {
             if (id != 9 || value > 4) return false;
             *a = {}; a->inputs[0] = value % 2 ? 2 : 0; a->carriers = value % 2 ? 1 : 3; a->feedback_from = a->feedback_to = 2;
             return true;
+        }, [](const clap_plugin_t*, clap_id id, double value, double* seconds) {
+            if (id != 8) return false;
+            *seconds = value > .5 ? 2 : .25;
+            return true;
         }};
-        // KICK_FIXTURE_UI_DRAFT_3: offered as draft 3, as a plugin built before views; its hints' prefix is the same.
-        if (!std::strcmp(id, std::getenv("KICK_FIXTURE_UI_DRAFT_3") ? OSCAIRN_EXT_UI_DRAFT_3 : OSCAIRN_EXT_UI)) return get(plugin).kind == 8 ? &ui : nullptr;
+        // KICK_FIXTURE_UI_DRAFT_3 and _4: offered as draft 3 or 4, as a plugin built before views
+        // or before seconds(); its prefix is the same.
+        const char* draft = std::getenv("KICK_FIXTURE_UI_DRAFT_3") ? OSCAIRN_EXT_UI_DRAFT_3 : std::getenv("KICK_FIXTURE_UI_DRAFT_4") ? OSCAIRN_EXT_UI_DRAFT_4 : OSCAIRN_EXT_UI;
+        if (!std::strcmp(id, draft)) return get(plugin).kind == 8 ? &ui : nullptr;
         if (!std::strcmp(id, CLAP_EXT_STATE)) return get(plugin).kind == 9 ? nullptr : &state;
         if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &latency;
         if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &timers;

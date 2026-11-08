@@ -408,6 +408,13 @@
           "maximum": 8,
           "description": "With view: whose field it is (an operator, element or zone, from 1); 0 the view's own"
         },
+        "seconds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 128,
+          "items": {"type": "number", "minimum": 0},
+          "description": "A time or rate field's stage length in seconds at evenly spaced values from its minimum to its maximum (each value of a stepped parameter of at most 128 values, else 33), from oscairn.ui draft 5's seconds() or the value texts' units; missing when unknown"
+        },
         "algorithms": {
           "type": "array",
           "maxItems": 128,

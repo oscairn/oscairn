@@ -93,6 +93,9 @@ namespace oscairn
             // An algorithm's routing per value from its minimum: inputs (8 operator masks),
             // carriers, feedback from and to (operators from 1; 0 none), as oscairn_fm_algorithm_t.
             std::vector<std::array<uint8_t, 11>> algorithms{};
+            // A time or rate field's seconds at evenly spaced values from its minimum to its
+            // maximum (each value of a stepped one of at most 128, else 33); empty: none.
+            std::vector<double> seconds{};
         };
         struct TransportState
         {

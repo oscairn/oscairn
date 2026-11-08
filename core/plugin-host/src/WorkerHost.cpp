@@ -84,6 +84,10 @@ namespace oscairn
                 if(routings > 128) throw std::runtime_error("Worker sent too many algorithms");
                 p.algorithms.resize(routings);
                 for(auto& a : p.algorithms) for(auto& b : a) b = r.u8();
+                const auto seconds = r.u32();
+                if(seconds > 128) throw std::runtime_error("Worker sent too many times");
+                p.seconds.resize(seconds);
+                for(auto& s : p.seconds) s = r.f64();
             }
             return parameters;
         }

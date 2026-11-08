@@ -401,12 +401,17 @@ int main(int argc, char** argv)
             tap(plusTarget(0), "Control 1's + Target");
             check(pick({"Another control", "Control 2"}), "Control 1 targets Control 2 from its menu");
             check(wait([&] { return graph().macros[0].targets.size() == 1; }), "Control 1 drives Control 2");
+            const auto fmUnset = engine.param(nodeName(fm), fmTarget.id), analogUnset = engine.param(nodeName(analog), analogTarget.id);
             tap(plusTarget(1), "Control 2's + Target");
             check(pick({"Plugin parameter", juce::String::fromUTF8(nodeName(fm).c_str()), juce::String::fromUTF8(fmTarget.name.c_str())}), "Control 2 targets FM's " + fmTarget.name);
             check(wait([&] { return graph().macros[1].targets.size() == 1; }), "Control 2 drives FM");
             tap(plusTarget(1), "Control 2's + Target");
             check(pick({"Plugin parameter", juce::String::fromUTF8(nodeName(analog).c_str()), juce::String::fromUTF8(analogTarget.name.c_str())}), "Control 2 targets Analog's " + analogTarget.name);
             check(wait([&] { return graph().macros[1].targets.size() == 2; }), "Control 2 drives a parameter in two parts");
+            // A new target starts from its parameter as it is: adding it moves nothing.
+            pump(300);
+            check(engine.param(nodeName(fm), fmTarget.id) == fmUnset && engine.param(nodeName(analog), analogTarget.id) == analogUnset,
+                  "adding the targets leaves FM's " + fmTarget.name + " at " + num(fmUnset) + " (" + num(engine.param(nodeName(fm), fmTarget.id)) + ") and Analog's " + analogTarget.name + " at " + num(analogUnset) + " (" + num(engine.param(nodeName(analog), analogTarget.id)) + ")");
             snapshot(view, "1-controls");
 
             // ---- 2. Play ----
@@ -590,12 +595,11 @@ int main(int argc, char** argv)
                                    " (" + num(analogWas) + " -> " + num(engine.param(nodeName(analog), analogTarget.id)) + ")");
                 snapshot(view, "3-controls-moved");
                 // Moving a control is playing, not editing (Session::playMacro), as a scene is: Undo
-                // is left as it was. Moved back, each absolute target goes where the control's value
-                // puts it in its range (RFC 0011's summing rule: one absolute target sets the value).
+                // is left as it was. Each target started from its parameter's value when it was
+                // added, with the control where it is, so moved back the control puts both back.
                 check(undoName() == undoBefore, "moving a control is not an edit to undo: Undo names \"" + undoName() + "\", as before: \"" + undoBefore + "\"");
                 if(!sliders.empty()) sliders.front()->setValue(was, juce::sendNotificationSync);
-                auto at = [&](const Control::ParamInfo& p) { return p.minimum + was * (p.maximum - p.minimum); };
-                auto near = [&](NodeId n, const Control::ParamInfo& p) { return std::abs(engine.param(nodeName(n), p.id) - at(p)) <= (p.maximum - p.minimum) * .02; };
+                auto near = [&](NodeId n, const Control::ParamInfo& p) { return std::abs(engine.param(nodeName(n), p.id) - (n == fm ? fmWas : analogWas)) <= (p.maximum - p.minimum) * .02; };
                 check(wait([&] { return near(fm, fmTarget) && near(analog, analogTarget); }), "Control 1 moved back to " + num(was) + " moves both with it: FM's " + fmTarget.name + " " +
                       num(engine.param(nodeName(fm), fmTarget.id)) + ", Analog's " + analogTarget.name + " " + num(engine.param(nodeName(analog), analogTarget.id)));
             }

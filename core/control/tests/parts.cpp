@@ -1837,6 +1837,48 @@ namespace
         s.removeMacro(assign); check(s.graphState().macros.size() == 1 && s.graphState().macros[0].targets.size() == 1, "removing a control drops it from the controls above it");
     }
 
+    // A new target starts from its destination as it is (decided 2026-11-08): added while the
+    // control is part way, the parameter does not move; moving the control moves it from there,
+    // and moving it back puts it back.
+    void anchored(const char* fixture)
+    {
+        Session s(48000, frames);
+        const auto a = s.add("a", fixture, "org.kick.test.synth");
+        s.setParameter(a, 7, .4);
+        const auto pa = s.addPart("A");
+        s.insertIntoPart(pa, 0, a); s.commit();
+        const auto knob = s.addMacro("Knob"), other = s.addMacro("Other");
+        s.setMacro(knob, .6);
+        auto gain = [&] { return s.parameter(a, 7); };
+        auto close = [](double v, double e) { return std::abs(v - e) < 1e-9; };
+        MacroTarget t; t.node = a; t.param = 7; // left at the full range, absolute
+        s.setMacroTargets(knob, {t});
+        const auto r = s.graphState().macros[0].targets[0];
+        check(close(gain(), .4) && close(r.start, 0) && close(r.end, .4 / .6), "a new target at .6 leaves the parameter at .4: start " + std::to_string(r.start) + ", end " + std::to_string(r.end) + ", " + std::to_string(gain()));
+        s.setMacro(knob, 1);
+        check(close(gain(), .4 / .6), "the knob up moves it from there: " + std::to_string(gain()));
+        s.setMacro(knob, .6);
+        check(close(gain(), .4), "and back puts it back: " + std::to_string(gain()));
+        // Below its value: the range runs on to the top. At 0: from the value to the top.
+        s.setMacro(other, 0);
+        MacroTarget level; level.kind = MacroTarget::Kind::PartLevel; level.part = pa;
+        s.setPartLevel(pa, .7, false);
+        s.setMacroTargets(other, {level});
+        const auto l = s.graphState().macros[1].targets[0];
+        check(close(l.start, .7) && close(l.end, 1), "a new target with its control at 0 runs from the part's level .7 to the top: " + std::to_string(l.start) + " to " + std::to_string(l.end));
+        // Editing a target already there keeps its range as given.
+        t.start = 0; t.end = 1;
+        s.setMacroTargets(knob, {t});
+        check(close(s.graphState().macros[0].targets[0].end, 1), "a target already there takes the range given");
+        // Another control onto a driven parameter adds nothing where it is.
+        s.setMacro(knob, .5); const double before = gain();
+        s.setMacro(other, .3);
+        s.setMacroTargets(other, {level, MacroTarget{.node = a, .param = 7}});
+        check(close(gain(), before), "a second control's new target leaves the sum where it is: " + std::to_string(before) + " -> " + std::to_string(gain()));
+        s.setMacro(other, 1);
+        check(gain() > before + .1, "and moves it from there: " + std::to_string(gain()));
+    }
+
     // RFC 0011's summing rule: two controls on one parameter add their offsets to its base, clamped
     // to its range; the base survives the clamp; a direct edit moves the base under the offsets.
     void summing(const char* fixture)
@@ -1981,6 +2023,9 @@ namespace
         const auto volume = s.addMacro("Volume");
         MacroTarget db; db.kind = MacroTarget::Kind::PartLevel; db.part = pa; db.curve = MacroTarget::Curve::Db; db.low = -96; db.high = 0;
         MacroTarget power = db; power.part = pb; power.curve = MacroTarget::Curve::Power; power.exponent = 2;
+        s.setMacroTargets(volume, {db, power});
+        // New, they start from the parts' levels (full, so reversed); given again, the range is as given.
+        check(s.graphState().macros[0].targets[0].start == 1 && s.graphState().macros[0].targets[0].end == 0, "a new target from the part's full level runs down from it");
         s.setMacroTargets(volume, {db, power});
         auto level = [&](uint32_t part) { for(const auto& p : s.graphState().parts) if(p.id == part) return p.level; return -1.0; };
         auto close = [](double v, double e) { return std::abs(v - e) < 1e-9; };
@@ -2261,6 +2306,7 @@ int main(int argc, char** argv)
         memoryClasses(argv[1], temp.path);
         controls(argv[1], temp.path);
         summing(argv[1]);
+        anchored(argv[1]);
         master(argv[1], temp.path);
         roles(argv[1], temp.path);
         optionalAssets(argv[1], temp.path);

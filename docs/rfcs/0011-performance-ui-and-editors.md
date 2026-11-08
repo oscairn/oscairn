@@ -790,6 +790,14 @@ kept: the base survives it, so the value comes back as the controls go back.
 - **A new destination's base** is its value when it gets its first target. Adding a target to a
   destination some control already drives keeps its base, as does editing a control's other
   targets.
+- **A new target starts from its destination as it is** (decided 2026-11-08). A target new to
+  its control and left at the default range (absolute, start 0, end 1) gets a range through
+  the control's present value and the destination's base (a control target: that control's
+  value), so adding it moves nothing and moving the control back puts the value back. The range
+  rises to the top, or from the bottom when the value lies below the control's point; with the
+  control at 0 or 1 it keeps the whole travel, falling instead when the value is already at the
+  end it would rise to; with the control part way and the value at an end, the range is that one
+  point until it is edited. A range given again, or any other range, is kept as given.
 - **A direct edit moves the base, not the offsets.** Anything but the controls that moves the
   value (the screen, a part's fader, undo, a scene's stored values, a glide or morph, the plugin
   itself) is taken as where the musician wants it with the controls where they are: the next

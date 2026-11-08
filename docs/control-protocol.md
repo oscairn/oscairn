@@ -1159,7 +1159,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   to date by the delta the root names from its serial; package files come from the root's
   `mirrors` in turn, then its `blobBase`, then the address itself, each checked by its SHA-256,
   the next tried when one does not verify, and a download cut short is resumed by the next
-  install with a range request. On macOS this is the system's HTTPS; on Linux this build
+  install with a range request. A server error (5xx) is asked again once, a second later; when
+  every place fails, the error names each one and its reason. On macOS this is the system's HTTPS; on Linux this build
   fetches `http://` only. Its root key must be in the trust store for `repositories`; the root key's signature
   over the index key, the index key's over the root, the index's and the package file's
   SHA-256 and size, and every signature in the archive are checked, and a root with a lower

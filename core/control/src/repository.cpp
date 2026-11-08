@@ -8,10 +8,12 @@
 #include "miniz/miniz.h"
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <map>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 
 namespace oscairn::repository
 {
@@ -109,11 +111,11 @@ namespace oscairn::repository
                             if(bytes.size() + n > maxBytes) { tooLarge = true; return false; }
                             bytes.append(data, n); return true;
                         });
-                        if(tooLarge) { why = path + " is too large at " + url; continue; }
+                        if(tooLarge) { because(why, path + " is too large at " + url); continue; }
                         if(status == 200) return bytes;
-                        why = url + " answered " + std::to_string(status);
+                        because(why, url + " answered " + std::to_string(status));
                     }
-                    catch(const std::runtime_error& e) { why = e.what(); }
+                    catch(const std::runtime_error& e) { because(why, e.what()); }
                 }
                 bad("cannot fetch " + path + ": " + why);
             }
@@ -145,13 +147,13 @@ namespace oscairn::repository
                             return bool(out);
                         });
                         out.close();
-                        if(status != 200 && status != 206) { why = url + " answered " + std::to_string(status); continue; }
-                        if(have < size) { why = "the download from " + url + " was cut short; installing again resumes it"; continue; }
+                        if(status != 200 && status != 206) { because(why, url + " answered " + std::to_string(status)); continue; }
+                        if(have < size) { because(why, "the download from " + url + " was cut short; installing again resumes it"); continue; }
                         if(assets::sha256File(to) == sha256) return;
                         fs::remove(to, e); // a mirror's bad copy: refused, and the next one tried
-                        why = url + " served a file that is not the one the index names";
+                        because(why, url + " served a file that is not the one the index names");
                     }
-                    catch(const std::runtime_error& e) { why = e.what(); }
+                    catch(const std::runtime_error& e) { because(why, e.what()); }
                     if(cancel_ && *cancel_) break;
                 }
                 bad("cannot fetch the package file " + sha256 + ": " + why);
@@ -163,13 +165,21 @@ namespace oscairn::repository
             }
 
         private:
-            // One GET through the host's transport, stopped when canceled.
+            // Each place's reason, so a failure names them all, not only the last place tried.
+            static void because(std::string& why, const std::string& reason) { why += (why.empty() ? "" : "; ") + reason; }
+            // One GET through the host's transport, stopped when canceled. A server error (5xx)
+            // is asked again once, a second later: a host's passing outage, not the file missing.
             int get(const std::string& url, uint64_t from, const std::function<bool(int, const char*, size_t)>& sink)
             {
                 Transport t;
                 { std::lock_guard lock(transportMutex); t = transport; }
                 if(!t) throw std::runtime_error("this build cannot fetch from the web");
-                return t(url, from, [&](int status, const char* data, size_t n) { return !(cancel_ && *cancel_) && sink(status, data, n); });
+                for(int attempt = 0;; ++attempt)
+                {
+                    const int status = t(url, from, [&](int status, const char* data, size_t n) { return !(cancel_ && *cancel_) && sink(status, data, n); });
+                    if(status < 500 || status > 599 || attempt == 1 || (cancel_ && *cancel_)) return status;
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
             }
             std::string base_, blobBase_;
             std::vector<std::string> mirrors_;

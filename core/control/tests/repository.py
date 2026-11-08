@@ -159,7 +159,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         # Over HTTP (RFC 0031 step 2), from a local server: the tree at /, a tampered mirror at
         # /bad/ and a good one at /good/. The root lists both mirrors, the bad one first, and a
         # blob base nothing answers. Every request is logged, and chosen ones are cut short.
-        state = {'log': [], 'cut': set(), 'site': None, 'bad': None}
+        state = {'log': [], 'cut': set(), 'site': None, 'bad': None, 'fail': {}}
 
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
@@ -169,6 +169,11 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
 
             def do_GET(self):
                 state['log'].append((self.path, self.headers.get('Range')))
+                if state['fail'].get(self.path):  # a server error, as a host's outage gives
+                    self.send_response(state['fail'][self.path].pop(0))
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
                 for prefix, root in (('/bad/', state['bad']), ('/good/', state['site']), ('/', state['site'])):
                     if self.path.startswith(prefix):
                         relative = self.path[len(prefix):]
@@ -299,6 +304,27 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
             check(third['state'] == 'done' and [path for path, _ in log][:2] == ['/bad/' + blob_path, '/good/' + blob_path] and log[-1][0] == '/' + blob_path and (log[-1][1] or '').startswith('bytes=')
                   and log[-1][1] != 'bytes=0-' and len(store()) == 1 and leftovers() == [],
                   'a tampered mirror is refused, the next used, and a cut download resumed elsewhere: ' + json.dumps(log) + ' ' + third['error'])
+
+            # A server error is asked again once, and a place answering in time is used.
+            rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+            state['bad'] = state['site']
+            state['fail'] = {'/bad/' + blob_path: [503]}
+            fetched()
+            fourth = job('packages.install', {'source': base, 'id': 'org.kick.test.synth'})
+            tried = [path for path, _ in state['log'] if path.endswith(synth_blob)]
+            check(fourth['state'] == 'done' and tried == ['/bad/' + blob_path] * 2 and len(store()) == 1,
+                  'a server error is asked again once, and the answer then used: ' + json.dumps(tried) + ' ' + fourth['error'])
+
+            # When every place fails, the error names each one and why, not only the last.
+            rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+            state['fail'] = {prefix + blob_path: [504, 504] for prefix in ('/bad/', '/good/', '/')}
+            fetched()
+            fifth = job('packages.install', {'source': base, 'id': 'org.kick.test.synth'})
+            tried = [path for path, _ in state['log'] if path.endswith(synth_blob)]
+            named = all(f'{base}{prefix}{blob_path} answered 504' in fifth['error'] for prefix in ('bad/', 'good/', '')) and '127.0.0.1:9/nothing/' in fifth['error']
+            check(fifth['state'] == 'failed' and named and len(tried) == 6 and store() == [],
+                  'when every place fails, each is asked twice and named with its reason: ' + fifth['error'])
+            state['fail'] = {}
 
             # Certificates are checked: a refused one fetches nothing. Python's own client
             # reaching the server with the authority shows the refusal is the certificate's.

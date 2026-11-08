@@ -23,6 +23,7 @@ namespace oscairn
                 : std::system_error(error, std::generic_category(), "bind Unix socket " + path) {}
         };
         static constexpr size_t maxClients = 8;
+        static constexpr size_t maxAppClients = 16; // apps' connections (RFC 0022), counted apart
         static constexpr size_t maxQueuedBytes = 1024 * 1024;
         static constexpr size_t maxRequestsPerTick = 16; // per client
         explicit LocalServer(Control& control);
@@ -83,6 +84,9 @@ namespace oscairn
         /// queue overflows by disconnecting, never by silently dropping updates.
         void poll();
         std::vector<std::string> takeNotifications();
+        /// A descriptor that came with what was read (apps.connect's connection), or -1. The
+        /// caller owns it; it is close-on-exec.
+        int takeDescriptor();
     private:
         struct Impl;
         std::unique_ptr<Impl> impl_;

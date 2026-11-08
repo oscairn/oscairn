@@ -548,7 +548,7 @@ untrusted clients. `adopt(fd)` takes ownership of an already connected stream, a
 socket activation and anonymous-stream tests without a pathname listener.
 
 The control thread calls `LocalServer::poll(monotonicNanoseconds)` regularly; the method
-never waits for socket readiness. There are at most 8 clients, 16 documents dispatched
+never waits for socket readiness. There are at most 8 clients (and 16 apps' connections, below), 16 documents dispatched
 per client per tick, roughly 64 KiB read/written per client per tick, and 1 MiB queued
 output per client. A document may contain up to 64 batch members. Method execution
 (including plugin loading and graph commits) remains synchronous on the control thread.
@@ -569,6 +569,38 @@ its own. `engine-pump` serves a session exactly so, without an audio device: req
 answered in about 0.03 ms (median; 0.1 ms worst) rather than 3 ms (6 ms worst) on the 5 ms
 timer the engine used before, a change another client made is heard in under 0.1 ms, and
 the process stays at about 1% CPU idle.
+
+### Apps
+
+Apps that run as processes ([RFC 0022](rfcs/0022-apps-and-requests.md) step 2) reach the
+engine on connections the local server makes for them, and ask each other for actions through
+it. The server relays; it never interprets an action. These methods exist only on the local
+transport (other transports answer "Method not found"), and are not in `session.hello`'s
+capabilities.
+
+- `apps.connect {app}` makes a connection for the app named (1 to 128 letters, digits, `.`, `-`
+  and `_`) and answers `{app}` with the other end of it as a descriptor riding on the reply
+  (`SCM_RIGHTS`); `LocalClient::takeDescriptor()` gives it, close-on-exec. The caller becomes
+  the app's *host* (the shell), and the connection the app's *main* one. On an app's own
+  connection, `app` may be left out and may only name itself: the connection made then is the
+  app's too (for its jobs) but not its main one. Up to 16 app connections, counted apart from
+  the 8 other clients.
+- `apps.request {app?, action, argument?}` answers `{request}`. From an app it goes to its host
+  (`app` not allowed: the host decides who answers); from a host it names the app, and goes to
+  that app's newest main connection ("… is not connected" otherwise). The connection it is for
+  gets `apps.requested {request, app, action, argument}`, `app` being the asker (empty for the
+  host).
+- `apps.answer {request, result?}`: only the connection asked may answer, once; the asker gets
+  `apps.answered {request, result}`. An empty result is a cancel. A request out to a
+  connection that closes is answered with a cancel.
+- `apps.ping {ping}` goes to each app's main connection once a second; its client library
+  answers `apps.pong {ping}` from the app's main thread. Its host gets `apps.status {apps:
+  [{app, silent}]}` once a second, `silent` being the milliseconds since the oldest ping it
+  has not answered (0 when none).
+
+Arguments and results are strings of at most 16 KiB. Notifications addressed to a connection
+(`apps.requested`, `apps.answered`, `apps.ping`, `apps.status`) need no subscription. Grants
+per app connection are RFC 0022 step 4; until then an app's connection may call every method.
 
 `LocalClient::call` waits for its matching response while retaining interleaved
 notifications. The default deadline is 1 second. Timeout, malformed response, mismatched

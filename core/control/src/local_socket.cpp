@@ -15,6 +15,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <map>
 #include <fcntl.h>
 #include <mutex>
 #include <poll.h>
@@ -23,6 +24,7 @@
 #include <thread>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -77,35 +79,70 @@ namespace oscairn
                 if(p.revents&(POLLERR|POLLHUP|POLLNVAL))throw std::runtime_error("Local RPC disconnected");
             }
         }
+        void closeOnExec(int fd){const int flags=fcntl(fd,F_GETFD);if(flags>=0)fcntl(fd,F_SETFD,flags|FD_CLOEXEC);}
+        // One byte with a descriptor riding on it (SCM_RIGHTS): apps.connect's connection.
+        ssize_t sendDescriptor(int fd,const char* p,int passed)
+        {
+            iovec io{const_cast<char*>(p),1};
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))]{};
+            msghdr message{};message.msg_iov=&io;message.msg_iovlen=1;message.msg_control=control;message.msg_controllen=sizeof control;
+            auto* header=CMSG_FIRSTHDR(&message);
+            header->cmsg_level=SOL_SOCKET;header->cmsg_type=SCM_RIGHTS;header->cmsg_len=CMSG_LEN(sizeof(int));
+            std::memcpy(CMSG_DATA(header),&passed,sizeof(int));
+#ifdef MSG_NOSIGNAL
+            return ::sendmsg(fd,&message,MSG_NOSIGNAL);
+#else
+            return ::sendmsg(fd,&message,0);
+#endif
+        }
         struct Stream
         {
             int fd=-1;
             std::string input,output;
             size_t sent=0;
             bool eof=false;
-            explicit Stream(int socket):fd(socket)
+            bool takesDescriptors=false; // a client's: a server's stream closes any sent to it
+            std::deque<std::pair<size_t,int>> descriptors; // to send, each with output's byte at that offset
+            std::deque<int> received;
+            explicit Stream(int socket,bool takes=false):fd(socket),takesDescriptors(takes)
             {
                 try { configure(fd); } catch(...) { ::close(fd); fd=-1; throw; }
             }
-            ~Stream(){if(fd>=0)::close(fd);}
-            void close(){if(fd>=0)::close(fd);fd=-1;input.clear();output.clear();sent=0;}
-            void queue(std::string_view line)
+            ~Stream(){close();}
+            void close()
+            {
+                if(fd>=0)::close(fd);
+                fd=-1;input.clear();output.clear();sent=0;
+                for(const auto& d:descriptors)::close(d.second);
+                for(int d:received)::close(d);
+                descriptors.clear();received.clear();
+            }
+            size_t queue(std::string_view line) // where the line starts in output
             {
                 if(line.size()+1>LocalServer::maxQueuedBytes-(output.size()-sent))
                     throw std::runtime_error("Local RPC output queue full");
-                if(sent){output.erase(0,sent);sent=0;}
+                if(sent){output.erase(0,sent);for(auto& d:descriptors)d.first-=sent;sent=0;}
+                const auto at=output.size();
                 output.append(line);output+='\n';
+                return at;
             }
             void flush()
             {
                 size_t budget=65536;
                 while(fd>=0 && sent<output.size() && budget)
                 {
-                    const auto n=sendBytes(fd,output.data()+sent,std::min(budget,output.size()-sent));
-                    if(n<0 && errno==EINTR)continue;
-                    if(n<0 && again())return;
-                    if(n<=0)throw std::runtime_error("Local RPC write disconnected");
-                    sent+=static_cast<size_t>(n);budget-=static_cast<size_t>(n);
+                    size_t n=std::min(budget,output.size()-sent);int passed=-1;
+                    if(!descriptors.empty())
+                    {
+                        if(descriptors.front().first==sent){passed=descriptors.front().second;n=1;}
+                        else n=std::min(n,descriptors.front().first-sent);
+                    }
+                    const auto written=passed<0?sendBytes(fd,output.data()+sent,n):sendDescriptor(fd,output.data()+sent,passed);
+                    if(written<0 && errno==EINTR)continue;
+                    if(written<0 && again())return;
+                    if(written<=0)throw std::runtime_error("Local RPC write disconnected");
+                    if(passed>=0){::close(passed);descriptors.pop_front();}
+                    sent+=static_cast<size_t>(written);budget-=static_cast<size_t>(written);
                 }
                 if(sent==output.size()){output.clear();sent=0;}
             }
@@ -116,10 +153,30 @@ namespace oscairn
                 if(eof)return false;
                 if(input.size()>=limit)throw std::runtime_error("Local RPC message too large");
                 std::array<char,4096> buffer;
+                iovec io{buffer.data(),std::min(buffer.size(),limit-input.size())};
+                alignas(cmsghdr) char control[CMSG_SPACE(4*sizeof(int))];
+                msghdr message{};
                 ssize_t n;
-                do { n=::recv(fd,buffer.data(),std::min(buffer.size(),limit-input.size()),0); } while(n<0 && errno==EINTR);
+                do
+                {
+                    message=msghdr{};message.msg_iov=&io;message.msg_iovlen=1;message.msg_control=control;message.msg_controllen=sizeof control;
+#ifdef MSG_CMSG_CLOEXEC
+                    n=::recvmsg(fd,&message,MSG_CMSG_CLOEXEC);
+#else
+                    n=::recvmsg(fd,&message,0);
+#endif
+                } while(n<0 && errno==EINTR);
                 if(n<0 && again())return false;
                 if(n<0)systemError("recv");
+                if(message.msg_controllen>0)
+                    for(auto* header=CMSG_FIRSTHDR(&message);header;header=CMSG_NXTHDR(&message,header))
+                        if(header->cmsg_level==SOL_SOCKET && header->cmsg_type==SCM_RIGHTS)
+                            for(size_t i=0;i<(header->cmsg_len-CMSG_LEN(0))/sizeof(int);++i)
+                            {
+                                int passed;std::memcpy(&passed,CMSG_DATA(header)+i*sizeof(int),sizeof(int));
+                                closeOnExec(passed);
+                                if(takesDescriptors && received.size()<8)received.push_back(passed);else ::close(passed);
+                            }
                 if(n==0){eof=true;return false;}
                 input.append(buffer.data(),static_cast<size_t>(n));return true;
             }
@@ -170,8 +227,98 @@ namespace oscairn
         int listener=-1;
         std::string path;
         dev_t device=0;ino_t inode=0;
-        struct Peer { Stream stream; JsonRpc rpc; Peer(int fd,Control& c):stream(fd),rpc(c){} };
+        // app: the app on this connection (RFC 0022), empty for any other client; main: the one
+        // apps.connect gave its host (pinged, and sent requests), not one it asked for itself.
+        struct Peer
+        {
+            Stream stream; JsonRpc rpc; uint64_t id;
+            std::string app; bool main=false; uint64_t host=0;
+            uint32_t pings=0,answered=0; uint64_t silentSince=0; // a ping unanswered since then, or 0
+            std::vector<std::string> notices; // relayed to it, sent with its notifications
+            Peer(int fd,Control& c,uint64_t n):stream(fd),rpc(c),id(n){}
+            void notice(std::string_view method,const std::string& params){notices.push_back("{\"jsonrpc\":\"2.0\",\"method\":"+quote(method)+",\"params\":"+params+'}');}
+        };
         std::vector<std::unique_ptr<Peer>> peers;
+        std::vector<std::unique_ptr<Peer>> joining; // apps' connections made while peers are walked
+        uint64_t nextPeer=1,lastPing=0;
+        uint32_t nextRequest=1;
+        int passing=-1; // the descriptor apps.connect is answered with, until it is queued
+        struct Pending { uint64_t asker,answerer; };
+        std::map<uint32_t,Pending> requests;
+        struct Relay final : AppRelay
+        {
+            Impl& s;
+            explicit Relay(Impl& server):s(server){}
+            Peer& of(JsonRpc& rpc)
+            {
+                for(auto* list:{&s.peers,&s.joining})for(auto& p:*list)if(&p->rpc==&rpc)return *p;
+                throw std::logic_error("apps: an adapter without its connection");
+            }
+            Peer* find(const std::function<bool(const Peer&)>& match)
+            {
+                Peer* found=nullptr; // the newest: an app restarted replaces its last connection
+                for(auto* list:{&s.peers,&s.joining})for(auto& p:*list)if(p->stream.fd>=0 && match(*p))found=p.get();
+                return found;
+            }
+            std::string connect(JsonRpc& rpc,const std::string& named) override
+            {
+                auto& from=of(rpc);
+                const auto app=named.empty()?from.app:named; // an app's own, unnamed
+                if(app.empty())throw std::invalid_argument("apps.connect names the app");
+                if(!from.app.empty() && app!=from.app)throw std::invalid_argument("An app asks for connections for itself only");
+                if(s.passing>=0)throw std::invalid_argument("One connection per request");
+                size_t apps=0;
+                for(auto* list:{&s.peers,&s.joining})for(auto& p:*list)apps+=!p->app.empty();
+                if(apps>=maxAppClients)throw std::invalid_argument("Too many app connections");
+                int fds[2];
+                if(::socketpair(AF_UNIX,SOCK_STREAM,0,fds)<0)throw std::invalid_argument(std::string("Cannot make a connection: ")+std::strerror(errno));
+                closeOnExec(fds[1]);
+                std::unique_ptr<Peer> peer;
+                try{peer=std::make_unique<Peer>(fds[0],s.control,s.nextPeer++);}catch(...){::close(fds[1]);throw;}
+                peer->app=app;peer->main=from.app.empty();peer->host=from.app.empty()?from.id:from.host;
+                peer->rpc.relayApps(this);
+                s.joining.push_back(std::move(peer));s.passing=fds[1];
+                return "{\"app\":"+quote(app)+'}';
+            }
+            std::string request(JsonRpc& rpc,const std::string& app,const std::string& action,const std::string& argument) override
+            {
+                auto& from=of(rpc);
+                Peer* to=nullptr;
+                if(!from.app.empty())
+                {
+                    if(!app.empty())throw std::invalid_argument("An app's requests go to its host, which decides who answers");
+                    to=find([&](const Peer& p){return p.id==from.host;});
+                    if(!to)throw std::invalid_argument("The app's host is gone");
+                }
+                else
+                {
+                    if(app.empty())throw std::invalid_argument("A request names the app it is for");
+                    to=find([&](const Peer& p){return p.main && p.app==app && p.host==from.id;});
+                    if(!to)throw std::invalid_argument(app+" is not connected");
+                }
+                const auto n=s.nextRequest++;
+                s.requests[n]={from.id,to->id};
+                to->notice("apps.requested","{\"request\":"+std::to_string(n)+",\"app\":"+quote(from.app)+",\"action\":"+quote(action)+",\"argument\":"+quote(argument)+'}');
+                return "{\"request\":"+std::to_string(n)+'}';
+            }
+            std::string answer(JsonRpc& rpc,uint64_t request,const std::string& result) override
+            {
+                auto& from=of(rpc);
+                const auto it=s.requests.find(uint32_t(request));
+                if(it==s.requests.end() || it->second.answerer!=from.id)throw std::invalid_argument("No such request for this connection");
+                const auto asker=it->second.asker;s.requests.erase(it);
+                if(auto* to=find([&](const Peer& p){return p.id==asker;}))
+                    to->notice("apps.answered","{\"request\":"+std::to_string(request)+",\"result\":"+quote(result)+'}');
+                return R"({"answered":true})";
+            }
+            std::string pong(JsonRpc& rpc,uint64_t ping) override
+            {
+                auto& from=of(rpc);
+                if(from.main && ping<=from.pings && ping>from.answered){from.answered=uint32_t(ping);if(from.answered==from.pings)from.silentSince=0;}
+                return R"({"accepted":true})";
+            }
+        };
+        Relay relay{*this};
         bool everAttached=false,abandoned=false; // abandoned: an attached UI left without releasing
         // watch(): the watcher waits on `watched` (what poll() left to look at) and the wake pipe,
         // which poll() writes when that set changed under it. armed: poll() ran since the last wake.
@@ -253,8 +400,9 @@ namespace oscairn
     }
     bool LocalServer::adopt(int fd)
     {
-        if(impl_->peers.size()>=maxClients){::close(fd);return false;}
-        impl_->peers.push_back(std::make_unique<Impl::Peer>(fd,impl_->control));return true;
+        auto& s=*impl_;
+        if(size_t(std::count_if(s.peers.begin(),s.peers.end(),[](const auto& p){return p->app.empty();}))>=maxClients){::close(fd);return false;}
+        s.peers.push_back(std::make_unique<Impl::Peer>(fd,s.control,s.nextPeer++));s.peers.back()->rpc.relayApps(&s.relay);return true;
     }
     void LocalServer::watch(std::function<void()> wake)
     {
@@ -293,7 +441,15 @@ namespace oscairn
                     {
                         if(line.size()>JsonRpc::maxMessageBytes)throw std::runtime_error("Request too large");
                         const bool wasAttached=peer->rpc.attached(),wasReleased=peer->rpc.released();
-                        if(auto reply=peer->rpc.dispatch(line))stream.queue(*reply);
+                        auto reply=peer->rpc.dispatch(line);
+                        const int passed=std::exchange(s.passing,-1);
+                        if(!reply){if(passed>=0)::close(passed);}
+                        else
+                        {
+                            size_t at=0;
+                            try{at=stream.queue(*reply);}catch(...){if(passed>=0)::close(passed);throw;}
+                            if(passed>=0)stream.descriptors.push_back({at,passed}); // apps.connect's connection, with its reply
+                        }
                         if(!wasAttached && peer->rpc.attached()){s.everAttached=true;s.abandoned=false;} // a UI back after a crash keeps it again
                         // The last window quitting normally: the user quit the app, whatever crashed before.
                         if(!wasReleased && peer->rpc.released() && std::none_of(s.peers.begin(),s.peers.end(),[&](const auto& p){return p!=peer && p->rpc.attached() && !p->rpc.released();}))s.abandoned=false;
@@ -303,6 +459,27 @@ namespace oscairn
                 }
             }
             catch(const std::exception&){stream.close();} // failure isolates this client
+        }
+        for(auto& peer:s.joining)s.peers.push_back(std::move(peer));
+        s.joining.clear();
+        // Apps (RFC 0022): once a second, each host hears how long its apps have left a ping
+        // unanswered, then each app's main connection is pinged; its client library answers.
+        if(!s.lastPing || now<s.lastPing || now-s.lastPing>=1000000000)
+        {
+            s.lastPing=now;
+            std::map<uint64_t,std::vector<std::string>> status;
+            for(const auto& p:s.peers)
+                if(p->main && p->stream.fd>=0)
+                    status[p->host].push_back("{\"app\":"+quote(p->app)+",\"silent\":"+std::to_string(p->silentSince?(now-p->silentSince)/1000000:0)+'}');
+            for(auto& p:s.peers)
+                if(const auto it=status.find(p->id);it!=status.end())
+                {
+                    std::string list;
+                    for(const auto& a:it->second)list+=(list.empty()?"":",")+a;
+                    p->notice("apps.status","{\"apps\":["+list+"]}");
+                }
+            for(auto& p:s.peers)
+                if(p->main){++p->pings;if(!p->silentSince)p->silentSince=now;p->notice("apps.ping","{\"ping\":"+std::to_string(p->pings)+'}');}
         }
         // Then what changed, to every client: a request one client made reaches the others in this poll.
         bool more=false;
@@ -314,7 +491,11 @@ namespace oscairn
             {
                 // End of a write-half: finish queued complete requests/responses first.
                 if(!stream.eof)
+                {
+                    for(const auto& notice:peer->notices)stream.queue(notice);
                     for(auto& notice:peer->rpc.notifications(now))stream.queue(notice);
+                }
+                peer->notices.clear();
                 stream.flush();
                 const bool lines=stream.input.find('\n')!=std::string::npos;
                 if(stream.eof && !lines && stream.output.empty())stream.close();
@@ -323,6 +504,14 @@ namespace oscairn
             catch(const std::exception&){stream.close();} // failure isolates this client
         }
         for(const auto& peer:s.peers)if(peer->stream.fd<0 && peer->rpc.attached() && !peer->rpc.released())s.abandoned=true;
+        // A request to a connection that closed is canceled for its asker (the next poll says so).
+        for(const auto& peer:s.peers)
+            if(peer->stream.fd<0)
+                std::erase_if(s.requests,[&](const auto& r){
+                    if(r.second.answerer==peer->id)
+                        if(auto* asker=s.relay.find([&](const Impl::Peer& p){return p.id==r.second.asker;}))
+                            asker->notice("apps.answered","{\"request\":"+std::to_string(r.first)+",\"result\":\"\"}");
+                    return r.second.answerer==peer->id || r.second.asker==peer->id;});
         std::erase_if(s.peers,[](const auto& peer){return peer->stream.fd<0;});
         if(auto* w=s.watch.get())
         {
@@ -399,7 +588,12 @@ namespace oscairn
     void LocalClient::disconnect()noexcept{impl_->stream.reset();impl_->messages.clear();impl_->messageBytes=impl_->notices=0;impl_->unanswered.clear();}
     LocalClient::Waits LocalClient::waits()const{return impl_->waits;}
     bool LocalClient::connected()const{return impl_->stream && !impl_->stream->eof;}
-    void LocalClient::adopt(int fd){disconnect();impl_->stream=std::make_unique<Stream>(fd);}
+    void LocalClient::adopt(int fd){disconnect();impl_->stream=std::make_unique<Stream>(fd,true);}
+    int LocalClient::takeDescriptor()
+    {
+        if(!impl_->stream || impl_->stream->received.empty())return -1;
+        const int fd=impl_->stream->received.front();impl_->stream->received.pop_front();return fd;
+    }
     void LocalClient::connect(const std::string& path,unsigned timeoutMs)
     {
         disconnect();const auto addr=address(path);

@@ -7,6 +7,7 @@
 #include "sheredom/json.h"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -515,6 +516,28 @@ namespace oscairn
                 fields(p,{});
                 if( method == "engine.attach" ) client.attach(); else client.release();
                 return R"({"accepted":true})";
+            }
+            // Apps (RFC 0022): connections for apps, and requests and answers between them, which
+            // the transport relays to the connection they are for.
+            if( method.starts_with("apps.") && client.apps() )
+            {
+                auto* relay = client.apps();
+                auto name = [&]( const char* field ) {
+                    const std::string v( string(member(p,field)) );
+                    if( v.empty() || v.size() > 128 || !std::all_of(v.begin(),v.end(),[](char ch){ return std::isalnum(static_cast<unsigned char>(ch)) || ch == '.' || ch == '-' || ch == '_'; }) )
+                        invalid("An app or action is named with 1 to 128 letters, digits, dots, hyphens and underscores");
+                    return v;
+                };
+                auto text = [&]( const char* field ) {
+                    if( !member(p,field) ) return std::string();
+                    std::string v( string(member(p,field)) );
+                    if( v.size() > 16384 ) invalid("An argument or result is at most 16 KiB");
+                    return v;
+                };
+                if( method == "apps.connect" ) { fields(p,{"app"}); return relay->connect(client,member(p,"app") ? name("app") : std::string()); }
+                if( method == "apps.request" ) { fields(p,{"app","action","argument"}); return relay->request(client,member(p,"app") ? name("app") : std::string(),name("action"),text("argument")); }
+                if( method == "apps.answer" ) { fields(p,{"request","result"}); return relay->answer(client,integer(member(p,"request")),text("result")); }
+                if( method == "apps.pong" ) { fields(p,{"ping"}); return relay->pong(client,integer(member(p,"ping"))); }
             }
             if( method == "subscribe" || method == "unsubscribe" )
             {

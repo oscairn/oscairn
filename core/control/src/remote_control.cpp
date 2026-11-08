@@ -107,6 +107,7 @@ namespace oscairn
         std::vector<Sent> sent;
         bool live=false;              // a live edit sent since the last commit
         std::string failure;          // a live edit the engine refused, for takeError()
+        std::vector<std::string> appMessages; // apps.*, for takeAppMessages()
         // Those answered while a graph read is out: its graph may be older than them, so they go
         // over it when it comes in, unless the engine pushed the value since or refused them.
         std::vector<Sent> confirmed;
@@ -1189,6 +1190,7 @@ namespace oscairn
         impl_->call("graph.commit");impl_->refresh();
     }
     std::string RemoteControl::takeError(){return std::exchange(impl_->failure,{});}
+    std::vector<std::string> RemoteControl::takeAppMessages(){return std::exchange(impl_->appMessages,{});}
     uint64_t RemoteControl::changeSequence()const{return impl_->sequence;}
     Control::Changes RemoteControl::changesAfter(uint64_t seq)const
     {Changes result{impl_->sequence,seq>impl_->sequence||(!impl_->history.empty()&&seq<impl_->history.front().sequence-1),{}};for(const auto& event:impl_->history)if(event.sequence>seq)result.events.push_back(event);return result;}
@@ -1249,6 +1251,7 @@ namespace oscairn
             }
             else if(method=="graph.changed"){refresh=true;impl_->publish({0,ChangeKind::Graph});}
             else if(method=="session.resync"){refresh=resync=true;impl_->publish({0,ChangeKind::Resync});}
+            else if(method.rfind("apps.",0)==0 && impl_->appMessages.size()<1024)impl_->appMessages.push_back(message);
             else if(method=="params.changed")for(auto c:array(field(params,"changes")))
             {
                 Change change;change.node=static_cast<NodeId>(integer(field(c,"node")));change.param=static_cast<uint32_t>(integer(field(c,"param")));

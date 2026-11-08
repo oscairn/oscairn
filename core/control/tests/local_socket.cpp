@@ -30,6 +30,7 @@ namespace
 {
     using namespace oscairn;
     void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+    void check(bool value,const std::string& message){check(value,message.c_str());}
     std::array<int,2> pair()
     {
         std::array<int,2> fds;check(socketpair(AF_UNIX,SOCK_STREAM,0,fds.data())==0,"socketpair");
@@ -127,6 +128,70 @@ namespace
         const auto notices=client.takeNotifications();
         check(notices.size()<=128 && std::any_of(notices.begin(),notices.end(),[](const auto& n){return n.find("session.resync")!=std::string::npos;}),"overflow becomes resync");
         clientWhileRendering(f,[&]{check(client.call("transport.get").find("\"tempo\"")!=std::string::npos,"replies continue after overflow");});
+    }
+    // Apps (RFC 0022): a host asks for an app's connection and gets it as a descriptor; requests
+    // and answers go between them through the engine, which pings the app and tells the host how
+    // long a ping has gone unanswered; a request to an app that closes is canceled.
+    void apps(const char* plugin)
+    {
+        Fixture f(plugin);
+        auto fd = pair(); f.server.adopt(fd[0]);
+        LocalClient host; host.adopt(fd[1]);
+        LocalClient app, own;
+        auto heard = [&](LocalClient& c, const std::string& wanted, std::string* out = nullptr) {
+            for(int i = 0; i < 400; ++i)
+            {
+                c.poll();
+                for(const auto& n : c.takeNotifications()) if(n.find(wanted) != std::string::npos) { if(out) *out = n; return true; }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            return false;
+        };
+        auto number = [](const std::string& reply, const char* field) { const auto at = reply.find(std::string("\"") + field + "\":"); return at == std::string::npos ? 0 : std::stoi(reply.substr(at + std::strlen(field) + 3)); };
+        clientWhileRendering(f, [&] {
+            check(host.call("apps.connect", R"({"app":"com.example.setlist"})").find(R"("app":"com.example.setlist")") != std::string::npos, "apps.connect answers");
+            const int given = host.takeDescriptor();
+            check(given >= 0 && (fcntl(given, F_GETFD) & FD_CLOEXEC), "the connection comes as a descriptor, close-on-exec");
+            app.adopt(given);
+            // The app asks; its host hears, and answers.
+            const auto asked = app.call("apps.request", R"({"action":"oscairn.pick.performance"})");
+            std::string notice;
+            check(heard(host, "apps.requested", &notice) && notice.find(R"("app":"com.example.setlist")") != std::string::npos && notice.find("oscairn.pick.performance") != std::string::npos, "the host hears the app's request");
+            check(number(notice, "request") == number(asked, "request"), "with its number");
+            check(host.call("apps.answer", "{\"request\":" + std::to_string(number(asked, "request")) + R"(,"result":"lib-7"})").find("answered") != std::string::npos, "the host answers");
+            check(heard(app, R"("result":"lib-7")"), "the app gets the answer");
+            check(app.call("apps.answer", "{\"request\":" + std::to_string(number(asked, "request")) + R"(,"result":"again"})").find("No such request") != std::string::npos, "only the one asked answers, once");
+            // The host sends to the app.
+            const auto sent = host.call("apps.request", R"({"app":"com.example.setlist","action":"oscairn.send.performance","argument":"lib-7"})");
+            check(heard(app, R"("argument":"lib-7")", &notice) && notice.find(R"("app":"")") != std::string::npos, "the app hears the host's request");
+            app.call("apps.answer", "{\"request\":" + std::to_string(number(sent, "request")) + R"(,"result":"Added to Friday"})");
+            check(heard(host, "Added to Friday"), "the host gets the app's answer");
+            check(host.call("apps.request", R"({"app":"com.example.other","action":"x"})").find("not connected") != std::string::npos, "a request for an app not connected is refused");
+            check(app.call("apps.request", R"({"app":"com.example.other","action":"x"})").find("host") != std::string::npos, "an app cannot address another app");
+            check(host.call("apps.request", R"({"app":"bad name","action":"x"})").find("letters") != std::string::npos, "names are checked");
+            // An app may ask for more connections, for itself only; those are not pinged.
+            check(app.call("apps.connect", R"({"app":"com.example.other"})").find("itself") != std::string::npos, "not for another app");
+            app.call("apps.connect", R"({"app":"com.example.setlist"})");
+            const int second = app.takeDescriptor();
+            check(second >= 0, "a second connection for itself");
+            own.adopt(second);
+            check(own.call("transport.get").find("tempo") != std::string::npos, "which works as any client");
+            // Pings: unanswered, the host hears the app's silence grow; answered, it is gone.
+            check(heard(app, "apps.ping", &notice), "the app is pinged");
+            std::string status;
+            for(int i = 0; i < 4 && number(status, "silent") < 900; ++i) heard(host, "apps.status", &status);
+            check(number(status, "silent") >= 900, "a ping left unanswered shows as silence: " + status);
+            check(heard(app, "apps.ping", &notice), "pinged again");
+            app.call("apps.pong", "{\"ping\":" + std::to_string(number(notice, "ping")) + '}');
+            for(int i = 0; i < 4; ++i) { heard(host, "apps.status", &status); if(status.find(R"("silent":0)") != std::string::npos) break; }
+            check(status.find(R"("silent":0)") != std::string::npos && status.find("com.example.other") == std::string::npos, "answered, no silence; one entry per app: " + status);
+            own.poll(); check(own.takeNotifications().empty(), "its own second connection is not pinged");
+            // A request out to an app that closes is canceled.
+            const auto pending = host.call("apps.request", R"({"app":"com.example.setlist","action":"oscairn.send.performance","argument":"lib-8"})");
+            app.disconnect();
+            check(heard(host, "{\"request\":" + std::to_string(number(pending, "request")) + R"(,"result":""})"), "canceled when the app goes");
+        });
+        check(f.server.clients() == 2, "the host and the app's own second connection remain");
     }
     // A managed engine's lifetime: it may stop once every UI that keeps it has quit normally;
     // one that leaves without releasing (a crash) keeps it until a UI attaches again, and a
@@ -749,7 +814,7 @@ int main(int argc,char** argv)
         if(argc==3 && std::string_view(argv[2])=="--path-policy"){pathPolicy(argv[1]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--named")return named(argv[1],argv[0]);
         if(argc!=2)return 2;
-        framing(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);removedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);controllerCrash(argv[1],argv[0]);
+        framing(argv[1]);apps(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);removedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);controllerCrash(argv[1],argv[0]);
         std::cout<<"ok: real Unix streams, framing, backpressure, notifications, reconnect, continuing audio and client failures\n";
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

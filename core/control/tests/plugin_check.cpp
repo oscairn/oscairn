@@ -194,7 +194,7 @@ int main(int argc, char** argv)
         const auto archive = temp.path / "Check.olib";
         std::vector<float> saved;
         std::vector<double> savedValues;
-        std::string performance;
+        std::string performance, stored; // stored: the plugin's path as the host saves it (resolved, not as typed)
         bool noteEffect = false;
         // Device A: played in a part, saved, opened again, exported.
         {
@@ -202,6 +202,7 @@ int main(int argc, char** argv)
             Session a(rate, block, {}, stereoIn);
             midiOutput(a);
             const auto node = a.add("plugin", plugin, id);
+            stored = a.graphState().topology.nodes.at(0).plugin.path;
             noteEffect = isNoteEffect(a);
             if(noteEffect) { synth = true; std::printf("a note effect: checked for the notes it sends, not sound\n"); }
             const auto part = a.addPart("Part", synth ? PartInput{} : PartInput{PartInput::Kind::Audio, 0});
@@ -267,7 +268,7 @@ int main(int argc, char** argv)
             check(packed.plugins.size() == 1 && packed.plugins[0].builds.size() == 1 + builds.size(), "the archive carries the plugin's builds: " + std::to_string(packed.plugins[0].builds.size()));
             if(!keep.empty()) fs::copy_file(archive, keep, fs::copy_options::overwrite_existing);
         }
-        const auto there = installAndOpen(archive, temp.path / "b", plugin, synth, &savedValues);
+        const auto there = installAndOpen(archive, temp.path / "b", stored, synth, &savedValues);
         std::printf("render there differs by rms %g (0: identical)\n", difference(saved, there));
     }
     catch(const std::exception& e) { check(false, e.what()); }

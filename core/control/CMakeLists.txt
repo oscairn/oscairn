@@ -129,7 +129,9 @@ add_executable(oscairn-plugin-check tests/plugin_check.cpp)
 target_link_libraries(oscairn-plugin-check PRIVATE oscairn_control)
 # A note effect is checked for the notes it sends, an audio effect for sound.
 add_test(NAME control-plugin-check-note-effect COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_transpose> org.oscairn.transpose effect)
-add_test(NAME control-plugin-check-audio-effect COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_delay> org.oscairn.delay effect)
+# Given relative to the working folder, as a packager types it.
+add_test(NAME control-plugin-check-audio-effect COMMAND oscairn-plugin-check ./$<TARGET_FILE_NAME:oscairn_delay> org.oscairn.delay effect
+    WORKING_DIRECTORY $<TARGET_FILE_DIR:oscairn_delay>)
 set_tests_properties(control-plugin-check-note-effect control-plugin-check-audio-effect PROPERTIES TIMEOUT 60)
 
 add_executable(oscairn-parts-test tests/parts.cpp)

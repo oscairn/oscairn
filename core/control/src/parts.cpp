@@ -1242,7 +1242,7 @@ namespace oscairn
 
     void Session::removeMacro(uint32_t id)
     {
-        findMacro(id);
+        if(findMacro(id).sourceNode) settle(id); // what its lane drove goes back where its knob puts it
         std::erase_if(macros_, [&](const Macro& m) { return m.id == id; });
         for(auto& m : macros_) std::erase_if(m.targets, [&](const MacroTarget& t) { return t.kind == MacroTarget::Kind::Macro && t.macro == id; });
         for(auto& s : scenes_) std::erase_if(s.macros, [&](const auto& v) { return v.first == id; });
@@ -1326,8 +1326,17 @@ namespace oscairn
         auto next = macros_;
         for(auto& m : next) if(m.id == id) { m.sourceNode = node; m.sourceLane = node ? lane : 0; }
         checkControlLoops(next);
+        const bool was = findMacro(id).sourceNode != 0;
         macros_ = std::move(next);
+        if(was) settle(id); // the lane no longer drives them
         staged_ = true;
+    }
+
+    void Session::settle(uint32_t id)
+    {
+        bool faders = false;
+        driveMacro(id, findMacro(id).value, faders);
+        if(faders) buildParts();
     }
 
     // RFC 0011's flattening: a lane's control reaches each parameter under it through a path of
@@ -2196,7 +2205,7 @@ namespace oscairn
             for(auto& p : parts_) eachChain(p, [&](std::vector<NodeId>& c) { std::erase(c, node); });
             buildParts();
             for(auto& m : macros_) std::erase_if(m.targets, [&](const MacroTarget& t) { return t.kind == MacroTarget::Kind::Parameter && t.node == node; });
-            for(auto& m : macros_) if(m.sourceNode == node) m.sourceNode = m.sourceLane = 0;
+            for(auto& m : macros_) if(m.sourceNode == node) { m.sourceNode = m.sourceLane = 0; settle(m.id); }
             for(auto& scene : scenes_)
             {
                 auto on = [&](const WireRef& r) { return r.from == node || r.to == node; };

@@ -1278,6 +1278,9 @@ void Session::open(Prepared& p,bool seamless) {
     lock_=std::move(p.lock);
     clearHistory(); // undo does not reach back into another Performance
     noteBases();
+    // Saving never captures modulation (RFC 0011): a lane's absolute targets, saved wherever the lane
+    // had them, load where the controls' own values put them, and the lane drives them again.
+    for(const auto& m:std::vector<Macro>(macros_))if(m.sourceNode){try{Quiet quiet(*this);settle(m.id);}catch(const std::exception&){}}
 }
 
 // A plugin into a lock being written: this platform's build by its digest (once per build) where

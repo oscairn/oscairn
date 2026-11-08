@@ -5,7 +5,8 @@
 // their sample, in the audio thread. The test fixture's instrument plays exactly its gain while
 // a note is held, so its output is the parameter's value at every sample.
 // The Oscairn LFO, the first first-party MODULATE sender, drives a control's relative targets as
-// CLAP modulation (the fixture adds its gain's modulation to its gain).
+// CLAP modulation (the fixture adds its gain's modulation to its gain) and absolute ones as values;
+// saving never captures what it drives.
 //   oscairn-control-source-test SEQUENCER.clap FIXTURE.clap LFO.clap BASIC_SYNTH.clap
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
@@ -253,6 +254,38 @@ namespace
         for(size_t i = 0; i < still.size(); ++i) { difference += std::abs(still[i] - moved[i]); level += std::abs(still[i]); }
         check(level > 0 && difference > .05 * level, "the LFO on Brightness changes the sound: " + std::to_string(difference / std::max(level, 1e-9)));
     }
+
+    // Saving never captures modulation: saved mid-swing, an absolute target loads where the control's
+    // own value puts it and a relative one at its value; the same as saving with the LFO removed.
+    void savedUnmodulated(const char* lfo, const char* fixture, const std::filesystem::path& root)
+    {
+        Session s(rate, maxFrames, {}, twoOutputs);
+        const auto r = lfoRig(s, lfo, fixture, 1, .5, MacroTarget{.start = .2, .end = .6}, MacroTarget{.start = .3, .end = .7, .relative = true});
+        size_t position = 0;
+        render(s, 256, position, .1, true); // a triangle at 3 Hz: 0.3 of a cycle, mid-swing
+        const double driven = s.parameter(r.a, gain);
+        check(std::abs(driven - .4) > .02, "mid-swing the absolute target is driven away from 0.4: " + std::to_string(driven));
+        s.savePerformance((root / "swing").string());
+        s.remove(r.lfo, UserWires::Remove); s.commit();
+        check(near(s.parameter(r.a, gain), .4), "with the LFO gone the absolute target is where the control puts it: " + std::to_string(s.parameter(r.a, gain)));
+        s.savePerformance((root / "still").string());
+
+        double loadedRate = 0;
+        auto loaded = [&](const char* name) {
+            Session t(rate, maxFrames, {}, twoOutputs);
+            t.loadPerformance((root / name).string());
+            std::map<std::string, double> values;
+            for(const auto& [id, n] : t.graphState().names) if(n == "a" || n == "b") values[n] = t.parameter(id, gain); else if(n == "lfo") loadedRate = t.parameter(id, lfoRate);
+            values["control"] = t.graphState().macros.front().value;
+            return values;
+        };
+        const auto swing = loaded("swing"), still = loaded("still");
+        check(near(swing.at("a"), .4) && near(swing.at("b"), .5), "saved mid-swing, loaded unmodulated: a " + std::to_string(swing.at("a")) + ", b " + std::to_string(swing.at("b")));
+        check(near(swing.at("control"), .5), "the LFO's control loads at its own value");
+        check(near(loadedRate, 3), "the LFO's parameters are saved: rate " + std::to_string(loadedRate));
+        check(swing == still, "loaded the same as when saved with the LFO removed");
+    }
+
 }
 
 int main(int argc, char** argv)
@@ -264,6 +297,7 @@ int main(int argc, char** argv)
         setLane(argv[1], argv[2], temp.path);
         lfoModulates(argv[3], argv[2]);
         synthBrightness(argv[3], argv[4]);
+        savedUnmodulated(argv[3], argv[2], temp.path);
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(failures) return 1;

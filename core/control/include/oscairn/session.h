@@ -475,6 +475,9 @@ namespace oscairn
         // the curves on the way and the summing rule's rest there (Graph::ControlTarget).
         static Graph::ControlTargets flattenControls(const Graph& graph, const std::vector<Macro>& macros, uint32_t mappingScene);
         bool stageControls(); // into the graph when they changed (at the next commit); true then
+        // A lane's absolute targets back where the control's own value puts them: what a Performance
+        // saved while a lane drove them loads as, and where they go when the lane stops driving.
+        void settle(uint32_t macro);
         void checkControlLoops(const std::vector<Macro>& macros) const; // throws for a lane reaching its own plugin
         // The summing rule on any copy of the controls (the controller input's too): drives control
         // `id` to `value` and the controls it targets, reading each destination with `current`

@@ -804,6 +804,19 @@ kept: the base survives it, so the value comes back as the controls go back.
 - **Scenes** store and restore the control values, then the parameter values and faders they
   hold, which have the last word: a stored value plays as stored, and the controls offset
   from it afterwards. Glides and morphs move them alike.
+- **Saving never captures modulation** (decided 2026-11-08). A Performance loads exactly as it
+  was last saved, whatever a plugin's lane was doing at the time. A relative target of a
+  lane-driven control is CLAP modulation, which never touches the parameter's value, the
+  Session's records or the plugin's state. An absolute target of one sets its parameter while
+  driven, and the plugin's own state saves what it had; so a Performance is loaded with each
+  such parameter put back where the controls put it with the lane's control at its own value
+  (its knob, as saved), and the lane drives it again from there. The lane-driven control's value
+  is never moved by its lane, so its saved value is its knob's. When the lane stops driving
+  (its plugin removed, the source cleared, the control removed) its absolute targets go back
+  there too, so a Performance saved mid-swing loads the same as one saved with the modulator
+  removed. Values set by hand, knobs and controls among them, are saved as they are. Not built:
+  a way to keep the modulated values on purpose ("Keep current values"), and the same on a
+  Sound's load (a Sound's lane-driven absolute targets load as its plugin saved them).
 
 **Converter notes** (MODX and MONTAGE Performances, format version 11):
 
@@ -854,7 +867,8 @@ offset on top of the parameter's own value, which stays put (left out of the sto
 summing rule keeps; a knob-only control's relative targets still move it). A lane
 that would reach its own plugin is refused, as a looping control is. `control-source` checks two
 targets, one reversed, at the lane's samples with 256- and 37-sample blocks, a knob's relative
-target summing beside them, loops, saving and undo. A lane reaches the parameters under its
+target summing beside them, loops, saving and undo; and, with the LFO, an absolute and a
+relative target saved mid-swing loading unmodulated, the same as saved with the LFO removed. A lane reaches the parameters under its
 control; part levels, mutes and morphs under it follow only its knob. Not yet:
 default Assign controls from each sound, MIDI CC learn, and part faders as direct gain
 updates rather than a new graph plan per move.

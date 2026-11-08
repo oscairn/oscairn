@@ -168,6 +168,7 @@ MODULATE sends the amount; through a control it is added to the control's value,
 LFO swings around the knob. SET sends a position, 0.5 ± Depth/2 bipolar or 0 to Depth unipolar.
 Synced while the transport plays, its phase follows the song position; stopped, or free,
 it runs on. Sample and hold draws a new value at each cycle
-from a fixed seed, so a render repeats. `control-source` checks its sine and triangle at every point through a control's
+from a fixed seed, so a render repeats. It has no state extension: the host saves its
+parameters. `control-source` checks its sine and triangle at every point through a control's
 relative targets, in the engine and in a worker; its other shapes, Sync, Retrigger and SET
 are not checked by a test yet.

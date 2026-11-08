@@ -128,6 +128,7 @@ namespace oscairn::standalone
         // Undo and redo name what they would do.
         const auto history = engine_.history();
         undo_.setEnabled(!history.undo.empty()); redo_.setEnabled(!history.redo.empty());
+        undo_.setButtonText(history.undo.empty() ? juce::String("Undo") : "Undo " + text(history.undo)); // on the button: a touch screen shows no tooltips
         undo_.setTooltip(history.undo.empty() ? juce::String("Nothing to undo") : "Undo " + text(history.undo));
         redo_.setTooltip(history.redo.empty() ? juce::String("Nothing to redo") : "Redo " + text(history.redo));
         // Controls are rebuilt only when the structure changes, so a slider being dragged survives.
@@ -186,7 +187,7 @@ namespace oscairn::standalone
         const int mode = desktopMode(*this), lineHeight = mode == 1 ? 34 : 40;
         name_.setFont(juce::FontOptions(mode ? textSize(TextRole::Title, mode) : 18.0f * themeData().fontScale, juce::Font::bold));
         done_.setBounds(top.removeFromRight(80).reduced(2));
-        redo_.setBounds(top.removeFromRight(60).reduced(2)); undo_.setBounds(top.removeFromRight(60).reduced(2));
+        redo_.setBounds(top.removeFromRight(60).reduced(2)); undo_.setBounds(top.removeFromRight(170).reduced(2));
         undo_.setVisible(true); redo_.setVisible(true);
         save_.setVisible(onSave != nullptr && !embedded_);
         if(save_.isVisible()) save_.setBounds(top.removeFromRight(70).reduced(2));

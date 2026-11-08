@@ -226,7 +226,8 @@ namespace oscairn::standalone
             // Wait behind a job that may change the graph; a refresh changes nothing, so notes and edits go at once.
             if(!controlReady()) { pendingControls_.emplace_back(std::forward<F>(f)); return; }
             // The polled reads above keep their pace through edits: a fader dragged sends 60 a
-            // second, and the undo names and the open Performance may trail an edit by 250 ms.
+            // second, and the open Performance may trail an edit by 250 ms (the undo names are
+            // asked again after each edit).
             try{f();}catch(const std::exception& e)
             {
                 if(client_ && !client_->connected())failed(e.what());
@@ -281,6 +282,7 @@ namespace oscairn::standalone
         mutable std::vector<PartMeter> meters_; mutable uint32_t metersRead_=0;
         mutable std::vector<WireMeter> wireMeters_; mutable uint32_t wireMetersRead_=0;
         mutable Control::History history_; mutable uint32_t historyRead_=0;
+        mutable bool historyStale_=false,historyChanged_=false; // an edit since the names were asked; a reply that changed them
         mutable std::optional<Control::PerformanceInfo> performance_; mutable uint32_t performanceRead_=0;
         mutable std::map<NodeId,bool> windowCache_; mutable uint32_t windowsRead_=0;
         double captureSeconds_=0;

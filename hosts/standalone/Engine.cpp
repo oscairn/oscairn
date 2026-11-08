@@ -266,6 +266,7 @@ namespace oscairn::standalone
         command([this,change=std::move(change)]{
             try{change(*control_);editError_.clear();}
             catch(const std::invalid_argument& e){editError_=e.what();}
+            historyStale_=true;
             sendChangeMessage();
         });
     }
@@ -454,9 +455,15 @@ namespace oscairn::standalone
         poll(wireMeters_,wireMetersRead_,50,[&](auto done){remote_->fetchWireMeters(done);},[&]{return control_->wireMeters();},0);
         return wireMeters_;
     }
+    // An edit makes the names stale: asked again at the next call, even with a read sent before
+    // the edit still out (its reply is broadcast, so the views call again), and a reply that
+    // changes them broadcast, so Undo names the edit just made or undone within a reply's time.
     Control::History Engine::history() const
     {
-        poll(history_,historyRead_,250,[&](auto done){remote_->fetchHistory(done);},[&]{return control_->history();},1000);
+        if(historyStale_)historyRead_=0;
+        poll(history_,historyRead_,250,[&](auto done){
+            if(remote_->fetchHistory([this,done](Control::History h){if(historyStale_ || h.undo!=history_.undo || h.redo!=history_.redo)historyChanged_=true;done(std::move(h));}))historyStale_=false;
+        },[&]{historyStale_=false;return control_->history();},1000);
         return history_;
     }
     bool Engine::hasPluginWindow(NodeId node) const
@@ -663,7 +670,7 @@ namespace oscairn::standalone
                 const auto values=remote_->liveValues();const auto revision=remote_->graphState().revision;
                 const bool read=remote_->service(); // a graph the engine changed is read without waiting
                 if(auto refused=remote_->takeError();!refused.empty())editError_=std::move(refused);
-                if(read || std::exchange(windowsChanged_,false) || std::exchange(textArrived_,false) || remote_->liveValues()!=values || remote_->graphState().revision!=revision)sendChangeMessage();
+                if(read || std::exchange(windowsChanged_,false) || std::exchange(textArrived_,false) || std::exchange(historyChanged_,false) || remote_->liveValues()!=values || remote_->graphState().revision!=revision)sendChangeMessage();
             }
             catch(const std::exception& e){failed(e.what());}
         }

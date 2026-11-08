@@ -500,7 +500,19 @@ int main(int argc, char** argv)
                 for(size_t i = 0; i < grid.pages(); ++i) { grid.showPage(i); if(auto* c = named(grid, viewName)) return c; }
                 return nullptr;
             };
-            auto undo = [&] { tap(button(view, "Undo"), "Undo"); };
+            // Undo names what it would undo on the button itself: the engine's own name for its
+            // last edit, shown soon after the edit or undo without the test refreshing the view.
+            auto undoButton = [&] { const auto f = all<juce::Button>(view, [](juce::Button& b) { return b.getButtonText().startsWith("Undo"); }); return f.empty() ? nullptr : f.front(); };
+            auto engineUndo = [&] { auto name = std::make_shared<std::string>(); engine.edit([name](Control& c) { *name = c.history().undo; }); return *name; };
+            auto labelled = [&](const std::string& when) {
+                const auto want = engineUndo();
+                const auto right = [&] { const auto* b = undoButton(); return b && (want.empty() ? !b->isEnabled() : b->isEnabled() && b->getButtonText() == "Undo " + juce::String::fromUTF8(want.c_str())); };
+                const auto from = juce::Time::getMillisecondCounter();
+                while(!right() && juce::Time::getMillisecondCounter() - from < 2000) juce::MessageManager::getInstance()->runDispatchLoopUntil(5);
+                const auto took = juce::Time::getMillisecondCounter() - from;
+                check(right() && took <= 150, when + ", the Undo button reads \"" + (undoButton() ? undoButton()->getButtonText().toStdString() : std::string()) + "\" (" + (want.empty() ? std::string("disabled: nothing to undo") : "Undo " + want) + ") within " + std::to_string(took) + " ms");
+            };
+            auto undo = [&] { tap(undoButton(), "Undo"); };
             const auto fmBase = values(fm), analogBase = values(analog);
             // FM: operator 2's level bar dragged to the top in the operator view.
             if(auto* grid = open("FM", fm))
@@ -515,9 +527,13 @@ int main(int argc, char** argv)
                     const float routing = std::min((ops->getWidth() - 28) * .36f, 360.f), columns = (ops->getWidth() - 28) - routing - 14, x = 14 + routing + 14 + columns / 6 * 1.5f;
                     drag(ops, {x, ops->getHeight() / 2.f}, {x, 0.f});
                     check(wait([&] { return !changed(fm, fmBase).empty(); }), "dragging operator 2's level bar edits FM: " + join(changed(fm, fmBase)));
+                    const auto before = engineUndo();
+                    labelled("after the drag");
                     snapshot(view, "3-fm-operators-edited");
                     undo();
                     check(wait([&] { return changed(fm, fmBase).empty(); }), "Undo puts FM back: " + join(changed(fm, fmBase)));
+                    labelled("after the undo");
+                    check(engineUndo() != before, "and Undo then names the edit before it, or nothing: \"" + engineUndo() + "\"");
                 }
             }
             // Analog: its envelope's first point dragged along.
@@ -542,6 +558,7 @@ int main(int argc, char** argv)
                     }
                     std::fprintf(stderr, "  Analog's envelope: %d drags from the left to find its first point\n", drags);
                     check(wait([&] { return !changed(analog, analogBase).empty(); }, 2), "dragging its envelope's first point edits Analog: " + join(changed(analog, analogBase)));
+                    labelled("after the envelope drag");
                     snapshot(view, "3-analog-envelope-edited");
                     undo();
                     check(wait([&] { return changed(analog, analogBase).empty(); }), "Undo puts Analog back: " + join(changed(analog, analogBase)));
@@ -551,7 +568,7 @@ int main(int argc, char** argv)
             toList();
             // Switching scenes is playing, not editing (Session::startScene): it leaves Undo as it was.
             // What Undo would undo, asked of the engine (Engine::history() is polled and may trail an Undo).
-            auto undoName = [&] { auto name = std::make_shared<std::string>(); engine.edit([name](Control& c) { *name = c.history().undo; }); return *name; };
+            auto undoName = engineUndo;
             const auto undoBefore = undoName();
             tap(button(view, "Scene 2"), "Scene 2");
             check(wait([&] { return graph().scene == scenes[1].id && std::abs(partNamed("FM")->level - .4) < 1e-6; }), "Scene 2's button brings its FM level: " + num(partNamed("FM")->level));

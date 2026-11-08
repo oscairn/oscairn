@@ -1176,6 +1176,15 @@ Cmd-Shift-Z (Ctrl elsewhere). `control-undo` covers
 grouping, merging, removal with state, scenes and controls, pads, splits with their nodes and
 loading; the socket test and `desktop-pad-editor` cover the protocol and the engine.
 
+**Undo says what it will undo** (decided 2026-11-08). Switching scenes and moving controls stay
+outside the history, so Undo after one takes back the last real edit; Undo shows that edit's
+name wherever it appears: on the Parts views' button ("Undo Basic Synth Attack", disabled with
+nothing to undo), in its tooltip and in the desktop's **Edit** menu. The app asks the engine for
+the names again after each edit and shows the reply as it arrives (they had trailed an edit
+or undo by hundreds of milliseconds: one read every 250 ms, its reply taken up only at the
+views' next 200 ms tick, and a read sent before the edit answering with the old names).
+`desktop-phase3b` checks the button names the edit within 150 ms of it and of its undo.
+
 Not yet: undo of preset and state loads, which replace a plugin's
 whole state outside this model; and a plugin's own edits in its window, which reach the host
 as parameter changes it reports, not edits made here.

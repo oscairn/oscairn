@@ -198,6 +198,8 @@ Decided 2026-11-08, from what the milestone test found:
 - A scene's Store, Rename, Scope and Transition are in one **Edit…** menu for the selected
   scene, and the scenes have a row of their own on the Parts list; a scene button is still one
   tap ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#scenes-status)).
+- Switching scenes and moving controls stay outside undo; Undo names the edit it would take
+  back, on its button too ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#undo-status)).
 
 ### Next build and test order
 

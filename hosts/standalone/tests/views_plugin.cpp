@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// A silent instrument for the desktop's tests that describes every rich view oscairn.ui draft 4
+// An instrument for the desktop's tests that describes every rich view oscairn.ui draft 4
 // has, as the engines will: an FM operator view (Common: Algorithm 1-32 with DX7's routings and
 // Feedback; Operator 1-6: Level, Coarse, Fine, a DX7 envelope of rates and levels, and keyboard
 // level scaling), two AWM2-style elements (Element 1-2: key and velocity limits in one map
 // across both, velocity depth, and an envelope of times and levels from a hold), and an ADSR as
 // Surge's (Amp: stages in log2 seconds, -8 to 5, whose value texts carry no unit). seconds()
-// gives every stage's time (draft 5): 2^value for the ADSR, MSFA's for DX7's rates.
+// gives every stage's time (draft 5): 2^value for the ADSR, MSFA's for DX7's rates. While a note
+// is held it plays a quiet sine, so a test can hear the part it is in; otherwise it is silent.
 #include <clap/clap.h>
 #include <oscairn-clap/ui.h>
 
@@ -116,6 +117,7 @@ namespace
     {
         clap_plugin_t plugin{};
         std::vector<std::atomic<double>> values = std::vector<std::atomic<double>>(params().size());
+        int held = 0; double phase = 0, rate = 48000; // audio thread: notes held, and the sine's
         Plugin() { for(size_t i = 0; i < values.size(); ++i) values[i] = params()[i].initial; }
     };
     Plugin& self(const clap_plugin_t* p) { return *static_cast<Plugin*>(p->plugin_data); }
@@ -203,15 +205,29 @@ namespace
         p.desc = &descriptor; p.plugin_data = s;
         p.init = [](const clap_plugin_t*) { return true; };
         p.destroy = [](const clap_plugin_t* pl) { delete &self(pl); };
-        p.activate = [](const clap_plugin_t*, double, uint32_t, uint32_t) { return true; };
+        p.activate = [](const clap_plugin_t* pl, double rate, uint32_t, uint32_t) { self(pl).rate = rate; return true; };
         p.deactivate = [](const clap_plugin_t*) {};
         p.start_processing = [](const clap_plugin_t*) { return true; };
         p.stop_processing = [](const clap_plugin_t*) {};
-        p.reset = [](const clap_plugin_t*) {};
+        p.reset = [](const clap_plugin_t* pl) { self(pl).held = 0; };
         p.process = [](const clap_plugin_t* pl, const clap_process_t* process) -> clap_process_status {
+            auto& s = self(pl);
             paramsExt.flush(pl, process->in_events, process->out_events);
-            for(uint32_t c = 0; c < process->audio_outputs[0].channel_count; ++c) std::memset(process->audio_outputs[0].data32[c], 0, process->frames_count * sizeof(float)); // silent
-            return CLAP_PROCESS_SLEEP;
+            for(uint32_t i = 0; i < process->in_events->size(process->in_events); ++i)
+            {
+                const auto* e = process->in_events->get(process->in_events, i);
+                if(e->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
+                if(e->type == CLAP_EVENT_NOTE_ON) ++s.held;
+                if(e->type == CLAP_EVENT_NOTE_OFF || e->type == CLAP_EVENT_NOTE_CHOKE) s.held = std::max(0, s.held - 1);
+                if(e->type == CLAP_EVENT_MIDI) { const auto* m = reinterpret_cast<const clap_event_midi_t*>(e); const int k = m->data[0] & 0xf0; if(k == 0x90 && m->data[2]) ++s.held; else if(k == 0x80 || k == 0x90) s.held = std::max(0, s.held - 1); }
+            }
+            for(uint32_t f = 0; f < process->frames_count; ++f)
+            {
+                const float x = s.held ? .1f * float(std::sin(s.phase)) : 0.f;
+                if(s.held) s.phase = std::fmod(s.phase + 2 * M_PI * 440 / s.rate, 2 * M_PI);
+                for(uint32_t c = 0; c < process->audio_outputs[0].channel_count; ++c) process->audio_outputs[0].data32[c][f] = x;
+            }
+            return s.held ? CLAP_PROCESS_CONTINUE : CLAP_PROCESS_SLEEP;
         };
         p.get_extension = [](const clap_plugin_t*, const char* id) -> const void* {
             if(!std::strcmp(id, CLAP_EXT_PARAMS)) return &paramsExt;

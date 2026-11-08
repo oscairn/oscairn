@@ -188,7 +188,10 @@ fails silencing only itself.
 Done when (proposed): a Performance with layered and split parts, shared effects, scenes and
 a control tree is built, played, edited and undone at 1024 × 600, with every plugin edited
 through Oscairn's own editors, while a crashing plugin in it is restarted without a dropout
-in the others.
+in the others. `desktop-phase3b` scripts it on the Panel's Parts views with the in-repo
+plugins, and `desktop-phase3b-engines` with Oscairn FM, Analog and FX from the folder
+`OSCAIRN_PHASE3B_ENGINES` names (skipped without it); what the views lack at 1024 × 600 prints
+as `GAP:` lines.
 
 ### Next build and test order
 

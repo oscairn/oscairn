@@ -118,6 +118,8 @@ namespace oscairn::standalone
         size_t panelsShown() const { return panels_.size(); } // rich views: envelopes, maps, FM operators, LFOs and filters
         // An envelope view's points where it draws them, in its coordinates (none for another component).
         static std::vector<juce::Point<float>> envelopePoints(juce::Component& envelope);
+        // A stepped parameter's buttons' labels, in order (none for another component).
+        static juce::StringArray choiceNames(juce::Component& choices);
         // Any page's parameters whose name or module has the text; empty: the page again.
         void search(const juce::String& text) { search_.setText(text, false); search_.onTextChange(); }
 
@@ -174,6 +176,7 @@ namespace oscairn::standalone
         void refresh();                 // tabs, layout and tiles for the page, tab and search shown
         void build();                   // the tiles shown
         void show(Tile&, double value); // a value into a tile's control and text
+        juce::StringArray labels(const Engine::ParamInfo&) const; // a stepped parameter's values' texts, numbers until they arrive
 
         Engine& engine_;
         NodeId node_;
@@ -183,6 +186,7 @@ namespace oscairn::standalone
         size_t page_ = 0, tab_ = 0;
         bool stale_ = false; // built while the engine was busy: value texts were placeholders
         uint64_t texts_ = 0; // the engine's textsArrived() the tiles' texts were read at
+        std::vector<size_t> guessed_; // two-value parameters (into params_) whose control was chosen before their texts arrived
         unsigned ticks_ = 0;
         std::vector<std::string> tabNames_;
         std::vector<std::unique_ptr<juce::Button>> pageButtons_, tabButtons_;

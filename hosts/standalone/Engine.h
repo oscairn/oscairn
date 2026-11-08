@@ -34,6 +34,9 @@ namespace oscairn::standalone
         // value's number meanwhile) is out of date once this changes and textKnown is true.
         uint64_t textsArrived()const{return textsArrived_;}
         bool textKnown(const std::string& node,uint32_t param,double value)const; // paramText would answer without asking
+        // A stepped parameter's label for one of its values: paramText's text, but the value's
+        // number until that text arrives (never another value's), and every value asked is read.
+        std::string stepText(const std::string& node,uint32_t param,double value)const;
         void setParam(const std::string& node,uint32_t param,double value);
         void paramGesture(const std::string& node,uint32_t param,bool begin);
         void setPlaying(bool playing);
@@ -286,6 +289,7 @@ namespace oscairn::standalone
         // last for each parameter, and whether one arrived since the timer last broadcast.
         mutable std::map<std::pair<std::string,uint32_t>,double> textWanted_;
         mutable std::map<std::pair<std::string,uint32_t>,std::string> textShown_;
+        mutable std::map<std::pair<std::string,uint32_t>,std::vector<double>> textSteps_; // stepText's still to read, after the value wanted
         mutable bool textArrived_=false;
         mutable uint64_t textsArrived_=0;
         void askText(const std::pair<std::string,uint32_t>& key,double value)const;

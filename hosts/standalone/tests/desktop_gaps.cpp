@@ -1294,6 +1294,37 @@ int main(int argc, char** argv)
                 look(grid);
                 check(written, "a page shown once shows the plugin's value texts as they arrive");
             }
+            // A stepped parameter's buttons and list: each step's own text once the texts arrive,
+            // never the text that came last for another step ("-LIN | +LIN | +LIN | +LIN").
+            {
+                // One value's text already in, as after its tile showed it: the other steps' wait.
+                for(const auto* name : {"Left Curve", "Coarse"})
+                {
+                    const auto param = id("Operator 1", name);
+                    engine.paramText("Views", param, value(param));
+                    check(wait([&] { return engine.textKnown("Views", param, value(param)); }), std::string("a text read for ") + name);
+                }
+                check(page("Operator 1"), "an operator's page");
+                juce::StringArray buttons, list;
+                auto read = [&] {
+                    buttons.clear(); list.clear();
+                    std::function<void(juce::Component&)> look = [&](juce::Component& c) {
+                        for(auto* child : c.getChildren())
+                        {
+                            if(child->getName() == "Left Curve") buttons = standalone::ParameterGrid::choiceNames(*child);
+                            if(auto* b = dynamic_cast<juce::ComboBox*>(child); b && b->getName() == "Coarse") for(int i = 0; i < b->getNumItems(); ++i) list.add(b->getItemText(i));
+                            look(*child);
+                        }
+                    };
+                    look(grid);
+                    return buttons.joinIntoString(" | ") == "-LIN | -EXP | +EXP | +LIN" && list.size() == 32 && list[0] == "x0.50" && list[1] == "x1.00" && list[2] == "x2.00" && list[31] == "x31.00";
+                };
+                read();
+                auto repeated = [](juce::StringArray names) { const int n = names.size(); names.removeDuplicates(false); return names.size() != n; };
+                check(buttons.size() == 4 && !repeated(buttons) && list.size() == 32 && !repeated(list),
+                      "before their texts arrive, no step shows another's: " + buttons.joinIntoString(" | ").toStdString() + "; " + list.joinIntoString(" | ").toStdString());
+                check(wait(read), "a stepped parameter's buttons and list show each step's own text: " + buttons.joinIntoString(" | ").toStdString() + "; " + list.joinIntoString(" | ").toStdString());
+            }
             // The descriptions, read without drawing: an ADSR, a DX7 envelope, an AWM2 envelope
             // from a hold, and DX7 algorithm 1's routing (2 over 1; 6 over 5 over 4 over 3).
             {

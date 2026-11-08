@@ -182,6 +182,16 @@ namespace oscairn::standalone
         }
         catch(const std::exception&){return std::to_string(v);}
     }
+    std::string Engine::stepText(const std::string& n,uint32_t p,double v)const
+    {
+        if(!remote_ || textKnown(n,p,v))return paramText(n,p,v);
+        const auto number=tidyNumber(std::to_string(v));
+        if(soundJob_.valid() && soundJobKind_!=SoundAction::Refresh)return number;
+        const auto key=std::make_pair(n,p);
+        if(auto& steps=textSteps_[key];std::find(steps.begin(),steps.end(),v)==steps.end())steps.push_back(v);
+        try{askText(key,v);}catch(const std::exception&){} // refused while another is out: read after it
+        return number;
+    }
     void Engine::askText(const std::pair<std::string,uint32_t>& key,double v)const
     {
         if(!connected())return;
@@ -189,9 +199,14 @@ namespace oscairn::standalone
             auto& values=textCache_[key];
             if(values.size()>=256)values.clear(); // a continuous knob dragged asks for a new value every move
             textShown_[key]=values[std::bit_cast<uint64_t>(v)]=tidyNumber(text);textArrived_=true;++textsArrived_;
-            // Moved on while this was out: the latest value's text next (one out per parameter).
-            if(const auto w=textWanted_.find(key);w!=textWanted_.end() && !values.contains(std::bit_cast<uint64_t>(w->second)))
+            // Moved on while this was out: the latest value's text next (one out per parameter),
+            // then the steps' labels asked meanwhile.
+            const auto known=[&](double x){return values.contains(std::bit_cast<uint64_t>(x));};
+            auto& steps=textSteps_[key];std::erase_if(steps,known);
+            if(const auto w=textWanted_.find(key);w!=textWanted_.end() && !known(w->second))
                 try{askText(key,w->second);}catch(const std::exception&){}
+            else if(!steps.empty())
+                try{askText(key,steps.front());}catch(const std::exception&){}
         });
     }
     void Engine::setParam(const std::string& n,uint32_t p,double v)
@@ -629,7 +644,7 @@ namespace oscairn::standalone
         {
             auto client=restarting_.get();
             auto fresh=std::make_unique<RemoteControl>(*client);
-            remote_=std::move(fresh);client_=std::move(client);control_=remote_.get();failure_.clear();textCache_.clear();textShown_.clear();textWanted_.clear();refreshPads();
+            remote_=std::move(fresh);client_=std::move(client);control_=remote_.get();failure_.clear();textCache_.clear();textShown_.clear();textWanted_.clear();textSteps_.clear();refreshPads();
             attach(); // resends the ignored inputs and Capture, as any reconnect
         }
         catch(const std::exception& e){failed(e.what());recoveryAvailable_=true;}
@@ -677,7 +692,7 @@ namespace oscairn::standalone
             {
                 client_->connect(socketPath_,100);
                 auto fresh=std::make_unique<RemoteControl>(*client_);
-                remote_=std::move(fresh);control_=remote_.get();failure_.clear();textCache_.clear();textShown_.clear();textWanted_.clear();recoveryAvailable_=false;refreshPads();
+                remote_=std::move(fresh);control_=remote_.get();failure_.clear();textCache_.clear();textShown_.clear();textWanted_.clear();textSteps_.clear();recoveryAvailable_=false;refreshPads();
                 attach();
             }
             catch(const std::exception&)

@@ -1023,9 +1023,17 @@ namespace oscairn::standalone
             const int i = std::clamp(int(e.position.x / (float(getWidth()) / float(names_.size()))), 0, names_.size() - 1);
             if(onChoose) onChoose(i);
         }
+        const juce::StringArray& names() const { return names_; }
+        void setNames(const juce::StringArray& names) { if(names != names_) { names_ = names; repaint(); } }
     private:
         juce::StringArray names_;
     };
+
+    juce::StringArray ParameterGrid::choiceNames(juce::Component& c)
+    {
+        auto* choices = dynamic_cast<Choices*>(&c);
+        return choices ? choices->names() : juce::StringArray{};
+    }
 
     /// The scrolling area: the tiles' backgrounds and the headings, under their controls.
     class ParameterGrid::Content : public juce::Component
@@ -1278,7 +1286,7 @@ namespace oscairn::standalone
 
     void ParameterGrid::build()
     {
-        controls_.clear(); tiles_.clear(); headings_.clear(); panels_.clear(); links_.clear(); linkedRuns_ = 0;
+        controls_.clear(); tiles_.clear(); headings_.clear(); panels_.clear(); links_.clear(); linkedRuns_ = 0; guessed_.clear();
         if(pages_.empty()) return;
         const int mode = std::max(1, desktopMode(*this)), width = content_->getWidth();
         const int gap = sectionGap(6), columns = std::clamp(width / 210, 2, 6);
@@ -1481,7 +1489,7 @@ namespace oscairn::standalone
                     // as a list, the rest a slider.
                     enum class Control { Buttons, Switch, List, Slider, Knob, Range } control;
                     juce::StringArray names;
-                    auto named = [&] { if(names.isEmpty()) for(int v = 0; v < count; ++v) names.add(text(engine_.paramText(node, id, p.minimum + v))); };
+                    auto named = [&] { if(names.isEmpty()) names = labels(p); };
                     switch(p.widget)
                     {
                     case OSCAIRN_WIDGET_KNOB: control = Control::Knob; break;
@@ -1492,6 +1500,8 @@ namespace oscairn::standalone
                     case OSCAIRN_WIDGET_RANGE: control = Control::Range; break;
                     default:
                         if(count >= 2 && count <= maxChoices) named();
+                        // Off and On told apart by texts not in yet: built again once they are.
+                        if(count == 2 && !(engine_.textKnown(node, id, p.minimum) && engine_.textKnown(node, id, p.minimum + 1))) guessed_.push_back(tile.param);
                         control = count >= 2 && count <= maxChoices && !(count == 2 && onOff(names[0], names[1])) ? Control::Buttons
                                 : count == 2 ? Control::Switch : count > 2 && count <= maxListed ? Control::List : Control::Slider;
                     }
@@ -1526,6 +1536,7 @@ namespace oscairn::standalone
                     else if(control == Control::Buttons)
                     {
                         auto choices = std::make_unique<Choices>(names);
+                        choices->setName(text(p.name));
                         choices->onChoose = [this, node, id, p](int v) { engine_.setParam(node, id, p.minimum + v); };
                         choices->setBounds(inner.withSizeKeepingCentre(inner.getWidth(), std::min(inner.getHeight(), 28)));
                         tile.choices = choices.get(); content_->addAndMakeVisible(*choices); controls_.push_back(std::move(choices));
@@ -1541,7 +1552,8 @@ namespace oscairn::standalone
                     else if(control == Control::List)
                     {
                         auto list = std::make_unique<juce::ComboBox>(text(p.name));
-                        for(int v = 0; v < count; ++v) list->addItem(text(engine_.paramText(node, id, p.minimum + v)), v + 1);
+                        named();
+                        for(int v = 0; v < count; ++v) list->addItem(names[v], v + 1);
                         list->onChange = [this, raw = list.get(), node, id, p] { if(raw->getSelectedId() > 0) engine_.setParam(node, id, p.minimum + raw->getSelectedId() - 1); };
                         list->setBounds(inner.withHeight(std::min(inner.getHeight(), 28)));
                         tile.list = list.get(); content_->addAndMakeVisible(*list); controls_.push_back(std::move(list));
@@ -1573,6 +1585,13 @@ namespace oscairn::standalone
         stale_ = !engine_.controlReady(); // the engine answers value texts only when it is free
         for(auto& t : tiles_) show(t, engine_.param(name_, params_[t.param].id));
         content_->repaint();
+    }
+
+    juce::StringArray ParameterGrid::labels(const Engine::ParamInfo& p) const
+    {
+        juce::StringArray names;
+        for(int v = 0; v < values(p); ++v) names.add(text(engine_.stepText(name_, p.id, p.minimum + v)));
+        return names;
     }
 
     void ParameterGrid::show(Tile& t, double value)
@@ -1614,6 +1633,15 @@ namespace oscairn::standalone
         // Values change from automation, scenes, controls and other clients: follow them, and
         // the texts that arrived since a tile showed its value's number in their place.
         const bool texts = std::exchange(texts_, engine_.textsArrived()) != texts_;
+        if(texts && !guessed_.empty() && std::all_of(guessed_.begin(), guessed_.end(), [&](size_t i) { const auto& p = params_[i]; return engine_.textKnown(name_, p.id, p.minimum) && engine_.textKnown(name_, p.id, p.minimum + 1); }))
+        { refresh(); return; }
+        for(auto& t : tiles_)
+            if(texts && (t.choices || t.list))
+            {
+                const auto names = labels(params_[t.param]);
+                if(t.choices) t.choices->setNames(names);
+                if(t.list) for(int i = 0; i < names.size(); ++i) if(t.list->getItemText(i) != names[i]) t.list->changeItemText(i + 1, names[i]);
+            }
         for(auto& t : tiles_)
             if(const double v = engine_.param(name_, params_[t.param].id);
                v != t.shown || (t.range && engine_.param(name_, params_[t.high].id) != t.shownHigh) || (texts && engine_.textKnown(name_, params_[t.param].id, v))) show(t, v);

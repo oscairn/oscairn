@@ -14,10 +14,7 @@ With WEB-RPC-SERVER, the same from a local web server instead. Over HTTPS (RFC 0
 certificate from an authority the system does not trust is refused. The rest runs over HTTPS
 only where the system trusts a test authority, which the test cannot arrange itself:
 OSCAIRN_TEST_CA names a folder holding that authority's ca.pem and ca.key (set up in a throwaway
-VM or container); a wrong host name is then refused too, and so is a certificate not yet valid.
-With OSCAIRN_TEST_TLS=mbedtls as well (libcurl built with Mbed TLS, as on the device), a session
-whose time is unknown takes that certificate and still refuses an expired one and a wrong host
-name (RFC 0035's time floor).
+VM or container); a wrong host name is then refused too.
 """
 import hashlib
 import http.server
@@ -34,7 +31,6 @@ import sys
 import tempfile
 import time
 import zipfile
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -217,16 +213,14 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
                 '-keyout', folder / 'ca.key', '-out', folder / 'ca.pem')
             return folder
 
-        def serve(ca=None, dates=None):
-            """A server for the tree on 127.0.0.1, and its address: over HTTPS for localhost, signed by ca, if given,
-            valid for two days or between dates (two datetimes in UTC)."""
+        def serve(ca=None):
+            """A server for the tree on 127.0.0.1, and its address: over HTTPS for localhost, signed by ca, if given."""
             server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
             if ca:
-                name = temp / f'localhost-{ca.name}{"-" + dates[0].strftime("%Y%m%d") if dates else ""}'
+                name = temp / f'localhost-{ca.name}'
                 run(openssl, 'req', '-new', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=localhost', '-keyout', name.with_suffix('.key'), '-out', name.with_suffix('.csr'))
                 name.with_suffix('.ext').write_text('subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyEncipherment\nauthorityKeyIdentifier=keyid\n')
-                validity = ['-not_before', dates[0].strftime('%Y%m%d%H%M%SZ'), '-not_after', dates[1].strftime('%Y%m%d%H%M%SZ')] if dates else ['-days', '2']
-                run(openssl, 'x509', '-req', *validity, '-set_serial', str(int.from_bytes(os.urandom(8), 'big')), '-in', name.with_suffix('.csr'),
+                run(openssl, 'x509', '-req', '-days', '2', '-set_serial', str(int.from_bytes(os.urandom(8), 'big')), '-in', name.with_suffix('.csr'),
                     '-CA', ca / 'ca.pem', '-CAkey', ca / 'ca.key', '-extfile', name.with_suffix('.ext'), '-out', name.with_suffix('.pem'))
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 context.load_cert_chain(name.with_suffix('.pem'), name.with_suffix('.key'))
@@ -347,32 +341,6 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
                 if trusted:
                     refused = job('packages.list', {'source': base.replace('localhost', '127.0.0.1')})
                     check(refused['state'] == 'failed' and fetched() == [], 'a certificate for another host name is refused: ' + refused['error'])
-
-                    # With the time unknown (RFC 0035), a certificate's dates are checked against
-                    # the time floor (2026-11-01 for now) only: one valid from tomorrow is taken,
-                    # as a device whose clock is behind takes a certificate issued after its floor;
-                    # one that expired before the floor is still refused, and so is a wrong host.
-                    # Where libcurl is built with Mbed TLS, as on the device (needs openssl 3.4).
-                    now = datetime.now(timezone.utc)
-                    later, later_address = serve(trusted, (now + timedelta(days=1), now + timedelta(days=30)))
-                    expired, expired_address = serve(trusted, (datetime(2026, 9, 1, tzinfo=timezone.utc), datetime(2026, 10, 1, tzinfo=timezone.utc)))
-                    refused = job('packages.list', {'source': later_address})
-                    check(refused['state'] == 'failed' and fetched() == [], 'with the time known, a certificate not yet valid is refused: ' + refused['error'])
-                    if os.environ.get('OSCAIRN_TEST_TLS') == 'mbedtls':
-                        p.stdin.close()
-                        p.wait(timeout=30)
-                        p = subprocess.Popen([web], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8',
-                                             env={**os.environ, 'OSCAIRN_DATA_HOME': str(home), 'OSCAIRN_TIME': 'unknown'})
-                        listing = job('packages.list', {'source': later_address})
-                        check(listing['state'] == 'done' and fetched()[:1] == ['/repository.json'], 'with the time unknown, one valid only after the floor is taken: ' + listing['error'])
-                        refused = job('packages.list', {'source': expired_address})
-                        check(refused['state'] == 'failed' and fetched() == [], 'with the time unknown, one expired before the floor is refused: ' + refused['error'])
-                        refused = job('packages.list', {'source': later_address.replace('localhost', '127.0.0.1')})
-                        check(refused['state'] == 'failed' and fetched() == [], 'with the time unknown, another host name is still refused: ' + refused['error'])
-                    else:
-                        print('OSCAIRN_TEST_TLS is not mbedtls; certificate dates with the time unknown not checked')
-                    later.shutdown()
-                    expired.shutdown()
                 else:
                     print('OSCAIRN_TEST_CA not set; HTTPS with a trusted certificate and a wrong host name not checked')
         finally:

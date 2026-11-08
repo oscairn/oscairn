@@ -202,6 +202,8 @@ Decided 2026-11-08, from what the milestone test found:
   back, on its button too ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#undo-status)).
 - A new control target starts from its parameter's present value, so adding it moves nothing
   ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree)).
+- Notes held when a plugin's worker crashes are not replayed after its restart
+  ([RFC 0010](rfcs/0010-plugin-worker-isolation.md#failure-handling)).
 
 ### Next build and test order
 

@@ -107,7 +107,9 @@ can compensate, but it is not the default.
   saved state (refreshed off the audio path after parameter or sound changes, debounced),
   parameter values, prepared sound contexts and routing. A restarted worker restores it,
   reconnects at a block boundary and fades in. Retries are bounded, after which the node stays
-  muted and the Performance reports it.
+  muted and the Performance reports it. Notes held through the crash are not replayed into the
+  restarted plugin (decided 2026-11-08): they were released at the crash, and it sounds again
+  from the next note.
 
 ### Control and host extensions
 

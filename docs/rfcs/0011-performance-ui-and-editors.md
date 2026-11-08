@@ -1031,6 +1031,15 @@ control's **+ Target**. `control-parts` checks a linear glide halfway and at its
 fade in, a mute fading out, a fader stopping a glide, a launch waiting for the beat, a morph
 before and after halfway, and the round-trip; removing a scene removes morphs to it.
 
+**The scene's Edit… menu** (decided 2026-11-08). A scene's store, scope and transition are
+setup, not live controls, and at 1024 × 600 Scope... and Transition... got no width once a scene
+was selected. The Parts list now has one **Edit…** for the selected scene, whose menu holds
+**Store**, **Rename...** (`scenes.name`), **Scope** and **Transition**, in place of Store,
+Scope... and Transition...; the scenes sit in a row of their own under the header, each one tap
+to switch. `desktop-phase3b` stores, scopes and sets a glide through it, and checks the scene
+buttons and Edit… whole and apart at 1024 wide with two scenes and with six. The desktop
+window keeps its toolbar's scene box and Store.
+
 **The mappings by scene** implemented 2026-11-01: **By scene** on the Controls page shows every
 control's mappings as one table, a row per mapping and a column per scene, ticked where the
 mapping works (its `offIn`, the per-mapping table this RFC asks for advanced users). Checked by

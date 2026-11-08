@@ -50,7 +50,7 @@ namespace
 {
     int failures = 0;
     void check(bool ok, const std::string& what) { std::fprintf(stderr, "%s: %s\n", ok ? "ok" : "FAIL", what.c_str()); if(!ok) ++failures; }
-    void gap(const std::string& what) { std::fprintf(stderr, "GAP: %s\n", what.c_str()); }
+    [[maybe_unused]] void gap(const std::string& what) { std::fprintf(stderr, "GAP: %s\n", what.c_str()); }
     std::string num(double v) { char b[32]; std::snprintf(b, sizeof b, "%.4g", v); return b; }
 
     // The worker process that has a plugin's binary loaded: a child of this one (the engine runs
@@ -249,15 +249,16 @@ int main(int argc, char** argv)
                 view.mouseDown(e); view.mouseUp(e);
                 wait([&] { return false; }, 0);
             };
+            const auto editScene = juce::String::fromUTF8("Edit…"); // the selected scene's menu: Store, Rename, Scope, Transition
             auto toList = [&] { if(view.page() != 0) tap(button(view, juce::String::fromUTF8("‹ Parts")), "‹ Parts"); wait([&] { return view.page() == 0; }); };
-            // A part's row, as the list lays them out (rows of 60 under the column titles; the buses after a gap).
+            // A part's row, as the list lays them out (rows of 60 under the scenes and the column titles; the buses after a gap).
             auto openPart = [&](uint32_t id) {
                 toList();
                 const auto state = standalone::readParts(graph());
                 int row = 0, at = -1;
                 for(const auto* list : {&state.parts, &state.buses}) for(const auto& p : *list) { if(p.id == id) at = row; ++row; }
                 const int gapAbove = at >= int(state.parts.size()) ? 36 : 0;
-                tapAt({60.f, 56 + 28 + at * 60 + gapAbove + 27.f});
+                tapAt({60.f, 56 + 48 + 28 + at * 60 + gapAbove + 27.f});
                 check(view.page() == id, "a tap on its row opens the part");
             };
             auto toControls = [&] { toList(); tap(button(view, "Controls"), "Controls"); wait([&] { return view.page() == standalone::PartsView::controlsPage; }); };
@@ -337,19 +338,51 @@ int main(int argc, char** argv)
                 std::sort(sliders.begin(), sliders.end(), [](auto* a, auto* b) { return a->getY() != b->getY() ? a->getY() < b->getY() : a->getX() < b->getX(); });
                 if(!sliders.empty()) sliders[0]->setValue(.4, juce::sendNotificationSync); // FM's level
                 check(wait([&] { return std::abs(partNamed("FM")->level - .4) < 1e-6; }), "FM's level slider");
-                tap(button(view, "Store"), "Store");
-                wait([&] { return false; }, 0);
+                // Store is in the selected scene's Edit... menu.
+                tap(button(view, editScene), "the selected scene's Edit...");
+                check(pick({"Store"}), "Edit... stores the scene");
+                // The menu's choice arrives after the menu closes: Scene 2 holds FM at .4 once it has.
+                check(wait([&] { const auto sc = graph().scenes; const auto fmId = partNamed("FM")->id; return sc.size() == 2 && std::any_of(sc[1].parts.begin(), sc[1].parts.end(), [&](const auto& p) { return p.part == fmId && std::abs(p.level - .4) < 1e-6; }); }),
+                      "Scene 2 stores FM's level .4");
                 tap(button(view, "Scene 1"), "Scene 1");
                 check(wait([&] { return graph().scene == scenes[0].id && std::abs(partNamed("FM")->level - 1) < 1e-6; }), "Scene 1's button brings FM back to its full level: " + num(partNamed("FM")->level));
-                // The selected scene's Scope... and Transition... beside Store, in the header.
-                for(const juce::String name : {"Store", "Scope...", "Transition..."})
-                {
-                    const auto* b = button(view, name);
-                    const auto at = b ? b->getBounds() : juce::Rectangle<int>();
-                    if(!b || at.getWidth() < 40 || !view.getLocalBounds().contains(at))
-                        gap(name.toStdString() + " has no room in the Parts list's header at 1024 wide with two scenes: " + at.toString().toStdString());
-                }
+                // Its scope and transition, from the same menu.
+                const auto scopeWas = graph().scenes[0].scope;
+                tap(button(view, editScene), "the selected scene's Edit...");
+                check(pick({"Scope", "Mutes and solos"}), "Edit... has the scene's scope");
+                check(wait([&] { return graph().scenes[0].scope == (scopeWas ^ Scene::Mutes); }), "and switches what selecting it changes");
+                tap(button(view, editScene), "the selected scene's Edit...");
+                pick({"Scope", "Mutes and solos"});
+                check(wait([&] { return graph().scenes[0].scope == scopeWas; }), "and back");
+                tap(button(view, editScene), "the selected scene's Edit...");
+                check(pick({"Transition", "250 ms"}), "Edit... has the scene's transition");
+                check(wait([&] { return graph().scenes[0].glide == 250; }), "and sets its glide");
+                tap(button(view, editScene), "the selected scene's Edit...");
+                pick({"Transition", "At once"});
+                check(wait([&] { return graph().scenes[0].glide == 0; }), "and back");
+                // Each scene's button and the selected one's Edit... whole on the screen, side by
+                // side, with two scenes and with six.
+                auto fits = [&](size_t count) {
+                    std::vector<juce::Rectangle<int>> taken;
+                    for(const auto& sc : graph().scenes) if(const auto* b = button(view, juce::String::fromUTF8(sc.name.c_str()))) taken.push_back(b->getBounds());
+                    if(const auto* b = button(view, editScene)) taken.push_back(b->getBounds());
+                    bool ok = taken.size() == count + 1;
+                    for(size_t i = 0; i < taken.size(); ++i)
+                    {
+                        ok = ok && taken[i].getWidth() >= 44 && view.getLocalBounds().contains(taken[i]);
+                        for(size_t j = 0; j < i; ++j) ok = ok && !taken[i].intersects(taken[j]);
+                    }
+                    check(ok, "the scenes and Edit... fit at 1024 wide with " + std::to_string(count) + " scenes");
+                };
+                fits(2);
                 snapshot(view, "1-scenes");
+                for(int n = 3; n <= 6; ++n) { tap(button(view, "+ Scene"), "+ Scene"); wait([&] { return graph().scenes.size() == size_t(n); }); }
+                fits(6);
+                snapshot(view, "1-six-scenes");
+                for(const auto& sc : graph().scenes) if(sc.id != scenes[0].id && sc.id != scenes[1].id) engine.edit([id = sc.id](Control& c) { c.removeScene(id); });
+                check(wait([&] { return graph().scenes.size() == 2; }), "the four extra scenes removed");
+                tap(button(view, "Scene 1"), "Scene 1");
+                check(wait([&] { return graph().scene == scenes[0].id; }), "Scene 1 selected again");
             }
             // The control tree: Control 1 (a Super Knob) drives Control 2 (an Assign knob), which drives a parameter in FM and one in Analog.
             toControls();

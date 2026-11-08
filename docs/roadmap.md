@@ -193,6 +193,12 @@ plugins, and `desktop-phase3b-engines` with Oscairn FM, Analog and FX from the f
 `OSCAIRN_PHASE3B_ENGINES` names (skipped without it); what the views lack at 1024 × 600 prints
 as `GAP:` lines.
 
+Decided 2026-11-08, from what the milestone test found:
+
+- A scene's Store, Rename, Scope and Transition are in one **Edit…** menu for the selected
+  scene, and the scenes have a row of their own on the Parts list; a scene button is still one
+  tap ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#scenes-status)).
+
 ### Next build and test order
 
 1. **Performance UI** ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#progress))

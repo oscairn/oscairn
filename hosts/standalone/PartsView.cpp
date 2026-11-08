@@ -16,7 +16,7 @@ namespace oscairn::standalone
             return juce::Colour(0xffc9b2ff); // notes and sequencers
         }
         juce::String text(const std::string& s) { return juce::String::fromUTF8(s.c_str()); }
-        constexpr int header = 56, columnTitles = 28, rowHeight = 60;
+        constexpr int header = 56, sceneRow = 48, columnTitles = 28, rowHeight = 60; // the list's scenes in a row of their own under its header
         // Whether Routing shows parts collapsed: the user's, beside the theme selection.
         juce::File routingPreference()
         {
@@ -168,7 +168,7 @@ namespace oscairn::standalone
     juce::Rectangle<int> PartsView::rowBounds(size_t row) const
     {
         const int gap = row >= state_.parts.size() ? 36 : 0; // a heading above the buses
-        return {16, header + columnTitles + int(row) * rowHeight + gap, getWidth() - 32, rowHeight - 6};
+        return {16, header + sceneRow + columnTitles + int(row) * rowHeight + gap, getWidth() - 32, rowHeight - 6};
     }
 
     void PartsView::rebuild()
@@ -253,27 +253,23 @@ namespace oscairn::standalone
             controlsButton_.setBounds(top.removeFromRight(84).reduced(2));
             mixerButton_.setBounds(top.removeFromRight(66).reduced(2));
             title_.setBounds(top.removeFromLeft(90));
-            // Scenes: tap one to switch to it; Store saves the parts' faders and the scene
-            // parameters into the selected one.
-            const auto sceneWidth = std::min(110, std::max(56, (top.getWidth() - 150) / std::max(1, int(scenes_.size()))));
+            // Scenes, in their own row: tap one to switch to it; the selected one's Edit... holds
+            // its setup (Store, Rename, Scope, Transition), so the scenes keep the room.
+            auto strip = getLocalBounds().reduced(16, 0).withTrimmedTop(header).withHeight(sceneRow - 4);
+            const auto sceneWidth = std::min(110, std::max(56, (strip.getWidth() - 150) / std::max(1, int(scenes_.size()))));
             for(const auto& s : scenes_)
             {
-                auto* b = button(top.removeFromLeft(sceneWidth).reduced(2), text(s.name), [this, id = s.id] { edit([id](Control& c) { c.selectScene(id); }); });
+                auto* b = button(strip.removeFromLeft(sceneWidth).reduced(2), text(s.name), [this, id = s.id] { edit([id](Control& c) { c.selectScene(id); }); });
                 b->setColour(juce::TextButton::buttonColourId, s.id == scene_ ? ink(Ink::Accent) : ink(Ink::Raised));
                 b->setTooltip("Switch to this scene");
             }
-            button(top.removeFromLeft(80).reduced(2), "+ Scene", [this] { const auto n = scenes_.size() + 1; edit([n](Control& c) { c.addScene("Scene " + std::to_string(n)); }); })
+            button(strip.removeFromLeft(80).reduced(2), "+ Scene", [this] { const auto n = scenes_.size() + 1; edit([n](Control& c) { c.addScene("Scene " + std::to_string(n)); }); })
                 ->setTooltip("A new scene with everything as it is now: plugins and wires on or off, mutes, the mix, parameters and controls");
             if(scene_)
             {
-                button(top.removeFromLeft(66).reduced(2), "Store", [this] { const auto id = scene_; edit([id](Control& c) { c.storeScene(id); }); })
-                    ->setTooltip("Save everything as it is now into the selected scene");
-                auto* scope = button(top.removeFromLeft(80).reduced(2), "Scope...", {});
-                scope->setTooltip("What switching to the selected scene changes; the rest stays as it is");
-                scope->onClick = [this, scope] { sceneScopeMenu(*scope); };
-                auto* transition = button(top.removeFromLeft(110).reduced(2), "Transition...", {});
-                transition->setTooltip("How switching to the selected scene moves there: how long it glides, along which curve, and whether it waits for the beat or bar");
-                transition->onClick = [this, transition] { sceneTransitionMenu(*transition); };
+                auto* sceneEdit = button(strip.removeFromLeft(70).reduced(2), juce::String::fromUTF8("Edit\u2026"), {});
+                sceneEdit->setTooltip("The selected scene: store everything as it is now into it, rename it, or set what switching to it changes and how it moves there");
+                sceneEdit->onClick = [this, sceneEdit] { sceneEditMenu(*sceneEdit); };
             }
             size_t row = 0;
             for(const auto* rows : {&state_.parts, &state_.buses})
@@ -1025,45 +1021,51 @@ namespace oscairn::standalone
         });
     }
 
-    // The selected scene's scope: the kinds switching to it changes, each ticked.
-    void PartsView::sceneScopeMenu(juce::Component& at)
-    {
-        const auto it = std::find_if(scenes_.begin(), scenes_.end(), [&](const Scene& s) { return s.id == scene_; });
-        if(it == scenes_.end()) return;
-        const auto scope = it->scope;
-        const std::array<const char*, sceneKinds.size()> names{"Plugins and wires on or off", "Mutes and solos", "Levels, pans and sends", "Parameters and controls", "Control mappings"};
-        juce::PopupMenu menu;
-        for(size_t k = 0; k < names.size(); ++k) menu.addItem(int(k) + 1, names[k], true, (scope & (1u << k)) != 0);
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&at), [safe = juce::Component::SafePointer<PartsView>(this), id = scene_, scope](int chosen) {
-            if(!safe || chosen <= 0) return;
-            const auto next = scope ^ (1u << (chosen - 1));
-            safe->edit([id, next](Control& c) { c.setSceneScope(id, next); });
-        });
-    }
-
-    // The selected scene's transition: its glide time, curve and launch, each ticked.
-    void PartsView::sceneTransitionMenu(juce::Component& at)
+    // The selected scene's setup, kept off the header: Store, Rename, its scope (the kinds
+    // switching to it changes, each ticked) and its transition (glide time, curve and launch).
+    void PartsView::sceneEditMenu(juce::Component& at)
     {
         const auto it = std::find_if(scenes_.begin(), scenes_.end(), [&](const Scene& s) { return s.id == scene_; });
         if(it == scenes_.end()) return;
         const auto scene = *it;
+        const std::array<const char*, sceneKinds.size()> kinds{"Plugins and wires on or off", "Mutes and solos", "Levels, pans and sends", "Parameters and controls", "Control mappings"};
         static constexpr std::array<uint32_t, 8> glides{0, 100, 250, 500, 1000, 2000, 4000, 8000};
-        juce::PopupMenu menu, curves, launches;
+        juce::PopupMenu menu, scope, transition, curves, launches;
+        for(size_t k = 0; k < kinds.size(); ++k) scope.addItem(10 + int(k), kinds[k], true, (scene.scope & (1u << k)) != 0);
         for(size_t i = 0; i < glides.size(); ++i)
-            menu.addItem(int(i) + 1, glides[i] == 0 ? juce::String("At once") : glides[i] < 1000 ? juce::String(int(glides[i])) + " ms" : juce::String(glides[i] / 1000.0, 0) + " s", true, scene.glide == glides[i]);
+            transition.addItem(20 + int(i), glides[i] == 0 ? juce::String("At once") : glides[i] < 1000 ? juce::String(int(glides[i])) + " ms" : juce::String(glides[i] / 1000.0, 0) + " s", true, scene.glide == glides[i]);
         const std::array<const char*, 3> curveNames{"Linear", "Ease in and out", "Equal power (levels by power)"}, launchNames{"At once", "On the next beat", "On the next bar"};
         for(size_t i = 0; i < curveNames.size(); ++i) curves.addItem(100 + int(i), curveNames[i], scene.glide > 0, size_t(scene.curve) == i);
         for(size_t i = 0; i < launchNames.size(); ++i) launches.addItem(200 + int(i), launchNames[i], true, size_t(scene.launch) == i);
+        transition.addSeparator();
+        transition.addSubMenu("Curve", curves, scene.glide > 0);
+        transition.addSubMenu("While playing", launches);
+        menu.addItem(1, "Store");
+        menu.addItem(2, "Rename...");
         menu.addSeparator();
-        menu.addSubMenu("Curve", curves, scene.glide > 0);
-        menu.addSubMenu("While playing", launches);
+        menu.addSubMenu("Scope", scope);
+        menu.addSubMenu("Transition", transition);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&at), [safe = juce::Component::SafePointer<PartsView>(this), scene](int chosen) {
             if(!safe || chosen <= 0) return;
+            const auto id = scene.id;
+            if(chosen == 1) { safe->edit([id](Control& c) { c.storeScene(id); }); return; }
+            if(chosen == 2)
+            {
+                auto* w = new juce::AlertWindow("Rename " + text(scene.name), juce::String(), juce::MessageBoxIconType::NoIcon, safe.getComponent());
+                w->addTextEditor("name", text(scene.name), "Name");
+                w->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey)); w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+                w->enterModalState(true, juce::ModalCallbackFunction::create([safe, w, id](int result) {
+                    const auto name = w->getTextEditorContents("name").trim().toStdString();
+                    if(safe && result == 1 && !name.empty()) safe->edit([id, name](Control& c) { c.setSceneName(id, name); });
+                }), true);
+                return;
+            }
+            if(chosen < 20) { const auto next = scene.scope ^ (1u << (chosen - 10)); safe->edit([id, next](Control& c) { c.setSceneScope(id, next); }); return; }
             auto glide = scene.glide; auto curve = scene.curve; auto launch = scene.launch;
-            if(chosen <= int(glides.size())) glide = glides[size_t(chosen - 1)];
+            if(chosen < 100) glide = glides[size_t(chosen - 20)];
             else if(chosen >= 200) launch = Scene::Launch(chosen - 200);
             else curve = Scene::Curve(chosen - 100);
-            safe->edit([id = scene.id, glide, curve, launch](Control& c) { c.setSceneTransition(id, glide, curve, launch); });
+            safe->edit([id, glide, curve, launch](Control& c) { c.setSceneTransition(id, glide, curve, launch); });
         });
     }
 
@@ -1391,11 +1393,11 @@ namespace oscairn::standalone
             if(state_.parts.empty() && state_.buses.empty())
             {
                 g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(16.0f * scale));
-                g.drawText("No parts yet. Add a part: it listens to the keyboard and plays to Main.", getLocalBounds().withTrimmedTop(header), juce::Justification::centred);
+                g.drawText("No parts yet. Add a part: it listens to the keyboard and plays to Main.", getLocalBounds().withTrimmedTop(header + sceneRow), juce::Justification::centred);
                 return;
             }
             const int partWidth = 150, fromWidth = 190, right = 160 + 92 * int(state_.buses.size());
-            auto titles = juce::Rectangle<int>(16, header, getWidth() - 32, columnTitles);
+            auto titles = juce::Rectangle<int>(16, header + sceneRow, getWidth() - 32, columnTitles);
             g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(12.0f * scale));
             titles.removeFromLeft(28);
             g.drawText("Part", titles.removeFromLeft(partWidth), juce::Justification::centredLeft);

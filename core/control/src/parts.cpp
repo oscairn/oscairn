@@ -1137,20 +1137,12 @@ namespace oscairn
         editWires([&] { findPart(id).name = name; });
     }
 
-    double MacroTarget::shape(double value) const
+    // The graph's, so a lane through the controls (Graph::ControlCurve) follows the same curves.
+    static Graph::ControlCurve curveOf(const MacroTarget& t, double shift)
     {
-        const double x = std::clamp(value, 0.0, 1.0);
-        switch(curve)
-        {
-        case Curve::Linear: break;
-        case Curve::Exponential: return (std::exp(4 * x) - 1) / (std::exp(4.0) - 1);
-        case Curve::Logarithmic: return std::log1p((std::exp(4.0) - 1) * x) / 4;
-        case Curve::SCurve: return x * x * (3 - 2 * x);
-        case Curve::Db: return x > 0 ? std::pow(10.0, (low + (high - low) * x) / 20) : 0;
-        case Curve::Power: return std::pow(x, exponent);
-        }
-        return x;
+        return {Graph::ControlCurve::Kind(t.curve), t.start, t.end, shift, t.low, t.high, t.exponent};
     }
+    double MacroTarget::shape(double value) const { return curveOf(*this, 0).shape(value); }
 
     bool MacroTarget::validCurve() const
     {
@@ -1313,8 +1305,116 @@ namespace oscairn
                 written_[destination(t)] = now;
             }
         }
+        if(findMacro(id).sourceNode || std::any_of(macros_.begin(), macros_.end(), [](const Macro& m) { return m.sourceNode != 0; }))
+        {
+            auto next = macros_;
+            for(auto& m : next) if(m.id == id) m.targets = targets;
+            checkControlLoops(next);
+        }
         findMacro(id).targets = std::move(targets);
         for(const auto& t : findMacro(id).targets) if(t.sums()) setBase(t, t.base);
+    }
+
+    void Session::setMacroSource(uint32_t id, NodeId node, uint32_t lane)
+    {
+        const auto owner = findMacro(id).part;
+        if(node)
+        {
+            if(!graph_.contains(node) || node == graphInput || node == graphOutput) throw std::invalid_argument("no such plugin to drive the control");
+            if(owner && !nodesOf(findPart(owner)).count(node)) throw std::invalid_argument("a part's control is driven only by the part's plugins");
+        }
+        auto next = macros_;
+        for(auto& m : next) if(m.id == id) { m.sourceNode = node; m.sourceLane = node ? lane : 0; }
+        checkControlLoops(next);
+        macros_ = std::move(next);
+        staged_ = true;
+    }
+
+    // RFC 0011's flattening: a lane's control reaches each parameter under it through a path of
+    // curves, the parameter's own last. A control target on the way maps as drive() moves it
+    // (MacroTarget::map); at the parameter, the summing rule with every other control where it is
+    // is folded into the last curve's shift, so the path gives the parameter's value.
+    Graph::ControlTargets Session::flattenControls(const Graph& graph, const std::vector<Macro>& macros, uint32_t mappingScene)
+    {
+        Graph::ControlTargets out;
+        auto find = [&](uint32_t id) { return std::find_if(macros.begin(), macros.end(), [&](const Macro& m) { return m.id == id; }); };
+        for(const auto& source : macros)
+        {
+            if(!source.sourceNode || !graph.contains(source.sourceNode)) continue;
+            auto& targets = out[{source.sourceNode, source.sourceLane}];
+            std::function<void(const Macro&, std::vector<Graph::ControlCurve>&, int)> walk = [&](const Macro& m, std::vector<Graph::ControlCurve>& path, int depth) {
+                if(depth > 64) return; // the tree has no loops (setMacroTargets); a bound all the same
+                for(const auto& t : m.targets)
+                {
+                    if(mappingScene && std::find(t.offIn.begin(), t.offIn.end(), mappingScene) != t.offIn.end()) continue; // off in this scene
+                    if(t.kind == MacroTarget::Kind::Macro)
+                    {
+                        const auto next = find(t.macro);
+                        if(next == macros.end()) continue;
+                        path.push_back(curveOf(t, t.relative ? t.base - .5 : 0));
+                        walk(*next, path, depth + 1);
+                        path.pop_back();
+                    }
+                    else if(t.kind == MacroTarget::Kind::Parameter && graph.contains(t.node))
+                    {
+                        const auto& params = graph.host(t.node).parameters();
+                        if(std::none_of(params.begin(), params.end(), [&](const kick::clap::Parameter& p) { return p.id == t.param; })) continue;
+                        auto full = path;
+                        // A relative target (of the lane's control itself, or below it) is CLAP modulation: its
+                        // offset around the parameter's own value. Under a control below, it is one whenever the
+                        // control is the lane's own; else the summing rule's rest is folded into an absolute one.
+                        const bool modulated = t.relative && path.empty();
+                        if(modulated) full.push_back(curveOf(t, -.5));
+                        else
+                        {
+                            // What this target adds, at its control's value now: a relative one its offset, an absolute one its point.
+                            const double own = t.relative ? t.offset(m.value) : t.start + (t.end - t.start) * t.shape(m.value);
+                            const double rest = contributions(macros, mappingScene, t, 0, 0).at(t.base) - own;
+                            full.push_back(curveOf(t, rest - (t.relative ? .5 : 0)));
+                        }
+                        targets.push_back({t.node, t.param, std::move(full), source.value, modulated});
+                    }
+                    // shortcut: part levels, mutes and morphs under a lane's control follow only its knob; reach them once part faders take sample-timed events.
+                }
+            };
+            std::vector<Graph::ControlCurve> path;
+            walk(source, path, 0);
+            if(targets.empty()) out.erase({source.sourceNode, source.sourceLane});
+        }
+        return out;
+    }
+
+    bool Session::stageControls()
+    {
+        auto next = flattenControls(graph_, macros_, mappingScene_);
+        if(next == graph_.controlTargets()) return false;
+        graph_.setControlTargets(std::move(next));
+        return true;
+    }
+
+    // A lane's events go to its parameters in the same block, after it: one that reaches its own
+    // plugin, directly or through the graph's connections and other lanes, would loop.
+    void Session::checkControlLoops(const std::vector<Macro>& macros) const
+    {
+        const auto d = graph_.describe();
+        std::map<NodeId, std::set<NodeId>> edges;
+        for(const auto& r : d.audioRoutes) edges[r.from.node].insert(r.to.node);
+        for(const auto& [from, to] : d.notes) edges[from].insert(to);
+        for(const auto& m : d.mappings) edges[m.source].insert(m.target);
+        const auto flat = flattenControls(graph_, macros, mappingScene_);
+        for(const auto& [lane, targets] : flat) for(const auto& t : targets) edges[lane.first].insert(t.target);
+        for(const auto& [lane, targets] : flat)
+        {
+            std::vector<NodeId> pending(edges[lane.first].begin(), edges[lane.first].end());
+            std::set<NodeId> seen;
+            while(!pending.empty())
+            {
+                const auto n = pending.back(); pending.pop_back();
+                if(n == lane.first) throw std::invalid_argument("that would make the controls loop: the lane reaches its own plugin");
+                if(!seen.insert(n).second) continue;
+                if(const auto e = edges.find(n); e != edges.end()) pending.insert(pending.end(), e->second.begin(), e->second.end());
+            }
+        }
     }
 
     Session::Sum Session::contributions(const MacroTarget& t, uint32_t macro, double value) const { return contributions(macros_, mappingScene_, t, macro, value); }
@@ -1323,7 +1423,7 @@ namespace oscairn
         Sum sum;
         for(const auto& m : macros)
             for(const auto& o : m.targets)
-                if(o.sameDestination(t) && !(mappingScene && std::find(o.offIn.begin(), o.offIn.end(), mappingScene) != o.offIn.end()))
+                if(o.sameDestination(t) && !modulated(m, o) && !(mappingScene && std::find(o.offIn.begin(), o.offIn.end(), mappingScene) != o.offIn.end()))
                 {
                     const double v = m.id == macro ? value : m.value;
                     sum.fixed += o.relative ? o.offset(v) : o.start + (o.end - o.start) * o.shape(v);
@@ -1384,6 +1484,7 @@ namespace oscairn
         };
         auto& macro = find(id);
         const double was = macro.value;
+        const Macro owner = {macro.id, {}, 0, {}, 0, macro.sourceNode}; // for modulated()
         value = std::clamp(value, 0.0, 1.0);
         const auto targets = macro.targets; // `macro` may move as children are driven
         // Where each destination goes with this control at its new value: its base plus every
@@ -1404,6 +1505,7 @@ namespace oscairn
         {
             const auto& t = targets[i];
             if(mappingScene && std::find(t.offIn.begin(), t.offIn.end(), mappingScene) != t.offIn.end()) continue; // off in this scene
+            if(modulated(owner, t)) continue; // the lane's CLAP modulation, never the parameter's value
             const double v = t.sums() ? to[i] : t.map(value);
             if(t.kind == MacroTarget::Kind::Macro) drive(macros, written, mappingScene, t.macro, v, current, apply);
             else apply(t, v);
@@ -1421,6 +1523,8 @@ namespace oscairn
         bool faders = false;
         const auto before = faderLevels();
         driveMacro(id, value, faders);
+        // The lanes' controls start from the values the controls have now (nothing else waiting to commit).
+        if(!staged_ && stageControls()) graph_.commit();
         if(!faders) return;
         // Faders with live gains move without a plan; any other compiles one, its gains ramping.
         const auto after = faderLevels();
@@ -2092,6 +2196,7 @@ namespace oscairn
             for(auto& p : parts_) eachChain(p, [&](std::vector<NodeId>& c) { std::erase(c, node); });
             buildParts();
             for(auto& m : macros_) std::erase_if(m.targets, [&](const MacroTarget& t) { return t.kind == MacroTarget::Kind::Parameter && t.node == node; });
+            for(auto& m : macros_) if(m.sourceNode == node) m.sourceNode = m.sourceLane = 0;
             for(auto& scene : scenes_)
             {
                 auto on = [&](const WireRef& r) { return r.from == node || r.to == node; };

@@ -35,6 +35,7 @@ Checked when built and tested; the sections below say how.
   - [x] the desktop's controls for it
   - [x] transitions: a glide per scene along a curve, launching on the beat or bar, and a control morphing between two scenes ([status](#scenes-status))
   - [x] the mappings' scenes laid out as one table ([status](#scenes-status))
+- [ ] Plugins as control sources ([the control tree](#the-control-tree)): a plugin's lane drives a control, the tree flattened into the graph at commit (done); a first-party LFO; control lines in the Routing view
 
 ## Problem
 
@@ -760,7 +761,7 @@ controls; physical knobs, faders, buttons, MIDI CC and sequencer lanes drive the
 - Moving a control sets its targets through the ordinary parameter path, as sample-timed
   events. For sequencer lanes that must morph many parameters at an exact sample, the tree
   is flattened when the graph is committed into each lane's final targets with their
-  combined ranges and curves (a later step).
+  combined ranges and curves (built 2026-11-08: a control's `source`, below).
 - Scenes store control values as they store part faders.
 
 **Curves** take the control's 0 to 1, `x`, to 0 to 1, which the target's start and end scale:
@@ -841,7 +842,20 @@ the destination the base does not count, and that point is the value less the ot
 offsets (a relative target's plus a half); with none or several the base takes up any edit
 since the controls last moved, so the target's point now already gives the value. A stepped
 parameter's is rounded to a step; a morph has none. `control-parts` and `desktop-phase3b`
-check it. Not yet: flattening the tree for sample-accurate sequencer lanes,
+check it. A plugin's lane as a control's source, 2026-11-08 (`Session::setMacroSource`,
+`controls.source`, saved and undoable; [RFC 0002](0002-param-target.md#lanes-driving-controls)
+says how): at each commit, and when a control is played, the tree under the control is flattened
+into the graph (`Graph::setControlTargets`) as each final parameter's path of curves with the
+summing rule's rest folded into the last, and the graph turns each lane event into a parameter
+event at every one of them, at its sample, in the audio thread. The lane gives the control its
+value (a SET event's, or a MODULATE event's amount added to the knob's); delivery is per target:
+an absolute target gets `CLAP_EVENT_PARAM_VALUE`, a relative one `CLAP_EVENT_PARAM_MOD`, its
+offset on top of the parameter's own value, which stays put (left out of the stored value the
+summing rule keeps; a knob-only control's relative targets still move it). A lane
+that would reach its own plugin is refused, as a looping control is. `control-source` checks two
+targets, one reversed, at the lane's samples with 256- and 37-sample blocks, a knob's relative
+target summing beside them, loops, saving and undo. A lane reaches the parameters under its
+control; part levels, mutes and morphs under it follow only its knob. Not yet:
 default Assign controls from each sound, MIDI CC learn, and part faders as direct gain
 updates rather than a new graph plan per move.
 

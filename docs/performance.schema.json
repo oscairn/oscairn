@@ -1685,6 +1685,25 @@
           "items": {
             "$ref": "#/$defs/ControlTarget"
           }
+        },
+        "source": {
+          "type": "object",
+          "description": "The plugin lane that drives it (RFC 0002 and 0011): the node's key and its param-target lane; absent: none",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeKey"
+            },
+            "lane": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          },
+          "required": [
+            "node",
+            "lane"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

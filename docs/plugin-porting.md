@@ -152,10 +152,40 @@ the current headers.
 | Snapshots prepared beside (`sound-contexts.h`, `oscairn.sound-snapshots/draft-4`, [RFC 0005](rfcs/0005-sound-contexts.md#preparing-a-snapshot-beside)) | Instant Performance changes: the next Performance's sounds for an instrument already playing are prepared in that instance, beside the playing ones, and selected at the cue, instead of loading its whole snapshot into an instance. Without it a native instrument is taken over whole, its snapshot loaded (for a sampler, its samples again). With its optional `ring_out` and `choke_retiring`, the outgoing sounds ring out through the outgoing Performance's effects and level instead of the incoming one's. Details [below](#instant-performance-changes). | Basic Synth |
 | Voice budget (`voice-budget.h`, `oscairn.voice-budget/draft-1`, [RFC 0018](rfcs/0018-voice-budget-and-stealing.md#step-4-status)) | For instruments that can give up one voice of a note (a layer, an element, a unison copy): the host gives the instance a voice limit from the shared CPU budget, and each sound context its part's reserve and priority, and the instrument chooses which of its voices to give up, instead of the host fading whole notes. Details [below](#voice-budget). | Basic Synth; test fixture (`voice_fixture.cpp`, layered) |
 | Native effect contexts (`effect-contexts.h`, [RFC 0007](rfcs/0007-effect-contexts.md)) | Many independent effect slots sharing one engine's memory, with tails reported. The next Performance's effects become new contexts of an engine already playing while the old ones ring out, so an engine outlives its first context and must refuse `create` past its capacity. Without `oscairn.memory`, the bytes its `resources` call reports are counted toward the memory budget. | Delay |
-| Parameter-target lanes (`param-target.h`, [RFC 0002](rfcs/0002-param-target.md)) | For sequencers and modulators: change other plugins' parameters at an exact sample in the same block (parameter locks). | Step Sequencer |
+| Parameter-target lanes (`param-target.h`, [RFC 0002](rfcs/0002-param-target.md)) | For sequencers and modulators: change other plugins' parameters at an exact sample in the same block (parameter locks), directly or through a control of the Performance. Details [below](#a-plugin-as-a-control-source). | Step Sequencer |
 | Free-running beat (`beat.h`, event space `oscairn.beat`, [RFC 0032](rfcs/0032-arpeggiator.md#step-3-status)) | For arpeggiators and clocks: a beat position the same for every plugin in a block that runs at the tempo while the transport is stopped, so parts keep time and start together. Query the event space through CLAP's event registry; an event arrives at sample 0 of every block. | Test fixture (`follower_fixture.cpp`) |
 | Harmony (`harmony.h`, event space `oscairn.harmony` and host extension `oscairn.harmony/draft`, [RFC 0033](rfcs/0033-script-block.md#host-side-status)) | For harmonizers, chord memories and scripts: the part's key and scale, and the chord held on the part with its root, type, bass and keys. Query the event space for an event in the first block and at each change, at the sample of the note that made it; read the last on the main thread through the host extension. | Test fixture (`follower_fixture.cpp`) |
 | Sound assets (`assets.h`, [RFC 0009](rfcs/0009-sound-assets-and-dependencies.md)) | For samplers: the host resolves sample files, and Performances list their samples so they can be checked and moved between machines. `oscairn.asset-dependencies/draft-2` adds `optional(index)`: an asset the plugin can do without (a fallback it embeds) does not stop a Performance loading when missing; the plugin's resolve of it fails and the host shows a notice. The host still accepts draft 1, every asset required. `oscairn.assets/draft-2` adds `library_root(owner, library_id, min_version, path, capacity)`: the read-only folder of an installed [asset library](library-archive.md#asset-packages) (`AssetLibraries/<id>/<version>/` in the data folder) when a version at least `min_version` is installed, else false. A preset-discovery provider gets it too: Oscairn's indexer answers `get_extension(OSCAIRN_EXT_ASSETS)` with a table whose `resolve` is null, so `provider->init`, which has an indexer and no `clap_host`, can declare the library's folder as a location (`owner` is the indexer, or the `clap_host_t` at runtime). The host still answers draft 1. | Legacy Sampler; asset libraries' preset providers (Oscairn Analog's factory patches) |
+
+### A plugin as a control source
+
+A plugin that sends on parameter-target lanes can drive anything a knob can: the user maps a
+lane straight to one parameter, or makes it a control's source, and the control then moves
+every target it has, each with its own range and curve, absolute or relative, summing with the
+other controls on the same parameter ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree)).
+The plugin never knows which. What it does:
+
+- Ask CLAP's `clap.event-registry` for the space `oscairn.param-target` in `init`; with none,
+  send nothing.
+- List its lanes through `oscairn.param-target-lanes/draft`: a count, and a number and name for
+  each, so the host can offer them.
+- Send `oscairn_event_param_target_t` events from `process` at the sample they apply, lane and
+  mode set, `note_id`, `port_index` and `key` -1 (a channel, or -1, for channel-wide changes).
+- Choose the mode by what the lane means. **SET** (value 0..1) is a position: a sequencer's lock,
+  a step's value; through a control it becomes the control's value. **MODULATE** (amount -1..1)
+  is movement around a position: an LFO, an envelope follower; through a control it is added to
+  the control's own value, so a bipolar lane swings around the knob and a unipolar one (0..1)
+  moves up from it. Mapped straight to a parameter, SET sets it and MODULATE modulates it.
+- What reaches each parameter under a control is the target's choice, not the lane's: an
+  absolute target sets the parameter (`CLAP_EVENT_PARAM_VALUE`); a relative one modulates it
+  (`CLAP_EVENT_PARAM_MOD`), so its value, the saved Performance and undo stay as they are and it
+  can still be turned by hand. Handle `CLAP_EVENT_PARAM_MOD` on modulatable parameters for a
+  modulator to reach them without moving them.
+- Send at every point that matters (each step, or every few samples for a smooth shape): the
+  host converts each event at the same sample, in the same block, for every parameter the lane
+  reaches, and orders a lane's targets after the plugin. Events beyond a block's event limit are
+  dropped and counted.
+
 
 ### Voice budget
 

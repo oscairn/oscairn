@@ -173,6 +173,7 @@ namespace oscairn
         void removeMacro(uint32_t macro) override;
         void setMacroName(uint32_t macro,const std::string& name) override;
         void setMacroTargets(uint32_t macro,const std::vector<MacroTarget>& targets) override;
+        void setMacroSource(uint32_t macro,NodeId node,uint32_t lane) override;
         void setMacro(uint32_t macro,double value) override;
         void remove(NodeId node,UserWires userWires) override;
         void mapParameter(NodeId from,uint32_t lane,NodeId to,uint32_t param) override;

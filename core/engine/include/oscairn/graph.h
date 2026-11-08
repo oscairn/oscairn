@@ -242,6 +242,43 @@ namespace oscairn
         void mapParamTarget( NodeId source, uint32_t lane, NodeId target, clap_id param );
         void unmapParamTarget( NodeId source, uint32_t lane );
 
+        /// RFC 0011's control tree, flattened for a lane that drives a control: one curve on the way
+        /// from the control to a parameter. Kinds as MacroTarget::Curve (Db: evenly in decibels from
+        /// `low` to `high`; Power: to `exponent`). A value v in 0..1 goes on as clamp(shift + point(v)).
+        struct ControlCurve
+        {
+            enum class Kind : uint8_t { Linear, Exponential, Logarithmic, SCurve, Db, Power } kind = Kind::Linear;
+            double start = 0, end = 1, shift = 0, low = -96, high = 0, exponent = 2;
+            double shape( double x ) const noexcept; // the curve, 0..1 to 0..1
+            double point( double x ) const noexcept { return start + ( end - start ) * shape( x ); }
+            double next( double x ) const noexcept { return std::clamp( shift + point( x ), 0.0, 1.0 ); }
+            bool operator==( const ControlCurve& ) const = default;
+        };
+        /// A lane's control reaching one parameter: `path` goes from the control down, the control
+        /// targets between, then the parameter's own. The lane gives the control its value: a SET
+        /// event's value, or a MODULATE event's amount added to `origin`, the control's own value,
+        /// clamped to 0..1. Delivery is the target's: an absolute one (`modulate` false) gets a
+        /// CLAP_EVENT_PARAM_VALUE of the path's result, its last curve's shift holding the rest of
+        /// the summing rule (the base and every other control's offset there), so the result is the
+        /// parameter's value as a fraction of its range; a relative one gets a CLAP_EVENT_PARAM_MOD
+        /// of it, the last curve unclamped with a shift of -0.5 (its offset around the parameter's
+        /// own value, which stays where it is).
+        struct ControlTarget
+        {
+            NodeId target = 0; clap_id param = 0;
+            std::vector<ControlCurve> path;
+            double origin = 0;
+            bool modulate = false;
+            bool operator==( const ControlTarget& ) const = default;
+        };
+        /// Replaces every lane's control targets (the Session's control tree, flattened): each lane's
+        /// events go to all of its targets, at their sample, in the same block, as mapParamTarget's do,
+        /// beside any mapping of that lane. Targets on nodes or parameters that are gone are left out.
+        /// Takes effect at the next commit().
+        using ControlTargets = std::map<std::pair<NodeId, uint32_t>, std::vector<ControlTarget>>;
+        void setControlTargets( ControlTargets targets );
+        const ControlTargets& controlTargets() const noexcept { return controlTargets_; }
+
         /// RFC 0012 step 1: MIDI for external outputs. A tap copies what a node sends from its note
         /// outputs (notes, pressure and MIDI channel messages), or what enters at graphInput through
         /// `zones` (as a note connection's), to the outputs in `ports` (a bit per output number), on
@@ -512,6 +549,7 @@ namespace oscairn
         // shortcut: after 2^31 notes recreate the graph; add safe ID recycling for longer lifetimes.
         uint32_t nextNoteId_=0; // audio thread; IDs are never reused within this graph
         std::map<std::pair<NodeId, uint32_t>, std::pair<NodeId, clap_id>> paramTargets_; // (source, lane) -> (target, param)
+        ControlTargets controlTargets_; // see setControlTargets
 
         std::vector<std::pair<MidiTap, std::shared_ptr<NoteRoute>>> taps_; // see setMidiTaps
         struct HeldKeys; // a harmony's keys held at its input, kept across plans

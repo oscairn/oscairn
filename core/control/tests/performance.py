@@ -79,6 +79,11 @@ try:
             for bad in [{'kind': 'db', 'min': 0, 'max': -6}, {'kind': 'db', 'min': -200, 'max': 0}, {'kind': 'power', 'exponent': 0},
                         {'kind': 'power'}, {'kind': 'db', 'min': -96, 'max': 0, 'exponent': 2}, 'square']:
                 rpc('controls.targets', {'control': control, 'targets': [{'kind': 'parameter', 'node': synth, 'param': 1, 'curve': bad}]}, True)
+            # A control driven by a plugin's lane (RFC 0002 and 0011): its source, refused for no such node.
+            driven = rpc('controls.add', {'name': 'Driven'})['result']['control']
+            rpc('controls.source', {'control': driven, 'node': synth, 'lane': 1})
+            rpc('controls.source', {'control': driven, 'node': 999, 'lane': 0}, True)
+            protocol_validator.validate({'jsonrpc': '2.0', 'id': 1, 'method': 'controls.source', 'params': {'control': driven}})
             rpc('graph.enable', {'node': synth, 'enabled': True})
             rpc('master.set', {'level': 0.8, 'pan': 0.25})
             rpc('graph.role', {'node': synth, 'role': 'insertion-a'})
@@ -91,6 +96,7 @@ try:
             assert next(n for n in graph['nodes'] if n['id'] == synth)['role'] == "insertion-a"
             assert graph['scenes'][0]['off'] == [synth] and graph['scenes'][0]['scope'] == ['enabled', 'mappings'] and graph['controls'][0]['targets'][0]['offIn'] == [scene]
             assert graph['controls'][0]['targets'][0]['curve'] == fader and graph['controls'][0]['targets'][1]['curve'] == power
+            assert graph['controls'][0]['source'] is None and graph['controls'][1]['source'] == {'node': synth, 'lane': 1}
             assert graph['parts'][0]['name'] == 'Check' and any(w['owner'] == 'part' for w in graph['wires'])
             assert graph['parts'][0]['chain'] == [{'split': split}] and graph['parts'][0]['splits'][0]['lanes'][1]['level'] == 0.5
             protocol_validator.validate({'jsonrpc':'2.0','id':1,'result':graph})
@@ -105,6 +111,7 @@ try:
             split_manifest = json.loads((Path(str(saved) + '-split') / 'performance.json').read_text())
             jsonschema.validate(split_manifest, json.loads(schema.read_text()))
             assert [t['curve'] for t in split_manifest['controls'][0]['targets']] == [fader, power]
+            assert 'source' not in split_manifest['controls'][0] and split_manifest['controls'][1]['source']['lane'] == 1
             assert split_manifest['master'] == {'level': 0.8, 'pan': 0.25}
             assert split_manifest['nodes'][0]['role'] == 'insertion-a'
             rpc('graph.role', {'node': synth, 'role': None})

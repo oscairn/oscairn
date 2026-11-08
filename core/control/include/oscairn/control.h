@@ -521,6 +521,11 @@ namespace oscairn
         // A target newly relative takes its current value as base; one already relative keeps its base.
         virtual void setMacroTargets( uint32_t macro, const std::vector<MacroTarget>& targets ) = 0;
         virtual void setMacro( uint32_t macro, double value ) = 0;
+        // A plugin's param-target lane drives the control (node 0: nothing does): a SET event moves
+        // it as a knob does, a MODULATE event modulates every parameter under it around where it is
+        // (RFC 0011). Refused for a node not in the graph, one outside the control's part, or a lane
+        // that would reach its own plugin through the controls and the graph (a loop).
+        virtual void setMacroSource( uint32_t macro, NodeId node, uint32_t lane ) = 0;
         virtual void remove( NodeId node, UserWires userWires ) = 0;
         virtual void mapParameter( NodeId from, uint32_t lane, NodeId to, uint32_t param ) = 0;
         virtual void unmapParameter( NodeId from, uint32_t lane ) = 0;

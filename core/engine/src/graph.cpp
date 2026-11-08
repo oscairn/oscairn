@@ -34,6 +34,7 @@ namespace oscairn
             std::array<kick::clap::Event,32> events; uint32_t count=0;
         };
         std::vector<Harmony> harmonies;
+        std::vector<Graph::ControlTarget> controls; // see setControlTargets
         // -1: external input. now, delta and left (audio thread only) ramp a gain that changed with a
         // new plan from the old one to the new one over a few milliseconds, so a moved fader does not step.
         struct AudioRoute { int source; uint32_t from, to; float gain; bool first=false; mutable float now=0, delta=0; mutable uint32_t left=0; std::array<uint8_t,4> live{}; }; // live: see setLiveGain
@@ -71,6 +72,7 @@ namespace oscairn
                 bool     stepped;
                 NoteRoute* notes=nullptr;
                 int16_t channel=-1; // a shared engine's context's channel
+                int control=-1; // a control's target (Plan::controls), else a plain mapping
             };
             std::vector<Route>             routes;
             std::vector<NoteRoute*> paramNotes;
@@ -351,7 +353,7 @@ namespace oscairn
         std::set<const PluginHost*> staying;for(const auto& [id,node]:next.nodes_)staying.insert(node.host.get());
         onPublish(); // caller supplies a nonthrowing metadata/transport commit
         for(const auto& [id,node]:nodes_)if(!staying.count(node.host.get()))removedHosts_.push_back(node.host);
-        nodes_.swap(next.nodes_);audioRoutes_.swap(next.audioRoutes_);noteEdges_.swap(next.noteEdges_);noteZones_.swap(next.noteZones_);draining_.swap(next.draining_);paramTargets_.swap(next.paramTargets_);taps_.swap(next.taps_);harmonies_.swap(next.harmonies_);
+        nodes_.swap(next.nodes_);audioRoutes_.swap(next.audioRoutes_);noteEdges_.swap(next.noteEdges_);noteZones_.swap(next.noteZones_);draining_.swap(next.draining_);paramTargets_.swap(next.paramTargets_);controlTargets_.swap(next.controlTargets_);taps_.swap(next.taps_);harmonies_.swap(next.harmonies_);
         nextId_=next.nextId_;replacementSerial_=next.replacementSerial_;
         delete pending_.exchange(plan.release(),std::memory_order_acq_rel);
     }
@@ -396,6 +398,11 @@ namespace oscairn
         std::erase_if(audioRoutes_,[&](const auto& e){return e.from.node==node || e.to.node==node;});
         for( auto it = paramTargets_.begin(); it != paramTargets_.end(); )
             it = ( it->first.first == node || it->second.first == node ) ? paramTargets_.erase( it ) : std::next( it );
+        for( auto it = controlTargets_.begin(); it != controlTargets_.end(); )
+        {
+            std::erase_if( it->second, [&]( const ControlTarget& t ) { return t.target == node; } );
+            it = it->first.first == node || it->second.empty() ? controlTargets_.erase( it ) : std::next( it );
+        }
         auto touches = [&]( const std::pair<NodeId, NodeId>& e ) { return e.first == node || e.second == node; };
         std::erase_if(noteEdges_,[&](const auto& edge){return touches(edge.first);});
         std::erase_if(noteZones_,[&](const auto& edge){return touches(edge.first);});
@@ -652,6 +659,32 @@ namespace oscairn
         paramTargets_.erase( { source, lane } );
     }
 
+    double Graph::ControlCurve::shape( double value ) const noexcept
+    {
+        const double x = std::clamp( value, 0.0, 1.0 );
+        switch( kind )
+        {
+        case Kind::Linear: break;
+        case Kind::Exponential: return ( std::exp( 4 * x ) - 1 ) / ( std::exp( 4.0 ) - 1 );
+        case Kind::Logarithmic: return std::log1p( ( std::exp( 4.0 ) - 1 ) * x ) / 4;
+        case Kind::SCurve: return x * x * ( 3 - 2 * x );
+        case Kind::Db: return x > 0 ? std::pow( 10.0, ( low + ( high - low ) * x ) / 20 ) : 0;
+        case Kind::Power: return std::pow( x, exponent );
+        }
+        return x;
+    }
+
+    void Graph::setControlTargets( ControlTargets targets )
+    {
+        // Only what can be compiled: a source and targets in the graph, and no lane driving its own node.
+        for( auto it = targets.begin(); it != targets.end(); )
+        {
+            std::erase_if( it->second, [&]( const ControlTarget& t ) { return !nodes_.count( t.target ) || t.target == it->first.first || t.path.empty(); } );
+            it = !nodes_.count( it->first.first ) || it->second.empty() ? targets.erase( it ) : std::next( it );
+        }
+        controlTargets_ = std::move( targets );
+    }
+
     const PluginHost& Graph::host( NodeId node ) const
     {
         return *nodes_.at( node ).host;
@@ -702,6 +735,9 @@ namespace oscairn
         std::vector<std::pair<NodeId, NodeId>> mappingEdges;
         for( const auto& [from, to] : paramTargets_ )
             mappingEdges.push_back( led( from.first, to.first ) );
+        for( const auto& [from, targets] : controlTargets_ )
+            for( const auto& t : targets )
+                mappingEdges.push_back( led( from.first, t.target ) );
         for( const auto* edges : { &std::as_const(audioDependencies), &std::as_const(noteDependencies), &std::as_const( mappingEdges ) } )
             for( const auto& e : *edges )
                 if( internal( e ) )
@@ -859,6 +895,22 @@ namespace oscairn
             target.paramIn.resize( kick::clap::Host::maxBlockEvents );
             target.paramNotes.resize( kick::clap::Host::maxBlockEvents );
         }
+        for( const auto& [from, targets] : controlTargets_ )
+            for( const auto& t : targets )
+            {
+                const auto& params = nodes_.at( t.target ).host->parameters();
+                const auto  p      = std::find_if( params.begin(), params.end(), [&]( const kick::clap::Parameter& q ) { return q.id == t.param; } );
+                if( p == params.end() || ( p->flags & CLAP_PARAM_IS_READONLY ) )
+                    continue;
+                auto& source = plan->steps[(size_t)stepOf[from.first]];
+                auto& target = plan->steps[(size_t)stepOf[t.target]];
+                const auto c = contextOf.find( t.target );
+                source.routes.push_back( { from.second, stepOf[t.target], t.param, p->minimum, p->maximum, ( p->flags & CLAP_PARAM_IS_STEPPED ) != 0, nullptr, c == contextOf.end() ? int16_t( -1 ) : c->second.first, int( plan->controls.size() ) } );
+                plan->controls.push_back( t );
+                if(const auto notes=noteEdges_.find({from.first,t.target});notes!=noteEdges_.end())source.routes.back().notes=notes->second.get();
+                target.paramIn.resize( kick::clap::Host::maxBlockEvents );
+                target.paramNotes.resize( kick::clap::Host::maxBlockEvents );
+            }
 
         auto prepare=[](auto& routes,uint32_t channels,auto& silent) {
             std::vector<bool> written(channels);
@@ -1332,41 +1384,54 @@ namespace oscairn
                     if( h->space_id != kick::clap::Host::paramTargetSpace || h->type != OSCAIRN_EVENT_PARAM_TARGET )
                         continue;
                     const auto& e     = *reinterpret_cast<const oscairn_event_param_target_t*>( h );
-                    const auto  route = std::find_if( step.routes.begin(), step.routes.end(), [&]( const Plan::Step::Route& r ) { return r.lane == e.lane; } );
-                    if( route == step.routes.end() )
-                        continue; // lane not mapped
-                    auto& target = plan->steps[(size_t)route->target];
-                    if( target.paramCount == target.paramIn.size() )
-                    {++target.paramDrops;continue;}
-                    // Per-note lane addresses belong to the source's corresponding note route.
-                    if(e.note_id>=0 && !route->notes){eventDrops_.fetch_add(1,std::memory_order_relaxed);continue;}
-                    target.paramNotes[target.paramCount]=e.note_id>=0?route->notes:nullptr;
-                    const double range = route->maximum - route->minimum;
-                    if( e.mode == OSCAIRN_PARAM_TARGET_SET )
+                    for( const auto& r : step.routes ) // a lane may reach several parameters, through a control
                     {
-                        clap_event_param_value_t v{};
-                        v.header     = { sizeof( v ), h->time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0 };
-                        v.param_id   = route->param;
-                        v.note_id    = e.note_id;
-                        v.port_index = e.port_index;
-                        v.channel    = route->channel >= 0 ? route->channel : e.channel;
-                        v.key        = e.key;
-                        v.value      = route->minimum + std::clamp( e.value, 0.0, 1.0 ) * range;
-                        if( route->stepped )
-                            v.value = std::round( v.value );
-                        target.paramIn[target.paramCount++] = kick::clap::Event::from( v );
-                    }
-                    else
-                    {
-                        clap_event_param_mod_t m{};
-                        m.header     = { sizeof( m ), h->time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD, 0 };
-                        m.param_id   = route->param;
-                        m.note_id    = e.note_id;
-                        m.port_index = e.port_index;
-                        m.channel    = route->channel >= 0 ? route->channel : e.channel;
-                        m.key        = e.key;
-                        m.amount     = std::clamp( e.value, -1.0, 1.0 ) * range;
-                        target.paramIn[target.paramCount++] = kick::clap::Event::from( m );
+                        if( r.lane != e.lane )
+                            continue;
+                        const auto* route = &r;
+                        auto& target = plan->steps[(size_t)route->target];
+                        if( target.paramCount == target.paramIn.size() )
+                        {++target.paramDrops;continue;}
+                        // Per-note lane addresses belong to the source's corresponding note route.
+                        if(e.note_id>=0 && !route->notes){eventDrops_.fetch_add(1,std::memory_order_relaxed);continue;}
+                        target.paramNotes[target.paramCount]=e.note_id>=0?route->notes:nullptr;
+                        const double range = route->maximum - route->minimum;
+                        // Through a control: the path from the control's value to the parameter's fraction.
+                        const auto* control = route->control >= 0 ? &plan->controls[(size_t)route->control] : nullptr;
+                        auto follow = [&]( double x ) {
+                            const size_t n = control->path.size();
+                            for( size_t k = 0; k < n; ++k )
+                                x = control->modulate && k + 1 == n ? control->path[k].shift + control->path[k].point( x ) : control->path[k].next( x );
+                            return x;
+                        };
+                        // The control's value from the lane: a SET event's, or a MODULATE event's amount from where it is.
+                        const double x = !control ? 0 : std::clamp( e.mode == OSCAIRN_PARAM_TARGET_SET ? e.value : control->origin + std::clamp( e.value, -1.0, 1.0 ), 0.0, 1.0 );
+                        if( control ? !control->modulate : e.mode == OSCAIRN_PARAM_TARGET_SET )
+                        {
+                            clap_event_param_value_t v{};
+                            v.header     = { sizeof( v ), h->time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0 };
+                            v.param_id   = route->param;
+                            v.note_id    = e.note_id;
+                            v.port_index = e.port_index;
+                            v.channel    = route->channel >= 0 ? route->channel : e.channel;
+                            v.key        = e.key;
+                            v.value      = route->minimum + ( control ? follow( x ) : std::clamp( e.value, 0.0, 1.0 ) ) * range;
+                            if( route->stepped )
+                                v.value = std::round( v.value );
+                            target.paramIn[target.paramCount++] = kick::clap::Event::from( v );
+                        }
+                        else
+                        {
+                            clap_event_param_mod_t m{};
+                            m.header     = { sizeof( m ), h->time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD, 0 };
+                            m.param_id   = route->param;
+                            m.note_id    = e.note_id;
+                            m.port_index = e.port_index;
+                            m.channel    = route->channel >= 0 ? route->channel : e.channel;
+                            m.key        = e.key;
+                            m.amount     = ( control ? follow( x ) : std::clamp( e.value, -1.0, 1.0 ) ) * range;
+                            target.paramIn[target.paramCount++] = kick::clap::Event::from( m );
+                        }
                     }
                 }
             }

@@ -416,7 +416,9 @@ namespace oscairn
     void Session::commit()
     {
         // Only levels and mutes changed since the last commit: their live gains have them already.
-        const bool live = std::exchange( liveEdit_, false ) && !staged_, mute = std::exchange( liveMute_, false );
+        // A control driven by a lane follows the tree as it is now (RFC 0011's flattening).
+        const bool controls = stageControls();
+        const bool live = std::exchange( liveEdit_, false ) && !staged_ && !controls, mute = std::exchange( liveMute_, false );
         if( !live ) graph_.commit(std::exchange(rampGains_, false));
         staged_ = false;
         // Levels moved live reach clients as values (controls.changed), with no graph to read

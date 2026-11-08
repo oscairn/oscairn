@@ -315,6 +315,7 @@ namespace oscairn
             for(auto m:array(field(root,"controls")))
             {
                 Macro macro;macro.id=static_cast<uint32_t>(integer(field(m,"id")));macro.part=static_cast<uint32_t>(integer(field(m,"part")));macro.name=string(field(m,"name"));macro.value=number(field(m,"value"));
+                if(const auto source=field(m,"source");source->type!=json_type_null){macro.sourceNode=static_cast<NodeId>(integer(field(source,"node")));macro.sourceLane=static_cast<uint32_t>(integer(field(source,"lane")));}
                 for(auto t:array(field(m,"targets")))
                 {
                     MacroTarget target;const auto kind=string(field(t,"kind"));
@@ -1016,6 +1017,8 @@ namespace oscairn
         }
         impl_->call("controls.targets","{\"control\":"+std::to_string(macro)+",\"targets\":"+list+"]}");impl_->refresh();
     }
+    void RemoteControl::setMacroSource(uint32_t macro,NodeId node,uint32_t lane)
+    {impl_->call("controls.source","{\"control\":"+std::to_string(macro)+(node?",\"node\":"+std::to_string(node)+",\"lane\":"+std::to_string(lane):std::string())+'}');impl_->refresh();}
     void RemoteControl::setMacro(uint32_t macro,double value)
     {
         impl_->call("controls.set","{\"control\":"+std::to_string(macro)+",\"value\":"+encode(value)+'}');

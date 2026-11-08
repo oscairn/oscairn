@@ -10,6 +10,7 @@ Checked when built and tested; the sections below say how.
 - [x] Mappings in the graph, converted to the target's parameter events in the same block
 - [x] Lock lanes in the step sequencer; Basic Synth parameters to lock
 - [x] `oscairn-render --map`
+- [x] A lane drives a control of [RFC 0011's control tree](0011-performance-ui-and-editors.md#the-control-tree), flattened into the graph at commit ([below](#lanes-driving-controls))
 
 ## Problem
 
@@ -49,6 +50,49 @@ A small CLAP extension, defined in `core/clap-ext/include/oscairn-clap/param-tar
   Lanes are listed through the plugin extension `oscairn.param-target-lanes/draft` (count,
   and a name for each lane) so a UI can offer them.
 
+### Lanes driving controls
+
+Decided 2026-11-08. Besides a direct mapping, a lane can drive a **control** (RFC 0011): the
+control's `source` is (plugin, lane), and the lane's events reach every parameter under the
+control, through its targets' ranges and curves, absolute or relative, and the summing rule,
+as when the control's knob moves.
+
+- **The lane gives the control its value, 0 to 1.** A SET event's value is the control's
+  value. A MODULATE event's amount (-1..1) is added to the control's own value (its knob, saved
+  in the Performance), clamped to 0..1: around the control's value rather than around 0.5, so
+  the knob sets the center a modulator swings about, and a control left at 0.5 is swept whole
+  by a full bipolar swing (a unipolar one, 0..1, with the control at 0).
+- **The control fans out as its knob does**: to any number of targets, each with its own range,
+  curve and absolute or relative setting.
+- **Delivery is decided per target, not by the lane's mode.** An **absolute** target gets a
+  `CLAP_EVENT_PARAM_VALUE`, which sets the parameter: the value the control gives it there, with
+  every other control's offset on that parameter where it is (the summing rule). A **relative**
+  target gets a `CLAP_EVENT_PARAM_MOD`: its offset (its point in its range less a half) on top of
+  the parameter's own value, which stays as it is, so the saved Performance and undo are
+  untouched and the parameter can still be turned by hand while it is modulated. A relative
+  target of a lane-driven control is therefore left out of the summing rule's stored value, and
+  moving that control's knob does not set it; it moves at the lane's next event. Relative
+  targets of a plain knob's control, and those under a control the lane drives through another,
+  still move the stored value as before (switching every relative target to CLAP modulation is
+  a larger change, not made).
+
+That is how CLAP itself separates the two: a parameter's value against modulation of it. A
+MODULATE lane's natural targets are relative ones.
+
+**Flattened at commit, sample-accurate.** The control thread is not in the per-sample path:
+when the graph is committed, the Session flattens the tree under each lane's control into its
+final parameters (`Graph::setControlTargets`), each a path of curves from the control down
+(the control targets on the way, then the parameter's own) with the summing rule's rest (the
+base and every other control's offset) folded into the last. The graph converts each lane
+event at every one of them in the audio thread, in the same block and at the same sample,
+with no allocation; the targets come after the source in the processing order. The flattening
+is redone at every commit and when a control is played (its value, or another control's on the
+same parameter, changes the rest), handed over with the plan as everything else is. Part levels,
+mutes and morphs under such a control follow only its knob.
+
+A direct mapping of a lane (`mapParamTarget`) is kept as it was, beside any control the lane
+drives: the sequencer's locks use it.
+
 ## Implementation
 
 - `core/clap-host`: the host offers `clap.event-registry`, accepts param-target events from
@@ -59,6 +103,10 @@ A small CLAP extension, defined in `core/clap-ext/include/oscairn-clap/param-tar
 - `plugins/step-sequencer`: one lane per track, a lock value per step, sent at the step's sample before
   its note. `plugins/basic-synth` has parameters to lock (Brightness, Level).
 - `oscairn-render --map SRC.LANE=DST.PARAM`.
+- `core/control` (`Session::setMacroSource`, `flattenControls`): a control's `source`, saved in
+  the Performance and Sound, undoable, `controls.source` and each control's `source` in the
+  control protocol; a lane that would reach its own plugin, through the controls and the
+  graph's connections, is refused.
 
 ## Verification
 
@@ -66,6 +114,14 @@ A small CLAP extension, defined in `core/clap-ext/include/oscairn-clap/param-tar
 is held is exactly its gain. Every step's output equals that step's lock value from the
 step's first sample, with 256- and 37-sample blocks; without the mapping the gain stays at
 its default.
+
+`control-source` (and `control-source-workers`, every plugin in a worker): the sequencer's lane 0
+drives a control whose two absolute targets are the gains of two test instruments, one range reversed
+(0.2 to 0.6, 0.6 to 0.2); each output equals its mapped lock from every step's first sample, with
+256- and 37-sample blocks; with a second control's relative target on one gain moved by its knob,
+that output adds its offset (the summing rule) from the next step; the source is refused for a
+lane reaching its own plugin (through the control, a target or a mapping back), survives a save
+and load, and is undone.
 
 `note-routing` checks explicit per-note lane ID remapping and ordering after same-sample
 notes. Not yet verified by a test: the ordering of global locks before notes at the same sample (the test

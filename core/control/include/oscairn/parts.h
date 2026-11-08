@@ -246,7 +246,14 @@ namespace oscairn
     inline constexpr std::array<const char*, 6> curveKinds{"linear", "exponential", "logarithmic", "s-curve", "db", "power"}; // as files and the control protocol name them
     // A control belongs to the Performance, or to a part (RFC 0021): a part's controls target only
     // its plugins and its other controls, and go with it into a Sound.
-    struct Macro { uint32_t id = 0; std::string name; double value = 0; std::vector<MacroTarget> targets; uint32_t part = 0; };
+    // A control may also be driven by a plugin's param-target lane (RFC 0002), its `source`: node 0
+    // for none. The tree under it is flattened into the graph (Graph::setControlTargets), so the
+    // lane's events reach every parameter below it at their sample, in the audio thread.
+    struct Macro { uint32_t id = 0; std::string name; double value = 0; std::vector<MacroTarget> targets; uint32_t part = 0; NodeId sourceNode = 0; uint32_t sourceLane = 0; };
+    // A relative parameter target of a lane-driven control is delivered by the lane as CLAP
+    // parameter modulation (CLAP_EVENT_PARAM_MOD), on top of the parameter's own value: it is
+    // left out of the summing rule's stored value, and moving the control's knob does not set it.
+    inline bool modulated(const Macro& m, const MacroTarget& t) { return m.sourceNode && t.relative && t.kind == MacroTarget::Kind::Parameter; }
 
     // Physical controls (RFC 0011): what a knob, fader or button is assigned to. Defaults come in
     // layers (physical_controls.h); a Performance override sets one by the control's logical

@@ -547,7 +547,8 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
                 t.kind==MacroTarget::Kind::Morph?",\"from\":"+std::to_string(t.sceneFrom)+",\"to\":"+std::to_string(t.sceneTo):",\"part\":"+std::to_string(t.part);
             targets.push_back(std::string("{\"kind\":\"")+kind+"\""+at+",\"start\":"+numeric(t.start)+",\"end\":"+numeric(t.end)+",\"curve\":"+curve+",\"relative\":"+(t.relative?"true":"false")+",\"base\":"+numeric(t.base)+",\"offIn\":"+offIn(t)+'}');
         }
-        controls.push_back("{\"id\":"+std::to_string(m.id)+",\"part\":"+std::to_string(m.part)+",\"name\":"+quote(m.name)+",\"value\":"+numeric(m.value)+",\"targets\":"+join(targets)+'}');
+        const std::string source=m.sourceNode && keys.count(m.sourceNode)?",\"source\":{\"node\":"+quote(keys.at(m.sourceNode))+",\"lane\":"+std::to_string(m.sourceLane)+'}':""; // a plugin's lane drives it
+        controls.push_back("{\"id\":"+std::to_string(m.id)+",\"part\":"+std::to_string(m.part)+",\"name\":"+quote(m.name)+",\"value\":"+numeric(m.value)+",\"targets\":"+join(targets)+source+'}');
     }
     std::vector<std::string> named;
     for(const auto& l:assets_.libraries())if(libraries.count(l.id))named.push_back("{\"id\":"+quote(l.id)+",\"name\":"+quote(l.name)+",\"fingerprint\":"+quote(l.fingerprint)+'}');
@@ -1115,7 +1116,8 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         const auto list=array(field(d,"controls"),4096);
         for(auto m:list){const auto id=integer(field(m,"id"));if(!id || !macroIds.insert(id).second)bad("invalid or duplicate control");}
         for(auto m:list){
-            fields(m,{"id","part","name","value","targets"});Macro macro;macro.id=integer(field(m,"id"));macro.part=integer(field(m,"part"));macro.name=text(field(m,"name"));macro.value=number(field(m,"value"));
+            fields(m,{"id","part","name","value","targets","source"});Macro macro;macro.id=integer(field(m,"id"));macro.part=integer(field(m,"part"));macro.name=text(field(m,"name"));macro.value=number(field(m,"value"));
+            if(const V source=member(m,"source")){fields(source,{"node","lane"});macro.sourceNode=node(field(source,"node"));macro.sourceLane=integer(field(source,"lane"));if(macro.sourceNode==graphInput || macro.sourceNode==graphOutput)bad("invalid control source");}
             if(macro.part && std::none_of(parts.begin(),parts.end(),[&](const Part& p){return p.id==macro.part;}))bad("a control of an unknown part");
             if(macro.value<0 || macro.value>1)bad("invalid control value");
             for(auto t:array(field(m,"targets"),256)){
@@ -1233,6 +1235,7 @@ void Session::open(Prepared& p,bool seamless) {
     auto history=history_;
     if(history.size()==historyCapacity)history.pop_front();
     history.push_back({sequence_+1,ChangeKind::Resync,0,0,0,false});
+    next->setControlTargets(flattenControls(*next,p.macros,p.mappingScene)); // the lanes' controls (RFC 0011)
     graph_.publishReplacement(*next,[&]() noexcept {
         // Their channels select the incoming sounds, queued for the plugin's next block: the plan's first,
         // or the last before it if one runs between here and the hand-over.
@@ -1446,7 +1449,8 @@ std::vector<std::string> Session::loadSoundInto(uint32_t partId,const fs::path& 
         const auto list=array(field(d,"controls"),4096);
         for(auto m:list)controlIds[integer(field(m,"id"))]=nextMacro_++;
         for(auto m:list){
-            fields(m,{"id","part","name","value","targets"});Macro macro;macro.id=controlIds.at(integer(field(m,"id")));macro.part=partId;macro.name=text(field(m,"name"));macro.value=number(field(m,"value"));
+            fields(m,{"id","part","name","value","targets","source"});Macro macro;macro.id=controlIds.at(integer(field(m,"id")));macro.part=partId;macro.name=text(field(m,"name"));macro.value=number(field(m,"value"));
+            if(const V source=member(m,"source")){fields(source,{"node","lane"});macro.sourceNode=node(field(source,"node"));macro.sourceLane=integer(field(source,"lane"));}
             if(macro.value<0 || macro.value>1)bad("invalid control value");
             for(auto t:array(field(m,"targets"),256)){
                 MacroTarget target;const auto kind=text(field(t,"kind"));
@@ -1735,9 +1739,10 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
         for(auto m:controlList)if(coming.count(integer(field(m,"id"))))controlIds[integer(field(m,"id"))]=nextControl++;
         auto takenName=[&](const std::string& n){return std::any_of(macros_.begin(),macros_.end(),[&](const Macro& x){return x.name==n;}) || std::any_of(macros.begin(),macros.end(),[&](const Macro& x){return x.name==n;});};
         for(auto m:controlList){
-            fields(m,{"id","part","name","value","targets"});const auto fileId=integer(field(m,"id"));if(!coming.count(fileId))continue;
+            fields(m,{"id","part","name","value","targets","source"});const auto fileId=integer(field(m,"id"));if(!coming.count(fileId))continue;
             Macro macro;macro.id=controlIds.at(fileId);macro.value=number(field(m,"value"));if(macro.value<0 || macro.value>1)bad("invalid control value");
             if(const auto owner=integer(field(m,"part")))macro.part=partIds.at(owner);
+            if(const V source=member(m,"source");source && has(field(source,"node"))){fields(source,{"node","lane"});macro.sourceNode=node(field(source,"node"));macro.sourceLane=integer(field(source,"lane"));} // one whose plugin does not come is a knob
             const auto name=text(field(m,"name"));macro.name=nextFree(name,takenName);
             if(macro.name!=name)notes.push_back("the control "+name+" is "+macro.name+" here");
             for(auto t:array(field(m,"targets"),256)){

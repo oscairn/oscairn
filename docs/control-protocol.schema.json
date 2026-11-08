@@ -6843,6 +6843,49 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "controls.source"
+            },
+            "params": {
+              "type": "object",
+              "description": "The plugin lane that drives the control: node and lane; without node, nothing does",
+              "properties": {
+                "control": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "node": {
+                  "$ref": "#/$defs/Node"
+                },
+                "lane": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                }
+              },
+              "required": [
+                "control"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "controls.set"
             },
             "params": {
@@ -9842,6 +9885,32 @@
           "items": {
             "$ref": "#/$defs/ControlTargetReply"
           }
+        },
+        "source": {
+          "description": "The plugin lane that drives it (RFC 0002 and 0011), or null: the node and its param-target lane",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "$ref": "#/$defs/Node"
+                },
+                "lane": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                }
+              },
+              "required": [
+                "node",
+                "lane"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -9849,7 +9918,8 @@
         "part",
         "name",
         "value",
-        "targets"
+        "targets",
+        "source"
       ],
       "additionalProperties": false
     },

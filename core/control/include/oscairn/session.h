@@ -182,6 +182,7 @@ namespace oscairn
         void setMacroName(uint32_t macro, const std::string& name) override;
         void setMacroTargets(uint32_t macro, const std::vector<MacroTarget>& targets) override;
         void setMacro(uint32_t macro, double value) override;
+        void setMacroSource(uint32_t macro, NodeId node, uint32_t lane) override;
         void remove(NodeId node, UserWires userWires) override;
         void mapParameter( NodeId from, uint32_t lane, NodeId to, uint32_t param ) override { graph_.mapParamTarget( from, lane, to, param ); staged_ = true; }
         void unmapParameter( NodeId from, uint32_t lane ) override { graph_.unmapParamTarget( from, lane ); staged_ = true; }
@@ -470,6 +471,11 @@ namespace oscairn
         static Destination destination(const MacroTarget& t) { return {int(t.kind), t.node, t.param, t.part}; }
         std::map<Destination, double> written_; // what the controls last set each destination to; anything else moving it since rebases it
         void driveMacro(uint32_t id, double value, bool& faders); // sets it and its targets
+        // The controls driven by plugin lanes, flattened for the graph: each lane's final parameters,
+        // the curves on the way and the summing rule's rest there (Graph::ControlTarget).
+        static Graph::ControlTargets flattenControls(const Graph& graph, const std::vector<Macro>& macros, uint32_t mappingScene);
+        bool stageControls(); // into the graph when they changed (at the next commit); true then
+        void checkControlLoops(const std::vector<Macro>& macros) const; // throws for a lane reaching its own plugin
         // The summing rule on any copy of the controls (the controller input's too): drives control
         // `id` to `value` and the controls it targets, reading each destination with `current`
         // (nothing: it is gone, and left alone) and setting it with `apply`.

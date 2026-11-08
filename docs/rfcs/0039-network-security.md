@@ -19,8 +19,9 @@ Checked when built and tested; the sections below say how.
 
 - [ ] 1. A TLS library in the image; HTTPS package fetching on Linux
       (built 2026-11-07: Buildroot's Mbed TLS 3.6.7, libcurl 8.22.0 built against it,
-      `ca-certificates` and the `curl` tool in the QEMU image; `JUCE_USE_CURL` for the app, the
-      engine and the web test on Linux, with certificates always verified. `control-repository-web`
+      `ca-certificates` and the `curl` tool in the QEMU image; libcurl for the app, the engine
+      and the web test on Linux (since 2026-11-08 called directly, not through JUCE's URL
+      streams), with certificates always verified. `control-repository-web`
       takes `OSCAIRN_TEST_CA`, a test authority the system trusts, and then runs over HTTPS and
       refuses a wrong host name; it always checks that an unknown authority is refused. Passed
       with the image's own binaries and libraries in a Linux container that trusts a test
@@ -28,8 +29,8 @@ Checked when built and tested; the sections below say how.
       curl and the web test binary fetched over HTTPS from a test authority's server, and curl
       from a public site with the image's bundle; an untrusted certificate and a wrong host name
       were refused. Size [below](#the-tls-library). Not yet, so the gate is not met:
-      `control-repository-web` run inside the booted image, which has no Python; the
-      last-known-time rule ([below](#https-fetching-and-the-clock)); the trusted case on macOS,
+      `control-repository-web` run inside the booted image, which has no Python; the saved
+      floor behind the time rule ([below](#https-fetching-and-the-clock)); the trusted case on macOS,
       which needs the test authority in the keychain; Mbed TLS 4.1, an open question)
 - [ ] 2. The firewall: default deny, rules generated from the enabled services
 - [ ] 3. The network gateway: a process apart from the engine, WebSocket over TLS, limits
@@ -362,12 +363,27 @@ Recommended: the second, plus NTP when the user has enabled network time, with d
 a fetch that fails on dates says the time is wrong and offers to set it. The trust bundle is
 Buildroot's `ca-certificates`, updated with the image.
 
-**Not built in step 1.** The floor needs the last saved time, which needs RFC 0035's supervisor
-and the data partition, and the image has neither, so there is no small place to put it yet. It
-waits for RFC 0035's step 6 (the time state and the saved floor), and step 1's gate stays open on
-it. Until then a device with no clock fails every HTTPS fetch on dates, and verification is not
-weakened to hide that. The QEMU image is not affected: QEMU's `virt` machine has a real-time
-clock that gives the host's time.
+**Built (2026-11-08), as RFC 0035's time table decides** (TLS to the package repository with the
+time unknown): when `timeKnown()` is false, the Linux transport (`hosts/audio/WebTransport.cpp`)
+checks each certificate's dates against `timeFloor()` only. One that expired before the floor is
+refused; one not yet valid at the floor is accepted, so a device whose clock is behind still takes
+a certificate issued after its image was built; the chain and the host name are checked as
+always. This goes a step past the recommendation above, which keeps every date check against a
+clock never set before the floor: that would refuse every certificate issued after the floor.
+It is done in Mbed TLS's verify callback, which then calls libcurl's own, so it needs libcurl
+built with Mbed TLS (the device's); with another TLS library (OpenSSL on a desktop Linux) the
+library's own date checks stay, and a desktop's clock is trusted anyway. macOS keeps the system's
+checks through JUCE. `control-repository-web` checks it with `OSCAIRN_TEST_CA` and
+`OSCAIRN_TEST_TLS=mbedtls`: with the time known a certificate valid from tomorrow is refused,
+with `OSCAIRN_TIME=unknown` it is taken, while one expired before the floor and a wrong host name
+are refused (passed in a Debian 13 container with curl 8.22.0 built against Mbed TLS 3.6.6; it
+fails on the line that takes the certificate without the change).
+
+**Not built:** the floor is still the fixed date in the code (2026-11-01), not the image's build
+time and the time last saved, which need RFC 0035's supervisor and data partition (its step 6);
+nothing sets `OSCAIRN_TIME` on the device yet, so the rule applies there only while the clock
+reads before that date. A fetch that fails on dates does not yet say the time is wrong. The QEMU
+image is not affected: QEMU's `virt` machine has a real-time clock that gives the host's time.
 
 ## The firewall
 

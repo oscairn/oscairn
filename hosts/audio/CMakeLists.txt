@@ -8,8 +8,9 @@ target_compile_definitions(oscairn_audio_host PUBLIC JUCE_WEB_BROWSER=0)
 target_compile_definitions(oscairn_audio_host PRIVATE OSCAIRN_AUDIO_BUFFER_FRAMES=${OSCAIRN_AUDIO_BUFFER_FRAMES})
 target_link_libraries(oscairn_audio_host PUBLIC oscairn_control juce::juce_audio_devices)
 target_compile_options(oscairn_audio_host PRIVATE -Wall -Wextra)
-# HTTPS on Linux through libcurl (JUCE_USE_CURL, on by default); macOS uses the system's. The apps
-# that fetch from repositories say NEEDS_CURL, and JUCE builds the rest without it.
+# HTTPS on Linux through libcurl, called directly (WebTransport.cpp); macOS uses the system's
+# through JUCE. The apps that fetch from repositories say NEEDS_CURL, and JUCE builds the rest
+# without it.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(oscairn_audio_host PRIVATE juce::pkgconfig_JUCE_CURL_LINUX_DEPS)
 endif()

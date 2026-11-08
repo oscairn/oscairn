@@ -456,7 +456,9 @@ updates ([systemd](https://www.freedesktop.org/software/systemd/man/latest/syste
   already there gets ` 2` added, and a rename keeps the number. `timeKnown()` is the smallest
   start on the time state: `OSCAIRN_TIME` (`known` or `unknown`) where a supervisor sets it,
   otherwise known unless the clock reads before a floor, which is a fixed date in the code
-  (2026-11-01), so a desktop's clock is trusted. Still to build: the time state itself and
+  (2026-11-01, `timeFloor()`), so a desktop's clock is trusted. With the time unknown, HTTPS on
+  Linux checks certificate dates against that floor only, as the table below says (RFC 0039,
+  libcurl with Mbed TLS). Still to build: the time state itself and
   `system.time`, the floor from the image's build time and the saved time, `OSCAIRN_TIME` set by
   the image, a take renamed to its date once the time is resolved in the same boot, the
   boot-relative start in `take.json`, and empty `bext` dates once takes have a `bext` chunk (RFC

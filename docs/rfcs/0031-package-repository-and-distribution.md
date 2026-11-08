@@ -809,8 +809,9 @@ waits on them. What remains, in order:
    the items chosen, the samples it lacks and its own platform's builds, unzipping each as it
    streams, so peak storage is the installed size plus one entry from the web too.
 2. HTTPS on Linux devices: done by RFC 0039's step 1 (libcurl with Mbed TLS in the image,
-   `JUCE_USE_CURL` on); the core's `Transport` did not change. A device with no clock still fails
-   on certificate dates until RFC 0039's time floor is built.
+   libcurl called directly); the core's `Transport` did not change. With the time unknown,
+   certificate dates are checked against the time floor only (RFC 0039), but the floor is still a
+   fixed date in the code until RFC 0035's saved floor is built.
 3. `.orepo` files, each installed package recording its repository, and the root fetched from a
    mirror when the repository's own address is down. (The desktop installing from an address and
    a device's list of repositories: done 2026-11-07, see Progress.)

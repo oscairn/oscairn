@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include "oscairn/control.h"
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -51,6 +52,8 @@ namespace oscairn
     // "known" or "unknown" where a supervisor keeps the state; otherwise the clock is trusted, as
     // on a desktop, unless it reads before the floor.
     bool timeKnown();
+    // The time is at least this, whatever the clock says (RFC 0035's floor).
+    std::chrono::system_clock::time_point timeFloor();
     // "#rrggbb" in hex digits, or empty: a Performance's color.
     bool validColor(const std::string& color);
     // A Sound's or Performance's content hash: SHA-256 over its document without the info block,

@@ -411,6 +411,29 @@ namespace
         double value=-1;for(const auto& m:remote->graphState().macros)if(m.id==knob)value=m.value;
         check(!remote->reading() && value==.75,"the read in keeps the value pushed after its graph");
     }
+    // A node removed by another client after a graph read's graph.get, and before its parameters
+    // are asked for (a Performance loading while the desktop reads): the parameters' "Unknown
+    // node" comes back ahead of the graph.changed behind it. That is a stale read, read again,
+    // not a failure the client throws (which the desktop takes for the engine gone). The server
+    // is polled by hand, the other client first, so the removal lands between the read's replies.
+    void removedDuringRead(const char* plugin)
+    {
+        Fixture f(plugin);
+        const auto effect=f.session.add("effect",plugin);const auto knob=f.session.addMacro("Knob");f.session.commit();
+        auto fd=pair(),other=pair();f.server.adopt(other[0]);f.server.adopt(fd[0]);
+        LocalClient client,second;std::unique_ptr<RemoteControl> remote;
+        clientWhileRendering(f,[&]{client.adopt(fd[1]);remote=std::make_unique<RemoteControl>(client);second.adopt(other[1]);second.call("session.hello");});
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        second.send("controls.name","{\"control\":"+std::to_string(knob)+",\"name\":\"Renamed\"}");second.send("graph.commit");
+        for(int i=0;i<10 && !remote->reading();++i){f.tick();remote->service();} // the graph.changed, and the read sent
+        check(remote->reading(),"a graph read out");
+        f.tick();remote->service(); // its graph answered, its parameters asked for
+        second.send("graph.remove","{\"node\":"+std::to_string(effect)+",\"userWires\":\"remove\"}");second.send("graph.commit");
+        bool threw=false;
+        for(int i=0;i<40 && (remote->reading() || remote->hasNode(effect));++i){f.tick();try{remote->service();}catch(const std::exception&){threw=true;}}
+        check(!threw,"a node removed during a graph read is no failure");
+        check(!remote->reading() && !remote->hasNode(effect) && remote->hasNode(remote->nodeId("synth")),"the graph is read again without it");
+    }
     // A mute sent after a graph read's graph.get, and answered before the engine's push of it
     // (pushes go at most 60 times a second), still shows once that older read is in.
     void editOverOlderRead(const char* plugin)
@@ -726,7 +749,7 @@ int main(int argc,char** argv)
         if(argc==3 && std::string_view(argv[2])=="--path-policy"){pathPolicy(argv[1]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--named")return named(argv[1],argv[0]);
         if(argc!=2)return 2;
-        framing(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);controllerCrash(argv[1],argv[0]);
+        framing(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);removedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);controllerCrash(argv[1],argv[0]);
         std::cout<<"ok: real Unix streams, framing, backpressure, notifications, reconnect, continuing audio and client failures\n";
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

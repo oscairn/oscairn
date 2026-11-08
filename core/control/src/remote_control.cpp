@@ -444,11 +444,12 @@ namespace oscairn
         {
             const auto step=reading->sent.front().second;reading->sent.pop_front();
             try{check(doc);take(*reading,step,field(doc.get(),"result"),bytes);send(*reading);}
-            catch(const std::exception&)
+            catch(const std::exception& e)
             {
-                // A node removed between the graph and its parameters: the change that removed
-                // it is on its way, and read once it comes. Anything else is said, as before.
-                const bool newer=again;drop();if(!newer)throw;refreshLater();return false;
+                // A node removed between the graph and its parameters ("Unknown node", which can
+                // come ahead of the graph.changed behind it): the read is stale, read again.
+                // Anything else is said, as before, unless a newer change is to be read anyway.
+                const bool stale=again || dynamic_cast<const std::invalid_argument*>(&e);drop();if(!stale)throw;refreshLater();return false;
             }
             if(!reading->done())return false;
             apply(*reading);reading.reset();

@@ -7125,12 +7125,36 @@
             },
             "name": {
               "type": "string"
+            },
+            "lanes": {
+              "type": "array",
+              "maxItems": 64,
+              "description": "Its oscairn.param-target lanes (RFC 0002), which can be mapped to a parameter or drive a control",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lane": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "lane",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
             "id",
             "path",
-            "name"
+            "name",
+            "lanes"
           ],
           "additionalProperties": false
         },

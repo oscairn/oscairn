@@ -48,7 +48,8 @@ A small CLAP extension, defined in `core/clap-ext/include/oscairn-clap/param-tar
   `clap.event-registry` extension (name `oscairn.param-target`); the Oscairn host returns
   space 1000. A host that does not know it returns false and the plugin sends nothing.
   Lanes are listed through the plugin extension `oscairn.param-target-lanes/draft` (count,
-  and a name for each lane) so a UI can offer them.
+  and a name for each lane) so a UI can offer them: the host reads them when the plugin loads
+  (in a worker too), and `graph.get` lists each plugin's `lanes`.
 
 ### Lanes driving controls
 
@@ -77,7 +78,8 @@ as when the control's knob moves.
   a larger change, not made).
 
 That is how CLAP itself separates the two: a parameter's value against modulation of it. A
-MODULATE lane's natural targets are relative ones.
+MODULATE lane's natural targets are relative ones, which the Routing view makes when a lane is
+connected to a parameter there (RFC 0011's control lines).
 
 **Flattened at commit, sample-accurate.** The control thread is not in the per-sample path:
 when the graph is committed, the Session flattens the tree under each lane's control into its

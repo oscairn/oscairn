@@ -175,6 +175,7 @@ int main(int argc, char** argv)
         ? std::vector<std::filesystem::path>{std::filesystem::path(engineDir) / "oscairn-fm.clap", std::filesystem::path(engineDir) / "oscairn-analog.clap", std::filesystem::path(engineDir) / "oscairn-effects.clap"}
         : std::vector<std::filesystem::path>{views, in / "oscairn-basic-synth.clap", in / "oscairn-delay.clap"};
     for(const auto& f : files) std::filesystem::create_symlink(std::filesystem::absolute(f), pluginDir / f.filename());
+    std::filesystem::create_symlink(std::filesystem::absolute(in / "oscairn-lfo.clap"), pluginDir / "oscairn-lfo.clap"); // a modulator, for the control lines
     // What each role plays, by plugin ID, and the file a crash kills.
     const std::string fmId = engines ? "org.oscairn.fm" : "org.oscairn.test.views", analogId = engines ? "org.oscairn.analog" : "org.oscairn.basic-synth";
     const std::vector<std::string> effectIds = engines ? std::vector<std::string>{"org.oscairn.effects.reverb", "org.oscairn.effects.delay"} : std::vector<std::string>{"org.oscairn.delay"};
@@ -706,6 +707,31 @@ int main(int argc, char** argv)
             if(reopened != saved) std::fprintf(stderr, "  saved:    %s\n  reopened: %s\n", saved.c_str(), reopened.c_str());
             toList();
             snapshot(view, "6-reopened");
+
+            // ---- 7. Control lines: an LFO's lane to a parameter, drawn in Routing ----
+            {
+                NodeId lfo = 0;
+                const NodeId analogNow = instrument("Analog"); // reopened, under its new ID
+                engine.edit([&](Control& c) { lfo = standalone::addLoose(c, choice("org.oscairn.lfo")); });
+                check(wait([&] { return lfo && graph().names.count(lfo); }, 20), "the LFO is added outside the parts " + engine.editError());
+                view.showRouting(lfo);
+                wait([&] { return false; }, 1);
+                tap(button(view, "Connect lane to..."), "Connect lane to... for the LFO");
+                check(pick({juce::String::fromUTF8((nodeName(analogNow) + " · Analog").c_str()), juce::String::fromUTF8(analogTarget.name.c_str())}), "the lane menu lists Analog's " + analogTarget.name);
+                auto driven = [&] { for(const auto& m : graph().macros) if(m.sourceNode == lfo) return std::optional<Macro>(m); return std::optional<Macro>(); };
+                check(wait([&] { return driven() && driven()->targets.size() == 1; }), "the lane drives a new control with Analog's parameter as its target");
+                if(const auto m = driven()) check(m->targets[0].relative && m->targets[0].node == analogNow && m->value == .5, "a relative target (CLAP modulation), the control at 0.5");
+                const auto layout = standalone::layoutRouting(graph(), true, {});
+                check(layout.controls.size() == 1 && layout.links.size() == 2, "Routing draws the control and its two lines: " + std::to_string(layout.controls.size()) + " controls, " + std::to_string(layout.links.size()) + " lines");
+                check(layout.height <= 600, "within the view");
+                snapshot(view, "7-routing-controls");
+                view.showRouting(0); wait([&] { return false; }, 0);
+                snapshot(view, "7-routing-controls-unchosen");
+                view.showRouting(lfo); wait([&] { return false; }, 0);
+                tap(button(view, "Disconnect"), "the lane's Disconnect");
+                check(wait([&] { return !driven(); }), "Disconnect: the lane drives nothing");
+                check(standalone::layoutRouting(graph(), true, {}).links.empty(), "and its lines are gone");
+            }
         }
         running = false;
         control.join();

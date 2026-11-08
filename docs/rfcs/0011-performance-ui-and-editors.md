@@ -35,7 +35,7 @@ Checked when built and tested; the sections below say how.
   - [x] the desktop's controls for it
   - [x] transitions: a glide per scene along a curve, launching on the beat or bar, and a control morphing between two scenes ([status](#scenes-status))
   - [x] the mappings' scenes laid out as one table ([status](#scenes-status))
-- [ ] Plugins as control sources ([the control tree](#the-control-tree)): a plugin's lane drives a control, the tree flattened into the graph at commit (done); a first-party LFO (done, `plugins/lfo`); control lines in the Routing view
+- [x] Plugins as control sources ([the control tree](#the-control-tree)): a plugin's lane drives a control, the tree flattened into the graph at commit; a first-party LFO (`plugins/lfo`); control lines in the Routing view ([status](#step-4-status))
 
 ## Problem
 
@@ -1190,9 +1190,31 @@ wiring two parts' instruments into a reverb gives that reverb's input a Mix row 
 makes it a shared row, and disconnecting one undoes both. `desktop-pad-editor` renders the
 view.
 
+**Control lines**, 2026-11-08: a plugin's param-target lanes (listed in `graph.get` as each
+plugin's `lanes`, read through `oscairn.param-target-lanes`, from a worker too) are drawn as
+lines in the theme's `control` wire color (theme format 7; Dark, Block and Classic `#6FE0A8`,
+Light `#00805A`), apart from audio and note wires: a lane mapped straight to a parameter is a
+line from its plugin to the parameter's plugin; a control a lane drives is a small node in a row
+under the graph, under its plugin where there is room, with a line from the lane's plugin into
+it and one from it to each plugin it targets. A control only knobs move stays off the view, so a
+Performance with many knob controls is no busier than before. The lines are drawn over the boxes
+with a rim of the background (a line from a control under the graph to a plugin above may cross
+a box); a part collapsed takes its plugins' lines. Tapping a control node opens the Controls
+page, where its targets' ranges, curves and relative or absolute setting are edited. Tapping a
+plugin with lanes offers **Connect lane to...**: a control (one in the list, or a new one named
+after the plugin, at 0.5) or a parameter of another plugin, which becomes a **relative** target
+of the control the lane drives (made as above when there is none): CLAP modulation, as a
+modulator's lane wants, switchable to absolute on the Controls page. Its panel lists each lane's
+lines ("LFO → control LFO (2 targets)") with **Disconnect**, which takes away the lane's mapping
+and makes its controls knobs again. `desktop-parts-model` checks the lines, the control node
+and its row, a direct mapping's line and Disconnect; `desktop-phase3b` adds the Oscairn LFO
+outside the parts at 1024 × 600, connects its lane to Analog's parameter from the menu, checks
+the control and its two lines, and disconnects it.
+
 Not yet: drawing wires by dragging, choosing ports other than the main ones, editing a
 wire's channel pairs, naming a shared row, scrolling a Performance with more nodes than fit,
-and the device's version of the view.
+and the device's version of the view; routing control lines around the boxes rather than over
+them, and a lane's targets edited without leaving Routing.
 
 ## Undo status
 

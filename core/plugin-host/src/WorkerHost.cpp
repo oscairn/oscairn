@@ -356,6 +356,7 @@ namespace oscairn
                 descriptor_.path = r.str(); descriptor_.id = r.str(); descriptor_.name = r.str(); descriptor_.vendor = r.str();
                 descriptor_.version = r.str(); descriptor_.description = r.str();
                 for(auto n = r.u32(); n--;) descriptor_.features.push_back(r.str());
+                for(auto n = std::min(r.u32(), 64u); n--;) { const auto lane = r.u32(); descriptor_.lanes.emplace_back(lane, r.str()); }
                 parameters_ = readParameters(r);
                 for(uint32_t i = 0; i < parameters_.size(); ++i) index_[parameters_[i].id] = i;
                 inputs_ = readPorts(r); outputs_ = readPorts(r);

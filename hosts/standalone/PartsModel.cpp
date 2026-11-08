@@ -523,6 +523,32 @@ namespace oscairn::standalone
             const auto part = partOf.at(g.wires[i].from);
             out.paths.push_back({g.wires[i], wireState(g.wires[i], g), shifted(part, inner.at(part).placed.paths[size_t(e)])});
         }
+        // Control lines: each plugin's box, or the collapsed part's that holds it.
+        auto boxOf = [&](NodeId node) -> const RoutingRect* {
+            for(const auto& b : out.boxes) if(b.kind == RoutingLayout::Box::Kind::Node && b.node == node) return &b.bounds;
+            if(const auto p = partOf.find(node); p != partOf.end()) for(const auto& b : out.boxes) if(b.kind == RoutingLayout::Box::Kind::Part && b.part == p->second) return &b.bounds;
+            return nullptr;
+        };
+        auto bottom = [](const RoutingRect& r, double shift = 0) { return RoutingPoint{r.x + r.w / 2.0 + shift, double(r.y + r.h)}; };
+        for(const auto& map : g.topology.mappings)
+            if(const auto* a = boxOf(map.source)) if(const auto* b = boxOf(map.target)) out.links.push_back({map.source, map.lane, 0, map.target, false, bottom(*a, -8), bottom(*b, 8)});
+        int right = 0; // the row of control nodes, under the graph, each under its plugin where it can be
+        const int row = out.height + m.gap / 2;
+        for(const auto& c : g.macros)
+        {
+            const auto* source = c.sourceNode ? boxOf(c.sourceNode) : nullptr;
+            if(!source) continue;
+            RoutingLayout::ControlNode node{c.id, c.name, {std::max(right, source->x + source->w / 2 - m.control / 2), row, m.control, m.controlHeight}};
+            right = node.bounds.x + node.bounds.w + m.slot;
+            out.controls.push_back(node);
+            const auto& r = node.bounds;
+            out.links.push_back({c.sourceNode, c.sourceLane, c.id, 0, false, bottom(*source), {double(r.x), r.y + r.h / 2.0}}); // into its left end
+            std::set<NodeId> drawn;
+            for(const auto& t : c.targets)
+                if(t.kind == MacroTarget::Kind::Parameter && drawn.insert(t.node).second)
+                    if(const auto* b = boxOf(t.node)) out.links.push_back({c.sourceNode, c.sourceLane, c.id, t.node, true, {r.x + r.w / 2.0, double(r.y)}, bottom(*b, 8)});
+        }
+        if(!out.controls.empty()) { out.height = row + m.controlHeight; out.width = std::max(out.width, right); }
         return out;
     }
 
@@ -820,6 +846,49 @@ namespace oscairn::standalone
     }
 
     void disconnect(Control& c, uint32_t wire) { c.disconnectWire(wire); c.commit(); }
+
+    namespace
+    {
+        uint32_t laneControl(Control& c, NodeId from, uint32_t lane, bool make)
+        {
+            const auto g = c.graphState();
+            for(const auto& m : g.macros) if(m.sourceNode == from && m.sourceLane == lane) return m.id;
+            if(!make) return 0;
+            const auto id = c.addMacro(g.names.count(from) ? g.names.at(from) : std::string("Lane"));
+            c.setMacroSource(id, from, lane);
+            return id;
+        }
+    }
+
+    uint32_t laneToControl(Control& c, NodeId from, uint32_t lane, uint32_t macro)
+    {
+        const bool fresh = !macro;
+        if(fresh) macro = c.addMacro(c.graphState().names.count(from) ? c.graphState().names.at(from) : std::string("Lane"));
+        c.setMacroSource(macro, from, lane);
+        c.commit();
+        if(fresh) c.setMacro(macro, .5);
+        return macro;
+    }
+
+    void laneToParameter(Control& c, NodeId from, uint32_t lane, NodeId to, uint32_t param)
+    {
+        const bool fresh = !laneControl(c, from, lane, false);
+        const auto macro = laneControl(c, from, lane, true);
+        std::vector<MacroTarget> targets;
+        for(const auto& m : c.graphState().macros) if(m.id == macro) targets = m.targets;
+        targets.push_back(MacroTarget{.node = to, .param = param, .start = 0, .end = 1, .relative = true});
+        c.setMacroTargets(macro, targets);
+        c.commit();
+        if(fresh) c.setMacro(macro, .5);
+    }
+
+    void disconnectLane(Control& c, NodeId from, uint32_t lane)
+    {
+        const auto g = c.graphState();
+        for(const auto& m : g.topology.mappings) if(m.source == from && m.lane == lane) c.unmapParameter(from, lane);
+        for(const auto& m : g.macros) if(m.sourceNode == from && m.sourceLane == lane) c.setMacroSource(m.id, 0, 0);
+        c.commit();
+    }
 
     void setWireMix(Control& c, uint32_t wire, double level, double pan, bool mute, bool solo) { c.setMix(wire, level, pan, mute, solo); c.commit(); }
 

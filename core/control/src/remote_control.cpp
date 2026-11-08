@@ -208,6 +208,7 @@ namespace oscairn
             {
                 Graph::NodeInfo node{};node.id=static_cast<NodeId>(integer(field(n,"id")));next.names[node.id]=string(field(n,"name"));
                 auto plugin=field(n,"plugin");node.plugin.id=string(field(plugin,"id"));node.plugin.name=string(field(plugin,"name"));node.plugin.path=string(field(plugin,"path"));
+                for(auto l:array(field(plugin,"lanes")))node.plugin.lanes.emplace_back(static_cast<uint32_t>(integer(field(l,"lane"))),string(field(l,"name")));
                 node.inputs=ports(field(n,"audioInputs"));node.outputs=ports(field(n,"audioOutputs"));
                 node.noteInputs=static_cast<uint32_t>(integer(field(n,"noteInputs")));node.noteOutputs=static_cast<uint32_t>(integer(field(n,"noteOutputs")));
                 if(!boolean(field(n,"enabled")))next.disabled.insert(node.id);

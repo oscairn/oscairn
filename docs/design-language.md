@@ -120,7 +120,7 @@ fonts, so text never depends on what a device has installed.
 | `radius` | Optional number, 0–16; default 6 |
 | `colors` | All nine semantic colors below, opaque `#RRGGBB` |
 | `style` | How controls are drawn: one choice for each of the eight below |
-| `wires` | The routing views' wire colors, opaque `#RRGGBB`: `audio` and `notes` for enabled wires, `disabled` (muted, or off in a scene), `draining` (taking no new notes while held ones ring out, in a seamless change) and `unconnected` (no longer fits its plugin's ports). Disabled and draining wires are drawn dashed |
+| `wires` | The routing views' wire colors, opaque `#RRGGBB`: `audio` and `notes` for enabled wires, `disabled` (muted, or off in a scene), `draining` (taking no new notes while held ones ring out, in a seamless change), `unconnected` (no longer fits its plugin's ports), and `control` for control lines (a plugin's param-target lane to a control or a parameter, and a control to the plugins it drives; RFC 0011). Disabled and draining wires are drawn dashed |
 | `splash` | Optional: the splash screen (below). `image`, an `.svg` or `.png` file inside the folder (≤ 1 MiB) shown in place of the mark; `background` and `ink`, opaque `#RRGGBB`, the colors behind it and of its name and status line, with at least 4.5:1 contrast. Each is optional; without them the splash shows the built-in mark on the theme's `background` in its `text` color |
 
 | Style | Choices | Draws |

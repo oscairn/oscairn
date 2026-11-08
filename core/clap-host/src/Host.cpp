@@ -745,7 +745,13 @@ struct Host::Impl {
         }
         // A modulator may send only on parameter-target lanes (RFC 0002): those are its outputs.
         const auto* lanes = static_cast<const oscairn_plugin_param_target_lanes_t*>(plugin->get_extension(plugin, OSCAIRN_EXT_PARAM_TARGET_LANES));
-        if (outputs.empty() && noteOutputs.empty() && !(lanes && lanes->count && lanes->count(plugin) > 0))
+        info.lanes.clear();
+        if (lanes && lanes->count && lanes->get)
+            for (uint32_t i = 0, n = std::min(lanes->count(plugin), 64u); i < n; ++i) {
+                oscairn_param_target_lane_info_t lane{};
+                if (lanes->get(plugin, i, &lane)) info.lanes.emplace_back(lane.lane, std::string(lane.name, strnlen(lane.name, CLAP_NAME_SIZE)));
+            }
+        if (outputs.empty() && noteOutputs.empty() && info.lanes.empty())
             throw std::runtime_error("Plugin has neither audio nor note outputs");
         size_t ni = 0, no = 0;
         for (const auto& p : inputs) ni += p.channels;

@@ -35,6 +35,7 @@
     "notes": "#7B4BD6",
     "disabled": "#9AA3AD",
     "draining": "#B85A0A",
-    "unconnected": "#C42D2D"
+    "unconnected": "#C42D2D",
+    "control": "#00805A"
   }
 }

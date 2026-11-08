@@ -106,6 +106,7 @@ namespace oscairn::standalone
         bool byScene_ = false; // the Controls page as one table of mappings by scene
         bool wireMeters_ = false; std::map<uint32_t, double> wirePeaks_; // wires colored by level, read at each tick while on
         void connectMenu(WireKind kind, juce::Component& at);
+        void laneMenu(juce::Component& at); // a lane of the chosen plugin to a control or a parameter
         void addLooseMenu(juce::Component& at);
     };
 }

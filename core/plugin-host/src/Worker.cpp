@@ -172,6 +172,8 @@ namespace oscairn::worker
             const auto& d = host.descriptor();
             w.str(d.path).str(d.id).str(d.name).str(d.vendor).str(d.version).str(d.description).u32(uint32_t(d.features.size()));
             for(const auto& f : d.features) w.str(f);
+            w.u32(uint32_t(d.lanes.size()));
+            for(const auto& [lane, name] : d.lanes) w.u32(lane).str(name);
             putParameters(w, host.parameters());
             putPorts(w, host.inputPorts()); putPorts(w, host.outputPorts());
             w.u32(host.noteInputPorts()).u32(host.noteOutputPorts());

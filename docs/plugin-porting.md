@@ -168,7 +168,8 @@ The plugin never knows which. What it does:
 - Ask CLAP's `clap.event-registry` for the space `oscairn.param-target` in `init`; with none,
   send nothing.
 - List its lanes through `oscairn.param-target-lanes/draft`: a count, and a number and name for
-  each, so the host can offer them.
+  each (at most 64), so the host can offer them: Routing's **Connect lane to...** lists them, and
+  draws each connection as a control line.
 - Send `oscairn_event_param_target_t` events from `process` at the sample they apply, lane and
   mode set, `note_id`, `port_index` and `key` -1 (a channel, or -1, for channel-wide changes).
 - Choose the mode by what the lane means. **SET** (value 0..1) is a position: a sequencer's lock,

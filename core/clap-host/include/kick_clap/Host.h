@@ -25,6 +25,7 @@ struct Descriptor {
     std::vector<std::string> features;
     bool presetDiscovery = false; // its library offers CLAP preset discovery
     std::vector<Preset> presets;  // what a scan indexed (RFC 0005)
+    std::vector<std::pair<uint32_t, std::string>> lanes; // its oscairn.param-target lanes: number and name, once loaded
 };
 
 struct Parameter {

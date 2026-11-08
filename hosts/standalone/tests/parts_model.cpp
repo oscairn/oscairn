@@ -28,6 +28,7 @@ int main(int argc, char** argv)
             return *it;
         };
         const auto synth = find("Basic Synth"), delay = find("Delay"), transpose = find("Transpose");
+        (void)find("LFO"); // for the control lines, below
 
         Session s(48000, 128);
         const auto bass = addPart(s, "Bass", false), lead = addPart(s, "Lead", false), room = addPart(s, "Room", true);
@@ -272,6 +273,38 @@ int main(int argc, char** argv)
             check(wireChannels(audio, g.topology) == 1, "one source channel copied to two is one");
             audio.channels = {{2, 0}, {3, 1}};
             check(wireChannels(audio, g.topology) == 2, "two source channels are two");
+        }
+        // Control lines (RFC 0011): an LFO's lane to a parameter, through a control Routing draws as
+        // a node, and a direct mapping; disconnected, none are left.
+        {
+            Session t(48000, 128);
+            const auto lfo = addLoose(t, find("LFO")), a = addLoose(t, synth), b = addLoose(t, synth);
+            const auto g0 = t.graphState();
+            bool listed = false;
+            for(const auto& n : g0.topology.nodes) if(n.id == lfo) listed = n.plugin.lanes.size() == 1 && n.plugin.lanes[0].second == "LFO";
+            check(listed, "the LFO's lane is listed");
+            check(layoutRouting(g0, true, {}).controls.empty(), "no control node while no lane drives a control");
+            laneToParameter(t, lfo, 0, a, 1);
+            laneToParameter(t, lfo, 0, b, 1); // the same control: a second target
+            auto g = t.graphState();
+            check(g.macros.size() == 1 && g.macros[0].sourceNode == lfo && g.macros[0].targets.size() == 2 && g.macros[0].targets[0].relative && g.macros[0].value == .5,
+                  "one control at 0.5 driven by the lane, two relative targets");
+            auto layout = layoutRouting(g, true, {});
+            auto link = [&](NodeId target, uint32_t macro) { return std::count_if(layout.links.begin(), layout.links.end(), [&](const RoutingLayout::Link& l) { return l.source == lfo && l.target == target && l.macro == macro; }); };
+            check(layout.controls.size() == 1 && link(0, g.macros[0].id) == 1 && link(a, g.macros[0].id) == 1 && link(b, g.macros[0].id) == 1, "a control node, the lane into it and a line to each plugin");
+            const auto& node = layout.controls[0].bounds;
+            check(node.y >= std::max_element(layout.boxes.begin(), layout.boxes.end(), [](const auto& x, const auto& y) { return x.bounds.y + x.bounds.h < y.bounds.y + y.bounds.h; })->bounds.y + 1 &&
+                  layout.height >= node.y + node.h, "the control node is in a row under the graph");
+            t.mapParameter(lfo, 0, b, 2); t.commit();
+            layout = layoutRouting(t.graphState(), true, {});
+            check(link(b, 0) == 1, "a direct mapping is a line from the lane to its plugin");
+            disconnectLane(t, lfo, 0);
+            g = t.graphState();
+            check(g.macros.size() == 1 && g.macros[0].sourceNode == 0 && g.topology.mappings.empty(), "disconnected: the control is a knob again, the mapping gone");
+            layout = layoutRouting(g, true, {});
+            check(layout.controls.empty() && layout.links.empty(), "and Routing draws no control lines");
+            const auto c = laneToControl(t, lfo, 0, g.macros[0].id);
+            check(t.graphState().macros[0].sourceNode == lfo && c == g.macros[0].id, "the lane drives a control chosen from the list");
         }
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }

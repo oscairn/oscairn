@@ -136,8 +136,8 @@ ThemeData ThemeData::parse(const juce::String& json) {
         return juce::Colour(0xff000000u|static_cast<juce::uint32>(text.substring(1).getHexValue32()));};
     for(size_t i=0;i<names.size();++i)t.colors[i]=hex(colors->getProperty(names[i]));
     const auto* wires=value["wires"].getDynamicObject();require(wires,"Theme needs its wire colors");
-    fields(*wires,{"audio","notes","disabled","draining","unconnected"});
-    t.wires={hex(wires->getProperty("audio")),hex(wires->getProperty("notes")),hex(wires->getProperty("disabled")),hex(wires->getProperty("draining")),hex(wires->getProperty("unconnected"))};
+    fields(*wires,{"audio","notes","disabled","draining","unconnected","control"});
+    t.wires={hex(wires->getProperty("audio")),hex(wires->getProperty("notes")),hex(wires->getProperty("disabled")),hex(wires->getProperty("draining")),hex(wires->getProperty("unconnected")),hex(wires->getProperty("control"))};
     const auto* style=value["style"].getDynamicObject();require(style,"Theme needs a style");
     fields(*style,{"buttons","edges","depth","sliders","tabs","marks","sections","rows"});
     auto choice=[&](const char* key,const juce::StringArray& options){const auto v=style->getProperty(key);const int i=options.indexOf(v.toString());require(v.isString() && i>=0,"Theme style choice is not one of its options");return i;};

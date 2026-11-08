@@ -221,6 +221,9 @@ namespace
                 check(near(peak, .2), what + ": a depth of 0.5 swings the control 0.5 either way, its whole travel, each gain 0.2: " + std::to_string(peak));
                 check(near(s.parameter(r.a, gain), .5) && near(s.parameter(r.b, gain), .5), what + ": modulation leaves the gains' values at 0.5");
                 check(near(s.graphState().macros.front().value, .5), what + ": the control keeps its own value");
+                bool listed = false;
+                for(const auto& n : s.graphState().topology.nodes) if(n.id == r.lfo) listed = n.plugin.lanes == std::vector<std::pair<uint32_t, std::string>>{{0, "LFO"}};
+                check(listed, what + ": the LFO's lane is listed with its name");
             }
     }
 

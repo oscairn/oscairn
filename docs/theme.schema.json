@@ -177,7 +177,7 @@
     },
     "wires": {
       "type": "object",
-      "description": "Wires in the routing views: enabled audio and note wires, disabled ones, draining ones (seamless changes) and ones that no longer fit their ports",
+      "description": "Wires in the routing views: enabled audio and note wires, disabled ones, draining ones (seamless changes), ones that no longer fit their ports, and control lines",
       "properties": {
         "audio": {
           "type": "string",
@@ -198,6 +198,11 @@
         "unconnected": {
           "type": "string",
           "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "control": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Control lines: a plugin's param-target lanes to controls and parameters, and controls to the plugins they drive"
         }
       },
       "required": [
@@ -205,7 +210,8 @@
         "notes",
         "disabled",
         "draining",
-        "unconnected"
+        "unconnected",
+        "control"
       ],
       "additionalProperties": false
     },

@@ -35,7 +35,8 @@
     "notes": "#C9A4FF",
     "disabled": "#5F7189",
     "draining": "#FFB86B",
-    "unconnected": "#FF9994"
+    "unconnected": "#FF9994",
+    "control": "#86E8B8"
   },
   "splash": {
     "image": "splash.svg",

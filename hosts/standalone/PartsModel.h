@@ -117,9 +117,18 @@ namespace oscairn::standalone
         struct Path { Wire wire; WireState state = WireState::Enabled; std::vector<RoutingPoint> points; };
         std::vector<Box> boxes; // frames first, then what is drawn over them
         std::vector<Path> paths;
+        // Control lines (RFC 0011): a plugin's lane straight to a parameter (macro 0), or to a
+        // control it drives, and that control to each plugin it targets. A control is a small node
+        // in a row under the graph, shown only when a plugin's lane drives it; controls moved only
+        // by knobs stay off the view. A link runs from the bottom of one box to a control node's left
+        // end, or from a control node's top (or a box) to the bottom of the plugin's box.
+        struct ControlNode { uint32_t macro = 0; std::string name; RoutingRect bounds; };
+        struct Link { NodeId source = 0; uint32_t lane = 0, macro = 0; NodeId target = 0; bool fromControl = false; RoutingPoint from, to; };
+        std::vector<ControlNode> controls;
+        std::vector<Link> links;
         int width = 0, height = 0;
     };
-    struct RoutingMetrics { int node = 170, nodeHeight = 44, part = 280, partHeight = 64, gap = 56, row = 16, slot = 10, frame = 14, frameHead = 40; };
+    struct RoutingMetrics { int node = 170, nodeHeight = 44, part = 280, partHeight = 64, gap = 56, row = 16, slot = 10, frame = 14, frameHead = 40, control = 120, controlHeight = 30; };
     // collapsed: parts are one box each, but those in `expanded`; otherwise every part is a frame.
     RoutingLayout layoutRouting(const Control::GraphState&, bool collapsed, const std::set<uint32_t>& expanded, const RoutingMetrics& = {});
     // Points along a path as drawn: a curve through its points, level at each one.
@@ -176,4 +185,11 @@ namespace oscairn::standalone
     void setWireMix(Control&, uint32_t wire, double level, double pan, bool mute, bool solo);
     NodeId addLoose(Control&, const PluginChoice&);                                // a node in no part
     void removeLoose(Control&, NodeId node);                                       // reconnecting its user wires
+    // Control lines (RFC 0011): a plugin's param-target lane drives a control (macro 0: a new one,
+    // named after the plugin, at 0.5 so a bipolar lane swings around the middle), or reaches a
+    // parameter as a relative target of the control the lane drives (made as above when there is
+    // none), CLAP modulation by default; and disconnected, its mapping and its controls' source.
+    uint32_t laneToControl(Control&, NodeId from, uint32_t lane, uint32_t macro);
+    void laneToParameter(Control&, NodeId from, uint32_t lane, NodeId to, uint32_t param);
+    void disconnectLane(Control&, NodeId from, uint32_t lane);
 }

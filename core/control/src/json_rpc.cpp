@@ -1066,10 +1066,15 @@ namespace oscairn
                             ",\"channels\":" + std::to_string(port.channels) + ",\"flags\":" + std::to_string(port.flags) + '}');
                     return join(result);
                 };
+                auto lanes = [](const auto& list) {
+                    std::vector<std::string> result;
+                    for( const auto& [lane, name] : list ) result.push_back("{\"lane\":" + std::to_string(lane) + ",\"name\":" + quote(name) + '}');
+                    return join(result);
+                };
                 for( const auto& n : graph.topology.nodes )
                     nodes.push_back("{\"id\":" + std::to_string(n.id) + ",\"name\":" + quote(graph.names.at(n.id)) +
                         ",\"plugin\":{\"id\":" + quote(n.plugin.id) + ",\"path\":" + quote(n.plugin.path) + ",\"name\":" + quote(n.plugin.name) +
-                        "},\"audioInputs\":" + ports(n.inputs) + ",\"audioOutputs\":" + ports(n.outputs) +
+                        ",\"lanes\":" + lanes(n.plugin.lanes) + "},\"audioInputs\":" + ports(n.inputs) + ",\"audioOutputs\":" + ports(n.outputs) +
                         ",\"noteInputs\":" + std::to_string(n.noteInputs) + ",\"noteOutputs\":" + std::to_string(n.noteOutputs) +
                         ",\"enabled\":" + (graph.disabled.count(n.id) ? "false" : "true") + ",\"ringing\":" + (graph.ringing.count(n.id) ? "true" : "false") +
                         ",\"role\":" + (graph.roles.count(n.id) ? quote(graph.roles.at(n.id)) : std::string("null")) +

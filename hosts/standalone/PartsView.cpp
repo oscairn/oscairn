@@ -344,6 +344,8 @@ namespace oscairn::standalone
                 const bool sendsNotes = node == graphInput ? chosen->port == notesPort : info && info->noteOutputs;
                 if(sendsAudio) { auto* b = button(head.removeFromLeft(150).reduced(2), "Connect audio to...", {}); b->onClick = [this, b] { connectMenu(WireKind::Audio, *b); }; }
                 if(sendsNotes) { auto* b = button(head.removeFromLeft(150).reduced(2), "Connect notes to...", {}); b->onClick = [this, b] { connectMenu(WireKind::Notes, *b); }; }
+                const bool lanes = info && !info->plugin.lanes.empty();
+                if(lanes) { auto* b = button(head.removeFromLeft(150).reduced(2), "Connect lane to...", {}); b->onClick = [this, b] { laneMenu(*b); }; }
                 if(node != graphInput && node != graphOutput)
                 {
                     const bool off = graph_.disabled.count(node) != 0;
@@ -361,6 +363,26 @@ namespace oscairn::standalone
                     button(head.removeFromLeft(170).reduced(2), "Open plugin window", [this, node, title] { engine_.openPluginWindow(node, title); })
                         ->setTooltip("The plugin's own window, beside this one");
                 }
+                // Its lanes' control lines: a mapping to a parameter, or a control it drives, each with Disconnect.
+                if(lanes)
+                    for(const auto& [lane, laneName] : info->plugin.lanes)
+                    {
+                        std::vector<std::string> reached;
+                        for(const auto& m : graph_.topology.mappings) if(m.source == node && m.lane == lane)
+                        {
+                            std::string param = std::to_string(m.param);
+                            for(const auto& p : engine_.parameters(m.target)) if(p.id == m.param) param = p.name;
+                            reached.push_back((graph_.names.count(m.target) ? graph_.names.at(m.target) : std::string()) + " · " + param);
+                        }
+                        for(const auto& m : graph_.macros) if(m.sourceNode == node && m.sourceLane == lane) reached.push_back("control " + m.name + " (" + std::to_string(m.targets.size()) + (m.targets.size() == 1 ? " target)" : " targets)"));
+                        if(reached.empty() || panel.getHeight() < 30) continue;
+                        auto r = panel.removeFromTop(30);
+                        std::string joined; for(const auto& x : reached) joined += (joined.empty() ? "" : ", ") + x;
+                        auto l = std::make_unique<juce::Label>(juce::String(), text(laneName) + juce::String::fromUTF8(" → ") + text(joined));
+                        l->setColour(juce::Label::textColourId, themeData().wires.control);
+                        l->setBounds(r.removeFromLeft(r.getWidth() - 110)); addAndMakeVisible(*l); controls_.push_back(std::move(l));
+                        button(r.removeFromLeft(100).reduced(2), "Disconnect", [this, node, lane] { edit([node, lane](Control& c) { disconnectLane(c, node, lane); }); });
+                    }
                 // Each input with sources: a Mix row per source.
                 for(const auto& input : inputsOf(graph_, node == graphOutput ? graphOutput : node))
                 {
@@ -1133,6 +1155,43 @@ namespace oscairn::standalone
         });
     }
 
+    // A lane of the chosen plugin to a control (one already there, or a new one) or to another
+    // plugin's parameter, which becomes a relative target of the lane's control: CLAP modulation.
+    void PartsView::laneMenu(juce::Component& at)
+    {
+        const auto from = routed_;
+        const Graph::NodeInfo* info = nullptr;
+        for(const auto& x : graph_.topology.nodes) if(x.id == from) info = &x;
+        if(!info) return;
+        struct Choice { uint32_t lane = 0, macro = 0; NodeId node = 0; uint32_t param = 0; };
+        std::vector<Choice> choices;
+        juce::PopupMenu menu;
+        for(const auto& [lane, laneName] : info->plugin.lanes)
+        {
+            const bool several = info->plugin.lanes.size() > 1; // a submenu per lane
+            juce::PopupMenu controls, own;
+            auto& target = several ? own : menu;
+            for(const auto& m : graph_.macros) if(m.sourceNode != from || m.sourceLane != lane) { choices.push_back({lane, m.id}); controls.addItem(int(choices.size()), text(m.name)); }
+            choices.push_back({lane, 0}); controls.addItem(int(choices.size()), "New control");
+            target.addSubMenu("Control", controls);
+            for(const auto& n : routing_.nodes)
+            {
+                if(n.node == from || n.node == graphInput || n.node == graphOutput) continue;
+                juce::PopupMenu params;
+                for(const auto& p : engine_.parameters(n.node))
+                    if(!(p.flags & CLAP_PARAM_IS_READONLY) && !(p.flags & CLAP_PARAM_IS_HIDDEN)) { choices.push_back({lane, 0, n.node, p.id}); params.addItem(int(choices.size()), text(p.name)); }
+                if(params.getNumItems()) target.addSubMenu(text(n.name) + (n.part ? juce::String::fromUTF8(" · ") + text(n.partName) : juce::String()), params);
+            }
+            if(several) menu.addSubMenu(text(laneName), own);
+        }
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&at), [safe = juce::Component::SafePointer<PartsView>(this), from, choices](int chosen) {
+            if(!safe || chosen <= 0 || size_t(chosen) > choices.size()) return;
+            const auto c = choices[size_t(chosen) - 1];
+            if(c.node) safe->edit([from, c](Control& x) { laneToParameter(x, from, c.lane, c.node, c.param); });
+            else safe->edit([from, c](Control& x) { laneToControl(x, from, c.lane, c.macro); });
+        });
+    }
+
     void PartsView::addLooseMenu(juce::Component& at)
     {
         juce::PopupMenu menu;
@@ -1369,6 +1428,31 @@ namespace oscairn::standalone
                 if(n && n->userWires && n->part) { g.setColour(juce::Colour(0xffffa040)); g.fillEllipse(r.getRight() - 12, r.getY() + 5, 7, 7); }
                 if(off) g.endTransparencyLayer();
             }
+            // Control lines, in the theme's control color, over the boxes with a rim of the
+            // background so a line crossing a box reads as passing over it: a plugin's lane to a
+            // control node or straight to a parameter's plugin, and a control to each plugin it
+            // targets. With a plugin chosen, those not touching it are faint.
+            for(const auto& l : layout_.links)
+            {
+                const auto a = point(l.from), b = point(l.to);
+                // Down out of one box and up into the next; level ends dip under both.
+                const float dip = std::abs(b.y - a.y) > 20 * routingScale_ ? (a.y + b.y) / 2 : std::max(a.y, b.y) + 36 * routingScale_;
+                juce::Path line; line.startNewSubPath(a); line.cubicTo({a.x, dip}, {b.x, dip}, b);
+                const bool lit = !focus || l.source == routed_ || l.target == routed_;
+                const float width = 2.f * std::max(.6f, routingScale_);
+                g.setColour(ink(Ink::Background).withAlpha(lit ? .9f : .3f)); g.strokePath(line, juce::PathStrokeType(width + 3));
+                g.setColour(colors.control.withAlpha(lit ? 1.f : .15f));
+                g.strokePath(line, juce::PathStrokeType(width));
+                g.fillEllipse(juce::Rectangle<float>(6 * routingScale_, 6 * routingScale_).withCentre(b));
+            }
+            for(const auto& c : layout_.controls)
+            {
+                const auto r = at(c.bounds);
+                g.setColour(ink(Ink::Surface)); g.fillRoundedRectangle(r, r.getHeight() / 2);
+                g.setColour(colors.control); g.drawRoundedRectangle(r, r.getHeight() / 2, 1.5f);
+                g.setColour(ink(Ink::Text)); g.setFont(juce::FontOptions(12.0f * scale * routingScale_));
+                g.drawText(text(c.name), r.reduced(10 * routingScale_, 0), juce::Justification::centred, true);
+            }
             return;
         }
         if(page_ == mixerPage)
@@ -1560,6 +1644,7 @@ namespace oscairn::standalone
             const double x = (e.position.x - routingOrigin_.x) / routingScale_, y = (e.position.y - routingOrigin_.y) / routingScale_;
             using Kind = RoutingLayout::Box::Kind;
             const RoutingMetrics m;
+            for(const auto& c : layout_.controls) if(c.bounds.contains(x, y)) { page_ = controlsPage; shape_.clear(); refresh(); return; } // its targets, ranges and curves
             for(auto b = layout_.boxes.rbegin(); b != layout_.boxes.rend(); ++b)
             {
                 const auto& r = b->bounds;

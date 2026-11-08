@@ -26,9 +26,10 @@ void drawSection(juce::Graphics&, juce::Rectangle<int>, juce::Colour fill);
 // Selection and other highlights are drawn over it.
 void drawListRow(juce::Graphics&, juce::Rectangle<int> row, int index, juce::Colour color);
 // Wires in the routing views (theme format 4): enabled audio and note wires, disabled ones,
-// draining ones (seamless changes, RFC 0021) and ones that no longer fit their plugin's ports.
+// draining ones (seamless changes, RFC 0021) and ones that no longer fit their plugin's ports; and
+// control lines, a plugin's lanes to controls and parameters (RFC 0011).
 struct ThemeWires {
-    juce::Colour audio{0xff8cc2ff},notes{0xffc29cff},disabled{0xff6b7480},draining{0xffff9a45},unconnected{0xffff6b63};
+    juce::Colour audio{0xff8cc2ff},notes{0xffc29cff},disabled{0xff6b7480},draining{0xffff9a45},unconnected{0xffff6b63},control{0xff6fe0a8};
 };
 // The splash screen (theme format 7), each part optional: an SVG or PNG in the theme's folder in
 // place of the mark, and the colors behind and of its text; by default the theme's background and text.

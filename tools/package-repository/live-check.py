@@ -8,8 +8,9 @@ repository's address, https://packages.oscairn.org by default. It needs the netw
 part of ctest. Everything goes into a throwaway data folder (OSCAIRN_DATA_HOME); no audio device
 is opened.
 
-Through the control API (oscairn-web-rpc-test): the repository is refused, and so is an install,
-until its root key is trusted, naming the key; once trusted it lists its packages. Analog's code
+Through the control API (oscairn-web-rpc-test): the official repository is known and its root key
+trusted from the start, for repositories only (another source is refused until its root key is
+trusted, naming the key); it lists its packages. Analog's code
 is refused while its publisher is not trusted; FM installs accepting it, its signer shown as
 unknown; once the publisher is trusted, Analog and the effects install with their signer shown as
 trusted. Each plugin package's asset library comes with it, file for file as its archive (fetched
@@ -86,15 +87,21 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
         return sorted(f.name for f in (home / 'Plugins' / 'clap').iterdir()) if (home / 'Plugins' / 'clap').is_dir() else []
 
     try:
-        # 1. Not trusted yet: refused, naming the root key's fingerprint, for listing and installing.
-        check(rpc('trust.list')['keys'] == [], 'a fresh data folder trusts no key')
-        for method, params in (('packages.list', {'source': source}), ('packages.install', {'source': source, 'id': 'org.oscairn.analog'})):
-            state = job(method, params)
-            check(state['state'] == 'failed' and 'not a repository this device trusts' in state['error'] and key_id(ROOT_KEY) in state['error'] and state['rootKey'] == ROOT_KEY,
-                  f'{method} before trusting the root is refused, naming its key: ' + state['error'])
-        check(stored() == [] and not (home / 'AssetLibraries').exists(), 'and nothing is installed')
-
-        rpc('trust.set', {'key': ROOT_KEY, 'name': 'Oscairn', 'scope': ['repositories']})
+        # 1. The official repository ships known, its root key trusted for repositories and nothing
+        # else; another source is refused, naming its root key, until that key is trusted.
+        if source == 'https://packages.oscairn.org':
+            known = rpc('packages.repositories')['repositories']
+            check(known and known[0]['address'] == source and known[0]['key'] == ROOT_KEY and known[0]['enabled'] and known[0]['origin'] == 'official',
+                  f'a fresh data folder knows the official repository first, on: {known[:1]}')
+            keys = rpc('trust.list')['keys']
+            check([(k['key'], k['scope']) for k in keys] == [(ROOT_KEY, ['repositories'])], f'and trusts only its root key, for repositories only: {keys}')
+        else:
+            for method, params in (('packages.list', {'source': source}), ('packages.install', {'source': source, 'id': 'org.oscairn.analog'})):
+                state = job(method, params)
+                check(state['state'] == 'failed' and 'not a repository this device trusts' in state['error'] and key_id(ROOT_KEY) in state['error'] and state['rootKey'] == ROOT_KEY,
+                      f'{method} before trusting the root is refused, naming its key: ' + state['error'])
+            check(stored() == [] and not (home / 'AssetLibraries').exists(), 'and nothing is installed')
+            rpc('trust.set', {'key': ROOT_KEY, 'name': 'Oscairn', 'scope': ['repositories']})
         listing = job('packages.list', {'source': source})
         offered = {x['id']: x for x in listing['packages']}
         check(listing['state'] == 'done' and listing['repository'] == 'org.oscairn.main', f"once trusted, it lists {len(offered)} packages at serial {listing['serial']}: {listing['error']}")

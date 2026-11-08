@@ -1211,20 +1211,6 @@ namespace oscairn
 
     void Session::setMacroName(uint32_t id, const std::string& name) { findMacro(id).name = name; }
 
-    // The target's range through the point (curve(x), v): rising to the top, or from the bottom
-    // when v is below that point; a control at either end keeps the whole travel to the other,
-    // falling instead when v is already where it would rise to.
-    static void anchor(MacroTarget& t, double x, double v)
-    {
-        const double c = t.shape(x);
-        v = std::clamp(v, 0.0, 1.0);
-        if(c <= 0) { t.start = v; t.end = v < 1 ? 1 : 0; }
-        else if(c >= 1) { t.end = v; t.start = v > 0 ? 0 : 1; }
-        else if(v >= c) { t.end = 1; t.start = (v - c) / (1 - c); }
-        else { t.start = 0; t.end = v / c; }
-        // shortcut: a control part way with v at 0 or 1 gets a range of one point; it moves nothing until its range is edited.
-    }
-
     void Session::setMacroTargets(uint32_t id, const std::vector<MacroTarget>& requested)
     {
         const auto owner = findMacro(id).part;
@@ -1279,13 +1265,6 @@ namespace oscairn
                 else t.base = other->base;
                 written_[destination(t)] = now;
             }
-            // A new target left at the full range starts from its destination as it is (decided
-            // 2026-11-08): its range is anchored so the control where it is now gives the base (or
-            // the control's value), and nothing moves until the control does.
-            const auto& old = findMacro(id).targets;
-            if(t.kind != MacroTarget::Kind::Morph && !t.relative && t.start == 0 && t.end == 1 &&
-               std::none_of(old.begin(), old.end(), [&](const MacroTarget& o) { return t.sums() ? t.sameDestination(o) : o.kind == t.kind && o.macro == t.macro; }))
-                anchor(t, findMacro(id).value, t.sums() ? t.base : currentFraction(t));
         }
         findMacro(id).targets = std::move(targets);
         for(const auto& t : findMacro(id).targets) if(t.sums()) setBase(t, t.base);

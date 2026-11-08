@@ -58,7 +58,36 @@ juce_add_binary_data(oscairn_standalone_icons HEADER_NAME IconData.h NAMESPACE I
     ../../branding/mark-hills-on-light.svg
     ../../branding/mark-hills-mono.svg)
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp Profile.cpp Launcher.cpp PlayView.cpp Controllers.cpp Splash.cpp Recording.cpp Settings.cpp)
+# The Setlist app (RFC 0022 step 2): a program of its own, which the shell starts from the
+# manifest beside it. Each app's folder (app.json and its build) is put together in Apps/ here,
+# which the shell finds beside itself.
+set(oscairn_apps "${CMAKE_CURRENT_BINARY_DIR}/Apps")
+juce_add_gui_app(oscairn_setlist_app
+    PRODUCT_NAME "Oscairn Setlist"
+    COMPANY_NAME "Oscairn"
+    BUNDLE_ID org.oscairn.setlist
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
+target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp)
+target_compile_definitions(oscairn_setlist_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(oscairn_setlist_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
+    juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+if(APPLE)
+    set(setlist_build "$<TARGET_BUNDLE_DIR:oscairn_setlist_app>")
+    set(setlist_copy copy_directory "${setlist_build}" "${oscairn_apps}/oscairn.setlist/Oscairn Setlist.app")
+else()
+    set(setlist_copy copy_if_different "$<TARGET_FILE:oscairn_setlist_app>" "${oscairn_apps}/oscairn.setlist/")
+endif()
+add_custom_command(TARGET oscairn_setlist_app POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${oscairn_apps}/oscairn.setlist"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/apps/setlist/app.json" "${oscairn_apps}/oscairn.setlist/app.json"
+    COMMAND ${CMAKE_COMMAND} -E ${setlist_copy}
+    VERBATIM)
+if(NOT APPLE)
+    install(DIRECTORY "${oscairn_apps}/" DESTINATION share/oscairn/apps USE_SOURCE_PERMISSIONS)
+endif()
+
+target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp Profile.cpp Launcher.cpp PlayView.cpp Controllers.cpp Splash.cpp Recording.cpp Settings.cpp AppProcesses.cpp)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"
@@ -84,15 +113,16 @@ set(bundled_plugin_files "")
 foreach(plugin IN LISTS bundled_plugins)
     list(APPEND bundled_plugin_files "$<TARGET_FILE:${plugin}>")
 endforeach()
-add_dependencies(oscairn_standalone oscairn-plugin-scan oscairn_engine_host oscairn-plugin-worker ${bundled_plugins})
+add_dependencies(oscairn_standalone oscairn-plugin-scan oscairn_engine_host oscairn-plugin-worker oscairn_setlist_app ${bundled_plugins})
 set_property(TARGET oscairn_standalone APPEND PROPERTY LINK_DEPENDS
-    "$<TARGET_FILE:oscairn-plugin-scan>;$<TARGET_FILE:oscairn_engine_host>;$<TARGET_FILE:oscairn-plugin-worker>;${bundled_plugin_files}")
+    "$<TARGET_FILE:oscairn-plugin-scan>;$<TARGET_FILE:oscairn_engine_host>;$<TARGET_FILE:oscairn-plugin-worker>;$<TARGET_FILE:oscairn_setlist_app>;${CMAKE_CURRENT_SOURCE_DIR}/apps/setlist/app.json;${bundled_plugin_files}")
 add_custom_command(TARGET oscairn_standalone POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:oscairn-plugin-scan> $<TARGET_FILE_DIR:oscairn_standalone>/oscairn-plugin-scan
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:oscairn_engine_host> $<TARGET_FILE_DIR:oscairn_standalone>/oscairn-engine
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE_DIR:oscairn_standalone>/oscairn-plugin-worker
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:oscairn_standalone>/plugins
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/themes $<TARGET_FILE_DIR:oscairn_standalone>/themes
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${oscairn_apps} $<TARGET_FILE_DIR:oscairn_standalone>/Apps
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${bundled_plugin_files}
         $<TARGET_FILE_DIR:oscairn_standalone>/plugins
@@ -164,6 +194,14 @@ if(Python3_Interpreter_FOUND)
     list(APPEND gaps_environment "OSCAIRN_TEST_MAKE_REPOSITORY=${Python3_EXECUTABLE}|${CMAKE_CURRENT_SOURCE_DIR}/tests/make_repository.py|$<TARGET_FILE:oscairn-sign>|$<TARGET_FILE:kick-clap-fixture-normal>|${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py")
 endif()
 set_tests_properties(desktop-gaps PROPERTIES TIMEOUT 120 ENVIRONMENT "${gaps_environment}")
+# RFC 0022 step 2: the Setlist app as a process of its own, started and supervised from its manifest, against a socket session.
+juce_add_console_app(oscairn_desktop_apps_test PRODUCT_NAME "Oscairn Desktop Apps Test")
+target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp DesktopShell.cpp PlayView.cpp Profile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_link_libraries(oscairn_desktop_apps_test PRIVATE oscairn_standalone_icons oscairn_standalone_profiles oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_desktop_apps_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_dependencies(oscairn_desktop_apps_test oscairn_setlist_app oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
+add_test(NAME desktop-apps COMMAND oscairn_desktop_apps_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" "${oscairn_apps}" "${CMAKE_CURRENT_SOURCE_DIR}/themes")
+set_tests_properties(desktop-apps PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}")
 # Phase 3b's "done when" end to end on the Panel layout, every plugin in a worker: with the in-repo
 # plugins, and with the real engines from the folder OSCAIRN_PHASE3B_ENGINES names (skipped when unset).
 juce_add_console_app(oscairn_phase3b_test PRODUCT_NAME "Oscairn Phase 3b Test")

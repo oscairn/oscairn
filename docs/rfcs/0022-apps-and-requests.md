@@ -4,8 +4,14 @@ Status: in progress, 2026-10-31. Step 1 is built in the desktop app: the registr
 (`hosts/standalone/Apps.h`), the Library answering `oscairn.pick.performance` and
 `oscairn.pick.sound` and the Setlist taking `oscairn.send.performance`, each flow checked by
 `desktop-shell`. One app
-per action for now (the first to offer it); manifests, the control API transport and the
-chooser are not built. [What an app is](#what-an-app-is) was decided 2026-11-06: native
+per action for now (the first to offer it). Step 2 is built (2026-11-08): the Setlist is its own
+program (`hosts/standalone/apps/setlist/`), started from its manifest by the shell's supervisor
+(`AppProcesses`) with a connection the engine makes for it, its picks and sends relayed by the
+engine (`apps.*`, [control protocol](../control-protocol.md#apps)), each part of the gate checked
+by `desktop-apps` on macOS (the Linux build not yet run); on a panel its window is placed over the
+shell's frame until step 6's display path. Its stdout and stderr go straight to its log file,
+rotated when it starts (not yet a pipe the shell reads), and after an engine restart it is started
+again rather than handed a fresh connection. The chooser is not built. [What an app is](#what-an-app-is) was decided 2026-11-06: native
 programs in their own processes, contained like plugin workers; the build order below follows
 from it. Builds on the separation of apps from the sound
 engine ([architecture](../architecture.md#two-kinds-of-thing-plugins-and-the-ui)), the
@@ -18,7 +24,7 @@ control API ([RFC 0003](0003-control-api.md)), the library
 Checked when built and tested; the sections below say how.
 
 - [x] 1. In-process actions: the registry; Library picks (Performances and Sounds), Setlist takes Performances
-- [ ] 2. Apps as processes: started and supervised by the shell, actions over the control API, manifests
+- [x] 2. Apps as processes: started and supervised by the shell, actions over the control API, manifests (the Setlist)
 - [ ] 3. Choice and defaults
 - [ ] 4. Permissions and limits enforced per app
 - [ ] 5. Apps in packages: signed builds, install, update, removal, data folders
@@ -363,6 +369,8 @@ like CLAP's extensions, so third parties can add their own without collisions.
 | `oscairn.pick.performance` | optional tags to start with | a library ID | Library |
 | `oscairn.pick.sound` | optional part, tags | a library ID | Library |
 | `oscairn.send.performance` | a library ID | done or canceled | Setlist |
+| `oscairn.step.setlist` | `-1` or `1` | the library ID it opened | Setlist |
+| `oscairn.send.setlist.entry` | the setlist's entry playing (a library ID, or empty) | done | Performance (Play shows Previous and Next) |
 | `oscairn.open.performance` | a library ID | | Sound editor |
 | `oscairn.open.part` | a part | | Sound editor |
 | `oscairn.open.pattern` | a part or sequencer node | | Groovebox |

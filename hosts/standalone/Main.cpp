@@ -32,7 +32,7 @@
 #include "PerformanceColors.h"
 #include "PlayView.h"
 #include "Recording.h"
-#include "Setlist.h"
+#include "AppProcesses.h"
 #include "Settings.h"
 #include "Splash.h"
 
@@ -126,10 +126,24 @@ namespace oscairn::standalone
             engine_.goHome=[this]{showHome();};
             engine_.goBack=[this]{showHome();}; // shortcut: every app's top screen is one level down; deeper levels go back inside their apps
 
-            // What the built-in apps offer each other (RFC 0022): the Library picks, the Setlist takes.
+            // What the built-in apps offer each other (RFC 0022): the Library picks; Play hears the
+            // setlist's entry playing. Apps that are processes (the Setlist) offer theirs from
+            // their manifests, found in Apps/ beside this program.
             actions_.offer(pickPerformance,"Library",[this](const std::string&,Actions::Answer answer){showPicker(std::move(answer),"performance");});
             actions_.offer(pickSound,"Library",[this](const std::string&,Actions::Answer answer){showPicker(std::move(answer),"sound");});
-            actions_.offer(sendPerformance,"Setlist",[this](const std::string& id,Actions::Answer answer){answer(setlist().add(id).toStdString());});
+            actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
+            const auto binary=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+            const auto apps=binary.getChildFile("Apps").isDirectory()?binary.getChildFile("Apps"):binary.getSiblingFile("share").getChildFile("oscairn/apps");
+            // Apps run as processes only against an engine on a socket (not --in-process).
+            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(apps):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString()});
+            appNotice_=std::make_unique<AppNotice>(*appProcesses_);
+            Component::addChildComponent(*appNotice_);
+            appProcesses_->onNotice=[this](const AppProcesses::Notice& n){
+                setDesktopMode(*appNotice_,panel() || inputMode_==InputMode::Touch?2:1);appNotice_->show(n);resized();
+                if(n.text.isEmpty() || n.choice!=AppProcesses::Notice::Choice::None)return;
+                // A notice of what happened goes by itself; one asking for a choice stays.
+                juce::Timer::callAfterDelay(8000,[safe=juce::Component::SafePointer<Window>(this),text=n.text]{if(safe && safe->appNotice_->text()==text)safe->appNotice_->show({});});
+            };
             show( first );
             setVisible( true );
         }
@@ -189,6 +203,7 @@ namespace oscairn::standalone
             DocumentWindow::resized();
             if( pads_ && getContentComponent() ) pads_->setBounds( getContentComponent()->getBounds() );
             if( notice_ ) notice_->setBounds( getLocalBounds() );
+            if( appNotice_ ) appNotice_->setBounds( getLocalBounds().reduced( 8 ).removeFromTop( desktopMode( *appNotice_ ) == 2 ? 56 : 40 ) );
             if( parts_ && parts_->getParentComponent() == this && getContentComponent() ) parts_->setBounds( getContentComponent()->getBounds() ); // a panel places its own
         }
 
@@ -239,7 +254,6 @@ namespace oscairn::standalone
             // On the desktop those three open in windows of their own: --snapshot shows that window.
             if( !panel() )
                 snapshotView_ = name == "library" && libraryApp_ ? libraryApp_->getContentComponent()
-                              : name == "setlist" ? static_cast<juce::Component*>( setlistPane_.get() )
                               : name == "groovebox" && groovebox_ ? groovebox_->getContentComponent()
                               : name == "recordings" && recordings_ ? recordings_->getContentComponent() : nullptr;
         }
@@ -291,7 +305,7 @@ namespace oscairn::standalone
                 if(profile_.offers("oscairn.performance"))menu.addItem(8004,"Performance");
                 if(profile_.offers("oscairn.groovebox"))menu.addItem(8000,"Groovebox");
                 if(profile_.offers("oscairn.library"))menu.addItem(8001,"Library");
-                if(profile_.offers("oscairn.setlist"))menu.addItem(8002,"Setlist");
+                if(profile_.offers("oscairn.setlist") && appProcesses_->find("oscairn.setlist"))menu.addItem(8002,"Setlist");
                 if(profile_.offers("oscairn.recordings"))menu.addItem(8005,"Recordings");
                 menu.addSeparator();menu.addItem(8006,"Settings...");
                 return menu;}
@@ -329,7 +343,7 @@ namespace oscairn::standalone
             if(id>=7000 && id<=7002){
                 inputMode_=InputMode(id-7000);writeInputMode(theme_.configuration(),inputMode_);if(auto* s=shell())s->setInputMode(inputMode_);
                 // Open app windows take the new sizes now, not when next resized.
-                for(auto* w:{groovebox_.get(),libraryApp_.get(),setlist_.get(),picker_.get()})
+                for(auto* w:{groovebox_.get(),libraryApp_.get(),picker_.get()})
                     if(auto* content=w?w->getContentComponent():nullptr){setDesktopMode(*content,inputMode_==InputMode::Touch?2:1);content->resized();}
                 return;}
             if(id==8000){openGroovebox();return;}
@@ -451,6 +465,7 @@ namespace oscairn::standalone
                 [this]( int i ) {
                     if( size_t( i ) >= running_.size() ) return;
                     engine_.appClosed( appId( running_[size_t( i )].name ) );
+                    if( auto* place = dynamic_cast<AppPlace*>( running_[size_t( i )].app ) ) appProcesses_->stop( place->id() ); // a process: it quits
                     running_.erase( running_.begin() + i ); // not shown: the switcher is in front
                     showSwitcher(); },
                 barShell() );
@@ -475,7 +490,7 @@ namespace oscairn::standalone
                     auto count = []( uint32_t n, const char* one, const char* many ) { return juce::String( int( n ) ) + " " + ( n == 1 ? one : many ); };
                     return count( performances->total, "Performance", "Performances" ) + ", " + count( sounds->total, "Sound", "Sounds" ); },
                     [this] { showLibraryApp(); } } );
-            if( profile_.offers( "oscairn.setlist" ) )
+            if( profile_.offers( "oscairn.setlist" ) && appProcesses_->find( "oscairn.setlist" ) )
                 apps.push_back( { "Setlist", "list-music", [] { return juce::String( "Songs in order, for the stage" ); }, [this] { showSetlist(); } } );
             if( profile_.offers( "oscairn.groovebox" ) )
                 apps.push_back( { "Groovebox", "layout-grid", [] { return juce::String( "Patterns and steps" ); }, [this] { openGroovebox(); } } );
@@ -499,9 +514,13 @@ namespace oscairn::standalone
         void showSetlist()
         {
             if( !admitted( "Setlist", [this] { showSetlist(); } ) ) return;
-            if( panel() ) { if( !bringForward( "Setlist" ) ) openOnScreen( "Setlist", "list-music", setlist(), nullptr ); return; }
-            if( !setlist_ ) { setlist_ = std::make_unique<AppWindow>( "Setlist", nullptr, 700, 760 ); setlist_->setContentNonOwned( &setlist(), false ); }
-            showApp( setlist_, "Setlist", nullptr, 0, 0 );
+            // Its own process (RFC 0022): on a panel, its window over a frame under the top bar.
+            if( panel() )
+            {
+                if( bringForward( "Setlist" ) ) return;
+                auto place = std::make_unique<AppPlace>( *appProcesses_, "oscairn.setlist" ); auto& app = *place; openOnScreen( "Setlist", "list-music", app, std::move( place ) ); return;
+            }
+            appProcesses_->open( "oscairn.setlist", {}, inputMode_ == InputMode::Touch ? 2 : 1 );
         }
         void openGroovebox()
         {
@@ -519,12 +538,6 @@ namespace oscairn::standalone
             if(!window)window=std::make_unique<AppWindow>(name,make(),width,height);
             if(auto* content=window->getContentComponent()){setDesktopMode(*content,inputMode_==InputMode::Touch?2:1);content->resized();}
             window->setVisible(true);window->toFront(true);
-        }
-        // The Setlist app, made hidden when another app sends it a Performance before it was opened.
-        SetlistPane& setlist()
-        {
-            if(!setlistPane_){setlistPane_=std::make_unique<SetlistPane>(engine_,actions_);setDesktopMode(*setlistPane_,inputMode_==InputMode::Touch?2:1);}
-            return *setlistPane_;
         }
         // A Library pane auditioning Sounds in the part the Part view shows.
         LibraryPane* libraryPane(LibraryPane::Mode mode,const std::string& kind="performance")
@@ -697,18 +710,18 @@ namespace oscairn::standalone
             }
             for( auto& r : running_ ) if( auto* app = r.name == "Performance" ? dynamic_cast<PerformanceApp*>( r.app ) : nullptr ) app->edit( editing );
         }
-        // Play's Previous and Next, while the open Performance is the setlist's current entry.
+        // Play's Previous and Next, while the open Performance is the setlist's entry playing,
+        // which the Setlist app sends (sendSetlistEntry); they ask it to step (stepSetlist).
         void followSetlist( PlayView& play )
         {
             // While the engine opens the next, which reads no Performance, the last answer holds.
             play.inSetlist = [this, last = false]() mutable {
-                if( !setlistPane_ || setlistPane_->current() < 0 ) return last = false;
-                const auto& entries = setlistPane_->setlist().entries;
+                if( setlistEntry_.empty() ) return last = false;
                 const auto info = engine_.performanceInfo();
                 if( !info ) return last;
-                return last = size_t( setlistPane_->current() ) < entries.size() && entries[size_t( setlistPane_->current() )].id == info->id;
+                return last = info->id == setlistEntry_;
             };
-            play.step = [this]( int by ) { if( setlistPane_ ) setlistPane_->step( by ); };
+            play.step = [this]( int by ) { actions_.request( stepSetlist, by < 0 ? "-1" : "1", []( const std::string& ) {} ); };
         }
         static juce::String title( const NamedLayout& l )
         {
@@ -743,7 +756,9 @@ namespace oscairn::standalone
         juce::File plugins_;
         std::unique_ptr<LibraryWindow> library_;
         Actions actions_;
-        std::unique_ptr<SetlistPane> setlistPane_; // before its window, which shows it without owning it
+        std::string setlistEntry_; // the setlist's entry playing, as the Setlist app last said
+        std::unique_ptr<AppProcesses> appProcesses_; // before running_: it outlives the places apps draw in
+        std::unique_ptr<AppNotice> appNotice_;
         juce::Component* snapshotView_ = nullptr;  // see snapshotView
         std::unique_ptr<Launcher> launcher_;       // Home on a panel
         // A panel's running apps (RFC 0030), each kept with its state: its frame goes before the
@@ -751,7 +766,7 @@ namespace oscairn::standalone
         struct RunningApp { juce::String name; const char* icon; std::unique_ptr<juce::Component> owned; juce::Component* app; std::unique_ptr<AppFrame> frame; };
         std::vector<RunningApp> running_;
         std::unique_ptr<AppSwitcher> switcher_;
-        std::unique_ptr<AppWindow> groovebox_, libraryApp_, setlist_, picker_, recordings_;
+        std::unique_ptr<AppWindow> groovebox_, libraryApp_, picker_, recordings_;
         std::unique_ptr<AppWindow> settings_;
         Controllers* controllers_ = nullptr;
         std::unique_ptr<LaunchNotice> notice_; // why an app did not open (RFC 0025)

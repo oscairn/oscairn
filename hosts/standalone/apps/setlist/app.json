@@ -1,0 +1,24 @@
+{
+  "format": "oscairn.app",
+  "version": 1,
+  "id": "oscairn.setlist",
+  "appVersion": "0.1.0",
+  "name": "Setlist",
+  "requires": { "protocol": 1 },
+  "builds": {
+    "macos-arm64": "Oscairn Setlist.app/Contents/MacOS/Oscairn Setlist",
+    "macos-x86_64": "Oscairn Setlist.app/Contents/MacOS/Oscairn Setlist",
+    "linux-arm64": "Oscairn Setlist",
+    "linux-x86_64": "Oscairn Setlist"
+  },
+  "surfaces": ["desktop", "panel"],
+  "offers": [
+    { "action": "oscairn.send.performance", "name": "Add to setlist" },
+    { "action": "oscairn.step.setlist", "name": "Previous and next" }
+  ],
+  "asks": ["oscairn.pick.performance", "oscairn.send.setlist.entry"],
+  "home": false,
+  "memory": { "reserve": 60, "max": 400 },
+  "cpu": { "audio": 0 },
+  "permissions": ["play", "library"]
+}

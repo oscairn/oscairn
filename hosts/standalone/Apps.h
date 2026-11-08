@@ -3,6 +3,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace oscairn::standalone
 {
@@ -18,6 +19,7 @@ namespace oscairn::standalone
         // shortcut: one app per action, the first to offer it; the choice between two is RFC 0022 step 3.
         void offer(const std::string& action, const std::string& app, Handler handler) { offers_.try_emplace(action, Offer{app, std::move(handler)}); }
         bool offered(const std::string& action) const { return offers_.count(action) != 0; }
+        std::vector<std::string> actions() const { std::vector<std::string> out; for(const auto& [action, offer] : offers_) out.push_back(action); return out; }
         // Asks whoever offers `action`; `answer` is called once, maybe later. False when no app offers it.
         bool request(const std::string& action, const std::string& argument, Answer answer) const
         {
@@ -36,4 +38,9 @@ namespace oscairn::standalone
     inline constexpr const char* pickPerformance = "oscairn.pick.performance"; // gives back a library ID
     inline constexpr const char* sendPerformance = "oscairn.send.performance"; // takes one; gives back what was done
     inline constexpr const char* pickSound = "oscairn.pick.sound";             // gives back a library ID
+    inline constexpr const char* stepSetlist = "oscairn.step.setlist";         // takes "-1" or "1"; gives back the library ID it opened
+    inline constexpr const char* sendSetlistEntry = "oscairn.send.setlist.entry"; // the setlist entry playing (a library ID, or empty): Play shows Previous and Next
+    // The shell's own request, which every app process answers (its client library): show the
+    // app, as its own window or where the shell says ({"visible", "mode", "bounds": [x, y, w, h]}).
+    inline constexpr const char* showApp = "oscairn.app.show";
 }

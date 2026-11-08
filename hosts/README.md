@@ -204,6 +204,43 @@ refused, a notice says why and what closing would free, and offers **Let the nex
 only the prepared next setlist entry is in the way. The desktop has no memory classes, so every
 app opens there.
 
+### Apps as processes
+
+The Setlist is a program of its own, `Oscairn Setlist` ([RFC 0022](../docs/rfcs/0022-apps-and-requests.md)
+step 2), in `standalone/apps/setlist/` with its manifest (`app.json`). The build puts each app's
+folder (the manifest and its build) in `Apps/` beside the app (inside the macOS bundle; on
+Linux installed as `share/oscairn/apps`), and the shell reads the manifests there at start.
+`AppProcesses` (`standalone/AppProcesses.h`) supervises them:
+
+- **Started** when opened, or when another app sends it something (the Library's **Add to
+  setlist**), with a connection the engine makes for it (`apps.connect`, [control
+  protocol](../docs/control-protocol.md#apps)) as its descriptor 3 (`OSCAIRN_CONTROL_FD`), its
+  data folder (`OSCAIRN_APP_DATA`, `AppData/<id>/` in the data folder) and the actions the shell
+  answers (`OSCAIRN_ACTIONS`). It never sees the control socket. Its stdout and stderr are
+  appended to `Logs/apps/<id>.log` in the data folder, started afresh past 1 MB when it starts.
+- **Shown** on the desktop as its own window, brought forward when its tile or Apps menu item is
+  chosen (the shell's `oscairn.app.show` request, which every app answers). On a panel the
+  shell keeps a frame under its top bar and the app's window, without a title bar, is put over
+  it; nothing from the app is drawn by the shell. A separate window above the shell's is
+  step 2's stand-in for the device's display path (RFC 0022 step 6).
+- **Crashed** (or over its manifest's `memory.max`, read every 100 ms): a notice across the top
+  says so, with **Details** (its log); the app in front is started again at once and comes back
+  where it was (the Setlist keeps the entry playing in its data folder). Past 3 restarts a
+  minute it stays closed, with **Open again**. An app behind is started when next opened.
+- **Hung:** the engine pings each app every second. Silent 5 seconds in front: "not
+  responding", with **Wait** and **Close** (which stops it and starts it again); 10 seconds
+  behind: stopped.
+- **Closed** by the musician (its window's close): it quits, which is not a crash. Quitting the
+  shell stops its apps.
+
+The Setlist asks for picks (Add) and Play's Previous and Next through the shell, and takes
+Performances sent to it, all through the engine (`oscairn.send.performance`,
+`oscairn.step.setlist`, `oscairn.send.setlist.entry`). Apps run as processes only against an
+engine on a socket: with `--in-process` the Setlist is not offered. `desktop-apps` checks all of
+this offline against a socket session. Not yet: permissions per app connection (step 4),
+packaging (step 5), sandboxing (step 6), and handing an app a fresh connection after an engine
+restart (it quits and the shell starts it again instead).
+
 `-DOSCAIRN_STANDALONE=ON` builds both the desktop and helper. To build only the live
 engine, use `-DOSCAIRN_ENGINE=ON`. Both options default to OFF. JUCE is downloaded for
 these hosts, while core and renderer builds need no JUCE. Linux and macOS are supported.

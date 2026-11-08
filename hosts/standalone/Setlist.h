@@ -44,6 +44,8 @@ namespace oscairn::standalone
         juce::Colour colorAt(int index) const;  // what it shows: its own, else its Performance's; transparent for none
         void setDisplay(SetlistDisplay display);
         void step(int by) { go(current_ < 0 ? 0 : current_ + by); }
+        void mark(int index);                    // the entry playing, without opening it (an app started again, RFC 0022)
+        std::function<void()> onCurrent;         // the entry playing changed
         const Setlist& setlist() const { return setlist_; }
         int current() const { return current_; }
         const juce::String& message() const { return message_; }

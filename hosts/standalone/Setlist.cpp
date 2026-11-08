@@ -293,6 +293,16 @@ namespace oscairn::standalone
         list_.selectRow(index);
         say(juce::String(index + 1) + ". " + text(entry.name));
         updateButtons(); repaint(); grid_->repaint();
+        if(onCurrent) onCurrent();
+    }
+
+    void SetlistPane::mark(int index)
+    {
+        if(index < 0 || index >= int(setlist_.entries.size())) return;
+        current_ = index;
+        list_.selectRow(index);
+        say(juce::String(index + 1) + ". " + text(setlist_.entries[size_t(index)].name));
+        updateButtons(); repaint(); grid_->repaint();
     }
 
     bool SetlistPane::keyPressed(const juce::KeyPress& key)

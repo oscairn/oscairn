@@ -48,6 +48,72 @@ namespace oscairn::standalone
         refreshPads();
         startTimer(16);
     }
+    Engine::Engine(int controlConnection):app_(true)
+    {
+        client_=std::make_unique<LocalClient>();client_->adopt(controlConnection);
+        remote_=std::make_unique<RemoteControl>(*client_);control_=remote_.get();
+        startTimer(16);
+    }
+    int Engine::appConnection(const std::string& app)
+    {
+        if(!client_ || !connected())return -1;
+        try
+        {
+            const auto reply=client_->call("apps.connect",app.empty()?"{}":"{\"app\":"+juce::JSON::toString(juce::String::fromUTF8(app.c_str())).toStdString()+'}',2000);
+            const int fd=client_->takeDescriptor();
+            if(fd<0)std::fprintf(stderr,"oscairn: no connection for %s: %s\n",app.c_str(),reply.c_str());
+            return fd;
+        }
+        catch(const std::exception& e){failed(e.what());return -1;}
+    }
+    void Engine::appRequest(const std::string& app,const std::string& action,const std::string& argument,std::function<void(const std::string&)> answer)
+    {
+        auto text=[](const std::string& s){return juce::JSON::toString(juce::String::fromUTF8(s.c_str())).toStdString();};
+        if(!client_ || !connected()){answer({});return;}
+        try
+        {
+            const auto reply=juce::JSON::parse(juce::String::fromUTF8(client_->call("apps.request",(app.empty()?"{":"{\"app\":"+text(app)+',')+"\"action\":"+text(action)+",\"argument\":"+text(argument)+'}',2000).c_str()));
+            if(const auto n=reply["result"]["request"];n.isInt() || n.isInt64()){appAnswers_[uint64_t(int64_t(n))]=std::move(answer);return;}
+            std::fprintf(stderr,"oscairn: %s not asked: %s\n",action.c_str(),reply["error"]["message"].toString().toRawUTF8());
+        }
+        catch(const std::exception& e){failed(e.what());}
+        answer({});
+    }
+    void Engine::appAnswer(uint64_t request,const std::string& result)
+    {
+        if(!client_ || !connected())return;
+        try{client_->send("apps.answer","{\"request\":"+std::to_string(request)+",\"result\":"+juce::JSON::toString(juce::String::fromUTF8(result.c_str())).toStdString()+'}');}
+        catch(const std::exception& e){failed(e.what());}
+    }
+    void Engine::appMessage(const std::string& message)
+    {
+        const auto doc=juce::JSON::parse(juce::String::fromUTF8(message.c_str()));
+        const auto method=doc["method"].toString();const auto params=doc["params"];
+        auto text=[&](const char* name){return params[name].toString().toStdString();};
+        if(method=="apps.ping")
+        {
+            // Answered here, on the message thread: an app whose thread is stuck answers none.
+            try{client_->send("apps.pong","{\"ping\":"+std::to_string(int64_t(params["ping"]))+'}');}catch(const std::exception& e){failed(e.what());}
+        }
+        else if(method=="apps.requested")
+        {
+            const auto request=uint64_t(int64_t(params["request"]));
+            if(onAppRequest)onAppRequest(request,text("app"),text("action"),text("argument"));else appAnswer(request,{});
+        }
+        else if(method=="apps.answered")
+        {
+            const auto it=appAnswers_.find(uint64_t(int64_t(params["request"])));
+            if(it==appAnswers_.end())return;
+            auto answer=std::move(it->second);appAnswers_.erase(it);
+            answer(text("result"));
+        }
+        else if(method=="apps.status" && onAppStatus)
+        {
+            std::map<std::string,uint32_t> silent;
+            if(const auto* apps=params["apps"].getArray())for(const auto& a:*apps)silent[a["app"].toString().toStdString()]=uint32_t(int64_t(a["silent"]));
+            onAppStatus(silent);
+        }
+    }
     Engine::~Engine()
     {
         stopTimer();pendingSounds_.clear();
@@ -307,7 +373,7 @@ namespace oscairn::standalone
 
     void Engine::refreshSounds(SoundAction action)
     {
-        if(socketPath_.empty())
+        if(socketPath_.empty() && !app_)
         {
             // A preset problem shown last goes once a later read lists them ("Presets are being listed; ask again").
             try{const auto shown=soundPicker_.presetProblem;if(const auto m=applySoundAction(*control_,action);!m.empty())soundMessage_=m;soundPicker_=readSoundPicker(*control_);editors_=readEditors(*control_);
@@ -331,11 +397,14 @@ namespace oscairn::standalone
                 action.directory=exportWritten_=folder.getChildFile(target.getFileName()).getFullPathName().toStdString(); // the same name: an unnamed Performance is named after it
             }
         }
-        soundJob_=std::async(std::launch::async,[socket=socketPath_,request=std::move(action),known=known_] {
+        // An app's job runs on a connection asked for on its own (it has no socket path).
+        const int given=app_?appConnection({}):-1;
+        soundJob_=std::async(std::launch::async,[socket=socketPath_,given,request=std::move(action),known=known_] {
             SoundResult result;LocalClient client;
             try
             {
-                client.connect(socket);RemoteControl control(client,known);
+                if(given>=0)client.adopt(given);else if(!socket.empty())client.connect(socket);else throw std::runtime_error("No connection for the engine's job");
+                RemoteControl control(client,known);
                 try{result.message=applySoundAction(control,request);}catch(const std::exception& e){result.error=e.what();}
                 result.state=readSoundPicker(control);
                 result.editors=readEditors(control);
@@ -380,7 +449,10 @@ namespace oscairn::standalone
         if(result.error.empty() && soundJobKind_==SoundAction::SaveSound)soundMessage_="Sound saved.";
         if(result.error.empty() && (soundJobKind_==SoundAction::LoadSound || soundJobKind_==SoundAction::PartFromSound)){textCache_.clear();soundMessage_="Sound loaded.";}
         if(result.error.empty() && soundJobKind_==SoundAction::ImportPerformance){textCache_.clear();soundMessage_="Performance imported.";}
-        if(result.disconnected)
+        // An app's job runs on a connection of its own: that one lost, with the app's own
+        // connection still up, fails the job only (said in soundMessage_), not the app.
+        // shortcut: desktop-apps sees this about once in 20 runs on the preparation after a load, cause not found; find it before third-party apps.
+        if(result.disconnected && !(app_ && client_ && client_->connected()))
         {
             pendingControls_.clear();
             failed(result.error);
@@ -636,6 +708,10 @@ namespace oscairn::standalone
         metersRead_=wireMetersRead_=historyRead_=performanceRead_=takesRead_=windowsRead_=assignmentsRead_=auditionRead_=0;
         failure_=message;std::fprintf(stderr,"oscairn: control connection: %s\n",message.c_str());
         if(client_)client_->disconnect();
+        // Requests out to other apps get no answer now: each is canceled.
+        auto answers=std::move(appAnswers_);appAnswers_.clear();
+        for(auto& [request,answer]:answers)answer({});
+        if(app_ && onLost)juce::MessageManager::callAsync([lost=onLost]{lost();});
     }
     void Engine::restart()
     {
@@ -669,6 +745,7 @@ namespace oscairn::standalone
             {
                 const auto values=remote_->liveValues();const auto revision=remote_->graphState().revision;
                 const bool read=remote_->service(); // a graph the engine changed is read without waiting
+                for(const auto& message:remote_->takeAppMessages())appMessage(message);
                 if(auto refused=remote_->takeError();!refused.empty())editError_=std::move(refused);
                 if(read || std::exchange(windowsChanged_,false) || std::exchange(textArrived_,false) || std::exchange(historyChanged_,false) || remote_->liveValues()!=values || remote_->graphState().revision!=revision)sendChangeMessage();
             }
@@ -690,9 +767,10 @@ namespace oscairn::standalone
         }
         if(failure_.empty())
         {
-            if((soundTicks_+=uint32_t(getTimerInterval()))>=480){soundTicks_=0;refreshSounds();} // every half second
+            // Not for an app: one that wants the picker refreshes it when it shows.
+            if(!app_ && (soundTicks_+=uint32_t(getTimerInterval()))>=480){soundTicks_=0;refreshSounds();} // every half second
         }
-        else if(!restarting_.valid() && ++reconnectTicks_>=60)
+        else if(!app_ && !restarting_.valid() && ++reconnectTicks_>=60)
         {
             reconnectTicks_=0;
             try

@@ -339,6 +339,9 @@ Decided 2026-11-08, from what the milestone test found:
    - [x] the desktop's Library app, Setlist app (list, scrolling list and grid; per-entry
      colors) and Part menu
    - [x] RFC 0022 step 1: actions between the built-in apps
+   - [x] RFC 0022 step 2: the Setlist as a program of its own, started from its manifest and
+     supervised by the shell (restarts, the hang rule, its memory maximum, its log), its pick and
+     send over the control API
    - [x] **where a Sound came from:** each part records the Sound and revision it was loaded
      from; **Save** writes that Sound's next revision, **Save As New** makes another, the
      parts list marks a part edited since (`*`), and **Update from library** loads a newer
@@ -392,8 +395,7 @@ Decided 2026-11-08, from what the milestone test found:
    - [ ] tag suggestions, plugin presets in the library, `LibraryModel`, and the Library on the
      panel and compact screens (RFC 0021 steps 2–7; editing an item's info and tags, copying, a
      source filter, the tag column, compact rows and the item menu are done)
-   - [ ] actions over the control API, then choosing between apps (RFC 0022 steps 2–3, also
-     in Phase 5)
+   - [ ] choosing between apps (RFC 0022 step 3, also in Phase 5)
 
 Also open:
 

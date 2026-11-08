@@ -164,7 +164,7 @@ namespace oscairn::standalone
         bool soundBusy() const { return std::any_of(pendingSounds_.begin(),pendingSounds_.end(),[](const SoundAction& a){return a.kind!=SoundAction::PrepareFromLibrary && a.kind!=SoundAction::Refresh;}) || (soundJob_.valid() && soundJobKind_!=SoundAction::Refresh && soundJobKind_!=SoundAction::PrepareFromLibrary); }
         // Why a load, save or export asked now would be refused (the engine busy or gone), or empty.
         std::string refusal() const { return !connected() ? "The engine is not running." : soundBusy() ? "The engine is busy; try again in a moment." : std::string(); }
-        bool canPrepareSounds() const { return !socketPath_.empty(); }
+        bool canPrepareSounds() const { return !socketPath_.empty() || app_; }
         void soundAction(SoundAction action);
         std::function<void()> openBrowser;
         // The library (RFC 0021); nothing while the engine is busy loading or saving, so ask again.
@@ -216,7 +216,26 @@ namespace oscairn::standalone
         struct Editor { std::string name,id,path;std::vector<ParamInfo> parameters;std::vector<PresetInfo> presets; };
         const std::map<std::string,Editor>& editors() const {return editors_;}
 
+        // Apps (RFC 0022), through the engine, which relays and never interprets an action.
+        // A connection for an app, to hand to it as a descriptor; -1 when refused (stderr says why).
+        int appConnection(const std::string& app);
+        // Asks `app` (from an app: its shell, which decides who answers) for `action`; `answer`
+        // is called once, maybe later, with "" for a cancel. Answering one asked of this side.
+        void appRequest(const std::string& app, const std::string& action, const std::string& argument, std::function<void(const std::string&)> answer);
+        void appAnswer(uint64_t request, const std::string& result);
+        std::function<void(uint64_t request, const std::string& app, const std::string& action, const std::string& argument)> onAppRequest; // unset: canceled
+        std::function<void(const std::map<std::string,uint32_t>&)> onAppStatus; // ms each app has left a ping unanswered, once a second
+        // An app's own facade, on the connection its shell handed it (OSCAIRN_CONTROL_FD): jobs
+        // run on further connections it asks for on that one; the engine's pings are answered
+        // each tick; a lost connection is not made again, onLost says so (the app quits, and its
+        // shell starts it again with a fresh one).
+        explicit Engine(int controlConnection);
+        std::function<void()> onLost;
+
     private:
+        bool app_=false;
+        std::map<uint64_t,std::function<void(const std::string&)>> appAnswers_;
+        void appMessage(const std::string& message);
         void timerCallback()override;
         void attach();
         void restarted(); // Restart's engine answers, or failed to start

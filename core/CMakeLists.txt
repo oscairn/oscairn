@@ -262,6 +262,13 @@ add_test(NAME worker-host COMMAND oscairn-worker-host-test $<TARGET_FILE:oscairn
     $<TARGET_FILE:oscairn_midi_delay> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(worker-host PROPERTIES TIMEOUT 60)
 
+# Phase 4: a new sample rate activates every plugin again at it, in the engine and in workers.
+add_executable(oscairn-sample-rate-test engine/tests/sample_rate.cpp)
+target_link_libraries(oscairn-sample-rate-test PRIVATE oscairn_control ${CMAKE_DL_LIBS})
+add_dependencies(oscairn-sample-rate-test oscairn-plugin-worker)
+add_test(NAME sample-rate COMMAND oscairn-sample-rate-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(sample-rate PROPERTIES TIMEOUT 60)
+
 # RFC 0032 step 1: SysEx between plugins, in the engine and in workers.
 add_library(oscairn-sysex-fixture MODULE engine/tests/sysex_fixture.cpp)
 target_link_libraries(oscairn-sysex-fixture PRIVATE oscairn_clap_headers)

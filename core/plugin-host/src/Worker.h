@@ -92,7 +92,8 @@ namespace oscairn::worker
         Reset,
         PrepareSnapshot, // a native snapshot's sounds prepared beside the playing ones (RFC 0021)
         ChokeRetiring, // sound-snapshots' choke_retiring (RFC 0005)
-        SaveSound, SoundValues // sound-snapshots draft 4: one sound on its own, a sound's values (RFC 0021)
+        SaveSound, SoundValues, // sound-snapshots draft 4: one sound on its own, a sound's values (RFC 0021)
+        Reconfigure // the plugin activated again at a new sample rate, the block size kept
     };
     // First byte of every message from the worker: a reply, or a request to the engine made while
     // the worker serves one (the plugin resolving a sound asset; a node about to activate, with

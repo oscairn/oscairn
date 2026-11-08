@@ -121,8 +121,11 @@ At 48 kHz, 512 frames span about 10.7 ms, excluding other device/driver latency.
 
 Neither a running UI nor the control API currently changes audio device settings. The
 profile, `--buffer-frames` or the CMake setting above chooses the startup request; a runtime
-settings UI and persistence remain follow-up work. The graph currently stays at its startup
-sample rate; a later device rate change deliberately silences playback until restart.
+settings UI and persistence remain follow-up work. When the device restarts at another sample
+rate (its rate changed from outside, for example in macOS's Audio MIDI Setup), playback is
+silent while the engine activates every plugin again at the new rate on its control thread,
+keeping their state, and then goes on (`Session::setSampleRate`); the log says
+"audio now at N Hz". This path is tested offline, not yet with a device changing rate.
 
 Buildroot Linux on hardware uses this same engine through ALSA. Its package explicitly
 sets `OSCAIRN_AUDIO_BUFFER_FRAMES=128`, matching the desktop's request, and the image's

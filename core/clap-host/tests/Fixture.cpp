@@ -32,6 +32,7 @@ namespace {
 std::atomic<bool> blockProcess{false}, enteredProcess{false}, releaseProcess{false};
 std::atomic<bool> savingState{false}, releaseState{false};
 std::atomic<int> threadErrors{0}, entryUsers{0}, processCalls{0}, callbackCalls{0};
+std::atomic<double> activatedRate{0}; // the rate the last instance activated at
 // The effect's window (CLAP gui), floating only, so a host shows it without drawing anything:
 // the instance whose window exists, whether it shows, and its suggested title. Main thread.
 struct Plugin;
@@ -125,7 +126,7 @@ struct Plugin {
                 } else engineShared->assign(bytes, 1);
                 s.shared = engineShared; s.context.assign(contextBytes(s.gain, rate), 1);
             }
-            s.active = true; s.maxFrames = max; return true;
+            s.active = true; s.maxFrames = max; activatedRate = rate; return true;
         };
         api.deactivate = [](const clap_plugin_t* p) { auto& s = get(p); s.main(); if (s.processing) ++threadErrors; s.active = false; s.shared.reset(); std::vector<char>().swap(s.context); };
         api.start_processing = [](const clap_plugin_t* p) { auto& s = get(p); s.audio(); if (!s.active) ++threadErrors; if (s.kind == 7) return false; s.processing = true; return true; };
@@ -492,6 +493,7 @@ CLAP_EXPORT void fixture_release_process() { releaseProcess=true; }
 CLAP_EXPORT bool fixture_saving_state() { return savingState.load(); }
 CLAP_EXPORT void fixture_release_state() { releaseState.store(true); }
 CLAP_EXPORT int fixture_thread_errors() { return threadErrors.load(); }
+CLAP_EXPORT double fixture_activated_rate() { return activatedRate.load(); }
 CLAP_EXPORT int fixture_entry_users() { return entryUsers.load(); }
 CLAP_EXPORT int fixture_process_calls() { return processCalls.load(); }
 CLAP_EXPORT int fixture_callback_calls() { return callbackCalls.load(); }

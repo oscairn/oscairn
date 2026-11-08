@@ -637,6 +637,20 @@ namespace oscairn
         }
     }
 
+    void Session::setSampleRate( double rate )
+    {
+        if( !( rate > 0 ) || !std::isfinite( rate ) ) throw std::invalid_argument( "A sample rate must be positive" );
+        if( rate == sampleRate_ ) return;
+        const AudioPause::Hold hold( pause_ );
+        // Loaded at the old rate and not playing: let go, loaded again when asked for.
+        prepared_.reset(); preparedOpportunistic_ = false;
+        warm_.clear();
+        transport_.setSampleRate( rate );
+        recorder_.setSampleRate( rate );
+        sampleRate_ = rate;
+        graph_.setSampleRate( rate );
+    }
+
     bool Session::process( float* const* outputs, uint32_t frames,
                            std::span<const kick::clap::Event> events, std::span<const MidiClockEvent> clocks,
                            std::span<const uint8_t> sources ) noexcept
@@ -652,6 +666,8 @@ namespace oscairn
            ni>Graph::maxAudioChannels || no>Graph::maxAudioChannels || (ni && !inputs) || (no && !outputs) || no<graph_.outputChannels())
         {silence();return false;}
         for(uint32_t c=0;c<graph_.outputChannels();++c)if(!outputs[c]){silence();return false;}
+        const AudioPause::Block block( pause_ );
+        if( !block ) { silence(); return true; } // setSampleRate is reactivating the plugins
 
         // A new Performance: the transport starts again. Queued notes still play: the last
         // Performance's plugins ring out beside it (RFC 0021), so a release must reach them.

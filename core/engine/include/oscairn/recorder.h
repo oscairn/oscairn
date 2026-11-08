@@ -93,6 +93,10 @@ namespace oscairn
         /// std::logic_error while a take recording reads them.
         void setRetro( double seconds, const Taps& taps );
         void updateRetro( const Taps& taps ); // new sources (after an edit)
+        /// A new sample rate, with the audio thread kept out (Session::setSampleRate): every take
+        /// still writing ends now, a playback stops, and the retroactive rings start over, empty,
+        /// sized for the new rate.
+        void setSampleRate( double sampleRate );
         double retroSeconds() const noexcept { return retroSeconds_; }
         uint64_t retroCommitted() const { return retroBytes( retroSeconds_, retro_.taps, sampleRate_, maxFrames_ ); }
         static uint64_t retroBytes( double seconds, const Taps& taps, double sampleRate, uint32_t maxFrames ); // what setRetro would allocate
@@ -126,6 +130,7 @@ namespace oscairn
         struct Set { std::vector<std::shared_ptr<Ring>> rings; std::shared_ptr<Notes> notes; Taps taps; }; // rings fed by taps
         void publish();
         void recount();
+        void armRetro( double seconds, const Taps& taps ); // setRetro's rings, checked
         void note( Notes& ring, uint16_t track, const kick::clap::Event& event ) noexcept;
         std::shared_ptr<Ring> ring( uint32_t channels, uint64_t capacity ) const;
 

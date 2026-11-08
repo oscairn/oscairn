@@ -27,7 +27,7 @@ namespace oscairn::host
         if( error.isNotEmpty() || !device )
             throw std::runtime_error( "no audio output: " + ( error.isNotEmpty() ? error.toStdString() : std::string( "no device" ) ) );
         sampleRate_ = device->getCurrentSampleRate();
-        std::fprintf( stderr, "oscairn: audio output \"%s\", %.0f Hz, %d-sample buffer\n", device->getName().toRawUTF8(), sampleRate_,
+        std::fprintf( stderr, "oscairn: audio output \"%s\", %.0f Hz, %d-sample buffer\n", device->getName().toRawUTF8(), sampleRate_.load(),
                       device->getCurrentBufferSizeSamples() );
         if( preferred.bufferSize > 0 && device->getCurrentBufferSizeSamples() != preferred.bufferSize )
             std::fprintf( stderr, "oscairn: requested %d frames; using the device's supported size above\n", preferred.bufferSize );
@@ -82,6 +82,14 @@ namespace oscairn::host
 
     void AudioEngine::service()
     {
+        if( const double rate = pendingRate_.exchange( 0 ); rate > 0 )
+        {
+            try { session_->setSampleRate( rate ); }
+            catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: %s\n", e.what() ); }
+            sampleRate_ = rate;
+            started_ = true;
+            std::fprintf( stderr, "oscairn: audio now at %.0f Hz; plugins activated again at it\n", rate );
+        }
         session_->service();
         if( midiDevicesDirty_.exchange( false ) )
             { openMidiInputs(); openMidiOutputs(); }
@@ -258,14 +266,18 @@ namespace oscairn::host
     {
         const auto& config=channelMap_.configuration();
         const auto inputMask=device->getActiveInputChannels(),outputMask=device->getActiveOutputChannels();
-        bool valid=std::abs(device->getCurrentSampleRate()-sampleRate_)<.5 && device->getName().toStdString()==initialDevice_ &&
+        const double rate=device->getCurrentSampleRate();
+        bool valid=rate>0 && device->getName().toStdString()==initialDevice_ &&
             device->getInputChannelNames()==initialInputs_ && device->getOutputChannelNames()==initialOutputs_;
         for(uint32_t i=0;i<ChannelMap::required(config.inputs);++i)valid=valid && inputMask[static_cast<int>(i)];
         const auto required=(!config.explicitOutputs && initialOutputs_.size()==1)?1:ChannelMap::required(config.outputs);
         for(uint32_t i=0;i<required;++i)valid=valid && outputMask[static_cast<int>(i)];
         outputLatencyMs_=(device->getOutputLatencyInSamples()+device->getCurrentBufferSizeSamples())*1000.0/device->getCurrentSampleRate();
         lastCallback_=0;lateCallbacks_=0;
-        started_=valid;
+        // At another rate, silent until service() has the plugins activated again at it, on the control thread.
+        const bool moved=std::abs(rate-sampleRate_)>=.5;
+        pendingRate_=valid && moved?rate:0;
+        started_=valid && !moved;
     }
 
     void AudioEngine::audioDeviceIOCallbackWithContext( const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples,

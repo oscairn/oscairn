@@ -103,7 +103,7 @@ namespace oscairn
             double rate; uint32_t frames;
             std::chrono::nanoseconds budget{}, hangLimit{};
             long replySeconds = 30; // how long a control request may take (a big preset load)
-            uint32_t missLimit = UINT32_MAX;
+            std::atomic<uint32_t> missLimit{UINT32_MAX}; // the supervisor reads it too
             const uint64_t policyLimit; // the placement policy's, in bytes; 0: none
             // What the supervisor holds it to: the policy's, or its plugins' declarations plus a margin (RFC 0025, fitLimit).
             std::atomic<uint64_t> memoryLimit;
@@ -139,19 +139,27 @@ namespace oscairn
             {
                 // Read here, on the creating thread: OSCAIRN_WORKER_REPLY_SECONDS shortens it for tests.
                 if(const char* s = std::getenv("OSCAIRN_WORKER_REPLY_SECONDS")) replySeconds = std::max(1L, std::atol(s));
+                hangLimit = mode == ProcessingMode::Offline ? std::chrono::nanoseconds(std::chrono::seconds(10)) : std::chrono::nanoseconds(std::chrono::milliseconds(250));
+                setRate(rate);
+                records = std::filesystem::temp_directory_path() / ("oscairn-worker-" + std::to_string(getpid()) + "-" + std::to_string(counter.fetch_add(1)));
+            }
+
+            // The rate a (re)started worker loads its plugin at, and the block budget it sets. Under
+            // control, while nothing plays (the constructor, or a rate change with the graph paused).
+            void setRate(double rate_)
+            {
+                rate = rate_;
                 // Each block may take half the block's time before it is silenced; a worker that
                 // misses a quarter second of blocks in a row, or leaves one unanswered that long,
                 // has failed. Offline rendering waits instead of silencing.
                 const double period = double(frames) / rate;
-                if(mode == ProcessingMode::Offline) { budget = std::chrono::seconds(10); hangLimit = std::chrono::seconds(10); }
+                if(mode == ProcessingMode::Offline) budget = std::chrono::seconds(10);
                 else
                 {
                     budget = std::chrono::nanoseconds(int64_t(0.5e9 * period));
                     if(const char* us = std::getenv("OSCAIRN_WORKER_BUDGET_US")) budget = std::chrono::microseconds(std::max(1L, std::atol(us)));
-                    hangLimit = std::chrono::milliseconds(250);
                     missLimit = std::max<uint32_t>(8, uint32_t(std::ceil(0.25 / period)));
                 }
-                records = std::filesystem::temp_directory_path() / ("oscairn-worker-" + std::to_string(getpid()) + "-" + std::to_string(counter.fetch_add(1)));
             }
 
             ~Process()
@@ -728,6 +736,15 @@ namespace oscairn
             void panic() noexcept override { if(!process_->failed.load()) shared_->panic.store(1, std::memory_order_release); }
             bool inWorker() const noexcept override { return true; }
             bool reset() override { return request(Op::Reset).u8() != 0; }
+            // Every node of the worker is reconfigured by its own call, each setting the worker's rate.
+            void reconfigure(double rate, uint32_t frames) override
+            {
+                if(frames != process_->frames) throw std::invalid_argument("A plugin worker keeps its block size"); // its shared block's
+                { std::lock_guard lock(process_->control); process_->setRate(rate); } // first, so a worker restarting meanwhile loads at it
+                shared_->sampleRate = rate;
+                fadeFrames_ = faded_ = uint32_t(rate * .01);
+                request(Op::Reconfigure, Writer().f64(rate));
+            }
             // Its share of the CPU time of this worker and those it replaced, as the supervisor last read it.
             double cpuSeconds() const override
             {

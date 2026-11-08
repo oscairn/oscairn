@@ -468,6 +468,7 @@ namespace oscairn::worker
                 case Op::SetMemoryRoom: host.setMemoryRoom(r.u64()); break;
                 case Op::Window: { const bool show = r.u8(); host.showWindow(show, r.str()); windows = windows || show; break; }
                 case Op::Reset: w.u8(host.reset()); break;
+                case Op::Reconfigure: host.reconfigure(r.f64(), frames); break;
                 default: throw std::runtime_error("Unknown worker request");
                 }
                 reply(socket, w);

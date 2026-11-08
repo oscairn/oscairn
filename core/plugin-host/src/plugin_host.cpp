@@ -147,6 +147,7 @@ namespace oscairn
             }
             void service() override { host.service(); }
             bool reset() override { host.reset(); return true; }
+            void reconfigure(double rate,uint32_t frames) override {if(!host.reconfigure(rate,frames))throw std::runtime_error(host.error());}
             const kick::clap::Descriptor& descriptor() const noexcept override { return host.descriptor(); }
             const std::vector<kick::clap::Parameter>& parameters() const noexcept override { return host.parameters(); }
             const std::vector<kick::clap::Port>& inputPorts() const noexcept override { return host.inputPorts(); }

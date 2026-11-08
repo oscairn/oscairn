@@ -269,6 +269,12 @@ namespace oscairn
         void panicInput() noexcept { graph_.panicInput(); } // audio thread only
         uint64_t droppedNotes() const noexcept { return droppedNotes_.load(); }
         double sampleRate() const noexcept { return sampleRate_; }
+        /// Control thread: the audio device's new sample rate. The audio thread is kept out (its
+        /// blocks meanwhile are silent) while every plugin is activated again at it, in the engine
+        /// and in workers, keeping its state (Graph::setSampleRate); the transport keeps its place;
+        /// a take recording ends; instances kept warm and a Performance prepared ahead are let go.
+        /// The block size stays maxFrames. Throws as Graph::setSampleRate does, after the rest.
+        void setSampleRate( double sampleRate );
         size_t leaving() const noexcept { return leaving_.size(); } // the last Performance's plugins still ringing out
         uint64_t reusedInstances() const noexcept { return reused_; } // plugin instances a Performance opened took over instead of loading (RFC 0021)
         size_t warmInstances() const noexcept { return warm_.size(); }  // instances kept loaded once rung out, for the next change (RFC 0021)
@@ -506,6 +512,7 @@ namespace oscairn
 
         double sampleRate_;
         uint32_t maxFrames_;
+        AudioPause pause_; // see setSampleRate
         assets::Store assets_; // outlives the graph whose plugins resolve through it
         Graph graph_;
         SessionStatus hostStatus_;

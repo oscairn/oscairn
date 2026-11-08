@@ -514,11 +514,16 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
 ## Phase 4: hardware (started)
 
 - [ ] Sample rates: 48 kHz is the default, and 44.1, 96 and 192 kHz must work where users or
-  hardware call for them. The engine already runs at the rate the audio device reports, and
-  plugins are activated at that rate, but changing the device's rate while running stops
-  audio instead of reactivating the graph, and the tests render almost only at 48 kHz.
-  Needed: reactivation at a new rate, render tests at each rate, and the device's ALSA
-  configuration.
+  hardware call for them. The engine runs at the rate the audio device reports, and plugins
+  are activated at that rate. Built: when the device restarts at another rate, the audio
+  thread is kept out while every plugin is deactivated and activated again at the new rate on
+  the control thread, in the engine and in workers, keeping its state; the transport keeps its
+  beat, a take recording ends, and the block size stays the engine's (`Session::setSampleRate`,
+  tested offline by `sample-rate`: the Basic Synth in tune at 44.1, 48 and 96 kHz in the engine
+  and in a worker, and no plugin reactivated mid-block). Not yet tried with a real device
+  changing rate (only the offline path is tested). LV2 plugins, off by default, cannot follow a
+  new rate yet (the error names them). Needed: render tests of every plugin at each rate
+  (192 kHz untested), and the device's ALSA configuration.
 - [ ] External MIDI and CV, clock and Link out, and setlists across several devices
   ([RFC 0012](rfcs/0012-sync-external-midi-and-multi-device.md)): needed by the Ignite and by
   rigs of several Oscairn devices. Steps 1–2 (a part's MIDI out, clock out) are built, with the

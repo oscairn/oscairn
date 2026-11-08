@@ -483,6 +483,11 @@ namespace oscairn
             if(!a->done.load() && ((a->notes && a->notes == retro_.notes) || std::any_of(a->rings.begin(), a->rings.end(), [&](const auto& r) { return std::count(retro_.rings.begin(), retro_.rings.end(), r) != 0; })))
                 throw std::logic_error("a take recording reads the retroactive rings");
         for(const auto& t : taps.audio) if(!t.channels || t.channels > Graph::maxAudioChannels) throw std::invalid_argument("a tap needs 1 to 256 channels");
+        armRetro(seconds, taps);
+    }
+
+    void Recorder::armRetro(double seconds, const Taps& taps)
+    {
         Set next;
         if(seconds > 0 && (!taps.audio.empty() || !taps.notes.empty()))
         {
@@ -496,6 +501,18 @@ namespace oscairn
         retroSeconds_ = seconds;
         publish();
         recount();
+    }
+
+    // RFC 0020: files use the engine's rate. A take ended by a rate change keeps what came before
+    // it, and a take's writer still reading the old retroactive rings keeps them until it is done.
+    void Recorder::setSampleRate(double rate)
+    {
+        stop();
+        const auto at = now();
+        for(const auto& a : live_) if(!a->done.load() && a->end.load() > at) a->end.store(at); // captures of a set length too
+        play(0, {});
+        sampleRate_ = rate;
+        if(retroSeconds_ > 0) armRetro(retroSeconds_, Taps(retro_.taps));
     }
 
     void Recorder::updateRetro(const Taps& taps)

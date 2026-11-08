@@ -57,7 +57,8 @@ namespace oscairn::host
         void timerCallback() override { service(); }
 
         juce::AudioDeviceManager devices_;
-        double                   sampleRate_ = 48000.0;
+        std::atomic<double>      sampleRate_{ 48000.0 }; // the graph's: the sender thread reads it too
+        std::atomic<double>      pendingRate_{ 0 };      // the device restarted at it: service() moves the graph to it
         static constexpr uint32_t maxFrames  = 512;
 
         std::unique_ptr<Session> session_;

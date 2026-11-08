@@ -347,6 +347,10 @@ public:
     uint64_t residentBytes() const override {uint64_t n=0;for(const auto& s:desired_.instances)if(s)n+=s->host->residentBytes();return n;}
     bool inWorker() const noexcept override {return base().inWorker();}
     bool reset() override {bool ok=true;for(const auto& s:desired_.instances)if(s)ok=s->host->reset() && ok;return ok;}
+    // The instances the next block plays; later ones load at the new rate.
+    void reconfigure(double rate,uint32_t frames) override {
+        if(frames!=frames_)throw std::invalid_argument("A prepared instrument keeps its block size"); // its instances' buffers
+        for(const auto& s:desired_.instances)if(s)s->host->reconfigure(rate,frames);rate_=rate;}
     double cpuSeconds() const override {double n=0;for(const auto& s:desired_.instances)if(s)n+=s->host->cpuSeconds();return n;}
 };
 }

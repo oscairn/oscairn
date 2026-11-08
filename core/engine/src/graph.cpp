@@ -904,6 +904,25 @@ namespace oscairn
         for(const auto& host:removedHosts_)host->service();
     }
 
+    void Graph::setSampleRate( double rate )
+    {
+        if( !( rate > 0 ) || !std::isfinite( rate ) ) throw std::invalid_argument( "A sample rate must be positive" );
+        if( rate == sampleRate_ ) return;
+        const AudioPause::Hold hold( pause_ );
+        std::set<PluginHost*> done;
+        std::string failed;
+        auto follow = [&]( PluginHost* host ) {
+            if( auto* context = dynamic_cast<SoundContext*>( host ) ) host = context->engine()->host.get(); // the engine it shares, once
+            if( !done.insert( host ).second ) return;
+            try { host->reconfigure( rate, maxFrames_ ); }
+            catch( const std::exception& e ) { failed += ( failed.empty() ? "" : "; " ) + host->descriptor().name + ": " + e.what(); }
+        };
+        for( auto& [id, node] : nodes_ ) follow( node.host.get() );
+        for( auto& host : removedHosts_ ) follow( host.get() ); // the plan playing may hold them until the next commit
+        sampleRate_ = rate;
+        if( !failed.empty() ) throw std::runtime_error( "Not at the new sample rate: " + failed );
+    }
+
     bool Graph::beginBlock() noexcept {
         // Adopt the newest plan, retiring the current one, if there is room to retire it.
         if( !current_ || !retired_.full() )
@@ -990,6 +1009,8 @@ namespace oscairn
            (no && !outputs) || no<outputChannels_ || (eventCount && !events) || eventCount>kick::clap::Host::maxBlockEvents)
         {clear();return false;}
         for(uint32_t c=0;c<outputChannels_;++c)if(!outputs[c]){clear();return false;}
+        const AudioPause::Block block(pause_);
+        if(!block){clear();return true;} // setSampleRate is reactivating the plugins
         if(adopt)beginBlock();
 
         const bool panicInput=std::exchange(panicInput_,false);

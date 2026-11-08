@@ -31,6 +31,9 @@ namespace oscairn
         void rewind() noexcept {position_=0;anchorSample_=0;anchorBeats_=0;clockRunning_=false;pulses_=-1;lastPulseTime_=now_;intervalCount_=intervalNext_=0;}
         void setPlaying( bool playing ) noexcept { playing_ = playing; }
         void setClockSource( ClockSource source ) noexcept;
+        /// A new sample rate: the play position keeps its beat and its seconds; MIDI clock's tempo
+        /// is measured again from the next pulses.
+        void setSampleRate( double sampleRate ) noexcept;
 
         double  tempo() const noexcept;
         bool    playing() const noexcept;

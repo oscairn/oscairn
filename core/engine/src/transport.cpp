@@ -28,6 +28,15 @@ namespace oscairn
         tempo_        = bpm;
     }
 
+    void Transport::setSampleRate( double rate ) noexcept
+    {
+        const double scale = rate / sampleRate_;
+        position_      = std::llround( (double)position_ * scale );
+        anchorSample_  = std::llround( (double)anchorSample_ * scale );
+        sampleRate_    = rate;
+        intervalCount_ = intervalNext_ = 0;
+    }
+
     void Transport::setClockSource( ClockSource source ) noexcept
     {
         source_       = source;

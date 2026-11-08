@@ -162,6 +162,8 @@ and read-only parameters accurately. Do not change an ID's meaning between prese
 - Honor the actual frame count, sample rate, audio-port inventory and transport validity
   flags. Calls can be shorter than the negotiated maximum. Process events at their
   sample offsets; do not apply every event at block start or assume 128/512 frames.
+  The rate can change while the plugin is loaded: the host deactivates it and activates it
+  again at the new rate, keeping its state, so derive everything rate-dependent in `activate`.
 - Support the note dialects you advertise. CLAP note IDs, ports, channels and keys have
   separate meanings; match wildcard note-offs/expressions correctly. Emit `NOTE_END`
   when a CLAP voice really finishes or is stolen, including after its release envelope.

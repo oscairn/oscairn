@@ -21,6 +21,7 @@ namespace oscairn
                 for(const auto& q : p_.parameters) values_[q.id] = q.defaultValue;
             }
             void service() override {}
+            void reconfigure(double, uint32_t) override {} // nothing here plays
             // The saved snapshot, kept as it was, every file, and written back unchanged.
             void loadSnapshot(const std::string& directory) override
             {

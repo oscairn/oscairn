@@ -16,11 +16,49 @@
 #include <optional>
 #include <functional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 namespace oscairn
 {
+    /// Keeps the audio thread out of a block while the control thread changes what blocks use (a
+    /// new sample rate). Sequentially consistent: a block either sees the hold and renders silence,
+    /// or the hold waits for it to finish. One control thread holds at a time.
+    class AudioPause
+    {
+    public:
+        class Block // audio thread, for one block: false while held
+        {
+        public:
+            explicit Block( AudioPause& pause ) noexcept : pause_( pause )
+            {
+                pause_.inside_.store( true );
+                entered_ = !pause_.held_.load();
+                if( !entered_ ) pause_.inside_.store( false );
+            }
+            ~Block() { if( entered_ ) pause_.inside_.store( false ); }
+            explicit operator bool() const noexcept { return entered_; }
+        private:
+            AudioPause& pause_;
+            bool entered_ = false;
+        };
+        class Hold // control thread: no block runs until it goes
+        {
+        public:
+            explicit Hold( AudioPause& pause ) : pause_( pause )
+            {
+                pause_.held_.store( true );
+                while( pause_.inside_.load() ) std::this_thread::yield();
+            }
+            ~Hold() { pause_.held_.store( false ); }
+        private:
+            AudioPause& pause_;
+        };
+    private:
+        std::atomic<bool> held_{ false }, inside_{ false };
+    };
+
     struct NoteRoute;
     class AudioHelpers;
     using NodeId = uint32_t;
@@ -140,6 +178,12 @@ namespace oscairn
         void publishReplacement(Graph& prepared,const std::function<void()>& onPublish);
         // Audio thread: adopt once before Session computes transport for this block.
         bool beginBlock() noexcept; // true: a replacement was adopted
+        /// A new sample rate (the audio device's changed): with the audio thread kept out, every
+        /// plugin is deactivated and activated again at it (a shared engine once), keeping its
+        /// state; its voices and tails go with the activation. Plugins added later load at it. Throws
+        /// std::runtime_error naming the plugins that could not follow (the rest did).
+        void setSampleRate( double sampleRate );
+        double sampleRate() const noexcept { return sampleRate_; }
 
         /// Connections take effect at the next commit(). Throw std::invalid_argument if
         /// the source cannot send or the destination cannot receive that kind of signal.
@@ -475,6 +519,7 @@ namespace oscairn
         std::array<MidiMessage, maxMidiOut> midiOut_{}; // audio thread
         uint32_t midiOutCount_ = 0;
         std::atomic<Plan*> pending_{ nullptr };
+        AudioPause pause_; // see setSampleRate
         std::atomic<Listener*> listener_{ nullptr };
         bool panicInput_=false;
         std::atomic<bool> parallel_{ true }; // see setParallel

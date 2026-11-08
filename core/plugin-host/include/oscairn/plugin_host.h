@@ -155,6 +155,10 @@ namespace oscairn
         // Control thread, on a host nothing plays: clears what processing left (CLAP reset: buffers,
         // voices, envelopes, modulation), as a fresh activation would. False where it cannot.
         virtual bool reset() { return false; }
+        // Control thread, on a host nothing plays (the graph pauses its audio thread first): the
+        // plugin deactivated and activated again at a new sample rate, its state kept and its voices
+        // and tails cleared, as a device's rate change needs. Throws where it cannot.
+        virtual void reconfigure(double /*sampleRate*/, uint32_t /*maxFrames*/) { throw std::runtime_error("Plugin cannot change its sample rate"); }
     };
     // A process's resident memory in bytes (0: this one); 0 when it cannot be read.
     uint64_t residentBytes(long pid = 0);

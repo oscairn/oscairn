@@ -792,6 +792,12 @@ stepped, hidden and read-only flags. How the editors use them:
   notes played at the change. Before giving it the new state the host
   saves its own, and loads that back if the change fails, so saving state must work on an
   instance that has played, and loading it back must restore its sound.
+- **A new sample rate while loaded:** when the audio device's rate changes, the host
+  deactivates the plugin and activates it again at the new rate, on the main thread and never
+  while it processes, in the engine or in its worker, without saving or loading its state
+  (parameters and sounds stay as they were). Size rate-dependent buffers and coefficients in
+  `activate`, not in `init`, and clear voices and tails there; a plugin that keeps its first
+  rate plays out of tune. The maximum block size stays the same.
 - **Keep your cost steady:** the host measures each plugin's CPU per block and its memory on
   the device, by plugin ID, version and build, and refuses a Performance, or
   an added plugin, that would go over the device's budget, saying why

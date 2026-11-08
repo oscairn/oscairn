@@ -362,6 +362,10 @@ Recommended: the second, plus NTP when the user has enabled network time, with d
 a fetch that fails on dates says the time is wrong and offers to set it. The trust bundle is
 Buildroot's `ca-certificates`, updated with the image.
 
+**Decided 2026-11-08:** while the time is unknown the device fetches nothing over HTTPS and says
+to set the time first; date checks are never relaxed. A network that blocks time but allows
+HTTPS is not one to install from, and installs from a drive or over USB need no TLS (RFC 0035).
+
 **Not built in step 1.** The floor needs the last saved time, which needs RFC 0035's supervisor
 and the data partition, and the image has neither, so there is no small place to put it yet. It
 waits for RFC 0035's step 6 (the time state and the saved floor), and step 1's gate stays open on

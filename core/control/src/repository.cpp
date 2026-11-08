@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/repository.h"
 #include "oscairn/assets.h"
+#include "oscairn/library.h"
 #include "oscairn/package.h"
 #include "oscairn/signing.h"
 #include "sheredom/json.h"
@@ -97,6 +98,9 @@ namespace oscairn::repository
             // From the base; an index or delta (named by its hash) from each mirror in turn too.
             std::string read(const std::string& path, uint64_t maxBytes) override
             {
+                // HTTPS checks certificate dates, so a clock not known to be right fetches nothing
+                // (decided 2026-11-08); a drive or a computer over USB needs no TLS and still works.
+                if(!timeKnown()) throw std::runtime_error("this device does not know the time yet: set it (from the network, a paired computer or by hand) before installing from the web");
                 std::vector<std::string> from{base_ + path};
                 if(path.rfind("index/", 0) == 0) for(const auto& m : mirrors_) from.push_back(m + path);
                 std::string why;

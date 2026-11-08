@@ -272,6 +272,26 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
             check(listing['state'] == 'done' and listing['serial'] == 8 and len(paths) == 3 and paths[2].endswith('.delta.gz') and yanked == {'1.0.0': '', '2.0.0': 'a test'},
                   'a refresh with one changed package fetches the root and one delta, and applies it: ' + json.dumps(paths) + ' ' + json.dumps(yanked))
 
+            # A device that does not know the time fetches nothing from the web, and says why.
+            q = subprocess.Popen([web], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8',
+                                 env={**os.environ, 'OSCAIRN_DATA_HOME': str(home), 'OSCAIRN_TIME': 'unknown'})
+            try:
+                def ask(method, params):
+                    q.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}) + '\n')
+                    q.stdin.flush()
+                    return json.loads(q.stdout.readline())['result']
+                number = ask('packages.list', {'source': base})['job']
+                for _ in range(300):
+                    refused = ask('packages.job', {'job': number})
+                    if refused['state'] != 'running':
+                        break
+                    time.sleep(0.05)
+            finally:
+                q.stdin.close()
+                q.wait(timeout=30)
+            check(refused['state'] == 'failed' and 'does not know the time' in refused['error'] and fetched() == [],
+                  'with the time unknown, nothing is fetched from the web, saying why: ' + refused['error'])
+
             def store():
                 return rpc('plugins.list')['plugins']
 

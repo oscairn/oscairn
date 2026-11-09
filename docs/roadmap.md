@@ -580,7 +580,10 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
   and offline rendering supported.
 - [ ] The KICK (i.MX8M Mini), once beta units exist: an image for its board, built for its
   Cortex-A53, and a hardware-services adapter for its panel, screen and audio. What exists
-  for it today, and how to try it on an emulator: [running on a KICK](kick.md).
+  for it today, and how to try it on an emulator: [running on a KICK](kick.md). A first step
+  builds: `oscairn_imx8mm_evk_defconfig`, for NXP's i.MX8M Mini EVK (the same SoC, mainline
+  boot chain and kernel, its codec and HDMI drivers, built for the Cortex-A53); it has not been
+  booted on a board ([os/](../os/README.md#imx8m-mini-evk)).
 - [ ] The Ignite (BE 0716-AAF), which uses the same board family and panel protocol: a 64-track
   MIDI and CV sequencer with a General MIDI sound engine. Its features need several MIDI
   ports (5 DIN pairs, USB device and USB host), CV/Gate with calibration, sync in and out,

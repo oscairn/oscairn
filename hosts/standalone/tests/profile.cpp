@@ -32,9 +32,9 @@ int main()
     try
     {
         auto all = builtInProfiles();
-        check(all.size() == 6, "six built-in profiles: " + std::to_string(all.size()));
+        check(all.size() == 7, "seven built-in profiles: " + std::to_string(all.size()));
         std::erase_if(all, [](const auto& p) { return Profile::parse(p.second).controller(); }); // the devices'
-        check(all.size() == 4, "four of them devices'");
+        check(all.size() == 5, "five of them devices'");
         for(const auto& [id, json] : all)
         {
             const auto p = Profile::parse(json);

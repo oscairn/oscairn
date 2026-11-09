@@ -81,7 +81,7 @@ From `os/buildroot/` and `os/scripts/`, 2026-11-07:
 | Part | Today |
 | --- | --- |
 | Buildroot | 2026.08.1 (`os/scripts/container-build.sh`), as an external tree; downloads hash-checked (`BR2_DOWNLOAD_FORCE_CHECK_HASHES`) |
-| Toolchain | Buildroot's own: GCC, glibc, C++; tuned for Cortex-A76/A55 (`BR2_cortex_a76_a55`), so ARMv8.2 |
+| Toolchain | Buildroot's own: GCC, glibc, C++; tuned for Cortex-A76/A55 (`BR2_cortex_a76_a55`), so ARMv8.2. The i.MX8M Mini EVK image (`oscairn_imx8mm_evk_defconfig`, 2026-11-08) is tuned for the Cortex-A53 (`BR2_cortex_a53`), so ARMv8.0 |
 | Kernel | Linux 6.18.7, Buildroot's QEMU `aarch64-virt` config plus `board/qemu-aarch64/linux.fragment`: ALSA, the sequencer, the dummy and virtio sound cards, and `CONFIG_PREEMPT` |
 | Init | BusyBox init (no `BR2_INIT_*` set, so Buildroot's default), eudev for device nodes |
 | The session | `/etc/init.d/S95oscairn` starts `/usr/libexec/oscairn-session` with `start-stop-daemon`. It raises `RLIMIT_MEMLOCK` to unlimited, starts Xorg, then loops: start `/usr/bin/Oscairn`, wait, restart after 2 seconds. The app starts the engine, which detaches from its process group |
@@ -93,8 +93,8 @@ From `os/buildroot/` and `os/scripts/`, 2026-11-07:
 | Licenses | The `oscairn` package declares `AGPL-3.0-or-later` and its vendored code's licenses with their files (MIT for CLAP and miniz, BSD-2-Clause or CC0-1.0 for Monocypher, Unlicense for sheredom's `json.h`; plus ISC for jalv with LV2, OFL-1.1 for the Inter font with the app); `oscairn-juce` declares `AGPL-3.0` |
 | Tests | `os/scripts/boot-test.py`: boots in QEMU, checks the app runs, the engine opened audio, the memory limit and a screenshot; `compare-audio.py` checks a recording against an offline render |
 
-There is no image for real hardware yet. Every gate below that needs a device is unverified until
-the RK3588 board image or the KICK exists (os/README.md, "Next").
+The only image for real hardware, the i.MX8M Mini EVK's (os/README.md), builds but has not been
+booted. Every gate below that needs a device is unverified until an image runs on a board.
 
 ## Real-time tuning
 

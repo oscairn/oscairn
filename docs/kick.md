@@ -1,7 +1,8 @@
 # Running Oscairn on a KICK or a KICK emulator
 
-Oscairn has not yet run on a KICK or on any i.MX8M Mini board. This page says what exists for
-the KICK today, how to try it on an emulator, and what to expect, as of November 1, 2026.
+Oscairn has not yet run on a KICK or on any i.MX8M Mini board. An image for NXP's i.MX8M Mini
+EVK builds, but has never been booted. This page says what exists for the KICK today, how to try
+it on an emulator or an EVK, and what to expect, as of November 8, 2026.
 
 ## What exists
 
@@ -16,7 +17,14 @@ the KICK today, how to try it on an emulator, and what to expect, as of November
   board), for trying the KICK's flow on a desktop.
 - **A Linux image** ([os/](../os/README.md)) built with Buildroot for QEMU's generic ARM64
   machine. It boots straight into Oscairn full screen under X11. It is **not** built for the
-  KICK's board: no i.MX8M Mini kernel or device tree, no display, codec or panel drivers.
+  KICK's board.
+- **An image for the i.MX8M Mini EVK** (`oscairn_imx8mm_evk_defconfig`,
+  [os/](../os/README.md#imx8m-mini-evk)), NXP's reference board for the KICK's SoC: the same
+  userspace on Buildroot's EVK boot chain (TF-A, U-Boot, `flash.bin` on the SD card), mainline
+  Linux 6.18 with the EVK's device tree, its WM8524 codec and HDMI bridge drivers, built for the
+  Cortex-A53, with its own profile (`--profile imx8mm-evk`, estimates). It **builds; it has not
+  been booted**, so whether it starts, makes sound or shows a picture is unknown. It is not the
+  KICK's own board: the KICK's display, codec, panel and device tree are still missing.
 
 ## What you see
 
@@ -75,12 +83,22 @@ overlay, `os/buildroot/board/common/session-juce-x11/etc/default/oscairn`, befor
 
 Two things to change for an emulator of the KICK's hardware, neither tried yet:
 
-- **The CPU:** the image is built for Cortex-A76/A55 (`BR2_cortex_a76_a55` in
+- **The CPU:** the QEMU image is built for Cortex-A76/A55 (`BR2_cortex_a76_a55` in
   `os/buildroot/configs/oscairn_qemu_aarch64_defconfig`), which is ARMv8.2. The KICK's Cortex-A53
-  is ARMv8.0, so those binaries may stop with an illegal instruction there. Set `BR2_cortex_a53=y`
-  instead to build for it.
-- **The kernel:** the image's kernel is configured for QEMU's `virt` machine. An emulator that
-  models the i.MX8M Mini needs a kernel and device tree for that SoC.
+  is ARMv8.0, so those binaries may stop with an illegal instruction there. The EVK image is
+  built for the Cortex-A53 (`BR2_cortex_a53`); its binaries run under
+  `qemu-aarch64 -cpu cortex-a53` (an offline render, checked).
+- **The kernel:** the QEMU image's kernel is configured for QEMU's `virt` machine. An emulator
+  that models the i.MX8M Mini needs a kernel and device tree for that SoC; the EVK image has the
+  EVK's.
+
+### On an i.MX8M Mini EVK
+
+Build `os/build.sh oscairn_imx8mm_evk_defconfig`, write `sdcard.img` to a microSD card, set the
+board to boot from it and watch the console on the micro-USB debug port (UART2, the second of
+its two serial ports, 115200 baud): [flashing and booting](../os/README.md#flashing-and-booting-an-evk).
+Nobody has done this yet; what the console shows, `aplay -l` and the logs below are what to
+report.
 
 ## Measuring latency
 

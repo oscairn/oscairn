@@ -1,0 +1,14 @@
+{
+  "format": "oscairn.profile",
+  "version": 2,
+  "id": "imx8mm-evk",
+  "name": "NXP i.MX8M Mini EVK",
+  "platform": { "os": "linux", "cpu": "arm64", "runtime": "oscairn-buildroot-2026.08", "board": "imx8mm-evk" },
+  "compute": { "cores": 4, "realtimeCores": 1, "memory": 2048 },
+  "audio": { "inputs": 0, "outputs": 2, "rates": [48000], "block": 128, "headphones": true },
+  "screens": [ { "width": 1024, "height": 600, "touch": false, "surface": "panel", "layout": "kick-screen" } ],
+  "network": { "ethernet": true },
+  "reliability": "instrument",
+  "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
+  "estimated": ["compute", "audio", "screens", "network"]
+}

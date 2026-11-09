@@ -449,10 +449,7 @@ namespace oscairn::standalone
         if(result.error.empty() && soundJobKind_==SoundAction::SaveSound)soundMessage_="Sound saved.";
         if(result.error.empty() && (soundJobKind_==SoundAction::LoadSound || soundJobKind_==SoundAction::PartFromSound)){textCache_.clear();soundMessage_="Sound loaded.";}
         if(result.error.empty() && soundJobKind_==SoundAction::ImportPerformance){textCache_.clear();soundMessage_="Performance imported.";}
-        // An app's job runs on a connection of its own: that one lost, with the app's own
-        // connection still up, fails the job only (said in soundMessage_), not the app.
-        // shortcut: desktop-apps sees this about once in 20 runs on the preparation after a load, cause not found; find it before third-party apps.
-        if(result.disconnected && !(app_ && client_ && client_->connected()))
+        if(result.disconnected)
         {
             pendingControls_.clear();
             failed(result.error);

@@ -235,7 +235,10 @@ namespace oscairn
             std::string app; bool main=false; uint64_t host=0;
             uint32_t pings=0,answered=0; uint64_t silentSince=0; // a ping unanswered since then, or 0
             std::vector<std::string> notices; // relayed to it, sent with its notifications
+            // apps.connect's: a copy of the other end, held until this connection speaks (see connect).
+            int kept=-1; uint64_t keptSince=0; bool spoke=false;
             Peer(int fd,Control& c,uint64_t n):stream(fd),rpc(c),id(n){}
+            ~Peer(){if(kept>=0)::close(kept);}
             void notice(std::string_view method,const std::string& params){notices.push_back("{\"jsonrpc\":\"2.0\",\"method\":"+quote(method)+",\"params\":"+params+'}');}
         };
         std::vector<std::unique_ptr<Peer>> peers;
@@ -276,6 +279,11 @@ namespace oscairn
                 std::unique_ptr<Peer> peer;
                 try{peer=std::make_unique<Peer>(fds[0],s.control,s.nextPeer++);}catch(...){::close(fds[1]);throw;}
                 peer->app=app;peer->main=from.app.empty();peer->host=from.app.empty()?from.id:from.host;
+                // The other end in flight with no process holding it (sent, and the copy sent closed,
+                // before the host reads it) the kernel may take for garbage when any Unix socket
+                // closes meanwhile, and shut it: the app reads EOF at once. A copy is held here
+                // until the connection speaks, so it is never only in flight.
+                peer->kept=::fcntl(fds[1],F_DUPFD_CLOEXEC,0);
                 peer->rpc.relayApps(this);
                 s.joining.push_back(std::move(peer));s.passing=fds[1];
                 return "{\"app\":"+quote(app)+'}';
@@ -453,7 +461,7 @@ namespace oscairn
                         if(!wasAttached && peer->rpc.attached()){s.everAttached=true;s.abandoned=false;} // a UI back after a crash keeps it again
                         // The last window quitting normally: the user quit the app, whatever crashed before.
                         if(!wasReleased && peer->rpc.released() && std::none_of(s.peers.begin(),s.peers.end(),[&](const auto& p){return p!=peer && p->rpc.attached() && !p->rpc.released();}))s.abandoned=false;
-                        ++requests;
+                        ++requests;peer->spoke=true;
                     }
                     else if(reads++>=16 || !stream.read(JsonRpc::maxMessageBytes+1))break;
                 }
@@ -462,6 +470,15 @@ namespace oscairn
         }
         for(auto& peer:s.joining)s.peers.push_back(std::move(peer));
         s.joining.clear();
+        // A handed connection that spoke was received; one never used lets its copy go after 5 s,
+        // so its end closed is seen.
+        // shortcut: a host that leaves apps.connect's reply unread past 5 s can still lose the connection; a receipt from the client would close that.
+        for(auto& peer:s.peers)
+            if(peer->kept>=0)
+            {
+                if(!peer->keptSince)peer->keptSince=now;
+                else if(peer->spoke || now<peer->keptSince || now-peer->keptSince>=5000000000){::close(peer->kept);peer->kept=-1;}
+            }
         // Apps (RFC 0022): once a second, each host hears how long its apps have left a ping
         // unanswered, then each app's main connection is pinged; its client library answers.
         if(!s.lastPing || now<s.lastPing || now-s.lastPing>=1000000000)

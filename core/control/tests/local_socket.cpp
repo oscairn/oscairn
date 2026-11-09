@@ -176,6 +176,19 @@ namespace
             check(second >= 0, "a second connection for itself");
             own.adopt(second);
             check(own.call("transport.get").find("tempo") != std::string::npos, "which works as any client");
+            // Each handed over works while other Unix sockets close, as a job's does when the next is
+            // asked for. With no copy held while one was in flight, the kernel took about two in
+            // five for garbage here and shut it: it read EOF at once.
+            {
+                std::atomic<bool> stop = false;
+                std::thread closing([&] { while(!stop) { int p[2]; if(socketpair(AF_UNIX, SOCK_STREAM, 0, p) == 0) { ::close(p[0]); ::close(p[1]); } } });
+                int lost = 0;
+                for(int i = 0; i < 100; ++i)
+                    try { app.call("apps.connect", "{}"); LocalClient job; job.adopt(app.takeDescriptor()); job.call("transport.get"); }
+                    catch(const std::exception&) { ++lost; }
+                stop = true; closing.join();
+                check(lost == 0, std::to_string(lost) + " of 100 connections handed over were lost");
+            }
             // Pings: unanswered, the host hears the app's silence grow; answered, it is gone.
             check(heard(app, "apps.ping", &notice), "the app is pinged");
             std::string status;

@@ -598,7 +598,8 @@ capabilities.
   the app's *host* (the shell), and the connection the app's *main* one. On an app's own
   connection, `app` may be left out and may only name itself: the connection made then is the
   app's too (for its jobs) but not its main one. Up to 16 app connections, counted apart from
-  the 8 other clients.
+  the 8 other clients. The server holds a copy of the end it hands over until the connection
+  sends its first request, or for 5 seconds: one that never speaks is seen closed only then.
 - `apps.request {app?, action, argument?}` answers `{request}`. From an app it goes to its host
   (`app` not allowed: the host decides who answers); from a host it names the app, and goes to
   that app's newest main connection ("… is not connected" otherwise). The connection it is for

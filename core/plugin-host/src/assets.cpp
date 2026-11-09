@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace oscairn::assets
@@ -228,7 +229,7 @@ namespace oscairn::assets
         if(version.empty() || (!minVersion.empty() && older(version, minVersion))) return {};
         return (root().parent_path() / "AssetLibraries" / id / version).string();
     }
-    void Store::installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files)
+    void Store::installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files, const Terms& given)
     {
         const auto store = root() / "store", folder = root().parent_path() / "AssetLibraries" / id;
         const auto partial = folder / ("." + version + ".partial");
@@ -262,6 +263,109 @@ namespace oscairn::assets
         for(const auto& o : old) fs::remove_all(o, e);
         registerFolder(folder / version, id);
         if(!name.empty()) { std::lock_guard lock(mutex_); RegistryLock registry(root()); loaded_ = false; load(); libraries_[id].name = name; save(); }
+        // Its terms ("license<TAB>redistribute<TAB>dependency") and license texts.
+        auto terms = given;
+        if(terms.dependency && fs::exists(folder / ".terms", e) && !libraryTerms(id).dependency) terms.dependency = false;
+        if(!plain(terms.license)) fail("license contains tabs or line breaks");
+        writeAtomically(folder / ".terms", terms.license + '\t' + (terms.redistribute ? "1" : "0") + '\t' + (terms.dependency ? "1" : "0") + '\n');
+        fs::remove_all(folder / ".licenses", e);
+        if(!terms.licenses.empty() && fs::is_directory(terms.licenses, e)) fs::copy(terms.licenses, folder / ".licenses", fs::copy_options::recursive);
+    }
+    Store::Terms Store::libraryTerms(const std::string& id) const
+    {
+        Terms t; std::string line, redistribute, dependency;
+        std::ifstream in(root().parent_path() / "AssetLibraries" / id / ".terms");
+        if(std::getline(in, line)) { std::istringstream fields(line); std::getline(fields, t.license, '\t'); std::getline(fields, redistribute, '\t'); std::getline(fields, dependency); }
+        t.redistribute = redistribute != "0"; t.dependency = dependency == "1";
+        if(fs::exists(root().parent_path() / "AssetLibraries" / id / ".licenses")) t.licenses = root().parent_path() / "AssetLibraries" / id / ".licenses";
+        return t;
+    }
+    std::vector<std::string> Store::installedLibraries() const
+    {
+        std::vector<std::string> out; std::error_code e;
+        for(const auto& entry : fs::directory_iterator(root().parent_path() / "AssetLibraries", e))
+            if(entry.is_directory(e) && entry.path().filename().string().front() != '.' && !libraryVersion(entry.path().filename().string()).empty()) out.push_back(entry.path().filename().string());
+        std::sort(out.begin(), out.end());
+        return out;
+    }
+    std::vector<std::string> Store::hashes(const std::string& id) const
+    {
+        std::lock_guard lock(mutex_); std::vector<std::string> out;
+        for(const auto& [path, entry] : index(id)) out.push_back(entry.sha256);
+        return out;
+    }
+    void Store::removeLibrary(const std::string& id)
+    {
+        if(id.empty() || id.find('/') != std::string::npos || id.front() == '.' || libraryVersion(id).empty()) fail("no asset library " + id + " is installed");
+        std::lock_guard lock(mutex_); RegistryLock registry(root()); loaded_ = false; load();
+        const auto libraries = root().parent_path() / "AssetLibraries", going = libraries / ("." + id + ".removing");
+        std::error_code e;
+        // Out of sight first, so a removal cut short leaves no half tree registered.
+        fs::remove_all(going, e); fs::rename(libraries / id, going);
+        libraries_.erase(id); indexes_.erase(id); fs::remove(root() / "index" / (id + ".tsv"), e); save();
+        fs::remove_all(going, e);
+    }
+    std::pair<size_t, uint64_t> Store::sweep(bool remove)
+    {
+        std::lock_guard lock(mutex_); RegistryLock registry(root());
+        size_t count = 0; uint64_t bytes = 0; std::error_code e;
+        for(const auto& entry : fs::directory_iterator(root() / "store", e))
+        {
+            struct stat info{};
+            if(::lstat(entry.path().c_str(), &info) != 0) continue;
+            const bool partial = entry.path().filename().string().front() == '.';
+            if(!partial && (!S_ISREG(info.st_mode) || info.st_nlink > 1)) continue;
+            ++count; bytes += uint64_t(info.st_size);
+            if(remove) fs::remove_all(entry.path(), e);
+        }
+        return {count, bytes};
+    }
+    // roots.tsv: "folder<TAB>library<TAB>sha256<TAB>path" per reference, or the folder alone for
+    // one without any; the folder with '%', tab and line breaks escaped as %25, %09, %0A, %0D.
+    namespace
+    {
+        std::string escape(const std::string& s)
+        {
+            std::string out;
+            for(const char c : s) out += c == '%' ? "%25" : c == '\t' ? "%09" : c == '\n' ? "%0A" : c == '\r' ? "%0D" : std::string(1, c);
+            return out;
+        }
+        std::string unescape(const std::string& s)
+        {
+            std::string out;
+            for(size_t i = 0; i < s.size(); ++i)
+                if(s[i] == '%' && i + 2 < s.size()) { out += char(std::strtol(s.substr(i + 1, 2).c_str(), nullptr, 16)); i += 2; }
+                else out += s[i];
+            return out;
+        }
+    }
+    std::map<fs::path, std::vector<Ref>> Store::roots() const
+    {
+        std::map<fs::path, std::vector<Ref>> out;
+        std::ifstream in(root() / "roots.tsv"); std::string line;
+        while(std::getline(in, line))
+        {
+            std::istringstream fields(line); std::string folder; Ref ref;
+            if(!std::getline(fields, folder, '\t') || folder.empty()) continue;
+            auto& refs = out[unescape(folder)];
+            if(std::getline(fields, ref.library, '\t') && std::getline(fields, ref.sha256, '\t') && std::getline(fields, ref.path)) refs.push_back(ref);
+        }
+        return out;
+    }
+    void Store::addRoot(const fs::path& folder, const std::vector<Ref>& references)
+    {
+        std::lock_guard lock(mutex_); RegistryLock registry(root());
+        auto all = roots(); std::error_code e;
+        const auto at = fs::absolute(folder).lexically_normal();
+        all[at] = references;
+        std::string text;
+        for(const auto& [f, refs] : all)
+        {
+            if(f != at && !fs::exists(f, e) && fs::exists(f.parent_path(), e)) continue; // deleted, not away
+            if(refs.empty()) text += escape(f.string()) + '\n';
+            for(const auto& r : refs) if(plain(r.library) && plain(r.sha256) && plain(r.path)) text += escape(f.string()) + '\t' + r.library + '\t' + r.sha256 + '\t' + r.path + '\n';
+        }
+        writeAtomically(root() / "roots.tsv", text);
     }
 
     std::string Store::registerFolder(const fs::path& folder, const std::string& given)

@@ -767,6 +767,14 @@ namespace oscairn
         for(auto l:array(field(field(doc.get(),"result"),"libraries")))result.push_back({string(field(l,"id")),string(field(l,"name")),string(field(l,"path")),static_cast<size_t>(integer(field(l,"files")))});
         return result;
     }
+    void RemoteControl::uninstallAssetLibrary(const std::string& library){impl_->call("assets.uninstall","{\"library\":"+quote(library)+"}",60000);}
+    Control::AssetCollection RemoteControl::collectAssets(bool remove)
+    {
+        auto doc=impl_->call("assets.collect",std::string("{\"remove\":")+(remove?"true":"false")+"}",60000);const auto r=field(doc.get(),"result");AssetCollection out;
+        for(auto l:array(field(r,"libraries")))out.libraries.push_back(string(l));
+        out.files=static_cast<uint64_t>(integer(field(r,"files")));out.bytes=static_cast<uint64_t>(integer(field(r,"bytes")));
+        return out;
+    }
     bool RemoteControl::selectSound(NodeId node,uint32_t id,int16_t channel)
     {try{impl_->call("sounds.select","{\"node\":"+std::to_string(node)+",\"context\":"+std::to_string(id)+",\"channel\":"+std::to_string(channel)+'}');return true;}catch(const RpcError& e){if(e.code==-32005)return false;throw;}}
     bool RemoteControl::discardSound(NodeId node,uint32_t id,bool cutTail)

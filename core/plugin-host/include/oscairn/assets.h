@@ -20,6 +20,13 @@ namespace oscairn::assets
     // Dotted versions compared part by part, numbers as numbers: is a older than b?
     bool older(const std::string& a, const std::string& b);
 
+    // What an asset library's package says of it, kept beside its tree (AssetLibraries/<id>/.terms,
+    // and its license texts in .licenses/): its license, whether others may pass it on in exports,
+    // and whether it was installed only because a plugin package needed it (a cleanup candidate
+    // once nothing uses it; RFC 0006). Installed again by hand, a library is no longer a dependency
+    // only; installed again as a dependency, a library installed by hand stays so.
+    struct LibraryTerms { std::string license; bool redistribute = true, dependency = false; std::filesystem::path licenses; };
+
     class Store final : public kick::clap::AssetResolver
     {
     public:
@@ -37,7 +44,25 @@ namespace oscairn::assets
         // Each `from` file (already checked by its caller) is moved into the store when the store
         // lacks it. The id and version must be plain names, each path a safe relative path.
         struct LibraryFile { std::string path, sha256; std::filesystem::path from; };
-        void installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files);
+        // What its package says of it (LibraryTerms above).
+        using Terms = LibraryTerms;
+        void installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files, const Terms& terms = {});
+        Terms libraryTerms(const std::string& id) const;
+        // The IDs of the libraries installed from asset packages.
+        std::vector<std::string> installedLibraries() const;
+        // The SHA-256 of each file a library's index lists.
+        std::vector<std::string> hashes(const std::string& id) const;
+        // Removes an installed library's tree and registration; its stored files stay until sweep.
+        void removeLibrary(const std::string& id);
+        // The stored files no installed library's tree links to any more, and partial ones left by an
+        // install cut short: their count and bytes, removed when `remove`. A tree copied where a
+        // link could not be made never needs the stored file, so it counts as unlinked too.
+        std::pair<size_t, uint64_t> sweep(bool remove);
+        // Saved Performances outside the library (performance.save's folders), with the references
+        // each had when saved, so a removal knows them while the folder is away (an unmounted drive).
+        // Adding one drops the entries whose folder is gone from a folder still there.
+        void addRoot(const std::filesystem::path& folder, const std::vector<Ref>& references);
+        std::map<std::filesystem::path, std::vector<Ref>> roots() const;
         // The installed version of a library from an asset package, empty when none is.
         std::string libraryVersion(const std::string& id) const;
         // Its tree when a version at least minVersion (empty: any) is installed, else empty.

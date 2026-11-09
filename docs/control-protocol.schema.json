@@ -4552,6 +4552,70 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "assets.uninstall"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "library": {
+                  "type": "string",
+                  "description": "ID of an asset library installed from an asset package"
+                }
+              },
+              "required": [
+                "library"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "assets.collect"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "remove": {
+                  "type": "boolean",
+                  "description": "Remove what is unused; absent or false only lists it"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "parts.add"
             },
             "params": {

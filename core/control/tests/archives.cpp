@@ -12,7 +12,9 @@
 // Signatures (RFC 0006): oscairn-sign signs a build and an archive, an export carries the build's
 // signature and signs its items and the whole archive when asked.
 // A plugin package carries one bundle holding several plugins (Oscairn's Splitters) once.
-//   oscairn-archives-test FIXTURE.clap OSCAIRN-SIGN [SPLITTERS.clap]
+// Asset libraries (RFC 0009 step 4): redistribution checks on export, and garbage collection
+// from explicit roots (with the Legacy Sampler playing one).
+//   oscairn-archives-test FIXTURE.clap OSCAIRN-SIGN [SPLITTERS.clap [SAMPLER.clap]]
 #include "oscairn/session.h"
 #include "oscairn/package.h"
 #include "oscairn/assets.h"
@@ -70,10 +72,11 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc < 3) { std::fprintf(stderr, "usage: %s FIXTURE OSCAIRN-SIGN [SPLITTERS.clap]\n", argv[0]); return 2; }
+    if(argc < 3) { std::fprintf(stderr, "usage: %s FIXTURE OSCAIRN-SIGN [SPLITTERS.clap [SAMPLER.clap]]\n", argv[0]); return 2; }
     const char* fixture = argv[1];
     const std::string tool = shell(argv[2]);
     const char* splitters = argc > 3 ? argv[3] : nullptr;
+    const char* sampler = argc > 4 ? argv[4] : nullptr;
     try
     {
         state_files::TemporaryDirectory temp;
@@ -679,6 +682,132 @@ int main(int argc, char** argv)
             std::string listed;
             for(const auto& p : l.presets(node)) listed += p.name + ";";
             check(listed == "Quiet;Bright;Warm;", "a node's presets come from the installed library too: " + listed);
+        }
+        // Device R (RFC 0009 step 4): redistribution. An asset library under an SPDX license goes into
+        // an export made from it, its license texts with it; one under the publisher's own terms
+        // (LicenseRef-, whose text it must carry, RFC 0031) stays out unless its package says it may
+        // be passed on, and the export says so; the destination then needs it installed.
+        {
+            device(temp.path / "r");
+            const auto freeFiles = temp.path / "r-free", vendorFiles = temp.path / "r-vendor";
+            fs::create_directories(freeFiles); fs::create_directories(vendorFiles);
+            std::ofstream(freeFiles / "free.wav", std::ios::binary) << "free sample bytes";
+            std::ofstream(vendorFiles / "piano.wav", std::ios::binary) << "vendor piano bytes";
+            const auto terms = temp.path / "VENDOR-LICENSE", attribution = temp.path / "ATTRIBUTION";
+            std::ofstream(terms) << "Not to be passed on"; std::ofstream(attribution) << "Free sample by its recordist";
+            const auto refused = run(tool + " asset-package --license LicenseRef-Vendor " + shell(temp.path / "NoText.olib") + " org.test.vendor 2 Vendor " + shell(vendorFiles) + " 2>&1");
+            check(refused.first != 0 && refused.second.find("carries no license text") != std::string::npos && !fs::exists(temp.path / "NoText.olib"),
+                  "a LicenseRef- asset package without its license text is refused: " + refused.second);
+            check(run(tool + " asset-package --license CC-BY-4.0 --license-file " + shell(attribution) + " " + shell(temp.path / "Free.olib") + " org.test.free 1 Free " + shell(freeFiles)).first == 0 &&
+                  run(tool + " asset-package --license LicenseRef-Vendor --license-file " + shell(terms) + " " + shell(temp.path / "Vendor.olib") + " org.test.vendor 2 'Vendor piano' " + shell(vendorFiles)).first == 0 &&
+                  run(tool + " asset-package --license LicenseRef-Vendor --license-file " + shell(terms) + " --redistribute yes " + shell(temp.path / "Shared.olib") + " org.test.shared 1 Shared " + shell(vendorFiles)).first == 0,
+                  "oscairn-sign packs them");
+            check(!readPackage(temp.path / "Free.olib", {}).redistribute && !readPackage(temp.path / "Vendor.olib", {}).redistribute && readPackage(temp.path / "Shared.olib", {}).redistribute == std::optional<bool>(true),
+                  "only a package that says so declares redistribute");
+            check(redistributable("CC-BY-4.0", {}) && redistributable("MIT OR Apache-2.0", {}) && !redistributable("LicenseRef-Vendor", {}) && redistributable("LicenseRef-Vendor", true) && !redistributable("MIT", false),
+                  "an SPDX license lets it be passed on, the publisher's own terms do not, and a package's word decides");
+            Session m(48000, 64);
+            m.installArchive((temp.path / "Free.olib").string(), false); m.installArchive((temp.path / "Vendor.olib").string(), false);
+            const auto freeTerms = m.assets().libraryTerms("org.test.free"), vendorTerms = m.assets().libraryTerms("org.test.vendor");
+            check(freeTerms.redistribute && freeTerms.license == "CC-BY-4.0" && read(freeTerms.licenses / "ATTRIBUTION") == "Free sample by its recordist" && !vendorTerms.redistribute && !freeTerms.dependency,
+                  "the device keeps each library's terms and license texts");
+            const auto synth = m.add("synth", fixture, "org.kick.test.synth");
+            const auto part = m.addPart("Keys"); m.insertIntoPart(part, 0, synth); m.commit();
+            const auto keysId = m.savePartAsSound(part, "Keys").id;
+            const auto doc = fs::path(m.libraryQuery({}).items.front().path) / "sound.json";
+            auto text = read(doc);
+            const auto freeHash = assets::sha256("free sample bytes"), vendorHash = assets::sha256("vendor piano bytes");
+            text.replace(text.find("\"assets\":[]"), 11, "\"assets\":[{\"library\":\"org.test.free\",\"path\":\"free.wav\",\"sha256\":\"" + freeHash +
+                         "\"},{\"library\":\"org.test.vendor\",\"path\":\"piano.wav\",\"sha256\":\"" + vendorHash + "\"}]");
+            std::ofstream(doc, std::ios::binary | std::ios::trunc) << text;
+            m.libraryRescan();
+            const auto notes = m.exportLibraryItem(keysId, (temp.path / "Keys.olib").string());
+            const auto keys = readPackage(temp.path / "Keys.olib", {});
+            check(notes.size() == 1 && notes[0].find("1 file of the asset library org.test.vendor 2 was left out: its license (LicenseRef-Vendor) does not let it be passed on") != std::string::npos,
+                  "the export says what it left out: " + (notes.empty() ? std::string() : notes[0]));
+            check(keys.files.count("Assets/" + freeHash.substr(0, 16) + "/free.wav") && !keys.files.count("Assets/" + vendorHash.substr(0, 16) + "/piano.wav") &&
+                  keys.files.count("Licenses/org.test.free/ATTRIBUTION"), "the free file goes in with its attribution, the vendor's does not");
+            device(temp.path / "r2");
+            Session m2(48000, 64);
+            const auto bare = m2.installArchive((temp.path / "Keys.olib").string(), false, {}, true);
+            check(bare.notes.size() == 1 && bare.notes[0].find("not in the archive or on this device: piano.wav") != std::string::npos, "a device without the vendor library is told");
+            m2.installArchive((temp.path / "Vendor.olib").string(), false);
+            kick::clap::AssetReference piano{"org.test.vendor", "piano.wav", vendorHash}, free{"org.test.free", "free.wav", freeHash};
+            check(!m2.assets().resolve(piano).empty() && !m2.assets().resolve(free).empty(), "with it installed both references resolve, the free one by its bytes");
+        }
+        // Device Q (RFC 0009 step 4): garbage collection from explicit roots. Collection removes the
+        // asset libraries a plugin package brought that nothing uses, and stored files no library
+        // links: never one a library item, the open Performance, a Performance saved outside the
+        // library (also while its drive is away) or a plugin package in the store still uses, nor
+        // one installed by hand. Uninstalling a used library is refused, naming what uses it.
+        if(sampler)
+        {
+            device(temp.path / "q");
+            Session q(48000, 64);
+            auto& store = q.assets();
+            int made = 0;
+            auto install = [&](const std::string& id, bool dependency) {
+                const auto from = temp.path / ("q-" + id); fs::create_directories(from);
+                writeWavFile(from / "tone.wav", std::vector<float>(480, .1f * float(++made)), 1, 48000);
+                std::ofstream(from / "notes.txt") << id;
+                std::vector<assets::Store::LibraryFile> files;
+                for(const auto* f : {"tone.wav", "notes.txt"}) files.push_back({f, assets::sha256File(from / f), from / f});
+                store.installLibrary(id, "1", id, files, {"MIT", true, dependency, {}}); // as a plugin package's install (dependency) or one by hand leaves it
+            };
+            for(const auto* id : {"org.test.unused", "org.test.item", "org.test.gig", "org.test.needed"}) install(id, true);
+            install("org.test.chosen", false);
+            const auto blob = [&](const std::string& id) { return fs::exists(store.root() / "store" / assets::sha256(id)); }; // each notes.txt holds its library's ID
+            // A library Sound uses org.test.item.
+            const auto synth = q.add("synth", fixture, "org.kick.test.synth");
+            const auto part = q.addPart("Keys"); q.insertIntoPart(part, 0, synth); q.commit();
+            q.savePartAsSound(part, "Keys");
+            const auto doc = fs::path(q.libraryQuery({}).items.front().path) / "sound.json";
+            auto text = read(doc);
+            text.replace(text.find("\"assets\":[]"), 11, "\"assets\":[{\"library\":\"org.test.item\",\"path\":\"notes.txt\",\"sha256\":\"" + assets::sha256("org.test.item") + "\"}]");
+            std::ofstream(doc, std::ios::binary | std::ios::trunc) << text;
+            q.libraryRescan();
+            q.remove(synth); q.commit();
+            // The Legacy Sampler plays org.test.gig, and the Performance is saved outside the library.
+            const auto player = q.add("player", sampler);
+            q.selectSound(player, q.prepareSound(player, "Gig", {}, {}, {}, "<region> sample=tone.wav\n", "org.test.gig", ""));
+            q.commit();
+            const auto drive = temp.path / "q-drive", gig = drive / "Shows" / "Gig";
+            fs::create_directories(gig.parent_path());
+            q.savePerformance(gig.string());
+            check(read(gig / "performance.json").find("org.test.gig") != std::string::npos, "the saved Performance lists the library");
+            // A plugin package needing org.test.needed.
+            const auto build = temp.path / "q-build" / "Needs.clap";
+            fs::create_directories(build.parent_path()); fs::copy_file(fixture, build);
+            check(run(tool + " plugin-package --license MIT --asset-dependency org.test.needed 1 " + shell(temp.path / "Needs.olib") + " clap org.kick.test.needs 1 Needs " + platform() + "=" + shell(build)).first == 0,
+                  "a plugin package needing a library");
+            q.installArchive((temp.path / "Needs.olib").string(), false, {}, true);
+            auto users = [&](const std::string& id) { std::string all; for(const auto& u : q.assetLibraryUsers(id)) all += u + ";"; return all; };
+            check(users("org.test.item") == "Keys;" && users("org.test.needed") == "Needs 1;" && users("org.test.unused").empty(), "what uses each library: " + users("org.test.item") + " " + users("org.test.needed"));
+            check(users("org.test.gig") == "the open Performance;" + gig.string() + ";", "the open Performance and the saved one use the sampler's: " + users("org.test.gig"));
+            auto preview = q.collectAssets(false);
+            check(preview.libraries == std::vector<std::string>{"org.test.unused"} && preview.bytes > 0 && blob("org.test.unused"), "a preview names only the unused dependency, removing nothing");
+            std::string why; try { q.uninstallAssetLibrary("org.test.item"); } catch(const std::exception& e) { why = e.what(); }
+            check(why.find("the asset library org.test.item is used by Keys") != std::string::npos && fs::exists(temp.path / "q" / "AssetLibraries" / "org.test.item"), "uninstalling a used library is refused, naming what uses it: " + why);
+            // Only the saved Performance holds org.test.gig now, also while its drive is away.
+            q.remove(player); q.commit();
+            check(users("org.test.gig") == gig.string() + ";", "the saved Performance alone: " + users("org.test.gig"));
+            fs::rename(drive, temp.path / "q-away");
+            check(q.collectAssets(true).libraries == std::vector<std::string>{"org.test.unused"} && !blob("org.test.unused") && blob("org.test.gig") && blob("org.test.item") && blob("org.test.needed") && blob("org.test.chosen"),
+                  "collection removes the unused dependency and its stored files, keeping the rest: " + users("org.test.gig"));
+            fs::rename(temp.path / "q-away", drive);
+            // Its Performance deleted and the plugin package removed: then they go too.
+            fs::remove_all(gig);
+            q.removePlugin("clap", "org.kick.test.needs", "1");
+            const auto second = q.collectAssets(true);
+            check(second.libraries == std::vector<std::string>{"org.test.gig", "org.test.needed"} && !blob("org.test.gig") && !blob("org.test.needed") && blob("org.test.item") && blob("org.test.chosen") &&
+                  store.libraryVersion("org.test.gig").empty(), "with their last root gone they are collected");
+            kick::clap::AssetReference kept{"org.test.item", "notes.txt", assets::sha256("org.test.item")};
+            check(!store.resolve(kept).empty(), "what a Sound uses still resolves");
+            // One installed by hand stays until uninstalled, which takes its stored files with it.
+            q.uninstallAssetLibrary("org.test.chosen");
+            check(store.libraryVersion("org.test.chosen").empty() && !blob("org.test.chosen") && q.collectAssets(false).libraries.empty(), "a library installed by hand goes only when uninstalled");
+            why.clear(); try { q.uninstallAssetLibrary("org.test.chosen"); } catch(const std::exception& e) { why = e.what(); }
+            check(why.find("no asset library org.test.chosen is installed") != std::string::npos, "and is then not there: " + why);
         }
         // A build path without its .clap or .lv2: the store keeps bundles by extension, so such a
         // build installs into the store and is never found again. readPackage refuses it.

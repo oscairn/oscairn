@@ -111,6 +111,8 @@ namespace oscairn
         AssetFolder registerAssetFolder(const std::string& folder) override;
         kick::clap::AssetReference importAsset(const std::string& file) override;
         std::vector<AssetLibrary> assetLibraries() const override;
+        void uninstallAssetLibrary(const std::string& library) override;
+        AssetCollection collectAssets(bool remove) override;
         bool selectSound(NodeId node,uint32_t id,int16_t channel=-1) override;
         bool discardSound(NodeId node,uint32_t id,bool cutTail=false) override;
         GraphState graphState() const override;

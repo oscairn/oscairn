@@ -322,7 +322,8 @@ Control::PackageJob Session::packageJob(uint64_t id){
         for(auto& [package,into]:packages){
             if(done.state=="failed"){std::error_code e;fs::remove_all(into,e);continue;}
             try{
-                const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true);
+                const bool dependency=&package!=&packages.back().first; // a library the package needs, installed first
+                const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true,false,dependency);
                 done.installed.added+=installed.added;done.installed.skipped+=installed.skipped;
                 done.installed.notes.insert(done.installed.notes.end(),installed.notes.begin(),installed.notes.end());
                 done.installed.code.insert(done.installed.code.end(),installed.code.begin(),installed.code.end());

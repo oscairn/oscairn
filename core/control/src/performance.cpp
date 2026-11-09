@@ -335,7 +335,11 @@ std::string nextFree(const std::string& name,const std::function<bool(const std:
 std::unique_ptr<json_value_s,decltype(&std::free)> document(const fs::path& root){const auto bytes=state_files::read(root/"performance.json",4*1024*1024);const auto error=detail::jsonPreflight({reinterpret_cast<const char*>(bytes.data()),bytes.size()},32);if(!error.empty())bad(std::string(error));auto* doc=json_parse(bytes.data(),bytes.size());if(!doc)bad("invalid JSON");return {doc,&std::free};}
 }
 
-void Session::savePerformance(const std::string& directory) {info_=writeDocument(directory,info_,nullptr,nullptr);}
+void Session::savePerformance(const std::string& directory) {
+    info_=writeDocument(directory,info_,nullptr,nullptr);
+    // A root for garbage collection (RFC 0009 step 4): what it uses stays installed.
+    assets_.addRoot(directory,assetsOf(fs::path(directory)/"performance.json"));
+}
 
 // The samples a saved Performance's or Sound's plugins use, as its document lists them.
 std::vector<assets::Ref> Session::assetsOf(const fs::path& manifest) {
@@ -409,14 +413,28 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
             package.items.push_back({"sound",item->id,item->name,to.generic_string()});
             manifests.push_back(stage/to/"sound.json");
         }
-        // Every sample they use, each once, by its hash.
-        std::set<std::string> copied;
+        // Every sample they use, each once, by its hash; but a file of an asset library whose
+        // package does not let it be passed on is left out (RFC 0009), as a reference the destination
+        // must have, and the license texts of each library whose files go in go with them.
+        std::set<std::string> copied;std::map<std::string,std::set<std::string>> withheld;std::set<std::string> licensed;
         for(const auto& m:manifests)for(auto ref:assetsOf(m)){
             const auto source=assets_.resolve(ref);
+            std::string holder,relative;
+            if(assets_.libraryVersion(ref.library).empty() && assets_.locate(source.parent_path(),holder,relative) && !assets_.libraryVersion(holder).empty())ref.library=holder; // found in another library by its bytes
+            if(!assets_.libraryVersion(ref.library).empty()){
+                if(!assets_.libraryTerms(ref.library).redistribute){withheld[ref.library].insert(ref.sha256);continue;}
+                licensed.insert(ref.library);
+            }
             if(!copied.insert(ref.sha256).second)continue;
             const auto to=stage/"Assets"/ref.sha256.substr(0,16)/source.filename();
             fs::create_directories(to.parent_path());fs::copy_file(source,to);
         }
+        for(const auto& [library,files]:withheld){
+            const auto terms=assets_.libraryTerms(library);
+            notes.push_back(std::to_string(files.size())+(files.size()==1?" file":" files")+" of the asset library "+library+" "+assets_.libraryVersion(library)+(files.size()==1?" was":" were")+" left out: its license ("+terms.license+") does not let it be passed on, so the destination needs it installed");
+        }
+        for(const auto& library:licensed)if(const auto from=assets_.libraryTerms(library).licenses;!from.empty())
+            {fs::create_directories(stage/"Licenses");fs::copy(from,stage/"Licenses"/library,fs::copy_options::recursive);}
         // Every plugin they use (RFC 0006), each build there is: this device's from its saved path,
         // else the store, and the store's for other platforms; one not here, or not CLAP yet, is
         // said and left out.
@@ -1926,7 +1944,7 @@ Control::Installed Session::installArchive(const std::string& file,bool asLibrar
 
 // What readPackage unpacked into `into`, moved into place by renames in the data folder (RFC
 // 0031: an install needs room for what it installs, not twice that); `into` goes either way.
-Control::Installed Session::installUnpacked(const Package& p,const fs::path& into,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode,bool thisPlatformOnly,bool checkOnly) {
+Control::Installed Session::installUnpacked(const Package& p,const fs::path& into,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode,bool thisPlatformOnly,bool checkOnly,bool dependency) {
     auto& l=library();
     Installed out;
     std::vector<fs::path> created; // item folders this call copies, undone if it fails
@@ -1942,7 +1960,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         if(p.kind=="asset" && !checkOnly){
             std::vector<assets::Store::LibraryFile> files;
             for(const auto& a:p.assets)files.push_back({a.path,a.sha256,into/"Assets"/a.path});
-            assets_.installLibrary(p.id,p.assetVersion,p.name,files);
+            assets_.installLibrary(p.id,p.assetVersion,p.name,files,{p.license,redistributable(p.license,p.redistribute),dependency,into/"Licenses"});
             out.added=uint32_t(files.size());
         }
         // A plugin package's asset libraries: each one missing, or older than it needs, is said.
@@ -2008,8 +2026,14 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 const bool later=std::any_of(p.plugins.begin(),p.plugins.end(),[&](const auto& q){return &q>&plugin && std::any_of(q.builds.begin(),q.builds.end(),[&](const auto& b){return b.path==build.path;});});
                 storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later,pluginPackage?p.license:std::string(),build.cpu,build.memory);
             }
-            // A plugin package's license texts and notices stay beside its plugins' builds.
+            // A plugin package's license texts and notices stay beside its plugins' builds, and the
+            // asset libraries it needs in assets.tsv ("id<TAB>version"): a root they stay installed for.
             std::error_code e;
+            if(pluginPackage && fs::is_directory(storeFolder(plugin.format,plugin.id,plugin.version),e)){
+                std::string needs;for(const auto& d:p.assetDependencies)needs+=d.id+'\t'+d.version+'\n';
+                const auto list=storeFolder(plugin.format,plugin.id,plugin.version)/"assets.tsv";
+                if(needs.empty())fs::remove(list,e);else state_files::write(list,needs.data(),needs.size());
+            }
             if(pluginPackage && fs::is_directory(into/"Licenses",e) && fs::is_directory(storeFolder(plugin.format,plugin.id,plugin.version),e)){
                 const auto to=storeFolder(plugin.format,plugin.id,plugin.version)/"Licenses";
                 fs::remove_all(to,e);fs::copy(into/"Licenses",to,fs::copy_options::recursive);
@@ -2072,6 +2096,57 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
 }
 
 std::vector<Control::InstalledLibrary> Session::libraries() { return library().installed(); }
+
+std::vector<std::string> Session::assetLibraryUsers(const std::string& id) {
+    // A reference uses it by its ID, or by bytes it holds (references resolve by content first).
+    const auto held=assets_.hashes(id);const std::set<std::string> hashes(held.begin(),held.end());
+    auto uses=[&](const std::vector<assets::Ref>& refs){return std::any_of(refs.begin(),refs.end(),[&](const auto& r){return r.library==id || hashes.count(r.sha256);});};
+    std::vector<std::string> out;
+    auto& l=library();l.rescan();
+    for(const auto& item:l.items()){
+        std::vector<assets::Ref> refs;
+        try{refs=assetsOf(fs::path(item.path)/(item.kind=="sound"?"sound.json":"performance.json"));}
+        catch(const std::exception&){out.push_back((item.name.empty()?"Untitled":item.name)+" (unreadable, so it may use it)");continue;} // unknown use is not proven unused
+        if(uses(refs))out.push_back(item.name.empty()?"Untitled":item.name);
+    }
+    for(const auto& n:nodes_)if(uses(graph_.host(n.first).assetDependencies())){out.push_back("the open Performance");break;}
+    // Performances saved outside the library: as they are now, or as saved while their folder is away.
+    std::error_code e;
+    for(const auto& [folder,saved]:assets_.roots()){
+        const auto doc=folder/"performance.json";
+        if(fs::exists(doc,e)){try{if(uses(assetsOf(doc)))out.push_back(folder.string());}catch(const std::exception&){if(uses(saved))out.push_back(folder.string());}}
+        else if(!fs::exists(folder.parent_path(),e) && uses(saved))out.push_back(folder.string()+" (not reachable now)");
+    }
+    // Plugin packages that need it.
+    for(const auto* format:{"clap","lv2"})
+        for(const auto& entry:fs::directory_iterator(dataHome()/"Plugins"/format,e)){
+            std::ifstream in(entry.path()/"assets.tsv");std::string line;
+            while(std::getline(in,line))if(line.substr(0,line.find('\t'))==id){const auto p=storedIdentity(entry.path());out.push_back((p.name.empty()?p.id:p.name)+" "+p.version);break;}
+        }
+    return out;
+}
+
+void Session::uninstallAssetLibrary(const std::string& id) {
+    if(assets_.libraryVersion(id).empty())bad("no asset library "+id+" is installed from a package");
+    const auto users=assetLibraryUsers(id);
+    if(!users.empty()){std::string list;for(const auto& u:users)list+=(list.empty()?"":", ")+u;bad("the asset library "+id+" is used by "+list);}
+    assets_.removeLibrary(id);
+    assets_.sweep(true);
+}
+
+Control::AssetCollection Session::collectAssets(bool remove) {
+    AssetCollection out;
+    // Each library a plugin package brought that nothing uses now: its tree's bytes, and the stored files they link.
+    for(const auto& id:assets_.installedLibraries()){
+        if(!assets_.libraryTerms(id).dependency || !assetLibraryUsers(id).empty())continue;
+        out.libraries.push_back(id);
+        if(remove)assets_.removeLibrary(id);
+        else{std::error_code e;for(const auto& f:fs::recursive_directory_iterator(fs::path(assets_.libraryRoot(id,{})),e))if(f.is_regular_file(e)){++out.files;out.bytes+=f.file_size(e);}}
+    }
+    const auto [files,bytes]=assets_.sweep(remove);
+    out.files+=files;out.bytes+=bytes;
+    return out;
+}
 
 void Session::uninstallLibrary(const std::string& id) {
     auto& l=library();

@@ -37,6 +37,7 @@ namespace oscairn
             }
             return false;
         }
+        bool licenseRef(const std::string& license) { return license.find("LicenseRef-") != std::string::npos; }
         bool hidden(const fs::path& relative) { for(const auto& part : relative) if(!part.empty() && part.string()[0] == '.') return true; return false; }
 
         [[noreturn]] void bad(const std::string& why) { throw std::runtime_error("not a usable Oscairn archive: " + why); }
@@ -137,6 +138,8 @@ namespace oscairn
         return assets::sha256(lines);
     }
 
+    bool redistributable(const std::string& license, std::optional<bool> declared) { return declared ? *declared : !licenseRef(license); }
+
     std::string manifestJson(const Package& package)
     {
         std::string items, plugins, files;
@@ -165,7 +168,8 @@ namespace oscairn
             std::string list;
             for(const auto& a : package.assets)
                 list += std::string(list.empty() ? "" : ",") + "{\"path\":" + detail::quote(a.path) + ",\"sha256\":" + detail::quote(a.sha256) + ",\"size\":" + std::to_string(a.size) + '}';
-            assets = "{\"version\":" + detail::quote(package.assetVersion) + ",\"files\":[" + list + "]}";
+            assets = "{\"version\":" + detail::quote(package.assetVersion) + ",\"files\":[" + list + "]" +
+                     (package.redistribute ? std::string(",\"redistribute\":") + (*package.redistribute ? "true" : "false") : std::string()) + "}";
         }
         for(const auto& d : package.assetDependencies) dependencies += std::string(dependencies.empty() ? "" : ",") + "{\"id\":" + detail::quote(d.id) + ",\"version\":" + detail::quote(d.version) + '}';
         return "{\"format\":\"oscairn.library\",\"version\":3,\"id\":" + detail::quote(package.id) + ",\"name\":" + detail::quote(package.name) +
@@ -417,6 +421,11 @@ namespace oscairn
                 if(!p.items.empty() || !p.plugins.empty()) bad("an asset package holds assets and no items or plugins");
                 p.assetVersion = text(detail::member(assets, "version"));
                 if(!plainId(p.assetVersion)) bad("an asset package's version is not plain");
+                if(const V r = detail::member(assets, "redistribute"); r && r->type != json_type_null)
+                {
+                    if(r->type != json_type_true && r->type != json_type_false) bad("an asset package's redistribute is not true or false");
+                    p.redistribute = r->type == json_type_true;
+                }
                 const V list = detail::member(assets, "files");
                 if(!list || list->type != json_type_array) bad("an asset package lists no files");
                 std::set<std::string> listed;
@@ -446,6 +455,12 @@ namespace oscairn
                         p.assetDependencies.push_back(std::move(dependency));
                     }
             if(!p.assetDependencies.empty() && p.kind != "plugin") bad("only a plugin package names asset dependencies");
+            // RFC 0031: a license of the publisher's own (LicenseRef-) comes with its text.
+            if((p.kind == "plugin" || p.kind == "asset") && licenseRef(p.license))
+            {
+                const auto texts = names.lower_bound("Licenses/");
+                if(texts == names.end() || texts->rfind("Licenses/", 0) != 0) bad("a package under " + p.license + " carries no license text under Licenses/");
+            }
             if(p.kind == "plugin" && copyleft(p.license))
             {
                 const auto texts = names.lower_bound("Licenses/");

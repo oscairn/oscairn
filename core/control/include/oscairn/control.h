@@ -422,6 +422,14 @@ namespace oscairn
         // Copies one file into the user library and returns its reference.
         virtual kick::clap::AssetReference importAsset(const std::string& file) = 0;
         virtual std::vector<AssetLibrary> assetLibraries() const = 0;
+        // An asset library installed from an asset package, removed: refused, naming them, while
+        // anything uses it (RFC 0009 step 4).
+        virtual void uninstallAssetLibrary(const std::string& library) = 0;
+        // Garbage collection from explicit roots (RFC 0009 step 4, RFC 0006): the asset libraries a
+        // plugin package brought that nothing uses any more, and stored files no library links to.
+        // With remove false, only what it would remove.
+        struct AssetCollection { std::vector<std::string> libraries; uint64_t files = 0, bytes = 0; };
+        virtual AssetCollection collectAssets(bool remove) = 0;
 
         virtual GraphState graphState() const = 0;
         virtual NodeId add( const std::string& name, const std::string& path, const std::string& pluginId = {} ) = 0;

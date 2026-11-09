@@ -1,7 +1,6 @@
 # RFC 0009: Sound assets and dependencies
 
-Status: steps 1–2 implemented 2026-10-30, step 3 2026-11-09 (see [Implementation status](#implementation-status));
-step 4 in part. This is the concrete asset contract that [RFC 0006](0006-packages-and-portability.md)
+Status: steps 1–2 implemented 2026-10-30, steps 3–4 2026-11-09 (see [Implementation status](#implementation-status)). This is the concrete asset contract that [RFC 0006](0006-packages-and-portability.md)
 leaves as "the planned host asset API" and "assets must be declared by the plugin".
 
 ## Progress
@@ -13,16 +12,16 @@ Checked when built and tested; the sections below say how.
 - [x] 3. LV2 path mapping onto the store; `create` for user-library files
       ([status](#implementation-status): `lv2-state-contract`, `prepared-instances`; the "first
       use" named in the build order, Yamaha user waveform conversion, is RFC 0008's and not built)
-- [ ] 4. Libraries as RFC 0006 packages, with redistribution checks and garbage collection
+- [x] 4. Libraries as RFC 0006 packages, with redistribution checks and garbage collection
+      (redistribution checks and garbage collection 2026-11-09: `control-archives` devices R and
+      Q, `control-repository`; see [status](#implementation-status))
       (built 2026-11-07: asset packages, kind `asset`, packed by `oscairn-sign asset-package`,
       each file by path, SHA-256 and size; installed into the asset store by hash with a
       read-only tree of hard links at `AssetLibraries/<id>/<version>/`, registered under the
       library's ID, one version at a time, replaced atomically; plugin packages naming the asset
       libraries they need (`dependencies.assets`), reported when missing from a file and fetched
       from a repository; the package repository's checks requiring them; `control-archives`,
-      `control-repository`, `package-repository-index`. Not yet: redistribution checks,
-      uninstalling a library and garbage collection of the store, an export carrying a library,
-      an asset package's license texts kept on the device)
+      `control-repository`, `package-repository-index`)
 
 ## Outcome
 
@@ -258,7 +257,37 @@ Step 3 (2026-11-09):
   it through the store, one without a store is refused, a file in a registered folder is
   referenced in place, and a state whose file the store no longer has is refused.
 
-Not done: packages' redistribution checks and garbage collection (step 4), a desktop screen for managing libraries, and fingerprint matching of whole libraries; files
+Step 4 (finished 2026-11-09), beyond the asset packages built 2026-11-07:
+
+- **Redistribution:** an asset package's `assets.redistribute` says whether others may pass the
+  library on; without it, RFC 0031's license rules decide: an SPDX license allows it, a
+  `LicenseRef-` one (the publisher's own terms, whose text the package must now carry) does not
+  (`redistributable()`, `oscairn-sign asset-package --redistribute`). The device keeps each
+  installed library's terms and license texts beside its tree. An export leaves out the files of
+  a library that may not be passed on, saying how many of which library, and carries the license
+  texts of those whose files go in. `control-archives` device R: a `LicenseRef-` package without
+  its text is refused, a Sound using a CC-BY and a vendor library exports with the first's file
+  and attribution and without the second's, a device without the vendor library is told, and
+  with it installed both references resolve.
+- **Garbage collection from explicit roots:** library items, the open Performance, Performances
+  saved outside the library (`performance.save` records each folder with its references, so a
+  drive that is away keeps its pins until the folder is gone from a folder that is there) and
+  plugin packages in the store (each keeps the libraries it needs). A library is used by a
+  reference to its ID or to bytes it holds. `assets.uninstall` refuses a used library, naming
+  what uses it; `assets.collect` removes the libraries a plugin package brought that nothing uses
+  (one installed by hand stays), and stored files no tree links. `control-archives` device Q,
+  with the Legacy Sampler playing a library: a preview names only the unused dependency; a library
+  used by a Sound, by the open Performance and a saved one, by the saved one alone (with its drive
+  renamed away too) and by a plugin package is kept; with the Performance deleted and the plugin
+  removed they are collected with their stored files; what a Sound uses still resolves; one
+  installed by hand goes only when uninstalled. `control-repository`: a library a repository
+  install brought is kept while its plugin package is installed and collected once it is removed.
+- **What an export carries:** the library files its items use, each once by its hash, with the
+  library's license texts, not the whole library as an asset package; installed elsewhere, they go
+  into the user library and the references resolve by their bytes.
+
+Not done: a desktop screen for managing libraries (Used by, the grouped cleanup prompt), roots
+the engine cannot see (a Performance copied by hand, an archive on a drive), and fingerprint matching of whole libraries; files
 resolve individually by content, which already covers a folder registered again elsewhere.
 Registration runs on the engine's control thread and blocks other control requests while a
 large folder is hashed.

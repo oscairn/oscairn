@@ -110,6 +110,11 @@ namespace oscairn
         AssetFolder registerAssetFolder(const std::string& folder) override {AssetFolder f;if(!assets_.locate(folder,f.library,f.directory))f.library=assets_.registerFolder(folder);return f;}
         kick::clap::AssetReference importAsset(const std::string& file) override {return assets_.import(file);}
         std::vector<AssetLibrary> assetLibraries() const override {std::vector<AssetLibrary> r;for(const auto& l:assets_.libraries())r.push_back({l.id,l.name,l.path,l.files});return r;}
+        void uninstallAssetLibrary(const std::string& library) override;
+        AssetCollection collectAssets(bool remove) override;
+        // What uses an asset library (RFC 0009 step 4), each named: library items, the open
+        // Performance, Performances saved outside the library, plugin packages in the store.
+        std::vector<std::string> assetLibraryUsers(const std::string& library);
         bool selectSound(NodeId node,uint32_t id,int16_t channel=-1) override {return graph_.host(node).selectSound(id,channel);}
         bool discardSound(NodeId node,uint32_t id,bool cutTail=false) override {return graph_.host(node).discardSound(id,cutTail);}
         GraphState graphState() const override;
@@ -688,7 +693,7 @@ namespace oscairn
         static signing::Key signingKey(const std::string& name); // Keys/<name>.key in the data folder
         static Signer judge(const std::string& kind, const std::vector<signing::Signature>& signatures); // against the trust store
         struct CodeRefused : std::runtime_error { std::vector<Signer> code; CodeRefused(const std::string& why, std::vector<Signer> signers) : std::runtime_error(why), code(std::move(signers)) {} }; // installUnpacked's refusal, with the signers it judged
-        Installed installUnpacked(const Package& package, const std::filesystem::path& into, bool asLibrary, const std::vector<std::string>& items, bool acceptUnsignedCode, bool thisPlatformOnly, bool checkOnly = false); // checkOnly: refuse as it would, installing nothing
+        Installed installUnpacked(const Package& package, const std::filesystem::path& into, bool asLibrary, const std::vector<std::string>& items, bool acceptUnsignedCode, bool thisPlatformOnly, bool checkOnly = false, bool dependency = false); // checkOnly: refuse as it would, installing nothing; dependency: an asset library a plugin package brought
         struct PackageWork;                        // the package job off the control thread (packages.cpp)
         std::shared_ptr<PackageWork> packageWork_; // joins its thread when it goes
         uint64_t packageJobs_ = 0;

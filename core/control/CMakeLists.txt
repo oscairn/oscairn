@@ -114,7 +114,7 @@ add_test(NAME control-libraries COMMAND oscairn-libraries-test $<TARGET_FILE:osc
     $<TARGET_FILE:oscairn_transpose> $<TARGET_FILE:oscairn_midi_delay> $<TARGET_FILE:kick-clap-fixture-normal>
     "$<$<TARGET_EXISTS:oscairn_modular>:$<TARGET_FILE:oscairn_modular>>")
 set_tests_properties(control-libraries PROPERTIES TIMEOUT 120)
-add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters>)
+add_test(NAME control-archives COMMAND oscairn-archives-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn_sampler>)
 if(Python3_Interpreter_FOUND)
     # The package repository template's index builder (RFC 0031), signed with oscairn-sign.
     add_test(NAME package-repository-index COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/test_build_index.py" $<TARGET_FILE:oscairn-sign>)

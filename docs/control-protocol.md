@@ -729,6 +729,13 @@ Sound assets are files that sounds use without copying them into a Performance
 | `assets.register` | `folder`: absolute path on the engine's filesystem | `library`, `directory`: the library containing the folder (registering the folder as a new library when none does) and the folder's path in it |
 | `assets.import` | `file`: absolute path | `library` (`user`), `path`, `sha256`: a copy in the user library |
 | `assets.libraries` | none | `libraries: [{id, name, path, files}]` |
+| `assets.uninstall` | `library`: an asset library installed from an [asset package](library-archive.md#asset-packages) | `{"accepted":true}`; refused while anything uses it, naming what |
+| `assets.collect` | optional `remove` (default `false`: only say) | `libraries` (IDs), `files`, `bytes`: the asset libraries a plugin package brought that nothing uses now, and the stored files no library links, removed when `remove` |
+
+What uses an asset library, for `assets.uninstall` and `assets.collect`, is reckoned from
+explicit roots ([removal](library-archive.md#asset-packages)): library items, the open
+Performance, Performances saved by `performance.save` (each folder recorded as it is saved) and
+plugin packages in the store. A library installed by hand is never collected.
 
 Registering hashes every file in the folder once, so it can take seconds for a large library;
 `RemoteControl` waits up to 10 minutes. Later lookups re-hash only files whose size or

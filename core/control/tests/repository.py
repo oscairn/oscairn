@@ -480,9 +480,21 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         # the newest version of the library that is at least the one it needs (RFC 0009).
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.analog'})
         library = home / 'AssetLibraries' / 'org.kick.factory'
-        check(state['state'] == 'done' and state['installed']['notes'] == [] and sorted(e.name for e in library.iterdir()) == ['1.1.0'] and
+        check(state['state'] == 'done' and state['installed']['notes'] == [] and sorted(e.name for e in library.iterdir() if not e.name.startswith('.')) == ['1.1.0'] and (library / '.terms').read_text() == 'MIT\t1\t1\n' and
               (library / '1.1.0' / 'patches' / 'Pad.fxp').read_bytes() == b'another patch' and any(p['id'] == 'org.kick.analog' for p in store()) and leftovers() == [],
               'a plugin package installs with the asset library it needs: ' + json.dumps(state)[:400])
+        # The library came only because the package needs it (RFC 0009 step 4): kept while the
+        # package is installed, refused to uninstall, and collected once the package is removed.
+        check(rpc('assets.collect')['libraries'] == [], 'a library a plugin package needs is not collected')
+        error = rpc('assets.uninstall', {'library': 'org.kick.factory'}, expect_error=True)
+        check(error['code'] == -32005 and 'used by' in error['message'], 'nor uninstalled while it needs it: ' + error['message'])
+        analog = next(p for p in store() if p['id'] == 'org.kick.analog')
+        rpc('plugins.remove', {'format': analog['format'], 'id': analog['id'], 'version': analog['version']})
+        preview = rpc('assets.collect', {'remove': False})
+        check(preview['libraries'] == ['org.kick.factory'] and preview['bytes'] > 0 and library.exists(), 'with the package gone, a preview names it: ' + json.dumps(preview))
+        collected = rpc('assets.collect', {'remove': True})
+        check(collected['libraries'] == ['org.kick.factory'] and not library.exists(), 'and collection removes it: ' + json.dumps(collected))
+        check(not any((home / 'assets' / 'store').iterdir()), 'with its stored files')
 
         # The repositories this device knows (RFC 0031): the official one, built in, its root key
         # trusted for repositories only; the image's, from its profile; and the user's.

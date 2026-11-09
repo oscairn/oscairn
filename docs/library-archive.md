@@ -32,7 +32,10 @@ The manifest:
 An export holds the Performance, the library Sound of each part that is still that Sound (the
 part unedited since it was loaded or saved, and the library holding that revision), and with
 **edited Sounds**, the Sound of each part edited since, as the library has it. Every sample their
-plugins list goes in once, by its hash. Each plugin they use goes in with every build there is:
+plugins list goes in once, by its hash, except a file of an installed [asset library](#asset-packages)
+that may not be passed on: that one stays out, the export's notes say how many files of which
+library, and the destination needs the library installed. The license texts of each asset
+library whose files go in go with them, under `Licenses/<library ID>/`. Each plugin they use goes in with every build there is:
 this device's from its `pathHint` while that build still has the document's locked digest, else
 from the plugin store, and the store's builds for other platforms (installed from archives, or
 added with `plugins.addBuild`). Only CLAP plugins go in: LV2 plugins are installed on each device (many need libraries
@@ -139,6 +142,15 @@ file under `Assets/` by its `path` there, `sha256` and `size`:
 "assets": {"version": "1.9.0", "files": [{"path": "wavetables/basic.wt", "sha256": "<64 hex digits>", "size": 16384}]}
 ```
 
+**Redistribution** ([RFC 0009](rfcs/0009-sound-assets-and-dependencies.md#where-files-live)): whether
+an export made on a device may carry the library's files. `assets.redistribute`, `true` or
+`false`, says so when present; without it the license decides, as
+[RFC 0031](rfcs/0031-package-repository-and-distribution.md)'s license rules do: an SPDX license
+grants redistribution, while a `LicenseRef-` license is the publisher's own terms, which Oscairn
+cannot read, so such a library stays out of exports unless its package says `true`. A package
+(plugin or asset) whose license names a `LicenseRef-` must carry its text under `Licenses/`.
+`oscairn-sign asset-package --redistribute yes|no` writes the field.
+
 Every other kind has `"assets": null`. `oscairn-sign asset-package` packs every file in a
 folder, hidden ones aside:
 
@@ -151,7 +163,9 @@ Installing one keeps each file once, by its SHA-256, in the asset store (`assets
 in the data folder), and builds a real folder of the library from it,
 `AssetLibraries/<id>/<version>/<path>`: hard links to the stored files (a copy where a link
 cannot be made), read-only, registered as the library `<id>` so references resolve by its ID and
-path. Preset discovery crawls folders, so a library needs that tree. One version of a library is
+path. Beside the version folder, `.terms` keeps its license, whether it may be passed on and
+whether a plugin package brought it (a line `license<TAB>1|0<TAB>1|0`), and `.licenses/` its
+license texts. Preset discovery crawls folders, so a library needs that tree. One version of a library is
 installed at a time: a new one is built beside the old one, moved into place, and the old one
 removed. A plugin finds the folder through `oscairn.assets`' `library_root`, from its preset
 provider too ([plugin porting](plugin-porting.md)).
@@ -162,7 +176,20 @@ plugin package's may list any), packed with `oscairn-sign plugin-package --asset
 <id> <version>`. Installed from a file, a plugin package whose library is missing, or older,
 says so in its notes. Installed from a package repository, it brings the newest stable version of
 each it lacks that is at least the one named, from the same repository, installed first; the
-install fails when the repository has none.
+install fails when the repository has none. The plugin store keeps the libraries a plugin
+package needs in `assets.tsv` (`id<TAB>version` lines) in each of its plugins' folders.
+
+**Removal** ([RFC 0009](rfcs/0009-sound-assets-and-dependencies.md) step 4, from explicit roots):
+an installed asset library is used by a library item (Sound or Performance) whose document
+references it, by ID or by bytes it holds; by the open Performance; by a Performance saved with
+`performance.save` outside the library (the engine keeps each such folder in `assets/roots.tsv`
+with the references it had when saved, so one on a drive that is away still counts, until its
+folder is gone from a folder that is there); or by a plugin package in the store that needs it.
+`assets.uninstall` removes one only when nothing uses it, naming what does otherwise.
+`assets.collect` removes each library a plugin package brought (not one installed by hand) that
+nothing uses, and the stored files no library's tree links. Anything else on the device, such
+as a copy of a Performance made by hand or an archive on a USB drive, cannot be seen, so a
+library installed by hand is never collected.
 
 ## License and source
 
@@ -194,6 +221,8 @@ nothing behind:
   `Licenses/`;
 - a plugin package naming no license, or under the GPL, LGPL or AGPL without its `source` or a
   file under `Licenses/`, and a `source` that is not an `https://` address and a revision;
+- a plugin or asset package whose license names a `LicenseRef-` without a file under
+  `Licenses/`, and an asset package whose `redistribute` is not `true` or `false`;
 - an asset package naming no license, with items or plugins, whose version is not plain, that
   lists no file, a file twice, one whose path is not safe or that is not under `Assets/`, or
   holds a file under `Assets/` it does not list; a file whose SHA-256 or size is not the one it

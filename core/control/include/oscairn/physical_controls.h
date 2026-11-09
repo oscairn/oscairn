@@ -115,6 +115,10 @@ namespace oscairn
     // of rows sending a number per row, the row (-1: none); nothing when no control sends it.
     struct MidiControl { size_t group = 0; uint32_t index = 0; int row = -1; };
     std::optional<MidiControl> midiControl(const std::vector<ControlGroup>&, const std::string& device, uint32_t port, const uint8_t* bytes, size_t size);
+    // A control's input without MIDI (a device panel's own, read by panel_reader.h): a position
+    // (Absolute, 0 to 1, picked up), a change (Relative, in the same units) or a switch (1
+    // pressed, 0 released; momentary). The MIDI messages above become these too.
+    struct ControlInput { enum class Kind { Absolute, Relative, Switch } kind = Kind::Absolute; double value = 0; };
     class ControllerMapping
     {
     public:
@@ -123,11 +127,15 @@ namespace oscairn
         std::vector<Action> handle(const AssignmentSource&, const std::vector<ControlGroup>&, uint32_t part, GroupPositions& positions,
                                    const std::string& device, uint32_t port, const uint8_t* bytes, size_t size,
                                    const std::function<double(const Assignment&)>& value);
+        // The control by identity ("fader:1", "screen:2", "button:101"), as resolveControls names it.
+        std::vector<Action> handle(const AssignmentSource&, const std::vector<ControlGroup>&, uint32_t part, GroupPositions& positions,
+                                   const std::string& control, ControlInput in, const std::function<double(const Assignment&)>& value);
         // A batch of actions to apply, with each continuous target (a parameter, control or part
         // level) set once, to its last value, where that last value came; mutes and scenes keep every
         // action in order. A swept wheel sends a CC a millisecond: applying each in turn falls behind.
         static std::vector<Action> latest(std::vector<Action> actions);
     private:
+        std::vector<Action> play(const ResolvedControl&, bool latch, ControlInput, const std::function<double(const Assignment&)>& value);
         struct Pickup { Assignment target; bool caught = false; double knob = -1; std::array<double, 32> sent{}; size_t sends = 0; };
         std::map<std::string, Pickup> pickup_;
     };

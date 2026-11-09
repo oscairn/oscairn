@@ -82,45 +82,67 @@ namespace oscairn
         const auto resolved = resolveControls(s, groups, part, positions);
         const auto r = std::find_if(resolved.begin(), resolved.end(), [&](const ResolvedControl& c) { return c.group == g && c.index == index; });
         if(r == resolved.end()) return {};
+        // The message as a control's input: a press or release, a relative step, or a position.
+        ControlInput in;
+        const auto encoding = index < group.midi.encodings.size() ? group.midi.encodings[index] : Encoding::Absolute;
+        if(group.kind == "buttons" || group.kind == "footswitches" || message == Message::Note)
+            in = {ControlInput::Kind::Switch, double(message == Message::Note ? kind == 0x90 && d2 > 0 : d2 >= 64)};
+        else if(encoding != Encoding::Absolute)
+        {
+            const auto steps = index < group.midi.steps.size() ? group.midi.steps[index] : std::array<uint8_t, 2>{};
+            in = {ControlInput::Kind::Relative, relativeSteps(encoding, d2, steps) / 127.0};
+        }
+        else in = {ControlInput::Kind::Absolute, message == Message::PitchBend ? (d1 | (d2 << 7)) / 16383.0 : message == Message::Pressure ? d1 / 127.0 : d2 / 127.0};
+        return play(*r, group.midi.latch, in, value);
+    }
+
+    std::vector<ControllerMapping::Action> ControllerMapping::handle(const AssignmentSource& s, const std::vector<ControlGroup>& groups, uint32_t part, GroupPositions& positions,
+                                                                     const std::string& control, ControlInput in, const std::function<double(const Assignment&)>& value)
+    {
+        const auto resolved = resolveControls(s, groups, part, positions);
+        const auto r = std::find_if(resolved.begin(), resolved.end(), [&](const ResolvedControl& c) { return c.control == control; });
+        if(r == resolved.end()) return {};
+        return play(*r, false, in, value);
+    }
+
+    std::vector<ControllerMapping::Action> ControllerMapping::play(const ResolvedControl& r, bool latch, ControlInput in, const std::function<double(const Assignment&)>& value)
+    {
         // What it plays: its target, or with a function and nothing assigned, each part's Sound's
         // (none: the controller's message reaches the parts on its own).
         std::vector<Assignment> targets;
-        if(r->target.kind != Assignment::Kind::None) targets.push_back(r->target);
-        else for(const auto& [p, t] : r->parts) targets.push_back(t);
+        if(r.target.kind != Assignment::Kind::None) targets.push_back(r.target);
+        else for(const auto& [p, t] : r.parts) targets.push_back(t);
         std::vector<Action> out;
-        const bool button = group.kind == "buttons" || group.kind == "footswitches" || message == Message::Note;
-        const auto encoding = index < group.midi.encodings.size() ? group.midi.encodings[index] : Encoding::Absolute;
-        constexpr double step = 1.0 / 127, tolerance = 1.0 / 127 + 1e-9;
+        constexpr double tolerance = 1.0 / 127 + 1e-9;
         for(const auto& t : targets)
         {
             const double now = std::clamp(value(t), 0.0, 1.0);
-            if(button)
+            if(in.kind == ControlInput::Kind::Switch)
             {
-                const bool on = message == Message::Note ? kind == 0x90 && d2 > 0 : d2 >= 64;
+                const bool on = in.value >= .5;
                 // A latching switch changes state on every press, so each message is a press.
-                if(t.kind == Assignment::Kind::Scene || t.kind == Assignment::Kind::Panic) { if(on || group.midi.latch) out.push_back({r->control, t, 1}); continue; }
-                if(group.midi.latch) out.push_back({r->control, t, on ? 1.0 : 0.0});
-                else if(on) out.push_back({r->control, t, now >= .5 ? 0.0 : 1.0});
+                if(t.kind == Assignment::Kind::Scene || t.kind == Assignment::Kind::Panic) { if(on || latch) out.push_back({r.control, t, 1}); continue; }
+                if(latch) out.push_back({r.control, t, on ? 1.0 : 0.0});
+                else if(on) out.push_back({r.control, t, now >= .5 ? 0.0 : 1.0});
                 continue;
             }
             if(t.kind == Assignment::Kind::Panic) continue; // a button's only
-            if(encoding != Encoding::Absolute)
+            if(in.kind == ControlInput::Kind::Relative)
             {
-                const auto steps = index < group.midi.steps.size() ? group.midi.steps[index] : std::array<uint8_t, 2>{};
-                out.push_back({r->control, t, std::clamp(now + relativeSteps(encoding, d2, steps) * step, 0.0, 1.0)});
+                out.push_back({r.control, t, std::clamp(now + in.value, 0.0, 1.0)});
                 continue;
             }
             // Absolute: pick up. Lost when the target changes or something else moves it (a value
             // that is none of this control's recent ones: values read back may lag a little).
-            const double x = message == Message::PitchBend ? (d1 | (d2 << 7)) / 16383.0 : message == Message::Pressure ? d1 / 127.0 : d2 / 127.0;
-            auto& p = pickup_[r->control + "/" + std::to_string(t.node) + "." + std::to_string(t.param) + "." + std::to_string(t.id) + "." + std::to_string(int(t.kind))];
+            const double x = std::clamp(in.value, 0.0, 1.0);
+            auto& p = pickup_[r.control + "/" + std::to_string(t.node) + "." + std::to_string(t.param) + "." + std::to_string(t.id) + "." + std::to_string(int(t.kind))];
             const bool ours = std::any_of(p.sent.begin(), p.sent.begin() + std::min(p.sends, p.sent.size()), [&](double v) { return std::abs(v - now) <= tolerance; });
             if(p.target != t || (p.caught && !ours)) { p.target = t; p.caught = false; p.sends = 0; }
             if(!p.caught && (std::abs(x - now) <= tolerance || (p.knob >= 0 && (p.knob - now) * (x - now) <= 0))) p.caught = true;
             p.knob = x;
             if(!p.caught) continue;
             p.sent[p.sends++ % p.sent.size()] = x;
-            out.push_back({r->control, t, x});
+            out.push_back({r.control, t, x});
         }
         return out;
     }

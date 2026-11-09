@@ -57,6 +57,23 @@ namespace oscairn
         if(wake) wake();
     }
 
+    bool ControllerInput::control(const std::string& control, ControlInput input) noexcept
+    {
+        std::function<void()> wake;
+        bool played = false;
+        try
+        {
+            std::lock_guard lock(lock_);
+            const auto moves = moves_;
+            for(const auto& action : mapping_.handle(source_, groups_, part_, positions_, control, input, [this](const Assignment& a) { return value(a); }))
+                { play(action); played = true; }
+            if(moves_ != moves) wake = wake_;
+        }
+        catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
+        if(wake) wake();
+        return played;
+    }
+
     double ControllerInput::value(const Assignment& a) const
     {
         switch(a.kind)

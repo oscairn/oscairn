@@ -821,6 +821,9 @@ namespace oscairn::standalone
                 const auto profile=loadProfile(argument(args,"--profile").unquoted().toStdString());
                 const auto controllers=controllerProfiles(controllerFiles); // checked before anything opens
                 if(!args.contains("--connect") && !args.contains("--buffer-frames") && profile.audio.block>0)audio.bufferFrames=uint32_t(profile.audio.block);
+                // Its audio device and channel map, unless the command line chooses a device or channels.
+                if(!args.contains("--connect") && !args.contains("--output-device") && !args.contains("--input-device") && !args.contains("--audio-outputs") &&
+                   !args.contains("--audio-inputs") && !args.contains("--device-channels") && !args.contains("--sample-rate"))profile.configureAudio(audio);
                 // Its panel, when it has one that is not MIDI: read by a new engine, its map beside the
                 // installed program (share/oscairn/panels) unless the profile gives a path.
                 if(!args.contains("--connect") && !profile.panel.device.empty())

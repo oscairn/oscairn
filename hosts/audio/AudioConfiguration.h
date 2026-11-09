@@ -15,9 +15,13 @@ struct AudioConfiguration
     std::vector<uint32_t> inputs,outputs{0,1}; // logical order -> physical channel (zero based)
     bool explicitOutputs=false;
     uint32_t bufferFrames=0; // the block the device is asked for (a device profile's, RFC 0024); 0: the build's default
+    // A profile's audio.device (RFC 0024): the device's channels, opened in each direction used
+    // whether mapped or not (a TDM link opens all its slots), and the rate it must run at. 0: as today.
+    uint32_t deviceChannels=0,sampleRate=0;
     std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, panel_reader.h); empty: none
     static bool isOption(std::string_view name)
-    {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames" || name=="--panel-device" || name=="--panel-map";}
+    {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames" ||
+            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map";}
     void setOption(std::string_view name,const std::string& value)
     {
         if(value.empty() || value.find('\0')!=std::string::npos)throw std::invalid_argument("Empty or invalid audio option");
@@ -27,11 +31,9 @@ struct AudioConfiguration
         else if(name=="--output-device")outputDevice=value;
         else if(name=="--panel-device")panelDevice=value;
         else if(name=="--panel-map")panelMap=value;
-        else if(name=="--buffer-frames")
-        {
-            const auto parsed=std::from_chars(value.data(),value.data()+value.size(),bufferFrames);
-            if(parsed.ec!=std::errc{} || parsed.ptr!=value.data()+value.size() || bufferFrames<16 || bufferFrames>8192)throw std::invalid_argument("--buffer-frames is 16 to 8192");
-        }
+        else if(name=="--buffer-frames")bufferFrames=number(value,16,8192,"--buffer-frames is 16 to 8192");
+        else if(name=="--device-channels")deviceChannels=number(value,1,256,"--device-channels is 1 to 256");
+        else if(name=="--sample-rate")sampleRate=number(value,8000,384000,"--sample-rate is 8000 to 384000");
         else throw std::invalid_argument("Unknown audio option");
     }
     void validate() const
@@ -45,6 +47,8 @@ struct AudioConfiguration
         if(!explicitOutputs && outputs!=std::vector<uint32_t>{0,1})throw std::invalid_argument("Custom outputs require explicit selection");
         if(inputDevice.find('\0')!=std::string::npos || outputDevice.find('\0')!=std::string::npos)throw std::invalid_argument("Invalid audio device name");
         if(panelDevice.empty()!=panelMap.empty())throw std::invalid_argument("--panel-device and --panel-map come together");
+        for(const auto* list:{&inputs,&outputs})
+            for(auto c:*list)if(deviceChannels && c>=deviceChannels)throw std::invalid_argument("A mapped channel is beyond --device-channels");
     }
     std::vector<std::string> arguments() const
     {
@@ -56,8 +60,16 @@ struct AudioConfiguration
         if(!inputs.empty()){args.push_back("--audio-inputs");args.push_back(list(inputs));}
         if(explicitOutputs){args.push_back("--audio-outputs");args.push_back(list(outputs));}
         if(bufferFrames){args.push_back("--buffer-frames");args.push_back(std::to_string(bufferFrames));}
+        if(deviceChannels){args.push_back("--device-channels");args.push_back(std::to_string(deviceChannels));}
+        if(sampleRate){args.push_back("--sample-rate");args.push_back(std::to_string(sampleRate));}
         if(!panelDevice.empty()){args.push_back("--panel-device");args.push_back(panelDevice);args.push_back("--panel-map");args.push_back(panelMap);}
         return args;
+    }
+    static uint32_t number(std::string_view value,uint32_t low,uint32_t high,const char* why)
+    {
+        uint32_t n=0;const auto parsed=std::from_chars(value.data(),value.data()+value.size(),n);
+        if(parsed.ec!=std::errc{} || parsed.ptr!=value.data()+value.size() || n<low || n>high)throw std::invalid_argument(why);
+        return n;
     }
     static std::vector<uint32_t> parseChannels(std::string_view text)
     {

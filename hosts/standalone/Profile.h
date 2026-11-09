@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
+#include "../audio/AudioConfiguration.h"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -18,7 +19,15 @@ namespace oscairn::standalone
         // memory and storage in MiB; osMemory and performanceMemory (RFC 0025's memory classes, both
         // or neither): what the OS and everything beside Oscairn need, and the floor for Performances.
         struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; } compute;
-        struct Audio { int inputs = 0, outputs = 2; std::vector<int> rates; int block = 0; bool headphones = false; } audio; // block 0: the build's default
+        // `device` (optional): the audio device the engine opens instead of the default: its name (an
+        // ALSA address such as hw:1,0 or PCM name on Linux, a device's name on macOS), its channel
+        // count (all opened in each direction used; 0: those mapped), the rate it must run at (0:
+        // the device's), and Oscairn's logical outputs and inputs, each by name with its device
+        // channels: `main` first (left and right), then the others in the profile's order.
+        // Unmapped channels are kept silent. Without it: the default device.
+        using Channels = std::vector<std::pair<std::string, std::vector<int>>>;
+        struct Device { std::string name; int channels = 0, rate = 0; Channels outputs, inputs; };
+        struct Audio { int inputs = 0, outputs = 2; std::vector<int> rates; int block = 0; bool headphones = false; Device device; } audio; // block 0: the build's default
         // A group of physical controls (RFC 0024, RFC 0011's physical controls): its kind and
         // count, and its role: notes (keys, pads), screen (following what the screen shows),
         // assign (playing banks), fixed (a dedicated function, named in `functions`, one each).
@@ -80,6 +89,8 @@ namespace oscairn::standalone
         std::vector<std::string> estimated;  // sections whose values are estimates, not measured on a unit
 
         bool offers(const std::string& app) const;
+        // audio.device as the engine's audio options (RFC 0024); nothing without it.
+        void configureAudio(host::AudioConfiguration& audio) const;
         // An external controller's profile: it has ports, and its controls join a device's while connected.
         bool controller() const { return !midi.ports.empty(); }
         // The engine's budget (RFC 0025): one audio thread's time less the reliability level's

@@ -498,7 +498,8 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
 - [ ] **device profiles:** one manifest per product that the image, engine, UI, mappings,
   packages and admission read instead of flags ([RFC 0024](rfcs/0024-device-profiles.md#progress)).
   Built: the schema, the desktop's, QEMU, KICK and Ignite profiles (the last two estimated),
-  `--profile`, the app's surface, layout, apps and audio block following it, the engine's
+  `--profile`, the app's surface, layout, apps, audio block and audio device with its channel
+  map following it, the engine's
   budget set from it, and external MIDI controllers' profiles matched by port name (the SMK37
   Elite and the MODX M over USB, estimated) with `oscairn-midi-monitor` to read them, and Mackie
   Control ports read and fed back

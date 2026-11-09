@@ -74,6 +74,22 @@ namespace oscairn::standalone
 
     bool Profile::offers(const std::string& app) const { return std::find(apps.begin(), apps.end(), app) != apps.end(); }
 
+    void Profile::configureAudio(host::AudioConfiguration& config) const
+    {
+        const auto& d = audio.device;
+        if(d.name.empty()) return;
+        auto list = [](const Channels& logical) {
+            std::string out;
+            for(const auto& entry : logical) for(auto c : entry.second) out += (out.empty() ? "" : ",") + std::to_string(c);
+            return out;
+        };
+        config.setOption("--output-device", d.name);
+        if(!d.outputs.empty()) config.setOption("--audio-outputs", list(d.outputs));
+        if(!d.inputs.empty()) { config.setOption("--input-device", d.name); config.setOption("--audio-inputs", list(d.inputs)); }
+        if(d.channels) config.setOption("--device-channels", std::to_string(d.channels));
+        if(d.rate) config.setOption("--sample-rate", std::to_string(d.rate));
+    }
+
     // shortcut: RFC 0025's illustrative figures, not measured; measure each app on each profile and read them from manifests (step 8).
     int Profile::appMemory(const std::string& app)
     {
@@ -115,7 +131,7 @@ namespace oscairn::standalone
         }
         if(const auto v = root.getProperty("audio"); !v.isVoid())
         {
-            const auto& o = object(v, "audio"); fields(o, {"inputs", "outputs", "rates", "block", "headphones"}, "audio");
+            const auto& o = object(v, "audio"); fields(o, {"inputs", "outputs", "rates", "block", "headphones", "device"}, "audio");
             p.audio.inputs = count(o, "inputs", 256); p.audio.outputs = count(o, "outputs", 256);
             p.audio.block = count(o, "block", 8192); p.audio.headphones = flag(o, "headphones");
             if(p.audio.block) require(p.audio.block >= 16, "block is at least 16 frames");
@@ -123,6 +139,37 @@ namespace oscairn::standalone
             {
                 require(r.isArray(), "rates must be a list");
                 for(const auto& e : *r.getArray()) { require(e.isInt() && int(e) >= 8000 && int(e) <= 384000, "rates are sample rates in Hz"); p.audio.rates.push_back(int(e)); }
+            }
+            if(const auto d = o.getProperty("device"); !d.isVoid())
+            {
+                const auto& od = object(d, "audio.device"); fields(od, {"name", "channels", "rate", "outputs", "inputs"}, "audio.device");
+                auto& device = p.audio.device;
+                device.name = text(od, "name");
+                require(!device.name.empty(), "audio.device names its device");
+                device.channels = count(od, "channels", 256); device.rate = count(od, "rate", 384000);
+                require(device.channels > 0 || !od.hasProperty("channels"), "audio.device's channels are at least 1");
+                require(device.rate >= 8000 || !od.hasProperty("rate"), "audio.device's rate is a sample rate in Hz");
+                for(auto [key, list] : {std::pair{"outputs", &device.outputs}, std::pair{"inputs", &device.inputs}})
+                {
+                    const auto m = od.getProperty(key);
+                    if(m.isVoid()) continue;
+                    std::set<int> used;
+                    for(const auto& [name, channels] : object(m, std::string("audio.device.") + key).getProperties())
+                    {
+                        require(channels.isArray() && channels.size() >= 1 && channels.size() <= 256, std::string("each of audio.device.") + key + " lists its device channels");
+                        std::vector<int> mapped;
+                        for(const auto& c : *channels.getArray())
+                        {
+                            require(c.isInt() && int(c) >= 0 && int(c) < (device.channels ? device.channels : 256), "audio.device's channels are numbered from 0, below its channel count");
+                            require(used.insert(int(c)).second, "audio.device maps a device channel twice");
+                            mapped.push_back(int(c));
+                        }
+                        list->emplace_back(name.toString().toStdString(), std::move(mapped));
+                    }
+                    const auto main = std::find_if(list->begin(), list->end(), [](const auto& e) { return e.first == "main"; });
+                    require(main != list->end() && main->second.size() == 2, std::string("audio.device.") + key + " has main, left and right");
+                    std::rotate(list->begin(), main, main + 1); // main first, the others in order
+                }
             }
         }
         if(const auto v = root.getProperty("controls"); !v.isVoid())

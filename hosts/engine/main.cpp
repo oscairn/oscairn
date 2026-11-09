@@ -27,7 +27,7 @@ int main(int argc,char** argv)
             audioConfig.setOption(arg,argv[++i]);continue;
         }
         if(arg=="--managed"){managed=true;continue;}
-        if(arg=="--help"){std::cout<<"oscairn-engine --socket /private/directory/control.sock [--plugins DIR]\n  [--input-device NAME] [--output-device NAME]\n  [--audio-inputs none|0,1,...] [--audio-outputs 0,1,...]\n  [--panel-device /dev/NAME --panel-map FILE] (built with OSCAIRN_PANEL_ROLAND)\nChannel indices are zero-based; list order defines logical graph channels.\n";return 0;}
+        if(arg=="--help"){std::cout<<"oscairn-engine --socket /private/directory/control.sock [--plugins DIR]\n  [--input-device NAME] [--output-device NAME]\n  [--audio-inputs none|0,1,...] [--audio-outputs 0,1,...]\n  [--device-channels N] [--sample-rate HZ] [--buffer-frames N]\n  [--panel-device /dev/NAME --panel-map FILE] (built with OSCAIRN_PANEL_ROLAND)\nChannel indices are zero-based; list order defines logical graph channels.\n";return 0;}
         if((arg=="--socket" || arg=="--plugins") && i+1<argc){(arg=="--socket"?socket:plugins)=argv[++i];continue;}
         std::cerr<<"Unknown or incomplete argument: "<<arg<<'\n';return 2;
     }

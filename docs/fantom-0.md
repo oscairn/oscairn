@@ -49,8 +49,7 @@ tree, and Roland's test tool), and Roland's published specifications and owner's
   audio, 2048 MiB), a 1280 × 720 touch screen, 48 kHz at 128-frame blocks, instrument
   reliability, the Performance, Groovebox, Library and Setlist apps, and its panel (below).
   **Estimated** (`estimated`): `audio` (two inputs for MIC/LINE, four outputs for MAIN and SUB
-  OUT, headphones: the TDM slots behind them are unknown, and the profile has no field for the
-  ALSA device or its 16 slots), `controls` (Roland's counts, but whether each reaches the i.MX,
+  OUT, headphones, and the audio device below, whose slots are a guess), `controls` (Roland's counts, but whether each reaches the i.MX,
   and the roles below, are Oscairn's guesses) and `midi`. The controls, in order, with what
   they are in Oscairn ([RFC 0024's identities](rfcs/0024-device-profiles.md#default-targets)):
   the lever as `wheel:1` (pitch bend) and `wheel:2` (modulation); WHEEL1 and WHEEL2 as
@@ -61,6 +60,17 @@ tree, and Roland's test tool), and Roland's published specifications and owner's
   `screen:1` to `screen:6`; ZONE INT/EXT 1 to 8 as `button:101` to `button:108` on part mutes;
   the VALUE dial, MASTER VOLUME and every other button as fixed functions; the keys and pads as
   notes; the HOLD jack as sustain and CTRL1 and CTRL2 as expression pedals, unassigned.
+- **The audio device** (the profile's `audio.device`, [RFC 0024](rfcs/0024-device-profiles.md#what-a-profile-holds)):
+  `{ "name": "hw:1,0", "channels": 16, "rate": 48000, "outputs": { "main": [0, 1] } }`. The
+  engine opens `hw:1,0` with all 16 slots at 48 kHz (refusing to start at another rate), plays
+  main left and right on slots 0 and 1 and keeps the other 14 silent. JUCE, which opens it, takes
+  S32_LE when the device offers no float format. **Slots 0 and 1 are a guess**, and so are 16
+  channels where Roland's app opens 6 (if `hw:1,0` refuses 16, try `"channels": 6`); no inputs and
+  no SUB OUT are mapped until their slots are known. To find MAIN OUT on a unit, copy the profile, change `main`
+  (for example to `[2, 3]`), start the app with `--profile` and the copy's path (the built-in
+  one is compiled in), and listen at a low level; or run `oscairn-engine` with
+  `--output-device hw:1,0 --device-channels 16 --sample-rate 48000 --audio-outputs 2,3`; the SUB OUT pair, once found,
+  goes in as `"sub": [n, n + 1]`.
 - **The screen:** Oscairn has no layout made for 1280 × 720 and no scaling by pixel density, so
   the profile shows `kick-screen`, the KICK's 1024 × 600 screen layout and the closest there is:
   a panel layout scales to fit (720 / 600, 1.2 times, about 1229 pixels wide with narrow bars at

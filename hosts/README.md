@@ -336,6 +336,20 @@ silently applying old routes to a different device. Restart with the desired con
 to change it. There is no routing editor, device-selection UI, or persistent project
 format yet. Physical multichannel interfaces and target-board drivers still need testing.
 
+A device profile can choose the device and its channels instead
+([RFC 0024](../docs/rfcs/0024-device-profiles.md#what-a-profile-holds), `audio.device`): the app
+turns it into these options for the engine it starts, unless the command line gives a device or
+channels itself. Two more
+options come with it: `--device-channels N` opens all N of the device's channels in each
+direction used, mapped or not (a TDM link's slots), with every unmapped one kept silent, and
+`--sample-rate HZ` asks for that rate and refuses to start at another. On Linux,
+`--output-device` and `--input-device` also take an ALSA address (`hw:1,0`) or PCM name: the
+engine opens the device JUCE lists by that name hint's description. ALSA lists `hw` devices only
+with `defaults.namehint.extended on`, which the OS image sets in `/etc/asound.conf`; elsewhere,
+put that line in `~/.asoundrc` to name a `hw:` address. On macOS they take a Core Audio device's name, as before.
+For example, the FANTOM-07's profile gives
+`--output-device hw:1,0 --audio-outputs 0,1 --device-channels 16 --sample-rate 48000`.
+
 The headless `audio-routing`/`audio-routing-lv2` tests check independent master/cue/record
 buses, sidechains, explicit averaging, range/cycle rejection, live edits and mixed CLAP/LV2
 ports under the allocation guard. `audio-device-channel-map` tests reordered/sparse

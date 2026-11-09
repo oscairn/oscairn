@@ -40,6 +40,10 @@ image is built for the Cortex-A53. See [running on a KICK](../docs/kick.md).
   same engine as the desktop app; see [audio buffer configuration](../hosts/README.md#audio-buffer-size).
   The backend chooses a supported size if 128 is unavailable; check the startup log
   for the actual size. Reliability at 128 frames still needs validation on real hardware.
+  `/etc/asound.conf` turns on ALSA's extended name hints, so a profile's `audio.device` can name
+  a card by its address (`hw:1,0`); `os/scripts/alsa-slots-test.py` boots the QEMU image and
+  checks that the engine writes a profile's map to a 16-channel ALSA device (a file, not a
+  speaker) and opens `hw:0,0`.
 
 ## Changing the UI later
 

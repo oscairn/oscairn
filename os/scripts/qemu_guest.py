@@ -20,11 +20,12 @@ def cmdline(images, extra=""):
     return " ".join(a for a in ("rootwait root=/dev/vda console=ttyAMA0", extra, args) if a)
 
 
-def control_client(images):
-    """control-request.c built with the image's own compiler (in images/../host), as base64."""
+def control_client(images, name="control-request"):
+    """NAME.c (control-request.c, or another tool beside it) built with the image's own compiler
+    (in images/../host), as base64."""
     gcc = glob.glob(os.path.join(images, "..", "host", "bin", "*-buildroot-linux-gnu-gcc"))[0]
-    out = os.path.join(tempfile.mkdtemp(), "control-request")
-    subprocess.run([gcc, "-O2", "-s", "-o", out, os.path.join(here, "control-request.c")], check=True)
+    out = os.path.join(tempfile.mkdtemp(), name)
+    subprocess.run([gcc, "-O2", "-s", "-o", out, os.path.join(here, name + ".c"), "-lm"], check=True)
     return base64.encodebytes(open(out, "rb").read()).decode()
 
 
@@ -67,9 +68,9 @@ class Console:
         output = self.text[mark:self.text.index("==DONE==", mark)]
         return "\n".join(l.rstrip("\r") for l in output.splitlines() if "==DO''NE==" not in l)
 
-    def install_client(self, images):
-        """Types the control client into the guest as /tmp/control-request."""
-        self.run("base64 -d > /tmp/control-request << 'EOF'\n" + control_client(images) + "EOF\nchmod +x /tmp/control-request")
+    def install_client(self, images, name="control-request"):
+        """Types the control client (or another tool beside it) into the guest as /tmp/NAME."""
+        self.run(f"base64 -d > /tmp/{name} << 'EOF'\n" + control_client(images, name) + f"EOF\nchmod +x /tmp/{name}")
 
     def session_status(self):
         """The engine's session.status, read in the guest, as the JSON line it returned."""

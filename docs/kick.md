@@ -53,7 +53,8 @@ sequencer through the Basic Synth and the Delay.
 - **The KICK's audio codec, display and touch controller:** nothing is specific to them; the app
   uses what ALSA and X11 provide. It opens ALSA's default device; the profile asks for
   128-frame blocks, the device may choose another size (the log says which), and the profile's
-  sample rate is not applied yet.
+  `rates` are not applied (a profile's `audio.device` can name the device and force its rate,
+  as the FANTOM-07's does; the KICK's does not yet).
 - **Live controls in the Performance app, the system shell's full top bar, quick settings and
   the running-apps switcher:** designed in RFC 0030, not built.
 - **Measured CPU and memory budgets on the KICK:** the budget comes from the profile's estimates.

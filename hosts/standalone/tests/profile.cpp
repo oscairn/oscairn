@@ -269,6 +269,36 @@ int main()
         check(audio.bufferFrames == 128 && audio.arguments() == std::vector<std::string>{"--buffer-frames", "128"}, "the block is passed to the engine");
         bool bad = false; try { audio.setOption("--buffer-frames", "8"); } catch(const std::invalid_argument&) { bad = true; }
         check(bad, "a block under 16 frames is refused");
+
+        // A profile's audio device (audio.device) reaches the engine as audio options: the
+        // FANTOM-07's TDM link, all 16 slots open, main out on the (estimated) slots 0 and 1.
+        {
+            std::string fantomJson; for(const auto& [id, text] : all) if(id == "fantom-07") fantomJson = text;
+            oscairn::host::AudioConfiguration fantom;
+            Profile::parse(fantomJson).configureAudio(fantom);
+            check(fantom.arguments() == std::vector<std::string>{"--output-device", "hw:1,0", "--audio-outputs", "0,1", "--device-channels", "16", "--sample-rate", "48000"},
+                  "the FANTOM-07's device, channels, rate and main outputs reach the engine");
+            oscairn::host::AudioConfiguration none;
+            Profile::parse(kickJson).configureAudio(none);
+            check(none.arguments().empty(), "a profile without a device leaves the engine's audio as it was");
+            const std::string device = "\"device\": { \"name\": \"hw:1,0\", \"channels\": 16, \"rate\": 48000, \"outputs\": { \"main\": [0, 1] } }";
+            const auto mapped = Profile::parse(replaced(fantomJson, device,
+                "\"device\": { \"name\": \"Interface\", \"outputs\": { \"cue\": [4, 5], \"main\": [7, 6], \"sub\": [2] }, \"inputs\": { \"main\": [1, 0] } }"));
+            oscairn::host::AudioConfiguration order;
+            mapped.configureAudio(order);
+            check(order.outputs == std::vector<uint32_t>{7, 6, 4, 5, 2} && order.inputs == std::vector<uint32_t>{1, 0} && order.inputDevice == "Interface" &&
+                  !order.deviceChannels && !order.sampleRate, "main first, the other outputs in order, and inputs from the same device");
+            for(const auto& [bad, why] : std::vector<std::pair<std::string, std::string>>{
+                    {"\"device\": { \"name\": \"\" }", "a device without a name"},
+                    {"\"device\": { \"name\": \"hw:1,0\", \"outputs\": { \"sub\": [2, 3] } }", "outputs without main"},
+                    {"\"device\": { \"name\": \"hw:1,0\", \"outputs\": { \"main\": [0] } }", "a mono main"},
+                    {"\"device\": { \"name\": \"hw:1,0\", \"channels\": 16, \"outputs\": { \"main\": [15, 16] } }", "a channel beyond the device's"},
+                    {"\"device\": { \"name\": \"hw:1,0\", \"outputs\": { \"main\": [0, 1], \"cue\": [1, 2] } }", "a channel mapped twice"},
+                    {"\"device\": { \"name\": \"hw:1,0\", \"rate\": 100 }", "a rate that is not a sample rate"},
+                    {"\"device\": { \"name\": \"hw:1,0\", \"channels\": 0 }", "no channels"},
+                    {"\"device\": { \"name\": \"hw:1,0\", \"format\": \"S32_LE\" }", "an unknown field"}})
+                check(refused(replaced(fantomJson, device, bad)), "refused: " + why);
+        }
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); ++failures; }
     if(!failures) std::puts("ok: device profiles: built in, the desktop's, refusals and the block");

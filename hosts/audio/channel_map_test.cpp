@@ -26,5 +26,23 @@ int main(){try{
     ChannelMap normal({},37);calls=0;
     auto stereo=[](const float* const*,uint32_t,float* const* output,uint32_t,uint32_t n,uint32_t){std::fill_n(output[0],n,.25f);std::fill_n(output[1],n,.75f);return true;};
     check(normal.process(nullptr,0,out.data(),1,100,stereo),"default retains mono-device support");for(auto value:buffers[0])check(value==.25f,"default mono policy keeps left");
-    std::cout<<"ok: physical channel order, sparse maps, aliasing, callback splitting and unavailable-output isolation\n";return 0;
+    // A profile's 16-channel device (a TDM link, RFC 0024's audio.device): main left and right on
+    // the mapped slots, every other slot silent, whatever the buffers held before.
+    for(auto slots:{"0,1","7,6"})
+    {
+        AudioConfiguration tdm;
+        for(auto [name,value]:{std::pair{"--output-device","hw:1,0"},std::pair{"--device-channels","16"},std::pair{"--audio-outputs",slots}})tdm.setOption(name,value);
+        check(ChannelMap::required(tdm.outputs)<16 && tdm.deviceChannels==16,"the device's channel count is apart from the map");
+        ChannelMap slotMap(tdm,128);
+        std::array<std::array<float,128>,16> device;std::array<float*,16> pointers;
+        for(size_t c=0;c<16;++c){device[c].fill(9.f);pointers[c]=device[c].data();}
+        forbidAllocation=true;const bool played=slotMap.process(nullptr,0,pointers.data(),16,128,stereo);forbidAllocation=false;
+        check(played,"a 16-channel device plays");
+        for(size_t c=0;c<16;++c)for(auto v:device[c])
+            check(v==(c==tdm.outputs[0]?.25f:c==tdm.outputs[1]?.75f:0.f),"main left and right on the mapped slots, silence on the other 14");
+        bool refused=false;try{AudioConfiguration beyond;beyond.setOption("--device-channels","16");beyond.setOption("--audio-outputs","15,16");beyond.validate();}catch(const std::invalid_argument&){refused=true;}
+        check(refused,"a slot beyond the device's channels is refused");
+    }
+    check(AudioConfiguration{}.arguments().empty(),"without a device the engine's options are as before");
+    std::cout<<"ok: physical channel order, sparse maps, aliasing, callback splitting, unavailable-output isolation and a 16-slot device\n";return 0;
 }catch(const std::exception& e){forbidAllocation=false;std::cerr<<e.what()<<'\n';return 1;}}

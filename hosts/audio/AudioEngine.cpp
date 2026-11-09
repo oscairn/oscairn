@@ -11,18 +11,71 @@
 #include <set>
 #include <sstream>
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
+#ifdef __linux__
+#include <alsa/asoundlib.h>
+#endif
 
 namespace oscairn::host
 {
+    namespace
+    {
+        // The name JUCE lists a device by. On Linux a profile may name an ALSA device by its
+        // address (hw:1,0, or any PCM name such as hw:CARD=Dummy,DEV=0): JUCE lists ALSA's name
+        // hints by their descriptions, so the address becomes the description of its hint.
+        // Anything else (a Core Audio device's name, a description) is returned as given.
+        std::string listedName( const std::string& name )
+        {
+#ifdef __linux__
+            if( name.empty() ) return name;
+            // ALSA hints at hw devices only with defaults.namehint.extended on (the image's
+            // /etc/asound.conf), and JUCE opens only what is hinted.
+            int card = -1, device = -1;
+            char tail = 0;
+            const bool numbered = std::sscanf( name.c_str(), "hw:%d,%d%c", &card, &device, &tail ) == 2;
+            void** hints = nullptr;
+            if( snd_device_name_hint( -1, "pcm", &hints ) < 0 ) return name;
+            std::string found;
+            for( auto** h = reinterpret_cast<char**>( hints ); *h && found.empty(); ++h )
+            {
+                char* id = snd_device_name_get_hint( *h, "NAME" );
+                char* description = snd_device_name_get_hint( *h, "DESC" );
+                bool match = id && name == id;
+                if( !match && numbered && id )
+                {
+                    char cardName[64] = {};
+                    int hintDevice = -1;
+                    if( std::sscanf( id, "hw:CARD=%63[^,],DEV=%d%c", cardName, &hintDevice, &tail ) == 2 )
+                        match = hintDevice == device && snd_card_get_index( cardName ) == card;
+                }
+                if( match )
+                {
+                    found = description && *description ? description : id; // as JUCE names it
+                    for( size_t at; ( at = found.find( '\n' ) ) != std::string::npos; ) found.replace( at, 1, "; " );
+                }
+                std::free( id );
+                std::free( description );
+            }
+            snd_device_name_free_hint( hints );
+            if( !found.empty() ) return found;
+#endif
+            return name;
+        }
+    }
+
     AudioEngine::AudioEngine( const std::string& pluginDir, AudioConfiguration audio ) : channelMap_(std::move(audio),maxFrames)
     {
         useWebTransport(); // package repositories on the web (RFC 0031)
         juce::AudioDeviceManager::AudioDeviceSetup preferred;
         const auto& config=channelMap_.configuration();
         preferred.bufferSize = config.bufferFrames ? int(config.bufferFrames) : OSCAIRN_AUDIO_BUFFER_FRAMES;
-        const auto inputs=ChannelMap::required(config.inputs),outputs=ChannelMap::required(config.outputs);
-        preferred.inputDeviceName=config.inputDevice;preferred.outputDeviceName=config.outputDevice;
+        if( config.sampleRate ) preferred.sampleRate = config.sampleRate;
+        // A profile's device opens all of its channels in each direction used, mapped or not.
+        const auto inputs=config.inputs.empty()?0:std::max(ChannelMap::required(config.inputs),config.deviceChannels);
+        const auto outputs=std::max(ChannelMap::required(config.outputs),config.deviceChannels);
+        const auto inputName=listedName(config.inputDevice),outputName=listedName(config.outputDevice);
+        preferred.inputDeviceName=inputName;preferred.outputDeviceName=outputName;
         preferred.useDefaultInputChannels=false;preferred.useDefaultOutputChannels=false;
         preferred.inputChannels.setRange(0,inputs,true);preferred.outputChannels.setRange(0,outputs,true);
         const auto error = devices_.initialise(inputs,outputs,nullptr,config.inputDevice.empty() && config.outputDevice.empty(),{},&preferred);
@@ -36,9 +89,11 @@ namespace oscairn::host
             std::fprintf( stderr, "oscairn: requested %d frames; using the device's supported size above\n", preferred.bufferSize );
         initialDevice_=device->getName().toStdString();initialInputs_=device->getInputChannelNames();initialOutputs_=device->getOutputChannelNames();
         juce::AudioDeviceManager::AudioDeviceSetup actual;devices_.getAudioDeviceSetup(actual);
-        if((!config.inputDevice.empty() && actual.inputDeviceName.toStdString()!=config.inputDevice) ||
-           (!config.outputDevice.empty() && actual.outputDeviceName.toStdString()!=config.outputDevice))
+        if((!config.inputDevice.empty() && actual.inputDeviceName.toStdString()!=inputName) ||
+           (!config.outputDevice.empty() && actual.outputDeviceName.toStdString()!=outputName))
             throw std::runtime_error("Requested audio device was not opened");
+        if(config.sampleRate && std::abs(device->getCurrentSampleRate()-config.sampleRate)>=.5)
+            throw std::runtime_error("the audio device runs at "+std::to_string(int(device->getCurrentSampleRate()))+" Hz, not the "+std::to_string(config.sampleRate)+" Hz asked for");
         audioDeviceAboutToStart(device);
         if(!started_)throw std::runtime_error("Requested audio channels are unavailable; no output fallback is permitted for explicit mappings");
 
@@ -290,7 +345,7 @@ namespace oscairn::host
         bool valid=rate>0 && device->getName().toStdString()==initialDevice_ &&
             device->getInputChannelNames()==initialInputs_ && device->getOutputChannelNames()==initialOutputs_;
         for(uint32_t i=0;i<ChannelMap::required(config.inputs);++i)valid=valid && inputMask[static_cast<int>(i)];
-        const auto required=(!config.explicitOutputs && initialOutputs_.size()==1)?1:ChannelMap::required(config.outputs);
+        const auto required=(!config.explicitOutputs && initialOutputs_.size()==1)?1:std::max(ChannelMap::required(config.outputs),config.deviceChannels);
         for(uint32_t i=0;i<required;++i)valid=valid && outputMask[static_cast<int>(i)];
         outputLatencyMs_=(device->getOutputLatencyInSamples()+device->getCurrentBufferSizeSamples())*1000.0/device->getCurrentSampleRate();
         lastCallback_=0;lateCallbacks_=0;realtime_=false;

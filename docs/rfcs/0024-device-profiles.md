@@ -17,7 +17,8 @@ Checked when built and tested; the sections below say how.
       (surface, layout and apps done; the control groups reach RFC 0011's physical controls,
       which resolve each group's defaults; the panel playing faders, rows and buttons remains)
 - [ ] 3. The engine reads it: audio block size, budgets and reliability level follow from it
-      (block size and the budget (RFC 0025) done; reliability waits for RFC 0027)
+      (block size, the budget (RFC 0025) and the audio device with its channel map
+      ([status](#audio-device-status)) done; reliability waits for RFC 0027)
 - [ ] 4. Packages and Performances checked against it (with RFC 0006 and RFC 0025)
 - [ ] 5. A second product's profile (a desktop module or pedal) built from the same image
 - [ ] 6. External MIDI controllers: [controller profiles](#controllers) matched by port name,
@@ -115,7 +116,27 @@ An illustrative profile (the values are an example, not a real product's):
   Performance 150, Library 120, Setlist 60, Groovebox 200 MiB; not measured). None of the
   built-in profiles sets them yet.
 - **`audio`:** its interface, the sample rates and the block size it runs at, headphones (a cue
-  bus).
+  bus). Optional `device` (added 2026-11-09): the audio device the engine opens instead of the
+  default, for a product whose interface is not ALSA's default or not plain stereo (the
+  FANTOM-0's 16-slot TDM link):
+
+  ```json
+  "device": { "name": "hw:1,0", "channels": 16, "rate": 48000,
+              "outputs": { "main": [0, 1], "sub": [2, 3] }, "inputs": { "main": [0, 1] } }
+  ```
+
+  `name` is an ALSA address (`hw:1,0`) or PCM name on Linux, or the name the engine lists the
+  device by (on macOS a Core Audio device's name); `channels`, all of the device's channels,
+  opened in each direction used whether mapped or not (absent: up to the highest mapped);
+  `rate`, the sample rate it must run at (the engine refuses to start at another; absent: the
+  device's); `outputs` and `inputs`, Oscairn's logical outputs and inputs by name, each with its
+  device channels from 0: `main` (left and right) is required and comes first, the others follow
+  in the profile's order as the engine's further logical channels (nothing plays them by
+  default). No channel is mapped twice. Every channel not mapped is kept silent. The sample
+  format is not a field: the engine takes the first the device offers of 32-bit float, then
+  32-bit integer (S32_LE), then narrower ones, so a device that offers only S32_LE gets S32_LE.
+  Without `device` the engine opens the default device, stereo on its first two channels, as
+  before.
 - **`controls`:** every physical control, in groups (below). Default control mappings and the
   panel layout come from these (RFC 0011's physical controls).
 - **`screens`:** each screen's size, touch and surface (RFC 0019: desktop, panel, compact, or
@@ -211,7 +232,7 @@ where they differ the unit's report wins and the difference is shown.
 | Reader | What follows from the profile |
 | --- | --- |
 | The image (RFC 0028) | Which session starts, which services run, the boot path, power management |
-| The engine | Audio block size, cores for audio, the reliability level's watchdog and bypass, the budget's ceiling |
+| The engine | Audio block size, the audio device and its channel map, cores for audio, the reliability level's watchdog and bypass, the budget's ceiling |
 | The UI (RFC 0019) | The surface and its layouts; whether there is a UI at all, or only the web UI (RFC 0026) |
 | Control mappings (RFC 0011) | The default layer for its knobs, faders, pads and pedals |
 | Packages (RFC 0006) | Which builds and backends fit; refusing a package with no build for it |
@@ -487,6 +508,30 @@ engine passes CC 1 to every part; filtering it per part comes with the engine's 
 a controller's mod wheel or pedal on a nonstandard CC passed on as its function; paging a
 controller's group that Play does not show, and Play following a row a controller switched;
 Mackie Control's rings and banks beyond eight parts ([its status](#mackie-control)).
+
+## Audio device status
+
+Built 2026-11-09 (`audio.device`, [above](#what-a-profile-holds); `Profile::configureAudio`,
+`hosts/audio/AudioConfiguration.h`, `AudioEngine.cpp`). The app turns the field into the engine's
+audio options (`--output-device`, `--input-device`, `--audio-outputs`, `--audio-inputs`, and two
+new ones, `--device-channels` and `--sample-rate`) unless its command line gives a device or
+channels. The engine opens that many channels, asks for the rate and refuses to start at another,
+and the channel map writes the logical outputs to their channels and silence to the rest. On
+Linux an ALSA address or PCM name becomes the description JUCE lists it by; ALSA lists `hw`
+devices only with extended name hints, which the OS image turns on in `/etc/asound.conf`. On
+macOS the name is a Core Audio device's, as `--output-device` already took; untried with this
+field. The FANTOM-07's profile has `hw:1,0`, 16 channels, 48 kHz and main on slots 0 and 1, an
+estimate ([running on a FANTOM-0](../fantom-0.md)).
+
+Checked without hardware: `desktop-profile` checks the FANTOM-07's options, a profile without the
+field changing nothing, the logical order (main first) with inputs, and eight refusals;
+`audio-device-channel-map` plays a 16-channel device with main on slots 0/1 and 7/6, every other
+slot exactly silent, without allocating. On the QEMU image, `os/scripts/alsa-slots-test.py` runs
+the engine with the options for a profile naming an ALSA `file` PCM of 16 channels at 48 kHz with
+main on 6 and 7: the engine reported the device at 48000 Hz, and the file held 16 channels, sound
+on 6 and 7 and zeros on the other 14; `hw:0,0` opened the kernel's dummy card by its address.
+Nothing reached a speaker. Whether `hw:1,0` on a FANTOM opens with 16 channels, and which slots
+are its outputs, needs the unit.
 
 ## Open questions
 

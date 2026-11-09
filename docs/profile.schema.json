@@ -125,6 +125,34 @@
         },
         "headphones": {
           "type": "boolean"
+        },
+        "device": {
+          "type": "object",
+          "description": "The audio device the engine opens instead of the default, and which of its channels Oscairn plays and records on; channels not mapped are kept silent. Absent: the default device, stereo out on its first two channels",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "On Linux an ALSA address (hw:1,0) or PCM name, or the name the engine lists the device by; on macOS a Core Audio device's name"
+            },
+            "channels": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256,
+              "description": "The device's channels, all opened in each direction used (a TDM link's slots); absent: up to the highest mapped"
+            },
+            "rate": {
+              "type": "integer",
+              "minimum": 8000,
+              "maximum": 384000,
+              "description": "The sample rate it must run at; the engine refuses to start at another. Absent: the device's"
+            },
+            "outputs": { "$ref": "#/$defs/ChannelMap" },
+            "inputs": { "$ref": "#/$defs/ChannelMap" }
+          },
+          "required": ["name"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -758,6 +786,33 @@
   ],
   "additionalProperties": false,
   "$defs": {
+    "ChannelMap": {
+      "type": "object",
+      "description": "Oscairn's logical outputs (or inputs) by name, each with its device channels, numbered from 0: main (left and right) first, then the others in this order",
+      "properties": {
+        "main": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 256,
+        "items": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "required": ["main"]
+    },
     "Channel": {
       "type": "integer",
       "minimum": 1,

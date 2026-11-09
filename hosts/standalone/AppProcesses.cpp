@@ -41,6 +41,7 @@ namespace oscairn::standalone
             return statm >> size >> resident ? resident * uint64_t(::sysconf(_SC_PAGESIZE)) : 0;
 #endif
         }
+        juce::File measuredFile() { return dataFolder().getChildFile("app-memory.json"); }
     }
 
     AppManifest readAppManifest(const juce::File& folder)
@@ -94,6 +95,9 @@ namespace oscairn::standalone
     AppProcesses::AppProcesses(Engine& engine, Actions& actions, std::vector<AppManifest> apps, std::vector<std::string> environment)
         : engine_(engine), actions_(actions), manifests_(std::move(apps)), environment_(std::move(environment))
     {
+        if(const auto* measured = juce::JSON::parse(measuredFile()).getDynamicObject())
+            for(const auto& p : measured->getProperties())
+                if(p.value.isInt() || p.value.isInt64()) measured_[p.name.toString().toStdString()] = uint64_t(std::max<juce::int64>(0, juce::int64(p.value)));
         for(const auto& m : manifests_)
             for(const auto& offer : m.offers)
                 actions_.offer(offer.action, m.name, [this, id = m.id, action = offer.action](const std::string& argument, Actions::Answer answer) {
@@ -115,13 +119,22 @@ namespace oscairn::standalone
         stopTimer();
         engine_.onAppRequest = {}; engine_.onAppStatus = {};
         for(auto& [id, r] : running_) if(r.pid > 0) { ::kill(r.pid, SIGTERM); }
-        for(auto& [id, r] : running_) if(r.pid > 0) host::stopChild(r.pid);
+        for(auto& [id, r] : running_) if(r.pid > 0) { host::stopChild(r.pid); engine_.appClosed(id); }
     }
 
     const AppManifest* AppProcesses::find(const std::string& id) const
     {
         for(const auto& m : manifests_) if(m.id == id) return &m;
         return nullptr;
+    }
+
+    uint64_t AppProcesses::reservation(const std::string& id) const
+    {
+        const auto* m = find(id);
+        if(!m) return 0;
+        const auto it = measured_.find(id);
+        const uint64_t measured = it == measured_.end() ? 0 : m->maximum ? std::min(it->second, m->maximum << 20) : it->second;
+        return std::max(m->reserve << 20, measured);
     }
 
     AppProcesses::State AppProcesses::state(const std::string& id) const { const auto it = running_.find(id); return it == running_.end() ? State::Closed : it->second.state; }
@@ -142,14 +155,21 @@ namespace oscairn::standalone
         auto& r = running_[id];
         if(!m) return false;
         if(m->executable == juce::File() || !m->executable.existsAsFile()) { say(id, juce::String(m->name) + " does not run on this computer."); return false; }
+        // RFC 0025: its manifest's reservation, admitted by the engine first (a restart, still
+        // counted, always is), and held until it is closed.
+        if(const auto launch = engine_.launchApp({id, reservation(id)}); !launch.admitted)
+        {
+            say(id, juce::String(m->name) + " did not open: it " + juce::String::fromUTF8(launch.reason.c_str()) + ".");
+            return false;
+        }
         const int connection = engine_.appConnection(id);
-        if(connection < 0) { say(id, juce::String(m->name) + " did not start: the engine gave it no connection."); return false; }
+        if(connection < 0) { engine_.appClosed(id); say(id, juce::String(m->name) + " did not start: the engine gave it no connection."); return false; }
         // Its log: appended, and started afresh past 1 MB.
         const auto file = logFile(id);
         file.getParentDirectory().createDirectory();
         if(file.getSize() > logRotation) file.moveFileTo(file.withFileExtension("log.1"));
         const int output = ::open(file.getFullPathName().toRawUTF8(), O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
-        if(output < 0) { ::close(connection); say(id, juce::String(m->name) + " did not start: its log cannot be written."); return false; }
+        if(output < 0) { ::close(connection); engine_.appClosed(id); say(id, juce::String(m->name) + " did not start: its log cannot be written."); return false; }
         const auto started = "--- " + juce::Time::getCurrentTime().toISO8601(true) + " started\n";
         [[maybe_unused]] const auto written = ::write(output, started.toRawUTF8(), started.getNumBytesAsUTF8());
         const auto data = dataFolder().getChildFile("AppData").getChildFile(juce::String(id));
@@ -161,7 +181,7 @@ namespace oscairn::standalone
         try { r.pid = host::spawnChild({m->executable.getFullPathName().toStdString()}, output, environment, connection); }
         catch(const std::exception& e) { r.pid = -1; say(id, juce::String(m->name) + " did not start: " + e.what()); }
         ::close(output); ::close(connection); // the child has its own
-        if(r.pid < 0) return false;
+        if(r.pid < 0) { engine_.appClosed(id); return false; }
         r.state = State::Running; r.waited = r.stopping = false; r.why = {};
         if(r.shown) show(id);
         return true;
@@ -270,9 +290,10 @@ namespace oscairn::standalone
         auto& r = running_[id];
         const auto* m = find(id);
         r.pid = -1;
-        if(r.stopping) { r.state = State::Closed; return; }
+        // Its reservation goes with it (RFC 0025), but for one started again at once.
+        if(r.stopping) { r.state = State::Closed; engine_.appClosed(id); return; }
         // Closed by the musician (its own window): no crash.
-        if(WIFEXITED(status) && WEXITSTATUS(status) == 0) { r.state = State::Closed; r.shown = false; return; }
+        if(WIFEXITED(status) && WEXITSTATUS(status) == 0) { r.state = State::Closed; r.shown = false; engine_.appClosed(id); return; }
         auto why = r.why.isNotEmpty() ? r.why : WIFSIGNALED(status) ? juce::String("stopped (signal ") + juce::String(WTERMSIG(status)) + ")" : "stopped (exit " + juce::String(WEXITSTATUS(status)) + ")";
         const auto now = seconds();
         r.crashes.push_back(now);
@@ -280,6 +301,7 @@ namespace oscairn::standalone
         if(r.crashes.size() > restartsPerMinute)
         {
             r.state = State::GaveUp;
+            engine_.appClosed(id);
             say(id, juce::String(m->name) + " " + why + " again and stays closed.", Notice::Choice::OpenAgain);
             return;
         }
@@ -287,6 +309,7 @@ namespace oscairn::standalone
         say(id, juce::String(m->name) + " " + why + (id == front_ ? "; started again." : "."));
         // In front: at once, restoring its own state from its data folder. Behind: when next opened.
         if(id == front_) start(id);
+        else engine_.appClosed(id);
     }
 
     void AppProcesses::timerCallback()
@@ -298,9 +321,21 @@ namespace oscairn::standalone
             const auto reaped = ::waitpid(r.pid, &status, WNOHANG);
             if(reaped == r.pid) { exited(id, status); continue; }
             if(reaped < 0 && errno == ECHILD) { exited(id, 0); continue; } // reaped elsewhere: closed
-            // Its memory: over the manifest's maximum, stopped and reported as a crash.
+            // Its memory: past its reservation, noted and kept as its reservation from its next
+            // start (RFC 0025), saved when it grows by a MiB; over the manifest's maximum, stopped
+            // and reported as a crash.
             const auto* m = find(id);
-            if(m && m->maximum && r.why.isEmpty() && footprint(r.pid) > (m->maximum << 20))
+            const auto used = m ? footprint(r.pid) : 0;
+            if(auto& peak = measured_[id]; m && used > (m->reserve << 20) && used >= peak + (1 << 20))
+            {
+                if(peak <= (m->reserve << 20))
+                    std::fprintf(stderr, "oscairn: %s uses more than its %llu MiB reservation; reserved at what it uses from its next start\n", m->name.c_str(), static_cast<unsigned long long>(m->reserve));
+                peak = used;
+                auto* saved = new juce::DynamicObject();
+                for(const auto& [app, bytes] : measured_) if(bytes) saved->setProperty(juce::Identifier(juce::String(app)), juce::int64(bytes));
+                measuredFile().replaceWithText(juce::JSON::toString(juce::var(saved)));
+            }
+            if(m && m->maximum && r.why.isEmpty() && used > (m->maximum << 20))
             {
                 r.why = "used more than its " + juce::String(int64_t(m->maximum)) + " MB of memory and was stopped";
                 ::kill(r.pid, SIGKILL);

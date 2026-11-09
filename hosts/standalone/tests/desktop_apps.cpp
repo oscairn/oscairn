@@ -212,6 +212,53 @@ int main(int argc, char** argv)
                 folder.getParentDirectory().deleteRecursively(false);
             }
 
+            // RFC 0025 step 8: an app that is a process holds its manifest's reservation (the
+            // Setlist's 60 MiB) while it runs, and a start that does not fit is refused, saying
+            // why, starting nothing; closed, its reservation is let go.
+            {
+                constexpr uint64_t MiB = 1ull << 20;
+                auto reserved = [&](const std::string& app) {
+                    Control::MemoryState m;
+                    engine.edit([&](Control& c) { m = c.memoryState(); });
+                    for(const auto& a : m.running) if(a.app == app) return a.reserve;
+                    return uint64_t(0);
+                };
+                check(reserved("oscairn.setlist") == 0, "the earlier runs let their reservations go");
+                // 1 GiB: 300 MiB for the system, the Library always available at 40, a 600 MiB floor and a 50 MiB margin leave 34 for apps.
+                engine.edit([](Control& c) { c.setBudget({.9, 0, 1024 * MiB, 300 * MiB, 600 * MiB, 50 * MiB}); c.setAlwaysAvailable({{"oscairn.library", 40 * MiB}}); });
+                // Measured afresh (the leak above was measured), and leaking 100 MB on its next run: past its reservation, under its maximum.
+                data.getChildFile("app-memory.json").deleteFile();
+                data.getChildFile("AppData/oscairn.setlist/leaked").deleteFile();
+                std::vector<standalone::AppProcesses::Notice> notices;
+                standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_TEST_LEAK=100"});
+                processes.onNotice = [&](const standalone::AppProcesses::Notice& n) { notices.push_back(n); std::fprintf(stderr, "  notice: %s\n", n.text.toRawUTF8()); };
+                check(processes.reservation("oscairn.setlist") == 60 * MiB, "it reserves its manifest's 60 MiB");
+                std::string answer = "?";
+                actions.request(standalone::sendPerformance, idOf("Bass Split"), [&](const std::string& a) { answer = a; });
+                check(answer.empty() && processes.pid("oscairn.setlist") < 0 && !notices.empty() && notices.back().text.contains("Setlist did not open: it needs 60 MiB, 34 free for apps"),
+                      "a start past what is free for apps is refused with the reason, and starts nothing: " + (notices.empty() ? std::string() : notices.back().text.toStdString()));
+                check(reserved("oscairn.setlist") == 0, "and reserves nothing");
+                // 2 GiB: it fits, and holds its manifest's 60 MiB while it runs.
+                engine.edit([](Control& c) { c.setBudget({.9, 0, 2048 * MiB, 300 * MiB, 600 * MiB, 50 * MiB}); });
+                answer = "?";
+                actions.request(standalone::sendPerformance, idOf("Bass Split"), [&](const std::string& a) { answer = a; });
+                check(wait([&] { return answer != "?"; }) && answer == "Added to Setlist" && processes.pid("oscairn.setlist") > 0, "with room, it starts and takes the send: " + answer);
+                check(reserved("oscairn.setlist") == 60 * MiB, "its manifest's reservation counts while it runs");
+                // Using more than it reserved: measured, and reserved at that from its next start.
+                check(wait([&] { return processes.reservation("oscairn.setlist") > 100 * MiB; }), "its use past its reservation is measured: " + std::to_string(processes.reservation("oscairn.setlist") >> 20) + " MiB");
+                check(data.getChildFile("app-memory.json").loadFileAsString().contains("oscairn.setlist"), "and kept in the data folder");
+                processes.stop("oscairn.setlist");
+                check(wait([&] { return processes.pid("oscairn.setlist") < 0; }) && reserved("oscairn.setlist") == 0, "closed, its reservation is let go");
+                const auto measured = processes.reservation("oscairn.setlist");
+                answer = "?";
+                actions.request(standalone::sendPerformance, idOf("Verse Keys"), [&](const std::string& a) { answer = a; });
+                check(wait([&] { return answer != "?"; }) && answer == "Added to Setlist" && reserved("oscairn.setlist") == measured, "started again, it reserves what it was measured using: " + std::to_string(reserved("oscairn.setlist") >> 20) + " MiB");
+                processes.stop("oscairn.setlist");
+                wait([&] { return processes.pid("oscairn.setlist") < 0; });
+                check(playing(), "sound went on");
+                engine.edit([](Control& c) { c.setBudget({}); c.setAlwaysAvailable({}); });
+            }
+
             // The KICK's screen with the Setlist shown: the shell's frame under its top bar, and the
             // app's own window where the shell puts it (the app renders itself, as it would there).
             if(argc >= 5)

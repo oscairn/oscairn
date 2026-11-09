@@ -23,9 +23,9 @@ Checked when built and tested; the sections below say how.
       (an audition's set-aside Performance is not counted as committed yet)
 - [x] 7. Plugins declare memory before activating (`oscairn.memory`), checked against measurement
       (a plugin holding more than it declared is counted at what it holds; its declaration is not yet distrusted at the next activation)
-- [ ] 8. Apps declare reservations in their manifests; running apps and the always-available set
+- [x] 8. Apps declare reservations in their manifests; running apps and the always-available set
       reserved; the shell admitting or refusing a launch, making room first
-      (the engine's admission and reservations, and the desktop shell asking, are built; manifests and measuring apps are not)
+      (`desktop-apps`; Oscairn's apps still inside the desktop app have no manifests and keep their placeholders; first-party apps are not yet measured per profile before release)
 - [ ] 9. Opportunistic memory and its eviction order: the sample file cache, recently used items,
       entries prepared further ahead; on demand and on pressure (PSI; macOS memory pressure)
       (built: a next entry prepared to cut, let go on demand and on Linux PSI, then a committed one under pressure; not: recent items, entries further ahead, macOS)
@@ -188,6 +188,24 @@ shell's own calls are not driven by a test). An app's own
 window closed on the desktop keeps its state, so its reservation stays. **Bookkeeping:** apps
 run inside the desktop app (RFC 0022 step 1), so a reservation is counted, not enforced or
 measured; per-app limits wait for apps as processes (RFC 0022 step 2).
+
+**Manifests** (step 8, built 2026-11-09; `AppProcesses`): an app that is a process reserves its
+manifest's `memory.reserve` (the Setlist's 60 MiB), or the most it was measured using on this
+device where that is more, up to its `max`. The supervisor reads each app's footprint every
+100 ms (the same reading that stops it past its maximum); past its reservation it says so on
+stderr and keeps the peak in `app-memory.json` in the data folder, saved when it grows by a
+MiB, so its next start reserves that. Every start, whether Home, the Apps menu or an action
+another app asked for, is admitted by the engine (`launchApp`) first; refused, the supervisor's
+notice gives the engine's reason ("Setlist did not open: it needs 60 MiB, 34 free for apps")
+and nothing starts. The reservation is let go (`appClosed`) when the app is stopped, closes its
+window, gives up after repeated crashes or crashes behind; one crashing in front is started
+again at once and keeps it. The shell's own asking (Home, the Apps menu) uses the same figure,
+and the always-available set takes a process app's manifest reservation at start (not its
+measurement: the supervisor is made later). Oscairn's apps that still run inside the desktop
+app keep `Profile::appMemory`'s placeholders. `desktop-apps` runs the Setlist as a process
+against a session with memory classes: refused on a 1 GiB device with the reason and nothing
+reserved; admitted on 2 GiB holding exactly 60 MiB; leaking 100 MB, measured at 118 MiB and
+kept in the data folder; closed, nothing reserved; started again, reserving the 118 MiB.
 
 **Linux** (step 10 in part, 2026-11-01; Linux only, guarded): with `OSCAIRN_CGROUP` naming a
 delegated cgroup v2 subtree, the engine moves itself into `engine/` at its first worker and puts

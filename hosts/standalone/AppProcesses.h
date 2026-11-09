@@ -51,6 +51,10 @@ namespace oscairn::standalone
         pid_t pid(const std::string& id) const;
         juce::File logFile(const std::string& id) const;
         juce::String log(const std::string& id) const; // the last 64 KiB of its log
+        // What it reserves when it starts (RFC 0025), in bytes: its manifest's reservation, or the
+        // most it was measured using here (app-memory.json in the data folder) where that is more,
+        // up to its maximum. The engine admits it before it starts and counts it until it closes.
+        uint64_t reservation(const std::string& id) const;
 
         // What to tell the musician, and what may be chosen; an empty text takes it away.
         struct Notice
@@ -87,6 +91,7 @@ namespace oscairn::standalone
         std::vector<AppManifest> manifests_;
         std::vector<std::string> environment_;
         std::map<std::string, Running> running_;
+        std::map<std::string, uint64_t> measured_; // each app's peak past its reservation, bytes
         std::string front_;
     };
 

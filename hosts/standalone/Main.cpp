@@ -77,6 +77,13 @@ namespace oscairn::standalone
             const auto i = args.indexOf( name );
             return i >= 0 && i + 1 < args.size() ? args[i + 1] : juce::String();
         }
+
+        // The apps that run as processes: Apps/ beside this program, else share/oscairn/apps.
+        juce::File appsFolder()
+        {
+            const auto binary = juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getParentDirectory();
+            return binary.getChildFile( "Apps" ).isDirectory() ? binary.getChildFile( "Apps" ) : binary.getSiblingFile( "share" ).getChildFile( "oscairn/apps" );
+        }
     }
 
     /// An app in a window of its own, apart from the sound editor; closing it hides it.
@@ -138,9 +145,8 @@ namespace oscairn::standalone
             actions_.offer(pickSound,"Library",[this](const std::string&,Actions::Answer answer){showPicker(std::move(answer),"sound");});
             actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
             const auto binary=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
-            const auto apps=binary.getChildFile("Apps").isDirectory()?binary.getChildFile("Apps"):binary.getSiblingFile("share").getChildFile("oscairn/apps");
             // Apps run as processes only against an engine on a socket (not --in-process).
-            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(apps):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString()});
+            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString()});
             appNotice_=std::make_unique<AppNotice>(*appProcesses_);
             Component::addChildComponent(*appNotice_);
             appProcesses_->onNotice=[this](const AppProcesses::Notice& n){
@@ -394,13 +400,15 @@ namespace oscairn::standalone
     private:
         // Oscairn's own apps by name, as RFC 0025's memory reservations name them.
         static std::string appId( const juce::String& name ) { return "oscairn." + name.toLowerCase().toStdString(); }
-        // Asked of the engine before an app opens (RFC 0025), with its placeholder reservation;
-        // refused, a notice over the window says why, and may let the next song go and try again.
+        // Asked of the engine before an app opens (RFC 0025), with its reservation (an app that is
+        // a process: its manifest's, or what it was measured using), else its placeholder; refused, a notice over the window says
+        // why, and may let the next song go and try again.
         // shortcut: an app's window closed on the desktop hides it with its state, so its reservation stays; the desktop has no memory classes yet.
         bool admitted( const juce::String& name, std::function<void()> retry )
         {
             const auto id = appId( name );
-            return askToLaunch( engine_, { id, uint64_t( Profile::appMemory( id ) ) << 20 }, name, std::move( retry ),
+            const auto reserve = appProcesses_->find( id ) ? appProcesses_->reservation( id ) : uint64_t( Profile::appMemory( id ) ) << 20;
+            return askToLaunch( engine_, { id, reserve }, name, std::move( retry ),
                 [this]( std::unique_ptr<LaunchNotice> notice ) {
                     notice_ = std::move( notice );
                     if( !notice_ ) return;
@@ -917,7 +925,13 @@ namespace oscairn::standalone
                     budget.system = uint64_t( profile.compute.osMemory ) * MiB + residentBytes();
                     budget.floor = uint64_t( profile.compute.performanceMemory ) * MiB;
                     budget.margin = profile.memoryMargin();
-                    for( const auto& a : profile.alwaysAvailable ) always.push_back( { a, uint64_t( Profile::appMemory( a ) ) * MiB } );
+                    // An app that is a process, at its manifest's reservation; Oscairn's in-process apps at their placeholders.
+                    const auto manifests = findApps( appsFolder() );
+                    for( const auto& a : profile.alwaysAvailable )
+                    {
+                        const auto m = std::find_if( manifests.begin(), manifests.end(), [&]( const AppManifest& x ) { return x.id == a; } );
+                        always.push_back( { a, ( m != manifests.end() ? m->reserve : uint64_t( Profile::appMemory( a ) ) ) * MiB } );
+                    }
                     if( budget.system + budget.floor + budget.margin > budget.device )
                     {
                         std::fprintf( stderr, "oscairn: memory classes off: the OS, this app, the floor and the margin exceed the device's memory\n" );

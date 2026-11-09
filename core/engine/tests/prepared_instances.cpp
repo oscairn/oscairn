@@ -3,6 +3,8 @@
 #include "oscairn/session.h"
 #include "oscairn/json_rpc.h"
 #include "AllocationGuard.h"
+#include "oscairn/assets.h"
+#include <cstdlib>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -94,6 +96,7 @@ void persistence(const char* path,const char* id,clap_id gain,const std::filesys
 // The pool's instances resolve sound assets through the session's store (RFC 0009): a state naming
 // one loads in a sound prepared from it and in a pool restoring its snapshot, as a sampler's must.
 void assetStates(const char* path,const std::filesystem::path& directory){
+    ::setenv("OSCAIRN_DATA_HOME",(directory/"data").c_str(),1); // the store the Sessions keep: this test's, never the user's
     const auto samples=directory/"samples";std::filesystem::create_directories(samples);std::ofstream(samples/"tone.wav")<<"tone";
     Session s(48000,512);const auto folder=s.registerAssetFolder(samples.string());
     const auto state=directory/"asset-state";std::filesystem::create_directories(state);
@@ -106,6 +109,25 @@ void assetStates(const char* path,const std::filesystem::path& directory){
     Session t(48000,512);t.registerAssetFolder(samples.string());
     try{t.loadPerformance(snapshot.string());}catch(const std::exception& e){throw std::runtime_error(std::string("a pool restoring a sound with an asset: ")+e.what());}
     check(t.sounds(t.nodeId("pooled")).contexts.size()==2,"both sounds restored");
+    // RFC 0009 step 3: a file the plugin made, kept by oscairn.assets' create in the user library;
+    // the plugin's state names the reference, so the Performance opens with the made file gone.
+    const auto made=directory/"made.wav";std::ofstream(made)<<"recorded take";
+    const auto madeState=directory/"made-state";std::filesystem::create_directories(madeState);
+    {std::ofstream(madeState/"plugin.id")<<"org.kick.test.midi";const double gain=.5;std::ofstream bytes(madeState/"state.clap",std::ios::binary);
+     bytes.write(reinterpret_cast<const char*>(&gain),sizeof gain);bytes<<'\x01'<<made.string();}
+    uint32_t take=0;try{take=t.prepareSound(t.nodeId("pooled"),"Made",{},madeState.string());}catch(const std::exception& e){throw std::runtime_error(std::string("a state whose plugin creates an asset: ")+e.what());}
+    t.selectSound(t.nodeId("pooled"),take,2);
+    const auto hash=oscairn::assets::sha256(std::string_view("recorded take"));
+    check(std::filesystem::exists(t.assets().root()/"user"/hash.substr(0,16)/"made.wav"),"the made file is in the user library");
+    const auto withTake=directory/"made-pool";t.savePerformance(withTake.string());std::filesystem::remove(made);
+    bool named=false;
+    for(const auto& f:std::filesystem::recursive_directory_iterator(withTake))if(f.path().filename()=="state.clap"){
+        std::ifstream in(f.path(),std::ios::binary);const std::string bytes((std::istreambuf_iterator<char>(in)),std::istreambuf_iterator<char>());
+        named=named || bytes.find(std::string("user")+'\0'+hash.substr(0,16)+"/made.wav")!=std::string::npos;}
+    check(named,"its saved state names the reference, not the made file");
+    Session u(48000,512);
+    try{u.loadPerformance(withTake.string());}catch(const std::exception& e){throw std::runtime_error(std::string("a Performance whose plugin made an asset: ")+e.what());}
+    check(u.sounds(u.nodeId("pooled")).contexts.size()==3,"it opens with the made file gone");
 }
 void bounds(const char* path){
     Instrument s(path,"org.kick.test.midi",7);std::array<uint32_t,7> ids{};for(auto& id:ids)id=s.prepare(.25);

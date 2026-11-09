@@ -38,7 +38,9 @@ My Performance/
       snapshot               # another node on node-3's engine: its own values
 ```
 
-LV2 state directories contain `state.ttl` and materialized assets. CLAP state is preserved
+LV2 state directories contain `state.ttl` and the files its state names as `assets.tsv`, asset
+references resolved through the store ([RFC 0009](rfcs/0009-sound-assets-and-dependencies.md),
+listed in the node's `assets`); a state saved without a store holds materialized copies. CLAP state is preserved
 as supplied by the plugin; the host cannot discover external sample paths hidden inside
 an arbitrary CLAP state blob. A plugin whose state is not self-contained may still require
 its original sample library. Plugins that declare their files through
@@ -142,8 +144,9 @@ installing the plugin later restores it. A document that is malformed is still r
   its library, folder and the sample's SHA-256.
 - Hosted instrument pools snapshot every prepared instance and the selected slot per
   channel. Restoring a pool checks every instance against the plugin's layout/parameters.
-- Plugins with state support use their full state interface. LV2 asset links produced by
-  saving are copied into the folder, so moving it does not depend on the original files.
+- Plugins with state support use their full state interface. The files an LV2 state names
+  are asset references (its `assets.tsv`), so moving the folder does not depend on the original
+  files, only on the store having their bytes; without a store they are copied into the folder.
 - A plugin without a state interface saves its writable parameter values. This captures
   our parameter-only sequencer/MIDI effects, but cannot recover private state a third-party
   plugin does not expose. This fallback supports at most 2048 writable parameters and checks

@@ -491,13 +491,14 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
         const auto* shared=dynamic_cast<const SoundContext*>(&h);
         const bool alone=shared && sound;
         if(!alone && !keys.count(graph_.effectSource(n.id,leaving_)))bad(nodes_.at(n.id)+" shares its engine with a plugin outside the part");
-        // Sound assets are dependencies (RFC 0009): record references, never the files.
-        std::vector<std::string> assets;
-        for(const auto& a:h.assetDependencies()){libraries.insert(a.library);assets.push_back("{\"library\":"+quote(a.library)+",\"path\":"+quote(a.path)+",\"sha256\":"+quote(a.sha256)+(a.optional?",\"optional\":true":"")+'}');}
         try{if(alone)h.saveSound(shared->own(),(bundle.temporary.path/"nodes"/key).string());
             else h.saveSnapshot((bundle.temporary.path/"nodes"/key).string());
             if(shared && !alone && graph_.effectSource(n.id,leaving_)==n.id)shared->engine()->host->saveSnapshot((bundle.temporary.path/"nodes"/key/"engine").string());}
         catch(const std::exception& e){bad("cannot save "+nodes_.at(n.id)+" ("+n.plugin.id+"): "+e.what());}
+        // Sound assets are dependencies (RFC 0009): record references, never the files. Asked after
+        // saving, as an LV2 plugin's are the files its saved state names.
+        std::vector<std::string> assets;
+        for(const auto& a:h.assetDependencies()){libraries.insert(a.library);assets.push_back("{\"library\":"+quote(a.library)+",\"path\":"+quote(a.path)+",\"sha256\":"+quote(a.sha256)+(a.optional?",\"optional\":true":"")+'}');}
         const bool lv2=lv2Path(n.plugin.path);
         lockPlugin(lock,lv2?"lv2":"clap",n.plugin.id,n.plugin.version,n.plugin.path,!h.failure().empty());
         nodes.push_back("{\"key\":"+quote(key)+",\"name\":"+quote(nodes_.at(n.id))+",\"plugin\":{\"format\":"+quote(lv2?"lv2":"clap")+",\"id\":"+quote(n.plugin.id)+",\"version\":"+quote(n.plugin.version)+",\"pathHint\":"+quote(n.plugin.path)+"},\"engine\":"+quote(alone?key:keys.at(graph_.effectSource(n.id,leaving_)))+",\"inputs\":"+ports(n.inputs)+",\"outputs\":"+ports(alone?shared->engine()->host->outputPorts():n.outputs)+",\"noteInputs\":"+std::to_string(n.noteInputs)+",\"noteOutputs\":"+std::to_string(n.noteOutputs)+",\"assets\":"+join(assets)+",\"enabled\":"+(disabled_.count(n.id)?"false":"true")+(roles_.count(n.id)?",\"role\":"+quote(roles_.at(n.id)):std::string())

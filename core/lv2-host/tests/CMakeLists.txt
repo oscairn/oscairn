@@ -3,6 +3,7 @@ set(bundle "${CMAKE_CURRENT_BINARY_DIR}/test fixture.lv2")
 file(MAKE_DIRECTORY "${bundle}")
 configure_file(manifest.ttl.in "${bundle}/manifest.ttl" @ONLY)
 configure_file(fixture.ttl "${bundle}/fixture.ttl" COPYONLY)
+file(WRITE "${bundle}/state-file.txt" "1.75\n") # the file preset's state file
 add_library(oscairn-lv2-fixture MODULE fixture.cpp)
 target_link_libraries(oscairn-lv2-fixture PRIVATE PkgConfig::LILV)
 set_target_properties(oscairn-lv2-fixture PROPERTIES PREFIX "" OUTPUT_NAME fixture LIBRARY_OUTPUT_DIRECTORY "${bundle}")

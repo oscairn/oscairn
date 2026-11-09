@@ -1,7 +1,7 @@
 # RFC 0009: Sound assets and dependencies
 
-Status: steps 1–2 implemented 2026-10-30 (see [Implementation status](#implementation-status));
-steps 3–4 planned. This is the concrete asset contract that [RFC 0006](0006-packages-and-portability.md)
+Status: steps 1–2 implemented 2026-10-30, step 3 2026-11-09 (see [Implementation status](#implementation-status));
+step 4 in part. This is the concrete asset contract that [RFC 0006](0006-packages-and-portability.md)
 leaves as "the planned host asset API" and "assets must be declared by the plugin".
 
 ## Progress
@@ -10,7 +10,9 @@ Checked when built and tested; the sections below say how.
 
 - [x] 1. Store index, library manifest, registered folders, `resolve` and `import` ([status](#implementation-status))
 - [x] 2. `oscairn.assets` and `oscairn.asset-dependencies`, used by the Legacy Sampler; preflight with a missing-asset report
-- [ ] 3. LV2 path mapping onto the store; `create` for user-library files
+- [x] 3. LV2 path mapping onto the store; `create` for user-library files
+      ([status](#implementation-status): `lv2-state-contract`, `prepared-instances`; the "first
+      use" named in the build order, Yamaha user waveform conversion, is RFC 0008's and not built)
 - [ ] 4. Libraries as RFC 0006 packages, with redistribution checks and garbage collection
       (built 2026-11-07: asset packages, kind `asset`, packed by `oscairn-sign asset-package`,
       each file by path, SHA-256 and size; installed into the asset store by hash with a
@@ -238,8 +240,25 @@ Steps 1 and 2 are implemented and tested (`assets`, `sampler`, `desktop-sound-pi
   Performance in a fresh store: it is refused, naming the library, until the folder is
   registered under a new ID, and then plays identically.
 
-Not done: LV2 path mapping and `create` (step 3), packages, export and garbage collection (step
-4), a desktop screen for managing libraries, and fingerprint matching of whole libraries; files
+Step 3 (2026-11-09):
+
+- **`create`:** `oscairn.assets/draft-3` adds `create(host, file, ref, message, capacity)`, and
+  `AssetResolver::create` behind it (`assets::Store::create`, and a request from a plugin worker to
+  the engine): a file already in a registered or installed library is referenced where it is, any
+  other copied into the user library. `prepared-instances` has the CLAP fixture keep a file it
+  made: its saved state names `user/<hash>/made.wav`, and the Performance opens with the made
+  file deleted.
+- **LV2:** with a store, `state:mapPath`'s `abstract_path` turns each file the state names into an
+  asset reference through `create`, stored under the abstract name
+  `oscairn-assets/<first 16 hex digits>/<file name>` and listed in `assets.tsv` beside `state.ttl`;
+  `absolute_path` resolves those names through the store. The node reports them as its asset
+  dependencies (a pooled instrument the union of its instances'), so a Performance records and
+  checks them. `lv2-state-contract` (an `OSCAIRN_LV2=ON` build) saves the fixture's file preset:
+  the state holds no copy and no path, the file is in the user library, a fresh instance loads
+  it through the store, one without a store is refused, a file in a registered folder is
+  referenced in place, and a state whose file the store no longer has is refused.
+
+Not done: packages' redistribution checks and garbage collection (step 4), a desktop screen for managing libraries, and fingerprint matching of whole libraries; files
 resolve individually by content, which already covers a folder registered again elsewhere.
 Registration runs on the engine's control thread and blocks other control requests while a
 large folder is hashed.

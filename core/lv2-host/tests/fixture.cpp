@@ -13,7 +13,10 @@
 #include <algorithm>
 #include <limits>
 #include <array>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <string>
 #include <string_view>
 
 namespace
@@ -28,7 +31,8 @@ struct Fixture
     std::array<std::array<bool,128>,16> held{},down{};
     std::array<bool,16> sustain{};
     std::array<std::array<float,128>,16> pressure{};
-    LV2_URID midi,sequence,object,position,bpm,frame,beat,bar,barBeat,beatUnit,beatsPerBar,speed,stateKey,atomFloat;
+    LV2_URID midi,sequence,object,position,bpm,frame,beat,bar,barBeat,beatUnit,beatsPerBar,speed,stateKey,atomFloat,fileKey,atomPath;
+    std::string file; // a state file (urn:oscairn:test:file), whose text is the value it plays
     float tempo=0,frameValue=0,beatValue=0;
     void message(const uint8_t* bytes)
     {
@@ -61,6 +65,7 @@ LV2_Handle instantiate(const LV2_Descriptor* descriptor,double rate,const char*,
             if(o->key==id(LV2_BUF_SIZE__sequenceSize) && o->type==id(LV2_ATOM__Int) && o->size==sizeof(int32_t))
                 s->sequenceSize=*static_cast<const int32_t*>(o->value);
     s->stateKey=id("urn:oscairn:test:value");s->atomFloat=id(LV2_ATOM__Float);
+    s->fileKey=id("urn:oscairn:test:file");s->atomPath=id(LV2_ATOM__Path);
     s->midi=id(LV2_MIDI__MidiEvent);s->sequence=id(LV2_ATOM__Sequence);s->object=id(LV2_ATOM__Object);s->position=id(LV2_TIME__Position);
     s->bpm=id(LV2_TIME__beatsPerMinute);s->frame=id(LV2_TIME__frame);s->beat=id(LV2_TIME__beat);
     s->bar=id(LV2_TIME__bar);s->barBeat=id(LV2_TIME__barBeat);s->beatUnit=id(LV2_TIME__beatUnit);
@@ -181,15 +186,39 @@ void largeRun(LV2_Handle instance,uint32_t frames)
     if(bad==1)echo->atom.size=capacity+1; // Just beyond this port's actual allocation.
     if(bad==2)e->body.size=0xffffffff; // Overflow-sized event within a valid outer size.
 }
-LV2_State_Status save(LV2_Handle h,LV2_State_Store_Function store,LV2_State_Handle context,uint32_t,const LV2_Feature* const*)
+const LV2_State_Map_Path* mapPath(const LV2_Feature* const* features)
+{
+    for(auto f=features;f && *f;++f)if(!std::strcmp((*f)->URI,LV2_STATE__mapPath))return static_cast<const LV2_State_Map_Path*>((*f)->data);
+    return nullptr;
+}
+LV2_State_Status save(LV2_Handle h,LV2_State_Store_Function store,LV2_State_Handle context,uint32_t,const LV2_Feature* const* features)
 {
     auto& s=*static_cast<Fixture*>(h);
     if(*static_cast<float*>(s.ports[8])==3)return LV2_STATE_ERR_UNKNOWN;
+    // Its file by an abstract path, as the state extension asks.
+    if(!s.file.empty())
+    {
+        const auto* map=mapPath(features);if(!map)return LV2_STATE_ERR_NO_FEATURE;
+        char* path=map->abstract_path(map->handle,s.file.c_str());if(!path)return LV2_STATE_ERR_UNKNOWN;
+        const auto status=store(context,s.fileKey,path,std::strlen(path)+1,s.atomPath,LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE);
+        std::free(path);if(status!=LV2_STATE_SUCCESS)return status;
+    }
     return store(context,s.stateKey,&s.workValue,sizeof(float),s.atomFloat,LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE);
 }
-LV2_State_Status restore(LV2_Handle h,LV2_State_Retrieve_Function retrieve,LV2_State_Handle context,uint32_t,const LV2_Feature* const*)
+LV2_State_Status restore(LV2_Handle h,LV2_State_Retrieve_Function retrieve,LV2_State_Handle context,uint32_t,const LV2_Feature* const* features)
 {
     auto& s=*static_cast<Fixture*>(h);size_t size=0;uint32_t type=0,flags=0;
+    s.file.clear();
+    if(const auto* path=retrieve(context,s.fileKey,&size,&type,&flags))
+    {
+        if(type!=s.atomPath)return LV2_STATE_ERR_BAD_TYPE;
+        const auto* map=mapPath(features);
+        char* absolute=map?map->absolute_path(map->handle,static_cast<const char*>(path)):nullptr;
+        s.file=absolute?absolute:static_cast<const char*>(path);std::free(absolute);
+        std::ifstream in(s.file);float v=0;
+        if(!(in>>v))return LV2_STATE_ERR_NO_PROPERTY;
+        s.workValue=v;return LV2_STATE_SUCCESS;
+    }
     auto* value=retrieve(context,s.stateKey,&size,&type,&flags);
     if(!value){s.workValue=1;return LV2_STATE_SUCCESS;}
     if(size!=sizeof(float) || type!=s.atomFloat)return LV2_STATE_ERR_BAD_TYPE;

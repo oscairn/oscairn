@@ -307,6 +307,14 @@ struct Plugin {
                 // sampler's state with a library reference must (RFC 0009).
                 std::string asset; char chunk[256]; int64_t got;
                 while ((got = in->read(in, chunk, sizeof chunk)) > 0) asset.append(chunk, size_t(got));
+                // Or "\x01" and a file's absolute path: a file it made, kept through oscairn.assets
+                // draft 3's create, its state naming the reference from then on.
+                if (asset.size() > 1 && asset[0] == '\x01') {
+                    const auto* assets = static_cast<const oscairn_host_assets_t*>(s.host->get_extension(s.host, OSCAIRN_EXT_ASSETS));
+                    oscairn_asset_ref_t ref{}; char message[256];
+                    if (!assets || !assets->create || !assets->create(s.host, asset.c_str() + 1, &ref, message, sizeof message)) return false;
+                    asset = std::string(ref.library) + '\0' + ref.path;
+                }
                 if (!asset.empty()) {
                     const auto zero = asset.find('\0');
                     const auto* assets = static_cast<const oscairn_host_assets_t*>(s.host->get_extension(s.host, OSCAIRN_EXT_ASSETS));

@@ -368,6 +368,23 @@ struct Host::Impl {
             return true;
         } catch (const std::exception& e) { return report(e.what()); }
     }
+    // oscairn.assets draft 3: a file the plugin made, kept as an asset.
+    static bool CLAP_ABI createAsset(const clap_host_t* h, const char* file, oscairn_asset_ref_t* ref, char* message, uint32_t messageCapacity) {
+        auto report = [&](const std::string& text) { if (message && messageCapacity) { std::snprintf(message, messageCapacity, "%s", text.c_str()); } return false; };
+        if (!isMain(h)) return report("assets are created on the main thread only");
+        if (!file || !ref) return report("invalid asset request");
+        auto& s = self(h);
+        if (!s.assets) return report("this host has no sound asset store");
+        try {
+            const auto made = s.assets->create(std::string(file, strnlen(file, 4096)));
+            if (made.library.size() >= sizeof(ref->library) || made.path.size() >= sizeof(ref->path) || made.sha256.size() >= sizeof(ref->sha256)) return report("asset reference too long");
+            *ref = {};
+            std::memcpy(ref->library, made.library.c_str(), made.library.size() + 1);
+            std::memcpy(ref->path, made.path.c_str(), made.path.size() + 1);
+            std::memcpy(ref->sha256, made.sha256.c_str(), made.sha256.size() + 1);
+            return true;
+        } catch (const std::exception& e) { return report(e.what()); }
+    }
     // oscairn.assets draft 2: an installed asset library's folder.
     static bool CLAP_ABI libraryRoot(const void* owner, const char* library, const char* minVersion, char* path, uint32_t pathCapacity) {
         const auto* h = static_cast<const clap_host_t*>(owner);
@@ -458,13 +475,13 @@ struct Host::Impl {
         static const clap_host_event_registry_t registry{queryEventSpace};
         static const clap_host_timer_support_t timer{registerTimer, unregisterTimer};
         static const clap_host_posix_fd_support_t descriptors{registerFd, modifyFd, unregisterFd};
-        static const oscairn_host_assets_t assets{resolveAsset, libraryRoot};
+        static const oscairn_host_assets_t assets{resolveAsset, libraryRoot, createAsset};
         static const clap_host_preset_load_t presetLoad{presetError, presetLoaded};
         static const clap_host_gui_t windows{guiHintsChanged, guiRequestResize, guiRequestShow, guiRequestHide, guiClosed};
         static const oscairn_host_harmony_t harmony{readHarmony};
         if (!id) return nullptr;
         if (!std::strcmp(id, CLAP_EXT_GUI)) return &windows;
-        if (!std::strcmp(id, OSCAIRN_EXT_ASSETS) || !std::strcmp(id, OSCAIRN_EXT_ASSETS_DRAFT_1)) return &assets; // draft 1 is draft 2's first member
+        if (!std::strcmp(id, OSCAIRN_EXT_ASSETS) || !std::strcmp(id, OSCAIRN_EXT_ASSETS_DRAFT_2) || !std::strcmp(id, OSCAIRN_EXT_ASSETS_DRAFT_1)) return &assets; // earlier drafts are draft 3's first members
         if (!std::strcmp(id, OSCAIRN_EXT_HARMONY)) return &harmony;
         if (!std::strcmp(id, CLAP_EXT_PRESET_LOAD) || !std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT)) return &presetLoad;
         if (!std::strcmp(id, CLAP_EXT_THREAD_CHECK)) return &threads;

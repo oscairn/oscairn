@@ -309,6 +309,22 @@ namespace oscairn::assets
         return {"user", relative, hash};
     }
 
+    Ref Store::create(const std::string& file)
+    {
+        const fs::path path(file); std::error_code ec;
+        if(!fs::is_regular_file(path, ec)) fail("file not found: " + file);
+        std::string library, relative;
+        if(locate(path.parent_path(), library, relative))
+            try
+            {
+                Ref ref{library, (relative.empty() ? std::string() : relative + "/") + path.filename().string(), ""};
+                resolve(ref); // its hash, and that it is inside the library (a link may lead out)
+                return ref;
+            }
+            catch(const std::exception&) {}
+        return import(path);
+    }
+
     std::vector<Library> Store::libraries() const
     {
         std::lock_guard lock(mutex_); loaded_ = false; load();

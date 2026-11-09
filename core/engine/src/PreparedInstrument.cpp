@@ -343,6 +343,13 @@ public:
     }
     void setMemoryRoom(uint64_t bytes) override {room_=bytes;}
     void setAssets(kick::clap::AssetResolver* assets) noexcept override {assets_=assets;for(const auto& s:desired_.instances)if(s)s->host->setAssets(assets);}
+    // Every instance's, each once: a Performance saving the pool records them all (RFC 0009).
+    std::vector<kick::clap::AssetReference> assetDependencies() const override {
+        std::vector<kick::clap::AssetReference> out;
+        for(const auto& s:desired_.instances)if(s)for(auto& r:s->host->assetDependencies())
+            if(std::none_of(out.begin(),out.end(),[&](const auto& o){return o.library==r.library && o.path==r.path && o.sha256==r.sha256;}))out.push_back(std::move(r));
+        return out;
+    }
     // Its instances' shares of their workers' memory.
     uint64_t residentBytes() const override {uint64_t n=0;for(const auto& s:desired_.instances)if(s)n+=s->host->residentBytes();return n;}
     bool inWorker() const noexcept override {return base().inWorker();}

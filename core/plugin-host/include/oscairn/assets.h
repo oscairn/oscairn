@@ -44,6 +44,9 @@ namespace oscairn::assets
         std::string libraryRoot(const std::string& id, const std::string& minVersion) const override;
         // Copies one file into the user library; the original can then be moved or deleted.
         Ref import(const std::filesystem::path& file);
+        // A file a plugin made or chose (oscairn.assets draft 3, LV2 state paths): referenced where
+        // it is when a registered or installed library holds it, else imported.
+        Ref create(const std::string& file) override;
         std::vector<Library> libraries() const;
         // A registered library containing this absolute directory, and the directory's path in it.
         bool locate(const std::filesystem::path& directory, std::string& library, std::string& relative) const;

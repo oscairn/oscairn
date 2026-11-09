@@ -26,6 +26,8 @@
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <map>
+#include <sstream>
 #include <stdexcept>
 
 namespace oscairn
@@ -66,6 +68,8 @@ class Lv2Host final : public PluginHost
     const LV2_State_Interface* state_=nullptr;
     bool statePortError_=false;
     state_files::TemporaryDirectory scratch_;
+    kick::clap::AssetResolver* assets_=nullptr; // where state files become asset references (RFC 0009)
+    std::map<std::string,kick::clap::AssetReference> stateAssets_; // the last state saved or loaded: abstract name -> reference
     std::unique_ptr<lv2::Patch> patch_;
     uint32_t patchInput_=UINT32_MAX;
     LV2_URID atomObject_=0,atomBlank_=0;
@@ -154,7 +158,9 @@ class Lv2Host final : public PluginHost
             host.apply(Event::from(e));return;
         }
     }
-    void restore(const LilvState* state)
+    // `assets`: a saved state's asset references by abstract name (assets.tsv), resolved through the
+    // store when the plugin maps them; `directory` the state's folder.
+    void restore(const LilvState* state,const std::map<std::string,kick::clap::AssetReference>& assets={},const std::filesystem::path& directory={})
     {
         if(!state || text(lilv_state_get_plugin_uri(state))!=descriptor_.id)throw std::runtime_error("State belongs to a different LV2 plugin");
         if(lilv_state_get_num_properties(state) && !state_)throw std::runtime_error("LV2 plugin has no state interface");
@@ -164,8 +170,12 @@ class Lv2Host final : public PluginHost
         try
         {
             lv2::StateBridge bridge(instance_.get(),state_);
+            auto table=assets;bridge.assets=assets_;bridge.table=&table;
+            if(!directory.empty())bridge.directory=(directory/"").string();
             lilv_state_restore(state,state_?&bridge.proxy:nullptr,setPort,this,0,featurePointers_.data());
-            if(bridge.status!=LV2_STATE_SUCCESS || bridge.missingPath || statePortError_)throw std::runtime_error(bridge.missingPath?"Missing LV2 state asset":"LV2 plugin rejected state");
+            if(bridge.status!=LV2_STATE_SUCCESS || bridge.missingPath || statePortError_)
+                throw std::runtime_error(bridge.missingPath?"Missing LV2 state asset"+(bridge.assetError.empty()?std::string():": "+bridge.assetError):"LV2 plugin rejected state");
+            stateAssets_=assets;
             tail_.store(head_.load());
             if(patch_)patch_->clear();
             lilv_instance_activate(instance_.get());active_=true;faulted_=false;resumePanic_=wasActive;
@@ -563,11 +573,23 @@ public:
         auto tail=tail_.load();const auto head=head_.load();
         while(tail!=head){apply(commands_[tail%commands_.size()]);++tail;}tail_=tail;
         lv2::StateBridge bridge(instance_.get(),state_);
+        std::map<std::string,kick::clap::AssetReference> table;bridge.assets=assets_;bridge.table=&table;
         const auto dir=bundle.temporary.path.string();
         std::unique_ptr<LilvState,decltype(&lilv_state_free)> state(lilv_state_new_from_instance(plugin_,&bridge.proxy,&map_,scratch_.path.c_str(),dir.c_str(),dir.c_str(),dir.c_str(),getPort,this,LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE,featurePointers_.data()),lilv_state_free);
-        if(!state || bridge.status!=LV2_STATE_SUCCESS)throw std::runtime_error("LV2 plugin state saving failed");
+        if(!state || bridge.status!=LV2_STATE_SUCCESS)throw std::runtime_error("LV2 plugin state saving failed"+(bridge.assetError.empty()?std::string():": "+bridge.assetError));
         if(lilv_state_save(world_.get(),&map_,&unmap_,state.get(),nullptr,dir.c_str(),"state.ttl"))throw std::runtime_error("Cannot write LV2 state");
+        // assets.tsv: "abstract name<TAB>library<TAB>sha256<TAB>path" per file the state names.
+        std::string list;for(const auto& [name,ref]:table)list+=name+'\t'+ref.library+'\t'+ref.sha256+'\t'+ref.path+'\n';
+        if(!list.empty())state_files::write(bundle.temporary.path/"assets.tsv",list.data(),list.size());
         state_files::materialize(bundle.temporary.path);bundle.publish();
+        stateAssets_=std::move(table);
+    }
+    void setAssets(kick::clap::AssetResolver* assets) noexcept override{assets_=assets;}
+    std::vector<kick::clap::AssetReference> assetDependencies() const override
+    {
+        std::vector<kick::clap::AssetReference> out;
+        for(const auto& [name,ref]:stateAssets_)if(std::none_of(out.begin(),out.end(),[&](const auto& r){return r.library==ref.library && r.path==ref.path;}))out.push_back(ref);
+        return out;
     }
     void loadState(const std::string& directory) override
     {
@@ -575,7 +597,19 @@ public:
         if(std::filesystem::file_size(file)>kick::clap::Host::maxStateBytes)throw std::runtime_error("LV2 state file exceeds size limit");
         std::unique_ptr<LilvState,decltype(&lilv_state_free)> state(lilv_state_new_from_file(world_.get(),&map_,nullptr,file.c_str()),lilv_state_free);
         if(!state)throw std::runtime_error("Cannot read LV2 state");
-        restore(state.get());
+        std::map<std::string,kick::clap::AssetReference> assets;
+        if(const auto list=file.parent_path()/"assets.tsv";std::filesystem::exists(list))
+        {
+            const auto bytes=state_files::read(list,16*1024*1024);std::istringstream in(std::string(bytes.begin(),bytes.end()));std::string line;
+            while(std::getline(in,line))
+            {
+                std::istringstream fields(line);std::string name;kick::clap::AssetReference ref;
+                if(!std::getline(fields,name,'\t') || !std::getline(fields,ref.library,'\t') || !std::getline(fields,ref.sha256,'\t') || !std::getline(fields,ref.path) ||
+                   name.empty() || ref.library.empty() || ref.path.empty() || ref.sha256.size()!=64 || assets.size()>=65536)throw std::runtime_error("Invalid LV2 state asset list");
+                assets[name]=std::move(ref);
+            }
+        }
+        restore(state.get(),assets,file.parent_path());
     }
     std::vector<PresetInfo> presets() override
     {

@@ -313,10 +313,10 @@ PresetIndex indexPresets(const clap_plugin_entry_t* entry, const std::vector<std
     if (!factory || !factory->count || !factory->get_descriptor || !factory->create) return index;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(budgetMs);
     Indexing data; data.plugins = &plugins; data.index = &index; data.assets = assets;
-    // oscairn.assets from the indexer: library_root only (resolve needs a plugin instance's host).
+    // oscairn.assets from the indexer: library_root only (resolve and create need a plugin instance's host).
     static const oscairn_host_assets_t libraries{nullptr, [](const void* owner, const char* library, const char* minVersion, char* path, uint32_t capacity) {
         const auto* i = static_cast<const clap_preset_discovery_indexer_t*>(owner);
-        return i && library && path && capacity && of(i).assets && detail::writeLibraryRoot(*of(i).assets, library, minVersion, path, capacity); }};
+        return i && library && path && capacity && of(i).assets && detail::writeLibraryRoot(*of(i).assets, library, minVersion, path, capacity); }, nullptr};
     clap_preset_discovery_indexer_t indexer{CLAP_VERSION, "Oscairn", "Oscairn", "https://github.com/oscairn/oscairn", "1", &data,
         [](const clap_preset_discovery_indexer_t* i, const clap_preset_discovery_filetype_t* type) {
             if (!type || of(i).extensions.size() >= 64) return false;
@@ -327,7 +327,7 @@ PresetIndex indexPresets(const clap_plugin_entry_t* entry, const std::vector<std
             of(i).locations.push_back({l->kind, l->location ? l->location : ""}); return true; },
         [](const clap_preset_discovery_indexer_t*, const clap_preset_discovery_soundpack_t*) { return true; },
         [](const clap_preset_discovery_indexer_t* i, const char* id) -> const void* {
-            return id && of(i).assets && !std::strcmp(id, OSCAIRN_EXT_ASSETS) ? &libraries : nullptr; }}; // not draft 1, whose resolve this has not
+            return id && of(i).assets && (!std::strcmp(id, OSCAIRN_EXT_ASSETS) || !std::strcmp(id, OSCAIRN_EXT_ASSETS_DRAFT_2)) ? &libraries : nullptr; }}; // not draft 1, whose resolve this has not
     clap_preset_discovery_metadata_receiver_t receiver{&data,
         [](const clap_preset_discovery_metadata_receiver_t*, int32_t, const char*) {},
         [](const clap_preset_discovery_metadata_receiver_t* r, const char* name, const char* key) {

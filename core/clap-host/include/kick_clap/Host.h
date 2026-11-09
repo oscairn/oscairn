@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -104,6 +105,10 @@ struct AssetResolver {
     // The folder of an installed asset library holding its files at their paths, when a version at
     // least minVersion (empty: any) is installed; empty otherwise (oscairn.assets draft 2).
     virtual std::string libraryRoot(const std::string&, const std::string&) const { return {}; }
+    // A reference for a file a plugin made or chose (oscairn.assets draft 3's create, and LV2
+    // state's mapped paths): where it is when a registered or installed library holds it, else a
+    // copy in the user library. Throws std::exception carrying the reason.
+    virtual AssetReference create(const std::string&) { throw std::runtime_error("this host has no sound asset store"); }
 };
 
 struct Statistics {

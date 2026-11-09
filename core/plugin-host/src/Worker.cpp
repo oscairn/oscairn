@@ -208,6 +208,13 @@ namespace oscairn::worker
                 if(r.data.empty() || r.data[0] != Done) throw std::runtime_error(r.data.empty() ? "No answer from the engine" : r.data.substr(1));
                 r.at = 1; auto local = r.str(); sha256 = r.str(); return local;
             }
+            kick::clap::AssetReference create(const std::string& file) override
+            {
+                send(socket, std::string(1, CreateAsset) + Writer().str(file).data);
+                Reader r; r.data = receive(socket);
+                if(r.data.empty() || r.data[0] != Done) throw std::runtime_error(r.data.empty() ? "No answer from the engine" : r.data.substr(1));
+                r.at = 1; kick::clap::AssetReference ref; ref.library = r.str(); ref.path = r.str(); ref.sha256 = r.str(); return ref;
+            }
         };
 
         // Before a node activates (RFC 0025), what it declares goes to the engine, which refits the

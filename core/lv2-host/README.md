@@ -189,8 +189,15 @@ preserves the graph and every prepared instance, including state-mapped assets.
 Saving requires a **new directory**. A private staging directory is published only after
 successful serialization; an existing destination is never deliberately overwritten.
 LV2 uses Lilv for Turtle, symbol-addressed control-port values, default state and path
-mapping. File assets registered by the plugin through `state:mapPath` are copied into
-the snapshot, including materializing Lilv's external-file links. `makePath` provides
+mapping. With a sound asset store (a Session's, [RFC 0009](../../docs/rfcs/0009-sound-assets-and-dependencies.md)),
+a file the plugin's state names through `state:mapPath` is never copied: it becomes an
+asset reference (a file in a registered or installed library where it is, any other copied
+into the user library), the state stores the abstract path
+`oscairn-assets/<first 16 hex digits of its SHA-256>/<file name>`, and `assets.tsv` beside
+`state.ttl` lists each name's library, SHA-256 and path. A restore resolves those names
+through the store, and the node lists them as its asset dependencies, so a Performance
+records and checks them like the Legacy Sampler's. Without a store, such files are copied
+into the snapshot, including materializing Lilv's external-file links. `makePath` provides
 instance-local scratch storage; directory assets are currently rejected. Snapshot
 relocation depends on plugins using the LV2 path contract correctly; arbitrary strings
 or embedded absolute paths cannot be repaired automatically. Missing mapped assets and

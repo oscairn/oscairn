@@ -21,6 +21,9 @@ if [ -n "$profile" ]; then
 	# kernel-args beside the images for the QEMU scripts, which give the command line themselves.
 	python3 "$here/../../../scripts/audio-cores.py" "$here/../../../../hosts/standalone/profiles/$profile.json" \
 		> "$target/etc/default/oscairn-cores"
+	# What the session runs the engine with when there is no display (headless).
+	python3 "$here/../../../scripts/engine-args.py" "$here/../../../../hosts/standalone/profiles/$profile.json" \
+		> "$target/etc/default/oscairn-engine"
 	args=$(sed -n 's/^OSCAIRN_KERNEL_ARGS="\(.*\)"$/\1/p' "$target/etc/default/oscairn-cores")
 	printf '%s\n' "$args" > "$BINARIES_DIR/kernel-args"
 	extlinux=$target/boot/extlinux/extlinux.conf

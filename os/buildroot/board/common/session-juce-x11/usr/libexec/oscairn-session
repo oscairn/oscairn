@@ -2,10 +2,16 @@
 # The Oscairn session: an X server for the JUCE app, then the app itself, restarted if it
 # exits. Progress goes to the console; the app's output to /var/log/oscairn.log.
 #
+# Headless, when the profile has no screen or the board shows no display: the engine alone,
+# restarted if it exits, with the options the app would give it (/etc/default/oscairn-engine,
+# written from the profile when the image is built); its output to /var/log/oscairn-engine.log.
+# No X and no app, until the session restarts.
+#
 # This is the only place the image depends on X11. A device UI built another way replaces
 # this script and the BR2_PACKAGE_OSCAIRN_STANDALONE option.
 
 [ -f /etc/default/oscairn ] && . /etc/default/oscairn
+[ -f /etc/default/oscairn-engine ] && . /etc/default/oscairn-engine
 export DISPLAY=:0 HOME=/root
 say() { echo "oscairn-session: $*" > /dev/console; }
 
@@ -50,12 +56,59 @@ if [ -n "${OSCAIRN_AUDIO_CORES:-}" ]; then
 		"interrupts on $OSCAIRN_HOUSEKEEPING_CORES: $set_irqs, not movable: $fixed_irqs; held:${held:- nothing (no frequency or idle states to set)}"
 fi
 
-Xorg :0 -nolisten tcp -nocursor > /var/log/oscairn-xorg.log 2>&1 &
-for i in $(seq 100); do
-	[ -S /tmp/.X11-unix/X0 ] && break
-	sleep 0.1
-done
-[ -S /tmp/.X11-unix/X0 ] && say "X server up" || say "X server did not start (see /var/log/oscairn-xorg.log)"
+# A display: a DRM output with something connected (an HDMI port with no monitor is not one), or
+# a framebuffer where there is no DRM to ask. Its driver may still be loading, so wait a little.
+# Without one X may still start, but the app cannot draw and would exit in a loop.
+display() {
+	if ls -d /sys/class/drm/card*-* > /dev/null 2>&1; then
+		grep -qx connected /sys/class/drm/card*-*/status 2> /dev/null
+	else
+		ls /dev/fb* > /dev/null 2>&1
+	fi
+}
+headless=""
+if [ "${OSCAIRN_HEADLESS:-0}" = 1 ]; then
+	headless="the profile has no screen"
+else
+	for i in $(seq 100); do
+		display && break
+		sleep 0.1
+	done
+	display || headless="no display (no connected DRM output or framebuffer)"
+fi
+if [ -z "$headless" ]; then
+	Xorg :0 -nolisten tcp -nocursor > /var/log/oscairn-xorg.log 2>&1 &
+	xorg=$!
+	for i in $(seq 100); do
+		[ -S /tmp/.X11-unix/X0 ] && break
+		sleep 0.1
+	done
+	sleep 1 # an X server with no screen to use exits soon after making its socket
+	if [ -S /tmp/.X11-unix/X0 ] && kill -0 "$xorg" 2> /dev/null; then
+		say "X server up"
+	else
+		headless="the X server did not start (see /var/log/oscairn-xorg.log)"
+	fi
+fi
+
+if [ -n "$headless" ]; then
+	say "headless: $headless; running the engine without the app"
+	# The engine's control socket, in a directory only root can reach, as the engine requires.
+	mkdir -p /run/oscairn && chmod 700 /run/oscairn
+	export OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-desktop}"
+	eval "set -- $OSCAIRN_ENGINE_ARGS"
+	while true; do
+		rm -f /run/oscairn/engine.sock
+		/usr/bin/oscairn-engine --socket /run/oscairn/engine.sock --plugins /usr/lib/clap "$@" >> /var/log/oscairn-engine.log 2>&1 &
+		pid=$!
+		sleep 5
+		kill -0 "$pid" 2>/dev/null && say "engine running (pid $pid)" && grep "audio output" /var/log/oscairn-engine.log | tail -n 1 > /dev/console
+		wait "$pid"
+		say "engine exited ($?), restarting"
+		tail -n 5 /var/log/oscairn-engine.log > /dev/console
+		sleep 2
+	done
+fi
 
 while true; do
 	/usr/bin/Oscairn --plugins /usr/lib/clap $OSCAIRN_ARGS >> /var/log/oscairn.log 2>&1 &

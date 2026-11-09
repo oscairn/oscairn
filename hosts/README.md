@@ -339,7 +339,8 @@ format yet. Physical multichannel interfaces and target-board drivers still need
 A device profile can choose the device and its channels instead
 ([RFC 0024](../docs/rfcs/0024-device-profiles.md#what-a-profile-holds), `audio.device`): the app
 turns it into these options for the engine it starts, unless the command line gives a device or
-channels itself. Two more
+channels itself, and the OS image's headless session gives the engine the same
+(`os/scripts/engine-args.py`, [headless](../os/README.md#headless)). Two more
 options come with it: `--device-channels N` opens all N of the device's channels in each
 direction used, mapped or not (a TDM link's slots), with every unmapped one kept silent, and
 `--sample-rate HZ` asks for that rate and refuses to start at another. On Linux,

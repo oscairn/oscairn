@@ -23,8 +23,9 @@ image is built for the Cortex-A53. See [running on a KICK](../docs/kick.md).
 
 - GCC 15, glibc, Linux 6.18 (LTS) with a low-latency (`PREEMPT`) kernel, BusyBox init, eudev.
   Each image's kernel has only its own board's drivers: see [kernels](#kernels).
-- Oscairn: the core, the CLAP plugins in `/usr/lib/clap`, `oscairn-render`, and the
-  desktop app as `/usr/bin/Oscairn`.
+- Oscairn: the core, the CLAP plugins in `/usr/lib/clap`, `oscairn-render`, the engine as
+  `/usr/bin/oscairn-engine` (`BR2_PACKAGE_OSCAIRN_ENGINE`: JUCE and ALSA, no X11), and the
+  desktop app as `/usr/bin/Oscairn` (`BR2_PACKAGE_OSCAIRN_STANDALONE`, which brings the engine).
 - The session (`board/common/session-juce-x11`): at boot, `/etc/init.d/S95oscairn` starts
   `/usr/libexec/oscairn-session`, which raises the locked-memory limit (`RLIMIT_MEMLOCK`) to
   unlimited for the engine and its workers, starts an X server and then Oscairn full screen,
@@ -32,7 +33,7 @@ image is built for the Cortex-A53. See [running on a KICK](../docs/kick.md).
   (`--profile qemu-aarch64 --play`: the image's [device profile](../docs/rfcs/0024-device-profiles.md),
   which fills the screen with the KICK's screen layout, starting at Home, and asks for
   128-frame audio blocks). Logs: `/var/log/oscairn.log` and
-  `/var/log/oscairn-xorg.log`.
+  `/var/log/oscairn-xorg.log`. Without a display it runs [headless](#headless).
 - HTTPS for package repositories: Mbed TLS, libcurl built against it, `ca-certificates`, and
   the `curl` tool for development ([RFC 0039](../docs/rfcs/0039-network-security.md#progress)).
 - Sound through ALSA. The QEMU image uses the kernel's dummy sound card, which plays
@@ -44,6 +45,40 @@ image is built for the Cortex-A53. See [running on a KICK](../docs/kick.md).
   a card by its address (`hw:1,0`); `os/scripts/alsa-slots-test.py` boots the QEMU image and
   checks that the engine writes a profile's map to a 16-channel ALSA device (a file, not a
   speaker) and opens `hw:0,0`.
+
+## Headless
+
+When the profile has no screen, or the board shows no display, the session runs the engine alone:
+no X and no app. A display is a DRM output whose status is `connected` (an HDMI port with no
+monitor is not one), or a framebuffer where there is no DRM; the session waits up to 10 s for
+one, for its driver to load. It also goes headless when X does not start, or exits within a
+second of making its socket (as it does in QEMU with no display device). It says why once on the
+console (`oscairn-session: headless: ...`) and then runs `oscairn-engine` with its control
+socket at `/run/oscairn/engine.sock`, restarting it if it exits; its log is
+`/var/log/oscairn-engine.log`. The engine keeps the session's setup: the unlimited
+locked-memory limit, the audio cores' partition, and the profile's reliability level
+(`OSCAIRN_RELIABILITY`), so it locks its memory as under the app. It gets the options the app
+would give it, from `/etc/default/oscairn-engine`, which `board/common/post-build.sh` writes from
+the profile with `os/scripts/engine-args.py` (`OSCAIRN_HEADLESS`, `OSCAIRN_RELIABILITY` and
+`OSCAIRN_ENGINE_ARGS`: the block, the [audio device and channel map](../hosts/README.md#audio-device-channels)
+and the panel). MIDI inputs and the panel play it as they would under the app; nothing is
+shown. A display that appears later is not picked up: the app starts only when the session does
+(`/etc/init.d/S95oscairn restart`, or a reboot).
+
+A profile with no screen leaves X and the app out of the image altogether
+(`check-image-profile.py`), so `BR2_PACKAGE_OSCAIRN_ENGINE` without
+`BR2_PACKAGE_OSCAIRN_STANDALONE` gives the engine on its own.
+
+`os/build.sh test --no-display` boots the QEMU image with no display device and passes when the
+session says once that it runs headless, the engine reports running and opens its audio device,
+holds locked memory (`VmLck` above 0) under an unlimited limit, runs alone (no Oscairn or Xorg)
+and has not restarted 30 s later, and the audio cores' checks pass without the app and X.
+Passed on 2026-11-09: the session said `headless: no display (no connected DRM output or
+framebuffer)` once, 22 s after power-on (10 of them waiting for a display); the engine opened
+`Default ALSA Output` (the dummy card) and held 546180 kB locked (`VmLck`); one engine, never restarted, no
+Oscairn or Xorg; its threads and workers alone on core 3, the audio thread at `SCHED_FIFO` 80;
+`audioUnderruns` 0. `os/build.sh test` with the display still passes on the same image. No board
+has run headless: whether the EVK's HDMI bridge reports no monitor as `disconnected` is untried.
 
 ## Changing the UI later
 
@@ -271,8 +306,9 @@ there is no EVK here, and QEMU has no i.MX8M Mini model.
   `-mcpu=cortex-a53`), so ARMv8.0, the [RFC 0035](../docs/rfcs/0035-system-base.md) SDK baseline.
 - **Display:** mainline's device tree routes the EVK's MIPI-DSI output to HDMI through an
   ADV7535 bridge (an accessory card on some boards). The drivers are in the image;
-  whether X gets a picture on a monitor is untried, and so is whether X starts with no monitor.
-  If it does not, the app restarts in a loop: the session has no headless mode yet.
+  whether X gets a picture on a monitor is untried. With no monitor on the HDMI port, the
+  session should find no connected output and run [headless](#headless); whether the ADV7535
+  reports `disconnected` then is untried.
 - **Audio:** ALSA's default device is the first card. The device tree also describes S/PDIF, a
   PDM microphone card and a Bluetooth SCO card, but their drivers are not in the kernel, so the
   WM8524 should be the only card unless a USB audio device is plugged in (untried; `aplay -l` on

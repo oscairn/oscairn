@@ -74,7 +74,8 @@ class Console:
 
     def session_status(self):
         """The engine's session.status, read in the guest, as the JSON line it returned."""
-        output = self.run("/tmp/control-request $(ls /tmp/oscairn-*/engine-*.sock | head -n 1) "
+        # The app's managed engine, or the session's own when it runs headless.
+        output = self.run("/tmp/control-request $(ls /tmp/oscairn-*/engine-*.sock /run/oscairn/engine.sock 2>/dev/null | head -n 1) "
                           "'{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"session.hello\"}' "
                           "'{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"session.status\"}'")
         return [l for l in output.splitlines() if l.startswith("{") and '"id":2' in l][-1]

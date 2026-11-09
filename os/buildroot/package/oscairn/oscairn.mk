@@ -34,18 +34,23 @@ else
 OSCAIRN_CONF_OPTS += -DOSCAIRN_PANEL_ROLAND=OFF
 endif
 
+ifeq ($(BR2_PACKAGE_OSCAIRN_ENGINE),y)
+OSCAIRN_DEPENDENCIES += oscairn-juce alsa-lib libcurl
+# JUCE comes from the oscairn-juce package: nothing is downloaded while building.
+OSCAIRN_CONF_OPTS += \
+	-DOSCAIRN_ENGINE=ON \
+	-DOSCAIRN_AUDIO_BUFFER_FRAMES=128 \
+	-DFETCHCONTENT_SOURCE_DIR_JUCE=$(OSCAIRN_JUCE_SRCDIR)
+endif
+
 ifeq ($(BR2_PACKAGE_OSCAIRN_STANDALONE),y)
 # The built-in themes carry the Inter font.
 OSCAIRN_LICENSE += , OFL-1.1
 OSCAIRN_LICENSE_FILES += hosts/standalone/themes/oscairn-dark/fonts/OFL.txt
-OSCAIRN_DEPENDENCIES += oscairn-juce alsa-lib freetype fontconfig libcurl \
+OSCAIRN_DEPENDENCIES += freetype fontconfig \
 	xlib_libX11 xlib_libXext xlib_libXinerama xlib_libXrandr \
 	xlib_libXcursor xlib_libXrender
-# JUCE comes from the oscairn-juce package: nothing is downloaded while building.
-OSCAIRN_CONF_OPTS += \
-	-DOSCAIRN_STANDALONE=ON \
-	-DOSCAIRN_AUDIO_BUFFER_FRAMES=128 \
-	-DFETCHCONTENT_SOURCE_DIR_JUCE=$(OSCAIRN_JUCE_SRCDIR)
+OSCAIRN_CONF_OPTS += -DOSCAIRN_STANDALONE=ON
 endif
 
 # The kernel follows the options (RFC 0035). REALTIME_KERNEL makes it real-time (step 2; nothing

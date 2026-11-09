@@ -3,7 +3,8 @@
 # lives in the Docker volume "oscairn-os"; the first build takes an hour or more.
 #
 #   os/build.sh [defconfig] [make targets...]     default: oscairn_qemu_aarch64_defconfig
-#   os/build.sh test                              boot the QEMU image and check Oscairn starts;
+#   os/build.sh test [--no-display]               boot the QEMU image and check Oscairn starts
+#                                                 (without a display: the engine alone, headless);
 #                                                 results in build-os/test
 #   os/build.sh record [SECONDS]                  as test, with a virtio sound card, recording
 #                                                 what Oscairn plays to build-os/record/oscairn.wav
@@ -46,7 +47,8 @@ if [ "${1:-}" = record ]; then
 	exit
 fi
 if [ "${1:-}" = test ]; then
-	run python3 /src/os/scripts/boot-test.py /work/output/oscairn_qemu_aarch64_defconfig/images /out/test
+	shift
+	run python3 /src/os/scripts/boot-test.py /work/output/oscairn_qemu_aarch64_defconfig/images /out/test "$@"
 	exit
 fi
 defconfig=${1:-oscairn_qemu_aarch64_defconfig}

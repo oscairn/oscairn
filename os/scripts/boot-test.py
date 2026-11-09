@@ -23,7 +23,14 @@ With --record SECONDS, the image gets a virtio sound card instead of the dummy o
 QEMU writes everything it plays for that long to OUTPUT_DIR/oscairn.wav (44.1 kHz, 16-bit
 stereo).
 
-    boot-test.py IMAGES_DIR OUTPUT_DIR [--timeout SECONDS] [--record SECONDS]
+With --no-display, the machine has no display at all, and the session must run headless: it
+says so once, starts neither X nor the app, and runs the engine alone. Passes when the session
+reports the engine running within the time limit and, 30 s later, has never restarted it; the
+engine opened its audio device and holds locked memory (VmLck); the locked-memory limit is
+unlimited; no Oscairn or Xorg process runs; and the audio cores' checks above pass (without the
+app's and X's, which are not there).
+
+    boot-test.py IMAGES_DIR OUTPUT_DIR [--timeout SECONDS] [--record SECONDS] [--no-display]
 """
 import argparse
 import os
@@ -89,7 +96,7 @@ for i in /proc/irq/[0-9]*; do echo "irq ${i##*/} $(cat $i/effective_affinity_lis
 """
 
 
-def audio_cores(guest, images, out):
+def audio_cores(guest, images, out, headless=False):
     """RFC 0035 step 3 in the guest; True when every check passes. Writes audio-cores.txt."""
     want = cpu_list(qemu_guest.cmdline(images).split("nohz_full=")[1].split()[0])
     facts = guest.run(AUDIO_CORES_SCRIPT, 120)
@@ -111,7 +118,8 @@ def audio_cores(guest, images, out):
     checks["the engine's audio thread SCHED_FIFO 80"] = any(t[0] == "oscairn-engine" and t[3:5] == ["80", "1"] for t in threads)
     checks["workers' audio threads SCHED_FIFO 70"] = not any(t[0] == "oscairn-plugin-" for t in threads) or any(t[0] == "oscairn-plugin-" and t[3:5] == ["70", "1"] for t in threads)
     others = get("other")
-    checks["the app and X off the audio cores"] = len(others) >= 2 and all(not cpu_list(o[1]) & want for o in others)
+    if not headless:
+        checks["the app and X off the audio cores"] = len(others) >= 2 and all(not cpu_list(o[1]) & want for o in others)
     # Per-core interrupts (the timer, and the like) cannot move; every other one must be off.
     on_audio = [i for i in get("irq") if len(i) > 1 and cpu_list(i[1]) & want and "arch_timer" not in i[-1]]
     checks["no movable interrupt on the audio cores"] = not on_audio
@@ -131,6 +139,7 @@ def main():
     parser.add_argument("out")
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--record", type=float, default=0)
+    parser.add_argument("--no-display", action="store_true")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
     console = os.path.join(args.out, "console.log")
@@ -156,7 +165,7 @@ def main():
         "-append", qemu_guest.cmdline(args.images, extra),
         "-drive", f"file={os.path.join(args.images, 'rootfs.ext4')},if=none,format=raw,id=hd0,snapshot=on",
         "-device", "virtio-blk-device,drive=hd0",
-        "-device", "virtio-gpu-pci,xres=1024,yres=600,romfile=",
+    ] + ([] if args.no_display else ["-device", "virtio-gpu-pci,xres=1024,yres=600,romfile="]) + [
         "-device", "virtio-keyboard-pci", "-device", "virtio-tablet-pci",
         "-nic", "none", "-display", "none",
         "-chardev", f"socket,id=s0,path={serial},server=on,wait=off", "-serial", "chardev:s0",
@@ -168,19 +177,44 @@ def main():
     try:
         guest = qemu_guest.Console(serial, log)
         running = False
+        marker = "oscairn-session: engine running" if args.no_display else "oscairn-session: Oscairn running"
         while time.time() - start < args.timeout:
             if qemu.poll() is not None:
                 print("FAIL: QEMU exited", qemu.returncode)
                 break
             try:
-                guest.wait_for("oscairn-session: Oscairn running", 2)
+                guest.wait_for(marker, 2)
                 running = True
                 break
             except TimeoutError:
                 pass
         elapsed = time.time() - start
         if not running:
-            print(f"FAIL: Oscairn did not report running within {elapsed:.0f} s")
+            print(f"FAIL: {marker!r} not seen within {elapsed:.0f} s")
+        elif args.no_display:
+            print(f"engine running headless {elapsed:.0f} s after power-on")
+            time.sleep(30)  # long enough for a restart loop to show
+            guest.login()
+            facts = guest.run("cat /var/log/oscairn-engine.log; echo others $(pidof Oscairn Xorg); echo engines $(pidof oscairn-engine | wc -w); "
+                              "grep VmLck /proc/$(pidof oscairn-engine | cut -d' ' -f1)/status")
+            text = guest.text
+            lines = [l.split() for l in facts.splitlines()]
+            locked = [l for l in lines if l and l[0] == "VmLck:"]
+            checks = {
+                "the session said once why it runs headless": text.count("oscairn-session: headless:") == 1,
+                "the engine opened its audio device": "audio output" in facts,
+                "the engine holds locked memory": bool(locked) and int(locked[0][1]) > 0,
+                "the locked-memory limit is unlimited": "oscairn-session: locked memory: unlimited" in text,
+                "the engine was never restarted": "engine exited" not in text and text.count("oscairn-session: engine running") == 1,
+                "one engine runs": ["engines", "1"] in lines,
+                "neither X nor the app started": ["others"] in lines and "Oscairn running" not in text and "X server up" not in text,
+            }
+            for name, ok in checks.items():
+                print(("ok: " if ok else "FAIL: ") + name)
+            print("engine locked memory:", " ".join(locked[0][1:]) if locked else "unknown")
+            cores = audio_cores(guest, args.images, args.out, headless=True) if "nohz_full=" in qemu_guest.cmdline(args.images) else True
+            result = 0 if all(checks.values()) and cores else 1
+            print("PASS" if result == 0 else "FAIL")
         else:
             print(f"Oscairn running {elapsed:.0f} s after power-on")
             time.sleep(5)

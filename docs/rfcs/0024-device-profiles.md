@@ -145,7 +145,8 @@ An illustrative profile (the values are an example, not a real product's):
   ([RFC 0019](0019-adaptive-ui.md#screens-of-any-size)). Built in: the FANTOM-07's 140 (5.5",
   its retailers' figure); the KICK's, the Ignite's, the MODX M's and the i.MX8M Mini EVK's 178
   (7"), each listed in `estimated`; QEMU's virtual screen has none and stays at one pixel per
-  design unit.
+  design unit. The Ignite's screen now shows `kick-screen`, as the KICK's does: its panel's own
+  layout, scaled into 1024 x 600, put its screen at a third of its size.
 - **`midi`, `cv`, `network`:** what it can connect to; CV outputs mean the CV service of RFC 0004.
 - **`power`:** battery or mains, for power management (RFC 0028).
 - **`panel`** (optional, added 2026-11-08): a panel that does not speak MIDI, `{protocol, device,

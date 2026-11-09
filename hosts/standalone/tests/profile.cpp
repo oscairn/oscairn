@@ -43,7 +43,7 @@ int main()
         }
         const auto kick = loadProfile("kick"), ignite = loadProfile("ignite"), qemu = loadProfile("qemu-aarch64"), modx = loadProfile("modx-m");
         check(kick.name == "Behringer KICK" && kick.screen()->layout == "kick-screen" && kick.screen()->touch, "the KICK shows its screen layout, by touch");
-        check(ignite.screen()->layout == "ignite" && ignite.cv.outputs > 0, "the Ignite shows its panel and has CV");
+        check(ignite.screen()->layout == "kick-screen" && ignite.cv.outputs > 0, "the Ignite shows its screen layout (its panel has the controls) and has CV");
         check(!kick.estimated.empty() && qemu.estimated.empty(), "the KICK's values are estimates; QEMU's are its test setup");
         // Their controls in groups (RFC 0024): the KICK's four assignable knobs paged on screen beside
         // fixed ones; the MODX M's screen knobs, knobs in rows and faders in modes.

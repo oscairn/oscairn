@@ -44,6 +44,11 @@ on it beside the playing app (QEMU's figures meaningless). Not done: the script 
 QEMU image is still `CONFIG_PREEMPT`, `NO_HZ_FULL` is built into every image's kernel (2026-11-08) but no `nohz_full=` is passed, and nothing has run on a device
 (the procedure is in [docs/kick.md](../kick.md#measuring-latency)).
 
+Step 10, partly built: per-board kernels, `BR2_PACKAGE_OSCAIRN_USB_GADGET`, and the profile check
+that fails a build when the image and its profile disagree, with a test that a feature left out
+leaves nothing behind ([below](#optional-hardware-built-per-product)). Not ticked: its gate also needs an app
+requiring Wi-Fi shown as unavailable, and `hardware` in `session.hello` is not built.
+
 ## Problem
 
 The image boots into Oscairn and plays (os/README.md), and RFC 0028 says how it updates, stores
@@ -598,6 +603,20 @@ The image already works this way for two things: CMake options (`OSCAIRN_STANDAL
 brings Lilv). Profiles describe hardware (`screens`, `network.wifi`, `power.battery`,
 `midi.usbDevice`, RFC 0024). `session.hello` returns protocol capabilities, not hardware ones.
 None of the subsystems below has Oscairn code yet, so the rule applies as each is built.
+
+Built 2026-11-08 (os/README.md, "Kernels" and "The image and its profile"): each board's kernel
+config names only its own hardware's drivers; without `BR2_PACKAGE_OSCAIRN_STANDALONE` the kernel
+has no DRM or framebuffer, and without the new `BR2_PACKAGE_OSCAIRN_USB_GADGET` no USB gadget.
+`os/scripts/check-image-profile.py`, run by the common post-build script, fails a build whose
+Buildroot options, resolved kernel config or target folder disagree with the profile the session
+starts the app with, for the display, touch, Bluetooth, Wi-Fi, Ethernet, a battery, USB device and
+host mode and a camera: nothing of a feature the profile lacks (options, packages, kernel options,
+files, programs naming its libraries), and the option and kernel support for one it declares.
+The QEMU and EVK images pass it; a QEMU build made to start the EVK's profile stopped at
+`target-finalize`. The `image-profile-consistency` test checks every product defconfig and each
+rule. Not built: `hardware` in `session.hello`, app manifests' hardware, and the
+CI build of the `oscairn` package with each option off (no subsystem has an Oscairn option yet
+but the app). Wi-Fi's firmware list in the check is a few common folders, not every chip's.
 
 ### The rule
 

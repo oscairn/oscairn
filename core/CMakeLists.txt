@@ -195,6 +195,7 @@ add_test(NAME write-failure COMMAND oscairn-write-failure-test)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME session-service-stop COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/os/scripts/test_session_stop.py")
+    add_test(NAME image-profile-consistency COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/os/scripts/test_image_profile.py")
 endif()
 
 add_executable(oscairn-prepared-instances-test engine/tests/prepared_instances.cpp)

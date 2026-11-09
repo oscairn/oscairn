@@ -134,6 +134,38 @@ The real-time QEMU variant's `Image` went from 12.6 to 9.8 MiB (879 options). Th
 `os/build.sh test`. Not in either kernel: Wi-Fi, Bluetooth, touch screens, cameras, batteries,
 USB storage and FAT or exFAT (RFC 0037 adds them per product), netfilter (RFC 0039).
 
+## The image and its profile
+
+An image's defconfig, its `oscairn` package options and the [device profile](../docs/rfcs/0024-device-profiles.md)
+its session starts the app with (`--profile` in the overlay's `/etc/default/oscairn`) must agree
+on the optional hardware ([RFC 0035](../docs/rfcs/0035-system-base.md#optional-hardware-built-per-product)).
+`os/scripts/check-image-profile.py` checks it, and `board/common/post-build.sh` runs it on every
+build, so a mismatch fails the build. For each feature, from the profile:
+
+| Feature | Declared by | Declared: the image must have | Not declared: the image must not have |
+| --- | --- | --- | --- |
+| Display | `screens` | `BR2_PACKAGE_OSCAIRN_STANDALONE`; DRM, fbdev emulation, `/dev/fb` | that option, X.org; DRM, framebuffers; `Oscairn`, `Xorg`, `libX11`, the themes, any file naming `libX11.so` |
+| Touch | a screen's `touch` | `CONFIG_INPUT_TOUCHSCREEN` | the same |
+| Bluetooth | `bluetooth` (RFC 0036) | `BR2_PACKAGE_OSCAIRN_BLUETOOTH` (not built yet), `CONFIG_BT` | BlueZ, BlueALSA; `CONFIG_BT`; `bluetoothd`, BlueALSA's files, `libbluetooth`, Bluetooth firmware, any file naming `libbluetooth.so` |
+| Wi-Fi | `network.wifi` | `CONFIG_CFG80211` | `wpa_supplicant`, iwd, hostapd, iw, wireless tools, the regulatory database; `cfg80211`, `mac80211`; their files and Wi-Fi firmware |
+| Ethernet | `network.ethernet` | `CONFIG_NETDEVICES` | `CONFIG_ETHERNET`, virtio-net |
+| Battery | `power.battery` | `CONFIG_POWER_SUPPLY` | any `CONFIG_BATTERY_*` or `CONFIG_CHARGER_*` |
+| USB device | `midi.usbDevice` | `BR2_PACKAGE_OSCAIRN_USB_GADGET`; the gadget with configfs MIDI and UAC2 | that option; `CONFIG_USB_GADGET` |
+| USB host | `midi.usbHost` | `CONFIG_USB`, USB audio and MIDI | `CONFIG_USB` |
+| Camera | `camera` (none yet) | `CONFIG_MEDIA_SUPPORT` | the media subsystem, libcamera, libv4l |
+
+At build time it reads Buildroot's `.config`, the kernel's resolved `.config` and the target
+folder. `os/scripts/test_image_profile.py` (the `image-profile-consistency` test in the CMake
+build) checks every product defconfig against its profile from the Buildroot options alone, and
+each rule on a made-up pedal with nothing optional: one thing of a missing feature left in (an
+option, a package, a kernel option, a file, a program naming a library), or a declared feature
+missing, fails it.
+
+Checked on 2026-11-08: the QEMU image (display, Ethernet) and the EVK image (display, Ethernet,
+USB device and host) pass. Each checked against the other's profile fails, naming the USB
+gadget and host the QEMU image lacks or the EVK image has, and a QEMU build whose session was
+made to name the EVK's profile stopped at `target-finalize` with the same mismatches.
+
 ## Real-time kernel
 
 `BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL` (in the `oscairn` package's options) builds the kernel with

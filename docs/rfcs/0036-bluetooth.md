@@ -461,6 +461,10 @@ A product without a radio carries none of the stack:
   `/etc/default/oscairn` passes `--profile`); `post-build.sh` reads that profile and fails the
   build when the profile has `bluetooth` and the option is off, or the option is on and the profile
   has none. The desktop's profile is not checked this way (the operating system has the radio).
+  Built 2026-11-08 for every optional feature (`os/scripts/check-image-profile.py`, RFC 0035):
+  for Bluetooth it already fails a profile with `bluetooth` (the option does not exist yet), and
+  one without it in an image with `CONFIG_BT`, BlueZ or BlueALSA, `bluetoothd`, `libbluetooth`,
+  Bluetooth firmware or a program naming `libbluetooth.so`.
 
 ### Reported, not failing
 

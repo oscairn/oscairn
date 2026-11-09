@@ -14,10 +14,10 @@
     { "kind": "buttons", "count": 31, "role": "fixed" },
     { "kind": "touchstrip", "count": 1, "role": "fixed" }
   ],
-  "screens": [ { "width": 1024, "height": 600, "touch": true, "surface": "panel", "layout": "kick-screen" } ],
+  "screens": [ { "width": 1024, "height": 600, "touch": true, "diagonal": 178, "surface": "panel", "layout": "kick-screen" } ],
   "midi": { "din": 1, "usbDevice": true, "usbHost": true },
   "network": { "wifi": true },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
-  "estimated": ["platform", "compute", "audio", "controls", "midi", "network"]
+  "estimated": ["platform", "compute", "audio", "controls", "screens", "midi", "network"]
 }

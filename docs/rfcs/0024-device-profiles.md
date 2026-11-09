@@ -140,7 +140,12 @@ An illustrative profile (the values are an example, not a real product's):
 - **`controls`:** every physical control, in groups (below). Default control mappings and the
   panel layout come from these (RFC 0011's physical controls).
 - **`screens`:** each screen's size, touch and surface (RFC 0019: desktop, panel, compact, or
-  none for a headless unit).
+  none for a headless unit), and (added 2026-11-09) its `diagonal` in millimeters, which gives
+  its density: the UI scales by it so a touch target stays at least 6.5 mm across
+  ([RFC 0019](0019-adaptive-ui.md#screens-of-any-size)). Built in: the FANTOM-07's 140 (5.5",
+  its retailers' figure); the KICK's, the Ignite's, the MODX M's and the i.MX8M Mini EVK's 178
+  (7"), each listed in `estimated`; QEMU's virtual screen has none and stays at one pixel per
+  design unit.
 - **`midi`, `cv`, `network`:** what it can connect to; CV outputs mean the CV service of RFC 0004.
 - **`power`:** battery or mains, for power management (RFC 0028).
 - **`panel`** (optional, added 2026-11-08): a panel that does not speak MIDI, `{protocol, device,

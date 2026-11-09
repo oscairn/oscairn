@@ -59,6 +59,11 @@ int main()
         std::string fantomJson; for(const auto& [id, text] : all) if(id == "fantom-07") fantomJson = text;
         check(refused(replaced(fantomJson, "\"roland-i2c-slave\"", "\"korg-serial\"")), "a panel of a protocol with no reader");
         check(refused(replaced(fantomJson, "\"/dev/i2c-slave-2\"", "\"i2c-slave-2\"")), "a panel device outside /dev");
+        // Density (RFC 0019): the FANTOM-07's 5.5" screen is dense enough to scale its UI so a
+        // touch target stays 6.5 mm across; the KICK's 7" and the MODX M's are not.
+        check(std::abs(fantom.screen()->density() - 10.49) < .01 && std::abs(fantom.screen()->scale() - 1.55f) < .01f && kick.screen()->scale() == 1.f &&
+              modx.screen()->scale() == 1.f && !qemu.screen()->diagonal && qemu.screen()->scale() == 1.f, "each screen's density and scale from its diagonal");
+        check(refused(replaced(fantomJson, "\"diagonal\": 140", "\"diagonal\": 1.5")), "a diagonal that is not whole millimeters");
         check(kick.cpuBudget() == .75 && kick.memoryBudget() == 2048ull * 1024 * 1024 * 8 / 10, "an instrument's budget: 75% of the audio thread, 80% of its memory");
         const auto desktop = loadProfile("");
         check(desktop.id == "desktop" && desktop.compute.cores >= 1 && desktop.screen() && desktop.screen()->surface == "desktop" && desktop.screen()->layout == "desktop" &&

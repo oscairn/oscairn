@@ -6,7 +6,7 @@
   "platform": { "os": "linux", "cpu": "arm64", "runtime": "oscairn-buildroot-2026.08", "board": "imx8mm-evk" },
   "compute": { "cores": 4, "realtimeCores": 1, "memory": 2048 },
   "audio": { "inputs": 0, "outputs": 2, "rates": [48000], "block": 128, "headphones": true },
-  "screens": [ { "width": 1024, "height": 600, "touch": false, "surface": "panel", "layout": "kick-screen" } ],
+  "screens": [ { "width": 1024, "height": 600, "touch": false, "diagonal": 178, "surface": "panel", "layout": "kick-screen" } ],
   "midi": { "usbDevice": true, "usbHost": true },
   "network": { "ethernet": true },
   "reliability": "instrument",

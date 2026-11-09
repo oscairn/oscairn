@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include "../audio/AudioConfiguration.h"
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -57,8 +59,19 @@ namespace oscairn::standalone
             std::string target; ControlMidi midi;
         };
         std::vector<Control> controls;
-        // A screen: its size, touch, the surface drawn on it (RFC 0019) and that surface's layout.
-        struct Screen { int width = 0, height = 0; bool touch = false; std::string surface = "desktop", layout = "desktop"; };
+        // A screen: its size, touch, the surface drawn on it (RFC 0019) and that surface's layout;
+        // `diagonal` in millimeters, 0 when not known.
+        struct Screen
+        {
+            int width = 0, height = 0; bool touch = false; std::string surface = "desktop", layout = "desktop"; int diagonal = 0;
+            // Pixels per millimeter; 0 when its size is not known.
+            double density() const { return diagonal > 0 ? std::hypot(double(width), double(height)) / diagonal : 0.0; }
+            // Pixels per design unit (RFC 0019): enough that a touch target (`touchTarget` units)
+            // is at least `minimumTouchMm` across, and never below 1.
+            float scale() const { return float(std::max(1.0, minimumTouchMm * density() / touchTarget)); }
+            static constexpr double minimumTouchMm = 6.5;
+            static constexpr int touchTarget = 44;
+        };
         std::vector<Screen> screens;
         // A controller's ports: an input matches when its name contains `name`, ignoring case;
         // `index`: its turn among the inputs of that name, counted round, so identical devices

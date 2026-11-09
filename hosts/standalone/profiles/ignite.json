@@ -14,11 +14,11 @@
     { "kind": "pads", "count": 16, "role": "notes" },
     { "kind": "buttons", "count": 26, "role": "fixed" }
   ],
-  "screens": [ { "width": 1024, "height": 600, "touch": true, "surface": "panel", "layout": "ignite" } ],
+  "screens": [ { "width": 1024, "height": 600, "touch": true, "diagonal": 178, "surface": "panel", "layout": "ignite" } ],
   "midi": { "din": 4, "usbDevice": true, "usbHost": true },
   "cv": { "outputs": 4 },
   "network": { "wifi": true },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
-  "estimated": ["platform", "compute", "audio", "controls", "midi", "cv", "network"]
+  "estimated": ["platform", "compute", "audio", "controls", "screens", "midi", "cv", "network"]
 }

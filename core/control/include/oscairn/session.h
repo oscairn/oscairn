@@ -387,6 +387,7 @@ namespace oscairn
         uint64_t committedMemory() const;                                   // open, ringing, a committed next entry
         void evictOpportunistic();                                          // until it fits what reservations and commitments leave
         int pressureFd_ = -1;                                               // Linux: a PSI trigger on memory pressure
+        void* pressureSource_ = nullptr;                                    // macOS: a dispatch source on the system's memory pressure, counting its firings
         void armPressure(bool on);
         void pollPressure();
         uint32_t noteLimit(NodeId node) const; // its part's, or 0

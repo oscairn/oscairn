@@ -29,7 +29,7 @@ Checked when built and tested; the sections below say how.
       (`desktop-apps`; Oscairn's apps still inside the desktop app have no manifests and keep their placeholders; first-party apps are not yet measured per profile before release)
 - [ ] 9. Opportunistic memory and its eviction order: the sample file cache, recently used items,
       entries prepared further ahead; on demand and on pressure (PSI; macOS memory pressure)
-      (built: a next entry prepared to cut, let go on demand and on Linux PSI, then a committed one under pressure; not: recent items, entries further ahead, macOS)
+      (built: instances kept warm, a next entry prepared to cut, let go on demand and on Linux PSI, then a committed one under pressure, and macOS's pressure notifications read, not exercised by a test; not: entries further ahead)
 - [ ] 10. Linux: cgroups for the engine, workers and apps, locked memory, the out-of-memory order
       (built: a cgroup per worker with `memory.max` from its declaration and no swap, the engine in its own, locking and scores
       for the engine and workers; not: the engine's `memory.min`, apps' cgroups, opportunistic workers first, the image's wiring)
@@ -277,7 +277,12 @@ the engine -999, a worker 300; what cannot be done (no `CAP_SYS_RESOURCE` to low
 low an `RLIMIT_MEMLOCK`) is printed, not fatal. With memory classes, the session arms a PSI
 trigger ("some 100 ms in 1 s", or 2 s windows when refused) on the subtree's `memory.pressure`,
 else `/proc/pressure/memory`, polled at each service; each firing lets go of one more item
-(`memoryPressure`). Not built: the engine cgroup's `memory.min`, polling `memory.events`, apps'
+(`memoryPressure`). **macOS** (step 9, 2026-11-09): with memory classes, a dispatch source on
+the system's warning and critical memory pressure (`DISPATCH_SOURCE_TYPE_MEMORYPRESSURE`) counts
+firings on a dispatch queue, never the audio thread; the next service lets go of one item a
+firing. It builds and arms, but no test fires it: `memory_pressure -S` needs root
+(`kern.memorypressure_manual_trigger`: not permitted), and filling a 64 GB Mac to reach a real
+warning was not done, so whether the engine receives it is unverified. Not built: the engine cgroup's `memory.min`, polling `memory.events`, apps'
 cgroups (apps are in-process), +1000 for workers holding only opportunistic plugins, zram, and
 the image making the subtree (RFC 0028's design note; `oscairn-session` raises
 `RLIMIT_MEMLOCK`, below).

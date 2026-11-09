@@ -21,6 +21,9 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include <atomic>
+#include <dispatch/dispatch.h>
 #endif
 
 namespace oscairn
@@ -206,7 +209,7 @@ namespace oscairn
         budget_ = budget;
         if(budget_.cpu > 0) loadMeasurements();
         if(memoryClasses()) evictOpportunistic();
-        if(memoryClasses() != (pressureFd_ >= 0)) armPressure(memoryClasses());
+        if(memoryClasses() != (pressureFd_ >= 0 || pressureSource_)) armPressure(memoryClasses());
     }
 
     // Memory classes (RFC 0025, "Admission's arithmetic"). An app counts once, running or always available.
@@ -294,8 +297,28 @@ namespace oscairn
             ::close(fd);
         }
         std::fprintf(stderr, "oscairn: no memory pressure trigger on %s (%s)\n", file.c_str(), std::strerror(errno));
+#elif defined(__APPLE__)
+        // macOS: the system's warning and critical memory pressure. The source fires on a
+        // dispatch queue, never the audio thread, and only counts; the count is read at the next
+        // service, which lets go of one item a firing. Its cancel handler frees the count once no
+        // firing still runs.
+        if(pressureSource_)
+        {
+            auto* source = static_cast<dispatch_source_t>(pressureSource_);
+            dispatch_source_cancel(source); dispatch_release(source);
+            pressureSource_ = nullptr;
+        }
+        if(!on) return;
+        auto* source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0, DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL,
+                                              dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+        if(!source) { std::fprintf(stderr, "oscairn: no memory pressure notifications\n"); return; }
+        dispatch_set_context(source, new std::atomic<uint32_t>(0));
+        dispatch_source_set_event_handler_f(source, [](void* count) { static_cast<std::atomic<uint32_t>*>(count)->fetch_add(1, std::memory_order_relaxed); });
+        dispatch_source_set_cancel_handler_f(source, [](void* count) { delete static_cast<std::atomic<uint32_t>*>(count); });
+        dispatch_resume(source);
+        pressureSource_ = source;
 #else
-        (void)on; // shortcut: macOS's memory pressure notifications (DISPATCH_SOURCE_TYPE_MEMORYPRESSURE) are not read yet
+        (void)on;
 #endif
     }
 
@@ -305,6 +328,10 @@ namespace oscairn
         if(pressureFd_ < 0) return;
         pollfd p{pressureFd_, POLLPRI, 0};
         if(::poll(&p, 1, 0) > 0 && (p.revents & POLLPRI)) memoryPressure();
+#elif defined(__APPLE__)
+        if(!pressureSource_) return;
+        auto* count = static_cast<std::atomic<uint32_t>*>(dispatch_get_context(static_cast<dispatch_source_t>(pressureSource_)));
+        for(auto n = count->exchange(0, std::memory_order_relaxed); n > 0 && memoryPressure(); --n) {}
 #endif
     }
 

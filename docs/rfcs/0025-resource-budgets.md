@@ -1,6 +1,6 @@
 # RFC 0025: Resource budgets: knowing before loading whether it fits
 
-Status: in progress, 2026-11-01: steps 1–4, 6 and 7 built, 8 to 10 in part ([status](#status));
+Status: in progress, 2026-11-09: steps 1–8 built, 9 and 10 in part ([status](#status));
 the memory classes' design is [below](#memory-reserved-committed-and-opportunistic). Required for
 every product Oscairn runs on. Builds on the
 voice budget ([RFC 0018](0018-voice-budget-and-stealing.md)), device profiles
@@ -104,7 +104,11 @@ memory. The budget keeps a margin (by reliability level, RFC 0027: more on `pass
 | 10. Linux cgroups, locking, OOM order | A cgroup per worker under `OSCAIRN_CGROUP` with `memory.max` from its declarations and no swap, the engine in `engine/`, `mlockall` and `oom_score_adj` (engine -999, workers 300), the PSI trigger; the session raises `RLIMIT_MEMLOCK`; since 3461f86 the engine and workers run in the `oscairn-audio` cpuset partition | The image does not set `OSCAIRN_CGROUP`, and the engine's move into `oscairn-audio` (`OSCAIRN_AUDIO_CGROUP`) and into `$OSCAIRN_CGROUP/engine` would have to be one tree; apps' cgroups and scores (apps are processes now, RFC 0022 step 2); the engine's `memory.min`; +1000 for workers holding only opportunistic plugins; zram |
 | 11. Tested: filled, launched to the floor | The simulated test in one process (`control-parts`, "memory classes" below) | Everything on the QEMU image at 4 GiB and on the target |
 
-What was built after the audit is in the step paragraphs below.
+What was built after the audit is in the step paragraphs below: steps 5 and 8 (gates met), and
+macOS pressure for step 9. Steps 10 and 11 were not touched on 2026-11-09: the image's wiring
+needs `OSCAIRN_CGROUP` and the audio partition made one tree in `oscairn-session` and apps'
+cgroups under the shell, and both need the QEMU image to check, which another change was
+building in the shared `oscairn-os` volume at the time; step 11 needs that and then the target.
 
 Built 2026-11-01 (`core/control/src/budget.cpp`; `setBudget`, `estimate`; `budget.set`,
 `budget.estimate`). The app sets the engine's budget from its device profile: one audio thread's

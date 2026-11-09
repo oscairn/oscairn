@@ -155,7 +155,12 @@ namespace oscairn
             case MacroTarget::Kind::Macro: break;
             }
         };
-        Session::drive(macros_, written_, mappingScene_, control, value, current, apply);
+        // A relative target's CLAP modulation, heard at the next block; the Session sends the same when it plays the move.
+        auto modulate = [&](const MacroTarget& m, double x) {
+            if(const auto r = ranges_.find({int(Assignment::Kind::Parameter), m.node, m.param, 0}); r != ranges_.end())
+                session_.graph_.queueModulation(m.node, m.param, x * (r->second.maximum - r->second.minimum));
+        };
+        Session::drive(macros_, written_, mappingScene_, control, value, current, apply, modulate);
     }
 
     // As Session::morphScenes, of what blend() sets: the control thread then switches what does

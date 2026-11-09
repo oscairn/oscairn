@@ -256,7 +256,9 @@ Decided 2026-11-08, from what the milestone test found:
      ([RFC 0002](rfcs/0002-param-target.md#lanes-driving-controls)); a first-party LFO
      ([plugins](../plugins/README.md#lfo)); control lines in the Routing view, in a color of
      their own ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#step-4-status)); the LFO
-     reaches 1,357 Hz, its points closer at high rates
+     reaches 1,357 Hz, its points closer at high rates; every relative target is CLAP
+     modulation however its control is driven, the summed value only on a parameter that takes
+     none ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree))
    - [ ] audio-rate modulation: a modulation port or sidechain carrying an audio-rate signal
      from a modulator to a target, for FM and the like, which parameter events cannot carry (a
      target holds each point until the next, or reads them once per block)

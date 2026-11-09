@@ -8,7 +8,9 @@
 // CLAP modulation (the fixture adds its gain's modulation to its gain) and absolute ones as values;
 // saving never captures what it drives. At 1,000 Hz it still sends every point, four targets
 // receive every one, and nothing is dropped; at high rates its square is band-limited. A target
-// fuller than its block holds thins the points, counted, without being reset.
+// fuller than its block holds thins the points, counted, without being reset. A knob's relative
+// targets, and those through a second control, are modulation too; a parameter that takes none
+// (the effect fixture's gain) gets the summed value instead.
 //   oscairn-control-source-test SEQUENCER.clap FIXTURE.clap LFO.clap BASIC_SYNTH.clap
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
@@ -350,6 +352,91 @@ namespace
         check(swing == still, "loaded the same as when saved with the LFO removed");
     }
 
+    // RFC 0011, 2026-11-09: every relative target on a parameter that takes CLAP modulation is
+    // modulation, however its control is driven. A knob's: A's sound moves, its gain's value and
+    // saved state do not, moving the knob is no edit, and the saved Performance loads the same
+    // with the knob modulating again. Through a second control, moved by a knob and driven by a
+    // lane: modulation. On the effect fixture's gain, which takes none: the summed value.
+    void knobModulates(const char* sequencer, const char* fixture, const std::filesystem::path& root)
+    {
+        auto bytes = [](const std::filesystem::path& p) { return state_files::read(p / "state.clap", 1 << 20); };
+        Session s(rate, maxFrames, {}, twoOutputs);
+        const auto a = s.add("a", fixture), b = s.add("b", fixture), fx = s.add("fx", fixture, "org.kick.test.effect");
+        for(const auto n : {a, b}) s.connectNotes(graphInput, n);
+        s.connectAudio(AudioConnection{{a, 0, 0}, {graphOutput, 0, 0}, 1});
+        s.connectAudio(AudioConnection{{b, 0, 0}, {graphOutput, 1, 0}, 1});
+        const auto knob = s.addMacro("Knob");
+        s.setMacroTargets(knob, {MacroTarget{.node = a, .param = gain, .start = .3, .end = .7, .relative = true}});
+        s.setMacro(knob, .5); s.commit();
+        check(s.graphState().macros[0].targets[0].delivery == MacroTarget::Delivery::Modulation, "a knob's relative target on a modulatable parameter is modulation");
+        s.saveState(a, (root / "rest").string());
+        s.savePerformance((root / "knob-rest").string());
+        const auto undo = s.history().undo;
+        s.setMacro(knob, 1);
+        size_t position = 0;
+        auto got = render(s, 256, position, .02, true);
+        check(near(got.at(0, 0), .7) && near(got.out[0].back(), .7), "the knob at its top modulates A's gain .5 by +.2: " + std::to_string(got.at(0, 0)));
+        check(near(s.parameter(a, gain), .5), "A's gain keeps its value: " + std::to_string(s.parameter(a, gain)));
+        check(s.history().undo == undo, "moving the knob is no edit: " + s.history().undo);
+        s.saveState(a, (root / "up").string());
+        check(bytes(root / "rest") == bytes(root / "up"), "A's saved state is the same with the knob at rest and at its top");
+        s.savePerformance((root / "knob-up").string());
+        {
+            Session t(rate, maxFrames, {}, twoOutputs);
+            t.loadPerformance((root / "knob-up").string());
+            const auto ta = t.nodeId("a");
+            size_t at = 0;
+            const auto loaded = render(t, 256, at, .02, true);
+            check(near(t.parameter(ta, gain), .5) && near(loaded.at(0, 0), .7), "loaded, A's gain is .5 and the saved knob modulates it again: " + std::to_string(t.parameter(ta, gain)) + ", " + std::to_string(loaded.at(0, 0)));
+        }
+        s.setMacro(knob, .5);
+        got = render(s, 256, position, .02);
+        check(near(got.at(0, got.start), .5), "the knob back at the middle: no modulation: " + std::to_string(got.at(0, got.start)));
+        s.setMacro(knob, 0);
+        s.setMacroTargets(knob, {});
+        got = render(s, 256, position, .02);
+        check(near(got.at(0, got.start), .5), "a target taken away takes its modulation with it: " + std::to_string(got.at(0, got.start)));
+
+        // A chain: Super drives Assign (absolute), whose relative target on B modulates it.
+        const auto assign = s.addMacro("Assign"), super = s.addMacro("Super");
+        s.setMacroTargets(assign, {MacroTarget{.node = b, .param = gain, .start = .3, .end = .7, .relative = true}});
+        s.setMacroTargets(super, {MacroTarget{.kind = MacroTarget::Kind::Macro, .macro = assign}});
+        s.commit();
+        s.setMacro(super, 0);
+        got = render(s, 256, position, .02);
+        check(near(got.at(1, got.start), .3) && near(s.parameter(b, gain), .5), "Super at 0 moves Assign to 0, modulating B by -.2: " + std::to_string(got.at(1, got.start)) + ", value " + std::to_string(s.parameter(b, gain)));
+
+        // The same chain driven by a lane: the sequencer's Lock A sets Super, whose path reaches B as
+        // modulation, B's value untouched.
+        const auto seq = s.add("seq", sequencer);
+        s.connectNotes(seq, b);
+        s.setMacroSource(super, seq, 0); s.commit();
+        bool modulates = false;
+        for(const auto& m : s.graphState().macros) if(m.id == assign) modulates = m.targets[0].delivery == MacroTarget::Delivery::LaneModulation;
+        check(modulates, "under a lane's control, through another, the relative target is carried by the lane as modulation");
+        s.setPlaying(true);
+        size_t transport = 0; // it plays from 0
+        got = render(s, 256, transport, .7);
+        size_t steps = 0;
+        for(size_t k = (got.start + step - 1) / step; (k * step + gate) <= got.start + got.out[1].size(); ++k)
+        {
+            const double expected = .3 + .4 * locks[k % locks.size()];
+            if(!near(got.at(1, k * step), expected)) { check(false, "a lane through two controls modulates B at step " + std::to_string(k) + ": " + std::to_string(got.at(1, k * step)) + ", expected " + std::to_string(expected)); break; }
+            ++steps;
+        }
+        check(steps >= 5, "steps checked through the chain: " + std::to_string(steps));
+        check(near(s.parameter(b, gain), .5), "the lane leaves B's gain at its value: " + std::to_string(s.parameter(b, gain)));
+        s.setPlaying(false);
+
+        // A parameter that takes no modulation: the knob's relative target sums into its value.
+        const auto plain = s.addMacro("Plain");
+        s.setMacroTargets(plain, {MacroTarget{.node = fx, .param = gain, .start = .3, .end = .7, .relative = true}});
+        s.commit();
+        check(s.graphState().macros.back().targets[0].delivery == MacroTarget::Delivery::Value, "on a parameter that takes no modulation, the relative target is the value");
+        s.setMacro(plain, 1); s.service();
+        check(near(s.parameter(fx, gain), .7), "it falls back to the summed value, .5 + .2: " + std::to_string(s.parameter(fx, gain)));
+    }
+
 }
 
 int main(int argc, char** argv)
@@ -364,6 +451,7 @@ int main(int argc, char** argv)
         lfoThinned(argv[3], argv[2]);
         synthBrightness(argv[3], argv[4]);
         savedUnmodulated(argv[3], argv[2], temp.path);
+        knobModulates(argv[1], argv[2], temp.path);
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(failures) return 1;

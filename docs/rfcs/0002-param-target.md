@@ -74,11 +74,19 @@ as when the control's knob moves.
   target gets a `CLAP_EVENT_PARAM_MOD`: its offset (its point in its range less a half) on top of
   the parameter's own value, which stays as it is, so the saved Performance and undo are
   untouched and the parameter can still be turned by hand while it is modulated. A relative
-  target of a lane-driven control is therefore left out of the summing rule's stored value, and
-  moving that control's knob does not set it; it moves at the lane's next event. Relative
-  targets of a plain knob's control, and those under a control the lane drives through another,
-  still move the stored value as before (switching every relative target to CLAP modulation is
-  a larger change, not made).
+  target is therefore left out of the summing rule's stored value, and moving a lane-driven
+  control's knob does not set it; it moves at the lane's next event. Under a control the lane
+  drives through another, a relative target is modulation too, the path running through the
+  control between. Several relative targets on one parameter add up into one modulation amount:
+  the lane's event carries the others' offsets where their controls are.
+- **A knob's relative targets are modulation too** (RFC 0011, built 2026-11-09). However a
+  control is driven, a relative target on a parameter that takes CLAP modulation
+  (`CLAP_PARAM_IS_MODULATABLE`) is a `CLAP_EVENT_PARAM_MOD`. For a control moved by a knob, the
+  Session sends each such parameter's summed modulation through the graph's queue
+  (`Graph::queueModulation`), heard at the next block's first sample; the controller input does
+  the same from its MIDI thread. A parameter some lane already reaches as modulation is left to
+  the lane, whose events carry the knobs' offsets. A parameter that does not take modulation
+  falls back to the summed value, as before.
 
 That is how CLAP itself separates the two: a parameter's value against modulation of it. A
 MODULATE lane's natural targets are relative ones, which the Routing view makes when a lane is

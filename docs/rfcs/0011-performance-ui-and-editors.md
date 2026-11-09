@@ -753,6 +753,15 @@ controls; physical knobs, faders, buttons, MIDI CC and sequencer lanes drive the
   value (decided 2026-11-08). A
   target is **absolute** (it sets the value) or **relative** (it moves the value around
   its base, the MODX's controller boxes).
+- **A relative target is CLAP modulation** (decided 2026-11-08, built 2026-11-09): a
+  `CLAP_EVENT_PARAM_MOD`, its offset on top of the parameter's own value, which never changes,
+  so it is not saved and does not touch undo. That holds however the control is driven (a knob,
+  a scene, a controller, a plugin's lane) and wherever the target is in the tree (under another
+  control too). Several relative targets on one parameter add up into one modulation amount. A
+  parameter that does not take modulation (no `CLAP_PARAM_IS_MODULATABLE`) falls back to the
+  summing rule's stored value below, as do relative targets on part levels and mutes, which are
+  not plugin parameters. The editor shows a parameter's own value; showing the modulated value
+  beside it is not built yet.
 - Controls form a tree without loops: an assignment that would loop is refused.
 - **Several controls driving one parameter add up**, as the MODX sums the boxes of every
   source assigned to one destination (the summing rule, below). When two controls drive the
@@ -783,7 +792,9 @@ of its targets (`base`). Each target on it contributes an **offset**, at its con
 
 - a **relative** target offsets by `p − ½`: the middle of its range is no change, so
   start 0.5 and end 0.9 add nothing at 0 and +0.4 at 1 (a unipolar box), and start 0.3 and
-  end 0.7 move ±0.2 (a bipolar one);
+  end 0.7 move ±0.2 (a bipolar one). On a parameter that takes modulation this offset is the
+  target's modulation and stays out of the value: the summing rule's value is the base and the
+  absolute targets' offsets only;
 - an **absolute** target offsets by `p − base`: alone it sets the value to `p`, as before;
   beside others it adds how far `p` is from the base.
 
@@ -805,9 +816,10 @@ kept: the base survives it, so the value comes back as the controls go back.
   hold, which have the last word: a stored value plays as stored, and the controls offset
   from it afterwards. Glides and morphs move them alike.
 - **Saving never captures modulation** (decided 2026-11-08). A Performance loads exactly as it
-  was last saved, whatever a plugin's lane was doing at the time. A relative target of a
-  lane-driven control is CLAP modulation, which never touches the parameter's value, the
-  Session's records or the plugin's state. An absolute target of one sets its parameter while
+  was last saved, whatever a plugin's lane was doing at the time. A relative target is CLAP
+  modulation, which never touches the parameter's value, the Session's records or the plugin's
+  state; a loaded control at its saved value modulates again from there. An absolute target of a
+  lane-driven control sets its parameter while
   driven, and the plugin's own state saves what it had; so a Performance is loaded with each
   such parameter put back where the controls put it with the lane's control at its own value
   (its knob, as saved), and the lane drives it again from there. The lane-driven control's value
@@ -864,12 +876,26 @@ event at every one of them, at its sample, in the audio thread. The lane gives t
 value (a SET event's, or a MODULATE event's amount added to the knob's); delivery is per target:
 an absolute target gets `CLAP_EVENT_PARAM_VALUE`, a relative one `CLAP_EVENT_PARAM_MOD`, its
 offset on top of the parameter's own value, which stays put (left out of the stored value the
-summing rule keeps; a knob-only control's relative targets still move it). A lane
+summing rule keeps). A lane
 that would reach its own plugin is refused, as a looping control is. `control-source` checks two
 targets, one reversed, at the lane's samples with 256- and 37-sample blocks, a knob's relative
-target summing beside them, loops, saving and undo; and, with the LFO, an absolute and a
+target beside them (modulation since 2026-11-09), loops, saving and undo; and, with the LFO, an absolute and a
 relative target saved mid-swing loading unmodulated, the same as saved with the LFO removed. A lane reaches the parameters under its
-control; part levels, mutes and morphs under it follow only its knob. Not yet:
+control; part levels, mutes and morphs under it follow only its knob. Every relative target as
+modulation, 2026-11-09 (`MacroTarget::delivery`, worked out by the Session from the graph and
+not saved; `Session::syncModulation`; `Graph::queueModulation`): a knob's relative targets, and
+those reached through a second control, by a knob or by a lane, are CLAP modulation; the
+Session sends each parameter's summed modulation when a control moves, its targets change, a
+scene's mappings change or a Performance loads, 0 when it stops, and again to a plugin that
+replaced the one it was sent to. A lane reaching the parameter carries the knobs' offsets in its
+events instead. The controller input sends the same from its MIDI thread. "Either end to the
+present value" on a modulating target is the point where the parameter's modulation adds up to
+nothing. The controller input's modulation, a replaced plugin's and either end on a modulating
+target are not tested yet. `control-source` checks a knob's relative target moving the sound but not the gain's
+value, its saved state, undo or the saved Performance (which loads with the knob modulating
+again), a target taken away taking its modulation with it, a chain of two controls by a knob and
+by the sequencer's lane, and the effect fixture's gain, which takes no modulation, getting the
+summed value; `control-parts`' summing rule and present ends run on that gain. Not yet:
 default Assign controls from each sound, MIDI CC learn, and part faders as direct gain
 updates rather than a new graph plan per move.
 

@@ -1165,7 +1165,9 @@ namespace oscairn
     // 0011's summing rule: the destination is the base plus each target's offset). With exactly one
     // absolute target the base does not count, so the point is the value less the other offsets.
     // With none or several the base counts, and Session::setMacroTargets takes any edit since the
-    // controls last moved into it, so the target's point now already gives the value.
+    // controls last moved into it, so the target's point now already gives the value. A relative
+    // target that modulates its parameter leaves the value alone: its point is the one where the
+    // modulation there adds up to nothing, so the parameter plays at its own value.
     void setRangeToPresent(Control& c, uint32_t macro, size_t target, bool end)
     {
         const auto state = c.graphState();
@@ -1188,18 +1190,22 @@ namespace oscairn
         }
         now = std::clamp(now, 0.0, 1.0);
         auto point = [](const MacroTarget& o, double x) { return o.start + (o.end - o.start) * o.shape(x); };
+        // Read from the parameter: a client's copy of the controls does not carry their delivery.
+        auto modulates = [&](const MacroTarget& o) { return o.relative && o.kind == MacroTarget::Kind::Parameter && (c.parameterInfo(o.node, o.param).flags & CLAP_PARAM_IS_MODULATABLE); };
+        const bool own = modulates(t);
         double others = 0;
         int absolute = 0;
         // shortcut: targets off in the scene last selected are counted; the session does not say which scene set the mappings.
         if(t.sums())
             for(const auto& x : state.macros)
                 for(size_t i = 0; i < x.targets.size(); ++i)
-                    if(const auto& o = x.targets[i]; o.sameDestination(t))
+                    if(const auto& o = x.targets[i]; o.sameDestination(t) && modulates(o) == own)
                     {
                         absolute += !o.relative;
                         if(!(x.id == macro && i == target)) others += o.relative ? point(o, x.value) - .5 : point(o, x.value);
                     }
-        double v = !t.sums() ? (t.relative ? now - t.base + .5 : now)
+        double v = own ? .5 - others
+                 : !t.sums() ? (t.relative ? now - t.base + .5 : now)
                  : absolute == 1 ? now - others + (t.relative ? .5 : 0)
                  : point(t, m->value);
         if(t.kind == MacroTarget::Kind::Parameter && info.stepped && info.maximum > info.minimum)
@@ -1246,6 +1252,7 @@ namespace oscairn
         std::erase_if(macros_, [&](const Macro& m) { return m.id == id; });
         for(auto& m : macros_) std::erase_if(m.targets, [&](const MacroTarget& t) { return t.kind == MacroTarget::Kind::Macro && t.macro == id; });
         for(auto& s : scenes_) std::erase_if(s.macros, [&](const auto& v) { return v.first == id; });
+        syncModulation();
     }
 
     void Session::setMacroName(uint32_t id, const std::string& name) { findMacro(id).name = name; }
@@ -1260,11 +1267,13 @@ namespace oscairn
         {
             if(!std::isfinite(t.start) || !std::isfinite(t.end) || t.start < 0 || t.start > 1 || t.end < 0 || t.end > 1) throw std::invalid_argument("a target's range is within 0..1");
             if(!t.validCurve()) throw std::invalid_argument("a dB curve runs from -144 to 0 dB, low below high; a power curve's exponent is 0.1 to 10");
+            t.delivery = MacroTarget::Delivery::Value;
             switch(t.kind)
             {
             case MacroTarget::Kind::Parameter:
                 if(!graph_.contains(t.node) || !hasParameter(t.node, t.param) || (parameterInfo(t.node, t.param).flags & CLAP_PARAM_IS_READONLY)) throw std::invalid_argument("not a writable parameter");
                 if(owner && !inside.count(t.node)) throw std::invalid_argument("a part's control targets only the part's plugins");
+                if(t.relative && (parameterInfo(t.node, t.param).flags & CLAP_PARAM_IS_MODULATABLE)) t.delivery = MacroTarget::Delivery::Modulation;
                 break;
             case MacroTarget::Kind::PartLevel: case MacroTarget::Kind::PartMute:
                 if(owner) throw std::invalid_argument("a part's control targets only the part's plugins and controls");
@@ -1313,6 +1322,8 @@ namespace oscairn
         }
         findMacro(id).targets = std::move(targets);
         for(const auto& t : findMacro(id).targets) if(t.sums()) setBase(t, t.base);
+        deliver(graph_, macros_, mappingScene_);
+        syncModulation();
     }
 
     void Session::setMacroSource(uint32_t id, NodeId node, uint32_t lane)
@@ -1329,6 +1340,8 @@ namespace oscairn
         const bool was = findMacro(id).sourceNode != 0;
         macros_ = std::move(next);
         if(was) settle(id); // the lane no longer drives them
+        deliver(graph_, macros_, mappingScene_);
+        syncModulation();
         staged_ = true;
     }
 
@@ -1369,11 +1382,11 @@ namespace oscairn
                         const auto& params = graph.host(t.node).parameters();
                         if(std::none_of(params.begin(), params.end(), [&](const kick::clap::Parameter& p) { return p.id == t.param; })) continue;
                         auto full = path;
-                        // A relative target (of the lane's control itself, or below it) is CLAP modulation: its
-                        // offset around the parameter's own value. Under a control below, it is one whenever the
-                        // control is the lane's own; else the summing rule's rest is folded into an absolute one.
-                        const bool modulated = t.relative && path.empty();
-                        if(modulated) full.push_back(curveOf(t, -.5));
+                        // A relative target on a modulatable parameter (of the lane's control itself, or below
+                        // it) is CLAP modulation: its offset around the parameter's own value, with every other
+                        // relative target's there where it is. Else the summing rule's rest is folded into the value.
+                        const bool modulates = modulated(t);
+                        if(modulates) full.push_back(curveOf(t, modulation(macros, mappingScene, t) - t.offset(m.value) - .5));
                         else
                         {
                             // What this target adds, at its control's value now: a relative one its offset, an absolute one its point.
@@ -1381,7 +1394,7 @@ namespace oscairn
                             const double rest = contributions(macros, mappingScene, t, 0, 0).at(t.base) - own;
                             full.push_back(curveOf(t, rest - (t.relative ? .5 : 0)));
                         }
-                        targets.push_back({t.node, t.param, std::move(full), source.value, modulated});
+                        targets.push_back({t.node, t.param, std::move(full), source.value, modulates});
                     }
                     // shortcut: part levels, mutes and morphs under a lane's control follow only its knob; reach them once part faders take sample-timed events.
                 }
@@ -1395,10 +1408,72 @@ namespace oscairn
 
     bool Session::stageControls()
     {
-        auto next = flattenControls(graph_, macros_, mappingScene_);
+        auto next = deliver(graph_, macros_, mappingScene_);
         if(next == graph_.controlTargets()) return false;
         graph_.setControlTargets(std::move(next));
         return true;
+    }
+
+    Graph::ControlTargets Session::deliver(const Graph& graph, std::vector<Macro>& macros, uint32_t mappingScene)
+    {
+        auto modulatable = [&](const MacroTarget& t) {
+            if(!t.relative || t.kind != MacroTarget::Kind::Parameter || !graph.contains(t.node)) return false;
+            const auto& params = graph.host(t.node).parameters();
+            const auto p = std::find_if(params.begin(), params.end(), [&](const kick::clap::Parameter& q) { return q.id == t.param; });
+            return p != params.end() && (p->flags & CLAP_PARAM_IS_MODULATABLE);
+        };
+        for(auto& m : macros) for(auto& t : m.targets) t.delivery = modulatable(t) ? MacroTarget::Delivery::Modulation : MacroTarget::Delivery::Value;
+        auto flat = flattenControls(graph, macros, mappingScene);
+        for(const auto& [lane, targets] : flat)
+            for(const auto& c : targets)
+                if(c.modulate)
+                    for(auto& m : macros) for(auto& t : m.targets) if(modulated(t) && t.node == c.target && t.param == c.param) t.delivery = MacroTarget::Delivery::LaneModulation;
+        return flat;
+    }
+
+    double Session::modulation(const std::vector<Macro>& macros, uint32_t mappingScene, const MacroTarget& t)
+    {
+        double sum = 0;
+        for(const auto& m : macros)
+            for(const auto& o : m.targets)
+                if(modulated(o) && o.sameDestination(t) && !(mappingScene && std::find(o.offIn.begin(), o.offIn.end(), mappingScene) != o.offIn.end())) sum += o.offset(m.value);
+        return sum;
+    }
+
+    void Session::syncModulation()
+    {
+        std::map<Address, double> want; // plain amounts
+        for(const auto& m : macros_)
+            for(const auto& t : m.targets)
+                if(t.delivery == MacroTarget::Delivery::Modulation && !want.count({t.node, t.param}) && graph_.planned(t.node) && hasParameter(t.node, t.param))
+                {
+                    const auto info = parameterInfo(t.node, t.param);
+                    want[{t.node, t.param}] = modulation(macros_, mappingScene_, t) * (info.maximum - info.minimum);
+                }
+        std::map<const PluginHost*, NodeId> nodeOf;
+        for(const auto& [id, name] : nodes_) if(graph_.planned(id)) nodeOf[graph_.node(id).host.get()] = id; // anything else waits for its commit
+        // What was sent: kept, sent again, or taken back to 0; a plugin gone takes its modulation with it.
+        for(auto it = modulation_.begin(); it != modulation_.end();)
+        {
+            const auto host = it->host.lock();
+            const auto node = host ? nodeOf.find(host.get()) : nodeOf.end();
+            if(node == nodeOf.end()) { it = modulation_.erase(it); continue; }
+            if(const auto w = want.find({node->second, it->param}); w != want.end())
+            {
+                if(std::abs(w->second - it->amount) < 1e-12) want.erase(w);
+                ++it;
+            }
+            else it = graph_.queueModulation(node->second, it->param, 0) ? modulation_.erase(it) : std::next(it); // a full queue: tried again next time
+        }
+        for(const auto& [at, amount] : want)
+        {
+            const auto host = graph_.node(at.first).host;
+            auto sent = std::find_if(modulation_.begin(), modulation_.end(), [&](const SentModulation& x) { return x.param == at.second && x.host.lock() == host; });
+            if(sent == modulation_.end() && amount == 0) continue; // a plugin starts unmodulated
+            if(!graph_.queueModulation(at.first, at.second, amount)) continue;
+            if(sent == modulation_.end()) modulation_.push_back({host, at.second, amount});
+            else sent->amount = amount;
+        }
     }
 
     // A lane's events go to its parameters in the same block, after it: one that reaches its own
@@ -1432,7 +1507,7 @@ namespace oscairn
         Sum sum;
         for(const auto& m : macros)
             for(const auto& o : m.targets)
-                if(o.sameDestination(t) && !modulated(m, o) && !(mappingScene && std::find(o.offIn.begin(), o.offIn.end(), mappingScene) != o.offIn.end()))
+                if(o.sameDestination(t) && !modulated(o) && !(mappingScene && std::find(o.offIn.begin(), o.offIn.end(), mappingScene) != o.offIn.end()))
                 {
                     const double v = m.id == macro ? value : m.value;
                     sum.fixed += o.relative ? o.offset(v) : o.start + (o.end - o.start) * o.shape(v);
@@ -1482,9 +1557,10 @@ namespace oscairn
             case MacroTarget::Kind::Macro: break; // drive's own
             }
         });
+        syncModulation();
     }
 
-    void Session::drive(std::vector<Macro>& macros, std::map<Destination, double>& written, uint32_t mappingScene, uint32_t id, double value, const MacroCurrent& current, const MacroApply& apply)
+    void Session::drive(std::vector<Macro>& macros, std::map<Destination, double>& written, uint32_t mappingScene, uint32_t id, double value, const MacroCurrent& current, const MacroApply& apply, const MacroApply& modulate)
     {
         auto find = [&](uint32_t m) -> Macro& {
             const auto it = std::find_if(macros.begin(), macros.end(), [&](const Macro& x) { return x.id == m; });
@@ -1493,7 +1569,6 @@ namespace oscairn
         };
         auto& macro = find(id);
         const double was = macro.value;
-        const Macro owner = {macro.id, {}, 0, {}, 0, macro.sourceNode}; // for modulated()
         value = std::clamp(value, 0.0, 1.0);
         const auto targets = macro.targets; // `macro` may move as children are driven
         // Where each destination goes with this control at its new value: its base plus every
@@ -1503,7 +1578,7 @@ namespace oscairn
         for(size_t i = 0; i < targets.size(); ++i)
         {
             auto t = targets[i];
-            if(!t.sums()) continue;
+            if(!t.sums() || modulated(t)) continue;
             const auto now = current(t);
             if(!now) continue;
             if(const auto w = written.find(destination(t)); w != written.end() && std::abs(w->second - *now) > 1e-6) { t.base = contributions(macros, mappingScene, t, id, was).baseFor(*now, t.base); setBase(macros, t, t.base); }
@@ -1514,9 +1589,13 @@ namespace oscairn
         {
             const auto& t = targets[i];
             if(mappingScene && std::find(t.offIn.begin(), t.offIn.end(), mappingScene) != t.offIn.end()) continue; // off in this scene
-            if(modulated(owner, t)) continue; // the lane's CLAP modulation, never the parameter's value
+            if(modulated(t)) // CLAP modulation, never the parameter's value
+            {
+                if(modulate && t.delivery == MacroTarget::Delivery::Modulation) modulate(t, modulation(macros, mappingScene, t));
+                continue;
+            }
             const double v = t.sums() ? to[i] : t.map(value);
-            if(t.kind == MacroTarget::Kind::Macro) drive(macros, written, mappingScene, t.macro, v, current, apply);
+            if(t.kind == MacroTarget::Kind::Macro) drive(macros, written, mappingScene, t.macro, v, current, apply, modulate);
             else apply(t, v);
             if(t.sums()) if(const auto now = current(t)) written[destination(t)] = *now;
         }
@@ -1674,7 +1753,7 @@ namespace oscairn
         transition_.reset();
         if(scene.scope & Scene::Mappings) mappingScene_ = scene.id;
         scene_ = scene.id;
-        if(!scene.glide) { applyScene(scene, scene.scope); return; }
+        if(!scene.glide) { applyScene(scene, scene.scope); syncModulation(); return; } // its mappings may change what modulates
         Transition t;
         capture(t.from);
         t.to = scene; t.start = framesProcessed_.load();
@@ -1682,6 +1761,7 @@ namespace oscairn
         transition_ = std::move(t);
         blendScenes(transition_->from, scene, 0, scene.curve, 0, scene.scope); // what cannot glide changes now
         transition_->applied = faderLevels();
+        syncModulation();
     }
 
     // Each service tick: a scene waiting for its beat, and a glide's next step. Both wait while
@@ -1780,6 +1860,7 @@ namespace oscairn
         transition_.reset(); pendingScene_.reset();
         if(to.scope & Scene::Mappings) mappingScene_ = t >= .5 ? to.id : from.id;
         blendScenes(from, to, t, to.curve, .5, to.scope);
+        syncModulation();
     }
 
     void Session::removeScene(uint32_t id)
@@ -1794,6 +1875,7 @@ namespace oscairn
         if(pendingScene_ && pendingScene_->scene == id) pendingScene_.reset();
         if(scene_ == id) scene_ = 0;
         if(mappingScene_ == id) mappingScene_ = 0;
+        syncModulation();
     }
 
     void Session::setSceneName(uint32_t id, const std::string& name) { findScene(id).name = name; }

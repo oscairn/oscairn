@@ -374,8 +374,12 @@ setting it. A control with a `source` is also driven by that plugin lane ([RFC 0
 in the audio thread at the lane's samples: a SET event's value becomes the control's, a
 MODULATE event's amount is added to its value. Its absolute parameter targets are set; its
 relative ones get CLAP parameter modulation on top of the parameter's value, which stays as it
-is (they are left out of the summing rule's stored value, and its knob does not set them). A
-lane reaches the parameters under the control (part levels, mutes and morphs follow only its knob). Assignments
+is. A lane reaches the parameters under the control (part levels, mutes and morphs follow only
+its knob). Whatever drives a control, a relative target on a parameter that takes modulation
+(`CLAP_PARAM_IS_MODULATABLE`) is CLAP parameter modulation, never the parameter's value: left
+out of the summing rule's stored value, the value `params.get` reads and the saved Performance.
+Several on one parameter add up into one amount. On a parameter that does not take modulation,
+and on part levels and mutes, a relative target moves the value by the summing rule. Assignments
 that would loop are refused. Scenes store control values (`controls` in each scene).
 
 **Scenes** are states of the Performance for sections of a song (RFC 0011's full model).

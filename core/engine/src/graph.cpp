@@ -354,6 +354,7 @@ namespace oscairn
         for(const auto& [id,node]:nodes_)if(!staying.count(node.host.get()))removedHosts_.push_back(node.host);
         nodes_.swap(next.nodes_);audioRoutes_.swap(next.audioRoutes_);noteEdges_.swap(next.noteEdges_);noteZones_.swap(next.noteZones_);draining_.swap(next.draining_);paramTargets_.swap(next.paramTargets_);controlTargets_.swap(next.controlTargets_);taps_.swap(next.taps_);harmonies_.swap(next.harmonies_);
         nextId_=next.nextId_;replacementSerial_=next.replacementSerial_;
+        notePlanned();
         delete pending_.exchange(plan.release(),std::memory_order_acq_rel);
     }
 
@@ -938,7 +939,15 @@ namespace oscairn
         ++plansCompiled_;
         plan->rampGains = rampGains;
         collect();
+        notePlanned();
         delete pending_.exchange( plan, std::memory_order_acq_rel ); // a plan the audio thread never took
+    }
+
+    bool Graph::planned( NodeId node ) const
+    {
+        const auto p = planned_.find( node );
+        const auto n = nodes_.find( node );
+        return p != planned_.end() && n != nodes_.end() && p->second == n->second.host.get();
     }
 
     void Graph::collect()
@@ -1028,12 +1037,15 @@ namespace oscairn
         return {};
     }
 
-    bool Graph::queueParameter( NodeId node, uint32_t param, double value ) noexcept
+    bool Graph::queueParameter( NodeId node, uint32_t param, double value ) noexcept { return queue( { node, param, value, false } ); }
+    bool Graph::queueModulation( NodeId node, uint32_t param, double amount ) noexcept { return queue( { node, param, amount, true } ); }
+
+    bool Graph::queue( const QueuedParameter& q ) noexcept
     {
         std::lock_guard lock( queueLock_ );
         const auto head = queueHead_.load( std::memory_order_relaxed );
         if( head - queueTail_.load( std::memory_order_acquire ) == queued_.size() ) return false;
-        queued_[head % queued_.size()] = { node, param, value };
+        queued_[head % queued_.size()] = q;
         queueHead_.store( head + 1, std::memory_order_release );
         return true;
     }
@@ -1078,10 +1090,20 @@ namespace oscairn
         for(auto tail=queueTail_.load(std::memory_order_relaxed),head=queueHead_.load(std::memory_order_acquire);tail!=head;++tail)
         {
             const auto& q=queued_[tail%queued_.size()];
-            clap_event_param_value_t v{};
-            v.header={sizeof(v),0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_PARAM_VALUE,CLAP_EVENT_IS_LIVE};
-            v.param_id=q.param;v.note_id=-1;v.port_index=v.channel=v.key=-1;v.value=q.value;
-            blockParameters_[blockParameterCount_++]={q.node,kick::clap::Event::from(v)};
+            if(q.modulation)
+            {
+                clap_event_param_mod_t m{};
+                m.header={sizeof(m),0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_PARAM_MOD,CLAP_EVENT_IS_LIVE};
+                m.param_id=q.param;m.note_id=-1;m.port_index=m.channel=m.key=-1;m.amount=q.value;
+                blockParameters_[blockParameterCount_++]={q.node,kick::clap::Event::from(m)};
+            }
+            else
+            {
+                clap_event_param_value_t v{};
+                v.header={sizeof(v),0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_PARAM_VALUE,CLAP_EVENT_IS_LIVE};
+                v.param_id=q.param;v.note_id=-1;v.port_index=v.channel=v.key=-1;v.value=q.value;
+                blockParameters_[blockParameterCount_++]={q.node,kick::clap::Event::from(v)};
+            }
             queueTail_.store(tail+1,std::memory_order_release);
         }
         Plan* plan = current_;

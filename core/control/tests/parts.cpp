@@ -1839,10 +1839,12 @@ namespace
 
     // RFC 0011's summing rule: two controls on one parameter add their offsets to its base, clamped
     // to its range; the base survives the clamp; a direct edit moves the base under the offsets.
+    // Relative targets sum into the value only on a parameter that takes no CLAP modulation (the
+    // effect fixture's gain); on one that does they modulate it (control-source).
     void summing(const char* fixture)
     {
         Session s(48000, frames);
-        const auto a = s.add("a", fixture, "org.kick.test.synth");
+        const auto a = s.add("a", fixture, "org.kick.test.effect");
         s.setParameter(a, 7, .4);
         const auto pa = s.addPart("A");
         s.insertIntoPart(pa, 0, a); s.commit();
@@ -1856,9 +1858,6 @@ namespace
         check(close(gain(), .8), "one control: the base .4 and +.4: " + std::to_string(gain()));
         s.setMacro(knob, .5);
         check(close(gain(), 1), "two controls add up: .4 + .4 + .2: " + std::to_string(gain()));
-        s.note(true, 60, 1); x.run(s); x.run(s);
-        check(near(x.l[0], 1), "and play the sum: " + std::to_string(x.l[0]));
-        s.note(false, 60, 0); x.run(s);
         s.setMacro(knob, 1);
         check(close(gain(), 1), "the sum is clamped to the range: " + std::to_string(gain()));
         s.setMacro(wheel, 0);
@@ -1877,10 +1876,12 @@ namespace
 
     // RFC 0011's target editor: either end of a target's range set to its destination's present
     // value (setRangeToPresent), so with the control at that end it stays where it is; an edit.
+    // Its relative targets sum into the value, on the effect fixture's gain, which takes no CLAP
+    // modulation; a modulating one's end is checked in control-source.
     void presentEnds(const char* fixture)
     {
         Session s(48000, frames);
-        const auto a = s.add("a", fixture, "org.kick.test.synth");
+        const auto a = s.add("a", fixture, "org.kick.test.effect");
         s.setParameter(a, 7, .4);
         const auto pa = s.addPart("A");
         s.insertIntoPart(pa, 0, a); s.commit();

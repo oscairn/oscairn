@@ -261,8 +261,9 @@ namespace oscairn
         /// CLAP_EVENT_PARAM_VALUE of the path's result, its last curve's shift holding the rest of
         /// the summing rule (the base and every other control's offset there), so the result is the
         /// parameter's value as a fraction of its range; a relative one gets a CLAP_EVENT_PARAM_MOD
-        /// of it, the last curve unclamped with a shift of -0.5 (its offset around the parameter's
-        /// own value, which stays where it is).
+        /// of it, the last curve unclamped, its shift -0.5 plus the other relative targets' offsets
+        /// on that parameter (the modulation's sum, around the parameter's own value, which stays
+        /// where it is).
         struct ControlTarget
         {
             NodeId target = 0; clap_id param = 0;
@@ -393,6 +394,12 @@ namespace oscairn
         /// when the queue is full.
         static constexpr uint32_t queuedParameters = 256;
         bool queueParameter( NodeId node, uint32_t param, double value ) noexcept;
+        /// The same for a parameter's CLAP modulation (CLAP_EVENT_PARAM_MOD): its amount, plain,
+        /// on top of the parameter's own value, which stays as it is (RFC 0011's relative targets).
+        bool queueModulation( NodeId node, uint32_t param, double amount ) noexcept;
+        /// Whether the node, with the plugin it has now, is in the last plan committed or published
+        /// (control thread): what is queued for it reaches it.
+        bool planned( NodeId node ) const;
 
         /// Frees plans the audio thread has finished with.
         void collect();
@@ -567,10 +574,13 @@ namespace oscairn
         Plan*              current_ = nullptr; // audio thread only
         Retired            retired_;
         uint64_t plansCompiled_ = 0; // control thread
+        std::map<NodeId, const PluginHost*> planned_; // control thread: see planned()
+        void notePlanned() { planned_.clear(); for( const auto& [id, node] : nodes_ ) planned_[id] = node.host.get(); }
         std::array<std::atomic<float>, liveGains> liveTarget_; // see setLiveGain; set to 1 by the constructor
         std::array<std::atomic<bool>, liveGains> liveJump_{};  // see setLiveGain's ramp
         std::array<float, liveGains> liveFrom_{}, liveTo_{};    // audio thread: each slot at the last block's start and this one's
-        struct QueuedParameter { NodeId node = 0; uint32_t param = 0; double value = 0; }; // see queueParameter
+        struct QueuedParameter { NodeId node = 0; uint32_t param = 0; double value = 0; bool modulation = false; }; // see queueParameter, queueModulation
+        bool queue( const QueuedParameter& q ) noexcept;
         std::mutex queueLock_; // the senders'
         std::array<QueuedParameter, queuedParameters> queued_{};
         std::atomic<uint32_t> queueHead_{ 0 }, queueTail_{ 0 };

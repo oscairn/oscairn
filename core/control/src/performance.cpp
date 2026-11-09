@@ -1235,7 +1235,7 @@ void Session::open(Prepared& p,bool seamless) {
     auto history=history_;
     if(history.size()==historyCapacity)history.pop_front();
     history.push_back({sequence_+1,ChangeKind::Resync,0,0,0,false});
-    next->setControlTargets(flattenControls(*next,p.macros,p.mappingScene)); // the lanes' controls (RFC 0011)
+    next->setControlTargets(deliver(*next,p.macros,p.mappingScene)); // the lanes' controls (RFC 0011)
     graph_.publishReplacement(*next,[&]() noexcept {
         // Their channels select the incoming sounds, queued for the plugin's next block: the plan's first,
         // or the last before it if one runs between here and the hand-over.
@@ -1278,9 +1278,16 @@ void Session::open(Prepared& p,bool seamless) {
     lock_=std::move(p.lock);
     clearHistory(); // undo does not reach back into another Performance
     noteBases();
-    // Saving never captures modulation (RFC 0011): a lane's absolute targets, saved wherever the lane
-    // had them, load where the controls' own values put them, and the lane drives them again.
-    for(const auto& m:std::vector<Macro>(macros_))if(m.sourceNode){try{Quiet quiet(*this);settle(m.id);}catch(const std::exception&){}}
+    settleLanes(std::vector<Macro>(macros_));
+}
+
+// Saving never captures modulation (RFC 0011): a lane's absolute targets, saved wherever the lane
+// had them, load where the controls' own values put them, and the lane drives them again; the
+// controls' relative targets modulate again from their saved values.
+void Session::settleLanes(const std::vector<Macro>& arriving) {
+    deliver(graph_,macros_,mappingScene_);
+    for(const auto& m:arriving)if(m.sourceNode){try{Quiet quiet(*this);settle(m.id);}catch(const std::exception&){}}
+    syncModulation();
 }
 
 // A plugin into a lock being written: this platform's build by its digest (once per build) where

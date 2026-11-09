@@ -92,6 +92,19 @@ An `oscairn.ui` extension without `param_hint` is ignored, not refused.
   plugin processes as `CLAP_EVENT_PARAM_VALUE` events at sample 0 of a block. One played on a hardware controller
   (on its own, by a control, by a control's morph between scenes or by a scene button) arrives at the next block and may arrive again, the same value, a block or so later: take a
   repeated value as no change.
+- **Modulation versus value changes:** a control's **relative** target, however the control is
+  driven (a knob on screen, a hardware controller, a scene, another plugin's lane), arrives as
+  `CLAP_EVENT_PARAM_MOD` on a parameter that declares `CLAP_PARAM_IS_MODULATABLE`: an amount in
+  the parameter's plain units, on top of its own value, which the host never changes for it. The
+  amount is the sum of every relative target on that parameter, sent again whenever it changes
+  (0 when nothing modulates it any more): add it to the value, keep it until the next one, and
+  leave it out of the state you save. From a knob it arrives at sample 0 of the next block (from
+  a hardware controller, perhaps again a block or so later); from a lane, at the lane's samples.
+  An **absolute** target arrives as `CLAP_EVENT_PARAM_VALUE`, which moves the parameter, as an
+  edit on screen does. A parameter without `CLAP_PARAM_IS_MODULATABLE` gets no modulation: its
+  relative targets fall back to value changes (the value plus every target's offset, as RFC
+  0011's summing rule adds them), which the plugin saves like any value, so declare the flag on
+  every parameter that can take modulation.
 - **Render mode:** a plugin that offers CLAP's `clap.render` is told the mode with `set` once
   it is initialized, before it activates, on the main thread, at every load (a worker restart
   included) and for each effect context made from it: `CLAP_RENDER_OFFLINE` in offline renders

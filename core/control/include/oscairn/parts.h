@@ -233,6 +233,13 @@ namespace oscairn
         std::vector<uint32_t> offIn; // the scenes this mapping is off in (RFC 0011); on in every other
         double low = -96, high = 0; // Db, in dB: -144 <= low < high <= 0
         double exponent = 2;        // Power: 0.1 to 10
+        // How a parameter target reaches its parameter, worked out by the Session from the graph
+        // and not saved (RFC 0011, 2026-11-09). Value: through the summing rule's stored value.
+        // A relative target on a parameter that takes CLAP modulation (CLAP_PARAM_IS_MODULATABLE)
+        // is CLAP_EVENT_PARAM_MOD on top of the parameter's own value instead, however its control
+        // is driven: Modulation, sent by the Session when controls move; LaneModulation, carried
+        // by a plugin's lane that reaches the same parameter (Graph::setControlTargets).
+        enum class Delivery : uint8_t { Value, Modulation, LaneModulation } delivery = Delivery::Value;
         double shape(double value) const;  // the curve: 0..1 to 0..1
         bool validCurve() const;           // its numbers within their ranges
         double offset(double value) const; // what a control value adds to the base
@@ -250,10 +257,9 @@ namespace oscairn
     // for none. The tree under it is flattened into the graph (Graph::setControlTargets), so the
     // lane's events reach every parameter below it at their sample, in the audio thread.
     struct Macro { uint32_t id = 0; std::string name; double value = 0; std::vector<MacroTarget> targets; uint32_t part = 0; NodeId sourceNode = 0; uint32_t sourceLane = 0; };
-    // A relative parameter target of a lane-driven control is delivered by the lane as CLAP
-    // parameter modulation (CLAP_EVENT_PARAM_MOD), on top of the parameter's own value: it is
-    // left out of the summing rule's stored value, and moving the control's knob does not set it.
-    inline bool modulated(const Macro& m, const MacroTarget& t) { return m.sourceNode && t.relative && t.kind == MacroTarget::Kind::Parameter; }
+    // A relative parameter target whose parameter takes CLAP modulation: an offset on top of the
+    // parameter's own value, left out of the summing rule's stored value (MacroTarget::delivery).
+    inline bool modulated(const MacroTarget& t) { return t.delivery != MacroTarget::Delivery::Value; }
 
     // Physical controls (RFC 0011): what a knob, fader or button is assigned to. Defaults come in
     // layers (physical_controls.h); a Performance override sets one by the control's logical

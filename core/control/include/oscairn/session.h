@@ -479,16 +479,30 @@ namespace oscairn
         // the curves on the way and the summing rule's rest there (Graph::ControlTarget).
         static Graph::ControlTargets flattenControls(const Graph& graph, const std::vector<Macro>& macros, uint32_t mappingScene);
         bool stageControls(); // into the graph when they changed (at the next commit); true then
+        // Marks each target's delivery (MacroTarget::delivery) from the graph and returns the
+        // controls flattened for it: a relative parameter target is modulation where the parameter
+        // takes it, carried by a lane where one reaches that parameter as modulation.
+        static Graph::ControlTargets deliver(const Graph& graph, std::vector<Macro>& macros, uint32_t mappingScene);
+        // The sum of the relative targets' offsets modulating t's parameter, each at its control's value.
+        static double modulation(const std::vector<Macro>& macros, uint32_t mappingScene, const MacroTarget& t);
+        // Sends each parameter's modulation from the controls (Delivery::Modulation) where it changed,
+        // through the graph at the next block; a parameter no longer modulated gets 0.
+        void syncModulation();
+        struct SentModulation { std::weak_ptr<PluginHost> host; uint32_t param = 0; double amount = 0; };
+        std::vector<SentModulation> modulation_; // by plugin instance: a new one starts unmodulated
         // A lane's absolute targets back where the control's own value puts them: what a Performance
         // saved while a lane drove them loads as, and where they go when the lane stops driving.
         void settle(uint32_t macro);
+        void settleLanes(const std::vector<Macro>& arriving); // settles those of a load, a Sound or an import that a lane drives
         void checkControlLoops(const std::vector<Macro>& macros) const; // throws for a lane reaching its own plugin
         // The summing rule on any copy of the controls (the controller input's too): drives control
         // `id` to `value` and the controls it targets, reading each destination with `current`
-        // (nothing: it is gone, and left alone) and setting it with `apply`.
+        // (nothing: it is gone, and left alone) and setting it with `apply`. A target sent as
+        // modulation (Delivery::Modulation) goes to `modulate`, if given, with its parameter's
+        // whole modulation as a fraction of its range; its value is never set.
         using MacroCurrent = std::function<std::optional<double>(const MacroTarget&)>;
         using MacroApply = std::function<void(const MacroTarget&, double)>;
-        static void drive(std::vector<Macro>& macros, std::map<Destination, double>& written, uint32_t mappingScene, uint32_t id, double value, const MacroCurrent& current, const MacroApply& apply);
+        static void drive(std::vector<Macro>& macros, std::map<Destination, double>& written, uint32_t mappingScene, uint32_t id, double value, const MacroCurrent& current, const MacroApply& apply, const MacroApply& modulate = {});
         static Sum contributions(const std::vector<Macro>& macros, uint32_t mappingScene, const MacroTarget& t, uint32_t macro, double value);
         static void setBase(std::vector<Macro>& macros, const MacroTarget& t, double base);
         // Played by the controller input: a control, and a part's fader; live: write the live

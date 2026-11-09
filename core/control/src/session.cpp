@@ -421,6 +421,7 @@ namespace oscairn
         const bool live = std::exchange( liveEdit_, false ) && !staged_ && !controls, mute = std::exchange( liveMute_, false );
         if( !live ) graph_.commit(std::exchange(rampGains_, false));
         staged_ = false;
+        syncModulation(); // after the plan, so a new plugin has it from its first block
         // Levels moved live reach clients as values (controls.changed), with no graph to read
         // again; a mute changes what the views show of the wires, so it is a graph change.
         if( !live || mute ) { ++revision_; publish(ChangeKind::Graph); }

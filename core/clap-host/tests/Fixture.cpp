@@ -267,7 +267,8 @@ struct Plugin {
                 std::strcpy(out->name, index ? "Read only" : "Gain");
                 out->min_value = 0; out->max_value = 1; out->default_value = .5;
                 if (std::getenv("KICK_FIXTURE_BAD_DEFAULT")) out->default_value = index ? 1e34 : std::numeric_limits<double>::quiet_NaN();
-                out->flags = index ? CLAP_PARAM_IS_READONLY : CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_MODULATABLE;
+                // The effect never adds its gain's modulation, so it does not claim to take it.
+                out->flags = index ? CLAP_PARAM_IS_READONLY : CLAP_PARAM_IS_AUTOMATABLE | (get(p).kind == 1 ? 0 : CLAP_PARAM_IS_MODULATABLE);
                 return true;
             },
             [](const clap_plugin_t* p, clap_id id, double* value) { get(p).main(); if (id == 8) *value = get(p).toggle; else if (id == 9) *value = get(p).mode; else if (id == 7 || id == 99) *value = get(p).gain; else return false; return true; },

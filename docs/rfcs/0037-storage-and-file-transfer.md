@@ -106,8 +106,9 @@ What is built, as of 2026-11-07:
   the root file system. BusyBox init and eudev; no automounting, no partitions beyond the root,
   no USB gadget configuration. Buildroot's default `fstab` mounts `/tmp` and `/run` as tmpfs
   ([skeleton fstab](https://raw.githubusercontent.com/buildroot/buildroot/master/package/skeleton-init-sysv/skeleton/etc/fstab)).
-  The kernel is Buildroot's QEMU `virt` configuration plus `board/qemu-aarch64/linux.fragment`;
-  which file systems and USB functions it has was not checked here.
+  The kernel is `board/qemu-aarch64/linux.config` plus `board/common/linux.fragment`, only the
+  `virt` machine's devices (RFC 0035): no USB host, gadget or storage, no FAT or exFAT; the EVK's
+  has the USB host and gadget, but no USB storage or FAT either (2026-11-08).
 - **Profiles** give `compute.storage` in MiB (16384 for the KICK, the Ignite and the MODX M, as
   estimates) and `midi.usbDevice` and `usbHost`.
 - **The web UI and network transport** (RFC 0026) are not built; the control API is a local

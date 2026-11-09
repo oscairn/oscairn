@@ -394,9 +394,9 @@ clock that gives the host's time.
   and NTP may connect out, apps with `network` (RFC 0022) may, plugin workers and other apps may
   not. RFC 0022 already plans seccomp to refuse network sockets to apps without `network`; this
   is a second layer. Step 7, after apps run as their own users.
-- **The kernel** must have nf_tables built; whether the QEMU kernel config
-  (`board/qemu/aarch64-virt/linux.config` plus `os/buildroot/board/qemu-aarch64/linux.fragment`)
-  has it is not checked. Step 2 adds it to the fragment if not.
+- **The kernel** must have nf_tables built; the image kernels have no netfilter at all
+  (`CONFIG_NETFILTER` is not set in the QEMU and EVK configs since they were cut to their boards'
+  drivers, 2026-11-08). Step 2 adds it to `os/buildroot/board/common/linux.fragment`.
 
 ## Rate limits and robustness
 

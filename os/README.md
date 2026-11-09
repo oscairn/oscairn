@@ -22,6 +22,7 @@ image is built for the Cortex-A53. See [running on a KICK](../docs/kick.md).
 ## What is in the image
 
 - GCC 15, glibc, Linux 6.18 (LTS) with a low-latency (`PREEMPT`) kernel, BusyBox init, eudev.
+  Each image's kernel has only its own board's drivers: see [kernels](#kernels).
 - Oscairn: the core, the CLAP plugins in `/usr/lib/clap`, `oscairn-render`, and the
   desktop app as `/usr/bin/Oscairn`.
 - The session (`board/common/session-juce-x11`): at boot, `/etc/init.d/S95oscairn` starts
@@ -96,6 +97,43 @@ nothing dropped or repeated), not whether the VM kept up in real time.
 Other Buildroot targets go after the defconfig, for example
 `os/build.sh oscairn_qemu_aarch64_defconfig oscairn-rebuild all`.
 
+## Kernels
+
+Each board's kernel config lists only what that board's hardware needs, so an image carries no
+drivers for hardware it does not have ([RFC 0035](../docs/rfcs/0035-system-base.md#optional-hardware-built-per-product)):
+
+- `board/<board>/linux.config`: the board's drivers, as a defconfig over the kernel's defaults
+  (options not named keep their default), so it lists only what differs. Buildroot uses it as
+  the custom config (`BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG`).
+- `board/common/linux.fragment`, added to every board's: what the session and engine need anywhere
+  (the low-latency kernel, `NO_HZ_FULL` and cpusets for the audio cores, ext4, devtmpfs, local
+  and IP sockets, System V shared memory for X, evdev, ALSA and its sequencer), and a few defaults
+  turned off that no board needs (PC keyboards and mice, USB HID, EFI boot).
+- The `oscairn` package's options take out what the image's profile lacks: without
+  `BR2_PACKAGE_OSCAIRN_STANDALONE` (the app, the only user of a screen) the kernel has no DRM or
+  framebuffer, and without `BR2_PACKAGE_OSCAIRN_USB_GADGET` no USB gadget, whatever the board's
+  config lists. Their drivers depend on those options, so none is left behind.
+
+To change a board's kernel, edit its `linux.config` and rebuild with
+`os/build.sh <defconfig> linux-dirclean all`; check a new option landed in the build's `.config`
+(an option whose dependencies are missing is dropped without a word; `scripts/kconfig/merge_config.sh`
+in the kernel tree names them). `linux-update-defconfig` would rewrite the file without its
+comments.
+
+Measured on 2026-11-08, before (the EVK on the arm64 `defconfig`, QEMU on Buildroot's
+`aarch64-virt` config) and after:
+
+| Image | Kernel options set | `Image` | Modules | Target folder |
+| --- | --- | --- | --- | --- |
+| EVK, before | 4,569 | 39.5 MiB | 1,424 (79 MiB) | 239.0 MB |
+| EVK, after | 984 | 11.1 MiB | 30 (2.0 MiB) | 133.4 MB |
+| QEMU, before | 1,103 | 12.6 MiB | 5 | 103.2 MB |
+| QEMU, after | 869 | 9.7 MiB | 2 | 102.8 MB |
+
+The real-time QEMU variant's `Image` went from 12.6 to 9.8 MiB (879 options). The target folder includes the EVK's copy of `Image` in `/boot`. The QEMU image still passes
+`os/build.sh test`. Not in either kernel: Wi-Fi, Bluetooth, touch screens, cameras, batteries,
+USB storage and FAT or exFAT (RFC 0037 adds them per product), netfilter (RFC 0039).
+
 ## Real-time kernel
 
 `BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL` (in the `oscairn` package's options) builds the kernel with
@@ -129,13 +167,18 @@ there is no EVK here, and QEMU has no i.MX8M Mini model.
   and the `genimage` layout (GPT, `flash.bin` at 33 KiB outside the partition table, the root
   filesystem as the only partition at 8 MiB). U-Boot boots the kernel and
   `freescale/imx8mm-evk.dtb` from `/boot` on the root filesystem.
-- **Kernel:** Linux 6.18.7, as in the QEMU image, with the arm64 `defconfig` plus
-  `board/imx8mm-evk/linux.fragment`: the EVK's WM8524 codec on SAI3 through `simple-audio-card`
-  (the device tree's `wm8524-audio` card), SDMA as a module so its firmware
-  (`imx/sdma/sdma-imx7d.bin`, from `firmware-imx`) loads from the root filesystem, the ALSA
-  sequencer, USB device mode with configfs MIDI and UAC2 functions, the HDMI path (LCDIF, the
-  Samsung DSIM MIPI-DSI host and the ADV7535 bridge, with a framebuffer for X), and
-  `CONFIG_PREEMPT`. The drivers are modules, for eudev to load from the device tree.
+- **Kernel:** Linux 6.18.7, as in the QEMU image, from `board/imx8mm-evk/linux.config` (see
+  [kernels](#kernels)): the SoC's clocks, pins, GPIO, power domains, thermal sensor, watchdog,
+  frequency scaling and idle states, the BD71847 PMIC, the UART2 console, the microSD and eMMC;
+  the EVK's WM8524 codec on SAI3 through `simple-audio-card` (the device tree's `wm8524-audio`
+  card), SDMA as a module so its firmware (`imx/sdma/sdma-imx7d.bin`, from `firmware-imx`) loads
+  from the root filesystem, the ALSA sequencer; the USB-C port (ChipIdea, with its PTN5110 port
+  controller switching roles) as a host for USB MIDI and audio devices and as a device with
+  configfs MIDI and UAC2 functions; Ethernet (FEC with its AR8031 PHY); the HDMI path (LCDIF, the
+  Samsung DSIM MIPI-DSI host and the ADV7535 bridge, with a framebuffer for X); and
+  `CONFIG_PREEMPT`. Audio and display drivers are modules, for eudev to load from the device
+  tree. Left out, since the profile does not use them: PCIe, the camera, the PDM microphones,
+  S/PDIF, the Bluetooth SCO link, the IR receiver, the SPI NOR flash and the power key.
 - **Userspace:** the QEMU image's, unchanged: the same packages, the `board/common` session
   overlay and post-build script. `board/imx8mm-evk/overlay` replaces only
   `/etc/default/oscairn`, to pass `--profile imx8mm-evk --play` (the
@@ -146,9 +189,10 @@ there is no EVK here, and QEMU has no i.MX8M Mini model.
   ADV7535 bridge (an accessory card on some boards). The drivers are in the image;
   whether X gets a picture on a monitor is untried, and so is whether X starts with no monitor.
   If it does not, the app restarts in a loop: the session has no headless mode yet.
-- **Audio:** ALSA's default device is the first card. Which card the WM8524 becomes (the device
-  tree also has S/PDIF, a PDM microphone card and a Bluetooth SCO card) and whether the engine
-  opens it at 128 frames is untried; `aplay -l` on the board says.
+- **Audio:** ALSA's default device is the first card. The device tree also describes S/PDIF, a
+  PDM microphone card and a Bluetooth SCO card, but their drivers are not in the kernel, so the
+  WM8524 should be the only card unless a USB audio device is plugged in (untried; `aplay -l` on
+  the board says). Whether the engine opens it at 128 frames is untried.
 - **Real-time kernel:** `BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL=y` applies here as on QEMU. With it,
   this kernel config resolves to `CONFIG_PREEMPT_RT=y` (checked with `olddefconfig`); the
   real-time kernel was not built for the EVK.
@@ -162,11 +206,15 @@ time over three runs (the first stopped at a Linux-only compile error in the app
 with the QEMU builds' downloads and compiler cache already in the volume; the toolchain was
 rebuilt for the Cortex-A53. Outputs, in `/work/output/oscairn_imx8mm_evk_defconfig/images` in
 the volume: `sdcard.img` (520 MiB), `flash.bin` (1.1 MiB), `Image` (40 MiB), `freescale/imx8mm-evk.dtb`,
-`rootfs.ext4` (512 MiB, 159 MiB used, 79 MiB of it kernel modules).
+`rootfs.ext4` (512 MiB, 159 MiB used, 79 MiB of it kernel modules). With the board's own kernel
+config (2026-11-08, [kernels](#kernels)): `Image` 11.1 MiB, 2.0 MiB of modules, and 147.7 MiB of
+`rootfs.ext4` in use by `dumpe2fs`'s count (blocks less free blocks, the journal included; how
+the 159 MiB was counted is not recorded, so the two are not compared).
 
 Checked without hardware: `flash.bin` sits byte for byte at 33 KiB in `sdcard.img`, after the
 GPT (which ends at 17 KiB), and the root filesystem at 8 MiB, with the partition UUID
-`extlinux.conf` names as `root=`; the kernel config has the drivers above; the Oscairn binaries
+`extlinux.conf` names as `root=`; the kernel config has the drivers above (checked again with the
+board's own config); the Oscairn binaries
 are aarch64 and, under `qemu-aarch64 -cpu cortex-a53` with the image's own libraries,
 `oscairn-engine --help` runs and `oscairn-render` renders the step sequencer, Basic Synth and
 Delay offline (4 s at 48 kHz, peak 0.45).

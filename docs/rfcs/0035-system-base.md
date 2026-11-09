@@ -41,7 +41,7 @@ variant `oscairn_qemu_aarch64_rt_defconfig` adds `rt-tests`. It builds, boots wi
 `SMP PREEMPT_RT`, passes `boot-test.py`, and `os/scripts/cyclictest-qemu.py` runs `cyclictest`
 on it beside the playing app (QEMU's figures meaningless). Not done: the script does not report
 `audioUnderruns` beside `cyclictest`, `compare-audio.py` has not run on the variant, the product
-QEMU image is still `CONFIG_PREEMPT`, `NO_HZ_FULL` is not set, and nothing has run on a device
+QEMU image is still `CONFIG_PREEMPT`, `NO_HZ_FULL` is built into every image's kernel (2026-11-08) but no `nohz_full=` is passed, and nothing has run on a device
 (the procedure is in [docs/kick.md](../kick.md#measuring-latency)).
 
 ## Problem
@@ -82,7 +82,7 @@ From `os/buildroot/` and `os/scripts/`, 2026-11-07:
 | --- | --- |
 | Buildroot | 2026.08.1 (`os/scripts/container-build.sh`), as an external tree; downloads hash-checked (`BR2_DOWNLOAD_FORCE_CHECK_HASHES`) |
 | Toolchain | Buildroot's own: GCC, glibc, C++; tuned for Cortex-A76/A55 (`BR2_cortex_a76_a55`), so ARMv8.2. The i.MX8M Mini EVK image (`oscairn_imx8mm_evk_defconfig`, 2026-11-08) is tuned for the Cortex-A53 (`BR2_cortex_a53`), so ARMv8.0 |
-| Kernel | Linux 6.18.7, Buildroot's QEMU `aarch64-virt` config plus `board/qemu-aarch64/linux.fragment`: ALSA, the sequencer, the dummy and virtio sound cards, and `CONFIG_PREEMPT` |
+| Kernel | Linux 6.18.7, one config per board with only its hardware's drivers (`board/<board>/linux.config`) plus `board/common/linux.fragment` (ALSA and the sequencer, cpusets, `NO_HZ_FULL`, `CONFIG_PREEMPT`); QEMU's has the `virt` machine's virtio devices, the dummy and virtio sound cards. Since 2026-11-08: before, QEMU used Buildroot's `aarch64-virt` config and the EVK the arm64 `defconfig` (os/README.md, "Kernels") |
 | Init | BusyBox init (no `BR2_INIT_*` set, so Buildroot's default), eudev for device nodes |
 | The session | `/etc/init.d/S95oscairn` starts `/usr/libexec/oscairn-session` with `start-stop-daemon`. It raises `RLIMIT_MEMLOCK` to unlimited, starts Xorg, then loops: start `/usr/bin/Oscairn`, wait, restart after 2 seconds. The app starts the engine, which detaches from its process group |
 | User | Everything runs as root (`HOME=/root`), so `SCHED_FIFO` and `mlockall` need no limits raised beyond `RLIMIT_MEMLOCK` |

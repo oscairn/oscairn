@@ -1,0 +1,42 @@
+# Added to every Oscairn image's kernel config (board/<board>/linux.config): what the session, the
+# engine and the userspace need on any board.
+
+# Scheduling for audio: a low-latency kernel (BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL makes it
+# PREEMPT_RT), high-resolution timers, full dynticks for the audio cores' nohz_full (RFC 0035),
+# and cpusets for their isolated partition.
+CONFIG_PREEMPT=y
+CONFIG_HIGH_RES_TIMERS=y
+CONFIG_NO_HZ_FULL=y
+CONFIG_CGROUPS=y
+CONFIG_CPUSETS=y
+CONFIG_MEMCG=y
+
+# Modules, loaded by eudev from the device tree.
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
+
+# File systems: ext4 for the root, devtmpfs for eudev, tmpfs for /tmp and the engine's sockets.
+CONFIG_EXT4_FS=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_TMPFS=y
+
+# Local sockets (the control protocol, X) and IP for package repositories; System V shared
+# memory for X.
+CONFIG_NET=y
+CONFIG_UNIX=y
+CONFIG_INET=y
+CONFIG_SYSVIPC=y
+
+# Input devices for X (libinput reads evdev), and ALSA with its sequencer for MIDI.
+CONFIG_INPUT_EVDEV=y
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_SEQUENCER=y
+
+# Defaults no Oscairn board needs: PC keyboards and mice, USB keyboards and mice, booting by EFI.
+# CONFIG_INPUT_KEYBOARD is not set
+# CONFIG_INPUT_MOUSE is not set
+# CONFIG_SERIO is not set
+# CONFIG_HID_SUPPORT is not set
+# CONFIG_EFI is not set

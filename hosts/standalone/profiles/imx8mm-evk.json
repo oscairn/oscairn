@@ -7,6 +7,7 @@
   "compute": { "cores": 4, "realtimeCores": 1, "memory": 2048 },
   "audio": { "inputs": 0, "outputs": 2, "rates": [48000], "block": 128, "headphones": true },
   "screens": [ { "width": 1024, "height": 600, "touch": false, "surface": "panel", "layout": "kick-screen" } ],
+  "midi": { "usbDevice": true, "usbHost": true },
   "network": { "ethernet": true },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],

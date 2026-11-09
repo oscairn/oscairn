@@ -44,6 +44,15 @@ config BR2_PACKAGE_OSCAIRN_STANDALONE
 comment "the desktop app needs X.org and a glibc toolchain"
 	depends on !BR2_PACKAGE_XORG7 || !BR2_TOOLCHAIN_USES_GLIBC
 
+config BR2_PACKAGE_OSCAIRN_USB_GADGET
+	bool "USB device mode (MIDI and audio to a computer)"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Keeps the kernel's USB gadget support (configfs, with its
+	  MIDI and UAC2 functions) for a product whose profile has
+	  midi.usbDevice. Off, the kernel has no gadget code, whatever
+	  the board's kernel config lists (RFC 0035, optional hardware).
+
 config BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL
 	bool "real-time kernel (PREEMPT_RT)"
 	depends on BR2_LINUX_KERNEL

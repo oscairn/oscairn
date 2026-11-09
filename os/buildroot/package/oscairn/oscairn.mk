@@ -42,13 +42,17 @@ OSCAIRN_CONF_OPTS += \
 	-DFETCHCONTENT_SOURCE_DIR_JUCE=$(OSCAIRN_JUCE_SRCDIR)
 endif
 
-# RFC 0035 step 2: the product's kernel made real-time; nothing in Oscairn changes with it.
-ifeq ($(BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL),y)
+# The kernel follows the options (RFC 0035). REALTIME_KERNEL makes it real-time (step 2; nothing
+# in Oscairn changes with it). A board's kernel config lists all of its hardware; an option that
+# is off takes that subsystem out (its drivers depend on it), so nothing of it is left behind:
+# the display without the app, the USB gadget without USB_GADGET.
 define OSCAIRN_LINUX_CONFIG_FIXUPS
-	$(call KCONFIG_ENABLE_OPT,CONFIG_EXPERT)
-	$(call KCONFIG_ENABLE_OPT,CONFIG_PREEMPT_RT)
+	$(if $(BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL),$(call KCONFIG_ENABLE_OPT,CONFIG_EXPERT))
+	$(if $(BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL),$(call KCONFIG_ENABLE_OPT,CONFIG_PREEMPT_RT))
+	$(if $(BR2_PACKAGE_OSCAIRN_STANDALONE),,$(call KCONFIG_DISABLE_OPT,CONFIG_DRM))
+	$(if $(BR2_PACKAGE_OSCAIRN_STANDALONE),,$(call KCONFIG_DISABLE_OPT,CONFIG_FB))
+	$(if $(BR2_PACKAGE_OSCAIRN_USB_GADGET),,$(call KCONFIG_DISABLE_OPT,CONFIG_USB_GADGET))
 endef
-endif
 
 # JUCE's modules compile as a few very large translation units, over a gigabyte of memory
 # each; a job per core can run out of memory on an 8 GB build machine.

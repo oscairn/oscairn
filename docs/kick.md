@@ -21,7 +21,8 @@ it on an emulator or an EVK, and what to expect, as of November 8, 2026.
 - **An image for the i.MX8M Mini EVK** (`oscairn_imx8mm_evk_defconfig`,
   [os/](../os/README.md#imx8m-mini-evk)), NXP's reference board for the KICK's SoC: the same
   userspace on Buildroot's EVK boot chain (TF-A, U-Boot, `flash.bin` on the SD card), mainline
-  Linux 6.18 with the EVK's device tree, its WM8524 codec and HDMI bridge drivers, built for the
+  Linux 6.18 with the EVK's device tree and only the drivers its hardware needs (its WM8524 codec
+  and HDMI bridge among them), built for the
   Cortex-A53, with its own profile (`--profile imx8mm-evk`, estimates). It **builds; it has not
   been booted**, so whether it starts, makes sound or shows a picture is unknown. It is not the
   KICK's own board: the KICK's display, codec, panel and device tree are still missing.

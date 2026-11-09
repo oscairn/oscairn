@@ -73,7 +73,7 @@ namespace oscairn::standalone
         try
         {
             const auto reply=juce::JSON::parse(juce::String::fromUTF8(client_->call("apps.request",(app.empty()?"{":"{\"app\":"+text(app)+',')+"\"action\":"+text(action)+",\"argument\":"+text(argument)+'}',2000).c_str()));
-            if(const auto n=reply["result"]["request"];n.isInt() || n.isInt64()){appAnswers_[uint64_t(int64_t(n))]=std::move(answer);return;}
+            if(const auto n=reply["result"]["request"];n.isInt() || n.isInt64()){appAnswers_[uint64_t(juce::int64(n))]=std::move(answer);return;}
             std::fprintf(stderr,"oscairn: %s not asked: %s\n",action.c_str(),reply["error"]["message"].toString().toRawUTF8());
         }
         catch(const std::exception& e){failed(e.what());}
@@ -93,16 +93,16 @@ namespace oscairn::standalone
         if(method=="apps.ping")
         {
             // Answered here, on the message thread: an app whose thread is stuck answers none.
-            try{client_->send("apps.pong","{\"ping\":"+std::to_string(int64_t(params["ping"]))+'}');}catch(const std::exception& e){failed(e.what());}
+            try{client_->send("apps.pong","{\"ping\":"+std::to_string(juce::int64(params["ping"]))+'}');}catch(const std::exception& e){failed(e.what());}
         }
         else if(method=="apps.requested")
         {
-            const auto request=uint64_t(int64_t(params["request"]));
+            const auto request=uint64_t(juce::int64(params["request"]));
             if(onAppRequest)onAppRequest(request,text("app"),text("action"),text("argument"));else appAnswer(request,{});
         }
         else if(method=="apps.answered")
         {
-            const auto it=appAnswers_.find(uint64_t(int64_t(params["request"])));
+            const auto it=appAnswers_.find(uint64_t(juce::int64(params["request"])));
             if(it==appAnswers_.end())return;
             auto answer=std::move(it->second);appAnswers_.erase(it);
             answer(text("result"));
@@ -110,7 +110,7 @@ namespace oscairn::standalone
         else if(method=="apps.status" && onAppStatus)
         {
             std::map<std::string,uint32_t> silent;
-            if(const auto* apps=params["apps"].getArray())for(const auto& a:*apps)silent[a["app"].toString().toStdString()]=uint32_t(int64_t(a["silent"]));
+            if(const auto* apps=params["apps"].getArray())for(const auto& a:*apps)silent[a["app"].toString().toStdString()]=uint32_t(juce::int64(a["silent"]));
             onAppStatus(silent);
         }
     }

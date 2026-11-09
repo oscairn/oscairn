@@ -1,0 +1,41 @@
+{
+  "format": "oscairn.profile",
+  "version": 2,
+  "id": "fantom-07",
+  "name": "Roland FANTOM-07",
+  "platform": { "os": "linux", "cpu": "arm64", "runtime": "oscairn-buildroot-2026.08", "board": "imx8mm" },
+  "compute": { "cores": 4, "realtimeCores": 1, "memory": 2048 },
+  "audio": { "inputs": 2, "outputs": 4, "rates": [48000], "block": 128, "headphones": true },
+  "controls": [
+    { "kind": "keys", "count": 76, "role": "notes", "sensing": "velocity, no aftertouch; where the keys reach the i.MX (directly or through the BMC) is unknown" },
+    { "kind": "wheels", "count": 1, "role": "assign", "functions": ["pitchBend"], "sensing": "the pitch bend/modulation lever, left and right" },
+    { "kind": "wheels", "count": 1, "role": "assign", "functions": ["modulation"], "sensing": "the pitch bend/modulation lever, pushed away" },
+    { "kind": "wheels", "count": 2, "role": "assign", "sensing": "WHEEL1 and WHEEL2" },
+    { "kind": "buttons", "count": 2, "role": "assign", "target": "switches", "sensing": "S1 and S2" },
+    { "kind": "knobs", "count": 8, "role": "assign", "paging": "button", "sensing": "control knobs 1 to 8; PAN/LEVEL, CTRL and ASSIGN pick what they play" },
+    { "kind": "faders", "count": 8, "role": "assign", "modes": ["part"], "sensing": "sliders 1 to 8" },
+    { "kind": "knobs", "count": 2, "role": "assign", "rows": [ { "name": "Synth control", "bank": "filter" } ], "sensing": "CUTOFF and RESONANCE" },
+    { "kind": "encoders", "count": 6, "role": "screen", "sensing": "FUNCTION knobs E1 to E6 under the screen, which also push" },
+    { "kind": "jog", "count": 1, "role": "fixed", "functions": ["data"], "sensing": "the VALUE dial" },
+    { "kind": "knobs", "count": 1, "role": "fixed", "functions": ["volume"], "sensing": "MASTER VOLUME; whether it reaches the i.MX at all is unknown" },
+    { "kind": "buttons", "count": 8, "role": "assign", "sensing": "ZONE INT/EXT 1 to 8: whether each zone sounds" },
+    { "kind": "pads", "count": 16, "role": "notes", "sensing": "4 x 4 pads; how they reach the i.MX is unknown" },
+    { "kind": "buttons", "count": 32, "role": "fixed", "sensing": "the zone and common sections' buttons, and E1 to E6 pushed", "functions": [
+      "zone9to16", "zoneSelect", "panLevel", "ctrl", "assign", "split", "chordMemory", "arpeggio", "transpose", "octaveDown", "octaveUp",
+      "write", "masterFx", "motionalPad", "dawCtrl", "menu", "tempo", "dec", "inc", "cursorUp", "cursorDown", "cursorLeft", "cursorRight", "shift", "exit", "enter",
+      "pushE1", "pushE2", "pushE3", "pushE4", "pushE5", "pushE6" ] },
+    { "kind": "buttons", "count": 39, "role": "fixed", "sensing": "the scene, synth control, sequencer and pad sections' buttons", "functions": [
+      "sceneSelect", "sceneChain", "zoneView", "singleTone",
+      "osc", "filterType", "param", "amp", "fx", "lfo",
+      "pattern", "group", "song", "trRec", "rhythmPattern", "stop", "play", "rec",
+      "tone1", "tone2", "tone3", "tone4", "tone5", "tone6", "tone7", "tone8", "tone9", "tone10", "tone11", "tone12", "tone13", "tone14", "tone15", "tone16",
+      "sampling", "padMode", "clipBoard", "bank", "hold" ] },
+    { "kind": "footswitches", "count": 1, "role": "assign", "functions": ["sustain"], "sensing": "the HOLD jack" },
+    { "kind": "expression", "count": 2, "role": "assign", "sensing": "the CTRL1 and CTRL2 jacks, an expression pedal or a switch each" }
+  ],
+  "screens": [ { "width": 1280, "height": 720, "touch": true, "surface": "panel", "layout": "kick-screen" } ],
+  "midi": { "din": 1, "usbDevice": true, "usbHost": true },
+  "reliability": "instrument",
+  "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
+  "estimated": ["audio", "controls", "midi"]
+}

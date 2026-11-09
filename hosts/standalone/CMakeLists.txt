@@ -22,6 +22,7 @@ juce_add_binary_data(oscairn_standalone_profiles HEADER_NAME ProfileData.h NAMES
     profiles/qemu-aarch64.json
     profiles/kick.json
     profiles/imx8mm-evk.json
+    profiles/fantom-07.json
     profiles/modx-m.json
     profiles/ignite.json
     profiles/smk37-elite.json

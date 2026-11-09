@@ -32,9 +32,9 @@ int main()
     try
     {
         auto all = builtInProfiles();
-        check(all.size() == 7, "seven built-in profiles: " + std::to_string(all.size()));
+        check(all.size() == 8, "eight built-in profiles: " + std::to_string(all.size()));
         std::erase_if(all, [](const auto& p) { return Profile::parse(p.second).controller(); }); // the devices'
-        check(all.size() == 5, "five of them devices'");
+        check(all.size() == 6, "six of them devices'");
         for(const auto& [id, json] : all)
         {
             const auto p = Profile::parse(json);
@@ -52,6 +52,9 @@ int main()
         check(modx.controls[1].role == "screen" && modx.controls[1].count == 6 && modx.controls[2].rows.size() == 6 && modx.controls[2].rows[2].bank == "filter" &&
               modx.controls[3].kind == "faders" && modx.controls[3].modes.size() == 3 && modx.screen()->layout == "modx-m-screen", "the MODX M: six screen knobs, four knobs in six rows, eight faders in three modes");
         check(std::none_of(ignite.controls.begin(), ignite.controls.end(), [](const Profile::Control& c) { return c.role == "assign"; }), "the Ignite's knobs are all dedicated");
+        const auto fantom = loadProfile("fantom-07");
+        check(fantom.screen()->width == 1280 && fantom.screen()->height == 720 && fantom.screen()->touch && fantom.screen()->layout == "kick-screen",
+              "the FANTOM-07: a 1280 x 720 touch screen showing the KICK's layout");
         check(kick.cpuBudget() == .75 && kick.memoryBudget() == 2048ull * 1024 * 1024 * 8 / 10, "an instrument's budget: 75% of the audio thread, 80% of its memory");
         const auto desktop = loadProfile("");
         check(desktop.id == "desktop" && desktop.compute.cores >= 1 && desktop.screen() && desktop.screen()->surface == "desktop" && desktop.screen()->layout == "desktop" &&

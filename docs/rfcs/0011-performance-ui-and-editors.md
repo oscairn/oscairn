@@ -826,9 +826,13 @@ kept: the base survives it, so the value comes back as the controls go back.
   is never moved by its lane, so its saved value is its knob's. When the lane stops driving
   (its plugin removed, the source cleared, the control removed) its absolute targets go back
   there too, so a Performance saved mid-swing loads the same as one saved with the modulator
-  removed. Values set by hand, knobs and controls among them, are saved as they are. Not built:
-  a way to keep the modulated values on purpose ("Keep current values"), and the same on a
-  Sound's load (a Sound's lane-driven absolute targets load as its plugin saved them).
+  removed. A Sound is the same (built 2026-11-09): loaded into a part, as a new part, or brought
+  in with a part by importing from another Performance, its lane-driven absolute targets go where
+  its controls' saved values put them. Values set by hand, knobs and controls among them, are
+  saved as they are. Not built: a way to keep the modulated values on purpose ("Keep current
+  values"). `control-source` checks a Sound saved while the sequencer's lane had its absolute
+  target at 0.28 loading at 0.4, its control's place at 0.5, into its part and as a new part;
+  the import is not tested.
 
 **Converter notes** (MODX and MONTAGE Performances, format version 11):
 

@@ -1530,6 +1530,7 @@ std::vector<std::string> Session::loadSoundInto(uint32_t partId,const fs::path& 
         for(auto& scene:scenes_)std::erase_if(scene.macros,[](const auto& v){return v.first==0;});
         macros_.insert(macros_.end(),arriving.begin(),arriving.end());
         noteBases();
+        settleLanes(arriving);
         std::erase_if(assignments_,[&](const AssignmentOverride& o){return o.part==partId;});
         assignments_.insert(assignments_.end(),owned.begin(),owned.end());
         auto& loaded=findPart(partId);loaded.name=info.name;
@@ -1831,6 +1832,7 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
     for(const auto& m:macros)nextMacro_=std::max(nextMacro_,m.id+1);
     macros_.insert(macros_.end(),macros.begin(),macros.end());
     noteBases();
+    settleLanes(macros);
     untouched_.insert(untouched_.end(),untouched.begin(),untouched.end());
     // This Performance's scenes keep what arrives as it arrives; the arriving scenes keep what was
     // here as it is now.

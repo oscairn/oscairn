@@ -437,6 +437,39 @@ namespace
         check(near(s.parameter(fx, gain), .7), "it falls back to the summed value, .5 + .2: " + std::to_string(s.parameter(fx, gain)));
     }
 
+    // Saving never captures modulation, for a Sound too: saved while the sequencer's lane has its
+    // control's absolute target away from where the control's own value puts it, the Sound loads
+    // with the target there (0.4, the control at 0.5), into the part it came from and into a new one.
+    void soundUnmodulated(const char* sequencer, const char* fixture)
+    {
+        Session s(rate, maxFrames, {}, twoOutputs);
+        const auto seq = s.add("seq", sequencer), a = s.add("a", fixture);
+        const auto part = s.addPart("Locks", {PartInput::Kind::None});
+        s.insertIntoPart(part, 0, seq); s.insertIntoPart(part, 1, a); s.commit();
+        const auto control = s.addMacro("Lock", part);
+        s.setMacroTargets(control, {MacroTarget{.node = a, .param = gain, .start = .2, .end = .6}});
+        s.setMacroSource(control, seq, 0); s.commit();
+        s.setMacro(control, .5);
+        s.setPlaying(true);
+        size_t position = 0;
+        render(s, 256, position, .2);
+        s.setPlaying(false);
+        render(s, 256, position, .01);
+        const double driven = s.parameter(a, gain);
+        check(std::abs(driven - .4) > .02, "the lane has the absolute target away from 0.4 when the Sound is saved: " + std::to_string(driven));
+        const auto saved = s.savePartAsSound(part, "Locks").id;
+        auto loaded = [&](uint32_t into, const std::string& what) {
+            NodeId node = 0; double value = -1;
+            for(const auto& p : s.parts()) if(p.id == into && p.chain.size() == 2) node = p.chain[1];
+            if(node) value = s.parameter(node, gain);
+            for(const auto& m : s.graphState().macros) if(m.part == into) check(near(m.value, .5) && m.sourceNode, what + ": the control loads at its own value, driven by the lane");
+            check(near(value, .4), what + ": the absolute target loads where the control puts it, 0.4: " + std::to_string(value));
+        };
+        s.loadSound(part, saved);
+        loaded(part, "loaded into its part");
+        loaded(s.partFromSound(saved), "loaded into a new part");
+    }
+
 }
 
 int main(int argc, char** argv)
@@ -452,6 +485,8 @@ int main(int argc, char** argv)
         synthBrightness(argv[3], argv[4]);
         savedUnmodulated(argv[3], argv[2], temp.path);
         knobModulates(argv[1], argv[2], temp.path);
+        ::setenv("OSCAIRN_DATA_HOME", temp.path.c_str(), 1); // a library of its own, for the Sound
+        soundUnmodulated(argv[1], argv[2]);
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(failures) return 1;

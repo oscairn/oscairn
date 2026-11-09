@@ -1428,16 +1428,17 @@ namespace oscairn::standalone
                 if(n && n->userWires && n->part) { g.setColour(juce::Colour(0xffffa040)); g.fillEllipse(r.getRight() - 12, r.getY() + 5, 7, 7); }
                 if(off) g.endTransparencyLayer();
             }
-            // Control lines, in the theme's control color, over the boxes with a rim of the
-            // background so a line crossing a box reads as passing over it: a plugin's lane to a
-            // control node or straight to a parameter's plugin, and a control to each plugin it
-            // targets. With a plugin chosen, those not touching it are faint.
+            // Control lines, in the theme's control color, around the boxes in straight runs with
+            // rounded turns (layoutRouting), with a rim of the background where one still has to
+            // cross: a plugin's lane to a control node or straight to a parameter's plugin, and a
+            // control to each plugin it targets. With a plugin chosen, those not touching it are faint.
             for(const auto& l : layout_.links)
             {
-                const auto a = point(l.from), b = point(l.to);
-                // Down out of one box and up into the next; level ends dip under both.
-                const float dip = std::abs(b.y - a.y) > 20 * routingScale_ ? (a.y + b.y) / 2 : std::max(a.y, b.y) + 36 * routingScale_;
-                juce::Path line; line.startNewSubPath(a); line.cubicTo({a.x, dip}, {b.x, dip}, b);
+                const auto b = point(l.to);
+                juce::Path corners; corners.startNewSubPath(point(l.points.empty() ? l.from : l.points.front()));
+                for(size_t k = 1; k < l.points.size(); ++k) corners.lineTo(point(l.points[k]));
+                if(l.points.empty()) corners.lineTo(b);
+                const auto line = corners.createPathWithRoundedCorners(8 * routingScale_);
                 const bool lit = !focus || l.source == routed_ || l.target == routed_;
                 const float width = 2.f * std::max(.6f, routingScale_);
                 g.setColour(ink(Ink::Background).withAlpha(lit ? .9f : .3f)); g.strokePath(line, juce::PathStrokeType(width + 3));

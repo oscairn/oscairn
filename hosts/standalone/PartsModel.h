@@ -120,10 +120,11 @@ namespace oscairn::standalone
         // Control lines (RFC 0011): a plugin's lane straight to a parameter (macro 0), or to a
         // control it drives, and that control to each plugin it targets. A control is a small node
         // in a row under the graph, shown only when a plugin's lane drives it; controls moved only
-        // by knobs stay off the view. A link runs from the bottom of one box to a control node's left
-        // end, or from a control node's top (or a box) to the bottom of the plugin's box.
+        // by knobs stay off the view. A link runs from the bottom of one box down into the left of a
+        // control node's top, or from the right of its top (or a box) to the bottom of the plugin's box, along
+        // `points` (from first, to last): straight runs and right-angle turns around the boxes.
         struct ControlNode { uint32_t macro = 0; std::string name; RoutingRect bounds; };
-        struct Link { NodeId source = 0; uint32_t lane = 0, macro = 0; NodeId target = 0; bool fromControl = false; RoutingPoint from, to; };
+        struct Link { NodeId source = 0; uint32_t lane = 0, macro = 0; NodeId target = 0; bool fromControl = false; RoutingPoint from, to; std::vector<RoutingPoint> points; };
         std::vector<ControlNode> controls;
         std::vector<Link> links;
         int width = 0, height = 0;

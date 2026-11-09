@@ -2,7 +2,10 @@
 #include "PartsModel.h"
 #include "oscairn/pads.h"
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <limits>
+#include <queue>
 #include "oscairn/discovery.h"
 
 namespace oscairn::standalone
@@ -388,6 +391,86 @@ namespace oscairn::standalone
         return out;
     }
 
+    namespace
+    {
+        // A way from `from` to `to` in straight runs and right-angle turns that keeps off `boxes`:
+        // out of `from` along `out` and into `to` along `in` (unit steps), each by `margin`, then
+        // through the lines `margin` beside each box's edges, within `bounds`, the shortest with
+        // the fewest turns. With no such way it goes straight across.
+        std::vector<RoutingPoint> routeAround(RoutingPoint from, RoutingPoint out, RoutingPoint to, RoutingPoint in, const std::vector<RoutingRect>& boxes, double margin, RoutingRect bounds)
+        {
+            const RoutingPoint a{from.x + out.x * margin, from.y + out.y * margin}, b{to.x - in.x * margin, to.y - in.y * margin};
+            std::vector<double> xs{a.x, b.x}, ys{a.y, b.y};
+            for(const auto& r : boxes) { xs.insert(xs.end(), {r.x - margin, r.x + r.w + margin}); ys.insert(ys.end(), {r.y - margin, r.y + r.h + margin}); }
+            auto keep = [](std::vector<double>& v, double low, double high, double p, double q) {
+                std::erase_if(v, [&](double x) { return (x < low || x > high) && x != p && x != q; });
+                std::sort(v.begin(), v.end()); v.erase(std::unique(v.begin(), v.end()), v.end());
+            };
+            keep(xs, bounds.x, bounds.x + bounds.w, a.x, b.x); keep(ys, bounds.y, bounds.y + bounds.h, a.y, b.y);
+            // A run is clear when it misses every box grown by half the margin.
+            auto clear = [&](RoutingPoint p, RoutingPoint q) {
+                const double h = margin / 2;
+                for(const auto& r : boxes)
+                {
+                    const double l = r.x - h, t = r.y - h, rr = r.x + r.w + h, bb = r.y + r.h + h;
+                    if(p.y == q.y ? p.y > t && p.y < bb && std::max(std::min(p.x, q.x), l) < std::min(std::max(p.x, q.x), rr)
+                                  : p.x > l && p.x < rr && std::max(std::min(p.y, q.y), t) < std::min(std::max(p.y, q.y), bb)) return false;
+                }
+                return true;
+            };
+            const int nx = int(xs.size()), ny = int(ys.size());
+            auto index = [&](const std::vector<double>& v, double x) { return int(std::lower_bound(v.begin(), v.end(), x) - v.begin()); };
+            const int ax = index(xs, a.x), ay = index(ys, a.y), bx = index(xs, b.x), by = index(ys, b.y);
+            // Dijkstra over (column, row, heading): length, and a turn costs as much as two margins.
+            constexpr int dx[4]{1, -1, 0, 0}, dy[4]{0, 0, 1, -1};
+            auto heading = [](RoutingPoint d) { return d.x > 0 ? 0 : d.x < 0 ? 1 : d.y > 0 ? 2 : 3; };
+            const double turn = 2 * margin;
+            std::vector<double> cost(size_t(nx * ny * 4), std::numeric_limits<double>::infinity());
+            std::vector<int> back(cost.size(), -1);
+            auto state = [&](int x, int y, int d) { return (y * nx + x) * 4 + d; };
+            using Item = std::pair<double, int>;
+            std::priority_queue<Item, std::vector<Item>, std::greater<>> queue;
+            const int first = state(ax, ay, heading(out));
+            cost[size_t(first)] = 0; queue.push({0, first});
+            int goal = -1;
+            while(!queue.empty())
+            {
+                const auto [c, s] = queue.top(); queue.pop();
+                if(c > cost[size_t(s)]) continue;
+                const int d = s % 4, x = (s / 4) % nx, y = s / 4 / nx;
+                if(x == bx && y == by) { goal = s; break; }
+                for(int e = 0; e < 4; ++e)
+                {
+                    const int u = x + dx[e], v = y + dy[e];
+                    if(u < 0 || v < 0 || u >= nx || v >= ny || (e ^ 1) == d) continue; // no turning back
+                    const RoutingPoint p{xs[size_t(x)], ys[size_t(y)]}, q{xs[size_t(u)], ys[size_t(v)]};
+                    if(!clear(p, q)) continue;
+                    // Arriving against `in` costs the turn into the end.
+                    const double next = c + std::abs(q.x - p.x) + std::abs(q.y - p.y) + (e != d ? turn : 0) + (u == bx && v == by && e != heading(in) ? turn : 0);
+                    const int t = state(u, v, e);
+                    if(next < cost[size_t(t)]) { cost[size_t(t)] = next; back[size_t(t)] = s; queue.push({next, t}); }
+                }
+            }
+            std::vector<RoutingPoint> way;
+            if(goal < 0) way = {a, {b.x, a.y}, b};
+            else for(int s = goal; s >= 0; s = back[size_t(s)]) way.insert(way.begin(), {xs[size_t((s / 4) % nx)], ys[size_t(s / 4 / nx)]});
+            way.insert(way.begin(), from); way.push_back(to);
+            // Only the corners: a point in line with both its neighbors goes.
+            std::vector<RoutingPoint> corners;
+            for(const auto& p : way)
+            {
+                if(!corners.empty() && corners.back().x == p.x && corners.back().y == p.y) continue;
+                if(corners.size() >= 2)
+                {
+                    const auto& o = corners[corners.size() - 2]; const auto& q = corners.back();
+                    if((o.x == q.x && q.x == p.x) || (o.y == q.y && q.y == p.y)) corners.pop_back();
+                }
+                corners.push_back(p);
+            }
+            return corners;
+        }
+    }
+
     RoutingLayout layoutRouting(const Control::GraphState& g, bool collapsed, const std::set<uint32_t>& expanded, const RoutingMetrics& m)
     {
         RoutingLayout out;
@@ -542,13 +625,25 @@ namespace oscairn::standalone
             right = node.bounds.x + node.bounds.w + m.slot;
             out.controls.push_back(node);
             const auto& r = node.bounds;
-            out.links.push_back({c.sourceNode, c.sourceLane, c.id, 0, false, bottom(*source), {double(r.x), r.y + r.h / 2.0}}); // into its left end
+            out.links.push_back({c.sourceNode, c.sourceLane, c.id, 0, false, bottom(*source), {r.x + r.w / 4.0, double(r.y)}}); // into the left of its top
             std::set<NodeId> drawn;
             for(const auto& t : c.targets)
                 if(t.kind == MacroTarget::Kind::Parameter && drawn.insert(t.node).second)
-                    if(const auto* b = boxOf(t.node)) out.links.push_back({c.sourceNode, c.sourceLane, c.id, t.node, true, {r.x + r.w / 2.0, double(r.y)}, bottom(*b, 8)});
+                    if(const auto* b = boxOf(t.node)) out.links.push_back({c.sourceNode, c.sourceLane, c.id, t.node, true, {r.x + r.w * 3 / 4.0, double(r.y)}, bottom(*b, 8)}); // out of the right of its top
         }
         if(!out.controls.empty()) { out.height = row + m.controlHeight; out.width = std::max(out.width, right); }
+        // Each line's way around the boxes: plugins, collapsed parts, control nodes, and the frames
+        // of parts it neither leaves nor enters.
+        auto within = [](const RoutingRect& outer, const RoutingRect* inner) { return inner && inner->x >= outer.x && inner->y >= outer.y && inner->x + inner->w <= outer.x + outer.w && inner->y + inner->h <= outer.y + outer.h; };
+        for(auto& l : out.links)
+        {
+            const auto* source = boxOf(l.source); const auto* target = l.target ? boxOf(l.target) : nullptr;
+            std::vector<RoutingRect> boxes;
+            for(const auto& b : out.boxes) if(b.kind != RoutingLayout::Box::Kind::Frame || !(within(b.bounds, source) || within(b.bounds, target))) boxes.push_back(b.bounds);
+            for(const auto& c : out.controls) boxes.push_back(c.bounds);
+            const RoutingPoint down{0, 1}, up{0, -1};
+            l.points = routeAround(l.from, l.fromControl ? up : down, l.to, l.target ? up : down, boxes, m.row / 2.0, {0, 0, out.width, out.height}); // half the closest rows' gap
+        }
         return out;
     }
 

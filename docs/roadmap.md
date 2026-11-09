@@ -258,7 +258,8 @@ Decided 2026-11-08, from what the milestone test found:
      their own ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#step-4-status)); the LFO
      reaches 1,357 Hz, its points closer at high rates; every relative target is CLAP
      modulation however its control is driven, the summed value only on a parameter that takes
-     none ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree))
+     none ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree)); control lines
+     routed around the boxes
    - [ ] audio-rate modulation: a modulation port or sidechain carrying an audio-rate signal
      from a modulator to a target, for FM and the like, which parameter events cannot carry (a
      target holds each point until the next, or reads them once per block)

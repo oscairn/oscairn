@@ -298,6 +298,25 @@ int main(int argc, char** argv)
             t.mapParameter(lfo, 0, b, 2); t.commit();
             layout = layoutRouting(t.graphState(), true, {});
             check(link(b, 0) == 1, "a direct mapping is a line from the lane to its plugin");
+            // Each line runs from its start to its end in straight runs and right-angle turns, through no box.
+            for(const auto& l : layout.links)
+            {
+                const auto& p = l.points;
+                bool ok = p.size() >= 2 && p.front().x == l.from.x && p.front().y == l.from.y && p.back().x == l.to.x && p.back().y == l.to.y;
+                for(size_t k = 1; ok && k < p.size(); ++k)
+                {
+                    const auto &u = p[k - 1], &v = p[k];
+                    ok = u.x == v.x || u.y == v.y;
+                    for(const auto& box : layout.boxes)
+                    {
+                        const auto& r = box.bounds;
+                        if(box.kind == RoutingLayout::Box::Kind::Frame) continue;
+                        if(u.y == v.y ? u.y > r.y && u.y < r.y + r.h && std::max(std::min(u.x, v.x), double(r.x)) < std::min(std::max(u.x, v.x), double(r.x + r.w))
+                                      : u.x > r.x && u.x < r.x + r.w && std::max(std::min(u.y, v.y), double(r.y)) < std::min(std::max(u.y, v.y), double(r.y + r.h))) ok = false;
+                    }
+                }
+                check(ok, "a control line goes around the boxes in straight runs, to " + std::to_string(l.target) + " from control " + std::to_string(l.macro));
+            }
             disconnectLane(t, lfo, 0);
             g = t.graphState();
             check(g.macros.size() == 1 && g.macros[0].sourceNode == 0 && g.topology.mappings.empty(), "disconnected: the control is a knob again, the mapping gone");

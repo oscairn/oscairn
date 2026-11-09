@@ -1227,9 +1227,12 @@ Light `#00805A`), apart from audio and note wires: a lane mapped straight to a p
 line from its plugin to the parameter's plugin; a control a lane drives is a small node in a row
 under the graph, under its plugin where there is room, with a line from the lane's plugin into
 it and one from it to each plugin it targets. A control only knobs move stays off the view, so a
-Performance with many knob controls is no busier than before. The lines are drawn over the boxes
-with a rim of the background (a line from a control under the graph to a plugin above may cross
-a box); a part collapsed takes its plugins' lines. Tapping a control node opens the Controls
+Performance with many knob controls is no busier than before. The lines go around the boxes
+(2026-11-09, `layoutRouting`): straight runs with rounded right-angle turns through the lanes
+beside the boxes' edges, the shortest with the fewest turns, keeping off plugins, collapsed
+parts, control nodes and the frames of parts a line neither leaves nor enters; with no way
+around, a line crosses, drawn over a rim of the background. A part collapsed takes its plugins'
+lines. Tapping a control node opens the Controls
 page, where its targets' ranges, curves and relative or absolute setting are edited. Tapping a
 plugin with lanes offers **Connect lane to...**: a control (one in the list, or a new one named
 after the plugin, at 0.5) or a parameter of another plugin, which becomes a **relative** target
@@ -1237,14 +1240,15 @@ of the control the lane drives (made as above when there is none): CLAP modulati
 modulator's lane wants, switchable to absolute on the Controls page. Its panel lists each lane's
 lines ("LFO → control LFO (2 targets)") with **Disconnect**, which takes away the lane's mapping
 and makes its controls knobs again. `desktop-parts-model` checks the lines, the control node
-and its row, a direct mapping's line and Disconnect; `desktop-phase3b` adds the Oscairn LFO
+and its row, a direct mapping's line, each line running in straight runs through no box, and Disconnect; `desktop-phase3b` adds the Oscairn LFO
 outside the parts at 1024 × 600, connects its lane to Analog's parameter from the menu, checks
 the control and its two lines, and disconnects it.
 
 Not yet: drawing wires by dragging, choosing ports other than the main ones, editing a
 wire's channel pairs, naming a shared row, scrolling a Performance with more nodes than fit,
-and the device's version of the view; routing control lines around the boxes rather than over
-them, and a lane's targets edited without leaving Routing.
+and the device's version of the view; a lane's targets edited without leaving Routing. Audio
+and note wires keep their layered layout's curves (laid out by signal flow, they pass under no
+box); only control lines are routed around boxes.
 
 ## Undo status
 

@@ -8,8 +8,8 @@ a device that does not exist yet and be tried with the same engine behind it. Bu
 | --- | --- |
 | `desktop.json` | The desktop app's own window (the Desktop surface): toolbar, parts list, and tabs for the part, Mixer, Routing and Controls; apps such as the Groovebox open from the Apps menu |
 | `kick.json` | The KICK's panel, with the geometry of chillbeast's KickEM simulator board (1024 x 600 screen); P1 to P4 play the row selected on screen; most buttons do nothing yet |
-| `kick-screen.json` | The KICK's screen alone, 1024 x 600: on the device, the hardware panel supplies the controls |
-| `modx-m-screen.json` | The MODX M profile's screen alone, 800 x 480 (an estimate): the hardware panel supplies the controls |
+| `kick-screen.json` | A device's screen alone, designed at the KICK's 1024 x 600 and stretching to any screen: on the device, the hardware panel supplies the controls. The KICK, the Ignite, the FANTOM-07 and the test boards show it |
+| `modx-m-screen.json` | The MODX M profile's screen alone, designed at 800 x 480 (an estimate) and stretching the same way |
 | `ignite.json` | The Ignite's panel (BE 0716-AAF), from its front-panel photo, with its 1024 x 600 screen; the 16 step encoders edit each step's note, CUTOFF and VOLUME the synth; most buttons do nothing yet |
 | `keys49.json` | A concept 49-key keyboard: screen, knobs, pads and keys |
 | `compact.json` | A small screen (320 x 240) with four encoders under it, the Compact surface's test layout ([RFC 0019](../../../docs/rfcs/0019-adaptive-ui.md#compact)): the Performance's plugins, their pages and their parameters as lists |
@@ -37,19 +37,29 @@ Others can be opened with View > Open Layout File... or `--layout path.json`.
   panel whose screen shows plugin editors as lists for a few encoders (below). Its controls
   follow the **View > Input** setting: Keyboard and mouse, Touch (larger targets) or Automatic.
 - `size`: design units. The window starts with one unit per pixel when it fits. `rect` is
-  `[x, y, width, height]`.
+  `[x, y, width, height]`. A design unit is a pixel at the KICK's density (1024 x 600 at 7",
+  about 6.7 pixels per millimeter), where a 44-unit touch target is 6.6 mm across.
 - `resize`: `scale` (the default: the window keeps the panel's proportions and the panel
   scales with it; right for a real device's panel), `stretch` (any window shape: the panel
   scales to fit the tighter dimension and the space left over in the other goes to
-  elements by their `anchor`) or `fixed`.
+  elements by their `anchor`) or `fixed`. On a device, a stretching layout is laid out at the
+  screen's own size in design units: its pixels over the profile's scale
+  ([RFC 0024](../../../docs/rfcs/0024-device-profiles.md)'s `diagonal` gives the density; a
+  screen dense enough that 44 pixels would be under 6.5 mm scales up, others stay at one unit
+  per pixel). The space it has may then be less than `size` as well as more, so a screen-only
+  layout (`screen` anchored `stretch stretch`) fills any screen with no bars, and what is on it
+  reflows: the views lay themselves out from the space they get (more columns where there is
+  room, fewer where there is not, scrolling what does not fit). No breakpoints are needed in
+  the layouts so far; the views choose their columns from their width.
 - `anchor` (panels and controls, used by `stretch`): a horizontal and a vertical part,
   `"left|right|center|stretch top|bottom|center|stretch"`. `right bottom` keeps the
   element's distance from the right and bottom edges; `stretch stretch` grows it with the
   window. The default is `left top`.
 - `panels`: background areas with a label.
 - `controls`, by `type`:
-  - `screen`: the display (at most one). It is drawn for a 1024 x 600 screen and scales; on a
-    compact layout, for 320 x 240.
+  - `screen`: the display (at most one). The apps over it (Home and the rest) lay themselves
+    out at its size in design units; the sequencer view under them is drawn for 1024 x 600 and
+    scales. On a compact layout it is drawn for 320 x 240.
   - `knob`: `bind` is `node:param` (nodes `sequencer`, `synth`, `delay`; a CLAP parameter
     id), `tempo`, or `control:NAME`: a control of the Performance's control tree by name
     (RFC 0011), driving everything it is set up to, such as a Super Knob.

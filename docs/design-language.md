@@ -10,7 +10,10 @@ Changing either must not change the audio graph, parameters, MIDI assignments or
 - Use the semantic roles below, never private color constants in a system component.
 - Use an 8-pixel spacing unit, 16-pixel outer margins and 30-pixel desktop controls with a
   keyboard and mouse, 44 pixels with touch ([RFC 0019](rfcs/0019-adaptive-ui.md#input-mode)).
-  Hardware layouts retain their measured geometry and scale as a unit.
+  Hardware layouts retain their measured geometry and scale as a unit. A device's screen is
+  laid out at its own size in design units, the pixels of a 7" 1024 x 600 screen; a denser
+  screen scales up so 44 units stay at least 6.5 mm across
+  ([RFC 0019](rfcs/0019-adaptive-ui.md#screens-of-any-size)).
 - Use a sans-serif family. On the desktop, text sizes are fixed by role, not by the box they
   sit in: small 12 (13 with touch), body 14 (16), buttons 13 (15), titles 18 (20), times the
   theme's font scale (`textSize` in `Theme.h`). A device's panel scales its text with the

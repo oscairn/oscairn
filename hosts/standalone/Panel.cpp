@@ -502,6 +502,12 @@ namespace oscairn::standalone
         if( view ) { board_->addAndMakeVisible( view ); view->setBounds( board_->screenBounds() ); }
     }
 
+    void Panel::setDesignSize( int width, int height )
+    {
+        designWidth_ = std::max( 1, width ); designHeight_ = std::max( 1, height );
+        resized();
+    }
+
     void Panel::paint( juce::Graphics& g )
     {
         g.fillAll( ink(Ink::Background).darker( 0.4f ) );
@@ -510,14 +516,18 @@ namespace oscairn::standalone
     void Panel::resized()
     {
         recovery_.setBounds(getLocalBounds().removeFromTop(44).reduced(4));
-        // Scale the board to fit the tighter dimension. A stretching layout takes the
-        // space left in the other; otherwise the board is centred in it.
-        const auto scale = juce::jmin( getWidth() / (float)layout_.width, getHeight() / (float)layout_.height );
+        // Scale the board to fit the tighter dimension. A stretching layout is laid out at its
+        // design size and takes the space left in the other, which may be less than the layout's
+        // own size: its elements move and stretch by their anchors. Otherwise the board is centred.
+        const bool stretch = layout_.resize == Layout::Resize::Stretch;
+        const auto scale = stretch ? juce::jmin( getWidth() / (float)designWidth_, getHeight() / (float)designHeight_ )
+                                   : juce::jmin( getWidth() / (float)layout_.width, getHeight() / (float)layout_.height );
         if( scale <= 0.0f )
             return;
-        if( layout_.resize == Layout::Resize::Stretch )
+        if( stretch )
         {
-            board_->layOut( juce::jmax( 0, (int)( getWidth() / scale ) - layout_.width ), juce::jmax( 0, (int)( getHeight() / scale ) - layout_.height ) );
+            // Rounded up, so a fractional scale leaves no strip unfilled.
+            board_->layOut( (int)std::ceil( getWidth() / scale - .01f ) - layout_.width, (int)std::ceil( getHeight() / scale - .01f ) - layout_.height );
             board_->setTransform( juce::AffineTransform::scale( scale ) );
             return;
         }

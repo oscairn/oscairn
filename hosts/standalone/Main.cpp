@@ -112,7 +112,12 @@ namespace oscairn::standalone
             const bool fullScreen = fullScreen_; // a device's screen: no title bar, no menu bar
             setUsingNativeTitleBar( !fullScreen );
             if( fullScreen )
+            {
                 setTitleBarHeight( 0 );
+                // A dense screen scales everything, dialogs and menus too, so a touch target keeps
+                // its physical size (RFC 0019).
+                juce::Desktop::getInstance().setGlobalScaleFactor( profile_.screen()->scale() );
+            }
 #if JUCE_MAC
             juce::MenuBarModel::setMacMainMenu( this );
 #else
@@ -172,7 +177,13 @@ namespace oscairn::standalone
             layout_ = layout;
             // Home first (RFC 0030): the window's content on the desktop, over a panel's screen.
             if( layout.surface != Layout::Surface::Desktop )
-                setContentOwned( new Panel( engine_, layout ), false );
+            {
+                auto* p = new Panel( engine_, layout );
+                // A device's screen: the layout reflows to the screen's size in design units.
+                if( const auto* s = profile_.screen(); fullScreen_ && s )
+                    p->setDesignSize( juce::roundToInt( s->width / s->scale() ), juce::roundToInt( s->height / s->scale() ) );
+                setContentOwned( p, false );
+            }
             showHome();
             setName( "Oscairn - " + juce::String( layout.name ) );
 

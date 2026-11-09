@@ -1,7 +1,8 @@
 {
   "name": "KICK screen",
   "size": [1024, 600],
+  "resize": "stretch",
   "controls": [
-    {"type": "screen", "rect": [0, 0, 1024, 600]}
+    {"type": "screen", "rect": [0, 0, 1024, 600], "anchor": "stretch stretch"}
   ]
 }

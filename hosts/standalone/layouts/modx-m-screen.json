@@ -1,7 +1,8 @@
 {
   "name": "MODX M screen",
   "size": [800, 480],
+  "resize": "stretch",
   "controls": [
-    {"type": "screen", "rect": [0, 0, 800, 480]}
+    {"type": "screen", "rect": [0, 0, 800, 480], "anchor": "stretch stretch"}
   ]
 }

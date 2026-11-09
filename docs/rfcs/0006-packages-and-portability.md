@@ -9,6 +9,18 @@ and [Packages](../architecture.md#packages-sound-packs-libraries-and-plugins).
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. Format-qualified IDs, package references and provenance in persisted identities; profiles, manifest and lock schemas
+      (audited 2026-11-09 against [completion check 1](#implementation-sequence-and-completion-checks).
+      Built: documents name a plugin by format, ID and version, its path only a hint
+      ([format](../performance-format.md)); the lock, each plugin build's digest per platform, in
+      Performances and Sounds; provenance in `info` (`revision`, `parent`: revision ancestry;
+      `origin`: the archive and item a copy came from); a package's identity by its manifest's
+      SHA-256, checked against a repository's index; resolution through the plugin store by format,
+      ID and version and through the asset store by content; retention roots for asset libraries
+      (RFC 0009 step 4, `control-archives`). Missing, so the gate is not met: target runtime and
+      versioned capability profiles for export (the product profiles of RFC 0024 are not export
+      targets), Oscairn-native and External labels, a project manifest of requested packages and
+      version ranges apart from the lock, per-device assignments and variations, and retention
+      roots for plugins (their removal is deliberate, with Used by; nothing collects them))
 - [ ] 2. First vertical slice: managed CLAP packages, locks, offline export and import, unavailable-node preservation
       (built 2026-11-01: unavailable-node preservation, a stand-in keeping the plugin's place and
       saved state, `control-parts`; the plugin store's lookup by format, ID and version; the
@@ -18,6 +30,17 @@ Checked when built and tested; the sections below say how.
       Performance plays it, `control-package`, `control-archives`. Not yet: grouped cleanup
       prompts and retention settings, shared runtime packages, a Setlist on a clean machine,
       signatures. [Decisions](#first-slice-decisions))
+      (audited 2026-11-09 against [completion check 2](#implementation-sequence-and-completion-checks).
+      Built since: plugin packages, signed, from files and package repositories (RFC 0031); a sample
+      dependency, asset libraries that plugin packages name and repositories bring, collected once
+      their last root goes (RFC 0009 step 4); side-by-side versions in the store; offline import from
+      a folder package. Missing, so the gate is not met: one explicit shared runtime package; a
+      Setlist exported and played on a clean second machine (Setlists are not exported, and a second
+      machine is not available here; tests use a second data folder on one machine); tests of
+      removing the repository cache without losing pinned installs and of two projects sharing a
+      release while another pins an older one; grouped cleanup prompts and per-device retention
+      settings; dependency-only repair from a bundle and the missing-content request fulfilled from
+      a computer's repository)
 - [ ] 3. Cross-platform proof
 - [ ] 4. LV2, existing installs, VST3 and AU with their adapters
 - [ ] 5. DAW delivery proof

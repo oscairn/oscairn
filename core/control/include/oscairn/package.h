@@ -20,8 +20,11 @@ namespace oscairn
         // signatures over its content hash (signing::itemMessage).
         struct Item { std::string kind, id, name, path; std::vector<signing::Signature> signatures = {}; };
         // A plugin's build for one platform (platform()): its folder or file in the archive, its
-        // digest (bundleDigest) and its publishers' signatures (signing::buildMessage).
-        struct Build { std::string platform, path, sha256; std::vector<signing::Signature> signatures = {}; };
+        // digest (bundleDigest) and its publishers' signatures (signing::buildMessage). cpu and
+        // memory: its declared estimate (RFC 0025), as oscairn-plugin-check measures it on that
+        // platform: its busiest block's share of the block's time and the bytes it holds; 0 for
+        // none. A device counts a plugin it has not measured itself at this, not at a default.
+        struct Build { std::string platform, path, sha256; std::vector<signing::Signature> signatures = {}; double cpu = 0; uint64_t memory = 0; };
         struct Plugin { std::string format, id, version, name; std::vector<Build> builds; };
         std::string id, name;
         // "library"; "performance" or "sound" for an exported item; "plugin" for a plugin package,

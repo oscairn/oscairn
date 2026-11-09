@@ -473,6 +473,39 @@ int main(int argc, char** argv)
             p.add("synth", (folders[0] / "Synth.clap").string(), "org.kick.test.synth"); p.commit();
             check(p.sessionStatus().failures.empty() && p.graphState().topology.nodes.size() == 1, "the installed build plays");
         }
+        // Device E (RFC 0025 step 5): a plugin package declares its build's estimate, as
+        // oscairn-plugin-check measures it; a device that has not measured the plugin counts it at
+        // that, not at the default. Installing what will not fit says so, and the library shows it.
+        {
+            device(temp.path / "e");
+            const auto package = temp.path / "Estimated.olib";
+            const auto packed = run(tool + " plugin-package --license MIT --estimate " + platform() + " 0.95 100663296 " + shell(package) + " clap org.kick.test.synth " + shell(version) + " Synth " + platform() + "=" + shell(fixture));
+            const auto read = readPackage(package, {});
+            check(packed.first == 0 && read.plugins.at(0).builds.at(0).cpu == .95 && read.plugins[0].builds[0].memory == 100663296, "the package carries its build's estimate");
+            const auto wild = run(tool + " plugin-package --license MIT --estimate " + platform() + " 99 1 " + shell(temp.path / "Wild.olib") + " clap org.kick.test.synth " + shell(version) + " Synth " + platform() + "=" + shell(fixture) + " 2>&1");
+            check(wild.first != 0 && wild.second.find("estimate is out of range") != std::string::npos && !fs::exists(temp.path / "Wild.olib"), "an estimate past any block is refused: " + wild.second);
+            Session e(48000, 64);
+            constexpr uint64_t MiB = 1ull << 20;
+            e.setBudget({.9, 512 * MiB});
+            e.installArchive(package.string(), true, {}, true);
+            check(fs::exists(pluginStoreFolders().at(0) / "estimate.json"), "the estimate is kept beside the build in the store");
+            const auto installed = e.installArchive(archive.string(), true, {}, true);
+            const auto said = [&](const std::string& name) { return std::any_of(installed.notes.begin(), installed.notes.end(), [&](const auto& n) { return n.rfind(name + " does not fit this device: it needs 95% of the audio time where this device allows 90%", 0) == 0; }); };
+            check(said("Set") && said("Bass"), "installing a Performance and a Sound that will not fit says so: " + (installed.notes.empty() ? std::string() : installed.notes[0]));
+            Control::LibraryQuery installedItems; installedItems.source = e.libraries().at(0).id; // the Set library, not the user's own
+            const auto listed = e.libraryQuery(installedItems);
+            check(listed.items.size() == 2 && std::all_of(listed.items.begin(), listed.items.end(), [](const auto& i) { return i.unfit.find("needs 95% of the audio time") == 0; }),
+                  "the library shows each as not fitting, before it is opened");
+            const auto set = std::find_if(listed.items.begin(), listed.items.end(), [](const auto& i) { return i.kind == "performance"; });
+            const auto estimate = e.estimate(listed.items.at(0).path);
+            check(estimate.plugins.size() == 1 && estimate.plugins[0].cpu == .95 && estimate.plugins[0].memory == 100663296 && !estimate.plugins[0].measured,
+                  "counted at the package's estimate, still marked unmeasured");
+            std::string why; try { if(set != listed.items.end()) e.loadPerformanceFromLibrary(set->id); } catch(const std::exception& x) { why = x.what(); }
+            check(why.find("needs 95% of the audio time") != std::string::npos, "and opening it is refused: " + why);
+            e.setBudget({2, 512 * MiB});
+            const auto roomy = e.libraryQuery(installedItems);
+            check(std::all_of(roomy.items.begin(), roomy.items.end(), [](const auto& i) { return i.unfit.empty(); }), "on a device it fits, nothing is shown");
+        }
         // Device S: one bundle holding two plugins, Oscairn's Splitters (Split and Join): packed once,
         // each plugin signed, both installed into the store and listed, and both play from it.
         if(splitters)

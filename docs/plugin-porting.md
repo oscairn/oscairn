@@ -965,6 +965,11 @@ What changes for the plugin:
   A bundle holding several plugins is signed for all of them at once (`oscairn-sign build`
   takes the IDs comma-separated) and packed once, each plugin named with `--plugin <id>
   <name>`; a plugin whose version is not the package's is `<id>@<version>` to both. A preset-discovery provider in it is not a plugin and is neither listed nor signed.
+  `--estimate <platform> <cpu> <memory-bytes>` gives a build its resource estimate
+  ([RFC 0025](rfcs/0025-resource-budgets.md#status)), as `oscairn-plugin-check` prints it
+  on that platform: a device that has not measured your plugin itself counts it at this,
+  not at the default of 2% of the audio time and 32 MiB, when it checks what fits. Installing
+  a Performance or Sound that will not fit says so, and the library marks it.
   To publish to Oscairn's package repository, sign the archive too and follow
   [Publishing a package](developer-guide.md#publishing-a-package).
 - **Installing code:** a device installs a build signed by a key its trust store trusts for
@@ -996,7 +1001,9 @@ writing tests:
   platform's build; `oscairn-plugin-check --install FILE synth|effect` on that platform installs
   it and checks it opens from the store and plays. A note effect (CLAP feature `note-effect`,
   or note ports in and out with no audio output) is played notes and must send notes on, through
-  its part's MIDI out, instead of making sound. It prints one line per check.
+  its part's MIDI out, instead of making sound. It prints one line per check, and what the
+  plugin cost while it played (its busiest 256-frame block at 48 kHz as a share of the block's
+  time, and its memory) as the `--estimate` for `oscairn-sign plugin-package`.
 - `core/lv2-host/tests/production/run.py PROBE OUT --case NAME,PATH,ID,synth|effect,PARAM,VALUE`:
   renders at 44.1 and 48 kHz, 37- and 512-frame blocks, offline and realtime, a fresh-instance
   repeat and a parameter edit that must change the sound

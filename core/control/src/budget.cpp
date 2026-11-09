@@ -5,6 +5,7 @@
 // be checked against the device's budget before it loads.
 #include "oscairn/session.h"
 #include "oscairn/library.h"
+#include "oscairn/package.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include "sheredom/json.h"
 #include "JsonInput.h"
@@ -46,6 +47,32 @@ namespace oscairn
             try { return host.declaredMemory(); } catch(const std::exception&) { return {}; }
         }
         uint64_t total(const oscairn_memory_t& m) { return m.shared_bytes + m.context_bytes + m.asset_bytes; }
+
+        // A plugin never measured here (its key "<id>@<version>..."): its package's declared
+        // estimate for this platform, kept beside its build in the store (estimate.json, RFC 0025
+        // step 5), else the default. Still marked unmeasured.
+        Control::Cost declaredCost(const std::string& key, const std::string& name, const std::string& plugin)
+        {
+            if(key.size() > plugin.size() && key.compare(0, plugin.size(), plugin) == 0 && key[plugin.size()] == '@')
+            {
+                const auto rest = key.substr(plugin.size() + 1);
+                const auto version = rest.substr(0, rest.find_first_of(" #"));
+                for(const char* format : {"clap", "lv2"})
+                    try
+                    {
+                        const auto bytes = state_files::read(dataHome() / "Plugins" / format / pluginFolderName(plugin, version) / platform() / "estimate.json", 4096);
+                        const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(bytes.data(), bytes.size()), &std::free};
+                        auto number = [&](const char* k) {
+                            const auto* v = detail::member(doc.get(), k);
+                            return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : -1.0;
+                        };
+                        const double cpu = number("cpu"), memory = number("memory");
+                        if(cpu >= 0 && cpu <= 64 && memory >= 0 && memory <= double(1ull << 40)) return {name, plugin, cpu, uint64_t(memory), false};
+                    }
+                    catch(const std::exception&) {} // none for that format
+            }
+            return {name, plugin, unmeasuredCpu, unmeasuredMemory, false};
+        }
     }
 
     // A plugin build, by its version and the digest of its files (so a rebuild without a new version
@@ -77,7 +104,7 @@ namespace oscairn
                 const auto& x = it->second;
                 m = {std::max(m.cpu, x.cpu), std::max(m.rest, x.rest), std::max(m.voice, x.voice), std::max(m.voices, x.voices), std::max(m.memory, x.memory)};
             }
-        if(!found) return {name, plugin, unmeasuredCpu, unmeasuredMemory, false};
+        if(!found) return declaredCost(key, name, plugin);
         const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : m.cpu;
         return {name, plugin, cpu, m.memory, true};
     }
@@ -450,6 +477,18 @@ namespace oscairn
         return why + (most.empty() ? "" : "; most: " + most);
     }
 
+    // The library shows what does not fit this device before it is opened (RFC 0025 step 5).
+    // shortcut: each item's document is read on every query; keep the result in the library's index if libraries of thousands make it slow.
+    Control::LibraryResult Session::libraryQuery(const LibraryQuery& query)
+    {
+        auto result = library().query(query);
+        if(budget_.cpu > 0)
+            for(auto& item : result.items)
+                try { if(const auto e = estimate(item.path); !e.fits) item.unfit = tooMuch(e); }
+                catch(const std::exception&) {} // unreadable: opening it says why
+        return result;
+    }
+
     Control::Estimate Session::estimate(const std::string& directory)
     {
         if(budget_.cpu > 0) loadMeasurements();
@@ -461,11 +500,12 @@ namespace oscairn
         // so adding a plugin right after a change is not refused for a tail.
         if(directory.empty()) return estimateOf(open, ringing);
         auto playing = open; playing.insert(playing.end(), ringing.begin(), ringing.end());
-        // A Performance in a folder: its plugins by identity, from its document.
-        const auto bytes = state_files::read(fs::path(directory) / "performance.json", 4 * 1024 * 1024);
+        // A Performance or a Sound in a folder: its plugins by identity, from its document.
+        const auto file = fs::path(directory) / (fs::exists(fs::path(directory) / "sound.json") ? "sound.json" : "performance.json");
+        const auto bytes = state_files::read(file, 4 * 1024 * 1024);
         const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(bytes.data(), bytes.size()), &std::free};
         const auto* nodes = detail::member(doc.get(), "nodes");
-        if(!nodes || nodes->type != json_type_array) throw std::runtime_error("not a Performance: " + directory);
+        if(!nodes || nodes->type != json_type_array) throw std::runtime_error("not a Performance or a Sound: " + directory);
         auto text = [](const json_value_s* v) { return v && v->type == json_type_string ? std::string(static_cast<const json_string_s*>(v->payload)->string, static_cast<const json_string_s*>(v->payload)->string_size) : std::string(); };
         // Each node's part's note limit, by its key: in the part's chain or a split's lanes.
         std::map<std::string, uint32_t> limits;

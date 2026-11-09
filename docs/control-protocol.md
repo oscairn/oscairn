@@ -1263,7 +1263,9 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   never removed. Each of these four returns `{"accepted":true}`.
 - `library.uninstall` takes `{library}`; `library.delete` takes `{id}`, any item's.
 - `library.query` items carry `library`: the installed library holding them, locked, or empty
-  for the user's own. Saving over a locked item, a Performance by `library.save` or a part's
+  for the user's own, and, with a budget set, `unfit` when it does not fit this device: why, from
+  its plugins' estimates ([RFC 0025](rfcs/0025-resource-budgets.md#status)); absent when it fits.
+  An install's `notes` say each item that does not fit. Saving over a locked item, a Performance by `library.save` or a part's
   Sound by `parts.saveSound`, makes a new one.
 - `parts.fromSound` takes `{id}` and returns `{part}`: a new part listening to every key,
   playing to the first output, with the Sound loaded.

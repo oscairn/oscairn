@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
@@ -35,6 +36,7 @@ namespace
                    "  oscairn-sign plugin-package [--key <key-file>] [--plugin <id> <name>]... [--allow-outside-libraries]\n"
                    "                             --license <spdx> [--license-file <file>]... [--source <url> <commit-or-tag>]\n"
                    "                             [--asset-dependency <library-id> <least-version>]...\n"
+                   "                             [--estimate <platform> <cpu> <memory-bytes>]...\n"
                    "                             <archive.olib> <format> <id> <version> <name> <platform>=<build>...\n"
                    "      pack plugin builds, each with the signatures in <build>.sig beside it, into a\n"
                    "      plugin package (an archive with no items) with that ID and name; with --key,\n"
@@ -46,7 +48,10 @@ namespace
                    "      expression), license texts and notices (into Licenses/) and source (an https://\n"
                    "      address and the exact commit or tag) travel in it; under the GPL, LGPL or AGPL\n"
                    "      the source and a license file are required. --asset-dependency names an asset\n"
-                   "      library it needs, and the least version\n"
+                   "      library it needs, and the least version. --estimate gives that platform's build\n"
+                   "      its resource estimate (RFC 0025), as oscairn-plugin-check prints it: its busiest\n"
+                   "      block's share of the block's time and the bytes it holds; a device that has not\n"
+                   "      measured the plugin itself counts it at this\n"
                    "  oscairn-sign asset-package [--key <key-file>] --license <spdx> [--license-file <file>]...\n"
                    "                            [--source <url> <commit-or-tag>] <archive.olib> <library-id> <version> <name> <folder>\n"
                    "      pack every file in <folder> (hidden ones aside) as an asset library, each by its\n"
@@ -148,6 +153,7 @@ int main(int argc, char** argv)
             std::vector<std::string> outside; // packed anyway, with --allow-outside-libraries: said when done
             Package p;
             std::vector<fs::path> licenseFiles; // --license-file: each into Licenses/
+            std::map<std::string, std::pair<double, uint64_t>> estimates; // --estimate: cpu and memory by platform
             while(!rest.empty() && rest[0].rfind("--", 0) == 0)
             {
                 if(rest[0] == "--key" && rest.size() > 1) { key = std::make_unique<signing::Key>(signing::loadKey(rest[1])); rest.erase(rest.begin(), rest.begin() + 2); }
@@ -157,6 +163,7 @@ int main(int argc, char** argv)
                 else if(rest[0] == "--license-file" && rest.size() > 1) { licenseFiles.push_back(rest[1]); rest.erase(rest.begin(), rest.begin() + 2); }
                 else if(rest[0] == "--source" && rest.size() > 2) { p.sourceUrl = rest[1]; p.sourceRevision = rest[2]; rest.erase(rest.begin(), rest.begin() + 3); }
                 else if(rest[0] == "--asset-dependency" && rest.size() > 2) { p.assetDependencies.push_back({rest[1], rest[2]}); rest.erase(rest.begin(), rest.begin() + 3); }
+                else if(rest[0] == "--estimate" && rest.size() > 3) { estimates[rest[1]] = {std::stod(rest[2]), std::stoull(rest[3])}; rest.erase(rest.begin(), rest.begin() + 4); }
                 else return usage();
             }
             if(rest.size() < 6) return usage();
@@ -204,7 +211,8 @@ int main(int argc, char** argv)
                 const auto inside = fs::path("Plugins") / format / pluginFolderName(p.plugins[0].id, p.plugins[0].version) / forPlatform / build.filename();
                 fs::create_directories((staged / inside).parent_path());
                 fs::copy(build, staged / inside, fs::copy_options::recursive);
-                for(size_t k = 0; k < p.plugins.size(); ++k) p.plugins[k].builds.push_back({forPlatform, inside.generic_string(), digest, signatures[k]});
+                const auto estimate = estimates.count(forPlatform) ? estimates[forPlatform] : std::pair<double, uint64_t>{};
+                for(size_t k = 0; k < p.plugins.size(); ++k) p.plugins[k].builds.push_back({forPlatform, inside.generic_string(), digest, signatures[k], estimate.first, estimate.second});
             }
             stageLicenses(licenseFiles, staged);
             writePackage(rest[0], p, staged, key.get());

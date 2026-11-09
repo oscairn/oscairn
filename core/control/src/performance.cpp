@@ -199,8 +199,9 @@ void moveInto(const fs::path& from,const fs::path& to){
 }
 // Puts one platform's build into the store, whole or not at all, replacing that platform's, with
 // its publishers' signatures beside it as <bundle>.sig (RFC 0006); moved when `move`, else copied.
-// An empty license keeps the one recorded.
-void storeBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& name,const std::string& forPlatform,const fs::path& build,const std::vector<signing::Signature>& signatures={},bool move=false,std::string license={}){
+// An empty license keeps the one recorded. Its package's declared estimate (RFC 0025), if any,
+// beside it as estimate.json, for a device that has not measured it yet.
+void storeBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& name,const std::string& forPlatform,const fs::path& build,const std::vector<signing::Signature>& signatures={},bool move=false,std::string license={},double cpu=0,uint64_t memory=0){
     const auto folder=storeFolder(format,id,version);
     fs::create_directories(folder);
     if(license.empty())license=storedIdentity(folder).license;
@@ -210,6 +211,7 @@ void storeBuild(const std::string& format,const std::string& id,const std::strin
     std::error_code e;fs::remove_all(partial,e);fs::create_directories(partial);
     if(move)moveInto(build,partial/build.filename());else fs::copy(build,partial/build.filename(),fs::copy_options::recursive);
     if(!signatures.empty())signing::writeSignatures(partial/(build.filename().string()+".sig"),signatures);
+    if(cpu>0 || memory>0){char text[96];const int n=std::snprintf(text,sizeof(text),"{\"cpu\":%.6g,\"memory\":%llu}\n",cpu,static_cast<unsigned long long>(memory));state_files::write(partial/"estimate.json",text,size_t(n));}
     fs::remove_all(folder/forPlatform,e);fs::rename(partial,folder/forPlatform);
 }
 // The signatures in <build>.sig, beside a build where its author or the store put it, that are
@@ -1927,6 +1929,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
     auto& l=library();
     Installed out;
     std::vector<fs::path> created; // item folders this call copies, undone if it fails
+    std::vector<std::string> placed; // their names
     bool freshRoot=false;
     try{
         std::vector<Package::Item> items;
@@ -2002,7 +2005,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 if(revoked.count({plugin.id,build.path}))continue;
                 // A bundle that holds several plugins is copied for each but the last, which takes it.
                 const bool later=std::any_of(p.plugins.begin(),p.plugins.end(),[&](const auto& q){return &q>&plugin && std::any_of(q.builds.begin(),q.builds.end(),[&](const auto& b){return b.path==build.path;});});
-                storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later,pluginPackage?p.license:std::string());
+                storeBuild(plugin.format,plugin.id,plugin.version,plugin.name,build.platform,into/build.path,build.signatures,!later,pluginPackage?p.license:std::string(),build.cpu,build.memory);
             }
             // A plugin package's license texts and notices stay beside its plugins' builds.
             std::error_code e;
@@ -2020,7 +2023,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 const auto to=root/i.path;
                 if(fs::exists(fs::symlink_status(to))){++out.skipped;continue;} // a link there too: never followed or removed
                 // Recorded before the move, so one that fails partway comes back out.
-                fs::create_directories(to.parent_path());created.push_back(to);moveInto(into/i.path,to);++out.added;
+                fs::create_directories(to.parent_path());created.push_back(to);placed.push_back(i.name);moveInto(into/i.path,to);++out.added;
             }
             // Listed only once its items are all there.
             writeAtomically(root/"library.json",manifestJson(p));
@@ -2033,7 +2036,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 const auto copy=std::find_if(l.items().begin(),l.items().end(),[&](const LibraryItem& x){return x.library.empty() && x.origin.library==p.id && x.origin.item==i.id;});
                 if(copy!=l.items().end() && copy->hash==copy->origin.hash){ids[i.id]=copy->id;++out.skipped;continue;} // still as imported
                 const auto to=l.newFolder(i.name,i.kind);
-                fs::create_directories(to.parent_path());created.push_back(to);moveInto(into/i.path,to);
+                fs::create_directories(to.parent_path());created.push_back(to);placed.push_back(i.name);moveInto(into/i.path,to);
                 const auto doc=to/(i.kind=="sound"?"sound.json":"performance.json");
                 if(i.kind=="performance"){
                     // Parts point at the Sounds' copies. The span comes from the needle itself: an
@@ -2059,6 +2062,11 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
     }
     std::error_code ignored;fs::remove_all(into,ignored);
     l.rescan();
+    // RFC 0025: what will not fit this device, from its plugins' estimates (its own measurements,
+    // else the packages' declared ones), is said; installed all the same, as opening refuses it.
+    if(budget_.cpu>0)for(size_t i=0;i<created.size();++i)try{
+        if(const auto e=estimate(created[i].string());!e.fits)out.notes.push_back(placed[i]+" does not fit this device: it "+tooMuch(e));
+    }catch(const std::exception&){}
     return out;
 }
 

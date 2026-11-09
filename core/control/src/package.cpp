@@ -7,6 +7,7 @@
 #include "oscairn/library.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <fstream>
@@ -146,8 +147,13 @@ namespace oscairn
         for(const auto& p : package.plugins)
         {
             std::string builds;
-            for(const auto& b : p.builds) builds += std::string(builds.empty() ? "" : ",") + "{\"platform\":" + detail::quote(b.platform) + ",\"path\":" + detail::quote(b.path) + ",\"sha256\":" + detail::quote(b.sha256) +
-                                                    ",\"signatures\":" + signatures(b.signatures) + '}';
+            for(const auto& b : p.builds)
+            {
+                char estimate[96] = "";
+                if(b.cpu > 0 || b.memory > 0) std::snprintf(estimate, sizeof(estimate), ",\"estimate\":{\"cpu\":%.6g,\"memory\":%llu}", b.cpu, static_cast<unsigned long long>(b.memory));
+                builds += std::string(builds.empty() ? "" : ",") + "{\"platform\":" + detail::quote(b.platform) + ",\"path\":" + detail::quote(b.path) + ",\"sha256\":" + detail::quote(b.sha256) +
+                          ",\"signatures\":" + signatures(b.signatures) + estimate + '}';
+            }
             plugins += std::string(plugins.empty() ? "" : ",") + "{\"format\":" + detail::quote(p.format) + ",\"id\":" + detail::quote(p.id) + ",\"version\":" + detail::quote(p.version) +
                        ",\"name\":" + detail::quote(p.name) + ",\"builds\":[" + builds + "]}";
         }
@@ -370,6 +376,18 @@ namespace oscairn
                         bad("a plugin build is not a .clap or .lv2 bundle: " + build.path);
                     if(!knownPlatform(build.platform)) bad("a plugin build for no known platform: " + build.platform);
                     build.signatures = signatures(detail::member(b->value, "signatures"));
+                    // Its declared estimate (RFC 0025), optional: a share of the block's time up to 64, and at most 1 TiB.
+                    if(const V estimate = detail::member(b->value, "estimate"))
+                    {
+                        auto number = [&](const char* key) {
+                            const V v = detail::member(estimate, key);
+                            if(!v || v->type != json_type_number) bad("a plugin build's estimate needs its cpu and memory: " + build.path);
+                            return std::strtod(std::string(static_cast<const json_number_s*>(v->payload)->number, static_cast<const json_number_s*>(v->payload)->number_size).c_str(), nullptr);
+                        };
+                        const double cpu = number("cpu"), memory = number("memory");
+                        if(!(cpu >= 0 && cpu <= 64) || !(memory >= 0 && memory <= double(1ull << 40))) bad("a plugin build's estimate is out of range: " + build.path);
+                        build.cpu = cpu; build.memory = uint64_t(memory);
+                    }
                     for(const auto& s : build.signatures)
                         if(!signing::verify(s, signing::buildMessage(plugin.format, plugin.id, plugin.version, build.platform, build.sha256))) bad("a plugin build's signature does not verify: " + build.path);
                     plugin.builds.push_back(std::move(build));

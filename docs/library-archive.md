@@ -26,7 +26,7 @@ The manifest:
 | `license` | Its license, an SPDX expression (at most 256 bytes); empty when it names none. A plugin package names one |
 | `source` | `null`, or where its source is: `{url, revision}`, an `https://` address and the exact commit or tag (at most 2048 and 128 bytes, no spaces or control characters) |
 | `items` | Each item's `kind` (`performance` or `sound`), `id` (as plain as the library's: an exported item's ID is its archive's), `name`, `path`, its folder in the archive, and `signatures` (optional) |
-| `plugins` | Each plugin's `format`, `id`, `version`, `name` and `builds`: each build's `platform` (such as `macos-arm64` or `linux-arm64`), `path` in the archive, `sha256`, its digest as a [Performance's lock](performance-format.md) gives it, and `signatures` (optional) |
+| `plugins` | Each plugin's `format`, `id`, `version`, `name` and `builds`: each build's `platform` (such as `macos-arm64` or `linux-arm64`), `path` in the archive, `sha256`, its digest as a [Performance's lock](performance-format.md) gives it, `signatures` (optional) and `estimate` (optional, [RFC 0025](rfcs/0025-resource-budgets.md#status): `{cpu,memory}`, its busiest block's share of the block's time, 0 to 64, and the bytes it holds, at most 1 TiB, as `oscairn-plugin-check` measures it on that platform; installing keeps it beside the build as `estimate.json`, and a device that has not measured the plugin counts it at this) |
 | `files` | Every other entry's SHA-256, by its path |
 
 An export holds the Performance, the library Sound of each part that is still that Sound (the

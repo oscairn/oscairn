@@ -17,7 +17,8 @@ Checked when built and tested; the sections below say how.
 - [x] 3. Admission: loading, switching and editing check the estimate; refuse or warn with the reason
       (loading a Performance and adding a plugin are checked and refused with the reason; a warning instead of a refusal is not offered yet)
 - [x] 4. Seamless changes counted: the outgoing Performance's plugins until they ring out
-- [ ] 5. Estimates in packages and Sounds, checked at install and in the library
+- [x] 5. Estimates in packages and Sounds, checked at install and in the library
+      (`control-archives`, `control-plugin-check-*`; installing warns, it does not refuse; exports do not carry estimates)
 - [x] 6. Memory classes: reserved (OS, engine, shell, app reservations), committed and
       opportunistic; admission against what reservations leave ([design](#memory-reserved-committed-and-opportunistic))
       (an audition's set-aside Performance is not counted as committed yet)
@@ -137,6 +138,25 @@ never write the user's data folder.
   still ringing out) opens as a cut; the desktop says so after opening it. Nor is it prepared
   ahead (RFC 0021): `preparePerformance` returns false, and the Setlist app says it will open
   when cued.
+
+**Estimates in packages** (step 5, built 2026-11-09): a plugin package's build may carry
+`estimate` `{cpu, memory}` ([archive format](../library-archive.md)): its busiest block's share
+of the block's time and the bytes it holds, as `oscairn-plugin-check` measures it on that
+platform (it now sets a budget, so the plugin is measured while it plays, and prints the line
+for `oscairn-sign plugin-package --estimate <platform> <cpu> <memory-bytes>`; the figure is at
+its own 256 frames and 48 kHz, not the device's block). Installing keeps it beside the build as
+`estimate.json`; a plugin this device has never measured counts at it instead of the 2% and
+32 MiB default, still marked unmeasured, and its own measurement replaces it once it plays.
+Measurements stay private: an export carries no estimate. A Sound in a folder is estimated
+from its `sound.json` as a Performance is. With a budget set, installing says, for each item
+it placed, that it does not fit and why ("Set does not fit this device: it needs 95% of the
+audio time where this device allows 90%; ..."), and installs it anyway, since opening refuses
+it; `library.query` items carry `unfit` with the same reason, and the desktop Library's row
+says "Does not fit this device". The library reads each listed item's document on every query
+(a shortcut, noted in the code). `control-archives` packs a package declaring 95% and 96 MiB,
+refuses one declaring 99 blocks, installs it under a 90% budget, and checks the notes, the
+library's `unfit`, the estimate at the package's figures, opening refused, and nothing shown
+under a 200% budget; `control-plugin-check-*` check the measurement is made and printed.
 
 **Memory classes** (step 6, built 2026-11-01; `budget.cpp`): `Budget` takes the device's
 memory, the system's share (the OS, the engine's base and the shell), the floor and the margin;

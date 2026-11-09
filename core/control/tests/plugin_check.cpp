@@ -200,6 +200,7 @@ int main(int argc, char** argv)
         {
             device(temp.path / "a");
             Session a(rate, block, {}, stereoIn);
+            a.setBudget({64, 0}); // measured as it plays (RFC 0025), never refused: 64 blocks' time
             midiOutput(a);
             const auto node = a.add("plugin", plugin, id);
             stored = a.graphState().topology.nodes.at(0).plugin.path;
@@ -212,6 +213,12 @@ int main(int argc, char** argv)
             check(a.sessionStatus().failures.empty(), "loads in a part");
             const auto first = render(a, synth);
             plays(first, noteEffect, "plays");
+            // RFC 0025 step 5: what it cost here, for its plugin package's estimate on this platform.
+            const auto cost = a.estimate();
+            check(cost.plugins.size() == 1 && cost.plugins[0].measured, "measured while it played");
+            if(!cost.plugins.empty())
+                std::printf("estimate (%u frames at %u Hz): oscairn-sign plugin-package --estimate %s %.4g %llu\n", block, rate, platform().c_str(), cost.plugins[0].cpu,
+                            static_cast<unsigned long long>(cost.plugins[0].memory));
             if(!synth) check(difference(first, render(a, synth, true)) > 1e-6, "changes the signal");
             for(const auto& [param, value] : params) check(a.setParameter(node, param, value), "parameter " + std::to_string(param) + " set");
             // Edits reach the plugin at service(), which a render does: so they are in what is saved.

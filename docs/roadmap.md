@@ -509,7 +509,8 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
   Control ports read and fed back
 - [ ] **knowing before loading whether it fits:** CPU and memory measured on the device, and
   admission for loading, editing and seamless changes ([RFC 0025](rfcs/0025-resource-budgets.md#progress)).
-  Built: measuring, estimates, refusing a Performance or plugin over the budget, and a change
+  Built: measuring, estimates (a package's declared ones for what is not measured yet, said at
+  install and in the library), refusing a Performance or plugin over the budget, and a change
   that would not fit beside the last Performance becoming a cut; CPU at rest and per voice,
   counting a part's note limit. Memory as reserved (the OS, the engine, running and
   always-available apps' reservations), committed (what plays) and opportunistic (a next entry

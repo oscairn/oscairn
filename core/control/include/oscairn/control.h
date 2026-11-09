@@ -248,7 +248,9 @@ namespace oscairn
         // The library (RFC 0021): the device's Performances, by tags, text, favorites and
         // recent use. Performances save into it by name; loading by ID marks one used.
         // library: the installed library it is in (its ID), locked; empty for the user's own.
-        struct LibraryItem { std::string id, kind = "performance", name, description, path; std::vector<std::string> tags; bool favorite = false; uint32_t recent = 0; std::string color, revision, hash, library; Origin origin; };
+        // unfit: with a budget set, why it does not fit this device, from its plugins' estimates
+        // (RFC 0025: measured here, else their packages'); empty when it fits or is not known.
+        struct LibraryItem { std::string id, kind = "performance", name, description, path; std::vector<std::string> tags; bool favorite = false; uint32_t recent = 0; std::string color, revision, hash, library; Origin origin; std::string unfit = {}; };
         // kind: "performance" or "sound"; empty for both. source: "mine" for the user's own items, an
         // installed library's ID for its items, empty for all. id: that item only, empty for any.
         struct LibraryQuery { std::string text; std::vector<std::string> tags; bool favorites = false, recent = false; uint32_t limit = 200; std::string kind, source, id; };

@@ -60,7 +60,7 @@ namespace oscairn
         bool preparePerformance(const std::string& directory) override;
         PerformanceInfo performanceInfo() const override {return info_;}
         void setPerformanceInfo(const PerformanceInfo& info) override;
-        LibraryResult libraryQuery(const LibraryQuery& query) override {return library().query(query);}
+        LibraryResult libraryQuery(const LibraryQuery& query) override;
         void libraryFavorite(const std::string& id,bool favorite) override {library().setFavorite(id,favorite);}
         void libraryTag(const std::string& tag, bool hidden, const std::string& color) override {library().setTag(tag,hidden,color);}
         uint32_t libraryRescan() override {return library().rescan();}

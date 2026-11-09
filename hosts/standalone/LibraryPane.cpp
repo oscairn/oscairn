@@ -600,6 +600,8 @@ namespace oscairn::standalone
         // A locked library's item says so first: Save makes a new one.
         auto detail = tags.joinIntoString(separator) + (item->description.empty() ? "" : (tags.isEmpty() ? "" : "   ") + text(item->description));
         if(!item->library.empty()) detail = "Locked" + (detail.isEmpty() ? juce::String() : separator + detail);
+        // RFC 0025: one that would be refused on opening says so first.
+        if(!item->unfit.empty()) detail = "Does not fit this device" + (detail.isEmpty() ? juce::String() : separator + detail);
         if(item->id == auditioning_.id) detail = "Auditioning" + (detail.isEmpty() ? juce::String() : separator + detail);
         const juce::Font bold(juce::FontOptions(body, juce::Font::bold));
         // On a row tinted with its color, the muted ink may not read: the text's own, a little lighter.

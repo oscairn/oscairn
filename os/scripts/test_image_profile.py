@@ -78,7 +78,12 @@ with tempfile.TemporaryDirectory(prefix="oscairn-image-") as temporary:
     fails("a USB host without midi.usbHost", kernel_extra={"CONFIG_USB": "y"}, needle="CONFIG_USB=")
     fails("a camera stack without a camera", kernel_extra={"CONFIG_MEDIA_SUPPORT": "y"}, needle="MEDIA_SUPPORT")
 
+    fails("the Roland panel option without the panel", br2={"BR2_PACKAGE_OSCAIRN_PANEL_ROLAND": "y"}, needle="PANEL_ROLAND")
+    fails("the panel dump tool left behind", files=[("usr/bin/oscairn-panel-dump", b"")], needle="oscairn-panel-dump")
+
     # Declared but missing.
+    fails("a FANTOM panel without the reader", profile={**pedal, "panel": {"protocol": "roland-i2c-slave"}},
+          needle="BR2_PACKAGE_OSCAIRN_PANEL_ROLAND is not set")
     fails("a screen without the app", profile={**pedal, "screens": [{"width": 800, "height": 480, "surface": "panel", "layout": "x"}]},
           kernel_extra={"CONFIG_DRM": "y", "CONFIG_DRM_FBDEV_EMULATION": "y", "CONFIG_FB_DEVICE": "y"}, needle="BR2_PACKAGE_OSCAIRN_STANDALONE is not set")
     fails("a touch screen without touch input", profile={**pedal, "screens": [{"width": 800, "height": 480, "touch": True, "surface": "panel", "layout": "x"}]},

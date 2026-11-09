@@ -3,6 +3,9 @@
 #include "oscairn/realtime.h"
 #include <algorithm>
 #include <cstdlib>
+#ifdef __linux__
+#include <sched.h>
+#endif
 
 namespace oscairn
 {
@@ -26,7 +29,12 @@ namespace oscairn
 
     AudioHelpers::AudioHelpers(double periodMicroseconds)
     {
-        uint32_t count = std::min(3u, std::max(1u, std::thread::hardware_concurrency()) - 1);
+        uint32_t cores = std::thread::hardware_concurrency();
+#ifdef __linux__
+        // On the image the engine is confined to the audio cores (RFC 0035): helpers for those only.
+        if(cpu_set_t set; sched_getaffinity(0, sizeof(set), &set) == 0) cores = uint32_t(CPU_COUNT(&set));
+#endif
+        uint32_t count = std::min(3u, std::max(1u, cores) - 1);
         if(const char* n = std::getenv("OSCAIRN_AUDIO_HELPERS"); n && *n) count = uint32_t(std::min(16L, std::max(0L, std::atol(n))));
         if(const char* w = std::getenv("OSCAIRN_HELPERS_WORTH_US"); w && *w) worth_ = float(std::max(0.0, std::atof(w)));
         for(uint32_t i = 0; i < count; ++i) threads_.emplace_back([this, periodMicroseconds] { helper(periodMicroseconds); });

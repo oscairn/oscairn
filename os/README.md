@@ -188,6 +188,53 @@ playing app reported maxima of 3.5 to 4.5 ms per core. QEMU's figures mean nothi
 hardware (its guest cores are host threads); `compare-audio.py` was not run on it. The
 procedure for a device is in [running on a KICK](../docs/kick.md#measuring-latency).
 
+## Audio cores
+
+An image whose profile is at the `instrument` or `pass-through` level keeps its last
+`compute.realtimeCores` cores for audio ([RFC 0035](../docs/rfcs/0035-system-base.md#cores-for-audio)),
+as long as one core is left for everything else: core 3 of the four on the QEMU image and the
+EVK, cores 0 to 2 for housekeeping. When the image is built, `board/common/post-build.sh` works
+them out from the profile with `os/scripts/audio-cores.py` and
+
+- adds `nohz_full=` (no scheduler tick on an audio core running one task) and `irqaffinity=` (new
+  interrupts on the housekeeping cores) to the kernel's command line: in the EVK's
+  `extlinux.conf`, and in `kernel-args` beside the images, which `os/build.sh test` and `run` and
+  `cyclictest-qemu.py` pass to QEMU;
+- writes `/etc/default/oscairn-cores` for the session.
+
+At start, `oscairn-session` mounts cgroup v2, makes `/sys/fs/cgroup/oscairn-audio` an isolated
+cpuset partition of the audio cores, moves every interrupt it can to the housekeeping cores, sets
+the audio cores' frequency governor to `performance` and turns off their idle states slower to
+leave than a tenth of the profile's block, and says on the console what it did. These hold for as
+long as the session runs, not only while something sounds (there is no battery product yet). The
+engine moves itself into the partition (`OSCAIRN_AUDIO_CGROUP`) before it starts a thread or a
+worker, so all of its threads and its workers run only there and nothing else does; the app, X
+and the rest run on the housekeeping cores. The priorities follow RFC 0035's table
+(`core/plugin-host/include/oscairn/realtime.h`): the engine's audio thread, JUCE's ALSA thread,
+takes `SCHED_FIFO` 80 at its first callback, above the workers' and graph helpers' 70, and the
+engine starts graph helpers only for the cores it may use (none with one audio core).
+
+`os/build.sh test` checks it where `kernel-args` has `nohz_full=`: it logs in on the serial
+console and reads, from `/proc` and `/sys`, the kernel's command line, the partition, which
+processes are in it, every engine and worker thread's core, allowed cores, policy and priority,
+the app's and X's allowed cores and every interrupt's effective affinity; it builds
+`os/scripts/control-request.c` with the image's compiler, types it into the guest and reads
+`session.status` there. Passed on 2026-11-08: partition `isolated` on core 3 holding the engine and
+its three workers only; every one of their threads on core 3 and allowed only there; the engine's
+audio thread `SCHED_FIFO` 80, one thread per worker at 70; the app and X on 0-2; every interrupt
+with an effective affinity on core 0 (the per-core timer has none to set); `audioUnderruns` 0. QEMU has no
+frequency scaling or idle states, so the session reported nothing to hold. What the results look
+like is in `build-os/test/audio-cores.txt`.
+
+Only a device can check the rest: that `nohz_full=` stops the tick on the audio core (the
+`LOC` column of `/proc/interrupts` stays still there while it plays), the EVK's governor and idle
+states (`/sys/devices/system/cpu/cpu3/cpufreq/scaling_governor` and `cpuidle/state*/disable`),
+where the SAI and SDMA interrupts land, and whether any of it lowers `cyclictest`'s maximum and the
+underrun count (the procedure in [running on a KICK](../docs/kick.md#measuring-latency)). Not
+built: the audio interface's interrupt on an audio core at priority 90 (the profile does not name
+it yet), releasing the frequency and idle states when nothing sounds, and `realtimeCores` as a
+list of cores.
+
 ## i.MX8M Mini EVK
 
 `oscairn_imx8mm_evk_defconfig` is the first image for real hardware: NXP's i.MX8M Mini EVK,

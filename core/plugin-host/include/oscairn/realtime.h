@@ -15,6 +15,14 @@ namespace oscairn::worker
     bool waitWhileEqual(std::atomic<uint32_t>& word, uint32_t value, std::chrono::nanoseconds timeout) noexcept;
     // Wakes up to `waiters` threads waiting on word (every one by default).
     void wake(std::atomic<uint32_t>& word, int waiters = INT_MAX) noexcept;
-    // The calling thread at real-time priority: a time constraint of the period on macOS, SCHED_FIFO on Linux.
-    bool makeRealtime(double periodMicroseconds) noexcept;
+    // RFC 0035's priority table for Oscairn's threads: SCHED_FIFO priorities on Linux, above the
+    // kernel's 50 for interrupt threads and below the audio interface's (90, the session's to set).
+    namespace priority
+    {
+        constexpr int engineAudio = 80; // the engine's audio thread
+        constexpr int workerAudio = 70; // workers' and the graph's helpers' audio threads
+    }
+    // The calling thread at real-time priority: a time constraint of the period on macOS, SCHED_FIFO
+    // at linuxPriority on Linux.
+    bool makeRealtime(double periodMicroseconds, int linuxPriority = priority::workerAudio) noexcept;
 }

@@ -3,6 +3,7 @@
 #include "WebTransport.h"
 
 #include "oscairn/midi_input.h"
+#include "oscairn/realtime.h"
 
 #include <algorithm>
 #include <cmath>
@@ -292,7 +293,7 @@ namespace oscairn::host
         const auto required=(!config.explicitOutputs && initialOutputs_.size()==1)?1:ChannelMap::required(config.outputs);
         for(uint32_t i=0;i<required;++i)valid=valid && outputMask[static_cast<int>(i)];
         outputLatencyMs_=(device->getOutputLatencyInSamples()+device->getCurrentBufferSizeSamples())*1000.0/device->getCurrentSampleRate();
-        lastCallback_=0;lateCallbacks_=0;
+        lastCallback_=0;lateCallbacks_=0;realtime_=false;
         // At another rate, silent until service() has the plugins activated again at it, on the control thread.
         const bool moved=std::abs(rate-sampleRate_)>=.5;
         pendingRate_=valid && moved?rate:0;
@@ -303,6 +304,11 @@ namespace oscairn::host
                                                    const juce::AudioIODeviceCallbackContext& )
     {
         if(numSamples<=0)return;
+#ifdef __linux__
+        // JUCE's ALSA thread is not real-time; once per device start it takes the engine's place in
+        // RFC 0035's priority table (CoreAudio's thread on macOS already is).
+        if(!realtime_){realtime_=true;oscairn::worker::makeRealtime(1e6*numSamples/sampleRate_,oscairn::worker::priority::engineAudio);}
+#endif
         const double now=juce::Time::getMillisecondCounterHiRes()*0.001;
         if(lastCallback_>0 && now-lastCallback_>2.0*numSamples/sampleRate_)lateCallbacks_.fetch_add(1,std::memory_order_relaxed);
         lastCallback_=now;

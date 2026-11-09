@@ -169,6 +169,11 @@ namespace oscairn
     // the out-of-memory killer's order (oom_score_adj: the engine -999, a worker 300). Returns what
     // could not be done, empty when everything asked was done or nothing was asked.
     std::string applyMemoryPolicy(int oomScoreAdj);
+    // RFC 0035, Linux only: the engine moves itself into the cgroup named by OSCAIRN_AUDIO_CGROUP
+    // (the audio cores' isolated cpuset partition, made by the image's session) before it starts
+    // any thread or worker, so they all run on the audio cores. Returns what could not be done,
+    // empty when it was done or nothing was asked.
+    std::string applyCpuPolicy();
     // CLAP module or LV2 bundle directory; pluginId is a CLAP ID or an LV2 URI.
     std::shared_ptr<PluginHost> loadPlugin(const std::string& path, const std::string& pluginId,
                                            double sampleRate, uint32_t maxFrames, ProcessingMode mode = ProcessingMode::Realtime, Lv2BufferLimits lv2Buffers = {},

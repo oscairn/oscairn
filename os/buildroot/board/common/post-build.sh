@@ -16,4 +16,16 @@ if [ -n "$profile" ]; then
 	python3 "$here/../../../scripts/check-image-profile.py" --br2-config "$BR2_CONFIG" \
 		--profile "$here/../../../../hosts/standalone/profiles/$profile.json" \
 		${kernel:+--kernel-config "$kernel"} --target "$target"
+	# The profile's audio cores (RFC 0035): for the session (oscairn-session), and nohz_full= and
+	# irqaffinity= for the kernel: in extlinux.conf where the board boots with it, and in
+	# kernel-args beside the images for the QEMU scripts, which give the command line themselves.
+	python3 "$here/../../../scripts/audio-cores.py" "$here/../../../../hosts/standalone/profiles/$profile.json" \
+		> "$target/etc/default/oscairn-cores"
+	args=$(sed -n 's/^OSCAIRN_KERNEL_ARGS="\(.*\)"$/\1/p' "$target/etc/default/oscairn-cores")
+	printf '%s\n' "$args" > "$BINARIES_DIR/kernel-args"
+	extlinux=$target/boot/extlinux/extlinux.conf
+	if [ -f "$extlinux" ]; then
+		sed -i -e '/^ *append /s/ nohz_full=[^ ]*//; /^ *append /s/ irqaffinity=[^ ]*//' \
+			-e "/^ *append /s/\$/ $args/" -e '/^ *append /s/ *$//' "$extlinux"
+	fi
 fi

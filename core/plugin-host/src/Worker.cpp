@@ -56,15 +56,16 @@ namespace oscairn::worker
 #endif
     }
 
-    bool makeRealtime(double periodUs) noexcept
+    bool makeRealtime(double periodUs, int linuxPriority) noexcept
     {
 #ifdef __APPLE__
+        (void)linuxPriority;
         mach_timebase_info_data_t base; mach_timebase_info(&base);
         const auto ticks = [&](double us) { return uint32_t(us * 1000.0 * base.denom / base.numer); };
         thread_time_constraint_policy_data_t policy{ticks(periodUs), ticks(periodUs * .5), ticks(periodUs * .9), 1};
         return thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY, reinterpret_cast<thread_policy_t>(&policy), THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
 #else
-        (void)periodUs; sched_param p{}; p.sched_priority = 70;
+        (void)periodUs; sched_param p{}; p.sched_priority = linuxPriority;
         return pthread_setschedparam(pthread_self(), SCHED_FIFO, &p) == 0;
 #endif
     }

@@ -24,9 +24,11 @@ run() {
 
 if [ "${1:-}" = run ]; then
 	images=/work/output/oscairn_qemu_aarch64_defconfig/images
+	# kernel-args: what the image's profile asks of the kernel (its audio cores, RFC 0035).
+	args=$(docker run --rm -v oscairn-os:/work oscairn-os-builder cat $images/kernel-args 2>/dev/null || true)
 	docker run -d --rm --name oscairn-qemu -p 127.0.0.1:5900:5900 -v oscairn-os:/work oscairn-os-builder \
 		qemu-system-aarch64 -M virt -cpu cortex-a76 -smp 4 -m 2048 \
-		-kernel $images/Image -append "rootwait root=/dev/vda console=ttyAMA0" \
+		-kernel $images/Image -append "rootwait root=/dev/vda console=ttyAMA0 $args" \
 		-drive file=$images/rootfs.ext4,if=none,format=raw,id=hd0,snapshot=on \
 		-device virtio-blk-device,drive=hd0 \
 		-device virtio-gpu-pci,xres=1024,yres=600,romfile= \

@@ -39,10 +39,28 @@ Steps 1 and 2, partly built: `BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL` gives a defco
 `PREEMPT_RT` kernel (`CONFIG_EXPERT` and `CONFIG_PREEMPT_RT`, no patch on 6.18), and the test
 variant `oscairn_qemu_aarch64_rt_defconfig` adds `rt-tests`. It builds, boots with
 `SMP PREEMPT_RT`, passes `boot-test.py`, and `os/scripts/cyclictest-qemu.py` runs `cyclictest`
-on it beside the playing app (QEMU's figures meaningless). Not done: the script does not report
-`audioUnderruns` beside `cyclictest`, `compare-audio.py` has not run on the variant, the product
-QEMU image is still `CONFIG_PREEMPT`, `NO_HZ_FULL` is built into every image's kernel (2026-11-08) but no `nohz_full=` is passed, and nothing has run on a device
-(the procedure is in [docs/kick.md](../kick.md#measuring-latency)).
+on it beside the playing app (QEMU's figures meaningless), on the audio core since 2026-11-08,
+and reports the engine's `audioUnderruns` from `session.status` beside it. Not done:
+`compare-audio.py` has not run on the variant, the product QEMU image is still
+`CONFIG_PREEMPT`, and nothing has run on a device (the procedure is in
+[docs/kick.md](../kick.md#measuring-latency)), so neither box is ticked: both gates need a device.
+
+Steps 3 and 4, partly built (2026-11-08; os/README.md, "Audio cores"). From the profile's
+`realtimeCores` (the last cores; core 3 of four) at `instrument` and `pass-through`: `nohz_full=`
+and `irqaffinity=` on the kernel's command line, the session's isolated cpuset partition, which
+the engine moves itself into before it starts a thread or a worker, every movable interrupt on
+the housekeeping cores, the `performance` governor and idle states slower to leave than a tenth
+of a block turned off on the audio cores; the priority table in `oscairn/realtime.h`, with the
+engine's audio thread at `SCHED_FIFO` 80 on Linux and graph helpers only for the cores the
+engine may use. `boot-test.py` checks step 3's QEMU gate and passes: the engine and its workers
+are in the partition and nothing else is, every one of their threads runs only on the audio core,
+the app and X are off it, no movable interrupt is on it, and `session.status`, read in the guest,
+has `audioUnderruns`. QEMU has no frequency scaling or idle states, so step 4's settings ran on
+nothing there. Not built: the audio interface's interrupt on an audio core at priority 90 (the
+profile does not name it), releasing frequency and idle states in silence (no battery product
+yet), `realtimeCores` as a list. Neither box is ticked: both gates are 12-hour runs on a device.
+The engine's control thread is in the partition with its audio thread, not on the housekeeping
+cores as the table below has it: cgroup v2 places processes, not threads.
 
 Step 10, partly built: per-board kernels, `BR2_PACKAGE_OSCAIRN_USB_GADGET`, and the profile check
 that fails a build when the image and its profile disagree, with a test that a feature left out
@@ -91,7 +109,7 @@ From `os/buildroot/` and `os/scripts/`, 2026-11-07:
 | Init | BusyBox init (no `BR2_INIT_*` set, so Buildroot's default), eudev for device nodes |
 | The session | `/etc/init.d/S95oscairn` starts `/usr/libexec/oscairn-session` with `start-stop-daemon`. It raises `RLIMIT_MEMLOCK` to unlimited, starts Xorg, then loops: start `/usr/bin/Oscairn`, wait, restart after 2 seconds. The app starts the engine, which detaches from its process group |
 | User | Everything runs as root (`HOME=/root`), so `SCHED_FIFO` and `mlockall` need no limits raised beyond `RLIMIT_MEMLOCK` |
-| Real-time threads | Workers' audio threads call `makeRealtime` (`core/plugin-host/src/Worker.cpp`): `SCHED_FIFO` priority 70 on Linux. No code sets CPU affinity. What priority the engine's own audio thread gets on Linux (it is JUCE's ALSA thread) was not checked |
+| Real-time threads | Workers' audio threads call `makeRealtime` (`core/plugin-host/src/Worker.cpp`): `SCHED_FIFO` priority 70 on Linux. No code sets CPU affinity. What priority the engine's own audio thread gets on Linux (it is JUCE's ALSA thread) was not checked. Since 2026-11-08 the engine's audio thread takes `SCHED_FIFO` 80 and the session's cpuset partition places the engine (step 3, above) |
 | Memory | Locked at `instrument` and above when `OSCAIRN_RELIABILITY` says so (RFC 0025, built); `oscairn-session` sets the unlimited `RLIMIT_MEMLOCK` they need and the boot test checks it. The cgroup subtree, `OSCAIRN_CGROUP` and zram are not wired in the image |
 | Logs | `/var/log/oscairn.log` and `/var/log/oscairn-xorg.log`, appended, never rotated |
 | Network, time, TLS | No network services, no NTP, no TLS library (RFC 0031 step 2 notes HTTPS on Linux waits for one) |
@@ -622,7 +640,9 @@ The `oscairn` package was audited for hardware-specific code compiled into every
 (2026-11-08). None was found to put behind an option:
 
 - **The app** (screens) and **the LV2 host** are options already (`BR2_PACKAGE_OSCAIRN_STANDALONE`;
-  `BR2_PACKAGE_OSCAIRN_LV2`, off on every product, and not hardware).
+  `BR2_PACKAGE_OSCAIRN_LV2`, off on every product, and not hardware). The FANTOM-0 panel reader,
+  added since, is too: `OSCAIRN_PANEL_ROLAND`, set by `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND` and
+  checked against the profile's `panel.protocol`.
 - **Bluetooth, Wi-Fi, touch, a battery, a camera and the USB gadget** have no Oscairn code yet.
   The app's touch input mode (`--input-mode touch`) only sizes the UI for fingers; it has no
   code for touch hardware, which X and JUCE handle.

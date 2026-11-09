@@ -909,6 +909,10 @@ What changes for the plugin:
   time, every thread's user and system time, is what `session.status` reports (shared among the
   plugins in that worker), and the budget does not use it. So work moved off the audio thread
   is not charged against the budget; on a device with few cores it still competes with audio.
+  On an Oscairn image the engine and every worker run only on the profile's audio cores (one of
+  four on the EVK and the QEMU image; RFC 0035), so your threads share those cores with the
+  audio threads, at a lower priority: a helper thread there gets the time audio leaves, not a
+  core of its own.
 
 ## Packages and signing
 

@@ -77,6 +77,7 @@ namespace oscairn::host
         // reports none of its own (audio thread; reset when the device starts).
         std::atomic<uint64_t>    lateCallbacks_{ 0 };
         double                   lastCallback_ = 0;
+        bool                     realtime_ = false; // the device's thread set to the engine's priority (Linux)
 
         // Physical MIDI to the audio thread: many producers, serialized by the mutex
         // (never taken on the audio thread), one consumer.

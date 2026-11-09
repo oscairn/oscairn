@@ -270,6 +270,18 @@ namespace oscairn
 #endif
     }
 
+    std::string applyCpuPolicy()
+    {
+        const char* cgroup=std::getenv("OSCAIRN_AUDIO_CGROUP");
+        if(!cgroup || !*cgroup)return {};
+#ifdef __linux__
+        std::ofstream procs(std::string(cgroup)+"/cgroup.procs");procs<<getpid()<<std::flush;
+        return procs?std::string():"not on the audio cores: "+std::string(cgroup)+"/cgroup.procs: "+std::strerror(errno);
+#else
+        return "audio cores are Linux only";
+#endif
+    }
+
     std::vector<PresetInfo> scanPluginPresets(const std::string& path, const std::string& pluginId)
     {
         // One listing per binary as it is now (its path and newest modification), the failures of a

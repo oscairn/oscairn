@@ -14,6 +14,42 @@ say() { echo "oscairn-session: $*" > /dev/console; }
 ulimit -l unlimited
 say "locked memory: $(ulimit -l)"
 
+# RFC 0035: the audio cores the profile asks for (/etc/default/oscairn-cores, written when the
+# image is built; the kernel's command line has nohz_full= and irqaffinity= for them). An isolated
+# cpuset partition on them, which the engine moves itself into before it starts a thread or a
+# worker, so nothing else runs there; every interrupt that can move kept off them; their frequency
+# held at the top and idle states slower to leave than a tenth of a block turned off, for as long
+# as the session runs.
+[ -f /etc/default/oscairn-cores ] && . /etc/default/oscairn-cores
+if [ -n "${OSCAIRN_AUDIO_CORES:-}" ]; then
+	cg=/sys/fs/cgroup
+	grep -q " $cg cgroup2 " /proc/mounts || mount -t cgroup2 none $cg
+	echo +cpuset > $cg/cgroup.subtree_control
+	mkdir -p $cg/oscairn-audio
+	echo "$OSCAIRN_AUDIO_CORES" > $cg/oscairn-audio/cpuset.cpus
+	echo isolated > $cg/oscairn-audio/cpuset.cpus.partition
+	export OSCAIRN_AUDIO_CGROUP=$cg/oscairn-audio
+	set_irqs=0 fixed_irqs=0
+	for irq in /proc/irq/[0-9]*; do
+		if echo "$OSCAIRN_HOUSEKEEPING_CORES" > $irq/smp_affinity_list 2>/dev/null; then
+			set_irqs=$((set_irqs + 1))
+		else
+			fixed_irqs=$((fixed_irqs + 1))
+		fi
+	done
+	held=""
+	first=${OSCAIRN_AUDIO_CORES%-*} last=${OSCAIRN_AUDIO_CORES#*-}
+	for cpu in $(seq "$first" "$last"); do
+		d=/sys/devices/system/cpu/cpu$cpu
+		[ -w $d/cpufreq/scaling_governor ] && echo performance > $d/cpufreq/scaling_governor && held="$held cpu$cpu-performance"
+		for s in $d/cpuidle/state*; do
+			[ -f $s/latency ] && [ "$(cat $s/latency)" -gt "$OSCAIRN_IDLE_LIMIT_US" ] && echo 1 > $s/disable && held="$held cpu$cpu-$(cat $s/name)-off"
+		done
+	done
+	say "audio cores $OSCAIRN_AUDIO_CORES: partition $(cat $cg/oscairn-audio/cpuset.cpus.partition);" \
+		"interrupts on $OSCAIRN_HOUSEKEEPING_CORES: $set_irqs, not movable: $fixed_irqs; held:${held:- nothing (no frequency or idle states to set)}"
+fi
+
 Xorg :0 -nolisten tcp -nocursor > /var/log/oscairn-xorg.log 2>&1 &
 for i in $(seq 100); do
 	[ -S /tmp/.X11-unix/X0 ] && break

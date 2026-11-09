@@ -142,10 +142,29 @@ milliseconds means the real-time kernel is not in effect or a driver holds the C
 figures (`os/scripts/cyclictest-qemu.py`) mean nothing for hardware: QEMU runs the guest's
 cores as host threads.
 
+**The audio cores.** An Oscairn image keeps core 3 for audio (RFC 0035 step 3; os/README.md,
+"Audio cores"): the session's console line `oscairn-session: audio cores 3: partition isolated; ...`
+says what it set. To measure that core beside the engine, put the shell in its partition before
+`cyclictest` (`echo $$ > /sys/fs/cgroup/oscairn-audio/cgroup.procs`); `-S` then runs one thread,
+on core 3. Checked in QEMU; on the board, check and report too:
+
+```sh
+cat /proc/cmdline                           # has nohz_full=3 irqaffinity=0-2
+grep -E 'LOC|sai|sdma' /proc/interrupts; sleep 10; grep -E 'LOC|sai|sdma' /proc/interrupts
+                                            # LOC (the tick) barely moves on CPU3 while it plays;
+                                            # where the SAI and SDMA interrupts land
+cat /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor   # performance
+grep . /sys/devices/system/cpu/cpu3/cpuidle/state*/{name,latency,disable}
+```
+
+And run `cyclictest` and watch `audioUnderruns` once with the session's settings and once without
+them (boot with `nohz_full=` and `irqaffinity=` removed from `extlinux.conf`, and
+`/etc/default/oscairn-cores` emptied), so the difference they make is measured, not assumed.
+
 **Report:** the board and image (`uname -a`, `/etc/os-release` or the image's commit), the
 kernel's preemption (both checks above), the load, the duration, each thread's Min, Avg and Max,
-the histogram files, `audioUnderruns` before and after, and the room's temperature if the board
-throttles.
+the histogram files, `audioUnderruns` before and after, the audio-core checks above, and the
+room's temperature if the board throttles.
 
 ## What to report
 

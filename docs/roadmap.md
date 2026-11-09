@@ -606,8 +606,9 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
 - [ ] An RK3588 board, once the target hardware is known: real-time kernel, audio on isolated
   cores, measured latency. The real-time kernel is a build option now
   (`BR2_PACKAGE_OSCAIRN_REALTIME_KERNEL`, [RFC 0035](rfcs/0035-system-base.md#progress)), built
-  and booted in QEMU with `cyclictest` in a test variant; the hardware measurement is
-  [written down](kick.md#measuring-latency), not run.
+  and booted in QEMU with `cyclictest` in a test variant; the audio cores (an isolated cpuset
+  partition with the engine and its workers, `nohz_full=`, interrupts kept off) are built and
+  checked in QEMU; the hardware measurement is [written down](kick.md#measuring-latency), not run.
 
 ## Phase 5: the rest of the architecture
 

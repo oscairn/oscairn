@@ -666,7 +666,9 @@ namespace oscairn::standalone
         compactButton_.setBounds(bar.removeFromRight(touch ? 120 : 96)); bar.removeFromRight(gap);
         recent_.setBounds(bar.removeFromRight(touch ? 110 : 90)); bar.removeFromRight(gap);
         favorites_.setBounds(bar.removeFromRight(touch ? 130 : 110)); bar.removeFromRight(gap);
-        search_.setBounds(bar);
+        // A narrow screen gives the search a row of its own rather than a sliver (RFC 0019).
+        if(bar.getWidth() < (touch ? 240 : 200)) { area.removeFromTop(gap); search_.setBounds(area.removeFromTop(control)); }
+        else search_.setBounds(bar);
         search_.setFont(juce::FontOptions(textSize(TextRole::Body, mode())));
         updatePlaceholder();
         area.removeFromTop(gap);

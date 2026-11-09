@@ -276,7 +276,8 @@ namespace oscairn::standalone
         addBus_.onClick = [this] { const auto n = state_.buses.size(); engine_.edit([n](Control& c) { addPart(c, std::string("Bus ") + char('A' + n % 26), true); }); };
         for(auto* c : std::initializer_list<juce::Component*>{&panic_, &undo_, &redo_, &tempoLabel_, &tempo_, &record_, &sceneLabel_, &sceneBox_, &storeScene_, &status_, tabs_.get(), list_.get(), &addPart_, &addBus_})
             addAndMakeVisible(c);
-        addAndMakeVisible(parts_);
+        partsView_.setViewedComponent(&parts_, false); partsView_.setScrollBarsShown(true, false); // a short window scrolls the Part page
+        addAndMakeVisible(partsView_);
         parts_.setEmbedded(true);
         refresh();
         showTab(Tab::Play); // the Performance app opens in Play
@@ -311,7 +312,7 @@ namespace oscairn::standalone
         if(tab != Tab::Play) editTab_ = tab;
         // Play covers Edit's parts list, tabs and views; the toolbar's Edit goes back to them.
         const bool playing = tab == Tab::Play;
-        for(auto* c : std::initializer_list<juce::Component*>{tabs_.get(), list_.get(), &addPart_, &addBus_, &parts_}) c->setVisible(!playing);
+        for(auto* c : std::initializer_list<juce::Component*>{tabs_.get(), list_.get(), &addPart_, &addBus_, &partsView_}) c->setVisible(!playing);
         play_.setVisible(playing);
         edit_.setButtonText(playing ? "Edit" : "Play");
         edit_.setColour(juce::TextButton::buttonColourId, playing ? ink(Ink::Accent) : ink(Ink::Raised));
@@ -475,7 +476,7 @@ namespace oscairn::standalone
         list_->setBounds(side);
         area.removeFromLeft(1);
         tabs_->setBounds(area.removeFromTop(m.control + m.gap * 2).withTrimmedTop(m.gap));
-        parts_.setBounds(area);
+        partsView_.setBounds(area); parts_.setSize(area.getWidth(), area.getHeight());
         repaint();
     }
 }

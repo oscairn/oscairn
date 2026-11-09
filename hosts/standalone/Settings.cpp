@@ -255,7 +255,7 @@ namespace oscairn::standalone
 
     void Settings::resized()
     {
-        const bool wide = getWidth() >= 900; // the repositories in the right-hand column; else they come last
+        const bool wide = getWidth() >= 720; // the repositories in the right-hand column (an 800-wide screen has the room); else they come last
         const int m = mode(), row = m == 2 ? 48 : 36, control = m == 2 ? 44 : 30, headed = int(textSize(TextRole::Title, m)) + 8 + (wide ? 2 : 1) * (int(textSize(TextRole::Small, m)) + 6) + 14;
         auto area = getLocalBounds().reduced(24);
         auto right = wide ? area.removeFromRight((area.getWidth() - 24) / 2) : juce::Rectangle<int>();

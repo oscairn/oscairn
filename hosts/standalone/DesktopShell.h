@@ -106,6 +106,7 @@ namespace oscairn::standalone
         std::unique_ptr<PartList> list_;
         juce::TextButton addPart_{"+ Part"}, addBus_{"+ Bus"};
         PartsView parts_;
+        juce::Viewport partsView_;
         PlayView play_;
         std::vector<std::unique_ptr<juce::DocumentWindow>> windows_; // detached tabs
     };

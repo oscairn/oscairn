@@ -10,8 +10,11 @@
 // - The rich views a plugin describes, on the Panel and the Desktop (RFC 0019).
 // - Installing from a repository by its https:// address, or its folder (RFC 0031).
 //   oscairn_desktop_gaps_test PLUGIN_DIR SCANNER THEMES [SNAPSHOTS]
+#include "../Catalog.h"
 #include "../DesktopShell.h"
 #include "../Launcher.h"
+#include "../PlayView.h"
+#include "../Profile.h"
 #include "../LibraryPane.h"
 #include "../Panel.h"
 #include "../ParameterGrid.h"
@@ -36,6 +39,8 @@
 #include <optional>
 #include <set>
 #include <thread>
+#include <tuple>
+#include <typeinfo>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -1511,6 +1516,190 @@ int main(int argc, char** argv)
                       "dragging the decay point down lowers the sustain level: " + std::to_string(value(sustain)));
                 engine.edit([](Control& c) { c.undo(); });
                 check(wait([&] { return std::abs(value(sustain) - s) < 1e-9; }), "and undo puts it back: " + std::to_string(value(sustain)));
+            }
+        }
+        std::filesystem::remove(path);
+    }
+    // RFC 0019: every built-in device profile's screen, and a Korg Kronos's (800 x 600 at 8"), at
+    // its size and density, over the Panel of its layout: Home, Play, the Parts view, an editor
+    // with rich views (each of its pages), the Library, the Catalog and Settings. The layout fills
+    // the screen (no bars), no control falls outside it, none is smaller across than the minimum
+    // touch target at that density, and no two overlap. Then the Desktop window at two sizes,
+    // every tab. With SNAPSHOTS, each screen size's views go to SNAPSHOTS-screen-<size>-<view>.png.
+    if(const char* views = std::getenv("OSCAIRN_TEST_VIEWS"))
+    {
+        const auto path = socket.string() + "-screens";
+        NodeId node = 0;
+        Served served(path, [&](Session& s) { node = s.add("Views", views); s.connectNotes(graphInput, node); s.connectAudio(node, graphOutput); s.commit(); });
+        {
+            standalone::Engine engine(argv[1], path);
+            const auto configuration = juce::File::createTempFile("oscairn-screens-config");
+            standalone::Theme theme(configuration, juce::File(argv[3]));
+            juce::LookAndFeel::setDefaultLookAndFeel(&theme);
+            theme.apply("oscairn-dark");
+            const auto plugins = standalone::bundledPlugins(argv[1], argv[2]);
+            engine.edit([&](Control& c) {
+                for(const char* name : {"Piano", "Strings", "Bass", "Lead"})
+                {
+                    const auto part = standalone::addPart(c, name, false);
+                    for(const auto& p : plugins) if(p.name == "Basic Synth") standalone::insertPlugin(c, part, 0, p);
+                }
+                c.addMacro("Brightness"); c.addMacro("Swell");
+            });
+            check(wait([&] { return engine.graph().parts.size() == 4 && !engine.parameters(node).empty(); }) && engine.editError().empty(), "parts and the views plugin to show: " + engine.editError());
+            auto settle = [] { for(int i = 0; i < 40; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); };
+
+            // The controls a finger or pointer uses in `top` (the view in front), in root's pixels:
+            // none outside the area its parents show (a scrolling view's content excepted), none
+            // smaller across than `minimum` pixels, no two overlapping where they show.
+            auto audit = [&](juce::Component& root, juce::Component& top, float minimum, const std::string& where) {
+                struct Hit { juce::Component* c; juce::Rectangle<float> shown, whole; };
+                std::vector<Hit> hits; std::vector<std::string> problems;
+                auto describe = [](juce::Component* c) {
+                    juce::String text = c->getName();
+                    if(auto* b = dynamic_cast<juce::Button*>(c); b && text.isEmpty()) text = b->getButtonText();
+                    if(auto* b = dynamic_cast<juce::Button*>(c); b && text.isEmpty()) text = b->getTooltip();
+                    return std::string(typeid(*c).name()) + " \"" + text.toStdString() + "\"";
+                };
+                std::function<void(juce::Component&, juce::Rectangle<float>, bool)> walk = [&](juce::Component& c, juce::Rectangle<float> clip, bool scrolled) {
+                    if((&c != &top && !c.isVisible()) || dynamic_cast<juce::ScrollBar*>(&c)) return; // a root on no desktop is never visible
+                    const auto r = root.getLocalArea(&c, c.getLocalBounds().toFloat());
+                    if(dynamic_cast<juce::Button*>(&c) || dynamic_cast<juce::Slider*>(&c) || dynamic_cast<juce::ComboBox*>(&c) || dynamic_cast<juce::TextEditor*>(&c))
+                    {
+                        if(r.isEmpty()) // a layout that ran out of room gives what is left: nothing
+                            problems.push_back(describe(&c) + " squeezed to " + r.toString().toStdString());
+                        else if(!scrolled && !clip.expanded(1.f).contains(r))
+                            problems.push_back(describe(&c) + " cut off at " + r.toString().toStdString() + " in " + clip.toString().toStdString());
+                        if(const auto shown = r.getIntersection(clip); !shown.isEmpty()) hits.push_back({&c, shown, r});
+                        return; // a control's children are its own parts
+                    }
+                    const auto inner = clip.getIntersection(r);
+                    for(auto* child : c.getChildren()) walk(*child, inner, scrolled || dynamic_cast<juce::Viewport*>(&c));
+                };
+                walk(top, root.getLocalBounds().toFloat(), false);
+                for(const auto& h : hits)
+                    if(minimum > 0 && std::min(h.whole.getWidth(), h.whole.getHeight()) < minimum - .5f)
+                        problems.push_back(describe(h.c) + " is " + h.whole.toString().toStdString() + ", under " + std::to_string(int(minimum)) + " px across");
+                for(size_t i = 0; i < hits.size(); ++i)
+                    for(size_t j = i + 1; j < hits.size(); ++j)
+                        if(const auto both = hits[i].shown.getIntersection(hits[j].shown); both.getWidth() > 1 && both.getHeight() > 1 &&
+                           !hits[i].c->isParentOf(hits[j].c) && !hits[j].c->isParentOf(hits[i].c))
+                            problems.push_back(describe(hits[i].c) + " overlaps " + describe(hits[j].c) + " at " + both.toString().toStdString());
+                std::string list; for(size_t i = 0; i < problems.size() && i < 40; ++i) list += "\n    " + problems[i];
+                check(problems.empty(), where + ": " + std::to_string(problems.size()) + " problems, " + std::to_string(hits.size()) + " controls" + list);
+                check(!hits.empty(), where + ": controls found");
+                return hits.size();
+            };
+            auto save = [&](juce::Component& c, const std::string& name) {
+                if(argc < 5) return;
+                const juce::File out{juce::String(argv[4]) + "-screen-" + name + ".png"};
+                out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(c.createComponentSnapshot(c.getLocalBounds()), stream);
+            };
+
+            std::vector<std::pair<std::string, standalone::Profile::Screen>> screens;
+            for(const auto& [id, json] : standalone::builtInProfiles())
+                if(json.find("\"screens\"") != std::string::npos) // a device's, not a controller's
+                    if(const auto p = standalone::loadProfile(id); p.screen() && p.screen()->surface == "panel") screens.push_back({id, *p.screen()});
+            check(screens.size() == 6, "six built-in profiles have a panel screen");
+            screens.push_back({"kronos", {800, 600, true, "panel", "kick-screen", 203}});
+            std::set<std::string> saved;
+            for(const auto& [id, screen] : screens)
+            {
+                const auto layout = standalone::Layout::parse(juce::File(argv[3]).getSiblingFile("layouts").getChildFile(screen.layout + ".json").loadFileAsString());
+                const auto scale = screen.scale(), density = float(screen.density());
+                // A screen of unknown size is taken as the KICK's density, which the UI is drawn for.
+                const float minimum = float(standalone::Profile::Screen::minimumTouchMm) * (density > 0 ? density : 1024 / 151.f);
+                const auto size = std::to_string(screen.width) + "x" + std::to_string(screen.height) + (scale > 1 ? "-dense" : "");
+                const bool snap = saved.insert(size).second;
+                const auto where = id + " (" + size + ")";
+                standalone::Panel panel(engine, layout);
+                panel.setDesignSize(juce::roundToInt(screen.width / scale), juce::roundToInt(screen.height / scale));
+                panel.setSize(screen.width, screen.height);
+                auto show = [&](juce::Component& view, const std::string& name, juce::Component* top = nullptr) {
+                    panel.overlay(&view); view.resized(); settle();
+                    const auto area = panel.getLocalArea(&view, view.getLocalBounds().toFloat());
+                    check(area.getX() <= .5f && area.getY() <= .5f && area.getRight() >= screen.width - .5f && area.getBottom() >= screen.height - .5f,
+                          where + " " + name + " fills the screen: " + area.toString().toStdString());
+                    audit(panel, top ? *top : view, minimum, where + " " + name);
+                    if(snap) save(panel, size + "-" + name);
+                };
+                standalone::TopBar::Shell shell{[] {}, [] {}, [] {}, [] {}, [](bool) {}, true};
+                {
+                    standalone::Launcher home(engine, {{"Performance", "piano", [] { return juce::String("Untitled: play or edit it"); }, [] {}},
+                                                       {"Library", "library-big", [] { return juce::String("3 Performances, 12 Sounds"); }, [] {}},
+                                                       {"Setlist", "list-music", [] { return juce::String("Songs in order, for the stage"); }, [] {}},
+                                                       {"Groovebox", "layout-grid", [] { return juce::String("Patterns and steps"); }, [] {}}}, shell);
+                    standalone::setDesktopMode(home, 2);
+                    show(home, "home");
+                    panel.overlay(nullptr);
+                }
+                {
+                    standalone::PerformanceApp app(engine, argv[2]);
+                    standalone::AppFrame frame(engine, "Performance", app, shell);
+                    standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(app, 2);
+                    app.attach(frame.bar(), [] {});
+                    show(frame, "play");
+                    app.edit(true);
+                    show(frame, "parts");
+                    // A part's page, taller than a short screen: it scrolls.
+                    app.edit(false); app.play().select(engine.graph().parts.front().id); app.edit(true);
+                    show(frame, "part");
+                    panel.overlay(nullptr);
+                }
+                {
+                    standalone::ParameterGrid grid(engine, node, "Views");
+                    standalone::AppFrame frame(engine, "Performance", grid, shell);
+                    standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(grid, 2);
+                    for(size_t p = 0; p < grid.pages(); ++p)
+                    {
+                        grid.showPage(p);
+                        auto name = "editor-" + grid.pageName(p);
+                        std::replace(name.begin(), name.end(), ' ', '-');
+                        show(frame, name);
+                    }
+                    panel.overlay(nullptr);
+                }
+                {
+                    standalone::Actions actions;
+                    standalone::LibraryPane library(engine, actions, standalone::LibraryPane::Mode::Play);
+                    standalone::AppFrame frame(engine, "Library", library, shell);
+                    standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(library, 2);
+                    show(frame, "library");
+                    // The Catalog over it, as LibraryPane::showCatalog sizes it on a panel (its dialog's
+                    // title bar aside); not read, so no repository is asked.
+                    standalone::Catalog catalog(engine, "plugin", {});
+                    standalone::setDesktopMode(catalog, 2);
+                    const auto logical = frame.getLocalBounds();
+                    catalog.setSize(std::min(984, std::max(600, logical.getWidth() - 40)), std::min(560, std::max(400, logical.getHeight() - 40)));
+                    catalog.setCentrePosition(logical.getCentre());
+                    frame.addAndMakeVisible(catalog);
+                    show(frame, "catalog", &catalog); // a dialog of its own over the Library
+                    frame.removeChildComponent(&catalog);
+                    panel.overlay(nullptr);
+                }
+                {
+                    standalone::Settings settings(engine);
+                    standalone::setDesktopMode(settings, 2);
+                    settings.refresh();
+                    show(settings, "settings");
+                    panel.overlay(nullptr);
+                }
+            }
+            // The Desktop: any window size, laid out by the shell. Its density is the computer's,
+            // unknown here, so no touch minimum is checked.
+            for(const auto& [width, height, mode] : {std::tuple{1440, 900, standalone::InputMode::Mouse}, std::tuple{1024, 640, standalone::InputMode::Mouse}, std::tuple{1024, 640, standalone::InputMode::Touch}})
+            {
+                standalone::DesktopShell desktop(engine, argv[2], mode);
+                desktop.setSize(width, height);
+                const auto size = "desktop-" + std::to_string(width) + "x" + std::to_string(height) + (mode == standalone::InputMode::Touch ? "-touch" : "");
+                for(const char* name : {"Play", "Part", "Mixer", "Routing", "Controls"})
+                {
+                    standalone::DesktopShell::Tab tab{};
+                    standalone::DesktopShell::tabNamed(name, tab);
+                    desktop.showTab(tab); settle();
+                    audit(desktop, desktop, 0.f, size + " " + name);
+                    save(desktop, size + "-" + juce::String(name).toLowerCase().toStdString());
+                }
             }
         }
         std::filesystem::remove(path);

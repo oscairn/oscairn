@@ -164,6 +164,15 @@ namespace oscairn::standalone
         if(shape != shape_) { shape_ = shape; rebuild(); }
         for(const auto& update : updaters_) (*update)();
         repaint();
+        // In a scrolling view (RFC 0019): as tall as the Part page's tiles need, so none is cut off
+        // on a short screen; else the view's height.
+        if(auto* view = dynamic_cast<juce::Viewport*>(getParentComponent() ? getParentComponent()->getParentComponent() : nullptr))
+        {
+            int needed = 0;
+            for(const auto& t : tiles_) needed = std::max(needed, t.getBottom() + 48); // and the message line under them
+            const int height = std::max(view->getHeight(), needed), width = view->getWidth() - (height > view->getHeight() ? view->getScrollBarThickness() : 0);
+            if(width != getWidth() || height != getHeight()) setSize(width, height);
+        }
     }
 
     juce::Rectangle<int> PartsView::rowBounds(size_t row) const
@@ -184,10 +193,12 @@ namespace oscairn::standalone
         title_.setText(controlsShown ? "Controls" : mixerShown ? "Mixer" : routingShown ? "Routing" : performance_.isEmpty() ? juce::String("Parts") : performance_, juce::dontSendNotification);
         auto top = getLocalBounds().reduced(16, 8).removeFromTop(header - 8);
         // On the desktop with a mouse, rows are tighter and text follows the type scale (RFC 0019).
-        const int mode = desktopMode(*this), lineHeight = mode == 1 ? 34 : 40;
+        const int mode = desktopMode(*this), lineHeight = mode == 1 ? 34 : 44; // touch: controls 44 high (RFC 0019)
         name_.setFont(juce::FontOptions(mode ? textSize(TextRole::Title, mode) : 18.0f * themeData().fontScale, juce::Font::bold));
-        done_.setBounds(top.removeFromRight(80).reduced(2));
-        redo_.setBounds(top.removeFromRight(60).reduced(2)); undo_.setBounds(top.removeFromRight(170).reduced(2));
+        auto ends = top; // inside the desktop's window, Done, Undo and Redo are hidden and take no room
+        done_.setBounds(ends.removeFromRight(80).reduced(2));
+        redo_.setBounds(ends.removeFromRight(60).reduced(2)); undo_.setBounds(ends.removeFromRight(170).reduced(2));
+        if(!embedded_) top = ends;
         undo_.setVisible(true); redo_.setVisible(true);
         save_.setVisible(onSave != nullptr && !embedded_);
         if(save_.isVisible()) save_.setBounds(top.removeFromRight(70).reduced(2));
@@ -195,8 +206,11 @@ namespace oscairn::standalone
         if(embedded_) for(auto* c : std::initializer_list<juce::Component*>{&done_, &back_, &undo_, &redo_, &title_, &addPart_, &addBus_, &controlsButton_, &mixerButton_, &routingButton_}) c->setVisible(false);
         message_.setBounds(getLocalBounds().reduced(16).removeFromBottom(24));
 
-        // A slider or toggle that follows the state unless it is being used.
-        auto slider = [this](juce::Rectangle<int> at, double min, double max, std::function<double()> value, std::function<void(double)> set) {
+        // A slider or toggle that follows the state unless it is being used. With touch, either
+        // is at least a touch target across (RFC 0019), centered where it was asked for.
+        const int target = mode == 1 ? 0 : 44;
+        auto slider = [this, target](juce::Rectangle<int> at, double min, double max, std::function<double()> value, std::function<void(double)> set) {
+            at = at.getWidth() >= at.getHeight() ? at.withSizeKeepingCentre(at.getWidth(), std::max(at.getHeight(), target)) : at.withSizeKeepingCentre(std::max(at.getWidth(), target), at.getHeight());
             auto s = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
             s->setRange(min, max); s->setValue(value(), juce::dontSendNotification);
             s->onValueChange = [s = s.get(), set] { set(s->getValue()); };
@@ -207,12 +221,13 @@ namespace oscairn::standalone
             return std::pair{raw, update};
         };
         std::vector<std::shared_ptr<std::function<void()>>> updates;
-        auto toggle = [this, &updates](juce::Rectangle<int> at, const juce::String& label, std::function<bool()> value, std::function<void(bool)> set) {
+        auto toggle = [this, &updates, target](juce::Rectangle<int> at, const juce::String& label, std::function<bool()> value, std::function<void(bool)> set) {
             // Mute and solo are the same marks everywhere; other toggles are checkboxes.
             std::unique_ptr<juce::Button> t;
-            if(label == "Mute" || label == "M") { t = std::make_unique<MarkButton>("M", Ink::Danger, "Mute"); at = at.withSizeKeepingCentre(std::min(at.getHeight(), 24), std::min(at.getHeight(), 24)); }
-            else if(label == "Solo" || label == "S") { t = std::make_unique<MarkButton>("S", Ink::Accent, "Solo"); at = at.withSizeKeepingCentre(std::min(at.getHeight(), 24), std::min(at.getHeight(), 24)); }
-            else t = std::make_unique<juce::ToggleButton>(label);
+            const int mark = target ? target : std::min(at.getHeight(), 24);
+            if(label == "Mute" || label == "M") { t = std::make_unique<MarkButton>("M", Ink::Danger, "Mute"); at = at.withSizeKeepingCentre(mark, mark); }
+            else if(label == "Solo" || label == "S") { t = std::make_unique<MarkButton>("S", Ink::Accent, "Solo"); at = at.withSizeKeepingCentre(mark, mark); }
+            else { t = std::make_unique<juce::ToggleButton>(label); at = at.withSizeKeepingCentre(at.getWidth(), std::max(at.getHeight(), target)); }
             t->setToggleState(value(), juce::dontSendNotification);
             t->onClick = [t = t.get(), set] { set(t->getToggleState()); };
             t->setBounds(at); addAndMakeVisible(*t);
@@ -260,15 +275,15 @@ namespace oscairn::standalone
             const auto sceneWidth = std::min(110, std::max(56, (strip.getWidth() - 150) / std::max(1, int(scenes_.size()))));
             for(const auto& s : scenes_)
             {
-                auto* b = button(strip.removeFromLeft(sceneWidth).reduced(2), text(s.name), [this, id = s.id] { edit([id](Control& c) { c.selectScene(id); }); });
+                auto* b = button(strip.removeFromLeft(sceneWidth).reduced(2, target ? 0 : 2), text(s.name), [this, id = s.id] { edit([id](Control& c) { c.selectScene(id); }); });
                 b->setColour(juce::TextButton::buttonColourId, s.id == scene_ ? ink(Ink::Accent) : ink(Ink::Raised));
                 b->setTooltip("Switch to this scene");
             }
-            button(strip.removeFromLeft(80).reduced(2), "+ Scene", [this] { const auto n = scenes_.size() + 1; edit([n](Control& c) { c.addScene("Scene " + std::to_string(n)); }); })
+            button(strip.removeFromLeft(80).reduced(2, target ? 0 : 2), "+ Scene", [this] { const auto n = scenes_.size() + 1; edit([n](Control& c) { c.addScene("Scene " + std::to_string(n)); }); })
                 ->setTooltip("A new scene with everything as it is now: plugins and wires on or off, mutes, the mix, parameters and controls");
             if(scene_)
             {
-                auto* sceneEdit = button(strip.removeFromLeft(70).reduced(2), juce::String::fromUTF8("Edit\u2026"), {});
+                auto* sceneEdit = button(strip.removeFromLeft(70).reduced(2, target ? 0 : 2), juce::String::fromUTF8("Edit\u2026"), {});
                 sceneEdit->setTooltip("The selected scene: store everything as it is now into it, rename it, or set what switching to it changes and how it moves there");
                 sceneEdit->onClick = [this, sceneEdit] { sceneEditMenu(*sceneEdit); };
             }
@@ -649,7 +664,7 @@ namespace oscairn::standalone
         {
             if(!embedded_) back_.setBounds(top.removeFromLeft(110).reduced(2));
             removePart_.setBounds(top.removeFromRight(130).reduced(2));
-            name_.setBounds(top.reduced(8, 4));
+            name_.setBounds(top.reduced(8, target ? 2 : 4));
             if(!name_.hasKeyboardFocus(true)) name_.setText(text(p->name), juce::dontSendNotification);
             name_.applyFontToAllText(name_.getFont());
             name_.setIndents(10, 0); // the editor centers it vertically; this lines it up with the rows' text
@@ -670,7 +685,7 @@ namespace oscairn::standalone
             {
                 // Joined sections: one band, the boxes edge to edge and each + a column of its own.
                 const bool joined = themeData().style.sections == ThemeStyle::Sections::Joined;
-                auto* plus = plusButton(joined ? chain.removeFromLeft(34) : chain.removeFromLeft(34).withSizeKeepingCentre(28, 28));
+                auto* plus = plusButton(joined ? chain.removeFromLeft(target ? target : 34) : chain.removeFromLeft(target ? target + 4 : 34).withSizeKeepingCentre(target ? target : 28, target ? target : 28));
                 if(joined) plus->setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
                 plus->setTooltip("Insert a plugin or a split here");
                 plus->onClick = [this, i, plus] { insertMenu(size_t(i), *plus); };

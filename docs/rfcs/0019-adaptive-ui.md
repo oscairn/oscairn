@@ -1,6 +1,6 @@
 # RFC 0019: One UI across desktop, touch panel and small screens
 
-Status: in progress, 2026-11-01. Step 1 done; steps 2, 3, 4 and 5 started (see [Progress](#progress)). Builds on the views and plugin editors of
+Status: in progress, 2026-11-09. Step 1 done; steps 2, 3, 4 and 5 started (see [Progress](#progress)); Panel screens of any size and density built ([Screens of any size](#screens-of-any-size)). Builds on the views and plugin editors of
 [RFC 0011](0011-performance-ui-and-editors.md), the control API
 ([RFC 0003](0003-control-api.md)) and the layouts and themes of the
 [design language](../design-language.md).
@@ -24,6 +24,9 @@ Checked when built and tested; the sections below say how.
       previews and filter responses by name ([status](#step-5-status)); waveform, step lane, the
       Modular grid and the gate (the Sampler's zones and envelope, once it declares them) remain
 - [ ] 6. Front panels
+
+Not a numbered step: [screens of any size](#screens-of-any-size), a Panel laid out at each
+device screen's own size and density, built and checked by `desktop-gaps` (2026-11-09).
 
 ## Problem
 
@@ -74,7 +77,7 @@ the desktop feels like a device and the pedal can't show it at all.
 | | Desktop | Panel | Compact (later) |
 | --- | --- | --- | --- |
 | Example | Mac or Linux computer | KICK, Ignite, a MODX-style keyboard | Guitar pedal, rack unit |
-| Screen | Any size, resizable, several windows | Fixed, about 1024 × 600, touch | About 320 × 240 down to 128 × 64; maybe no touch |
+| Screen | Any size, resizable, several windows | Fixed, any size and density (800 × 480 to 1280 × 720 so far), touch | About 320 × 240 down to 128 × 64; maybe no touch |
 | Input | Keyboard and mouse, or touch (input mode) | Touch, the device's knobs and buttons | A few encoders and buttons |
 | At once | Several panes side by side | One main view, with a strip of tabs and quick controls | One list or one parameter |
 | Plugin editor | Description, generated pages, or the plugin's own window | Description or generated pages | The description's top-priority parameters, as a list |
@@ -119,7 +122,7 @@ The desktop's input mode is a per-user, per-device preference, like the theme:
 
 | | Keyboard and mouse | Touch |
 | --- | --- | --- |
-| Control size | The design language's 32–36 pixels, dense | At least 44 pixels, with more spacing |
+| Control size | The design language's 32–36 pixels, dense | At least 44 pixels (on a Panel, 44 design units: at least 6.5 mm, [Screens of any size](#screens-of-any-size)), with more spacing |
 | More actions | Right-click menu, hover help | Long press, an info button |
 | Adjust a value | Drag, scroll wheel, a modifier for fine steps, type a value | Drag with larger travel, a fine-adjust button, the on-screen keyboard to type |
 | Lists | Scroll wheel, keyboard focus and arrow keys | Swipe with momentum |
@@ -139,6 +142,44 @@ show:
 - the physical knobs following the parameters on screen, by priority, with their names and
   values shown next to them;
 - every action reachable by touch, with no right-click or hover.
+
+### Screens of any size
+
+Decided and built 2026-11-09. Panels come in many sizes: the KICK and the Ignite at 1024 × 600
+(about 7"), the FANTOM-07 at 1280 × 720 on 5.5", a Kronos-sized 800 × 600 on 8", the MODX M's
+800 × 480. The Panel is drawn for none of them in particular:
+
+- **A design unit** is a pixel at the KICK's density (about 6.7 pixels per millimeter). The
+  **minimum touch target** is 44 units, and physically **6.5 mm** across, on any screen.
+- **Density from the profile:** a screen declares its diagonal in millimeters
+  ([RFC 0024](0024-device-profiles.md)), which gives its pixels per millimeter. Its scale, pixels
+  per design unit, is what keeps 44 units at least 6.5 mm, and never below 1: the FANTOM-07's
+  10.5 pixels per millimeter give 1.55, the KICK, Ignite, MODX M and an 8" 800 × 600 stay at 1
+  (their targets are 6.6 to 8.9 mm). A screen of unknown size stays at 1. On a device, the scale
+  is JUCE's global scale, so dialogs and menus follow it too.
+- **Reflow, not stretch:** a screen-only layout (`kick-screen`, `modx-m-screen`) is laid out at
+  the screen's size in design units, its pixels over its scale (the FANTOM-07's 1280 × 720 is
+  826 × 465 units), and fills it with no bars. The views over it lay themselves out from the space
+  they get: Home's tiles and the editor's tiles in as many columns as fit, Play's strips scrolling
+  sideways past six, the Library's search on a row of its own when narrow, Settings in two
+  columns from 720 units wide, and the Part page scrolling (on the Desktop too) when its
+  settings are taller than the screen. No layout needs breakpoints of its own
+  yet; a layout says what goes where, and the views decide how it fits.
+- **Touch sizes:** in Touch (every Panel), the controls a finger uses are at least 44 units
+  across: parameter tiles' sliders and lists, Play's faders and mute and solo, the Parts list's
+  mute and level and its scene buttons, the Part page's controls and its chain's add buttons.
+
+`desktop-gaps` renders every built-in device profile's screen at its size and density, and an
+800 × 600 one at 8", over the Panel of its layout: Home, Play, the Parts list, a part's page, each
+page of an editor with rich views (the views test plugin), the Library, the Catalog (sized as it
+opens over the Library, without its dialog's title bar, and with no repository read) and Settings.
+Each fills the screen, and no control falls outside what its parents show (a scrolling view's
+content aside), is under 6.5 mm across at that density, or overlaps another. The Desktop window is
+checked the same way at 1,440 × 900 and 1,024 × 640 (and Touch at 1,024 × 640), without the
+physical minimum, since a computer's density is not known. Given a path it writes
+`SNAPSHOTS-screen-<size>-<view>.png`. Not yet: the Mixer, Routing and Controls pages on a Panel
+(their mutes, sends and faders are not all 44 units yet); a split's lane buttons; the scale on a
+device's own screen, which only the hardware shows.
 
 ### Compact
 

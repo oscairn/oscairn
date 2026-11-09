@@ -108,13 +108,14 @@ namespace oscairn::standalone
         // Puts its actions in the bar: Edit or Play, and Save.
         void attach(TopBar& bar, std::function<void()> save);
         void edit(bool editing);
-        bool editing() const { return parts_.isVisible(); }
+        bool editing() const { return partsView_.isVisible(); }
         void resized() override;
 
     private:
         void actions();
         PlayView play_;
         PartsView parts_;
+        juce::Viewport partsView_;
         TopBar* bar_ = nullptr;
         std::function<void()> save_;
     };

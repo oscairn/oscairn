@@ -71,11 +71,13 @@ tree, and Roland's test tool), and Roland's published specifications and owner's
   one is compiled in), and listen at a low level; or run `oscairn-engine` with
   `--output-device hw:1,0 --device-channels 16 --sample-rate 48000 --audio-outputs 2,3`; the SUB OUT pair, once found,
   goes in as `"sub": [n, n + 1]`.
-- **The screen:** Oscairn has no layout made for 1280 × 720 and no scaling by pixel density, so
-  the profile shows `kick-screen`, the KICK's 1024 × 600 screen layout and the closest there is:
-  a panel layout scales to fit (720 / 600, 1.2 times, about 1229 pixels wide with narrow bars at
-  the sides). At 5.5" that is a dense screen, so everything is physically smaller than on a
-  larger screen of the same layout. Untried.
+- **The screen:** the profile gives its diagonal (140 mm, 5.5"), so the UI scales by its density
+  ([RFC 0019](rfcs/0019-adaptive-ui.md#screens-of-any-size)): 10.5 pixels per millimeter make a
+  scale of 1.55, and `kick-screen` is laid out at the screen's own 826 × 465 design units and
+  fills it, with no bars. A touch target is 68 pixels, 6.5 mm, as on the KICK. `desktop-gaps`
+  renders Home, Play, the Parts views, an editor, the Library, the Catalog and Settings at
+  1280 × 720 and checks every control fits, is that large and overlaps none. Untried on the
+  instrument.
 - **A panel reader** in the engine, built only with `OSCAIRN_PANEL_ROLAND` (below).
 - **No image.** The i.MX8M Mini EVK image (`oscairn_imx8mm_evk_defconfig`,
   [kick.md](kick.md)) is the nearest; the FANTOM's own device tree, display, touch, audio and

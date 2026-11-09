@@ -166,14 +166,15 @@ namespace oscairn::standalone
         {
             auto r = inner();
             r.removeFromTop(nameArea().getHeight() + detailArea().getHeight() + 6);
-            auto marks = r.removeFromBottom(view_.mode() == 2 ? 40 : 30);
+            auto marks = r.removeFromBottom(view_.mode() == 2 ? 44 : 30);
             const int side = marks.getHeight();
             mute_.setBounds(marks.withSizeKeepingCentre(side * 2 + 8, side).removeFromLeft(side));
             solo_.setBounds(marks.withSizeKeepingCentre(side * 2 + 8, side).removeFromRight(side));
             r.removeFromBottom(8);
             // The fader and its meters as a pair, centered.
-            auto pair = r.withSizeKeepingCentre(std::min(r.getWidth(), 28 + 12 + 14), r.getHeight());
-            fader_.setBounds(pair.removeFromLeft(28)); pair.removeFromLeft(12);
+            const int fader = view_.mode() == 2 ? 44 : 28; // touch: a target 44 across (RFC 0019)
+            auto pair = r.withSizeKeepingCentre(std::min(r.getWidth(), fader + 12 + 14), r.getHeight());
+            fader_.setBounds(pair.removeFromLeft(fader)); pair.removeFromLeft(12);
             meter_ = pair.removeFromLeft(14).reduced(0, 8);
         }
         void mouseUp(const juce::MouseEvent& e) override
@@ -499,7 +500,7 @@ namespace oscairn::standalone
         if(side)
         {
             auto column = knobs.removeFromRight(touch ? 150 : 130); knobs.removeFromRight(gap ? gap : 8);
-            const int h = touch ? 40 : 30;
+            const int h = touch ? 44 : 30;
             if(performanceControls_.isVisible()) { performanceControls_.setBounds(column.removeFromTop(knobRow_.getHeight() / 2).withSizeKeepingCentre(column.getWidth(), h)); partControlsButton_.setBounds(column.withSizeKeepingCentre(column.getWidth(), h)); }
             if(pageButton_.isVisible() && !performanceControls_.isVisible()) pageButton_.setBounds(column.withSizeKeepingCentre(column.getWidth(), h));
             else if(pageButton_.isVisible()) { pageButton_.setBounds(knobs.removeFromRight(touch ? 110 : 96).withSizeKeepingCentre(touch ? 110 : 96, h)); knobs.removeFromRight(8); }
@@ -580,7 +581,8 @@ namespace oscairn::standalone
     {
         parts_.onDone = [this] { juce::MessageManager::callAsync([safe = juce::Component::SafePointer<PerformanceApp>(this)] { if(safe) safe->edit(false); }); };
         addAndMakeVisible(play_);
-        addChildComponent(parts_);
+        partsView_.setViewedComponent(&parts_, false); partsView_.setScrollBarsShown(true, false); // a short screen scrolls the Part page
+        addChildComponent(partsView_);
     }
 
     void PerformanceApp::attach(TopBar& bar, std::function<void()> save) { bar_ = &bar; save_ = std::move(save); actions(); }
@@ -588,8 +590,8 @@ namespace oscairn::standalone
     void PerformanceApp::edit(bool editing)
     {
         // Edit opens on the part selected in Play, or the parts list.
-        if(editing && !parts_.isVisible()) parts_.showPart(play_.selectedPart());
-        parts_.setVisible(editing); play_.setVisible(!editing);
+        if(editing && !partsView_.isVisible()) parts_.showPart(play_.selectedPart());
+        partsView_.setVisible(editing); play_.setVisible(!editing);
         actions();
     }
 
@@ -597,12 +599,12 @@ namespace oscairn::standalone
     {
         if(!bar_) return;
         std::vector<TopBar::Action> list;
-        const bool editing = parts_.isVisible();
+        const bool editing = partsView_.isVisible();
         list.push_back({editing ? "Play" : "Edit", [safe = juce::Component::SafePointer<PerformanceApp>(this), editing] { if(safe) safe->edit(!editing); }, !editing});
         if(save_) list.push_back({"Save", save_});
         if(!editing && play_.canLearn()) list.push_back({"Learn", [safe = juce::Component::SafePointer<PerformanceApp>(this)] { if(safe) safe->play_.learn(!safe->play_.learning()); }});
         bar_->setActions(std::move(list));
     }
 
-    void PerformanceApp::resized() { play_.setBounds(getLocalBounds()); parts_.setBounds(getLocalBounds()); }
+    void PerformanceApp::resized() { play_.setBounds(getLocalBounds()); partsView_.setBounds(getLocalBounds()); parts_.setSize(getWidth(), getHeight()); }
 }

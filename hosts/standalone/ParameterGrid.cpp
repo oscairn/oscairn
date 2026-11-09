@@ -1290,7 +1290,7 @@ namespace oscairn::standalone
         if(pages_.empty()) return;
         const int mode = std::max(1, desktopMode(*this)), width = content_->getWidth();
         const int gap = sectionGap(6), columns = std::clamp(width / 210, 2, 6);
-        const int tileWidth = (width - gap * (columns - 1)) / columns, tileHeight = mode == 2 ? 78 : 64;
+        const int tileWidth = (width - gap * (columns - 1)) / columns, tileHeight = mode == 2 ? 84 : 64; // touch: a control 44 high (RFC 0019)
         // What shows, each group under its heading: a search's matches from every page by their
         // whole module path; else the page's (or its tab's) parameters by the rest of the path.
         std::vector<std::pair<std::string, std::vector<size_t>>> groups;
@@ -1517,7 +1517,7 @@ namespace oscairn::standalone
                         s->onValueChange = [this, raw = s.get(), node, id, highId] { engine_.setParam(node, id, raw->getMinValue()); engine_.setParam(node, highId, raw->getMaxValue()); };
                         s->onDragStart = [this, node, id, highId] { engine_.paramGesture(node, id, true); engine_.paramGesture(node, highId, true); };
                         s->onDragEnd = [this, node, id, highId] { engine_.paramGesture(node, id, false); engine_.paramGesture(node, highId, false); };
-                        s->setBounds(inner.withHeight(std::min(inner.getHeight(), 24)));
+                        s->setBounds(inner.withHeight(std::min(inner.getHeight(), mode == 2 ? 44 : 24)));
                         tile.range = s.get(); tile.high = size_t(high - params_.begin());
                         content_->addAndMakeVisible(*s); controls_.push_back(std::move(s));
                     }
@@ -1538,7 +1538,7 @@ namespace oscairn::standalone
                         auto choices = std::make_unique<Choices>(names);
                         choices->setName(text(p.name));
                         choices->onChoose = [this, node, id, p](int v) { engine_.setParam(node, id, p.minimum + v); };
-                        choices->setBounds(inner.withSizeKeepingCentre(inner.getWidth(), std::min(inner.getHeight(), 28)));
+                        choices->setBounds(inner.withSizeKeepingCentre(inner.getWidth(), std::min(inner.getHeight(), mode == 2 ? 44 : 28)));
                         tile.choices = choices.get(); content_->addAndMakeVisible(*choices); controls_.push_back(std::move(choices));
                     }
                     else if(control == Control::Switch)
@@ -1546,7 +1546,7 @@ namespace oscairn::standalone
                         auto b = std::make_unique<juce::TextButton>();
                         b->setClickingTogglesState(true);
                         b->onClick = [this, raw = b.get(), node, id, p] { engine_.setParam(node, id, raw->getToggleState() ? p.maximum : p.minimum); };
-                        b->setBounds(inner.withHeight(std::min(inner.getHeight(), 28)).withWidth(std::min(inner.getWidth(), 110)));
+                        b->setBounds(inner.withHeight(std::min(inner.getHeight(), mode == 2 ? 44 : 28)).withWidth(std::min(inner.getWidth(), 110)));
                         tile.toggle = b.get(); content_->addAndMakeVisible(*b); controls_.push_back(std::move(b));
                     }
                     else if(control == Control::List)
@@ -1555,7 +1555,7 @@ namespace oscairn::standalone
                         named();
                         for(int v = 0; v < count; ++v) list->addItem(names[v], v + 1);
                         list->onChange = [this, raw = list.get(), node, id, p] { if(raw->getSelectedId() > 0) engine_.setParam(node, id, p.minimum + raw->getSelectedId() - 1); };
-                        list->setBounds(inner.withHeight(std::min(inner.getHeight(), 28)));
+                        list->setBounds(inner.withHeight(std::min(inner.getHeight(), mode == 2 ? 44 : 28)));
                         tile.list = list.get(); content_->addAndMakeVisible(*list); controls_.push_back(std::move(list));
                     }
                     else
@@ -1568,7 +1568,7 @@ namespace oscairn::standalone
                         s->onValueChange = [this, raw = s.get(), node, id] { engine_.setParam(node, id, raw->getValue()); };
                         s->onDragStart = [this, node, id] { engine_.paramGesture(node, id, true); };
                         s->onDragEnd = [this, node, id] { engine_.paramGesture(node, id, false); };
-                        s->setBounds(inner.withHeight(std::min(inner.getHeight(), 24)));
+                        s->setBounds(inner.withHeight(std::min(inner.getHeight(), mode == 2 ? 44 : 24)));
                         tile.slider = s.get(); content_->addAndMakeVisible(*s); controls_.push_back(std::move(s));
                     }
                 }

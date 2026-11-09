@@ -122,6 +122,12 @@ An illustrative profile (the values are an example, not a real product's):
   none for a headless unit).
 - **`midi`, `cv`, `network`:** what it can connect to; CV outputs mean the CV service of RFC 0004.
 - **`power`:** battery or mains, for power management (RFC 0028).
+- **`panel`** (optional, added 2026-11-08): a panel that does not speak MIDI, `{protocol, device,
+  map}`: the reader (`roland-i2c-slave`, the FANTOM-0's, compiled into an image only with
+  `OSCAIRN_PANEL_ROLAND`), its character device, and its message map, which turns each message
+  into a control by the identities below ([panel map schema](../panel-map.schema.json),
+  [running on a FANTOM-0](../fantom-0.md)). The engine plays those controls as a controller's.
+  A controller's profile has none.
 - **`reliability`:** its level (RFC 0027): `desktop`, `instrument` or `pass-through`.
 - **`apps`:** the apps installed with it (RFC 0022), by app ID; the user can add others. The
   built-in ones are `oscairn.performance`, `oscairn.library`, `oscairn.setlist` and

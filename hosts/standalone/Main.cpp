@@ -821,6 +821,19 @@ namespace oscairn::standalone
                 const auto profile=loadProfile(argument(args,"--profile").unquoted().toStdString());
                 const auto controllers=controllerProfiles(controllerFiles); // checked before anything opens
                 if(!args.contains("--connect") && !args.contains("--buffer-frames") && profile.audio.block>0)audio.bufferFrames=uint32_t(profile.audio.block);
+                // Its panel, when it has one that is not MIDI: read by a new engine, its map beside the
+                // installed program (share/oscairn/panels) unless the profile gives a path.
+                if(!args.contains("--connect") && !profile.panel.device.empty())
+                {
+#if OSCAIRN_PANEL_ROLAND
+                    const auto exe=juce::File::getSpecialLocation(juce::File::currentExecutableFile);
+                    if(!args.contains("--panel-device"))audio.panelDevice=profile.panel.device;
+                    if(!args.contains("--panel-map"))audio.panelMap=juce::File::isAbsolutePath(profile.panel.map)?profile.panel.map
+                        :exe.getParentDirectory().getSiblingFile("share/oscairn/panels").getChildFile(profile.panel.map).getFullPathName().toStdString();
+#else
+                    std::fprintf(stderr,"oscairn: %s's panel is not read: this build has no reader for it (OSCAIRN_PANEL_ROLAND)\n",profile.name.c_str());
+#endif
+                }
                 audio.validate();
                 const auto socket = argument(args, "--connect");
                 if(audioOptions && args.contains("--connect"))

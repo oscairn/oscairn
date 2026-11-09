@@ -60,6 +60,10 @@ namespace oscairn::standalone
         struct Port { std::string name; int index = 1; std::string protocol = "midi"; bool ignore = false, display = false; };
         struct Midi { int din = 0; bool usbDevice = false, usbHost = false; std::vector<Port> ports; } midi;
         struct Cv { int inputs = 0, outputs = 0; } cv;
+        // A panel that does not speak MIDI, read by the engine (core/control's panel_reader.h): its
+        // protocol (roland-i2c-slave, built with OSCAIRN_PANEL_ROLAND), its character device and
+        // its message map (a file in share/oscairn/panels, or a path). Empty: none.
+        struct Panel { std::string protocol, device, map; } panel;
         struct Network { bool ethernet = false, wifi = false; } network;
         bool battery = false;
         std::string reliability = "desktop"; // desktop, instrument or pass-through (RFC 0027)

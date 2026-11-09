@@ -15,8 +15,9 @@ struct AudioConfiguration
     std::vector<uint32_t> inputs,outputs{0,1}; // logical order -> physical channel (zero based)
     bool explicitOutputs=false;
     uint32_t bufferFrames=0; // the block the device is asked for (a device profile's, RFC 0024); 0: the build's default
+    std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, panel_reader.h); empty: none
     static bool isOption(std::string_view name)
-    {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames";}
+    {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames" || name=="--panel-device" || name=="--panel-map";}
     void setOption(std::string_view name,const std::string& value)
     {
         if(value.empty() || value.find('\0')!=std::string::npos)throw std::invalid_argument("Empty or invalid audio option");
@@ -24,6 +25,8 @@ struct AudioConfiguration
         else if(name=="--audio-outputs"){outputs=parseChannels(value);explicitOutputs=true;}
         else if(name=="--input-device")inputDevice=value;
         else if(name=="--output-device")outputDevice=value;
+        else if(name=="--panel-device")panelDevice=value;
+        else if(name=="--panel-map")panelMap=value;
         else if(name=="--buffer-frames")
         {
             const auto parsed=std::from_chars(value.data(),value.data()+value.size(),bufferFrames);
@@ -41,6 +44,7 @@ struct AudioConfiguration
         if(outputs.empty())throw std::invalid_argument("Audio device needs at least one output");
         if(!explicitOutputs && outputs!=std::vector<uint32_t>{0,1})throw std::invalid_argument("Custom outputs require explicit selection");
         if(inputDevice.find('\0')!=std::string::npos || outputDevice.find('\0')!=std::string::npos)throw std::invalid_argument("Invalid audio device name");
+        if(panelDevice.empty()!=panelMap.empty())throw std::invalid_argument("--panel-device and --panel-map come together");
     }
     std::vector<std::string> arguments() const
     {
@@ -52,6 +56,7 @@ struct AudioConfiguration
         if(!inputs.empty()){args.push_back("--audio-inputs");args.push_back(list(inputs));}
         if(explicitOutputs){args.push_back("--audio-outputs");args.push_back(list(outputs));}
         if(bufferFrames){args.push_back("--buffer-frames");args.push_back(std::to_string(bufferFrames));}
+        if(!panelDevice.empty()){args.push_back("--panel-device");args.push_back(panelDevice);args.push_back("--panel-map");args.push_back(panelMap);}
         return args;
     }
     static std::vector<uint32_t> parseChannels(std::string_view text)

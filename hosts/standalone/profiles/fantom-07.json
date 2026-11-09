@@ -35,6 +35,7 @@
   ],
   "screens": [ { "width": 1280, "height": 720, "touch": true, "surface": "panel", "layout": "kick-screen" } ],
   "midi": { "din": 1, "usbDevice": true, "usbHost": true },
+  "panel": { "protocol": "roland-i2c-slave", "device": "/dev/i2c-slave-2", "map": "fantom-07.json" },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
   "estimated": ["audio", "controls", "midi"]

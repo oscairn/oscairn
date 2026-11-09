@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <set>
+#include <sstream>
 #include <cstdio>
 #include <stdexcept>
 
@@ -58,6 +60,20 @@ namespace oscairn::host
 
         // RFC 0011's instant controls: a control's move that waits for the control thread wakes it.
         session_->setControllerWake( [this] { triggerAsyncUpdate(); } );
+        if( !config.panelDevice.empty() )
+        {
+#if OSCAIRN_PANEL_ROLAND
+            // A device panel's own controls, played as a controller's are, by their identities.
+            std::ifstream file( config.panelMap, std::ios::binary );
+            if( !file ) throw std::runtime_error( "cannot read the panel map " + config.panelMap );
+            std::stringstream text; text << file.rdbuf();
+            panel_ = std::make_unique<PanelReader>( config.panelDevice, PanelMap::parse( text.str() ), [this]( const PanelEvent& e ) {
+                if( !e.control.empty() ) session_->controllerControl( e.control, e.input );
+            } );
+#else
+            throw std::runtime_error( "this build reads no panel (OSCAIRN_PANEL_ROLAND is off)" );
+#endif
+        }
         openMidiInputs();
         openMidiOutputs();
         sender_.startThread();
@@ -70,6 +86,9 @@ namespace oscairn::host
     AudioEngine::~AudioEngine()
     {
         stopTimer();
+#if OSCAIRN_PANEL_ROLAND
+        panel_.reset(); // its thread plays the session's controls
+#endif
         session_->setControllerWake( {} );
         cancelPendingUpdate();
         devices_.removeAudioCallback( this ); // waits for the callback to finish

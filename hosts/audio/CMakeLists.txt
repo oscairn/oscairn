@@ -26,3 +26,9 @@ if(Python3_Interpreter_FOUND)
         $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:kick-clap-fixture-normal> "${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py" $<TARGET_FILE:oscairn_web_rpc_test>)
     set_tests_properties(control-repository-web PROPERTIES TIMEOUT 180)
 endif()
+
+# A FANTOM-0 panel read in the engine (panel_reader.h), for images whose profile has one.
+if(OSCAIRN_PANEL_ROLAND)
+    target_compile_definitions(oscairn_audio_host PUBLIC OSCAIRN_PANEL_ROLAND=1)
+    target_link_libraries(oscairn_audio_host PUBLIC oscairn_panel)
+endif()

@@ -4,6 +4,9 @@
 #include "oscairn/session.h"
 #include "ChannelMap.h"
 #include "MidiBlock.h"
+#if OSCAIRN_PANEL_ROLAND
+#include "oscairn/panel_reader.h"
+#endif
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
@@ -62,6 +65,9 @@ namespace oscairn::host
         static constexpr uint32_t maxFrames  = 512;
 
         std::unique_ptr<Session> session_;
+#if OSCAIRN_PANEL_ROLAND
+        std::unique_ptr<PanelReader> panel_; // the profile's panel, on its own thread, into the session's controls
+#endif
         std::function<void()> serviced_;
         ChannelMap channelMap_;
         std::string initialDevice_;

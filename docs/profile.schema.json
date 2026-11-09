@@ -638,6 +638,33 @@
       },
       "additionalProperties": false
     },
+    "panel": {
+      "type": "object",
+      "description": "A panel that does not speak MIDI, read by the engine: its protocol (roland-i2c-slave: an image built with OSCAIRN_PANEL_ROLAND), its character device and its message map (docs/panel-map.schema.json; a file in share/oscairn/panels, or a path)",
+      "properties": {
+        "protocol": {
+          "enum": [
+            "roland-i2c-slave"
+          ]
+        },
+        "device": {
+          "type": "string",
+          "pattern": "^/dev/",
+          "maxLength": 256
+        },
+        "map": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "protocol",
+        "device",
+        "map"
+      ],
+      "additionalProperties": false
+    },
     "reliability": {
       "enum": [
         "desktop",
@@ -829,6 +856,11 @@
             {
               "required": [
                 "power"
+              ]
+            },
+            {
+              "required": [
+                "panel"
               ]
             },
             {

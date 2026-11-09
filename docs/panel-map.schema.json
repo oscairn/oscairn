@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Oscairn panel map version 1",
+  "description": "How a non-MIDI device panel's 4-byte messages decode (core/control's panel_reader.h, docs/fantom-0.md): where the kind, ID, value and encoder step sit in a message, and the control each kind and ID is. The first byte of every message has bit 7 set; the reader frames on it. Sections listed in estimated are guesses, not read off a unit.",
+  "type": "object",
+  "properties": {
+    "format": { "const": "oscairn.panel-map" },
+    "version": { "const": 1 },
+    "protocol": { "enum": ["roland-i2c-slave"] },
+    "estimated": { "type": "array", "maxItems": 2, "items": { "enum": ["layout", "controls"] } },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "#/$defs/Field" },
+        "kinds": {
+          "type": "object",
+          "description": "The kind field's value for each message kind (Roland's PMDWEncoder, PMDWADChange, PMDWSwitchOn, PMDWSwitchOff); all different",
+          "properties": {
+            "encoder": { "$ref": "#/$defs/Code" },
+            "analog": { "$ref": "#/$defs/Code" },
+            "switchOn": { "$ref": "#/$defs/Code" },
+            "switchOff": { "$ref": "#/$defs/Code" }
+          },
+          "required": ["encoder", "analog", "switchOn", "switchOff"],
+          "additionalProperties": false
+        },
+        "id": { "$ref": "#/$defs/Field" },
+        "value": { "$ref": "#/$defs/Field", "description": "An analog control's position, 0 to its max" },
+        "delta": { "$ref": "#/$defs/Field", "description": "An encoder's steps, usually signed" },
+        "analogMax": { "type": "integer", "minimum": 1, "maximum": 4294967295, "description": "An analog control's top value, unless its entry says; default 1023" },
+        "encoderStep": { "type": "number", "minimum": 0.000001, "maximum": 1, "description": "The change one encoder step makes, 0 to 1 across a target's range; default 1/127" }
+      },
+      "required": ["kind", "kinds", "id", "value", "delta"],
+      "additionalProperties": false
+    },
+    "controls": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "description": "A control: its message kind and ID, and its identity (knob:N, fader:N, wheel:N, screen:N, button:N as overrides name them, RFC 0024) or a fixed control's profile function. Without an id it is not mapped yet and is skipped. No two entries of one kind share an id",
+        "properties": {
+          "kind": { "enum": ["encoder", "analog", "switch"], "description": "switch: both switch kinds, on and off" },
+          "id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "control": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "max": { "type": "integer", "minimum": 1, "maximum": 4294967295, "description": "Analog only: its top value" },
+          "step": { "type": "number", "minimum": -1, "maximum": 1, "not": { "const": 0 }, "description": "Encoder only: its change per step; negative turns it round" }
+        },
+        "required": ["kind", "control"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["format", "version", "protocol", "layout", "controls"],
+  "additionalProperties": false,
+  "$defs": {
+    "Code": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "Field": {
+      "type": "object",
+      "description": "A number from a message: the bytes (0 to 3) joined, most significant first, the low `bits` of each (default 8), shifted right by `shift`, masked by `mask`, and read as two's complement in the mask's width when `signed` (the mask then a run of low bits)",
+      "properties": {
+        "bytes": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "integer", "minimum": 0, "maximum": 3 } },
+        "bits": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "shift": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "mask": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "signed": { "type": "boolean" }
+      },
+      "required": ["bytes"],
+      "additionalProperties": false
+    }
+  }
+}

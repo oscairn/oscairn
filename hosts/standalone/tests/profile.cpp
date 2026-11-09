@@ -53,8 +53,12 @@ int main()
               modx.controls[3].kind == "faders" && modx.controls[3].modes.size() == 3 && modx.screen()->layout == "modx-m-screen", "the MODX M: six screen knobs, four knobs in six rows, eight faders in three modes");
         check(std::none_of(ignite.controls.begin(), ignite.controls.end(), [](const Profile::Control& c) { return c.role == "assign"; }), "the Ignite's knobs are all dedicated");
         const auto fantom = loadProfile("fantom-07");
-        check(fantom.screen()->width == 1280 && fantom.screen()->height == 720 && fantom.screen()->touch && fantom.screen()->layout == "kick-screen",
-              "the FANTOM-07: a 1280 x 720 touch screen showing the KICK's layout");
+        check(fantom.screen()->width == 1280 && fantom.screen()->height == 720 && fantom.screen()->touch && fantom.screen()->layout == "kick-screen" &&
+              fantom.panel.protocol == "roland-i2c-slave" && fantom.panel.device == "/dev/i2c-slave-2" && kick.panel.device.empty(),
+              "the FANTOM-07: a 1280 x 720 touch screen showing the KICK's layout, and its I2C panel; the KICK has no such panel");
+        std::string fantomJson; for(const auto& [id, text] : all) if(id == "fantom-07") fantomJson = text;
+        check(refused(replaced(fantomJson, "\"roland-i2c-slave\"", "\"korg-serial\"")), "a panel of a protocol with no reader");
+        check(refused(replaced(fantomJson, "\"/dev/i2c-slave-2\"", "\"i2c-slave-2\"")), "a panel device outside /dev");
         check(kick.cpuBudget() == .75 && kick.memoryBudget() == 2048ull * 1024 * 1024 * 8 / 10, "an instrument's budget: 75% of the audio thread, 80% of its memory");
         const auto desktop = loadProfile("");
         check(desktop.id == "desktop" && desktop.compute.cores >= 1 && desktop.screen() && desktop.screen()->surface == "desktop" && desktop.screen()->layout == "desktop" &&

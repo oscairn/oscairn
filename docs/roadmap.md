@@ -589,6 +589,12 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
   ports (5 DIN pairs, USB device and USB host), CV/Gate with calibration, sync in and out,
   MIDI Machine Control, and sequencers that drive external instruments as well as internal
   engines.
+- [ ] A Roland FANTOM-07 as a test keyboard (the KICK's SoC, Roland's BMC chips as its audio
+  interface over a TDM link, a panel on I2C): an image for its board, audio through `hw:1,0`,
+  its keys, and its panel mapped from captures. What exists: a profile (`--profile fantom-07`,
+  estimates) and a panel reader built with `OSCAIRN_PANEL_ROLAND`, whose map is provisional
+  until read off a unit with `oscairn-panel-dump`; there is no unit yet
+  ([running on a FANTOM-0](fantom-0.md)).
 - [ ] A DJ deck, once Behringer publishes its details (it has been teased; nothing is public
   yet): several clocks with decks as the master, high-resolution jog input, a track player
   with key lock, track analysis, DJ mixer outputs and cue, waveform streams, and the three

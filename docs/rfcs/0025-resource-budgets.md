@@ -93,6 +93,18 @@ memory. The budget keeps a margin (by reliability level, RFC 0027: more on `pass
 
 ## Status
 
+**Audit of the open steps, 2026-11-09**, each against its line in Progress, on main at 3461f86:
+
+| Step | Built | Missing for the gate |
+| --- | --- | --- |
+| 5. Estimates in packages and Sounds | Measurements per plugin build on the device (step 1); `estimate` for a Performance in a folder from them | Packages carry no estimate (`Package::Build` has none) and `oscairn-plugin-check` measures nothing, so a plugin not measured here counts at the flat 2% and 32 MiB; a Sound's folder cannot be estimated (only `performance.json` is read); installing checks nothing; library items say nothing about fitting |
+| 8. App reservations in manifests | The engine's reservations and launch admission (step 6); the shell asking `launchApp` before Home, the Apps menu and `--app` open an app; the Setlist's manifest declares `memory.reserve` 60 and `max` 400, read by `AppProcesses`, which stops it past its maximum (`desktop-apps`) | The shell asks with `Profile::appMemory`'s placeholders, not the manifest; an app started by an action (`AppProcesses::start`) is not asked at all; a process that exits, is stopped or gives up keeps its reservation; nothing measures an app's peak or raises its reservation |
+| 9. Opportunistic memory and eviction | Instances kept warm (order 2), a next entry prepared to cut (order 4), the committed next entry last (order 5); let go on demand (a launch, a reservation, committed growth) and on Linux PSI (`control-parts`, `control-performance-switch`) | Entries further ahead (order 3): the session prepares one entry only; macOS memory pressure is not read; the sample file cache (order 1) is the kernel's page cache by design |
+| 10. Linux cgroups, locking, OOM order | A cgroup per worker under `OSCAIRN_CGROUP` with `memory.max` from its declarations and no swap, the engine in `engine/`, `mlockall` and `oom_score_adj` (engine -999, workers 300), the PSI trigger; the session raises `RLIMIT_MEMLOCK`; since 3461f86 the engine and workers run in the `oscairn-audio` cpuset partition | The image does not set `OSCAIRN_CGROUP`, and the engine's move into `oscairn-audio` (`OSCAIRN_AUDIO_CGROUP`) and into `$OSCAIRN_CGROUP/engine` would have to be one tree; apps' cgroups and scores (apps are processes now, RFC 0022 step 2); the engine's `memory.min`; +1000 for workers holding only opportunistic plugins; zram |
+| 11. Tested: filled, launched to the floor | The simulated test in one process (`control-parts`, "memory classes" below) | Everything on the QEMU image at 4 GiB and on the target |
+
+What was built after the audit is in the step paragraphs below.
+
 Built 2026-11-01 (`core/control/src/budget.cpp`; `setBudget`, `estimate`; `budget.set`,
 `budget.estimate`). The app sets the engine's budget from its device profile: one audio thread's
 time less the reliability level's margin (desktop 90%, instrument 75%, pass-through 60%) and 80%

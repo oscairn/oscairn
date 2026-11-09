@@ -618,6 +618,27 @@ rule. Not built: `hardware` in `session.hello`, app manifests' hardware, and the
 CI build of the `oscairn` package with each option off (no subsystem has an Oscairn option yet
 but the app). Wi-Fi's firmware list in the check is a few common folders, not every chip's.
 
+The `oscairn` package was audited for hardware-specific code compiled into every image
+(2026-11-08). None was found to put behind an option:
+
+- **The app** (screens) and **the LV2 host** are options already (`BR2_PACKAGE_OSCAIRN_STANDALONE`;
+  `BR2_PACKAGE_OSCAIRN_LV2`, off on every product, and not hardware).
+- **Bluetooth, Wi-Fi, touch, a battery, a camera and the USB gadget** have no Oscairn code yet.
+  The app's touch input mode (`--input-mode touch`) only sizes the UI for fingers; it has no
+  code for touch hardware, which X and JUCE handle.
+- **CV** is a profile field (`cv`, read by `hosts/standalone/Profile.cpp`) with no code behind it.
+- **Mackie Control** (`core/control/src/control_surface.cpp`, the app's `Controllers.cpp`) talks
+  MIDI to an external controller on any MIDI input, USB, DIN or a computer's; it is not hardware
+  of the product, and every product with an image has a MIDI input.
+- **Desktop-only parts:** the desktop shell (`DesktopShell.cpp`) and the compact editor are
+  surfaces of the one app, chosen by the profile's screen at run time. They are UI, with no
+  libraries or drivers of their own; taking them out of device builds needs the app's surfaces
+  separated (RFC 0030's shell), not done here.
+- **Development tools** go into every image: `kick-clap-scan`, `kick-clap-bench`,
+  `kick-clap-benchmark-matrix` (a Python script, and the image has no Python),
+  `oscairn-midi-monitor` and `oscairn-render`. Not hardware; an option for them is left to a
+  decision on what a product image carries for development.
+
 ### The rule
 
 - **Compiled out and left out.** Each optional subsystem is a CMake option in Oscairn

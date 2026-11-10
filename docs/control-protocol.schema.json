@@ -834,6 +834,31 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "hardware.capabilities"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "transport.set"
             },
             "params": {

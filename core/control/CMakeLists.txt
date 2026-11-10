@@ -9,7 +9,7 @@ target_compile_options(oscairn_control PRIVATE -Wall -Wextra)
 # JSON stays off the render path and out of the typed Control interface.
 add_library(oscairn_control_json STATIC src/json_rpc.cpp)
 target_include_directories(oscairn_control_json SYSTEM PRIVATE third_party)
-target_link_libraries(oscairn_control_json PUBLIC oscairn_control)
+target_link_libraries(oscairn_control_json PUBLIC oscairn_control oscairn_hardware)
 target_compile_options(oscairn_control_json PRIVATE -Wall -Wextra)
 
 if(UNIX)

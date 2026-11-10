@@ -39,6 +39,10 @@ try:
     assert 'session.status' in hello['capabilities'] and 'graph.audio-routing' in hello['capabilities']
     assert 'sounds.prepare' in hello['capabilities']
     assert 'state.save' in hello['capabilities'] and 'properties.set' in hello['capabilities']
+    # RFC 0004: the accelerators offered to plugins, read-only; none in this CPU-only engine.
+    assert 'hardware.capabilities' in hello['capabilities']
+    assert rpc('hardware.capabilities')['result'] == {'accelerators': [], 'clocks': [], 'cpuFallback': {'micros': 0, 'reserved': 0}, 'failures': []}
+    error(rpc('hardware.capabilities', {'accelerator': 'dsp0'}), -32602)
     assert rpc('state.info', {'node':'synth'})['result'] == {'supported':True}
     presets = rpc('presets.list', {'node':'synth'})['result']['presets']  # the Basic Synth's factory presets (RFC 0005)
     assert [p['name'] for p in presets] == ['Warm', 'Bright', 'Pressure swell', 'Detuned saws', 'Square vibrato'] and presets[0]['uri'] == 'clap-preset:1:#warm'

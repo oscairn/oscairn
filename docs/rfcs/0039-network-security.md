@@ -421,6 +421,12 @@ Why a process apart:
   with a memory limit. It is the only process that can read the device's TLS key.
 - The engine's control thread never does a handshake.
 
+**Written in Rust** (decided 2026-11-09): the gateway is new code facing untrusted network
+input, where memory safety pays most, and it talks to the engine only over the local socket, so
+no C++ boundary is needed. The same applies to new components that parse untrusted input, such as
+importers for other instruments' file formats. The existing host, its archive parsing and the
+plugins stay in C++; nothing is rewritten. Buildroot builds Rust, so device images can carry it.
+
 The gateway is trusted for one thing: telling the engine which paired client a connection
 belongs to. A compromised gateway could claim any paired client's grants. Two limits bound that:
 the engine keeps the pairing records and the grants (the gateway sends a client's identity, and

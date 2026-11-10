@@ -1,16 +1,107 @@
 # RFC 0004: Hardware services, event timing and engine backends
 
-**Status:** proposed; architecture direction agreed, interfaces and implementation pending
+**Status:** proposed; architecture direction agreed. Step 1 built 2026-11-09
+([status](#step-1-status)); the interfaces it drafts are not frozen
 
 ## Progress
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Capability, clock and event contracts with CPU-only and fake-clock services
+- [x] 1. Capability, clock and event contracts with CPU-only and fake-clock services ([status](#step-1-status))
 - [ ] 2. Desktop I/O through those contracts, with latency measured
 - [ ] 3. One board's timing backend, measured with loopback
 - [ ] 4. Backend discovery, reservations and one reference engine
 - [ ] 5. Accelerator failure and recovery, with measured benefit
+
+## Step 1 status
+
+Built 2026-11-09, in the core library `oscairn_hardware` (`core/hardware`), without JUCE or board
+drivers. Tests: `hardware-timeline`, `hardware-service`, `hardware-plugin`, `desktop-profile`,
+`image-profile-consistency` and `control-json-protocol`.
+
+**Capabilities as data.** A device profile's `hardware` section (RFC 0024,
+[schema](../profile.schema.json)) lists its `accelerators` and its device `clocks`; absent, the
+device is CPU-only, as every built-in profile is. An accelerator record says what it actually
+offers, not a chip label: `kind` (`dsp`, `fpga`, `sound-chip`, `realtime-core`, or `simulated` for
+tests), `abi`, the service ABI its backends are written for (`<family>/<version>`), `device` (the
+chip or board and revision, informative), the installed `firmware` it needs by `id` and `version`,
+its `operations` (each `<family>.<name>/<version>`), resident `banks`, exclusive `regions`,
+`voices`, `parts`, `memory` in bytes, its `clock`, `pipelineFrames` (0: results in the same block)
+and `offline`. A clock record has its nominal `rate` in ticks per second, `driftPpm`,
+`leadMicros` (how far ahead an event must reach it), `queue` and `cancel`. Each record says
+whether its values are `documented` or `measured` (`evidence`); a capacity left out is unknown,
+and a reservation asking for any of an unknown capacity is refused rather than promised. The core
+parser (`oscairn::hardware::fromProfile`) is the only one: the app's profile reader calls it.
+
+**The clock and event contract** (`oscairn/timeline.h`). The timeline is the audio sample counter
+in an epoch. A device clock is mapped onto it by a least-squares line through its last 32 paired
+readings (both clocks read together, at block boundaries), reporting its drift from nominal and its
+uncertainty (the largest residual, in samples); a reading off the line by more than 64 samples is a
+jump, and the fit restarts from it in a new generation. Inputs keep their device timestamp and its
+origin (a capture time, or a receive time, never presented as a capture time) to graph ingress and
+are placed in a block after an explicit delay, or reported late by so many samples. Scheduled
+outputs carry endpoint, deadline, epoch and cancellation generation in a bounded queue (256 events)
+that keeps 16 slots for note and gate releases, refuses events that cannot reach the device by its
+lead time (a late release is sent as soon as it can be, never dropped), cancels from a boundary no
+earlier than now plus the lead time (a note already sounding keeps its release, moved to the
+boundary), and, when the link is lost, drops what is queued and hands over a release for every note
+and gate the device holds; events of the old epoch are then refused. `FakeClock` is the fake-clock
+service: a device clock as a function of the audio sample, with an offset, a drift and a jump.
+Measured by `hardware-timeline` on a 48 MHz fake timer against 48 kHz audio, blocks of 128: a +50
+ppm drift with an offset of 123456789 ticks estimated at 50.0095 ppm, mapped within 0.005 samples
+(uncertainty reported 0.0004); -120 ppm with a negative offset at -120.0141 ppm, within 0.007; a
+240-sample jump found once, and mapped again within 0.007 samples after it. Late input, equal-time
+ordering, lead time, overflow, cancellation, the lost link's releases and the reconnect's new epoch
+and clock generation are checked there too.
+
+**The hardware service** (`oscairn/hardware.h`). `Service` mediates every plugin's access to the
+accelerators: discovery and capability query; reservations counted across every plugin (voices,
+parts, memory, an exclusive region held by one lease, unknown capacity refused, an accelerator
+without its service in the build or without its firmware listed unavailable with the reason);
+submit and collect of jobs, tied to the plugin's timeline and activation (a job from before a
+reactivation is stale); and failures, a whole accelerator failing together (its failure domain),
+each recorded with its time and whether the lease had a CPU fallback. A lease may reserve the CPU
+time of the plugin's CPU path as its prepared fallback, from a fixed allowance until RFC 0025's
+budget provides it (step 4). Reservations happen on the main thread; submit and collect neither
+allocate nor block, using transfer buffers allocated at reservation. Each accelerator's board
+adapter is a `Driver` for its service ABI. The CPU-only service, with none, is the process's until
+another is set. The simulated accelerator (`core/hardware/tests/simulated.cpp`, service ABI
+`oscairn.sim/1`, one operation rendering a sine) is a `Driver` built only for the tests.
+
+**Plugins reach it** through the draft CLAP extension `oscairn.hardware/draft`
+(`core/clap-ext/include/oscairn-clap/hardware.h`, MIT): the plugin lists the accelerators, picks
+one whose service ABI it has a backend for, reserves before it activates, submits a job for the
+block it is processing and collects the result, and on a late job renders that block on its CPU
+path; on a failure it continues on its CPU path when its fallback was reserved, and mutes when not
+while the host reports the interruption. Offline it uses its CPU path. Every Oscairn host offers
+the extension; without accelerators it lists none. Plugins in worker processes (RFC 0010) list none
+for now. The control API reports the service read-only: `hardware.capabilities`
+([control protocol](../control-protocol.md)).
+
+`hardware-plugin` renders a test plugin (`hardware_fixture.cpp`) for 400 blocks of 128 frames:
+with the simulated accelerator declared, every block on the accelerator (400 jobs) and identical
+to its CPU path (largest difference 0; the stated tolerance is 1e-6); a second instance, refused
+the busy region, on its CPU path, identical; the accelerator declared but its service not built,
+the CPU path with the reason in the status; a failure at block 200 with 20 us of CPU fallback
+reserved, the CPU path from that block, identical to the CPU render with no gap, the failure
+reported with its time; the same failure without a fallback, silence from that block and the
+interruption reported; two late jobs rendered on the CPU without a gap or a failure; offline, the
+CPU path, identical, with no jobs; and unloading the plugin releases its lease.
+
+**Compiled out.** The contracts and the CPU-only service are in every build. Each accelerator's
+service will be a `Driver` under a CMake and Buildroot option of its own, on only for a product
+whose profile declares that accelerator; `os/scripts/check-image-profile.py` gets a feature for each
+as it lands. The simulated accelerator is test code only: the check fails an image whose programs
+name its service ABI, or a product profile that declares one.
+
+Not built: device I/O through these contracts (step 2), any board's timing backend or real
+accelerator (steps 3 to 5), the engine handing the profile's records to the service (the app
+validates them; the engine's service is CPU-only until a real service exists), pipelined backends
+(`pipelineFrames` above 0: defined, never exercised), a driver interface split into start and
+finish for asynchronous transfers, recovery after a failure (the accelerator stays failed and the
+plugin on its CPU path or muted until it is activated again), and the package resolver
+([RFC 0006](0006-packages-and-portability.md#backend-variants-and-device-specific-dependencies)
+defines how a plan names the backend and capabilities it needs, in these records' terms).
 
 ## Problem
 
@@ -303,11 +394,26 @@ clock and callback constraints remain authoritative.
 
 ## Open interface details
 
-- Exact versioned C extension/ABI for plugin backend negotiation and service handles;
-  keep format adapters separate and use standard plugin features where sufficient.
+- Exact versioned C extension/ABI for plugin backend negotiation and service handles; keep
+  format adapters separate and use standard plugin features where sufficient. Drafted in step 1 as
+  `oscairn.hardware/draft`: accelerators listed by service ABI, reservations by a request
+  (operation, bank, region, voices, parts, memory, transfer sizes, CPU fallback time), leases as
+  host-issued numbers checked against the plugin that holds them, jobs on the plugin's own timeline
+  (`steady_time`) and activation. It stays a draft until a real backend has used it.
 - Clock estimation method, timestamp representation and endpoint-specific timing budgets.
+  Narrowed in step 1: the timeline is an epoch and a 64-bit audio sample count, device times are
+  64-bit ticks, and the mapping is a least-squares fit over the last 32 block-boundary readings with
+  jumps restarting it. Endpoint budgets are open until step 2 measures desktop I/O.
 - Per-board queue/cancellation protocol, minimum presentation delay and recovery behavior.
-- Accelerator buffer ownership, sandbox transport and firmware/kernel packaging format.
+  Narrowed in step 1 to the host side's rules (bounded queue with a reserve for releases,
+  cancellation from now plus the lead time, releases on a lost link, a new epoch after it); each
+  board's queue depth, lead time and recovery are measured with its backend (step 3).
+- Accelerator buffer ownership, sandbox transport and firmware/kernel packaging format. Buffer
+  ownership answered for step 1: the host owns transfer buffers sized at reservation, copies a
+  job's input in and its result out, and checks every size; one job per lease is outstanding.
+  Plugins in worker processes see no accelerators until the worker protocol carries jobs. Firmware
+  is named by identity in the capability record and in a package plan's requirements; its
+  packaging format is open.
 
 These need prototypes and measurements before an ABI is frozen. None requires moving
 sequencer decisions into board firmware or making the UI responsible for timing.

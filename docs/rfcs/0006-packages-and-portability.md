@@ -807,6 +807,25 @@ Selecting one plan pulls its transitive dependencies; unselected alternatives re
 metadata only. An install must fail honestly if a selected plan's artifacts/services are
 missing, rather than pulling an unrelated implementation that happens to be available.
 
+How a plan names its backend (defined 2026-11-09 with [RFC 0004 step 1](0004-hardware-services.md#step-1-status);
+the resolver is not built): a plan's `backend` is `"cpu"`, or the requirements its backend has of
+one accelerator, in the terms of the device profile's `hardware.accelerators` records
+([RFC 0024](0024-device-profiles.md#what-a-profile-holds)), so selection compares them field by field:
+
+```json
+"backend": { "abi": "vendor.dsp/2", "kind": "dsp", "operations": ["vendor.dsp.organ/1"],
+             "firmware": { "id": "vendor.dsp.fw", "version": "2.1" }, "banks": ["tonewheels"],
+             "region": "slot1", "voices": 32, "parts": 1, "memory": 1048576, "offline": false }
+```
+
+`abi`, and `kind` when given, must equal the record's; each operation and bank must be listed in it;
+`firmware` must equal the installed identity it records; `region` must be one of its regions;
+`voices`, `parts` and `memory` must be at most its stated capacity (a capacity it leaves out does
+not match: unknown is not a fit); `offline` true needs a record with `offline` true. A plan that
+matches is a candidate for that device; whether it fits now is the live reservation, made by the
+same request through `oscairn.hardware` before the plugin activates (RFC 0004). The lock records
+the matched accelerator's `id`, `abi` and firmware identity with the profile revision.
+
 For a hypothetical `vendor.organ` release:
 
 - **CPU device:** common data plus the matching CPU DSP artifact.

@@ -48,7 +48,9 @@ in sync with MIDI clock, and renders an identical file in CI on every run.
 - [x] the core as a library that does not own the audio device or the process;
 - [x] parameter events between plugins ([RFC 0002](rfcs/0002-param-target.md));
 - [x] offline renderer, and CI on Linux and macOS with a ThreadSanitizer run;
-- [ ] the hardware-services interface ([RFC 0004](rfcs/0004-hardware-services.md));
+- [ ] the hardware-services interface ([RFC 0004](rfcs/0004-hardware-services.md)); step 1 built:
+  capability, clock and event contracts, the CPU-only and simulated services, and the draft
+  `oscairn.hardware` extension ([status](rfcs/0004-hardware-services.md#step-1-status));
 - [x] file formats and a library index: Performances, Sounds and the library
   ([RFC 0021](rfcs/0021-sounds-performances-and-library.md)); packages and Projects remain
   (Phase 5);

@@ -166,6 +166,7 @@ development; rebuild against the current headers.
 | Free-running beat (`oscairn.beat`) | For arpeggiators and clocks: a beat position shared by every plugin that runs while the transport is stopped | [beat](https://github.com/oscairn/oscairn-clap/blob/main/docs/beat.md) | Test fixture (`follower_fixture.cpp`) |
 | Harmony (`oscairn.harmony`, `oscairn.harmony/draft`) | For harmonizers, chord memories and scripts: the part's key, scale and held chord | [harmony](https://github.com/oscairn/oscairn-clap/blob/main/docs/harmony.md) | Test fixture (`follower_fixture.cpp`) |
 | Sound assets (`oscairn.assets/draft-3`, `oscairn.asset-dependencies/draft-2`) | For samplers: the host resolves sample files, and Performances list their samples so they can be checked and moved between machines | [assets](https://github.com/oscairn/oscairn-clap/blob/main/docs/assets.md) | Legacy Sampler; asset libraries' preset providers (Oscairn Analog's factory patches) |
+| Hardware backends (`oscairn.hardware/draft`) | A backend of your own for a device's DSP, FPGA region or sound chip, with your CPU path for every other device, offline rendering and failures. Draft: not yet in oscairn-clap | The header, `core/clap-ext/include/oscairn-clap/hardware.h`; [below](#hardware-backends-draft) | Test fixture (`core/hardware/tests/hardware_fixture.cpp`) |
 | CLAP preset discovery | Presets listed in Oscairn's sound lists and prepared as instant-switch sounds | SDK [preset-discovery-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/preset-discovery-plugin.md) | Basic Synth |
 
 The sections below are what the host does around them, which no single extension's page covers.
@@ -475,6 +476,24 @@ algorithms) are not counted at the largest. In a worker process, declarations al
 memory limit ([In a worker process](#in-a-worker-process)). The numbers, the calls and how sound
 and effect contexts are counted:
 [memory](https://github.com/oscairn/oscairn-clap/blob/main/docs/memory.md).
+
+### Hardware backends (draft)
+
+`oscairn.hardware/draft` ([RFC 0004](rfcs/0004-hardware-services.md#step-1-status)) is for a
+plugin that has, beside its CPU path, a backend for an accelerator a device offers. The host lists
+the accelerators as the device's profile records them: the service ABI each speaks, its operations,
+firmware, banks and capacity. In `activate`, pick one whose `abi` you have a backend for and
+`reserve()` what you need (operation, voices, memory, an exclusive region, transfer sizes, and
+`cpu_fallback_us`, your CPU path's time per block); on a refusal, use your CPU path. In `process`,
+`submit()` a job for this block with `steady_time` and `collect()` its result. A late job: render
+that block on your CPU path. A failed accelerator: continue on your CPU path if the lease says
+`cpu_fallback`, else output silence; the host reports it. Offline (`clap.render`), use your CPU
+path. `release()` in `deactivate`. Your state holds nothing of the accelerator, and your backends
+must match your CPU path within a tolerance you state; a different sound is a saved mode of its
+own. Every desktop and every product so far offers the extension with no accelerators, and a plugin
+in a worker process sees none, so the CPU path is the one that plays today; Oscairn tests the
+contract with a simulated accelerator. The header is in Oscairn's copy and not yet in oscairn-clap,
+and changes without notice.
 
 ## The plugin's window
 

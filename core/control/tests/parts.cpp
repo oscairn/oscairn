@@ -1608,6 +1608,27 @@ namespace
             check(cost("d") == r.shared_bytes + r.context_bytes && cost("d2") == r.context_bytes && e.memory == r.shared_bytes + 2 * r.context_bytes,
                   "effect contexts counted from their resources: " + std::to_string(cost("d")) + ", " + std::to_string(cost("d2")));
         }
+        {
+            // An effect context made while memory is tight is held to the room left then only while
+            // it is made: with memory freed since, the restart it asks for into its bigger mode
+            // (.95: 15.2 MiB a context) is admitted, not refused at the 12 MiB once left.
+            const auto tight = root / "memory-tight";
+            fs::create_directories(tight);
+            ::setenv("OSCAIRN_DATA_HOME", tight.c_str(), 1);
+            ::setenv("KICK_FIXTURE_MEMORY_CONTEXTS", "1", 1);
+            Session w(48000, frames);
+            w.setBudget({.9, 30 * MiB});
+            const auto engine = w.add("engine", fixture, "org.kick.test.memory"), filler = w.add("filler", fixture, "org.kick.test.memory"); // 9 MiB each
+            const auto context = w.addEffectContext("context", engine); // 8 MiB of the 12 left
+            w.connectAudio(context, graphOutput);
+            w.remove(filler); w.commit(); // 21 MiB left beside the engine
+            w.setParameter(context, 7, .95);
+            Audio x; for(int i = 0; i < 8; ++i) x.run(w);
+            const auto r = w.effectResources(context);
+            ::unsetenv("KICK_FIXTURE_MEMORY_CONTEXTS");
+            check(r && r->context_bytes == uint64_t(.95 * (16 * MiB)),
+                  "a context's restart is held to the memory left now, not when it was made: " + std::to_string(r ? r->context_bytes : 0) + " bytes a context");
+        }
         ::setenv("OSCAIRN_DATA_HOME", (root / "budget-home").c_str(), 1);
     }
 

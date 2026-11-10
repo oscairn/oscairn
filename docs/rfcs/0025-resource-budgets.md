@@ -312,7 +312,9 @@ the others (adding to the open Performance: beside its plugins; a Performance be
 beside those of it loaded before, as its estimate is checked alone; a context: beside the open
 ones), and a plugin declaring more is refused before it activates: "needs 13 MiB of memory where
 12 MiB is left". An instance counts its shared, context and asset bytes, an effect context its
-context and asset bytes. Admission counts the larger of the declaration and the measurement, or
+context and asset bytes. The room holds for the operation it was given for: a context keeps none
+after it is made, so a restart it asks for later is not refused at the room left then, as an
+instance's is not. Admission counts the larger of the declaration and the measurement, or
 the declaration alone until the plugin has been measured. Measurements are kept per plugin build
 and declared size (`id@version digest#bytes`), so a plugin whose modes differ (Reverb 1 at 2.2 MB, an
 EQ at 1 KB a context) is not counted at the largest seen; a Performance not open, which cannot
@@ -328,8 +330,9 @@ when they would, and a Performance prepared ahead only when both would fit. `des
 per state and rate, that it agrees with `current`, and a load and a state load refused before
 activating; `control-parts` checks the default mode counted at its own measurement beside a big
 mode's, a third plugin refused before activating, a saved state refused at loading when only
-another mode's measurement made it look like it fits, and effect contexts counted from their
-resources; `control-plugin-failures` checks the declaration and the refusal through a worker.
+another mode's measurement made it look like it fits, effect contexts counted from their
+resources, and a context made while memory was tight restarting into a bigger mode once it is
+freed; `control-plugin-failures` checks the declaration and the refusal through a worker.
 `control-parts` also runs the memory classes test below in small (simulated, in one process: the
 fixture's memory effect declares and allocates set sizes): opportunistic memory filled with a
 next entry prepared to cut and let go when an always-available app opens, every app admitted up

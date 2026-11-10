@@ -1008,6 +1008,7 @@ bool Host::loadEffectContext(const Host& source) {
         s.plugin=ext->create(parent.plugin,&s.host);
         if(!s.plugin)throw std::runtime_error("Effect context capacity exhausted");
         s.initialize(parent.sampleRate,parent.maxFrames,{});
+        s.memoryRoom=0; // the source's room was for this first activation; later ones are given their own (RFC 0025)
         return true;
     } catch(const std::exception& e){s.message=e.what();}
       catch(...){s.message="Plugin threw preparing an effect context";}

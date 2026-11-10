@@ -804,8 +804,7 @@ The bundled plugins are working references ([plugins](../plugins/README.md)):
 - **Not implemented:** remote controls, voice info, note names,
   audio-ports configurations, and watching preset folders for changes (they are
   read when listed). (From the host's source; not exercised with a plugin.)
-- **In a worker,** a restarted worker's parameter info shows only after its next rescan, and
-  `oscairn.assets`' `library_root` returns false (a preset provider's indexer gets it).
+- **In a worker,** a restarted worker's parameter info shows only after its next rescan.
 - **Declarations** are not yet distrusted after a plugin holds more than it declared, and
   `oscairn.memory`'s `current` is not used for budgets.
 

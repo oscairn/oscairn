@@ -315,6 +315,18 @@ struct Plugin {
                     if (!assets || !assets->create || !assets->create(s.host, asset.c_str() + 1, &ref, message, sizeof message)) return false;
                     asset = std::string(ref.library) + '\0' + ref.path;
                 }
+                // Or "\x02", a library ID, NUL and a minimum version: asked of oscairn.assets'
+                // library_root, its answer (empty when it returned false) kept after another NUL,
+                // so the saved state shows what the host said.
+                if (asset.size() > 1 && asset[0] == '\x02') {
+                    const auto* assets = static_cast<const oscairn_host_assets_t*>(s.host->get_extension(s.host, OSCAIRN_EXT_ASSETS));
+                    const auto zero = asset.find('\0'), end = asset.find('\0', zero == std::string::npos ? zero : zero + 1);
+                    if (!assets || !assets->library_root || zero == std::string::npos) return false;
+                    const auto library = asset.substr(1, zero - 1), minVersion = asset.substr(zero + 1, end == std::string::npos ? end : end - zero - 1);
+                    char root[2048];
+                    const bool found = assets->library_root(s.host, library.c_str(), minVersion.c_str(), root, sizeof root);
+                    s.gain = value; s.asset = '\x02' + library + '\0' + minVersion + '\0' + (found ? root : ""); return true;
+                }
                 if (!asset.empty()) {
                     const auto zero = asset.find('\0');
                     const auto* assets = static_cast<const oscairn_host_assets_t*>(s.host->get_extension(s.host, OSCAIRN_EXT_ASSETS));

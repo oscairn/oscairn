@@ -229,8 +229,10 @@ Steps 1 and 2 are implemented and tested (`assets`, `sampler`, `desktop-sound-pi
   `oscairn.assets` too, with `resolve` null and `library_root` working: a fork such as Oscairn
   Analog declares its factory patches' library (`org.oscairn.analog-factory`) as a location.
   The host answers draft 1 with the same table. `control-archives` installs an asset library
-  of presets and sees the fixture provider's location from `library_root` indexed; the host-side
-  call (from a plugin instance) is not tested yet.
+  of presets and sees the fixture provider's location from `library_root` indexed. A plugin in
+  a worker asks the engine's store over the worker connection (as `resolve` and `create` do);
+  `worker-host` checks the fixture gets the same answers in a worker as in the engine, for an
+  installed library, a missing one and one older than asked for.
 - Control: `assets.register`, `assets.import`, `assets.libraries`, and `sounds.prepare` with
   `library`/`directory`. The desktop picker copies an imported WAV into the user library and
   registers an imported SFZ's folder.

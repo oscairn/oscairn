@@ -247,8 +247,8 @@ namespace oscairn
                         send(socket, answer);
                         continue;
                     }
-                    if(reply.empty() || (reply[0] != ResolveAsset && reply[0] != CreateAsset)) return expect(std::move(reply));
-                    const bool create = reply[0] == CreateAsset;
+                    if(reply.empty() || (reply[0] != ResolveAsset && reply[0] != CreateAsset && reply[0] != LibraryRoot)) return expect(std::move(reply));
+                    const auto kind = reply[0];
                     Reader r; r.data = std::move(reply); r.at = 1;
                     std::string answer;
                     try
@@ -256,7 +256,12 @@ namespace oscairn
                         // The store locks itself, so a restart may resolve from the supervisor thread.
                         auto* resolver = assets.load();
                         if(!resolver) throw std::runtime_error("No sound asset store");
-                        if(create)
+                        if(kind == LibraryRoot)
+                        {
+                            const auto library = r.str(), minVersion = r.str();
+                            answer = std::string(1, Done) + Writer().str(resolver->libraryRoot(library, minVersion)).data;
+                        }
+                        else if(kind == CreateAsset)
                         {
                             const auto ref = resolver->create(r.str());
                             answer = std::string(1, Done) + Writer().str(ref.library).str(ref.path).str(ref.sha256).data;

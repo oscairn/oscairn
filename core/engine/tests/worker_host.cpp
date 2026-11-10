@@ -5,6 +5,7 @@
 // in the worker reaches the engine.
 //   oscairn-worker-host-test WORKER PLUGIN.clap [PLUGIN.clap...]
 #include <oscairn/plugin_host.h>
+#include <oscairn/assets.h>
 #include <oscairn-clap/ui.h>
 #include <cmath>
 #include <cstring>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 #include <unistd.h>
 
@@ -207,10 +209,46 @@ void renderMode(const std::string& worker, const std::string& fixture)
     std::filesystem::remove(log);
 }
 
+// oscairn.assets draft 2's library_root answers a plugin in a worker as it answers one in the
+// engine, through the engine's store: an installed library's folder, false for a missing one and
+// for one older than the version asked for. The fixture's state asks it and saves the answer.
+void libraryRoot(const std::string& worker, const std::string& fixture)
+{
+    const auto dir = std::filesystem::temp_directory_path() / ("oscairn-library-root-" + std::to_string(getpid()));
+    std::filesystem::remove_all(dir);
+    oscairn::assets::Store store(dir / "data" / "assets");
+    store.installLibrary("org.kick.test.factory", "1.2", "Factory", {});
+    const auto installed = store.libraryRoot("org.kick.test.factory", "1.0");
+    check(!installed.empty(), "the library is installed");
+    auto answer = [&](const std::shared_ptr<oscairn::PluginHost>& host, const std::string& library, const std::string& minVersion) {
+        const auto state = dir / "state";
+        std::filesystem::remove_all(state); std::filesystem::create_directories(state);
+        { std::ofstream(state / "plugin.id") << "org.kick.test.midi"; const double gain = .5; std::ofstream bytes(state / "state.clap", std::ios::binary);
+          bytes.write(reinterpret_cast<const char*>(&gain), sizeof gain); bytes << '\x02' << library << '\0' << minVersion; }
+        host->loadState(state.string());
+        std::filesystem::remove_all(state); host->saveState(state.string());
+        std::ifstream in(state / "state.clap", std::ios::binary); std::stringstream text; text << in.rdbuf();
+        const auto saved = text.str(); const auto at = saved.find('\0', sizeof(double) + 1);
+        return at == std::string::npos ? std::string("(no answer)") : saved.substr(saved.find('\0', at + 1) + 1);
+    };
+    auto local = oscairn::loadPlugin(fixture, "org.kick.test.midi", 48000, 64, oscairn::ProcessingMode::Offline);
+    auto remote = oscairn::loadPluginInWorker(worker, fixture, "org.kick.test.midi", 48000, 64, oscairn::ProcessingMode::Offline);
+    local->setAssets(&store); remote->setAssets(&store);
+    for(const auto& [library, minVersion, expected] : std::vector<std::tuple<std::string, std::string, std::string>>{
+            {"org.kick.test.factory", "1.0", installed}, {"org.kick.test.factory", "", installed},
+            {"org.kick.test.missing", "", ""}, {"org.kick.test.factory", "2.0", ""}})
+    {
+        const auto inEngine = answer(local, library, minVersion), inWorker = answer(remote, library, minVersion);
+        check(inEngine == expected, "library_root in the engine for " + library + " " + minVersion + ": " + inEngine);
+        check(inWorker == inEngine, "library_root in a worker for " + library + " " + minVersion + ": " + inWorker + ", in the engine: " + inEngine);
+    }
+    std::filesystem::remove_all(dir);
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 3) { std::fprintf(stderr, "usage: %s WORKER PLUGIN...\n", argv[0]); return 2; }
-    try { renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc; ++i) compare(argv[1], argv[i]); }
+    try { libraryRoot(argv[1], argv[2]); renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc; ++i) compare(argv[1], argv[i]); }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     return failures ? 1 : 0;
 }

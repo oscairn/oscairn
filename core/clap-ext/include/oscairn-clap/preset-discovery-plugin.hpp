@@ -35,6 +35,7 @@ namespace oscairn::presets
             ok = indexer->declare_location(indexer, &l) && ok;
         }
         // A file, or a folder searched for files ending ".extension" (null or empty: every file).
+        // Oscairn's indexer applies every declared extension to every folder of the provider.
         void files(const char* name, const char* path, const char* extension, uint32_t flags = CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT)
         {
             const clap_preset_discovery_filetype_t t{name, nullptr, extension};

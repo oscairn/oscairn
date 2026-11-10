@@ -20,7 +20,7 @@
  *    change: the sample of the note that changed the chord, before that note. A plugin that
  *    does not ask never gets one.
  *  - The host extension OSCAIRN_EXT_HARMONY, on the main thread: the harmony as of the last
- *    block the plugin processed.
+ *    event the host delivered, so a plugin queries the event space to read it this way too.
  *
  * See docs/rfcs/0033-script-block.md.
  */
@@ -91,8 +91,9 @@ typedef struct oscairn_event_harmony
 
 typedef struct oscairn_host_harmony
 {
-    /* [main-thread] The harmony as of the last block the plugin processed; false before the
-     * first, or for a plugin in no part. */
+    /* [main-thread] The harmony of the last event the host delivered to the plugin; false
+     * before the first (always, for a plugin that did not query the event space or is in no
+     * part). A plugin taken out of its part keeps reading its part's last harmony. */
     bool( CLAP_ABI* get )( const clap_host_t* host, oscairn_harmony_t* harmony );
 } oscairn_host_harmony_t;
 

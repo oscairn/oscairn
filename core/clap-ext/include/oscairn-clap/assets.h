@@ -26,14 +26,15 @@ typedef struct oscairn_asset_ref {
  * is older, or the path does not fit. `owner` is what the table came from: the clap_host_t, or
  * the clap_preset_discovery_indexer_t, whose get_extension answers OSCAIRN_EXT_ASSETS too, so a
  * preset provider can declare the library's folder as a location in its init. From an indexer,
- * resolve is NULL. A host answers draft 1 with the same table (resolve only).
+ * resolve is NULL. A host answers draft 1 with the same table (resolve only). (Oscairn: from a
+ * plugin in a worker process, library_root returns false for now; from an indexer it works.)
  *
  * Draft 3 adds create: store a file the plugin produced (a recording, an edited wavetable, a
- * converted waveform), given as a finished file at `file`, an absolute path the plugin may delete
- * once create returns. It fills ref with the file's library, path and SHA-256 and returns true:
- * a file already in a registered or installed library is referenced where it is, any other is
- * copied into the user library (`user`, `<first 16 hex digits of the SHA-256>/<name>`). The plugin
- * then keeps ref in its state and lists it in oscairn.asset-dependencies. On failure it returns
+ * converted waveform), given as a finished file at `file`, an absolute path. It fills ref with the
+ * file's library, path and SHA-256 and returns true: a file already in a registered or installed
+ * library is referenced where it is, and must stay there; any other is copied, and the plugin may
+ * delete it once create returns. The copy goes into the user library (`user`, `<first 16 hex
+ * digits of the SHA-256>/<name>`). The plugin then keeps ref in its state and lists it in oscairn.asset-dependencies. On failure it returns
  * false with a NUL-terminated reason in message. From an indexer, create is NULL. A host answers
  * drafts 1 and 2 with the same table. */
 static const char OSCAIRN_EXT_ASSETS[] = "oscairn.assets/draft-3";

@@ -12,8 +12,9 @@
  * it up, so the sending plugin never needs to know what it controls. The host turns each
  * event into a CLAP_EVENT_PARAM_VALUE (mode SET) or CLAP_EVENT_PARAM_MOD (mode MODULATE)
  * for the target, at the same sample time, ordered before notes at that time, so a
- * step's parameter lock applies to that step's note. The target is processed after the
- * source in the same block.
+ * step's parameter lock applies to that step's note (an event for one note, note_id >= 0,
+ * comes after the notes at its time, so it can reach a note that starts then). The target is
+ * processed after the source in the same block.
  *
  * Hosts that do not know this event space return false from event-registry's query, and
  * the plugin then sends nothing. Plugins that do not know it never see these events.

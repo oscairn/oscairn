@@ -38,7 +38,7 @@ typedef struct oscairn_event_beat
     clap_event_header_t header; /* space_id from event-registry, type OSCAIRN_EVENT_BEAT, time 0 */
 
     clap_beattime beats; /* the free-running position at header.time, in CLAP_BEATTIME_FACTOR units */
-    double        tempo; /* beats per minute it moves at through this block (the transport's) */
+    double        tempo; /* beats per minute it moves at through this block: the transport's, 120 without one */
 } oscairn_event_beat_t;
 
 #ifdef __cplusplus

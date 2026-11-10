@@ -305,7 +305,7 @@ namespace oscairn::contexts
         void applyMidi(const clap_event_midi_t& e)
         {
             if(e.port_index) return;
-            const auto channel = e.data[0] & 15, kind = e.data[0] & 0xf0;
+            const auto channel = int16_t(e.data[0] & 15); const int kind = e.data[0] & 0xf0;
             if(kind == 0x90 || kind == 0x80)
             {
                 clap_event_note_t n{}; n.note_id = -1; n.channel = channel; n.key = e.data[1]; n.velocity = e.data[2] / 127.0;
@@ -315,7 +315,7 @@ namespace oscairn::contexts
             if(kind == 0xa0 || kind == 0xd0)
             {
                 clap_event_note_expression_t pressure{}; pressure.expression_id = CLAP_NOTE_EXPRESSION_PRESSURE;
-                pressure.note_id = -1; pressure.channel = channel; pressure.key = kind == 0xa0 ? e.data[1] : -1;
+                pressure.note_id = -1; pressure.channel = channel; pressure.key = int16_t(kind == 0xa0 ? e.data[1] : -1);
                 pressure.value = (kind == 0xa0 ? e.data[2] : e.data[1]) / 127.0; applyExpression(pressure); return;
             }
             if(kind == 0xe0)

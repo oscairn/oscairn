@@ -106,6 +106,18 @@ int main()
             check(!refused(fewer) && Profile::parse(fewer).alwaysAvailable.size() == 1, "fitting with only the Performance app always available (600 + 1200 + 150)");
             check(refused(replaced(kickJson, "\"apps\":", "\"alwaysAvailable\": [\"oscairn.recorder\"], \"apps\":")), "an always-available app it does not have");
         }
+        // Its accelerators (RFC 0004), read by the core's parser: what each offers, not a chip label.
+        {
+            const std::string dsp = "\"hardware\": { \"clocks\": [{ \"id\": \"dsp-timer\", \"rate\": 200000000 }], \"accelerators\": [{ \"id\": \"dsp0\", \"kind\": \"dsp\", "
+                                    "\"abi\": \"vendor.dsp/2\", \"firmware\": { \"id\": \"vendor.dsp.fw\", \"version\": \"2.1\" }, \"operations\": [\"vendor.dsp.filter/1\"], "
+                                    "\"voices\": 64, \"memory\": 1048576, \"clock\": \"dsp-timer\" }] }, \"apps\":";
+            const auto p = Profile::parse(replaced(kickJson, "\"apps\":", dsp));
+            check(p.hardware.accelerators.size() == 1 && p.hardware.accelerators[0].abi == "vendor.dsp/2" && p.hardware.accelerators[0].voices == 64u &&
+                  p.hardware.accelerators[0].memory == 1048576u && p.hardware.clocks.size() == 1, "a profile's accelerator and clock are read");
+            check(kick.hardware.accelerators.empty(), "the KICK's profile has none: CPU-only");
+            check(refused(replaced(replaced(kickJson, "\"apps\":", dsp), "\"kind\": \"dsp\"", "\"kind\": \"SHARC\"")), "a chip label as an accelerator's kind");
+            check(refused(replaced(replaced(kickJson, "\"apps\":", dsp), "\"vendor.dsp.filter/1\"", "\"filter\"")), "an unversioned operation");
+        }
         // Package repositories its image ships (RFC 0031), and hiding the official one.
         {
             const std::string key(64, 'a');

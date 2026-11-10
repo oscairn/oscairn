@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include "../audio/AudioConfiguration.h"
+#include <oscairn/hardware.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -86,6 +87,8 @@ namespace oscairn::standalone
         // protocol (roland-i2c-slave, built with OSCAIRN_PANEL_ROLAND), its character device and
         // its message map (a file in share/oscairn/panels, or a path). Empty: none.
         struct Panel { std::string protocol, device, map; } panel;
+        // RFC 0004: its accelerators and device clocks (CPU-only: none).
+        hardware::Capabilities hardware;
         struct Network { bool ethernet = false, wifi = false; } network;
         bool battery = false;
         std::string reliability = "desktop"; // desktop, instrument or pass-through (RFC 0027)

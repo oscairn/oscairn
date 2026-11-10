@@ -104,13 +104,13 @@ namespace oscairn::standalone
         juce::var value;
         require(juce::JSON::parse(juce::String::fromUTF8(json.data(), int(json.size())), value).wasOk(), "not valid JSON");
         const auto& root = object(value, "a profile");
-        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "reliability", "apps", "alwaysAvailable", "repositories", "estimated"}, "the profile");
+        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "estimated"}, "the profile");
         require(text(root, "format") == "oscairn.profile", "format must be oscairn.profile");
         require(root.getProperty("version").isInt() && int(root.getProperty("version")) == 2, "version must be 2");
         Profile p;
         // A controller's profile (it names ports) holds its controls and ports only.
         if(const auto m = root.getProperty("midi"); m.getDynamicObject() && m.getDynamicObject()->hasProperty("ports"))
-            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "reliability", "apps", "alwaysAvailable", "repositories"})
+            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories"})
                 require(!root.hasProperty(key), std::string("a controller's profile has no ") + key);
         const bool controller = root.getProperty("midi").getDynamicObject() && root.getProperty("midi").getDynamicObject()->hasProperty("ports");
         p.id = text(root, "id"); p.name = text(root, "name");
@@ -324,6 +324,12 @@ namespace oscairn::standalone
         {
             const auto& o = object(v, "power"); fields(o, {"battery"}, "power");
             p.battery = flag(o, "battery");
+        }
+        // RFC 0004: its accelerators and device clocks, read by the core's parser.
+        if(const auto v = root.getProperty("hardware"); !v.isVoid())
+        {
+            try { p.hardware = hardware::fromProfile("{\"hardware\":" + juce::JSON::toString(v, true).toStdString() + "}"); }
+            catch(const std::invalid_argument& e) { require(false, e.what()); }
         }
         if(const auto v = root.getProperty("panel"); !v.isVoid())
         {

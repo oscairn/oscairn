@@ -148,6 +148,19 @@ An illustrative profile (the values are an example, not a real product's):
   design unit. The Ignite's screen now shows `kick-screen`, as the KICK's does: its panel's own
   layout, scaled into 1024 x 600, put its screen at a third of its size.
 - **`midi`, `cv`, `network`:** what it can connect to; CV outputs mean the CV service of RFC 0004.
+- **`hardware`** (optional, added 2026-11-09 with [RFC 0004](0004-hardware-services.md#step-1-status)):
+  its accelerators (a DSP, an FPGA region, a dedicated sound chip, a real-time core) and the
+  clocks they keep. Each accelerator is what it actually offers, never only a chip label: `id`,
+  `kind` (`dsp`, `fpga`, `sound-chip`, `realtime-core`; `simulated` only in tests), `abi` (the
+  service ABI its backends are written for, `<family>/<version>`), `device` (chip or board and
+  revision), the installed `firmware` it needs (`id`, `version`), `operations` (each
+  `<family>.<name>/<version>`), resident `banks`, exclusive `regions`, `voices`, `parts`, `memory`
+  (bytes), its `clock`, `pipelineFrames` and `offline`. A clock is `id`, `rate` (ticks per second),
+  `driftPpm`, `leadMicros`, `queue` and `cancel`. Either says whether its values are `documented`
+  or `measured` (`evidence`), and a capacity left out is unknown. Absent: CPU-only, as every
+  built-in profile is. Read by the core's parser, in the app and in tests; an image carries the
+  service code of only the accelerators its profile declares (RFC 0035's check). A controller's
+  profile has none.
 - **`power`:** battery or mains, for power management (RFC 0028).
 - **`panel`** (optional, added 2026-11-08): a panel that does not speak MIDI, `{protocol, device,
   map}`: the reader (`roland-i2c-slave`, the FANTOM-0's, compiled into an image only with

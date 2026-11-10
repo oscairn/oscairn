@@ -144,7 +144,7 @@ add_test(NAME desktop-theme COMMAND oscairn_theme_test "${CMAKE_CURRENT_SOURCE_D
 
 juce_add_console_app(oscairn_profile_test PRODUCT_NAME "Oscairn Profile Test")
 target_sources(oscairn_profile_test PRIVATE tests/profile.cpp Profile.cpp)
-target_link_libraries(oscairn_profile_test PRIVATE oscairn_standalone_profiles juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_link_libraries(oscairn_profile_test PRIVATE oscairn_standalone_profiles oscairn_hardware juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_profile_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
 add_test(NAME desktop-profile COMMAND oscairn_profile_test)
 

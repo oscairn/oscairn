@@ -6,6 +6,7 @@
 #include "../../plugin-host/src/StateFiles.h"
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <thread>
@@ -42,7 +43,9 @@ void lv2(const char* sampler,const char* fixture){
     Fixture imported;imported.session.loadPerformance(moved.string());imported.render();
     imported.session.note(true,60,1);imported.render();check(imported.left[0]==.25f,"Performance carries sampler assets after move and original removal");
     const auto revision=imported.session.graphState().revision;
-    for(const auto& entry:std::filesystem::recursive_directory_iterator(moved))if(entry.path().extension()==".wav")std::filesystem::remove(entry.path());
+    // The Performance references the sample's asset; its bytes are in the store under the test's own OSCAIRN_DATA_HOME.
+    const char* data=std::getenv("OSCAIRN_DATA_HOME");check(data!=nullptr,"OSCAIRN_DATA_HOME set (by CTest)");
+    for(const std::filesystem::path dir:{moved,std::filesystem::path(data)})for(const auto& entry:std::filesystem::recursive_directory_iterator(dir))if(entry.path().extension()==".wav")std::filesystem::remove(entry.path());
     bool missing=false;try{imported.session.loadPerformance(moved.string());}catch(const std::exception&){missing=true;}
     check(missing && imported.session.graphState().revision==revision,"missing Performance asset preserves live graph");
     imported.render();check(imported.left[0]==.25f,"missing asset does not interrupt current sampler");

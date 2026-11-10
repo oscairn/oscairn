@@ -25,7 +25,7 @@ unless it says otherwise.
    the plugin's own window opens on the desktop only ([The plugin's window](#the-plugins-window)).
 5. **Add `oscairn.ui` hints and roles** so the right parameters land on the physical knobs,
    and views for envelopes, key maps and FM operators so they are drawn to drag
-   ([Rich views](#rich-views-what-each-engine-should-declare)).
+   ([Editor hints and roles](#editor-hints-and-roles)).
 6. **Declare memory with `oscairn.memory`** if activating allocates a lot (delay lines, sample
    pools, reverb tables).
 7. **Be real-time safe and say when you are silent:** no allocation, locks or file access in
@@ -48,7 +48,7 @@ A plugin that fails one of these is refused with the message shown.
 | At most 16 note ports in each direction, each one described | "More than 16 note ports are unsupported", "Invalid CLAP note port" |
 | If it has the params extension: `count`, `get_info`, `get_value` and `flush` (`value_to_text` and `text_to_value` are optional); every parameter with info, a unique ID and a finite minimum ≤ maximum; at most 32,768. A default outside the range is brought into it, and one that is not a number becomes the minimum: it only misplaces a reset | "Incomplete CLAP parameter interface", "Invalid CLAP parameter metadata", "Duplicate CLAP parameter ID", "Plugin advertises too many parameters" |
 | If it has the state or audio-ports extension, all its functions | "Incomplete plugin state interface", "Incomplete CLAP audio-ports interface" |
-| If it has `oscairn.memory`, `oscairn.sound-contexts`, `oscairn.sound-snapshots` or `oscairn.asset-dependencies`, all their functions; at most 256 sound contexts | "Incomplete memory interface", "Invalid sound-context interface", "Invalid sound-snapshot interface", "Incomplete asset-dependency interface" |
+| If it has `oscairn.memory`, `oscairn.sound-contexts`, `oscairn.sound-snapshots`, `oscairn.voice-budget` or `oscairn.asset-dependencies`, the functions each requires (each extension's [reference page](https://github.com/oscairn/oscairn-clap) says which); at most 256 sound contexts | "Incomplete memory interface", "Invalid sound-context interface", "Invalid sound-snapshot interface", "Invalid voice-budget interface", "Incomplete asset-dependency interface" |
 | With a memory budget, a declared size (`oscairn.memory`) that fits what is left | "Plugin needs N MiB of memory where M MiB is left" |
 | A declared size a worker could hold: its three parts add up without overflowing, and in a worker to at most four times the policy's memory limit (1 TiB with none) | "Plugin's memory declaration is not credible" |
 | Activates at the host's sample rate and maximum block size | "Plugin activation failed" |
@@ -144,31 +144,31 @@ to 2,048 writable parameters.
 
 ### Oscairn extensions
 
-Headers are in `core/clap-ext/include/oscairn-clap/`, under the MIT license, so plugins of
-any license can include them. Each is optional; a plugin without them works as above. For native
-sound contexts, `sound-contexts-plugin.hpp` (also MIT) implements the extension's slot,
-selection, voice-ownership and snapshot rules; an instrument supplies its patch and voice DSP,
-as the Basic Synth and Legacy Sampler do. Its optional `voiceFinished(voice)` is called whenever a
-voice ends (released out, choked, stolen or reset), so an instrument need not poll its voices.
-A snapshot load that succeeds resets every context's pins and ends every voice: an instrument
-that pins a context itself, as for a ringing tail, forgets those pins in `restored()`, which a
-refused load never calls. `buildPreset(context, error)` runs with a preset's or a snapshot's
-patch in place before the context is published, for an instrument that builds per-sound state. A plugin in its own repository vendors the folder at a
-pinned commit. The drafts change without notice during initial development; rebuild against
-the current headers.
+Oscairn's own extensions are optional: a plugin without them works as above, and gets what the
+[fallback matrix](https://github.com/oscairn/oscairn-clap/blob/main/docs/fallback-matrix.md) lists.
+Their headers and SDK helpers are MIT, so plugins of any license can include them, and live in
+[oscairn-clap](https://github.com/oscairn/oscairn-clap), with a reference page for each: its ID and
+draft, which side implements what, every function's thread and call order, what the host does
+without it, an example, and how to test it. Oscairn keeps a copy at `core/clap-ext` (see the
+[developer guide](developer-guide.md#the-clap-extension-headers)). A plugin in its own repository
+vendors oscairn-clap at a pinned commit. The drafts change without notice during initial
+development; rebuild against the current headers.
 
-| Extension | Why | Example |
-| --- | --- | --- |
-| Editor hints (`ui.h`, `oscairn.ui/draft-5`, [RFC 0019](rfcs/0019-adaptive-ui.md)) | Puts the right parameters first on small screens and on the physical knobs, and draws envelopes, key maps and FM operator views to drag. Details [below](#editor-hints-and-roles). | Basic Synth (cutoff and level, its envelope as an ADSR view), Delay (Wet is its `mix`) |
-| Declared memory (`memory.h`, `oscairn.memory/draft`, [RFC 0025](rfcs/0025-resource-budgets.md#declarations)) | Lets a device near its memory limit refuse the plugin before its large allocation, and sets a tighter worker memory limit. Details [below](#declared-memory). | KICK memory test fixture |
-| Native sound contexts (`sound-contexts.h`, [RFC 0005](rfcs/0005-sound-contexts.md)) | Multitimbral playing: up to 8 prepared sounds in one instance, each MIDI channel choosing one, held notes keeping theirs, without an extra instance per sound. New native Oscairn instruments implement it. | Basic Synth, Legacy Sampler |
-| Snapshots prepared beside (`sound-contexts.h`, `oscairn.sound-snapshots/draft-4`, [RFC 0005](rfcs/0005-sound-contexts.md#preparing-a-snapshot-beside)) | Instant Performance changes: the next Performance's sounds for an instrument already playing are prepared in that instance, beside the playing ones, and selected at the cue, instead of loading its whole snapshot into an instance. Without it a native instrument is taken over whole, its snapshot loaded (for a sampler, its samples again). With its optional `ring_out` and `choke_retiring`, the outgoing sounds ring out through the outgoing Performance's effects and level instead of the incoming one's. Details [below](#instant-performance-changes). | Basic Synth |
-| Voice budget (`voice-budget.h`, `oscairn.voice-budget/draft-1`, [RFC 0018](rfcs/0018-voice-budget-and-stealing.md#step-4-status)) | For instruments that can give up one voice of a note (a layer, an element, a unison copy): the host gives the instance a voice limit from the shared CPU budget, and each sound context its part's reserve and priority, and the instrument chooses which of its voices to give up, instead of the host fading whole notes. Details [below](#voice-budget). | Basic Synth; test fixture (`voice_fixture.cpp`, layered) |
-| Native effect contexts (`effect-contexts.h`, [RFC 0007](rfcs/0007-effect-contexts.md)) | Many independent effect slots sharing one engine's memory, with tails reported. The next Performance's effects become new contexts of an engine already playing while the old ones ring out, so an engine outlives its first context and must refuse `create` past its capacity. Without `oscairn.memory`, the bytes its `resources` call reports are counted toward the memory budget. | Delay |
-| Parameter-target lanes (`param-target.h`, [RFC 0002](rfcs/0002-param-target.md)) | For sequencers and modulators: change other plugins' parameters at an exact sample in the same block (parameter locks), directly or through a control of the Performance. Details [below](#a-plugin-as-a-control-source). | Step Sequencer |
-| Free-running beat (`beat.h`, event space `oscairn.beat`, [RFC 0032](rfcs/0032-arpeggiator.md#step-3-status)) | For arpeggiators and clocks: a beat position the same for every plugin in a block that runs at the tempo while the transport is stopped, so parts keep time and start together. Query the event space through CLAP's event registry; an event arrives at sample 0 of every block. | Test fixture (`follower_fixture.cpp`) |
-| Harmony (`harmony.h`, event space `oscairn.harmony` and host extension `oscairn.harmony/draft`, [RFC 0033](rfcs/0033-script-block.md#host-side-status)) | For harmonizers, chord memories and scripts: the part's key and scale, and the chord held on the part with its root, type, bass and keys. Query the event space for an event in the first block and at each change, at the sample of the note that made it; read the last on the main thread through the host extension. | Test fixture (`follower_fixture.cpp`) |
-| Sound assets (`assets.h`, [RFC 0009](rfcs/0009-sound-assets-and-dependencies.md)) | For samplers: the host resolves sample files, and Performances list their samples so they can be checked and moved between machines. `oscairn.asset-dependencies/draft-2` adds `optional(index)`: an asset the plugin can do without (a fallback it embeds) does not stop a Performance loading when missing; the plugin's resolve of it fails and the host shows a notice. The host still accepts draft 1, every asset required. `oscairn.assets/draft-2` adds `library_root(owner, library_id, min_version, path, capacity)`: the read-only folder of an installed [asset library](library-archive.md#asset-packages) (`AssetLibraries/<id>/<version>/` in the data folder) when a version at least `min_version` is installed, else false. A preset-discovery provider gets it too: Oscairn's indexer answers `get_extension(OSCAIRN_EXT_ASSETS)` with a table whose `resolve` is null, so `provider->init`, which has an indexer and no `clap_host`, can declare the library's folder as a location (`owner` is the indexer, or the `clap_host_t` at runtime). The host still answers draft 1. `oscairn.assets/draft-3` adds `create(host, file, ref, message, capacity)`: a file the plugin made (a recording, an edited wavetable) given as a finished file it may delete afterwards, kept as an asset: referenced where it is when a registered or installed library holds it, else copied into the user library; `ref` is what its state stores from then on. The host answers drafts 1 and 2 with the same table; an indexer's `create` is null. LV2 plugins need none of this: the files their state maps through `state:mapPath` become asset references the same way. Factory content packed with `oscairn-sign asset-package` under the publisher's own license (`LicenseRef-...`) must carry its text (`--license-file`) and stays out of users' exports unless packed with `--redistribute yes` ([redistribution](library-archive.md#asset-packages)). | Legacy Sampler; asset libraries' preset providers (Oscairn Analog's factory patches) |
+| Extension | Why | Reference | Bundled example |
+| --- | --- | --- | --- |
+| Editor hints (`oscairn.ui/draft-5`) | Puts the right parameters first on small screens and on the physical knobs, and draws envelopes, key maps and FM operator views to drag | [ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md) | Basic Synth (cutoff and level, its envelope as an ADSR view), Delay (Wet is its `mix`) |
+| Declared memory (`oscairn.memory/draft`) | A device near its memory limit refuses the plugin before its large allocation, and a worker gets a memory limit that fits it | [memory](https://github.com/oscairn/oscairn-clap/blob/main/docs/memory.md) | KICK memory test fixture |
+| Native sound contexts (`oscairn.sound-contexts/draft-5`) | Multitimbral playing and instant switching: prepared sounds in one instance (up to the plugin's capacity, at most 256; the SDK's default is 8), each MIDI channel choosing one, held notes keeping theirs, presets prepared while playing | [sound-contexts](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-contexts.md), SDK [sound-contexts-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-contexts-plugin.md) | Basic Synth, Legacy Sampler |
+| Snapshots prepared beside (`oscairn.sound-snapshots/draft-4`) | Instant Performance changes without loading a snapshot into an instance; tails ringing out through the outgoing Performance's effects; parts sharing one instance | [sound-snapshots](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-snapshots.md) | Basic Synth |
+| Voice budget (`oscairn.voice-budget/draft-1`) | The instrument gives up its own least audible voices (a layer, an element) within a limit from the shared CPU budget, instead of the host fading whole notes | [voice-budget](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget.md), SDK [voice-budget-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget-plugin.md) | Basic Synth; test fixture (`voice_fixture.cpp`, layered) |
+| Native effect contexts (`oscairn.effect-contexts/draft`) | Many effect slots sharing one engine's memory, with tails reported; the next Performance's effects as new contexts while the old ones ring out | [effect-contexts](https://github.com/oscairn/oscairn-clap/blob/main/docs/effect-contexts.md) | Delay |
+| Parameter-target lanes (`oscairn.param-target`, `oscairn.param-target-lanes/draft`) | For sequencers and modulators: change other plugins' parameters at an exact sample in the same block, directly or through a control | [param-target](https://github.com/oscairn/oscairn-clap/blob/main/docs/param-target.md) | Step Sequencer, LFO |
+| Free-running beat (`oscairn.beat`) | For arpeggiators and clocks: a beat position shared by every plugin that runs while the transport is stopped | [beat](https://github.com/oscairn/oscairn-clap/blob/main/docs/beat.md) | Test fixture (`follower_fixture.cpp`) |
+| Harmony (`oscairn.harmony`, `oscairn.harmony/draft`) | For harmonizers, chord memories and scripts: the part's key, scale and held chord | [harmony](https://github.com/oscairn/oscairn-clap/blob/main/docs/harmony.md) | Test fixture (`follower_fixture.cpp`) |
+| Sound assets (`oscairn.assets/draft-3`, `oscairn.asset-dependencies/draft-2`) | For samplers: the host resolves sample files, and Performances list their samples so they can be checked and moved between machines | [assets](https://github.com/oscairn/oscairn-clap/blob/main/docs/assets.md) | Legacy Sampler; asset libraries' preset providers (Oscairn Analog's factory patches) |
+| CLAP preset discovery | Presets listed in Oscairn's sound lists and prepared as instant-switch sounds | SDK [preset-discovery-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/preset-discovery-plugin.md) | Basic Synth |
+
+The sections below are what the host does around them, which no single extension's page covers.
 
 ### A plugin as a control source
 
@@ -176,143 +176,34 @@ A plugin that sends on parameter-target lanes can drive anything a knob can: the
 lane straight to one parameter, or makes it a control's source, and the control then moves
 every target it has, each with its own range and curve, absolute or relative, summing with the
 other controls on the same parameter ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree)).
-The plugin never knows which. What it does:
-
-- Ask CLAP's `clap.event-registry` for the space `oscairn.param-target` in `init`; with none,
-  send nothing.
-- List its lanes through `oscairn.param-target-lanes/draft`: a count, and a number and name for
-  each (at most 64), so the host can offer them: Routing's **Connect lane to...** lists them, and
-  draws each connection as a control line.
-- Send `oscairn_event_param_target_t` events from `process` at the sample they apply, lane and
-  mode set, `note_id`, `port_index` and `key` -1 (a channel, or -1, for channel-wide changes).
-- Choose the mode by what the lane means. **SET** (value 0..1) is a position: a sequencer's lock,
-  a step's value; through a control it becomes the control's value. **MODULATE** (amount -1..1)
-  is movement around a position: an LFO, an envelope follower; through a control it is added to
-  the control's own value, so a bipolar lane swings around the knob and a unipolar one (0..1)
-  moves up from it. Mapped straight to a parameter, SET sets it and MODULATE modulates it.
-- What reaches each parameter under a control is the target's choice, not the lane's: an
-  absolute target sets the parameter (`CLAP_EVENT_PARAM_VALUE`); a relative one modulates it
-  (`CLAP_EVENT_PARAM_MOD`), so its value, the saved Performance and undo stay as they are and it
-  can still be turned by hand. Handle `CLAP_EVENT_PARAM_MOD` on modulatable parameters for a
-  modulator to reach them without moving them.
-- Send at every point that matters (each step, or every few samples for a smooth shape): the
-  host converts each event at the same sample, in the same block, for every parameter the lane
-  reaches, and orders a lane's targets after the plugin. A plugin sends at most 512 events other
-  than parameter changes a block (`kick::clap::Host::maxBlockEvents`); past that they are
-  dropped and counted. A target takes at most 512 converted events a block from all the lanes
-  reaching it; past that the graph thins them, the newest replacing the last one waiting for the
-  same parameter, and counts each point lost in its dropped events, without resetting the target.
-- A point reaches the target at its sample, but what happens between points is the target's:
-  one that applies parameter events once per block steps once per block however many points
-  arrive; read them at their sample for smooth modulation. Parameter events are not an audio
-  signal: audio-rate modulation such as FM needs an audio-rate path, which Oscairn does not have
-  yet (see the roadmap).
-
-A plugin whose only outputs are its lanes, with no audio or note port, loads and runs as any
-node; the Oscairn LFO is one.
-
+The plugin never knows which. Routing's **Connect lane to...** lists the lanes and draws each
+connection as a control line. A plugin whose only outputs are its lanes, with no audio or note
+port, loads and runs as any node; the Oscairn LFO is one. What the plugin sends, the modes, the
+timing and the 512-event limits are on the
+[param-target](https://github.com/oscairn/oscairn-clap/blob/main/docs/param-target.md) page.
 
 ### Voice budget
 
-With a CPU budget set, the host shares it among every plugin by measured cost (RFC 0018): for a
-plugin without this extension it fades out and chokes whole notes, released and quiet ones
-first. A plugin with `oscairn.voice-budget/draft-1` (`voice-budget.h`) gives up its own voices
-instead, within a limit the host sets between blocks. What it implements, in
-`oscairn_plugin_voice_budget_t` (every entry required):
-
-- `honors_volume` (main thread): true when every voice follows `CLAP_NOTE_EXPRESSION_VOLUME`.
-  Under pressure the host fades a held note of a plugin that says so before one that does not.
-- `set_limits(limit, contexts, count)` (audio thread, never during `process`): keep at most
-  `limit` voices from the next block (0: the whole pool), and per sound context its own `limit`,
-  `reserve` (voices never taken for another context's), `priority` (0 to 10, lower gives way
-  first) and `flags` (`OSCAIRN_VOICE_BUDGET_MONO`, `_LEGATO`). An entry for
-  `OSCAIRN_VOICE_BUDGET_SELECTED` covers every context a MIDI channel selects; a context named by
-  none has no limit or reserve and priority 0. Copy what you need; at the next block's start,
-  fade out voices past a lowered limit; a new note past it takes a voice the same way. Fade what
-  you give up (2 to 5 ms); cut only when the pool has no free slot, a voice already fading first.
-- `active_voices(&cost)` (audio thread, after `process`): the voices sounding, fading ones
-  included, and your estimate of one voice's cost in microseconds a block (0: none). The host
-  measures your block's time either way and shares it per voice.
-- `notes(out, capacity)` (audio thread, after `process`): each note still sounding, by the
-  address the host gave it (note ID, port, channel, key), with its voices and its loudness now:
-  the largest of its voices' gains, linear, 1 at full level (envelope, velocity and volume
-  expression; not the patch's output level). The host compares notes across plugins by it.
-- Send `NOTE_END` when a note's last voice ends, not each voice's.
-
-The order to give voices up in: never a held voice of a context marked mono or legato, nor one
-of a context at or under its reserve unless the new voice is that context's; released voices
-before held ones; the new voice's own context first; lower priority first; the quietest, then
-the oldest. `voice-budget-plugin.hpp` (MIT) implements it: keep a `voices::Limits`, describe
-each voice as a `voices::Candidate` (context, selected, held, fading, mono, loudness, age) and
-call `voices::victim`, which returns the voice to give up or -1; `voices::Report` collects
-`notes`. An engine playing several regions or elements a note (a sfizz-style sampler) gives
-each its own `Candidate` and loudness, so a quiet element goes before another note's only one.
-An instrument built on `sound-contexts-plugin.hpp` gets all of it from its `Engine`: return
-`oscairn_plugin_voice_budget_t{Engine::honorsVolume, Engine::setLimits, Engine::activeVoices,
-Engine::voiceNotes}` from `get_extension`, and optionally provide `loudness(voice)` (default:
-velocity, volume expression and choke fade), `mono(context)` (a sound that plays one note at a
-time), `voiceCost()`, and `static constexpr bool volumeExpressions = true` when `render`
-multiplies by `amplitude()`. The Engine also uses this order when its pool is full, with or
-without the extension.
-
-Parts sharing one instance ([below](#parts-sharing-one-instance)) get an entry each, for the
-sound their channel selects, with the part's reserve and priority, so one pool across parts
-keeps each part's reserve. An instance one part plays alone gets one entry, for the selected
-contexts, which also covers a Performance change (the outgoing sounds ringing out beside the
-incoming ones). No entry carries a limit of its own (the host keeps a part's note limit itself)
-or mode flags (parts have no mono or legato mode yet). The host supports the extension
-for plugins in the engine's process and in a worker process (RFC 0010) alike: in a worker,
-`honors_volume` is asked once at load, and the limits and the report ride each block's shared
-memory, with the same threads and timing. The engine keeps at most 512 notes of a report and
-65,536 voices.
+With a CPU budget set, the host shares it among every plugin by measured cost (RFC 0018). For a
+plugin without `oscairn.voice-budget` it fades out and chokes whole notes, released and quiet ones
+first ([Behaving well](#behaving-well)). A plugin with it gives up its own voices within a limit
+the host sets between blocks; an instance one part plays alone gets one entry, for the selected
+contexts (a plugin without sound contexts reads that entry), and parts sharing an instance get one
+each with the part's reserve and priority. The host supports it in the engine's process and in a
+worker alike. The calls and the order to give voices up in:
+[voice-budget](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget.md).
 
 ### Instant Performance changes
 
-An instrument with native sound contexts switches Performances without a new instance or a state
-load when it also offers `oscairn.sound-snapshots/draft-4` ([RFC 0021](rfcs/0021-sounds-performances-and-library.md#native-sound-contexts-across-a-change)).
-On `sound-contexts-plugin.hpp` that is one table and one `get_extension` line:
-
-```cpp
-const oscairn_plugin_sound_snapshots_t soundSnapshots{Engine::prepareSnapshot, Engine::setRingOut, Engine::chokeRetiring, Engine::saveSound, Engine::soundValues};
-// in get_extension:
-if(std::strcmp(id, OSCAIRN_EXT_SOUND_SNAPSHOTS) == 0) return &soundSnapshots;
-```
-
-What the plugin must then do:
-
-- `readPatch` runs on the main thread while the plugin renders, into a patch not yet published;
-  it must not touch anything a voice uses.
-- `buildPreset(context, error)`, if it has one, builds each prepared sound the same way; to be
-  fast it reuses what other contexts hold (a sample already loaded) instead of loading it again.
-- Enough contexts: the incoming sounds are prepared beside the playing ones (the snapshot's
-  Default counts), and each outgoing sound is discarded only once it is idle. With too few free
-  contexts the change falls back to loading the snapshot into an instance.
-- Report idleness honestly: a sound with a voice or a tail must refuse `discard`, so it rings out.
-- Ring out into the hidden buffer (`ring_out` with `choke_retiring`, optional together; [RFC 0005](rfcs/0005-sound-contexts.md#ringing-out-through-the-outgoing-chain)):
-  while `Engine::ringOut` is set, `render` adds the main output of every context for which
-  `Engine::retiring(slot)` returns two channels into those channels instead of the main output
-  port; `Engine` clears it when each `process()` returns. Other ports are unchanged. A plugin built
-  against draft 1 or 2 must be rebuilt against draft 3 (neither is read any more): add
-  `Engine::chokeRetiring` to the table, and take the channels from `retiring(slot)`, which
-  returns a pointer (null when not retiring) instead of a bool, rather than always writing
-  `ringOut[0]` and `ringOut[1]`. Leaving both calls null keeps today's behavior, its tails
-  playing through the incoming chain.
-  With `ring_out`, three limits, which a plugin needs no code for beyond the SDK's but its users hear:
-  - **One tail carries over.** A second Performance change while a first change's tail still
-    rings cuts that tail: the host calls `choke_retiring` just before selecting the incoming
-    sounds, and the SDK chokes every voice of a sound retiring then, with the 3 ms choke fade,
-    rendering the fade into `ringOut[2]` and `ringOut[3]`, which the host still routes through
-    the first change's chain. The second change's outgoing sounds take `ringOut[0]` and
-    `ringOut[1]` and ring out through theirs. So no tail jumps to another chain, and no click,
-    but a long tail (a held pad, an instrument's own delay) ends at the second cue. A plugin
-    with tails outside its voices, which the SDK cannot choke, fades them itself in that
-    context while `retiring(slot)` returns `ringOut + 2`.
-  - **Main output only.** Only a retiring sound's main output port rings out through the
-    outgoing chain. Its other output ports (the Basic Synth's sound buses, for example) keep
-    playing through the instance's ports, which follow the incoming Performance's chain.
-  - **30 seconds.** An outgoing effect fed only by the ring-out buffer goes once 30 seconds pass
-    with no note through it. A note held through the change for longer loses the outgoing
-    effects, and its tail moves back to the main output, through the incoming chain.
+An instrument with native sound contexts and `oscairn.sound-snapshots` switches Performances
+without a new instance or a state load: the next Performance's sounds are prepared beside the
+playing ones and selected at the cue ([RFC 0021](rfcs/0021-sounds-performances-and-library.md#native-sound-contexts-across-a-change)).
+With too few free contexts the change falls back to loading the snapshot into an instance. With
+`ring_out`, the outgoing sounds ring out through the outgoing Performance's effects, within three
+limits its users hear: one tail carries over (a second change cuts the first change's tail with a
+3 ms fade), only the main output rings out, and an outgoing effect goes 30 seconds after the last
+note through it. What the plugin must do:
+[sound-snapshots](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-snapshots.md).
 
 A plugin carried over whole into a Performance change (one the next Performance does not take
 over) rings out until it is idle, but no longer than 30 seconds after the change with no note
@@ -327,55 +218,30 @@ sound, MIDI channel and output bus ([RFC 0021](rfcs/0021-sounds-performances-and
 adding the plugin where an instance of it has room, opening a Performance, or changing to one
 (whose sounds are then prepared beside the playing ones, as above, and selected at the cue on
 channels of their own) all put a part's sound into an instance that has room; a part alone keeps
-an instance of its own.
-The host sends a part's notes and its parameter edits on its channel, and takes its sound from
-its output port. A plugin offers this with native sound contexts and their snapshot (above), more
-than one output port, no audio input and no note output, draft 4's `save_sound` and
-`sound_values` (a part's sound saved as a snapshot of its own, for a Sound, and the values its
-part shows; on the SDK, the instrument's `alone(Patch&)`, which puts a patch on the main output,
-and `patchValues`, which lists a patch's values; [RFC 0005](rfcs/0005-sound-contexts.md#one-sound-on-its-own)),
-and one stepped parameter, from 0,
-whose value is the output port a sound plays on by the port's index (0 the main port), tagged
-with oscairn.ui's `OSCAIRN_ROLE_OUTPUT_BUS` ([below](#editor-hints-and-roles)). The host sets it
-per sound, with a parameter event on the part's channel, so it must follow per-channel parameter
-events like any other (`sound-contexts-plugin.hpp`'s Engine does: a parameter event with a
-channel edits the sound that channel selects). Voices keep the port they started on. An instance
-holds as many parts as it has sounds, ports and channels; the host takes another instance past
-that. The Basic Synth (eight sounds, its Default one of them; eight sound buses beside its main
-output) does all of it; the Legacy Sampler has one output, so each Legacy Sampler part keeps its own instance,
-as every plugin without native contexts does. Per-part voice budgets follow ([above](#voice-budget)).
-What its users hear differently: the parts sharing an instance share its voice pool (the Basic
-Synth's 128, which the shared voice budget rather than the pool limits in practice); a plugin
-meant to share should have a pool sized for several parts.
+an instance of its own. The host sends a part's notes and its parameter edits on its channel, and
+takes its sound from its output port. A plugin offers this with native sound contexts and their
+snapshot with `save_sound` and `sound_values`, more than one output port, a stepped output-bus
+parameter tagged `OSCAIRN_ROLE_OUTPUT_BUS`, no audio input and no note output; the full list,
+with what the host checks at run time, is in the
+[fallback matrix](https://github.com/oscairn/oscairn-clap/blob/main/docs/fallback-matrix.md#parts-sharing-one-instance).
+An instance holds as many parts as it has sounds, ports and channels; the host takes another
+instance past that. The Basic Synth (eight sounds, its Default one of them; eight sound buses
+beside its main output) does all of it; the Legacy Sampler has one output, so each Legacy Sampler
+part keeps its own instance, as every plugin without native contexts does. What its users hear
+differently: the parts sharing an instance share its voice pool (the Basic Synth's 128, which the
+shared voice budget rather than the pool limits in practice); a plugin meant to share should have
+a pool sized for several parts.
 
 ### Presets
 
-Publish presets through CLAP preset discovery, and Oscairn lists them where sounds are picked
-and prepares any of them as an instant-switch sound ([RFC 0005](rfcs/0005-sound-contexts.md#presets)).
-A plugin provides:
-
-1. **The factory:** `clap_entry.get_factory(CLAP_PRESET_DISCOVERY_FACTORY_ID)` (the `draft-2`
-   compatibility ID also works) returning a factory with one provider or more.
-2. **A provider** that declares its locations in `init` (inside the plugin, or a file or
-   folder with the file types it reads) and reports each preset in `get_metadata` with
-   `begin_preset(name, load_key)` and `add_plugin_id` for the plugins it is for.
-3. **A load-key scheme.** A preset is its location kind, location and load key. Inside the
-   plugin, every preset needs a name and a load key; a file holding several presets names each
-   and gives each a load key; a file that is one preset may give neither (it is named after the
-   file).
-4. **Loading by that triple:** for native sound contexts, draft 5's `prepare_preset` (the
-   preset becomes a new context, from the plugin's defaults, while the playing sound plays
-   on); otherwise CLAP `preset-load`'s `from_location`, which Oscairn calls on a spare
-   instance. A native instrument without `prepare_preset` has its presets listed but refused.
-
-The SDK does the protocol for an instrument on `sound-contexts-plugin.hpp`:
-`preset-discovery-plugin.hpp` makes the factory and provider from `declare` (where the presets
-are: `d.inside("Factory")`, `d.files("Patches", folder, "fxp")`) and `list` (the presets in
-one location: `l.add(name, loadKey)`), and `Engine::preparePreset` implements `prepare_preset`
-from one hook, `readPreset(kind, location, loadKey, patch, error)`: read the preset into a
-`Patch`, which starts at the defaults. The Basic Synth is the reference: five factory presets
-inside the plugin, load keys their names in lower case and hyphenated. What each fork should
-provide (recommended; none is built yet):
+Publish presets through CLAP preset discovery, and Oscairn lists them where sounds are picked and
+prepares any of them as an instant-switch sound ([RFC 0005](rfcs/0005-sound-contexts.md#presets)):
+a native instrument's through `prepare_preset`, any other plugin's with CLAP `preset-load` on a
+spare instance. The protocol, the SDK helper, how the scan helper lists presets and its limits are
+on the [preset-discovery-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/preset-discovery-plugin.md)
+page. The Basic Synth is the reference: five factory presets inside the plugin, load keys their
+names in lower case and hyphenated. What each fork should provide (recommended; none is built
+yet):
 
 | Plugin | Locations | Load key |
 | --- | --- | --- |
@@ -383,115 +249,26 @@ provide (recommended; none is built yet):
 | Oscairn Analog (Surge) | Files: the factory and user patch folders, type `fxp` | None: each file is one patch |
 | Oscairn FM (Dexed) | Files: the cartridge folders, type `syx` | The voice in the cartridge, `0` to `31`, each named from the cartridge |
 
-Limits: 4096 presets per plugin library, 64 locations and file types per provider, 10,000
-files per folder and 16 folder levels, names up to 255 bytes, locations and load keys up to
-4096; a preset over a size limit is skipped. A scan indexes presets in a separate helper
-process with a 15-second timeout, and a listing for a loaded plugin reads them through that
-same helper process (`oscairn-plugin-scan`, found beside the engine or the desktop app, or
-named by `OSCAIRN_PLUGIN_SCAN`). The listing, or its failure, is kept per plugin binary until
-the binary changes, so a provider that hangs costs one 15-second timeout, not one per listing;
-a helper that could not be started is tried again at the next listing.
-The helper runs off the caller's thread: until its listing is in, `presets.list` answers
-`Presets are being listed; ask again`.
-A plugin in a worker lists presets only through the helper: without one it lists none, and
-`presets.list` says why. Only a plugin hosted in the engine's own process with no helper
-configured has its provider run there, on the control thread, as the rest of that plugin
-does. `get_metadata` must be fast and never interactive, as CLAP says.
-Nothing watches preset folders, and the listing is kept, so preset files added later show once
-the plugin's binary changes or the engine restarts. What a Sound saves is the plugin's
-own state (for native contexts, the snapshot of every prepared patch), never a reference to the
-preset, so it opens when the preset is gone.
+What a Sound saves is the plugin's own state (for native contexts, the snapshot of every prepared
+patch), never a reference to the preset, so it opens when the preset is gone.
 
 ### Editor hints and roles
 
-`oscairn.ui` gives a hint per parameter, asked when the host reads parameter info (at every
-activation and after an info rescan):
+`oscairn.ui` gives each parameter a control, a priority (which orders its tiles, the Compact list
+and the physical knobs), a group, a role (its knob in the instrument role banks: Filter, Amp EG, EQ,
+Levels; an effect's `mix` goes to the Effects bank) and its place in a rich view. A plugin that
+declares no role gets roles guessed from exact parameter names, which misses most spellings, and
+declaring any role turns the guessing off for its other parameters, so declare every role it has.
+Every parameter stays reachable whatever its hint. The fields, the drafts and the view rules:
+[ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md).
 
-- **The control it wants:** knob, slider, buttons, switch, list, or a range with its high
-  parameter. The host keeps a hint only where it fits (buttons and lists on a stepped
-  parameter, a switch on two values, a range whose high end exists); otherwise it decides.
-- **A priority,** 1 first. It orders the parameter's tiles, the Compact list, and the
-  physical knobs: a device's screen knobs play an editor page's first parameters in this
-  order; a part with no controls of its own whose roles fill no bank gets two Assign banks
-  from its instrument's first parameters in this order; an effect without a `mix` role has its
-  first continuous parameter (not `CLAP_PARAM_IS_STEPPED`, such as an EQ's Mode) as its knob in
-  the Effects bank, or its first parameter where all are stepped
-  ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#step-6-status)).
-- **A group:** parameters of one module in the same group are drawn joined, edge to edge,
-  and kept together on narrow screens.
-- **A role** (`enum oscairn_role`): cutoff, resonance, filter envelope amount, key tracking
-  and the filter envelope's stages; attack, decay, sustain, release, hold, velocity, amp key
-  tracking and level; the EQ's gains, frequencies, mid Q and output; levels 1 to 8 (elements,
-  operators, oscillators); `mix`, an effect's main control; pan; and `OSCAIRN_ROLE_OUTPUT_BUS`,
-  the parameter choosing the output port a sound plays on, which lets parts share the instance
-  ([above](#parts-sharing-one-instance)) and fills no bank. Roles put a parameter on
-  the same knob in every instrument's role banks (Filter, Amp EG, EQ, Levels); a role the
-  plugin lacks is a blank knob. Only instruments fill role banks; an effect's `mix` goes to
-  the Effects bank. The banks serve every set of physical knobs: a controller profile's knob
-  rows and a Mackie Control surface's V-pots
-  ([RFC 0024](rfcs/0024-device-profiles.md#mackie-control)).
+### Rich views for Oscairn's engines
 
-A plugin that declares no role gets roles from its parameters' names: exact names only, such
-as "Cutoff", "Resonance", "Attack" (a filter module's "Attack" is the filter envelope's),
-"Level", "Wet" or "Mix". That misses most spellings, so declare roles. Declaring any role
-turns the guessing off for the plugin's other parameters, so declare every role it has.
-Every parameter stays reachable whatever its hint. A module grid and a waveform with markers
-come later. Draft 3 added the role, draft 4 a view and draft 5 `seconds` (below), so the
-structs grew each time: a plugin built against draft 2 must rebuild; one built against draft 3
-still gets its hints and roles, without views, and one built against draft 4 its views, its
-envelopes' times read from value texts with units, until it rebuilds against draft 5.
-
-### Rich views: what each engine should declare
-
-Draft 4 lets a plugin say which of its parameters make an envelope, a key or velocity map, or
-an FM operator view; Desktop and Panel then draw that view above the parameters' tiles, from
-their values, and dragging it sets them, undone as any parameter edit
-([RFC 0019](rfcs/0019-adaptive-ui.md#step-5-status)). Three more fields at the end of the hint:
-
-- **`view`:** any nonzero number, the same for every parameter of one view, and stable across
-  info rescans. A view may span modules (an FM view's operators are on their own pages).
-- **`field`** (`enum oscairn_field`): the parameter's place in it.
-- **`index`:** whose field it is, 1 to 8 (an operator's, an element's, a zone's), or 0 for the
-  view's own (the algorithm).
-
-What a view is follows from its fields:
-
-| View | Fields | Drawn |
-| --- | --- | --- |
-| Envelope, named stages | `DELAY`, `ATTACK`, `HOLD`, `DECAY`, `SUSTAIN`, `RELEASE` (attack and release needed) | From zero: delay, attack to full, hold, decay to the sustain level, held, release to zero |
-| Envelope, points | `LEVEL_0`…`LEVEL_8`, `TIME_1`…`TIME_8` or `RATE_1`…`RATE_8` (a rate: faster when higher) | Segment k reaches `LEVEL_k`; without one it holds, and the last falls to zero. From `LEVEL_0`, else the last segment's level. Holds before the last segment, which is the release |
-| Key or velocity map | `KEY_LOW`, `KEY_HIGH`, `VELOCITY_LOW`, `VELOCITY_HIGH` per index (a zone); `BREAKPOINT`, `LEFT_DEPTH`, `RIGHT_DEPTH`, `LEFT_CURVE`, `RIGHT_CURVE`, `VELOCITY_DEPTH`, `VELOCITY_CURVE` | Every index's zone over a keyboard, the page's own in the accent; level scaling around the breakpoint, a curve's value text saying its sign and shape (`-Linear`, `+EXP`); velocity's effect |
-| FM operator view | `ALGORITHM` (stepped, up to 128 values; index 0) and `FEEDBACK`; per operator `OPERATOR_LEVEL`, `RATIO` (or its coarse part), `FINE`, `DETUNE`, `FIXED`, and its envelope and scaling fields with its index | Where the algorithm is: the routing, and a column per operator (level, ratio, envelope); an operator's page draws its envelope and scaling |
-
-An envelope is drawn per view and index, a map per view and index (with all the view's zones),
-each where its parameters' tiles are. Rules:
-
-- `param_hint` must return true for **every** parameter in a view, also those with no role or
-  widget (`OSCAIRN_WIDGET_AUTO`, priority 0, `CLAP_INVALID_ID`, group 0, their role or none).
-  A plugin that returns false for parameters without a role, as the forks do today, must change
-  that.
-- Fill `algorithm` in `oscairn_plugin_ui_t` (or leave it null): the routing of each algorithm
-  value, `inputs[n]` the mask of operators modulating operator n + 1, `carriers` the mask
-  heard, `feedback_from` and `feedback_to` (0: none). The host asks for every value of the
-  parameter when it reads the hints, and drops all routings if one is missing.
-- The host keeps a field only where it knows it, on an index up to 8, and an algorithm only on
-  a stepped parameter of at most 128 values; anything else leaves its view and is a tile.
-- An envelope's stages are drawn by time: each segment has the same room, filled on a log
-  scale (about even below 50 ms) up to the longest any of its stages can take, past a least
-  width that keeps an instant stage's point apart to grab. Dragging a point maps back through
-  the same scale. The times come from `seconds` (draft 5): fill it in `oscairn_plugin_ui_t`
-  (or leave it null) to give how long a `DELAY`, `ATTACK`, `HOLD`, `DECAY`, `RELEASE`, `TIME_n`
-  or `RATE_n` parameter's stage takes at a value, and for a rate the time a segment across the
-  envelope's whole range takes; approximate is enough. The host asks at each value of a stepped
-  parameter of at most 128 values, else at 33 evenly spaced values, when it reads the hints,
-  and drops them all if one is missing. Without `seconds` it reads the value texts at those
-  values, when every one is a number with `ms`, `s` or `sec` ("31.2 ms", "1.20 s"). When any of
-  an envelope's stages has neither, the envelope is drawn by its parameters' ranges, a rate
-  reversed.
-- Levels and other positions are by each parameter's range (0 at the left or bottom); value
-  texts label them. A pitch envelope's levels are drawn from the bottom, not about a center,
-  for now.
-- Views never replace tiles or physical controls; the knobs bind to the parameters.
+What the forks should declare, as worked examples of the views
+([RFC 0019](rfcs/0019-adaptive-ui.md#step-5-status); the fields and rules are on the
+[ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md#rich-views) page). `param_hint`
+must return true for **every** parameter in a view, also those with no role or widget: a plugin
+that returns false for parameters without a role, as the forks do today, must change that.
 
 **Oscairn FM** (IDs from `source/oscairn/Parameters.cpp`): the Classic voice as view 1, the
 Extended voice as view 2, the pitch EG as view 3. `OperatorGraph` already has
@@ -690,30 +467,14 @@ declares all three kinds and is what `desktop-gaps` edits.
 
 ### Declared memory
 
-`oscairn.memory` has two calls, and the host refuses a plugin that offers one without the
-other:
-
-- `estimate(rate, max_frames)`, called after the state loads and before every activation (a
-  load, a state load, a new effect context, a new sample rate or block size, and a restart the
-  plugin asks for), says what activating would allocate: shared
-  bytes (once per instance or engine), bytes per context (an instance without contexts is
-  one) and decoded asset bytes for the current state. A new effect context costs its context
-  and asset bytes. With a memory budget, the host refuses to activate a plugin declaring more
-  than the budget leaves, saying how much it needs. With native sound contexts, the estimate
-  covers every sound the state holds, and each sound prepared after activating (`prepare`,
-  `prepare_preset`, or a snapshot's sounds prepared beside) costs its context bytes, so report
-  one sound's memory as `context_bytes` (the Oscairn Analog counts the state's other sounds in
-  `shared_bytes`). The host refuses a prepare whose context bytes are more than the memory the
-  budget leaves, before calling the plugin ("Plugin needs N MiB of memory where M MiB is
-  left"), and a snapshot whose prepared sounds' bytes are, discarding them again.
-- `current`, after activating, says what the plugin holds. The host requires it but does not
-  use it for budgets yet; it counts its own measurement.
-
-Oscairn counts the larger of the declaration and its own measurement, and keeps its
-measurements per declared size, so a plugin's modes (a reverb's algorithms) are not counted at
-the largest. In a worker process, a declaration also sets the worker's memory limit
-([In a worker process](#in-a-worker-process)). A plugin that holds more than it declared is
-counted at what it holds; distrusting its later declarations is planned.
+With `oscairn.memory`, the host asks what activating would allocate before every activation, and
+with a memory budget refuses a plugin that would not fit before it allocates ("Plugin needs N MiB
+of memory where M MiB is left"). Oscairn counts the larger of the declaration and its own
+measurement, and keeps its measurements per declared size, so a plugin's modes (a reverb's
+algorithms) are not counted at the largest. In a worker process, declarations also set the worker's
+memory limit ([In a worker process](#in-a-worker-process)). The numbers, the calls and how sound
+and effect contexts are counted:
+[memory](https://github.com/oscairn/oscairn-clap/blob/main/docs/memory.md).
 
 ## The plugin's window
 
@@ -786,7 +547,7 @@ stepped, hidden and read-only flags. How the editors use them:
 - an envelope's parameters (described, or recognized by name below), and an LFO's or
   filter's recognized by name, are linked into one group of tiles, as a hint's group would;
 - an envelope, a key or velocity map and an FM operator view are drawn from a plugin's
-  `oscairn.ui` views ([above](#rich-views-what-each-engine-should-declare)), and dragged to
+  `oscairn.ui` views ([ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md#rich-views)), and dragged to
   edit them. For parameters in no view, an envelope is still drawn as a curve you can drag
   when one module holds its parameters under one of these sets of names: `Attack`, `Decay`,
   `Sustain`, `Release` (optionally `Delay` and `Hold`); `Rate 1`–`4` with `Level 1`–`4`
@@ -1041,9 +802,10 @@ The bundled plugins are working references ([plugins](../plugins/README.md)):
   instance per prepared sound (up to eight), and only for instruments: note input, audio
   output, no audio input, no note output.
 - **Not implemented:** remote controls, voice info, note names,
-  audio-ports configurations, render mode, and watching preset folders for changes (they are
+  audio-ports configurations, and watching preset folders for changes (they are
   read when listed). (From the host's source; not exercised with a plugin.)
-- **In a worker,** a restarted worker's parameter info shows only after its next rescan.
+- **In a worker,** a restarted worker's parameter info shows only after its next rescan, and
+  `oscairn.assets`' `library_root` returns false (a preset provider's indexer gets it).
 - **Declarations** are not yet distrusted after a plugin holds more than it declared, and
   `oscairn.memory`'s `current` is not used for budgets.
 

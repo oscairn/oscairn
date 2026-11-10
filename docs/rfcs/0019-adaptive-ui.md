@@ -511,7 +511,7 @@ falls, Decay stays), and undoes that; `control-json-protocol` checks the view in
 four parameters loads with the envelope it had.
 
 Not yet: the real engines' declarations (their forks declare draft 3 roles; what each should
-declare is in the [porting guide](../plugin-porting.md#rich-views-what-each-engine-should-declare));
+declare is in the [porting guide](../plugin-porting.md#rich-views-for-oscairns-engines));
 a pitch envelope's levels around a center; Compact draws no views (it lists their parameters).
 
 ## Step 4 status

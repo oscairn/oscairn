@@ -4,6 +4,7 @@
 // ordering, lead time, overflow, cancellation, a lost link's safe releases and the reconnect.
 #include <oscairn/timeline.h>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <vector>
 

@@ -4,6 +4,7 @@
 // epochs and CPU fallback accounting.
 //   oscairn-hardware-service-test simulated-profile.json PROFILES_DIR
 #include "simulated.h"
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>

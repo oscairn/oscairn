@@ -80,6 +80,8 @@ with tempfile.TemporaryDirectory(prefix="oscairn-image-") as temporary:
 
     fails("the Roland panel option without the panel", br2={"BR2_PACKAGE_OSCAIRN_PANEL_ROLAND": "y"}, needle="PANEL_ROLAND")
     fails("the panel dump tool left behind", files=[("usr/bin/oscairn-panel-dump", b"")], needle="oscairn-panel-dump")
+    fails("the simulated accelerator's service in a program", files=[("usr/bin/oscairn-engine", b"\x7fELF oscairn.sim/1\0")],
+          needle="names oscairn.sim/")
 
     # Declared but missing.
     fails("a FANTOM panel without the reader", profile={**pedal, "panel": {"protocol": "roland-i2c-slave"}},
@@ -92,6 +94,9 @@ with tempfile.TemporaryDirectory(prefix="oscairn-image-") as temporary:
     fails("Bluetooth declared, not built", profile={**pedal, "bluetooth": {"midi": True}}, kernel_extra={"CONFIG_BT": "y"},
           needle="BR2_PACKAGE_OSCAIRN_BLUETOOTH is not set")
     fails("Wi-Fi declared, not in the kernel", profile={**pedal, "network": {"wifi": True}}, needle="lacks CONFIG_CFG80211")
+    fails("a product profile declaring the simulated accelerator", needle="for tests only",
+          profile={**pedal, "hardware": {"accelerators": [{"id": "sim0", "kind": "simulated", "abi": "oscairn.sim/1",
+                                                           "operations": ["oscairn.sim.sine/1"]}]}})
     fails("a USB device port without the gadget option", profile={**pedal, "midi": {"usbDevice": True}},
           kernel_extra={"CONFIG_USB_GADGET": "y", "CONFIG_USB_CONFIGFS_F_MIDI": "y", "CONFIG_USB_CONFIGFS_F_UAC2": "y"},
           needle="BR2_PACKAGE_OSCAIRN_USB_GADGET is not set")

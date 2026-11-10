@@ -5,6 +5,8 @@ A profile that lacks a feature (no screen, Bluetooth, Wi-Fi, touch, battery, Eth
 device or host mode, camera) must leave nothing of it in the image: no Oscairn option, no
 Buildroot package, no kernel option, no file, and no program or library naming its libraries.
 A profile that declares a feature must have the Oscairn option and the kernel support for it.
+Accelerators (RFC 0004) follow the same rule: each one's service is a feature of its own, and the
+simulated accelerator, for tests only, is never in an image nor declared by a product's profile.
 
     check-image-profile.py --br2-config FILE --profile FILE [--kernel-config FILE] [--target DIR]
     check-image-profile.py --defconfigs DIR --profiles DIR
@@ -32,10 +34,15 @@ class Feature:
     kernel_off: list = field(default_factory=list)  # kernel options (a trailing * for a prefix): unset when not
     files: list = field(default_factory=list)  # globs in the target: absent when not declared
     libraries: list = field(default_factory=list)  # names no file in the target may contain when not declared
+    test_only: bool = False  # never in a product: declaring it is itself a mismatch
 
 
 def screens(p):
     return p.get("screens") or []
+
+
+def accelerators(p):
+    return (p.get("hardware") or {}).get("accelerators") or []
 
 
 FEATURES = [
@@ -77,6 +84,12 @@ FEATURES = [
     Feature("camera", lambda p: bool(p.get("camera")),
             kernel_on=["CONFIG_MEDIA_SUPPORT"], kernel_off=["CONFIG_MEDIA_SUPPORT"],
             packages=["BR2_PACKAGE_LIBCAMERA", "BR2_PACKAGE_LIBV4L"]),
+    # RFC 0004: an accelerator's service is compiled in only for a profile declaring that
+    # accelerator. Each real one adds its feature here (its BR2_PACKAGE_OSCAIRN_HARDWARE_ option,
+    # its files, and its service ABI as a name no binary may hold without it) as it lands; the
+    # simulated one's code names its ABI, oscairn.sim/1.
+    Feature("simulated-accelerator", lambda p: any(a.get("kind") == "simulated" for a in accelerators(p)),
+            libraries=["oscairn.sim/"], test_only=True),
 ]
 
 
@@ -116,6 +129,8 @@ def check(name, br2, profile, kernel=None, target=None):
         problems.append(f"{name}: {feature.name} {text}")
     for f in FEATURES:
         declared = f.declared(profile)
+        if declared and f.test_only:
+            problem(f, "is for tests only, and no product's profile declares it")
         for option in f.options:
             if declared and option not in br2:
                 problem(f, f"declared by the profile, but {option} is not set")

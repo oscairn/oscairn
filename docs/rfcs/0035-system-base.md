@@ -632,9 +632,11 @@ host mode and a camera: nothing of a feature the profile lacks (options, package
 files, programs naming its libraries), and the option and kernel support for one it declares.
 The QEMU and EVK images pass it; a QEMU build made to start the EVK's profile stopped at
 `target-finalize`. The `image-profile-consistency` test checks every product defconfig and each
-rule. Not built: `hardware` in `session.hello`, app manifests' hardware, and the
-CI build of the `oscairn` package with each option off (no subsystem has an Oscairn option yet
-but the app). Wi-Fi's firmware list in the check is a few common folders, not every chip's.
+rule. Accelerators (RFC 0004 step 1, 2026-11-09): each one's service is a feature of the check as
+it lands (none yet); the simulated accelerator, test code only, fails an image whose programs name
+its service ABI and a product profile declaring it. Not built: `hardware` in `session.hello`, app
+manifests' hardware, and the CI build of the `oscairn` package with each option off (no subsystem
+has an Oscairn option yet but the app). Wi-Fi's firmware list in the check is a few common folders, not every chip's.
 
 The `oscairn` package was audited for hardware-specific code compiled into every image
 (2026-11-08). None was found to put behind an option:

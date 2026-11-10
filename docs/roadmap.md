@@ -629,6 +629,8 @@ Each starts as an RFC:
 - [ ] VST3 hosting
 - [ ] macOS Audio Units hosting (AUv2/AUv3 scope to decide)
 - [ ] Windows desktop, process and IPC support
+- [ ] **iOS and iPadOS developer builds** ([RFC 0040](rfcs/0040-ios-developer-builds.md#progress), proposed):
+  signed by their user, not on the App Store; one process, plugins bundled at signing time
 - [ ] the sampler workflow: slicing, resampling, looper
 - [ ] the Live workflow (splits, layers, scenes): parts with splits, layers and scenes exist
   (Phase 3b, item 1); the workflow itself is still to be specified

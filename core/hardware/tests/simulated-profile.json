@@ -1,0 +1,32 @@
+{
+  "format": "oscairn.profile",
+  "version": 2,
+  "id": "org.oscairn.test.simulated-accelerator",
+  "name": "Test device with a simulated accelerator",
+  "platform": { "os": "linux", "cpu": "arm64" },
+  "audio": { "inputs": 0, "outputs": 2, "rates": [48000], "block": 128 },
+  "reliability": "instrument",
+  "hardware": {
+    "clocks": [
+      { "id": "sim-timer", "rate": 48000000, "driftPpm": 50, "leadMicros": 1000, "queue": 256, "cancel": true }
+    ],
+    "accelerators": [
+      {
+        "id": "sim0",
+        "kind": "simulated",
+        "abi": "oscairn.sim/1",
+        "device": "simulated, in-process",
+        "firmware": { "id": "oscairn.sim", "version": "1" },
+        "operations": ["oscairn.sim.sine/1"],
+        "banks": ["sine"],
+        "regions": ["osc"],
+        "voices": 8,
+        "parts": 2,
+        "memory": 65536,
+        "clock": "sim-timer",
+        "pipelineFrames": 0,
+        "offline": true
+      }
+    ]
+  }
+}

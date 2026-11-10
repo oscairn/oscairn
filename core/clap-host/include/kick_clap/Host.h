@@ -7,6 +7,7 @@
 #include <oscairn-clap/assets.h>
 #include <oscairn-clap/memory.h>
 #include <oscairn-clap/voice-budget.h>
+#include <oscairn-clap/hardware.h>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -119,6 +120,23 @@ struct Statistics {
     uint64_t restarts = 0; // Oscairn plugin workers restarted after failing (RFC 0010)
 };
 
+// oscairn.hardware (oscairn-clap/hardware.h, RFC 0004): the process's accelerators, which every
+// host offers its plugin through that extension (oscairn::hardware::Service implements it).
+// owner is the plugin's host, which only its own leases answer to; epoch is its activation, which
+// a job is submitted and collected in. The audio-thread calls neither allocate nor block.
+struct HardwareAccess {
+    virtual ~HardwareAccess() = default;
+    virtual uint32_t count() const noexcept = 0;                                          // main thread
+    virtual bool get(uint32_t index, oscairn_hardware_accelerator_t&) const noexcept = 0; // main thread
+    virtual bool supports(uint32_t index, const char* operation) const noexcept = 0;     // main thread
+    virtual int32_t reserve(const void* owner, uint32_t index, const oscairn_hardware_request_t&,
+                            oscairn_hardware_lease_t&) noexcept = 0;                       // main thread
+    virtual void release(const void* owner, uint32_t lease) noexcept = 0;                 // main thread
+    virtual void releaseAll(const void* owner) noexcept = 0;                              // main thread
+    virtual int32_t submit(const void* owner, uint32_t epoch, uint32_t lease, const oscairn_hardware_job_t&) noexcept = 0;
+    virtual int32_t collect(const void* owner, uint32_t epoch, uint32_t lease, oscairn_hardware_result_t&) noexcept = 0;
+};
+
 // Control API belongs to ONE main/UI thread. process(), enqueue() and atomic
 // telemetry are the only cross-thread API. Control operations exclude rendering
 // with a gate: the callback NEVER waits and returns silence during a change.
@@ -180,6 +198,11 @@ public:
     // refuses the activation. Process-wide; set once, before any plugin loads. Null: none.
     using ActivationObserver = void (*)(void* context, const oscairn_memory_t* declared);
     static void observeActivations(ActivationObserver, void* context) noexcept;
+    // oscairn.hardware (RFC 0004): the accelerators plugins are offered. Process-wide; set once,
+    // before any plugin loads, and kept until after the last is unloaded. Null, the default:
+    // none, so count() is 0 and every reservation is refused as unavailable.
+    static void setHardware(HardwareAccess*) noexcept;
+    static HardwareAccess* hardware() noexcept;
     void unload();
     bool reconfigure(double sampleRate, uint32_t maxFrames);
     // Main thread: reject later port ID/order/channel-count changes under the render gate.

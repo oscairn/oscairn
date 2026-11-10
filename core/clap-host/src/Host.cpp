@@ -55,6 +55,7 @@ namespace {
 thread_local const void* audioScope = nullptr;
 Host::ActivationObserver activationObserver = nullptr; // observeActivations: set once, before any plugin loads
 void* activationContext = nullptr;
+std::atomic<HardwareAccess*> hardwareAccess{nullptr}; // setHardware
 struct AudioScope {
     const void* previous;
     explicit AudioScope(const void* owner) : previous(audioScope) { audioScope = owner; }
@@ -209,6 +210,7 @@ struct Host::Impl {
     double sampleRate = 48000;
     uint32_t maxFrames = 512;
     int64_t steadyTime = 0;
+    std::atomic<uint32_t> hardwareEpoch{0}; // oscairn.hardware: the activation jobs belong to
     bool active = false;
     std::atomic<bool> sleeping{false}; // asleep() reads it on the audio thread while service() may stop the plugin
     std::atomic<bool> wantsBeat{false}, wantsHarmony{false}; // the plugin queried oscairn.beat's, oscairn.harmony's event space
@@ -464,6 +466,28 @@ struct Host::Impl {
         if (guiHide.exchange(false)) { gui->hide(plugin); if (window) window->hide(); }
         if (guiShow.exchange(false)) { gui->show(plugin); if (window) window->show(); }
     }
+    // oscairn.hardware: the process's service, with this host as the owner of its plugin's leases.
+    static uint32_t CLAP_ABI hardwareCount(const clap_host_t*) { auto* h = hardwareAccess.load(); return h ? h->count() : 0; }
+    static bool CLAP_ABI hardwareGet(const clap_host_t*, uint32_t index, oscairn_hardware_accelerator_t* out) {
+        auto* h = hardwareAccess.load(); return h && out && h->get(index, *out);
+    }
+    static bool CLAP_ABI hardwareSupports(const clap_host_t*, uint32_t index, const char* operation) {
+        auto* h = hardwareAccess.load(); return h && operation && h->supports(index, operation);
+    }
+    static int32_t CLAP_ABI hardwareReserve(const clap_host_t* host, uint32_t index, const oscairn_hardware_request_t* request, oscairn_hardware_lease_t* lease) {
+        auto* h = hardwareAccess.load();
+        if (!request || !lease || !request->operation) return OSCAIRN_HARDWARE_INVALID;
+        return h ? h->reserve(&self(host), index, *request, *lease) : OSCAIRN_HARDWARE_UNAVAILABLE;
+    }
+    static void CLAP_ABI hardwareRelease(const clap_host_t* host, uint32_t lease) { if (auto* h = hardwareAccess.load()) h->release(&self(host), lease); }
+    static int32_t CLAP_ABI hardwareSubmit(const clap_host_t* host, uint32_t lease, const oscairn_hardware_job_t* job) {
+        auto* h = hardwareAccess.load(); auto& s = self(host);
+        return h && job ? h->submit(&s, s.hardwareEpoch.load(std::memory_order_relaxed), lease, *job) : OSCAIRN_HARDWARE_INVALID;
+    }
+    static int32_t CLAP_ABI hardwareCollect(const clap_host_t* host, uint32_t lease, oscairn_hardware_result_t* result) {
+        auto* h = hardwareAccess.load(); auto& s = self(host);
+        return h && result ? h->collect(&s, s.hardwareEpoch.load(std::memory_order_relaxed), lease, *result) : OSCAIRN_HARDWARE_INVALID;
+    }
     static const void* CLAP_ABI extension(const clap_host_t*, const char* id) {
         static const clap_host_thread_check_t threads{isMain, isAudio};
         static const clap_host_params_t parameters{rescanParams, clearParams, requestFlush};
@@ -480,6 +504,7 @@ struct Host::Impl {
         static const clap_host_preset_load_t presetLoad{presetError, presetLoaded};
         static const clap_host_gui_t windows{guiHintsChanged, guiRequestResize, guiRequestShow, guiRequestHide, guiClosed};
         static const oscairn_host_harmony_t harmony{readHarmony};
+        static const oscairn_host_hardware_t accelerators{hardwareCount, hardwareGet, hardwareSupports, hardwareReserve, hardwareRelease, hardwareSubmit, hardwareCollect};
         if (!id) return nullptr;
         if (!std::strcmp(id, CLAP_EXT_GUI)) return &windows;
         if (!std::strcmp(id, OSCAIRN_EXT_ASSETS) || !std::strcmp(id, OSCAIRN_EXT_ASSETS_DRAFT_2) || !std::strcmp(id, OSCAIRN_EXT_ASSETS_DRAFT_1)) return &assets; // earlier drafts are draft 3's first members
@@ -495,6 +520,7 @@ struct Host::Impl {
         if (!std::strcmp(id, CLAP_EXT_LOG)) return &logging;
         if (!std::strcmp(id, CLAP_EXT_EVENT_REGISTRY)) return &registry;
         if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &timer;
+        if (!std::strcmp(id, OSCAIRN_EXT_HARDWARE)) return &accelerators;
 #ifndef _WIN32
         if (!std::strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT)) return &descriptors;
 #else
@@ -529,6 +555,7 @@ struct Host::Impl {
         if (plugin) destroyGui();
         gui = nullptr; guiApi = nullptr;
         if (plugin) { deactivate(); if (plugin->destroy) plugin->destroy(plugin); }
+        if (auto* h = hardwareAccess.load()) h->releaseAll(this); // what the plugin did not release
         plugin = nullptr; params = nullptr; state = nullptr; sounds = nullptr; assetDependencies = nullptr; pluginLatency = nullptr;
         timerSupport = nullptr; fdSupport = nullptr; memory = nullptr; hasDeclared = false;
         timers.clear(); fds.clear();
@@ -808,6 +835,7 @@ struct Host::Impl {
             if (memoryRoom && bytes > memoryRoom) refuse(bytes);
         }
         if (activationObserver) activationObserver(activationContext, hasDeclared ? &declared : nullptr);
+        hardwareEpoch.fetch_add(1); // jobs from an earlier activation collect as stale
         if (!plugin->activate(plugin, sampleRate, 1, maxFrames)) throw std::runtime_error("Plugin activation failed");
         active = true;
         transportObserved = false; haveHarmony = false;
@@ -1025,6 +1053,8 @@ bool Host::currentMemory(oscairn_memory_t& result) const {
     return s.main() && s.plugin && s.memory && s.active && s.memory->current(s.plugin, &result);
 }
 void Host::observeActivations(ActivationObserver observer, void* context) noexcept { activationObserver = observer; activationContext = context; }
+void Host::setHardware(HardwareAccess* access) noexcept { hardwareAccess.store(access); }
+HardwareAccess* Host::hardware() noexcept { return hardwareAccess.load(); }
 bool Host::effectResources(oscairn_effect_resources_t& result) const {
     if(!impl->plugin)return false;
     const auto* ext=static_cast<const oscairn_plugin_effect_contexts_t*>(impl->plugin->get_extension(impl->plugin,OSCAIRN_EXT_EFFECT_CONTEXTS));

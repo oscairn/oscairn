@@ -29,6 +29,34 @@ install(TARGETS oscairn-plugin-scan RUNTIME DESTINATION bin)
 add_library(oscairn_clap_headers INTERFACE)
 target_include_directories(oscairn_clap_headers INTERFACE clap-host/third_party/clap/include clap-ext/include)
 
+# RFC 0004: hardware services. The capability, clock and event contracts and the CPU-only service,
+# in every build. Each accelerator's service is a Driver under an option of its own, on only for a
+# product whose profile declares that accelerator (none yet; os/scripts/check-image-profile.py).
+add_library(oscairn_hardware STATIC hardware/src/capabilities.cpp hardware/src/service.cpp hardware/src/timeline.cpp)
+target_include_directories(oscairn_hardware PUBLIC hardware/include)
+target_include_directories(oscairn_hardware SYSTEM PRIVATE control/third_party)
+target_link_libraries(oscairn_hardware PUBLIC kick_clap_host)
+target_compile_options(oscairn_hardware PRIVATE -Wall -Wextra)
+# The simulated accelerator is for tests only: linked into the tests, nothing installed.
+add_library(oscairn_hardware_sim STATIC hardware/tests/simulated.cpp)
+target_link_libraries(oscairn_hardware_sim PUBLIC oscairn_hardware)
+add_library(oscairn-hardware-fixture MODULE hardware/tests/hardware_fixture.cpp)
+target_link_libraries(oscairn-hardware-fixture PRIVATE oscairn_clap_headers)
+set_target_properties(oscairn-hardware-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
+add_executable(oscairn-hardware-timeline-test hardware/tests/timeline.cpp)
+target_link_libraries(oscairn-hardware-timeline-test PRIVATE oscairn_hardware)
+add_test(NAME hardware-timeline COMMAND oscairn-hardware-timeline-test)
+add_executable(oscairn-hardware-service-test hardware/tests/service.cpp)
+target_link_libraries(oscairn-hardware-service-test PRIVATE oscairn_hardware_sim)
+add_test(NAME hardware-service COMMAND oscairn-hardware-service-test "${CMAKE_CURRENT_SOURCE_DIR}/hardware/tests/simulated-profile.json"
+    "${PROJECT_SOURCE_DIR}/hosts/standalone/profiles")
+add_executable(oscairn-hardware-plugin-test hardware/tests/plugin.cpp)
+target_link_libraries(oscairn-hardware-plugin-test PRIVATE oscairn_hardware_sim)
+add_dependencies(oscairn-hardware-plugin-test oscairn-hardware-fixture)
+add_test(NAME hardware-plugin COMMAND oscairn-hardware-plugin-test $<TARGET_FILE:oscairn-hardware-fixture>
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware/tests/simulated-profile.json")
+set_tests_properties(hardware-plugin PROPERTIES TIMEOUT 30)
+
 add_library(oscairn_engine STATIC
     engine/src/chain.cpp
     engine/src/graph.cpp

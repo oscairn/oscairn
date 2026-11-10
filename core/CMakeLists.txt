@@ -197,6 +197,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME session-service-stop COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/os/scripts/test_session_stop.py")
     add_test(NAME image-profile-consistency COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/os/scripts/test_image_profile.py")
     add_test(NAME session-headless-engine-args COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/os/scripts/test_engine_args.py")
+    # core/clap-ext is oscairn-clap at the commit upstream.json pins; skipped without the network.
+    add_test(NAME clap-ext-upstream COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/check-clap-ext.py")
+    set_tests_properties(clap-ext-upstream PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 endif()
 
 add_executable(oscairn-prepared-instances-test engine/tests/prepared_instances.cpp)

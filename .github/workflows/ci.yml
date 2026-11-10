@@ -45,6 +45,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Check core/clap-ext against its pinned oscairn-clap commit
+        env:
+          OSCAIRN_REQUIRE_NETWORK: "1"
+        run: python3 tools/check-clap-ext.py
+
       - name: Check out pinned MOD MDA sources
         uses: actions/checkout@v4
         with:

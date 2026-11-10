@@ -148,6 +148,30 @@ engine into its DSP binary. Vendored SDK declarations are in
 [`core/clap-host/third_party/clap/include`](../core/clap-host/third_party/clap/include).
 The pinned SDK revision is recorded alongside them in `upstream.json`.
 
+### The CLAP extension headers
+
+Oscairn's own extension headers and SDK helpers (`include/oscairn-clap/`, MIT) are developed in
+[oscairn-clap](https://github.com/oscairn/oscairn-clap), which also holds the reference page for
+each extension and the example plugins. Oscairn keeps a copy of its `include/` and `LICENSE` at
+[`core/clap-ext`](../core/clap-ext), and `core/clap-ext/upstream.json` names the repository and the
+commit the copy is. `tools/check-clap-ext.py` fetches that commit and fails if the copy differs from
+its `include/` and `LICENSE` in any file; it runs as the `clap-ext-upstream` test, which is skipped
+without the network (exit 77), and as its own CI step, where `OSCAIRN_REQUIRE_NETWORK=1` makes an
+unreachable repository a failure.
+
+To change a header:
+
+1. Change it in oscairn-clap (with its reference page under `docs/` in the same commit), and push.
+2. Copy that commit's `include/` and `LICENSE` over `core/clap-ext/` (`rsync -a --delete
+   ../oscairn-clap/include/ core/clap-ext/include/` and the license), and set `commit` in
+   `core/clap-ext/upstream.json` to the oscairn-clap commit.
+3. Run `python3 tools/check-clap-ext.py`. Before the oscairn-clap commit is pushed, check against a
+   local clone with `OSCAIRN_CLAP_EXT_REPO=../oscairn-clap`.
+4. Commit the copy, the pin and the host change that needs the header together, and update
+   [plugin-porting.md](plugin-porting.md) for the host's side.
+
+Never edit `core/clap-ext` alone: the check fails until oscairn-clap has the same change.
+
 Stable descriptor, parameter and port IDs are identities, not display names or array
 indices. Give parameters truthful ranges, defaults, units/text and flags. Host-facing
 parameter values use plain units, not an assumed normalized 0..1 range. Declare stepped

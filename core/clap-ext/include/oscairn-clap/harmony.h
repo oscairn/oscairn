@@ -92,8 +92,10 @@ typedef struct oscairn_event_harmony
 typedef struct oscairn_host_harmony
 {
     /* [main-thread] The harmony of the last event the host delivered to the plugin; false
-     * before the first (always, for a plugin that did not query the event space or is in no
-     * part). A plugin taken out of its part keeps reading its part's last harmony. */
+     * before the first (always, for a plugin that did not query the event space). It follows
+     * the plugin's part: moved to another part, the plugin reads that part's harmony from its
+     * next block; taken out of its part, or with its part's harmony gone, it reads false again
+     * until it is in a part. */
     bool( CLAP_ABI* get )( const clap_host_t* host, oscairn_harmony_t* harmony );
 } oscairn_host_harmony_t;
 

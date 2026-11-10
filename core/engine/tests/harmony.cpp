@@ -9,6 +9,8 @@
 //     follower fixture in a part keyed to D Dorian, whose zone transposes up a tone, sees the
 //     key from the first sample and each chord change at the sample of the note that made it;
 //     the host extension gives the latest on the main thread.
+//   - The host extension follows the plugin's part: another part's harmony when it moves, none
+//     when it is taken out of its part or its part's harmony goes.
 //   oscairn-harmony-test WORKER follower-fixture.clap
 #include "oscairn/graph.h"
 #include "oscairn/harmony.h"
@@ -138,6 +140,49 @@ namespace
               h.held[0] == keys.held[0] && h.held[1] == keys.held[1], where + "the main thread reads D Dorian, D minor, its keys");
     }
 
+    // The host extension follows the plugin's part: moved to another part it reads that part's
+    // harmony, taken out of every part (or its part's harmony gone) it reads none, as before its
+    // first block, and put back it reads its part's again.
+    void leaving(const std::string& worker, const std::string& fixture, bool inWorker)
+    {
+        const std::string where = std::string(inWorker ? "worker: " : "engine: ");
+        oscairn::setPlacementPolicy({inWorker ? worker : std::string(), oscairn::Placement::Worker});
+        constexpr uint32_t block = 256;
+        oscairn::Graph g(48000, block, oscairn::ProcessingMode::Offline);
+        const auto f = g.add(fixture);
+        std::vector<float> left(block), right(block);
+        float* outputs[]{left.data(), right.data()};
+        const auto dir = std::filesystem::temp_directory_path() / ("oscairn-harmony-leaving-" + std::to_string(getpid()));
+        auto read = [&](uint8_t& root, uint16_t& scale) {
+            check(g.process(outputs, block, nullptr), where + "process");
+            std::filesystem::remove_all(dir);
+            g.host(f).saveState(dir.string());
+            std::ifstream in(dir / "state.clap", std::ios::binary);
+            const std::string bytes{std::istreambuf_iterator<char>(in), {}};
+            std::filesystem::remove_all(dir);
+            oscairn_harmony_t h{};
+            if(bytes.size() != sizeof h) return false;
+            std::memcpy(&h, bytes.data(), sizeof h); root = h.key_root; scale = h.scale; return true;
+        };
+        constexpr uint16_t major = 1 | 1 << 2 | 1 << 4 | 1 << 5 | 1 << 7 | 1 << 9 | 1 << 11;
+        uint8_t root = 0; uint16_t scale = 0;
+        g.setHarmonies({{1, {f}, false, {}, 2, dorian}, {2, {}, false, {}, 7, major}});
+        g.commit();
+        check(read(root, scale) && root == 2 && scale == dorian, where + "in part 1, D Dorian");
+        g.setHarmonies({{1, {}, false, {}, 2, dorian}, {2, {f}, false, {}, 7, major}});
+        g.commit();
+        check(read(root, scale) && root == 7 && scale == major, where + "moved to part 2, G major");
+        g.setHarmonies({{1, {}, false, {}, 2, dorian}, {2, {}, false, {}, 7, major}});
+        g.commit();
+        check(!read(root, scale), where + "taken out of its part, no harmony, not part 2's last (root " + std::to_string(root) + ")");
+        g.setHarmonies({{1, {f}, false, {}, 2, dorian}});
+        g.commit();
+        check(read(root, scale) && root == 2 && scale == dorian, where + "back in part 1, D Dorian again");
+        g.setHarmonies({});
+        g.commit();
+        check(!read(root, scale), where + "its part's harmony gone, no harmony");
+    }
+
     // Turning a part's input off (or moving its zones off the channel) while keys are down must
     // not leave the harmony holding them: the releases never reach it, and every block would
     // re-send a chord nobody holds.
@@ -174,6 +219,7 @@ int main(int argc, char** argv)
     for(bool inWorker : {false, true})
         for(uint32_t block : {256u, 37u}) delivery(argv[1], argv[2], block, inWorker);
     staleKeys(argv[2]);
+    for(bool inWorker : {false, true}) leaving(argv[1], argv[2], inWorker);
     if(failures) return 1;
     std::printf("ok: common chords and inversions recognized; key, scale and chord changes reach a plugin at their samples, in the engine and a worker\n");
     return 0;

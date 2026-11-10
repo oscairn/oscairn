@@ -213,32 +213,33 @@ struct Host::Impl {
     std::atomic<bool> sleeping{false}; // asleep() reads it on the audio thread while service() may stop the plugin
     std::atomic<bool> wantsBeat{false}, wantsHarmony{false}; // the plugin queried oscairn.beat's, oscairn.harmony's event space
     // oscairn.harmony: the last delivered (audio thread), and a copy the main thread reads
-    // through the host extension, behind a sequence count that is odd while it is written.
+    // through the host extension, behind a sequence count that is odd while it is written. The
+    // fourth word is 1 while the plugin is in a part (a block brought a harmony), else 0.
     oscairn_harmony_t lastHarmony{};
     bool haveHarmony = false;
     std::atomic<uint32_t> harmonySequence{0};
-    std::array<std::atomic<uint64_t>, 3> harmonyWords{};
+    std::array<std::atomic<uint64_t>, 4> harmonyWords{};
     static_assert(sizeof(oscairn_harmony_t) == 3 * sizeof(uint64_t));
-    void publishHarmony(const oscairn_harmony_t& h) noexcept {
-        uint64_t words[3]; std::memcpy(words, &h, sizeof words);
+    void publishHarmony(const oscairn_harmony_t* h) noexcept { // null: in no part
+        uint64_t words[4]{}; if (h) { std::memcpy(words, h, sizeof *h); words[3] = 1; }
         const auto n = harmonySequence.load(std::memory_order_relaxed);
         harmonySequence.store(n + 1, std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_release);
-        for (size_t i = 0; i < 3; ++i) harmonyWords[i].store(words[i], std::memory_order_relaxed);
+        for (size_t i = 0; i < 4; ++i) harmonyWords[i].store(words[i], std::memory_order_relaxed);
         harmonySequence.store(n + 2, std::memory_order_release);
     }
     static bool CLAP_ABI readHarmony(const clap_host_t* host, oscairn_harmony_t* out) {
         auto& s = self(host);
         if (!out) return false;
-        uint64_t words[3]; uint32_t before, after;
+        uint64_t words[4]; uint32_t before, after;
         do {
             before = s.harmonySequence.load(std::memory_order_acquire);
-            for (size_t i = 0; i < 3; ++i) words[i] = s.harmonyWords[i].load(std::memory_order_relaxed);
+            for (size_t i = 0; i < 4; ++i) words[i] = s.harmonyWords[i].load(std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_acquire);
             after = s.harmonySequence.load(std::memory_order_relaxed);
         } while ((before & 1) || before != after);
-        if (!before) return false;
-        std::memcpy(out, words, sizeof words);
+        if (!words[3]) return false;
+        std::memcpy(out, words, sizeof *out);
         return true;
     }
     std::atomic<bool> processing{false}; // read by service() without the gate
@@ -1307,6 +1308,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
     } acknowledged{s}; // Saving must wait until plugin processing, not just queue removal.
     try {
         uint32_t total = 0;
+        bool harmonyCame = false; // a block without one: the plugin is in no part
         auto deliver = [&](Event e) {
             // A malformed or late event is dropped on its own; resetting the plugin
             // for it would cut every sounding note on stage.
@@ -1316,8 +1318,9 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
                 if (e.header()->space_id == Host::beatSpace && !s.wantsBeat.load(std::memory_order_relaxed)) return;
                 if (e.header()->space_id == Host::harmonySpace) {
                     const auto& h = reinterpret_cast<const oscairn_event_harmony_t*>(e.header())->harmony;
+                    harmonyCame = true;
                     if (!s.wantsHarmony.load(std::memory_order_relaxed) || (s.haveHarmony && !std::memcmp(&h, &s.lastHarmony, sizeof h))) return;
-                    s.lastHarmony = h; s.haveHarmony = true; s.publishHarmony(h);
+                    s.lastHarmony = h; s.haveHarmony = true; s.publishHarmony(&h);
                 }
                 if (total == Impl::renderEvents) { s.dropped.fetch_add(1); return; }
                 s.ordered[total] = {e, total}; ++total; return;
@@ -1353,6 +1356,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         while (acknowledged.count < maxBlockEvents && s.commands.pop(event)) { ++acknowledged.count; append(event); }
         for (uint32_t i = 0; i < direct; ++i) append(incoming[i]);
         if (count > maxProcessEvents) { s.dropped.fetch_add(count - maxProcessEvents); s.panic.store(true); }
+        if (!harmonyCame && s.harmonyWords[3].load(std::memory_order_relaxed)) { s.haveHarmony = false; s.publishHarmony(nullptr); } // out of its part, or its part's harmony gone
         if (s.panic.exchange(false)) {
             // Never leave a stuck gate after an event overflow. Reset is an
             // audio-thread operation and covers every note channel and port.

@@ -269,13 +269,16 @@ Built in the host; the script block that reads it is not (step 5 stays open unti
   scale, chord root, type and bass, and the held keys. Every plugin in the part's chain and
   lanes that queries the event space gets an event in its first block and wherever anything
   changes, at the sample of the note that changed it, before that note; the host extension
-  gives the last on the main thread. Workers carry the event like any other.
+  gives the last on the main thread, following the plugin's part: another part's when it moves,
+  none once it is in no part (a block without a harmony event). Workers carry the event like
+  any other.
 - **Limits:** keys held across a seamless Performance change count again only once pressed
   again; past 32 changes in one block, the last event takes the later ones.
 
 Tested in `harmony` (common chords and inversions; the key from the first sample and each
 chord change at its sample through a transposing zone, in the engine and in workers, at two
-block sizes; the main-thread read) and `control-parts` (saving, opening, undo and refusals;
+block sizes; the main-thread read, and it following the plugin into another part and out of
+every part, in the engine and in a worker) and `control-parts` (saving, opening, undo and refusals;
 a plugin in a part reading its own key and then the Performance's). The JSON-RPC test covers
 the protocol.
 

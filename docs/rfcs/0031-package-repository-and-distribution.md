@@ -88,7 +88,11 @@ Checked when built and tested; the sections below say how.
       device can install, newer than the one installed; `desktop-gaps`, `control-repository`.
       A locked library's new version replaces each item whose files differ, swapped in whole,
       and removes those it no longer has; the same version again changes nothing;
-      `control-archives`. Not
+      `control-archives`. Each install records the archive's SHA-256 and signers: the Catalog
+      says Installed only for the repository's build at that version, else Installed (a
+      different build), with an explicit Install the repository's build after a confirmation
+      naming both (`packages.install`'s `replace`); nothing updates on its own;
+      `control-repository`, `desktop-gaps`. Not
       yet: `packages.updates`, update lists and a card on Home, Performances' locks, apps)
 - [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source
 - [ ] 8. The official repository goes public: hosting, mirrors, policy
@@ -484,7 +488,13 @@ on Install…; it belongs with the repositories in Settings.
 desktop Library, labeled Catalog. Its rows name each package, its version, publisher and
 summary; what this device cannot install is grayed with the reason. What is installed says
 **Installed** with the version installed, or **Update to** the newest stable version this device
-can install when that is newer. A package's details are its summary, version, the version
+can install when that is newer. Installed means the repository's build (decided 2026-11-11): the
+same ID and version installed with different content (a user's own build that kept the ID, or
+one installed some other way), told by the archive's SHA-256 recorded at install, says
+**Installed (a different build)**, and its details say the installed build does not match this
+repository's. It offers **Install the repository's build**, never on its own, which replaces it
+after a confirmation naming both. An install recorded before the SHA-256 was says Installed, as
+nothing tells its build. A package's details are its summary, version, the version
 installed, license, publisher and key fingerprint, repository, download and installed size, and
 the packages it needs, with Install (or Update; neither when what is installed is current), which
 runs the install job and its questions. A

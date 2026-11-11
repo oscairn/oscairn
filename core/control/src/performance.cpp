@@ -1942,13 +1942,15 @@ Control::Installed Session::installArchive(const std::string& file,bool asLibrar
     const auto p=readPackage(file,into);
     const auto out=installUnpacked(p,into,asLibrary,chosen,acceptUnsignedCode,false);
     // From a file, no repository and no version, but a plugin package's: its first plugin's, the package's unless that plugin names its own.
-    recordPackage(p,asLibrary,p.plugins.empty()?std::string():p.plugins.front().version,{});
+    // Its file's SHA-256, as a repository's index would list it; a package folder has none.
+    std::error_code e;
+    recordPackage(p,asLibrary,p.plugins.empty()?std::string():p.plugins.front().version,{},fs::is_regular_file(file,e)?assets::sha256File(file):std::string(),out.otherBuild);
     return out;
 }
 
 // What readPackage unpacked into `into`, moved into place by renames in the data folder (RFC
 // 0031: an install needs room for what it installs, not twice that); `into` goes either way.
-Control::Installed Session::installUnpacked(const Package& p,const fs::path& into,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode,bool thisPlatformOnly,bool checkOnly,bool dependency) {
+Control::Installed Session::installUnpacked(const Package& p,const fs::path& into,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode,bool thisPlatformOnly,bool checkOnly,bool dependency,bool replace) {
     auto& l=library();
     Installed out;
     std::vector<fs::path> created; // item folders this call copies, undone if it fails
@@ -1990,12 +1992,21 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             for(auto node:array(field(doc.get(),"nodes"),256)){const V plugin=field(node,"plugin");used.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
         }
         std::set<std::pair<std::string,std::string>> revoked; // builds not installed, by plugin ID and path (a bundle holding several plugins is listed for each)
+        std::set<std::pair<std::string,std::string>> replaced; // builds here, by plugin ID and platform, that `replace` puts the archive's over
         std::string unknown;
         for(const auto& plugin:p.plugins){
             if(!used.count({plugin.format,plugin.id,plugin.version}))continue;
             const auto there=storedBuilds(plugin.format,plugin.id,plugin.version);
             for(const auto& build:plugin.builds){
-                if(there.count(build.platform) || (thisPlatformOnly && build.platform!=platform()))continue;
+                if(thisPlatformOnly && build.platform!=platform())continue;
+                if(const auto at=there.find(build.platform);at!=there.end()){
+                    if(!replace || bundleDigest(at->second)==build.sha256)continue;
+                    // Never under the open Performance, as plugins.remove refuses; by real paths, as a host loads by its own.
+                    std::error_code e;const auto here=fs::weakly_canonical(storeFolder(plugin.format,plugin.id,plugin.version)/platform(),e).string()+"/";
+                    if(build.platform==platform())for(const auto& n:nodes_)if(fs::weakly_canonical(graph_.host(n.first).descriptor().path,e).string().rfind(here,0)==0 && graph_.host(n.first).failure().empty())
+                        bad("the open Performance plays "+plugin.name+" "+plugin.version+"; remove it from the Performance or open another before replacing its build");
+                    replaced.insert({plugin.id,build.platform});
+                }
                 auto s=judge("plugin",build.signatures);s.name=plugin.name;s.version=plugin.version;s.platform=build.platform;
                 const auto what=plugin.name+" "+plugin.version+" ("+build.platform+")";
                 if(s.status=="revoked"){revoked.insert({plugin.id,build.path});out.notes.push_back(what+" is signed by a revoked key ("+s.key+"); it was not installed");}
@@ -2022,8 +2033,8 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             const auto there=storedBuilds(plugin.format,plugin.id,plugin.version);
             for(const auto& build:plugin.builds){
                 if(thisPlatformOnly && build.platform!=platform())continue; // a repository install takes what this device runs (RFC 0031)
-                if(const auto at=there.find(build.platform);at!=there.end()){
-                    if(bundleDigest(at->second)!=build.sha256)out.notes.push_back("a different "+build.platform+" build of "+plugin.name+" "+plugin.version+" is already installed; it was kept");
+                if(there.count(build.platform) && !replaced.count({plugin.id,build.platform})){
+                    if(bundleDigest(there.at(build.platform))!=build.sha256){out.notes.push_back("a different "+build.platform+" build of "+plugin.name+" "+plugin.version+" is already installed; it was kept");out.otherBuild=true;}
                     continue;
                 }
                 if(revoked.count({plugin.id,build.path}))continue;
@@ -2204,8 +2215,9 @@ Control::AssetCollection Session::collectAssets(bool remove) {
 namespace {
 // packages.json in the data folder: each package installed, by ID, version, kind and the address
 // of the repository it came from (RFC 0031), with a plugin package's plugins, as nothing else says
-// which it installed: {"format":"oscairn.packages","version":1,"packages":[{"id","version","kind",
-// "repository","plugins":[{"format","id","version"}]}]}.
+// which it installed, and what it was installed from (InstalledPackage): {"format":"oscairn.packages",
+// "version":1,"packages":[{"id","version","kind","repository","plugins":[{"format","id","version"}],
+// "sha256","signers":[key ID],"otherBuild"}]}; the last three absent in records written before them.
 struct Recorded { Control::InstalledPackage package; std::vector<std::tuple<std::string,std::string,std::string>> plugins; };
 std::mutex recordedMutex; // packages.json, read and written whole
 fs::path recordedFile(){return dataHome()/"packages.json";}
@@ -2219,6 +2231,9 @@ std::vector<Recorded> readRecorded(){
         for(auto r:array(field(doc.get(),"packages"),100000)){
             Recorded x{{text(field(r,"id")),text(field(r,"version")),text(field(r,"kind")),text(field(r,"repository"))},{}};
             for(auto p:array(field(r,"plugins"),4096))x.plugins.push_back({text(field(p,"format")),text(field(p,"id")),text(field(p,"version"))});
+            if(member(r,"sha256"))x.package.sha256=text(member(r,"sha256"));
+            if(member(r,"signers"))for(auto k:array(member(r,"signers"),64))x.package.signers.push_back(text(k));
+            x.package.otherBuild=member(r,"otherBuild") && boolean(member(r,"otherBuild"));
             out.push_back(std::move(x));
         }
     }catch(const std::exception& x){std::fprintf(stderr,"oscairn: %s unreadable (%s); what it recorded is derived where it can be\n",recordedFile().string().c_str(),x.what());out.clear();}
@@ -2227,10 +2242,11 @@ std::vector<Recorded> readRecorded(){
 void writeRecorded(const std::vector<Recorded>& all){
     std::string out;
     for(const auto& r:all){
-        std::string plugins;
+        std::string plugins,signers;
         for(const auto& [format,id,version]:r.plugins)plugins+=std::string(plugins.empty()?"":",")+"{\"format\":"+quote(format)+",\"id\":"+quote(id)+",\"version\":"+quote(version)+'}';
+        for(const auto& k:r.package.signers)signers+=std::string(signers.empty()?"":",")+quote(k);
         out+=std::string(out.empty()?"":",")+"{\"id\":"+quote(r.package.id)+",\"version\":"+quote(r.package.version)+",\"kind\":"+quote(r.package.kind)+
-             ",\"repository\":"+quote(r.package.repository)+",\"plugins\":["+plugins+"]}";
+             ",\"repository\":"+quote(r.package.repository)+",\"plugins\":["+plugins+"],\"sha256\":"+quote(r.package.sha256)+",\"signers\":["+signers+"],\"otherBuild\":"+(r.package.otherBuild?"true":"false")+'}';
     }
     writeAtomically(recordedFile(),"{\"format\":\"oscairn.packages\",\"version\":1,\"packages\":["+out+"]}\n");
 }
@@ -2243,10 +2259,12 @@ bool present(const Recorded& r,const std::vector<Control::InstalledLibrary>& lib
 }
 }
 
-void Session::recordPackage(const Package& p,bool asLibrary,const std::string& version,const std::string& repository) {
+void Session::recordPackage(const Package& p,bool asLibrary,const std::string& version,const std::string& repository,const std::string& sha256,bool otherBuild) {
     const std::string kind=p.kind=="plugin" || p.kind=="asset"?p.kind:asLibrary?"library":"";
     if(kind.empty())return; // copies in the user's own storage: no package is installed
-    Recorded r{{p.id,kind=="asset"?p.assetVersion:version,kind,repository},{}};
+    // A build kept from before is not this archive's: neither its hash nor its signer says what is installed.
+    Recorded r{{p.id,kind=="asset"?p.assetVersion:version,kind,repository,otherBuild?std::string():sha256,{},otherBuild},{}};
+    if(!otherBuild && !p.signature.key.empty())r.package.signers.push_back(signing::keyId(p.signature.key));
     for(const auto& q:p.plugins)r.plugins.push_back({q.format,q.id,q.version});
     std::lock_guard lock(recordedMutex);
     auto all=readRecorded();

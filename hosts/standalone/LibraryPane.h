@@ -131,7 +131,8 @@ namespace oscairn::standalone
         // Code from a publisher not trusted for plugins asks first: trust the publisher (its name,
         // fingerprint and full key shown; `publisher` names it when known) and try again, install
         // anyway this once, or cancel. Nothing is trusted unless the user says so.
-        void installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher = {});
+        // replace: the repository's build over a different one installed, as the user chose.
+        void installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher = {}, bool replace = false);
         void awaitPackageJob(uint64_t job, std::function<void(const Control::PackageJob&)> then);
         void itemMenu(int row);                             // everything that can be done with it
         void editItem(int row);                              // its name, description and tags, asked for

@@ -314,8 +314,9 @@ namespace oscairn
         // install is refused, listing them, unless acceptUnsignedCode (the user said yes, having
         // seen archiveContents' code); a build by a revoked key is never installed (what uses it
         // opens with a stand-in) and is noted. Data installs whether signed or not. code: the
-        // signer of each build installed or refused.
-        struct Installed { uint32_t added = 0, skipped = 0; std::vector<std::string> notes; std::vector<Signer> code; };
+        // signer of each build installed or refused. otherBuild: a different build of one of its
+        // plugins was here already and kept (said in notes; not sent on its own).
+        struct Installed { uint32_t added = 0, skipped = 0; std::vector<std::string> notes; std::vector<Signer> code; bool otherBuild = false; };
         virtual Installed installArchive(const std::string& file, bool asLibrary, const std::vector<std::string>& items = {}, bool acceptUnsignedCode = false) = 0;
         struct InstalledLibrary { std::string id, name; uint32_t items = 0; };
         virtual std::vector<InstalledLibrary> libraries() = 0;
@@ -351,17 +352,20 @@ namespace oscairn
         // offers, each version with why this device cannot install it (incompatible), if so.
         // Install: one package, as a locked library (a plugin package's builds into the store), at
         // `version` or the newest stable one this device can install that is not yanked; only this
-        // device's plugin builds are installed, under installArchive's rules for code.
+        // device's plugin builds are installed, under installArchive's rules for code. A different
+        // build of its plugins already here is kept, unless `replace`: the user chose to install
+        // the repository's build over it (never done on its own); refused while the open
+        // Performance plays it. sha256: the version's archive SHA-256, as the index lists it.
         // types: how many items of each type (oscairn.sound, oscairn.performance...) and plugins of
         // each format (clap, lv2) it holds; dependencies: the packages it needs, each ID and least version.
-        struct RepositoryVersion { std::string version, channel, yanked, incompatible; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; };
+        struct RepositoryVersion { std::string version, channel, yanked, incompatible, sha256; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; };
         struct RepositoryPackage { std::string id, name, summary, license, publisher, publisherKey; std::vector<std::string> tags; std::vector<RepositoryVersion> versions; };
         // state: "running", "done" or "failed" (error says why). rootKey: the repository's root key
         // once read, so a refusal for an untrusted one can offer to trust it. packages: a listing's;
         // package and version: what an install installed, and installed what installArchive returns.
         struct PackageJob { uint64_t id = 0; std::string state, error, repository, name, rootKey; uint64_t serial = 0; std::vector<RepositoryPackage> packages; std::string package, version; Installed installed; };
         virtual uint64_t listRepository(const std::string& source) = 0;
-        virtual uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false) = 0;
+        virtual uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false, bool replace = false) = 0;
         virtual PackageJob packageJob(uint64_t id) = 0;
         // The packages installed here (RFC 0031), each version once: its ID, version, kind
         // ("plugin", "asset" or "library") and the repository's address it came from. Each install
@@ -370,7 +374,12 @@ namespace oscairn
         // version, a locked library with none (empty version, as for a library installed from a
         // file), neither with a repository; a plugin package is not, as nothing says which
         // plugins it held. Plugin packages install side by side, so one may be listed at several versions.
-        struct InstalledPackage { std::string id, version, kind, repository; };
+        // What it was installed from: sha256, the archive's SHA-256 (as a repository's index lists
+        // it, or the file's), and signers, the key IDs that signed the archive; both empty when not
+        // known (recorded before installs kept them), sha256 also from a package folder. otherBuild:
+        // the install kept a different build of its plugins already here, so what is installed is
+        // not that archive's; sha256 and signers are then empty.
+        struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; };
         virtual std::vector<InstalledPackage> installedPackages() = 0;
         // The repositories this device knows (RFC 0031), each by its address (a folder, or
         // https://, with no '/' at the end), its root key (hex) and name. origin: "official" (built

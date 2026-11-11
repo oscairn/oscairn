@@ -927,11 +927,11 @@ namespace oscairn
             // Package repositories (RFC 0031): jobs off the control thread, asked about by number.
             if(method=="packages.list" || method=="packages.install") {
                 const bool install=method=="packages.install";
-                if(install)fields(p,{"source","id","version","acceptUnsignedCode"});else fields(p,{"source"});
+                if(install)fields(p,{"source","id","version","acceptUnsignedCode","replace"});else fields(p,{"source"});
                 const auto source=std::string(string(member(p,"source")));
                 try{
                     const auto job=install?c.installFromRepository(source,std::string(string(member(p,"id"))),member(p,"version")?std::string(string(member(p,"version"))):std::string(),
-                                                                   member(p,"acceptUnsignedCode") && boolean(member(p,"acceptUnsignedCode")))
+                                                                   member(p,"acceptUnsignedCode") && boolean(member(p,"acceptUnsignedCode")),member(p,"replace") && boolean(member(p,"replace")))
                                           :c.listRepository(source);
                     return "{\"job\":"+std::to_string(job)+'}';
                 }catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
@@ -941,7 +941,11 @@ namespace oscairn
             // The packages installed here (RFC 0031).
             if(method=="packages.installed") {
                 fields(p,{});std::vector<std::string> out;
-                try{for(const auto& x:c.installedPackages())out.push_back("{\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"kind\":"+quote(x.kind)+",\"repository\":"+quote(x.repository)+'}');}
+                try{for(const auto& x:c.installedPackages()){
+                    std::vector<std::string> signers;for(const auto& k:x.signers)signers.push_back(quote(k));
+                    out.push_back("{\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"kind\":"+quote(x.kind)+",\"repository\":"+quote(x.repository)+
+                                  ",\"sha256\":"+quote(x.sha256)+",\"signers\":"+join(signers)+",\"otherBuild\":"+(x.otherBuild?"true":"false")+'}');
+                }}
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return "{\"packages\":"+join(out)+'}';
             }
@@ -982,7 +986,7 @@ namespace oscairn
                         for(const auto& [type,n]:v.types)types+=(types.empty()?"":",")+quote(type)+":"+std::to_string(n);
                         std::vector<std::string> needs;
                         for(const auto& [id,least]:v.dependencies)needs.push_back("{\"id\":"+quote(id)+",\"version\":"+quote(least)+'}');
-                        versions.push_back("{\"version\":"+quote(v.version)+",\"channel\":"+quote(v.channel)+",\"yanked\":"+quote(v.yanked)+",\"incompatible\":"+quote(v.incompatible)+
+                        versions.push_back("{\"version\":"+quote(v.version)+",\"channel\":"+quote(v.channel)+",\"yanked\":"+quote(v.yanked)+",\"incompatible\":"+quote(v.incompatible)+",\"sha256\":"+quote(v.sha256)+
                                            ",\"size\":"+std::to_string(v.size)+",\"installed\":"+std::to_string(v.installed)+",\"types\":{"+types+"},\"dependencies\":"+join(needs)+'}');
                     }
                     packages.push_back("{\"id\":"+quote(x.id)+",\"name\":"+quote(x.name)+",\"summary\":"+quote(x.summary)+",\"license\":"+quote(x.license)+",\"publisher\":"+quote(x.publisher)+

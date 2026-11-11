@@ -19,7 +19,7 @@ namespace oscairn::standalone
         return false;
     }
 
-    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, std::string>& installed)
+    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, Control::InstalledPackage>& installed)
     {
         std::vector<Offer> out;
         for(const auto& [source, listing] : listings)
@@ -37,8 +37,15 @@ namespace oscairn::standalone
                 // Installed at a version not known (a library installed before installs were recorded): no update can be told.
                 if(const auto at = installed.find(p.id); at != installed.end())
                 {
-                    o.installed = at->second;
-                    o.update = pick && !at->second.empty() && repository::older(at->second, pick->version);
+                    const auto& r = at->second;
+                    o.installed = r.version; o.record = r;
+                    o.update = pick && !r.version.empty() && repository::older(r.version, pick->version);
+                    // "Installed" only as this repository builds it (decided 2026-11-11).
+                    for(const auto& v : p.versions)
+                        if(!o.update && !r.version.empty() && v.version == r.version && (r.otherBuild || (!r.sha256.empty() && !v.sha256.empty() && r.sha256 != v.sha256)))
+                        {
+                            o.otherBuild = true; o.version = v; o.installable = v.incompatible.empty();
+                        }
                 }
                 out.push_back(std::move(o));
             }
@@ -46,7 +53,30 @@ namespace oscairn::standalone
         return out;
     }
 
-    Catalog::Catalog(Engine& engine, const std::string& kind, std::map<std::string, std::string> installed) : engine_(engine), kind_(kind), installed_(std::move(installed))
+    juce::String describe(const Offer& o)
+    {
+        const auto about = text(o.package.publisher) + (o.package.summary.empty() ? juce::String() : separator + text(o.package.summary));
+        return o.update ? "Update to " + text(o.version.version) + separator + about
+             : o.otherBuild ? "Installed (a different build)" + separator + about
+             : o.installed ? "Installed" + separator + about
+             : o.installable ? about
+                             : "Cannot be installed here: " + text(o.version.incompatible.empty() ? "no version it can install" : o.version.incompatible);
+    }
+
+    juce::String replaceQuestion(const Offer& o)
+    {
+        auto archive = [](const std::string& sha) { return "archive " + text(sha.substr(0, 16)); };
+        juce::StringArray signers;
+        for(const auto& k : o.record.signers) signers.add(fingerprint(k));
+        const auto name = text(o.package.name.empty() ? o.package.id : o.package.name) + " " + text(o.version.version);
+        const auto installed = o.record.sha256.empty() ? juce::String("a build installed some other way, its archive not known")
+                                                       : archive(o.record.sha256) + (signers.isEmpty() ? juce::String(", unsigned") : ", signed by key " + signers.joinIntoString(", "));
+        return name + " is installed here, but it is not the build " + text(o.repository) + " has.\n\nInstalled: " + installed + "\n" + text(o.repository) + "'s: " +
+               archive(o.version.sha256) + ", signed by " + text(o.package.publisher) + ", key " + fingerprint(o.package.publisherKey) +
+               "\n\nInstalling the repository's build replaces the installed one.";
+    }
+
+    Catalog::Catalog(Engine& engine, const std::string& kind, std::map<std::string, Control::InstalledPackage> installed) : engine_(engine), kind_(kind), installed_(std::move(installed))
     {
         setTitle("Catalog");
         for(auto* b : {&performances, &sounds, &plugins}) { b->setClickingTogglesState(true); b->setRadioGroupId(1); }
@@ -148,11 +178,11 @@ namespace oscairn::standalone
         if(row < 0 || size_t(row) >= shown_.size()) return;
         opened_ = shown_[size_t(row)];
         const auto& o = *opened_;
-        install.setButtonText(o.update ? "Update to " + text(o.version.version) : juce::String("Install"));
+        install.setButtonText(o.update ? "Update to " + text(o.version.version) : o.otherBuild ? juce::String("Install the repository's build") : juce::String("Install"));
         install.setEnabled(o.installable);
         install.setTooltip(o.installable ? juce::String() : text(o.version.incompatible.empty() ? "No version this device can install" : o.version.incompatible));
         for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &search, &list}) c->setVisible(false);
-        backButton.setVisible(true); install.setVisible(!o.installed || o.update); // installed and current: nothing to install
+        backButton.setVisible(true); install.setVisible(!o.installed || o.update || o.otherBuild); // installed and current: nothing to install
         resized(); repaint();
     }
 
@@ -179,7 +209,9 @@ namespace oscairn::standalone
             {"Repository", text(o.repository)},
             {"Size", bytes(v.size) + " to download, " + bytes(v.installed) + " installed"},
             {"Needs", needs.isEmpty() ? juce::String("Nothing else") : needs.joinIntoString(", ")}};
-        if(o.installed) out.insert(out.begin() + 2, {"Installed", o.installed->empty() ? juce::String("Its version not known") : text(*o.installed)});
+        if(o.installed)
+            out.insert(out.begin() + 2, {"Installed", o.installed->empty() ? juce::String("Its version not known")
+                                                      : text(*o.installed) + (o.otherBuild ? ", a different build: it does not match this repository's" : "")});
         if(!o.installable) out.push_back({"On this device", text(v.incompatible.empty() ? "no version it can install" : v.incompatible)});
         return out;
     }
@@ -198,12 +230,7 @@ namespace oscairn::standalone
         g.setFont(juce::FontOptions(textSize(TextRole::Body, m), juce::Font::bold));
         g.drawText(text(o.package.name.empty() ? o.package.id : o.package.name) + "  " + text(o.installed ? *o.installed : o.version.version), top, juce::Justification::bottomLeft, true);
         g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(textSize(TextRole::Small, m)));
-        const auto about = text(o.package.publisher) + (o.package.summary.empty() ? juce::String() : separator + text(o.package.summary));
-        const auto line = o.update ? "Update to " + text(o.version.version) + separator + about
-                        : o.installed ? "Installed" + separator + about
-                        : o.installable ? about
-                                        : "Cannot be installed here: " + text(o.version.incompatible.empty() ? "no version it can install" : o.version.incompatible);
-        g.drawText(line, area, juce::Justification::topLeft, true);
+        g.drawText(describe(o), area, juce::Justification::topLeft, true);
     }
 
     void Catalog::resized()

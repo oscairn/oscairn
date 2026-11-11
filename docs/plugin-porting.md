@@ -725,7 +725,9 @@ What changes for the plugin:
   `oscairn-sign plugin-package` and `oscairn-plugin-check` check it
   ([the rules](library-archive.md#plugin-packages)). When a device's store already has a different
   build of the same version for a platform, it keeps that one and notes that the incoming build
-  was not installed, so give a changed build a new version. LV2 plugins
+  was not installed, so give a changed build a new version. The Catalog shows such a package as
+  Installed (a different build), not as the repository's, and replaces it with the repository's
+  build only when the user chooses to. LV2 plugins
   are not packaged; they must be installed on each device.
 - **Signing your builds** ([RFC 0006](rfcs/0006-packages-and-portability.md#signatures)):
   `oscairn-sign key author.key` makes your key (keep it private; it is readable only by you),

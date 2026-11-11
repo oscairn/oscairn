@@ -381,8 +381,11 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
     def store():
         return rpc('plugins.list')['plugins']
 
-    def recorded():
+    def records():
         return rpc('packages.installed')['packages']
+
+    def recorded():  # what each record names, without what it was installed from
+        return [{k: r[k] for k in ('id', 'version', 'kind', 'repository')} for r in records()]
 
     try:
         # Not trusted yet: refused, naming its root key so the user can choose to trust it.
@@ -483,6 +486,53 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
               'and the unpacked one installs, read in place and left as it was')
         check(recorded() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': ''}], 'installed from a file, it is recorded with no repository: ' + json.dumps(recorded()))
 
+        # What an install came from (the owner's rule, 2026-11-11): the archive's SHA-256 as the
+        # repository lists it, and its signer. The user's own build at the same ID and version is
+        # told apart; an install from the repository keeps it unless asked to replace it.
+        listing = {x['id']: x for x in job('packages.list', {'source': str(good)})['packages']}
+        listed = {v['version']: v['sha256'] for v in listing['org.kick.test.synth']['versions']}
+        check(listed['1.0.0'] == hashlib.sha256(synth.read_bytes()).hexdigest(), 'a listing gives each version its archive SHA-256: ' + json.dumps(listed))
+        check(records()[0]['sha256'] == '' and records()[0]['signers'] == [keys['publisher'][0]] and not records()[0]['otherBuild'],
+              'from a package folder there is no archive hash, only its signer: ' + json.dumps(records()))
+        stored = home / 'Plugins' / 'clap' / 'org.kick.test.synth@1.0.0' / here / 'Synth.clap'
+        rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+        state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
+        check(state['state'] == 'done' and records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good),
+                                                          'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False}],
+              'from the repository, the listed archive hash and its signer are recorded: ' + json.dumps(records()))
+        again = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
+        check(again['state'] == 'done' and again['installed']['notes'] == [] and records()[0]['sha256'] == listed['1.0.0'], 'the same build again changes nothing')
+        # The user's own build, keeping the ID and version, signed by another key.
+        own = temp / 'builds' / 'own' / 'Synth.clap'
+        own.parent.mkdir(parents=True)
+        own.write_bytes(fixture.read_bytes() + b'\0' * 16)  # past the end of the binary: it loads the same
+        mine = temp / 'mine.olib'
+        run(tool, 'build', temp / 'other.key', 'clap', 'org.kick.test.synth', '1.0.0', here, own)
+        run(tool, 'plugin-package', '--license', 'MIT', '--key', temp / 'other.key', mine, 'clap', 'org.kick.test.synth', '1.0.0', 'Test Synth', f'{here}={own}')
+        rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+        rpc('library.install', {'file': str(mine), 'acceptUnsignedCode': True})
+        r = records()[0]
+        check(r['sha256'] == hashlib.sha256(mine.read_bytes()).hexdigest() != listed['1.0.0'] and r['signers'] == [keys['other'][0]] and r['repository'] == '' and stored.read_bytes() == own.read_bytes(),
+              'a build from a file is recorded by its own archive hash and signer: ' + json.dumps(r))
+        # From the repository without asking: the different build is kept and said to be another build.
+        state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
+        r = records()[0]
+        check(state['state'] == 'done' and any('already installed; it was kept' in n for n in state['installed']['notes']) and stored.read_bytes() == own.read_bytes() and
+              r['otherBuild'] and r['sha256'] == '' and r['signers'] == [] and r['repository'] == str(good),
+              'an install from the repository keeps a different build, recorded as another build: ' + json.dumps(r))
+        # Replacing it, asked for: refused while the open Performance plays it, then done and recorded.
+        node = rpc('graph.add', {'path': str(stored), 'pluginId': 'org.kick.test.synth', 'name': 'mine'})['node']
+        rpc('graph.commit')
+        state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth', 'replace': True})
+        check(state['state'] == 'failed' and 'open Performance plays' in state['error'] and stored.read_bytes() == own.read_bytes() and leftovers() == [],
+              'the repository\'s build does not replace one the open Performance plays: ' + state['error'])
+        rpc('graph.remove', {'node': node})
+        rpc('graph.commit')
+        state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth', 'replace': True})
+        check(state['state'] == 'done' and state['installed']['notes'] == [] and stored.read_bytes() == fixture.read_bytes() and
+              records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good), 'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False}],
+              'asked to, the repository\'s build replaces it and is recorded as the repository\'s: ' + json.dumps(records()))
+
         # A plugin package that needs an asset library: installing it from the repository pulls
         # the newest version of the library that is at least the one it needs (RFC 0009).
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.analog'})
@@ -518,6 +568,11 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(state['state'] == 'done' and state['version'] == '1.1.0' and [x for x in recorded() if x['id'] == 'org.kick.factory'] == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good)}] and
               sorted(e.name for e in library.iterdir() if not e.name.startswith('.')) == ['1.1.0'], 'updated, the new version replaces the old one and its record: ' + json.dumps(recorded()))
         # Installed before installs were recorded: an asset library is derived at its version, a plugin package is not.
+        # A record written before the archive hash was (no sha256) still reads, with none.
+        (home / 'packages.json').write_text(json.dumps({'format': 'oscairn.packages', 'version': 1, 'packages': [
+            {'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'plugins': []}]}))
+        check(records() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'sha256': '', 'signers': [], 'otherBuild': False}],
+              'an older record reads, with no archive hash: ' + json.dumps(records()))
         (home / 'packages.json').unlink()
         check(recorded() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': ''}] and any(x['id'] == 'org.kick.test.synth' for x in store()),
               'with no record, the asset library is derived and the plugin package is not: ' + json.dumps(recorded()))

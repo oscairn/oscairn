@@ -958,6 +958,76 @@ int main(int argc, char** argv)
                 check(catalog && wait([&] { return !catalog->reading(); }) && synthRow() >= 0 && catalog->shown()[size_t(synthRow())].installed == std::optional<std::string>("1.0.0") &&
                           !catalog->shown()[size_t(synthRow())].update,
                       "updated, it is installed and current");
+                // The same version installed as another build (its archive is not the repository's,
+                // by the SHA-256 recorded at install): never shown as Installed, offering the
+                // repository's build, which replaces it only once the user says so, having seen both.
+                std::string listedSha;
+                if(catalog && synthRow() >= 0)
+                {
+                    const auto& synth = catalog->shown()[size_t(synthRow())];
+                    listedSha = synth.version.sha256;
+                    check(listedSha.size() == 64 && synth.record.sha256 == listedSha && !synth.otherBuild && standalone::describe(synth).startsWith("Installed  "),
+                          "the repository's own build, by its archive's hash, is Installed: " + standalone::describe(synth).toStdString());
+                    closeCatalog();
+                }
+                const auto recorded = data.getChildFile("packages.json");
+                const auto was = recorded.loadFileAsString();
+                const auto other = was.replace(juce::String(listedSha), juce::String(std::string(64, 'e')));
+                check(!listedSha.empty() && other != was && recorded.replaceWithText(other), "an install recorded with another archive's hash: " + was.toStdString());
+                const auto written = recorded.loadFileAsString(); // as written, its line ends JUCE's
+                pane.showCatalog("plugin");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && synthRow() >= 0, "the Catalog lists it again");
+                for(const bool confirm : {false, true})
+                    if(catalog && synthRow() >= 0)
+                    {
+                        const auto& synth = catalog->shown()[size_t(synthRow())];
+                        check(synth.otherBuild && synth.installed == std::optional<std::string>("1.0.0") && !synth.update && synth.offered() &&
+                                  standalone::describe(synth).startsWith("Installed (a different build)"),
+                              "another build at the listed version is not shown as Installed: " + standalone::describe(synth).toStdString());
+                        if(!confirm)
+                        {
+                            standalone::setDesktopMode(*catalog, 1); catalog->setSize(820, 560); settle();
+                            snapshot(*catalog, "catalog-other-build");
+                        }
+                        catalog->open(synthRow());
+                        const auto facts = catalog->facts();
+                        std::map<juce::String, juce::String> fact(facts.begin(), facts.end());
+                        check(fact["Installed"] == "1.0.0, a different build: it does not match this repository's" && catalog->install.isVisible() && catalog->install.isEnabled() &&
+                                  catalog->install.getButtonText() == "Install the repository's build",
+                              "its details say so, offering the repository's build: " + fact["Installed"].toStdString() + " / " + catalog->install.getButtonText().toStdString());
+                        if(!confirm) { settle(); snapshot(*catalog, "catalog-other-build-details"); }
+                        catalog->install.triggerClick();
+                        check(wait([&] { auto* w = modalAlert(); return w && w->getName() == "Install the repository's build?"; }), "it asks first");
+                        if(auto* w = modalAlert(); w && w->getName() == "Install the repository's build?")
+                        {
+                            const auto said = alertText(w);
+                            check(w->getNumButtons() == 2 && w->getButton(0)->getButtonText() == "Install the repository's build" && w->getButton(1)->getButtonText() == "Cancel" &&
+                                      said.contains("Installed: archive " + juce::String(std::string(16, 'e'))) && said.contains("Test repository's: archive " + juce::String(listedSha.substr(0, 16))) &&
+                                      said.contains(standalone::fingerprint(signing::keyId(publisherKey))),
+                                  "naming both builds by their archives and signers: " + said.toStdString());
+                            if(!confirm) over(*w, "catalog-other-build-confirm");
+                            answer(w, confirm ? 1 : 0);
+                        }
+                        if(!confirm)
+                        {
+                            settle();
+                            check(!pane.message().startsWith("Installing") && recorded.loadFileAsString() == written, "Cancel installs nothing: " + pane.message().toStdString());
+                            pane.showCatalog("plugin");
+                            catalog = pane.catalog();
+                            check(catalog && wait([&] { return !catalog->reading(); }) && synthRow() >= 0, "the Catalog lists it again");
+                        }
+                    }
+                check(wait([&] { return pane.message().startsWith("Installing"); }) && wait([&] { return pane.message().contains("installed."); }), "confirmed, the repository's build installs: " + pane.message().toStdString());
+                std::vector<Control::InstalledPackage> packages;
+                engine.packages([&](Control& c) { packages = c.installedPackages(); });
+                check(std::any_of(packages.begin(), packages.end(), [&](const auto& p) { return p.id == "org.kick.test.synth" && p.version == "1.0.0" && p.sha256 == listedSha && !p.otherBuild; }),
+                      "and is recorded as the repository's build");
+                pane.showCatalog("plugin");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && synthRow() >= 0 && !catalog->shown()[size_t(synthRow())].otherBuild &&
+                          !catalog->shown()[size_t(synthRow())].offered(),
+                      "then it is Installed, with nothing to install");
                 if(catalog) closeCatalog();
                 // Removed in Settings, asked first: no longer listed, its root key no longer trusted.
                 {

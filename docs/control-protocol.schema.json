@@ -4000,6 +4000,10 @@
                 "acceptUnsignedCode": {
                   "type": "boolean",
                   "description": "The user said yes to plugin builds unsigned or signed by an unknown key"
+                },
+                "replace": {
+                  "type": "boolean",
+                  "description": "The user chose the repository's build over a different build of the same version installed here"
                 }
               },
               "required": [
@@ -4061,7 +4065,7 @@
             },
             "method": {
               "const": "packages.installed",
-              "description": "The packages installed on this device: each version's ID, version, kind and repository"
+              "description": "The packages installed on this device: each version's ID, version, kind, repository and the archive it came from"
             },
             "params": {
               "type": "object",

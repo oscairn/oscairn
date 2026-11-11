@@ -994,10 +994,10 @@ namespace oscairn::standalone
     // with the newest version installed (packages.installed).
     void LibraryPane::showCatalog(const std::string& kind)
     {
-        std::map<std::string, std::string> installed;
+        std::map<std::string, Control::InstalledPackage> installed;
         if(const auto error = engine_.packages([&](Control& c) {
                for(const auto& p : c.installedPackages())
-                   if(auto [at, added] = installed.try_emplace(p.id, p.version); !added && repository::older(at->second, p.version)) at->second = p.version;
+                   if(auto [at, added] = installed.try_emplace(p.id, p); !added && repository::older(at->second.version, p.version)) at->second = p;
            }); !error.empty())
             tell(text(error));
         auto* content = new Catalog(engine_, kind, std::move(installed));
@@ -1012,7 +1012,14 @@ namespace oscairn::standalone
         content->close.onClick = [dialog] { dialog->exitModalState(0); };
         content->onInstall = [safe = juce::Component::SafePointer<LibraryPane>(this), dialog](const Offer& o) {
             dialog->exitModalState(0);
-            if(safe) safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher);
+            if(!safe) return;
+            if(!o.otherBuild || o.update) { safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher); return; }
+            // Over a different build only when the user says so, having seen both.
+            auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::QuestionIcon, "Install the repository's build?", replaceQuestion(o),
+                                                                        "Install the repository's build", "Cancel", safe.getComponent());
+            juce::AlertWindow::showAsync(options, [safe, o](int chosen) {
+                if(safe && chosen == 1) safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher, true);
+            });
         };
         content->read();
     }
@@ -1028,12 +1035,12 @@ namespace oscairn::standalone
         });
     }
 
-    void LibraryPane::installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher)
+    void LibraryPane::installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher, bool replace)
     {
         uint64_t job = 0;
-        if(const auto error = engine_.packages([&](Control& c) { job = c.installFromRepository(folder, id, version, acceptCode); }); !error.empty()) { tell(text(error)); return; }
+        if(const auto error = engine_.packages([&](Control& c) { job = c.installFromRepository(folder, id, version, acceptCode, replace); }); !error.empty()) { tell(text(error)); return; }
         tell("Installing " + text(id) + " " + text(version) + "...");
-        awaitPackageJob(job, [safe = juce::Component::SafePointer<LibraryPane>(this), folder, id, version, publisher](const Control::PackageJob& done) {
+        awaitPackageJob(job, [safe = juce::Component::SafePointer<LibraryPane>(this), folder, id, version, publisher, replace](const Control::PackageJob& done) {
             if(!safe) return;
             // Code from an unknown source asks first, as installing an archive does; signed code
             // can instead have its publisher trusted for plugins, shown by name, fingerprint and
@@ -1049,15 +1056,15 @@ namespace oscairn::standalone
                 if(keys.empty())
                 {
                     auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::WarningIcon, "Install anyway?", said, "Install anyway", "Cancel", safe.getComponent());
-                    juce::AlertWindow::showAsync(options, [safe, folder, id, version](int chosen) { if(safe && chosen == 1) safe->installPackage(folder, id, version, true); });
+                    juce::AlertWindow::showAsync(options, [safe, folder, id, version, replace](int chosen) { if(safe && chosen == 1) safe->installPackage(folder, id, version, true, {}, replace); });
                 }
                 else
                 {
                     said << "\n\nTrust " << who << " to run its plugins on this device only if you know that key is theirs.";
                     auto options = juce::MessageBoxOptions::makeOptionsYesNoCancel(juce::MessageBoxIconType::WarningIcon, "Install anyway?", said, "Trust " + who, "Install anyway", "Cancel", safe.getComponent());
-                    juce::AlertWindow::showAsync(options, [safe, folder, id, version, publisher, keys](int chosen) {
+                    juce::AlertWindow::showAsync(options, [safe, folder, id, version, publisher, keys, replace](int chosen) {
                         if(!safe) return;
-                        if(chosen == 2) { safe->installPackage(folder, id, version, true, publisher); return; }
+                        if(chosen == 2) { safe->installPackage(folder, id, version, true, publisher, replace); return; }
                         if(chosen != 1) return;
                         for(const auto& k : keys)
                             if(const auto error = safe->engine_.packages([&](Control& c) {
@@ -1067,7 +1074,7 @@ namespace oscairn::standalone
                                    c.setTrustedKey(t);
                                }); !error.empty())
                                 { safe->tell(text(error)); return; }
-                        safe->installPackage(folder, id, version, false, publisher);
+                        safe->installPackage(folder, id, version, false, publisher, replace);
                     });
                 }
                 safe->tell("");

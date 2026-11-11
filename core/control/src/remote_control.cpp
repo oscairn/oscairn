@@ -613,13 +613,14 @@ namespace oscairn
     uint64_t RemoteControl::listRepository(const std::string& source) {
         auto d=impl_->call("packages.list","{\"source\":"+quote(source)+'}');return uint64_t(integer(field(field(d.get(),"result"),"job")));
     }
-    uint64_t RemoteControl::installFromRepository(const std::string& source,const std::string& id,const std::string& version,bool acceptUnsignedCode) {
-        auto d=impl_->call("packages.install","{\"source\":"+quote(source)+",\"id\":"+quote(id)+(version.empty()?std::string():",\"version\":"+quote(version))+",\"acceptUnsignedCode\":"+(acceptUnsignedCode?"true":"false")+'}');
+    uint64_t RemoteControl::installFromRepository(const std::string& source,const std::string& id,const std::string& version,bool acceptUnsignedCode,bool replace) {
+        auto d=impl_->call("packages.install","{\"source\":"+quote(source)+",\"id\":"+quote(id)+(version.empty()?std::string():",\"version\":"+quote(version))+",\"acceptUnsignedCode\":"+(acceptUnsignedCode?"true":"false")+
+                                              ",\"replace\":"+(replace?"true":"false")+'}');
         return uint64_t(integer(field(field(d.get(),"result"),"job")));
     }
     std::vector<Control::InstalledPackage> RemoteControl::installedPackages() {
         auto d=impl_->call("packages.installed","{}");std::vector<InstalledPackage> out;
-        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository"))});
+        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild"))});
         return out;
     }
     std::vector<Control::Repository> RemoteControl::repositories() {
@@ -644,7 +645,7 @@ namespace oscairn
         for(auto x:array(field(r,"packages"))){
             RepositoryPackage p{string(field(x,"id")),string(field(x,"name")),string(field(x,"summary")),string(field(x,"license")),string(field(x,"publisher")),string(field(x,"publisherKey")),strings(field(x,"tags")),{}};
             for(auto v:array(field(x,"versions"))){
-                RepositoryVersion version{string(field(v,"version")),string(field(v,"channel")),string(field(v,"yanked")),string(field(v,"incompatible")),uint64_t(integer(field(v,"size"))),uint64_t(integer(field(v,"installed"))),{},{}};
+                RepositoryVersion version{string(field(v,"version")),string(field(v,"channel")),string(field(v,"yanked")),string(field(v,"incompatible")),string(field(v,"sha256")),uint64_t(integer(field(v,"size"))),uint64_t(integer(field(v,"installed"))),{},{}};
                 if(V types=field(v,"types");types && types->type==json_type_object)
                     for(auto* m=static_cast<const json_object_s*>(types->payload)->start;m;m=m->next)version.types.push_back({std::string(m->name->string,m->name->string_size),integer(m->value)});
                 for(auto d:array(field(v,"dependencies")))version.dependencies.push_back({string(field(d,"id")),string(field(d,"version"))});

@@ -1249,7 +1249,7 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   returns the new key's `{name,id,key}`; its private key is written to `Keys/<name>.key`,
   readable only by the user. A name already used is refused.
 - `packages.list` takes `{source}` and `packages.install` takes `{source,id}` and optional
-  `version` and `acceptUnsignedCode`; each returns `{job}` at once and goes on in the engine,
+  `version`, `acceptUnsignedCode` and `replace`; each returns `{job}` at once and goes on in the engine,
   off its control thread ([RFC 0031](rfcs/0031-package-repository-and-distribution.md)).
   A plugin package that needs asset libraries brings, from the same repository, the newest
   stable version of each this device lacks (or has older than it needs), installed first; the
@@ -1275,14 +1275,18 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   or bringing plugin code with no build for this device is refused. The archive must be the
   release the index names (its manifest's SHA-256) and signed by its publisher's key. It
   installs as `library.install` installs a locked library (a plugin package's builds into
-  the store), with only this device's plugin builds, under the same rules for code. One job
-  runs at a time; another is refused with reason `busy`.
+  the store), with only this device's plugin builds, under the same rules for code. A different
+  build of the same plugin version already here (the user's own, or one installed some other way)
+  is kept and noted, unless `replace` is true: the user chose to install the repository's build
+  over it, which nothing does on its own. That is refused while the open Performance plays the
+  build, as `plugins.remove` is. One job runs at a time; another is refused with reason `busy`.
 - `packages.job` takes `{job}` and returns `{job,state,error,repository,name,rootKey,serial,
   packages,package,version,installed}`. `state` is `running`, `done` or `failed`, `error`
   saying why. `rootKey` is the repository's root key once read, so a refusal for an untrusted
   one can offer to trust it. A listing's `packages` are each `{id,name,summary,license,
   publisher,publisherKey,tags,versions}`, each version `{version,channel,yanked,incompatible,
-  size,installed,types,dependencies}`: `incompatible` says why this device cannot install it (empty when it can),
+  sha256,size,installed,types,dependencies}`: `incompatible` says why this device cannot install it (empty when it can),
+  `sha256` is its archive's SHA-256 as the index lists it (`archive.sha256`),
   `size` and `installed` are this platform's download and installed bytes, `types` how many
   items of each type (`oscairn.performance`, `oscairn.sound`, `oscairn.asset`) and plugins of each
   format (`clap`) it holds, and `dependencies` the packages it needs, each `{id,version}` (the
@@ -1295,9 +1299,15 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   control thread; asking about it once it has unpacked moves it into place.
 - `packages.installed` (`{}`) returns `{packages}`: the packages installed on this device
   ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
-  `{id,version,kind,repository}`: `kind` is `plugin`, `asset` or `library` (installed as a locked
-  library), and `repository` the address of the repository it came from, empty for one installed
-  from a file. Each install records its package in `packages.json` in the data folder: from a
+  `{id,version,kind,repository,sha256,signers,otherBuild}`: `kind` is `plugin`, `asset` or
+  `library` (installed as a locked library), and `repository` the address of the repository it
+  came from, empty for one installed from a file. `sha256` is the SHA-256 of the archive it was
+  installed from, as the repository's index lists it (or the file's), so a client can tell the
+  repository's build from another with the same ID and version by comparing it with the listing's
+  `sha256`; `signers` the IDs of the keys that signed that archive. Both are empty when not known:
+  installed before installs recorded them, or (`sha256` only) from a package folder. `otherBuild`
+  is true when the install kept a different build of its plugins already here, so what is
+  installed is not that archive's; its `sha256` and `signers` are then empty. Each install records its package in `packages.json` in the data folder: from a
   repository, or by `library.install` a plugin or asset package or one installed as a library (a
   copy into the user's own storage installs no package). Removing what it installed
   (`plugins.remove`, `assets.uninstall`, `assets.collect`, `library.uninstall`) removes the

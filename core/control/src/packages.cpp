@@ -101,7 +101,9 @@ struct Session::PackageWork {
     PackageJob job;          // guarded by mutex
     bool unpacked=false;     // the thread is done and left packages, each in its folder, to move into place
     std::vector<std::pair<Package,fs::path>> packages; // the asset libraries it needs first, then the package
+    std::map<std::string,std::string> archives; // each one's archive SHA-256 as the index lists it, by package ID
     bool acceptUnsignedCode=false;
+    bool replace=false;      // the user chose the repository's build over a different one installed
     std::string source;      // the repository's address, recorded with what it installs
     std::atomic<bool> cancel=false; // set when the session goes: a download stops
     std::thread thread;
@@ -215,7 +217,7 @@ uint64_t Session::listRepository(const std::string& source){
             out.repository=index.repository;out.name=index.name;out.serial=index.serial;
             for(const auto& p:index.packages){
                 RepositoryPackage listed{p.id,p.name,p.summary,p.license,p.publisherName,p.publisherKey,p.tags,{}};
-                for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.size,v.installed,v.types,v.dependencies});
+                for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.archiveSha256,v.size,v.installed,v.types,v.dependencies});
                 out.packages.push_back(std::move(listed));
             }
             out.state="done";
@@ -226,18 +228,19 @@ uint64_t Session::listRepository(const std::string& source){
     return packageJobs_;
 }
 
-uint64_t Session::installFromRepository(const std::string& source,const std::string& id,const std::string& version,bool acceptUnsignedCode){
+uint64_t Session::installFromRepository(const std::string& source,const std::string& id,const std::string& version,bool acceptUnsignedCode,bool replace){
     if(packageWork_ && packageJob(packageWork_->id).state=="running")throw std::logic_error("a package job is running; wait for it to finish");
     if(id.empty())throw std::invalid_argument("which package?");
     std::vector<std::string> trusted,revoked;keys(trustedKeys(),trusted,revoked);
     auto work=std::make_shared<PackageWork>();
-    work->id=work->job.id=++packageJobs_;work->job.state="running";work->acceptUnsignedCode=acceptUnsignedCode;work->source=addressOf(source);
+    work->id=work->job.id=++packageJobs_;work->job.state="running";work->acceptUnsignedCode=acceptUnsignedCode;work->replace=replace;work->source=addressOf(source);
     auto* w=work.get();
     packageWork_.reset();
     const auto assetRoot=assets_.root(); // read on the control thread; the job reads which libraries are installed from its own Store
     w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot]{
         std::string rootKey,error,chosen,repositoryId,name;uint64_t serial=0;
         std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each asset library it needs
+        std::map<std::string,std::string> archives;
         try{
             auto from=sourceFor(source,&w->cancel);
             const auto index=repository::open(*from,trusted,revoked,rootKey,kept());
@@ -264,6 +267,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
                     throw std::runtime_error("refused: the package file for "+package.id+" "+pick.version+" is not the release the index names");
                 if(got.signature.key.empty() || signing::keyId(got.signature.key)!=package.publisherKey)
                     throw std::runtime_error("refused: "+package.id+" "+pick.version+" is not signed by its publisher's key "+package.publisherKey);
+                archives[package.id]=pick.archiveSha256;
             };
             // The newest stable version this device can install that is not yanked, and at least `least`.
             auto newest=[&](const repository::Package& package,const std::string& least){
@@ -299,7 +303,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
         w->job.rootKey=rootKey;w->job.repository=repositoryId;w->job.name=name;w->job.serial=serial;w->job.package=id;w->job.version=chosen;
         if(!error.empty()){w->job.state="failed";w->job.error=error;return;}
         std::rotate(unpacked.begin(),unpacked.begin()+1,unpacked.end()); // the libraries first, so the package finds them installed
-        w->packages=std::move(unpacked);w->unpacked=true;
+        w->packages=std::move(unpacked);w->archives=std::move(archives);w->unpacked=true;
     });
     packageWork_=std::move(work);
     return packageJobs_;
@@ -316,7 +320,7 @@ Control::PackageJob Session::packageJob(uint64_t id){
         auto packages=std::move(w.packages);w.packages.clear();
         PackageJob done;done.state="done";
         // The package's code is acceptable before anything goes in: a refusal installs none of the libraries it needs either.
-        try{installUnpacked(packages.back().first,packages.back().second,true,{},w.acceptUnsignedCode,true,true);}
+        try{installUnpacked(packages.back().first,packages.back().second,true,{},w.acceptUnsignedCode,true,true,false,w.replace);}
         catch(const CodeRefused& e){done.state="failed";done.error=e.what();done.installed.code=e.code;} // its signers' keys, to trust
         catch(const std::exception& e){done.state="failed";done.error=e.what();}
         // Each asset library it needs, then the package; installUnpacked removes each folder either way.
@@ -324,8 +328,8 @@ Control::PackageJob Session::packageJob(uint64_t id){
             if(done.state=="failed"){std::error_code e;fs::remove_all(into,e);continue;}
             try{
                 const bool dependency=&package!=&packages.back().first; // a library the package needs, installed first
-                const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true,false,dependency);
-                recordPackage(package,true,w.job.version,w.source); // an asset library is recorded at its own version
+                const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true,false,dependency,w.replace && !dependency);
+                recordPackage(package,true,w.job.version,w.source,w.archives[package.id],installed.otherBuild); // an asset library is recorded at its own version
                 done.installed.added+=installed.added;done.installed.skipped+=installed.skipped;
                 done.installed.notes.insert(done.installed.notes.end(),installed.notes.begin(),installed.notes.end());
                 done.installed.code.insert(done.installed.code.end(),installed.code.begin(),installed.code.end());

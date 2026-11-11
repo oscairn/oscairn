@@ -85,7 +85,10 @@ Checked when built and tested; the sections below say how.
       is not tested: listing still fetches the root)
 - [ ] 6. Updates: packages, Performances' locks moved on explicitly, apps
       (built 2026-11-11 on the desktop: the Catalog's Update to the newest stable version this
-      device can install, newer than the one installed; `desktop-gaps`, `control-repository`. Not
+      device can install, newer than the one installed; `desktop-gaps`, `control-repository`.
+      A locked library's new version replaces each item whose files differ, swapped in whole,
+      and removes those it no longer has; the same version again changes nothing;
+      `control-archives`. Not
       yet: `packages.updates`, update lists and a card on Home, Performances' locks, apps)
 - [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source
 - [ ] 8. The official repository goes public: hosting, mirrors, policy

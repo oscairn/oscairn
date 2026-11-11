@@ -4,7 +4,8 @@
 // Performance carries its unedited part's Sound and the samples they use; installed into the
 // user's own storage it gets new IDs, its part pointing at the Sound's copy, and installing again
 // skips what is unchanged; installed as a library it is locked, comes back when deleted and goes
-// when uninstalled, leaving the user's copies and the samples. The plugin it uses goes with it
+// when uninstalled, leaving the user's copies and the samples; a new version of it replaces its
+// revised items and removes those it no longer has. The plugin it uses goes with it
 // (RFC 0006) and installs into the store, where a Performance whose plugin is not at its saved
 // path finds it. A build for another platform added on one device goes along too. The store
 // lists each plugin with what uses it, and removing one is refused while the open Performance
@@ -983,6 +984,68 @@ int main(int argc, char** argv)
             check(installed.added == 1 && installed.skipped == 1, "the Sound is skipped, the Performance added");
             const auto doc = fs::path(items(n, "performance").at(0).path) / "performance.json";
             check(read(doc).find("\"sound\":\"same\"") != std::string::npos, "and its part points at the copy, whose ID is the archive's");
+        }
+        // A new version of a locked library (RFC 0031's Updates): its items are replaced with their
+        // new revisions, each swapped in whole, and what it no longer has goes. The open Performance
+        // from it plays on as it was, the user's favorite stays, and the same version again replaces nothing.
+        {
+            device(temp.path / "o");
+            const std::string zeros(64, '0');
+            auto sound = [&](const fs::path& root, const std::string& id, const std::string& name) {
+                fs::create_directories(root / "Sounds" / id);
+                std::ofstream(root / "Sounds" / id / "sound.json", std::ios::binary | std::ios::trunc)
+                    << R"({"format":"oscairn.sound","version":8,"info":{"id":")" << id << R"(","name":")" << name << R"(","description":"","tags":[],"color":"","revision":"r","parent":"","origin":null,"hash":")" << zeros << R"("},"nodes":[]})";
+            };
+            // A Performance that opens: one saved here, under the library's ID and its version's name.
+            Session o(48000, 64);
+            const auto saved = o.savePerformanceToLibrary("Set");
+            const auto savedDoc = fs::path(o.libraryQuery({}).items.at(0).path) / "performance.json";
+            const auto document = read(savedDoc);
+            o.deleteLibraryItem(saved);
+            auto performance = [&](const fs::path& root, const std::string& name) {
+                auto text = document;
+                text.replace(text.find("\"id\":\"" + saved + '"'), 7 + saved.size(), "\"id\":\"set\"");
+                text.replace(text.find("\"name\":\"Set\""), 12, "\"name\":\"" + name + '"');
+                fs::create_directories(root / "Performances" / "set");
+                std::ofstream(root / "Performances" / "set" / "performance.json", std::ios::binary | std::ios::trunc) << text;
+            };
+            // Version 1: Changed, Kept, Removed and the Performance Set; version 2: Changed and Set revised, Kept as it was, Added new, Removed gone.
+            const auto v1 = temp.path / "o-v1", v2 = temp.path / "o-v2";
+            sound(v1, "changed", "Changed 1"); sound(v1, "kept", "Kept"); sound(v1, "removed", "Removed"); performance(v1, "Set 1");
+            sound(v2, "changed", "Changed 2"); sound(v2, "kept", "Kept"); sound(v2, "added", "Added"); performance(v2, "Set 2");
+            Package p1; p1.id = "o.pack"; p1.name = "Pack";
+            p1.items = {{"sound", "changed", "Changed 1", "Sounds/changed"}, {"sound", "kept", "Kept", "Sounds/kept"}, {"sound", "removed", "Removed", "Sounds/removed"}, {"performance", "set", "Set 1", "Performances/set"}};
+            Package p2 = p1;
+            p2.items = {{"sound", "changed", "Changed 2", "Sounds/changed"}, {"sound", "kept", "Kept", "Sounds/kept"}, {"sound", "added", "Added", "Sounds/added"}, {"performance", "set", "Set 2", "Performances/set"}};
+            writePackage(temp.path / "Pack1.olib", p1, v1);
+            writePackage(temp.path / "Pack2.olib", p2, v2);
+            const auto library = temp.path / "o" / "Libraries" / "o.pack";
+            auto inode = [](const fs::path& p) { struct stat s{}; ::stat(p.c_str(), &s); return s.st_ino; };
+            auto name = [&](Session& s, const std::string& id) { for(const auto& i : s.libraryQuery({}).items) if(i.id == id) return i.name; return std::string("(none)"); };
+            check(o.installArchive((temp.path / "Pack1.olib").string(), true).added == 4, "version 1 installs");
+            o.libraryFavorite("changed", true);
+            o.loadPerformanceFromLibrary("set");
+            const auto kept = inode(library / "Sounds" / "kept");
+            const auto again = o.installArchive((temp.path / "Pack1.olib").string(), true);
+            check(again.added == 0 && again.skipped == 4 && inode(library / "Sounds" / "kept") == kept && name(o, "changed") == "Changed 1",
+                  "the same version again replaces nothing: " + std::to_string(again.added) + " added");
+            const auto changed = inode(library / "Sounds" / "changed");
+            const auto updated = o.installArchive((temp.path / "Pack2.olib").string(), true);
+            check(name(o, "changed") == "Changed 2" && name(o, "set") == "Set 2" && inode(library / "Sounds" / "changed") != changed, "a revised item is replaced with its new revision");
+            check(name(o, "added") == "Added" && name(o, "kept") == "Kept" && inode(library / "Sounds" / "kept") == kept, "a new item is added, an unchanged one left in place");
+            check(name(o, "removed") == "(none)" && !fs::exists(library / "Sounds" / "removed"), "an item the new version no longer has goes");
+            check(updated.added == 3 && updated.skipped == 1 && o.libraries().at(0).items == 4, "three put in place, one kept: " + std::to_string(updated.added) + " added, " + std::to_string(updated.skipped) + " skipped");
+            bool leftover = false;
+            for(const auto& e : fs::recursive_directory_iterator(library)) leftover |= e.path().filename().string().starts_with(".");
+            check(!leftover, "nothing half-made is left beside the items");
+            Control::LibraryQuery favorites; favorites.favorites = true;
+            const auto favored = o.libraryQuery(favorites).items;
+            check(favored.size() == 1 && favored[0].id == "changed", "the user's favorite stays on the replaced item");
+            check(o.performanceInfo().name == "Set 1", "the open Performance plays on as it was opened: " + o.performanceInfo().name);
+            check(o.savePerformanceToLibrary("") != "set" && name(o, "set") == "Set 2", "and saving it makes a new one, the library's left as installed");
+            const auto revised = inode(library / "Sounds" / "changed");
+            const auto twice = o.installArchive((temp.path / "Pack2.olib").string(), true);
+            check(twice.added == 0 && twice.skipped == 4 && inode(library / "Sounds" / "changed") == revised, "version 2 again replaces nothing");
         }
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); ++failures; }

@@ -1209,7 +1209,12 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `code` and said yes. A build signed by a revoked key is never installed (noted; what uses it
   opens with a stand-in where it is not installed otherwise). Sounds, Performances and samples
   install whether signed or not. `code` is the signer of each build it judged. As a library its items are locked and keep
-  their IDs, and installing again adds only what is missing; otherwise they are copied into the
+  their IDs; installing again adds what is missing, replaces an item whose files differ from the
+  archive's with the archive's revision (another version of the library,
+  [RFC 0031](rfcs/0031-package-repository-and-distribution.md#updates)), each built beside it and
+  swapped in whole, and removes the items the library's last install listed that the archive no
+  longer has; the same archive again changes nothing. `added` counts the items put in place, new
+  or replaced. The open Performance is not touched, and favorites and the user's copies stay; otherwise they are copied into the
   user's own storage under new IDs, and installing again skips copies still as imported. The
   samples they use go into the user's sample library, and the builds of the plugins they use,
   every platform's, into the plugin store; `notes` names any sample that is in neither the

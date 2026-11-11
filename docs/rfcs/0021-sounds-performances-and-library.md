@@ -464,7 +464,8 @@ Built 2026-11-01 ([archive format](../library-archive.md); `library.contents`,
 one archive file (a zip, decided 2026-11-01, with a single-file form easier to share than a
 folder), read as untrusted input. Installed as a library its items are locked under its ID in
 `Libraries/`, Save over one is Save As New, deleting an item or uninstalling works and
-installing again restores only what is missing. Installed into the user's own storage its
+installing again restores only what is missing (another version of it replaces its revised
+items and removes those it no longer has, RFC 0031). Installed into the user's own storage its
 items get new IDs and an `origin` in their info (the archive's ID, the item's ID there, the
 copy's content hash), and installing again skips copies still as imported. All of it or chosen
 items; the samples go into the user's sample library by hash either way, so they stay when a

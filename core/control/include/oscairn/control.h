@@ -304,8 +304,10 @@ namespace oscairn
         struct Archive { std::string id, name, kind; std::vector<LibraryItem> items; std::vector<Signer> code; Signer signer; std::string license, sourceUrl, sourceRevision; }; // items: kind, id, name
         virtual Archive archiveContents(const std::string& file) = 0;
         // Installs an archive, all of it or the chosen items (IDs), with the samples they use.
-        // asLibrary: locked, under its name and its items' IDs; installing again puts back only
-        // what is missing. Else into the user's own Performances and Sounds, under new IDs, a
+        // asLibrary: locked, under its name and its items' IDs; installing again puts back what
+        // is missing, replaces an item whose files differ with the archive's (another version of
+        // the library), each swapped in whole, and removes the items its last install listed that
+        // the archive does not; the same archive again changes nothing. Else into the user's own Performances and Sounds, under new IDs, a
         // Performance's parts pointing at the Sounds that came with it; an item whose copy is
         // still as imported is skipped, one edited or deleted since comes again as a new copy.
         // Code (RFC 0006): when a plugin build the items use is unsigned or by an unknown key, the

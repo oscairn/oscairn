@@ -1953,6 +1953,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
     Installed out;
     std::vector<fs::path> created; // item folders this call copies, undone if it fails
     std::vector<std::string> placed; // their names
+    std::vector<std::pair<fs::path,fs::path>> aside; // a locked library's items replaced or gone, each where it was and where it waits
     bool freshRoot=false;
     try{
         std::vector<Package::Item> items;
@@ -2044,15 +2045,59 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             }
         }
         if(asLibrary){
-            // Locked, in its own folder: what is there stays, what is missing comes back.
+            // Locked, in its own folder: what is missing comes back, an item as the archive has it
+            // stays, and one that differs is replaced with the archive's revision (RFC 0031's
+            // Updates); what its last install listed and this archive does not goes. Locked items
+            // hold nothing of the user's: edits are Save As New copies, favorites are in the user file.
             const auto root=l.libraries()/p.id; // readPackage: the ID is a plain name
             freshRoot=!fs::exists(root);
             fs::create_directories(root);
+            // An item folder as the manifest lists it: every file, its hash, nothing else but hidden files.
+            auto asListed=[&](const Package::Item& i,const fs::path& folder){
+                std::map<std::string,std::string> there,listed;
+                const auto prefix=i.path+'/';
+                for(const auto& [path,sha]:p.files)if(path.starts_with(prefix))listed[path]=sha;
+                for(const auto& e:fs::recursive_directory_iterator(folder)){
+                    const auto relative=(fs::path(i.path)/fs::relative(e.path(),folder)).generic_string();
+                    if(relative.find("/.")!=std::string::npos)continue;
+                    if(e.is_symlink())return false;
+                    if(e.is_regular_file())there[relative]=assets::sha256File(e.path());
+                }
+                return there==listed;
+            };
             for(const auto& i:items){
                 const auto to=root/i.path;
-                if(fs::exists(fs::symlink_status(to))){++out.skipped;continue;} // a link there too: never followed or removed
-                // Recorded before the move, so one that fails partway comes back out.
-                fs::create_directories(to.parent_path());created.push_back(to);placed.push_back(i.name);moveInto(into/i.path,to);++out.added;
+                const auto status=fs::symlink_status(to);
+                if(fs::is_symlink(status) || (fs::exists(status) && asListed(i,to))){++out.skipped;continue;} // a link there too: never followed, replaced or removed
+                fs::create_directories(to.parent_path());
+                if(!fs::exists(status)){
+                    // Recorded before the move, so one that fails partway comes back out.
+                    created.push_back(to);placed.push_back(i.name);moveInto(into/i.path,to);++out.added;continue;
+                }
+                // A new revision: built beside it, then swapped in; the old one is kept aside until
+                // the install is done, and put back if it fails.
+                const auto fresh=to.parent_path()/("."+to.filename().string()+".new"),old=to.parent_path()/("."+to.filename().string()+".old");
+                fs::remove_all(fresh);fs::remove_all(old);
+                // Its document's time made now: an archive's is the packer's, perhaps the old one's, and the library's index goes by path and time.
+                try{moveInto(into/i.path,fresh);fs::last_write_time(fresh/manifest(i).filename(),fs::file_time_type::clock::now());}
+                catch(...){std::error_code ignored;fs::remove_all(fresh,ignored);throw;}
+                fs::rename(to,old);aside.push_back({to,old});
+                fs::rename(fresh,to);created.push_back(to);placed.push_back(i.name);++out.added;
+            }
+            // What the library's last install listed and this archive does not: set aside the same way.
+            std::vector<std::string> listed;
+            try{
+                const auto bytes=state_files::read(root/"library.json",maxManifestBytes);
+                const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
+                for(auto item:array(field(doc.get(),"items"),1u<<20))listed.push_back(text(field(item,"path")));
+            }catch(const std::exception&){} // none, or unreadable: nothing it listed is known, so nothing goes
+            for(const auto& path:listed){
+                if(std::any_of(p.items.begin(),p.items.end(),[&](const auto& i){return i.path==path;}))continue;
+                // Only an item folder of this library's, as readPackage allowed it: Performances/<name> or Sounds/<name>.
+                const auto gone=root/path;const auto name=gone.filename().string();
+                if((gone.parent_path()!=root/"Performances" && gone.parent_path()!=root/"Sounds") || name.empty() || name.front()=='.' || !fs::is_directory(fs::symlink_status(gone)))continue;
+                const auto old=gone.parent_path()/("."+name+".old");
+                fs::remove_all(old);fs::rename(gone,old);aside.push_back({gone,old});
             }
             // Listed only once its items are all there.
             writeAtomically(root/"library.json",manifestJson(p));
@@ -2086,10 +2131,12 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         // The unpacked folder, this call's item copies, and a library folder it made itself: nothing half stays.
         std::error_code ignored;
         for(const auto& made:created)fs::remove_all(made,ignored);
+        for(const auto& [was,old]:aside)fs::rename(old,was,ignored);
         if(freshRoot)fs::remove_all(l.libraries()/p.id,ignored);
         fs::remove_all(into,ignored);l.rescan();throw;
     }
     std::error_code ignored;fs::remove_all(into,ignored);
+    for(const auto& [was,old]:aside)fs::remove_all(old,ignored);
     l.rescan();
     // RFC 0025: what will not fit this device, from its plugins' estimates (its own measurements,
     // else the packages' declared ones), is said; installed all the same, as opening refuses it.

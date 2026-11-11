@@ -94,7 +94,8 @@ int main(int argc, char** argv)
             std::string entry = "?";
             actions.offer(standalone::pickPerformance, "Library", [&](const std::string&, standalone::Actions::Answer answer) { answer(picks++ == 0 ? idOf("Bass Split") : std::string()); });
             actions.offer(standalone::sendSetlistEntry, "Performance", [&](const std::string& id, standalone::Actions::Answer answer) { entry = id; answer("shown"); });
-            const auto apps = standalone::findApps(juce::File(argv[2]));
+            auto apps = standalone::findApps(juce::File(argv[2]));
+            std::erase_if(apps, [](const auto& a) { return a.id != "oscairn.setlist"; }); // the Settings app beside it has a test of its own
             check(apps.size() == 1 && apps[0].id == "oscairn.setlist" && apps[0].executable.existsAsFile() && apps[0].maximum == 400 && apps[0].permissions == std::vector<std::string>{"play", "library"}, "the Setlist's manifest is found in the folder, with its build for this platform and its permissions");
             const auto setlists = data.getChildFile("Setlists");
             auto saved = [&] { try { return standalone::readSetlist(standalone::setlistFile(setlists, "Setlist")).entries.size(); } catch(const std::exception&) { return size_t(0); } };

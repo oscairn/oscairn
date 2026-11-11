@@ -18,7 +18,10 @@ namespace oscairn
         /// Each node's parameter info as read, by its parameterRevision. Given another adapter's, one on a
         /// fresh connection lists only the nodes whose plugin or info changed since (it reads every value).
         using KnownParameters = std::map<NodeId,std::pair<uint64_t,std::vector<ParamInfo>>>;
-        explicit RemoteControl(LocalClient& client, const KnownParameters& known = {});
+        /// reads false: the status alone is subscribed to and read, for a connection granted neither
+        /// play nor edit (the Settings app's, RFC 0022) or a short job's; the graph, the transport
+        /// and the controllers stay empty.
+        explicit RemoteControl(LocalClient& client, const KnownParameters& known = {}, bool reads = true);
         KnownParameters knownParameters() const;
         ~RemoteControl() override;
         /// Takes what the engine sent. A graph it changed is read again without waiting (the

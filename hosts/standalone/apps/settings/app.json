@@ -1,0 +1,19 @@
+{
+  "format": "oscairn.app",
+  "version": 1,
+  "id": "oscairn.settings",
+  "appVersion": "0.1.0",
+  "name": "Settings",
+  "requires": { "protocol": 1 },
+  "builds": {
+    "macos-arm64": "Oscairn Settings.app/Contents/MacOS/Oscairn Settings",
+    "macos-x86_64": "Oscairn Settings.app/Contents/MacOS/Oscairn Settings",
+    "linux-arm64": "Oscairn Settings",
+    "linux-x86_64": "Oscairn Settings"
+  },
+  "surfaces": ["desktop", "panel"],
+  "home": false,
+  "memory": { "reserve": 60, "max": 400 },
+  "cpu": { "audio": 0 },
+  "permissions": ["system"]
+}

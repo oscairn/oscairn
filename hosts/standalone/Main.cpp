@@ -77,6 +77,13 @@ namespace oscairn::standalone
             const auto i = args.indexOf( name );
             return i >= 0 && i + 1 < args.size() ? args[i + 1] : juce::String();
         }
+        // --profile as apps that are processes read it (OSCAIRN_PROFILE): a built-in's id, or the file's full path.
+        std::string profileSource( const juce::StringArray& args )
+        {
+            const auto given = argument( args, "--profile" ).unquoted();
+            const auto file = juce::File::getCurrentWorkingDirectory().getChildFile( given );
+            return ( given.isNotEmpty() && file.existsAsFile() ? file.getFullPathName() : given ).toStdString();
+        }
 
         // The apps that run as processes: Apps/ beside this program, else share/oscairn/apps.
         juce::File appsFolder()
@@ -109,7 +116,7 @@ namespace oscairn::standalone
     class Window : public juce::DocumentWindow, public juce::MenuBarModel
     {
     public:
-        Window( Engine& engine, std::vector<NamedLayout> layouts, const Layout& first, Profile profile,Theme& theme,const juce::File& plugins, InputMode mode )
+        Window( Engine& engine, std::vector<NamedLayout> layouts, const Layout& first, Profile profile,Theme& theme,const juce::File& plugins, InputMode mode, const std::string& profileArgument )
             : DocumentWindow( "Oscairn", juce::Colours::black, DocumentWindow::allButtons )
             , engine_( engine )
             , layouts_( std::move( layouts ) )
@@ -146,7 +153,7 @@ namespace oscairn::standalone
             actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
             const auto binary=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
             // Apps run as processes only against an engine on a socket (not --in-process).
-            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString()});
+            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString(),"OSCAIRN_PROFILE="+profileArgument});
             appNotice_=std::make_unique<AppNotice>(*appProcesses_);
             menuItemsChanged(); // the Apps menu again, now that it knows the Setlist app
             Component::addChildComponent(*appNotice_);
@@ -326,6 +333,8 @@ namespace oscairn::standalone
                 if(profile_.offers("oscairn.setlist") && appProcesses_ && appProcesses_->find("oscairn.setlist"))menu.addItem(8002,"Setlist"); // the menu is first built before the app processes
                 if(profile_.offers("oscairn.recordings"))menu.addItem(8005,"Recordings");
                 menu.addSeparator();menu.addItem(8006,"Settings...");
+                // The Settings app (RFC 0022) where it runs; the shell's dialog keeps the pages not yet moved into it.
+                if(settingsApp())menu.addItem(8007,"Signing Keys, Repositories and Controllers...");
                 return menu;}
             if(index==4){themeItems_=theme_.installed();for(size_t i=0;i<themeItems_.size();++i)menu.addItem(3000+int(i),themeItems_[i].second,true,themeItems_[i].first==themeData().id);menu.addSeparator();menu.addItem(4000,"Manage themes...");return menu;}
             for( size_t i = 0; i < layouts_.size(); ++i )
@@ -370,7 +379,8 @@ namespace oscairn::standalone
             if(id==8003){showHome();return;}
             if(id==8004){openPerformance();return;}
             if(id==8005){showRecordings();return;}
-            if(id==8006){showApp(settings_,"Settings",[this]{return settingsPane();},1000,640);
+            if(id==8006 && settingsApp()){showSettings();return;}
+            if(id==8006 || id==8007){showApp(settings_,"Settings",[this]{return settingsPane();},1000,640);
                 if(auto* s=dynamic_cast<Settings*>(settings_->getContentComponent()))s->refresh();return;} // the ports and keys now
             if(id==5002 || id==5003){saveToLibrary(id==5003);return;}
             if(id==5004){importPerformance();return;}
@@ -530,6 +540,13 @@ namespace oscairn::standalone
                 std::unique_ptr<juce::Component> pane( libraryPane( LibraryPane::Mode::Play ) ); auto& app = *pane; openOnScreen( "Library", "library-big", app, std::move( pane ) ); return;
             }
             showApp( libraryApp_, "Library", [this] { return libraryPane( LibraryPane::Mode::Play ); }, 900, 700 );
+        }
+        // The Settings app, its own process (RFC 0022), in a window of its own; only against an engine on a socket.
+        bool settingsApp() const { return appProcesses_ && appProcesses_->find( "oscairn.settings" ); }
+        void showSettings()
+        {
+            if( !admitted( "Settings", [this] { showSettings(); } ) ) return;
+            appProcesses_->open( "oscairn.settings", {}, inputMode_ == InputMode::Touch ? 2 : 1 );
         }
         void showSetlist()
         {
@@ -972,7 +989,7 @@ namespace oscairn::standalone
                     else if( m == "touch" ) mode = InputMode::Touch;
                     else throw std::invalid_argument( "--input-mode must be automatic, mouse or touch" );
                 }
-                window_ = std::make_unique<Window>( *engine_, std::move( layouts ), Layout::parse( json ), profile,*theme_,juce::File(dir.unquoted()), mode );
+                window_ = std::make_unique<Window>( *engine_, std::move( layouts ), Layout::parse( json ), profile,*theme_,juce::File(dir.unquoted()), mode, profileSource( args ) );
                 if( !args.contains( "--snapshot" ) )
                 {
                     controllers_ = std::make_unique<Controllers>( *engine_, controlGroups( profile ), controllers, theme_->configuration().getChildFile( "controller-profiles.json" ).getFullPathName().toStdString() );

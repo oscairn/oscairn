@@ -48,11 +48,26 @@ namespace oscairn::standalone
         refreshPads();
         startTimer(16);
     }
-    Engine::Engine(int controlConnection):app_(true)
+    Engine::Engine(int controlConnection,bool reads):app_(true)
     {
         client_=std::make_unique<LocalClient>();client_->adopt(controlConnection);
-        remote_=std::make_unique<RemoteControl>(*client_);control_=remote_.get();
+        remote_=std::make_unique<RemoteControl>(*client_,RemoteControl::KnownParameters{},reads);control_=remote_.get();
         startTimer(16);
+    }
+    void Engine::job(std::function<void(Control&)> work,std::function<void(const std::string&)> done)
+    {
+        const int given=app_?appConnection({}):-1;
+        jobs_.push_back({std::async(std::launch::async,[socket=socketPath_,given,work=std::move(work)]{
+            try
+            {
+                LocalClient client;
+                if(given>=0)client.adopt(given);else if(!socket.empty())client.connect(socket);else return std::string("No connection for the engine's job");
+                RemoteControl control(client,{},false);
+                work(control);
+                return std::string();
+            }
+            catch(const std::exception& e){return std::string(e.what());}
+        }),std::move(done)});
     }
     int Engine::appConnection(const std::string& app,const std::vector<std::string>& permissions)
     {
@@ -733,6 +748,12 @@ namespace oscairn::standalone
     }
     void Engine::timerCallback()
     {
+        // Jobs done, in the order asked; `done` may ask another.
+        while(!jobs_.empty() && jobs_.front().error.wait_for(std::chrono::seconds(0))==std::future_status::ready)
+        {
+            auto finished=std::move(jobs_.front());jobs_.pop_front();
+            finished.done(finished.error.get());
+        }
         try{if(connected())macros_=control_->graphState().macros;}catch(const std::exception&){}
         readControllers();
         if(restarting_.valid() && restarting_.wait_for(std::chrono::seconds(0))==std::future_status::ready)restarted();

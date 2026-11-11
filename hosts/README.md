@@ -123,7 +123,7 @@ The control API's `audio.devices` and `audio.set` ([control protocol](../docs/co
 list the devices and choose the device, sample rate and buffer size while the engine runs; the
 choice is saved in the data folder (`audio.json`) and wins over the profile, `--buffer-frames`
 and the CMake setting at the next start (a profile's device with its channel map stays fixed).
-No Settings page uses them yet. When the device restarts at another sample
+The Settings app's **Audio** page uses them (below). When the device restarts at another sample
 rate (its rate changed from outside, for example in macOS's Audio MIDI Setup), playback is
 silent while the engine activates every plugin again at the new rate on its control thread,
 keeping their state, and then goes on (`Session::setSampleRate`); the log says
@@ -147,7 +147,10 @@ A panel profile fills the display with no title or menu bar and shows its screen
 `apps` decide Home's tiles and the Apps menu; its block is the audio request. `--layout` still overrides the
 layout for a run (on the desktop, `--profile kick` shows the KICK's screen, full screen).
 
-**Apps → Settings...** lists the signing keys
+**Apps → Settings...** opens the Settings app (below) where it runs (against an engine on a
+socket); with `--in-process`, the shell's own Settings dialog. Until every page of that dialog is
+in the app, the Apps menu also has **Signing Keys, Repositories and Controllers...**, which
+opens the dialog. The dialog lists the signing keys
 ([RFC 0006](../docs/rfcs/0006-packages-and-portability.md#signatures)) by name and fingerprint,
 never a private key, and makes one. **Export Performance...** (and the Library's Export) asks
 whether to sign: Not signed unless a key is chosen, or **Make a key...**; the item and the
@@ -240,7 +243,23 @@ The Setlist asks for picks (Add) and Play's Previous and Next through the shell,
 Performances sent to it, all through the engine (`oscairn.send.performance`,
 `oscairn.step.setlist`, `oscairn.send.setlist.entry`). Apps run as processes only against an
 engine on a socket: with `--in-process` the Setlist is not offered. `desktop-apps` checks all of
-this offline against a socket session. Not yet: permissions per app connection (step 4),
+this offline against a socket session.
+
+Settings is one too, `Oscairn Settings` in `standalone/apps/settings/` (its
+[README](standalone/apps/settings/README.md) says how to add a page), granted `system` alone.
+The shell hands it the device's profile (`OSCAIRN_PROFILE`, from `--profile`), and it shows the
+pages that apply there: each page in `Pages.cpp` says where (the OS, a device or the desktop, the
+profile's hardware), and a page a build leaves out is left out of the list. Wide with a mouse,
+the list is a column beside the page; narrow or with touch, the list, then the page with Back.
+Built so far: **Audio**, the output device, the input device where the engine opens inputs, the
+sample rate and the buffer size from `audio.devices`, each applied with `audio.set` off the
+message thread; where the device came from and any device passed over are said under it, a
+device the profile fixes is shown so and cannot be chosen, a refused change says why under it,
+and it is listed again when the status's `audioDevice`, `sampleRate`, `bufferSize` or
+`audioDeviceList` change. `desktop-settings` checks the pages per profile, the Audio page on an
+app connection granted `system` against a socket session whose audio host is a stand-in (no
+device opened), the connection allowed `audio.set` and refused `graph.add`, and the app started
+as a process. Not yet: permissions per app connection (step 4),
 packaging (step 5), sandboxing (step 6), and handing an app a fresh connection after an engine
 restart (it quits and the shell starts it again instead).
 

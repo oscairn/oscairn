@@ -231,11 +231,21 @@ namespace oscairn::standalone
         // run on further connections it asks for on that one; the engine's pings are answered
         // each tick; a lost connection is not made again, onLost says so (the app quits, and its
         // shell starts it again with a fresh one).
-        explicit Engine(int controlConnection);
+        // reads false: an app granted neither play nor edit (Settings), which reads the status alone.
+        explicit Engine(int controlConnection, bool reads = true);
         std::function<void()> onLost;
+        // The session's status as the engine last pushed it (the audio device, its rate and buffer
+        // size, audioDeviceList), read from the cache without waiting.
+        Control::SessionStatus sessionStatus() const { return control_->sessionStatus(); }
+        // A call that may take long (audio.set restarts the device), off the message thread on a
+        // connection of its own (an app's asked for on its own, with its permissions); `done` gets
+        // the error, or empty, on the message thread. `work` must touch nothing but what it captures.
+        void job(std::function<void(Control&)> work, std::function<void(const std::string& error)> done);
 
     private:
         bool app_=false;
+        struct Job { std::future<std::string> error; std::function<void(const std::string&)> done; };
+        std::deque<Job> jobs_;
         std::map<uint64_t,std::function<void(const std::string&)>> appAnswers_;
         void appMessage(const std::string& message);
         void timerCallback()override;

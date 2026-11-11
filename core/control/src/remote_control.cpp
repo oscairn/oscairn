@@ -469,10 +469,17 @@ namespace oscairn
         void edge(std::string_view method,const char* kind,NodeId from,NodeId to)
         {call(method,"{\"kind\":"+quote(kind)+",\"from\":"+std::to_string(from)+",\"to\":"+std::to_string(to)+'}');refresh();}
     };
-    RemoteControl::RemoteControl(LocalClient& client,const KnownParameters& known):impl_(std::make_unique<Impl>(client))
+    RemoteControl::RemoteControl(LocalClient& client,const KnownParameters& known,bool reads):impl_(std::make_unique<Impl>(client))
     {
         for(const auto& [node,k]:known){impl_->graph.parameterRevisions[node]=k.first;impl_->info[node]=k.second;}
         auto hello=impl_->call("session.hello");if(integer(field(field(hello.get(),"result"),"protocolVersion"))!=1)throw std::runtime_error("Unsupported control protocol version");
+        if(!reads)
+        {
+            const auto subscribed=impl_->client.send("subscribe",R"({"topics":["status"]})"),status=impl_->client.send("session.status");
+            impl_->reply(subscribed);
+            {auto state=impl_->reply(status);impl_->readStatus(field(state.get(),"result"));}
+            return;
+        }
         // The rest at once, the graph read behind them: the server answers in order, so the
         // snapshots are read after subscribing, and the reads take a few ticks, not one each.
         auto& c=impl_->client;

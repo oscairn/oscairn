@@ -119,6 +119,16 @@ follows the theme like an icon (Home's header). `markName` in `Icons.h` names th
 the alternate is embedded too, so switching to it is that name alone. The app bundle's icon is
 `branding/app-icon-1024.png`.
 
+## Settings pages
+
+The Settings app ([README](../hosts/standalone/apps/settings/README.md)) lays out every page
+the same way: a list of pages, a column at the left on a wide screen with a mouse, or the list
+alone and then the page with Back on a narrow or touch screen; the page's title over a
+scrolling area of rows. A row is a label (body, bold) in the left two fifths, at most 280
+pixels, the control beside it, and an optional explanatory line under the control in the small
+size: muted for what the setting does or why it is as it is, the danger color for a failure.
+Narrower than 480 pixels, the label goes above its control. Rows are divided by a hairline.
+
 ## Theme format, version 7
 
 A theme is a folder named after its ID, holding `theme.json` ([schema](theme.schema.json))

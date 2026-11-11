@@ -148,6 +148,7 @@ namespace oscairn::standalone
             // Apps run as processes only against an engine on a socket (not --in-process).
             appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString()});
             appNotice_=std::make_unique<AppNotice>(*appProcesses_);
+            menuItemsChanged(); // the Apps menu again, now that it knows the Setlist app
             Component::addChildComponent(*appNotice_);
             appProcesses_->onNotice=[this](const AppProcesses::Notice& n){
                 setDesktopMode(*appNotice_,panel() || inputMode_==InputMode::Touch?2:1);appNotice_->show(n);resized();
@@ -322,7 +323,7 @@ namespace oscairn::standalone
                 if(profile_.offers("oscairn.performance"))menu.addItem(8004,"Performance");
                 if(profile_.offers("oscairn.groovebox"))menu.addItem(8000,"Groovebox");
                 if(profile_.offers("oscairn.library"))menu.addItem(8001,"Library");
-                if(profile_.offers("oscairn.setlist") && appProcesses_->find("oscairn.setlist"))menu.addItem(8002,"Setlist");
+                if(profile_.offers("oscairn.setlist") && appProcesses_ && appProcesses_->find("oscairn.setlist"))menu.addItem(8002,"Setlist"); // the menu is first built before the app processes
                 if(profile_.offers("oscairn.recordings"))menu.addItem(8005,"Recordings");
                 menu.addSeparator();menu.addItem(8006,"Settings...");
                 return menu;}

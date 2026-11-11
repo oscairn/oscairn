@@ -189,7 +189,7 @@ namespace oscairn
             status.audioInputs=channels(field(v,"audioInputs"));status.audioOutputs=channels(field(v,"audioOutputs"));
             status.audioReady=boolean(field(v,"audioReady"));
             status.graphEventDrops=integer(field(v,"graphEventDrops"));status.midiEventDrops=integer(field(v,"midiEventDrops"));
-            status.deadlineMisses=integer(field(v,"deadlineMisses"));status.audioUnderruns=integer(field(v,"audioUnderruns"));status.audioDeviceList=integer(field(v,"audioDeviceList"));status.midiInputs.clear();status.midiOutputs.clear();status.failures.clear();status.workers.clear();
+            status.deadlineMisses=integer(field(v,"deadlineMisses"));status.audioUnderruns=integer(field(v,"audioUnderruns"));status.audioDeviceList=integer(field(v,"audioDeviceList"));status.midiPortList=integer(field(v,"midiPortList"));status.midiInputs.clear();status.midiOutputs.clear();status.failures.clear();status.workers.clear();
             for(auto f:array(field(v,"failures")))status.failures.push_back({static_cast<NodeId>(integer(field(f,"node"))),string(field(f,"name")),string(field(f,"reason"))});
             status.notices.clear();for(auto n:array(field(v,"notices")))status.notices.push_back(string(n));
             for(auto w:array(field(v,"workers")))status.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),number(field(w,"cpu")),uint64_t(integer(field(w,"memory"))),number(field(w,"block")),number(field(w,"blockMax"))});
@@ -831,6 +831,31 @@ namespace oscairn
         for(const auto& n : names) inputs += (inputs.empty() ? "" : ",") + quote(n);
         impl_->call("midi.ignore", "{\"inputs\":[" + inputs + "]}");
     }
+    namespace
+    {
+        std::vector<Control::MidiPort> midiPortsFrom(V r)
+        {
+            std::vector<Control::MidiPort> out;
+            auto ids=[](V v){std::vector<std::string> list;for(auto e:array(v))list.push_back(string(e));return list;};
+            for(auto e:array(field(r,"inputs")))
+            {
+                Control::MidiPort port{string(field(e,"name")),{},boolean(field(e,"automatic")),ids(field(e,"chosen")),ids(field(e,"playing")),string(field(e,"use")),boolean(field(e,"ignored"))};
+                for(auto f:array(field(e,"profiles")))port.profiles.push_back({string(field(f,"id")),string(field(f,"name"))});
+                out.push_back(std::move(port));
+            }
+            return out;
+        }
+    }
+    std::vector<Control::MidiPort> RemoteControl::midiPorts(){auto d=impl_->call("controllers.inputs");return midiPortsFrom(field(d.get(),"result"));}
+    std::vector<Control::MidiPort> RemoteControl::chooseMidiPort(const std::string& input,const std::optional<std::vector<std::string>>& profiles)
+    {
+        std::string list;
+        if(profiles)for(const auto& id:*profiles)list+=(list.empty()?"":",")+quote(id);
+        auto d=impl_->call("controllers.choose","{\"input\":"+quote(input)+(profiles?",\"profiles\":["+list+"]}":",\"automatic\":true}"));
+        return midiPortsFrom(field(d.get(),"result"));
+    }
+    std::vector<Control::MidiPort> RemoteControl::ignoreMidiPort(const std::string& input,bool ignored)
+    {auto d=impl_->call("controllers.ignore","{\"input\":"+quote(input)+",\"ignored\":"+(ignored?"true":"false")+'}');return midiPortsFrom(field(d.get(),"result"));}
     void RemoteControl::setControllers(const std::vector<ControlGroup>& groups,const std::vector<ControllerPort>& ports)
     {
         static constexpr std::array<const char*,4> roles{"notes","screen","assign","fixed"},messages{"cc","note","pitchBend","pressure"};

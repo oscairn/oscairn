@@ -222,7 +222,7 @@ namespace oscairn
             auto channels=[](const auto& list){std::vector<std::string> result;for(const auto& ch:list)result.push_back("{\"deviceChannel\":"+std::to_string(ch.deviceChannel)+",\"name\":"+quote(ch.name)+",\"available\":"+(ch.available?"true":"false")+'}');return join(result);};
             return "{\"audioReady\":"+std::string(s.audioReady?"true":"false")+",\"audioInputs\":"+channels(s.audioInputs)+",\"audioOutputs\":"+channels(s.audioOutputs)+",\"audioDevice\":" + quote(s.audioDevice) + ",\"midiInputs\":" + endpoints(s.midiInputs) + ",\"midiOutputs\":" + endpoints(s.midiOutputs) +
                 ",\"sampleRate\":" + encode(s.sampleRate) + ",\"bufferSize\":" + std::to_string(s.bufferSize) +
-                ",\"cpuLoad\":" + encode(s.cpuLoad) + ",\"deadlineMisses\":" + std::to_string(s.deadlineMisses) + ",\"audioUnderruns\":" + std::to_string(s.audioUnderruns) + ",\"audioDeviceList\":" + std::to_string(s.audioDeviceList) + ",\"graphEventDrops\":" + std::to_string(s.graphEventDrops) + ",\"midiEventDrops\":" + std::to_string(s.midiEventDrops) +
+                ",\"cpuLoad\":" + encode(s.cpuLoad) + ",\"deadlineMisses\":" + std::to_string(s.deadlineMisses) + ",\"audioUnderruns\":" + std::to_string(s.audioUnderruns) + ",\"audioDeviceList\":" + std::to_string(s.audioDeviceList) + ",\"midiPortList\":" + std::to_string(s.midiPortList) + ",\"graphEventDrops\":" + std::to_string(s.graphEventDrops) + ",\"midiEventDrops\":" + std::to_string(s.midiEventDrops) +
                 ",\"failures\":" + [&]{ std::vector<std::string> f; for(const auto& x : s.failures) f.push_back("{\"node\":" + std::to_string(x.node) + ",\"name\":" + quote(x.name) + ",\"reason\":" + quote(x.reason) + '}'); return join(f); }() +
                 ",\"notices\":" + [&]{ std::vector<std::string> n; for(const auto& x : s.notices) n.push_back(quote(x)); return join(n); }() +
                 ",\"workers\":" + [&]{ std::vector<std::string> w; for(const auto& x : s.workers) w.push_back("{\"node\":" + std::to_string(x.node) + ",\"name\":" + quote(x.name) + ",\"cpu\":" + encode(x.cpu) + ",\"memory\":" + std::to_string(x.memory) + ",\"block\":" + encode(x.block) + ",\"blockMax\":" + encode(x.blockMax) + '}'); return join(w); }() + '}';
@@ -549,6 +549,7 @@ namespace oscairn
                 {"trust.list",System},{"trust.set",System},{"trust.remove",System},{"keys.list",System},{"keys.make",System},
                 {"plugins.list",System},{"plugins.remove",System},{"plugins.addBuild",System},
                 {"controllers.get",Play|Edit|System},{"controllers",Play|Edit|System},{"controllers.set",System},{"controllers.view",System},{"midi.ignore",System},
+                {"controllers.inputs",System},{"controllers.choose",System},{"controllers.ignore",System},
                 {"engine.attach",System},{"engine.release",System},{"budget.set",System},{"audio.set",System},
                 {"memory.alwaysAvailable",System},{"memory.launch",System},{"memory.closed",System},{"memory.state",System}};
             return table;
@@ -597,7 +598,7 @@ namespace oscairn
             if( method == "session.hello" )
             {
                 fields(p, {});
-                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.export","budget.set","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
+                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.export","budget.set","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
             }
             if( method == "engine.attach" || method == "engine.release" )
             {
@@ -1783,6 +1784,41 @@ namespace oscairn
                 return R"({"accepted":true})";
             }
             if( method == "controllers.get" ) { fields(p, {}); return controllers(c); }
+            // External controllers' ports (RFC 0024): what Settings lists and chooses.
+            if( method == "controllers.inputs" || method == "controllers.choose" || method == "controllers.ignore" )
+            {
+                std::vector<Control::MidiPort> ports;
+                try
+                {
+                    if( method == "controllers.choose" )
+                    {
+                        fields(p, {"input","profiles","automatic"});
+                        const auto input = std::string(string(member(p,"input")));
+                        const auto list = member(p,"profiles"), automatic = member(p,"automatic");
+                        if( !list == !(automatic && boolean(automatic)) ) invalid("Give the profiles, or automatic: true");
+                        std::optional<std::vector<std::string>> ids;
+                        if( list ) { ids.emplace(); for( auto id : array(list,16,0) ) ids->push_back(std::string(string(id))); }
+                        ports = c.chooseMidiPort(input, ids);
+                    }
+                    else if( method == "controllers.ignore" )
+                    {
+                        fields(p, {"input","ignored"});
+                        ports = c.ignoreMidiPort(std::string(string(member(p,"input"))), boolean(member(p,"ignored")));
+                    }
+                    else { fields(p, {}); ports = c.midiPorts(); }
+                }
+                catch( const std::runtime_error& e ) { throw Failure{-32005,e.what()}; }
+                auto ids = [](const std::vector<std::string>& list) { std::vector<std::string> out; for( const auto& id : list ) out.push_back(quote(id)); return join(out); };
+                std::vector<std::string> out;
+                for( const auto& port : ports )
+                {
+                    std::vector<std::string> profiles;
+                    for( const auto& f : port.profiles ) profiles.push_back("{\"id\":" + quote(f.id) + ",\"name\":" + quote(f.name) + '}');
+                    out.push_back("{\"name\":" + quote(port.name) + ",\"profiles\":" + join(profiles) + ",\"automatic\":" + (port.automatic ? "true" : "false") + ",\"chosen\":" + ids(port.chosen) +
+                        ",\"playing\":" + ids(port.playing) + ",\"use\":" + quote(port.use) + ",\"ignored\":" + (port.ignored ? "true" : "false") + '}');
+                }
+                return "{\"inputs\":" + join(out) + '}';
+            }
             if( method == "notes.send" )
             {
                 fields(p, {"on","key","velocity","channel"});

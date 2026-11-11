@@ -474,7 +474,16 @@ namespace oscairn
     void Session::setControllers( const std::vector<ControlGroup>& groups, const std::vector<ControllerPort>& ports )
     {
         if( groups.size() > 64 || ports.size() > 64 ) throw std::invalid_argument( "at most 64 control groups and 64 ports" );
-        controllers_->set( groups, ports );
+        groups_ = groups; ports_ = ports;
+        setHostControllers( hostGroups_, hostPorts_, hostIgnored_ );
+    }
+    void Session::setHostControllers( std::vector<ControlGroup> groups, std::vector<ControllerPort> ports, std::vector<std::string> ignored )
+    {
+        hostGroups_ = std::move( groups ); hostPorts_ = std::move( ports );
+        auto allGroups = groups_; allGroups.insert( allGroups.end(), hostGroups_.begin(), hostGroups_.end() );
+        auto allPorts = ports_; allPorts.insert( allPorts.end(), hostPorts_.begin(), hostPorts_.end() );
+        controllers_->set( std::move( allGroups ), std::move( allPorts ) );
+        if( ignored != hostIgnored_ ) { hostIgnored_ = std::move( ignored ); applyIgnored(); }
     }
     void Session::setControlView( const ControlView& view ) { controllers_->view( view ); }
     Control::ControllerState Session::controllerState() const { return controllers_->state(); }

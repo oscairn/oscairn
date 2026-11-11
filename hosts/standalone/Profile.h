@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include "../audio/AudioConfiguration.h"
+#include <oscairn/control_groups.h>
 #include <oscairn/hardware.h>
 #include <algorithm>
 #include <array>
@@ -136,25 +137,31 @@ namespace oscairn::standalone
     std::vector<std::pair<std::string, std::string>> builtInProfiles(); // id, json
     // A built-in device profile by id, or a profile file by path; "desktop" (or nothing) makes the
     // desktop's. A controller's profile is refused here: it joins when its ports are connected.
+    // (DesktopProfile.cpp, with Profile::desktop: the app's alone, as they read the display.)
     Profile loadProfile(const std::string& nameOrFile);
+    // A built-in profile of either kind by id, or a profile file by path.
+    Profile readProfile(const std::string& nameOrFile);
+    // A profile's control groups, as physical controls resolve them.
+    std::vector<ControlGroup> controlGroups(const Profile&);
     // The built-in controllers' profiles, and those in `files`.
     std::vector<Profile> controllerProfiles(const std::vector<std::string>& files = {});
     // The musician's choice of profiles for a port (RFC 0024): the profiles' ids by the port's
-    // name, kept in the app's settings (controller-profiles.json in its configuration folder, an
-    // array of ids per name; none when it is missing or unreadable). Several: identical
-    // controllers told apart by MIDI channel, each profile with its own channels
-    // ([identical controllers](../../docs/rfcs/0024-device-profiles.md#identical-controllers)).
+    // name; a name not there has none chosen (the first that fits plays it), and an empty list
+    // chooses none. Several: identical controllers told apart by MIDI channel, each profile with
+    // its own channels ([identical controllers](../../docs/rfcs/0024-device-profiles.md#identical-controllers)).
+    // The engine keeps them (ControllerPorts.h); readProfileChoices reads the file the app kept
+    // them in before (controller-profiles.json in its configuration folder, an array of ids per
+    // name; none when it is missing or unreadable), to move them to the engine once.
     using ProfileChoices = std::map<std::string, std::vector<std::string>>;
     ProfileChoices readProfileChoices(const std::string& file);
-    void writeProfileChoices(const std::string& file, const ProfileChoices& choices);
     // The profiles (their places) with a port that is the input at `input`, in the order given.
     // Every input whose name carries a port's name is that port: inputs with one name take a
     // profile's ports of that name (their `index`) in turn, so two devices of one model give
     // each port twice.
     std::vector<size_t> profilesFor(const std::vector<Profile>& controllers, const std::vector<std::string>& inputs, size_t input);
     // The profiles an input is: those chosen for its name (whether or not the name carries their
-    // port's, for a port renamed), else the first that fits (controllerProfiles sorts them by id);
-    // none for none. profileOf: the first of them, or controllers.size().
+    // port's, for a port renamed; none when none is chosen), else the first that fits
+    // (controllerProfiles sorts them by id). profileOf: the first of them, or controllers.size().
     std::vector<size_t> profilesOf(const std::vector<Profile>& controllers, const std::vector<std::string>& inputs, size_t input, const ProfileChoices& choices = {});
     size_t profileOf(const std::vector<Profile>& controllers, const std::vector<std::string>& inputs, size_t input, const ProfileChoices& choices = {});
     // Which MIDI inputs (or outputs), by name in the system's order, are which controller's ports

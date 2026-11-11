@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Profile.h"
 #include "ProfileData.h"
-#include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_core/juce_core.h>
 #include <algorithm>
 #include <map>
 #include <set>
 #include <stdexcept>
 #include <tuple>
-#include <thread>
 
 namespace oscairn::standalone
 {
@@ -385,37 +384,38 @@ namespace oscairn::standalone
         return p;
     }
 
-    Profile Profile::desktop()
+    std::vector<ControlGroup> controlGroups(const Profile& profile)
     {
-        Profile p;
-        p.id = "desktop"; p.name = "This computer";
-#if JUCE_MAC
-        p.platform.os = "macos";
-#elif JUCE_WINDOWS
-        p.platform.os = "windows";
-#else
-        p.platform.os = "linux";
-#endif
-#if JUCE_ARM
-        p.platform.cpu = "arm64";
-#else
-        p.platform.cpu = "x86_64";
-#endif
-        p.compute.cores = int(std::max(1u, std::thread::hardware_concurrency()));
-        p.compute.memory = juce::SystemStats::getMemorySizeInMegabytes();
-        // The main display, if there is one yet (a test or a headless run may have none).
-        Screen s;
-        if(const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        std::vector<ControlGroup> out;
+        for(const auto& c : profile.controls)
         {
-            s.width = display->userArea.getWidth(); s.height = display->userArea.getHeight();
-            s.touch = juce::Desktop::getInstance().getMainMouseSource().isTouch();
+            ControlGroup g;
+            g.role = c.role == "notes" ? ControlGroup::Role::Notes : c.role == "screen" ? ControlGroup::Role::Screen : c.role == "fixed" ? ControlGroup::Role::Fixed : ControlGroup::Role::Assign;
+            g.kind = c.kind; g.count = uint32_t(c.count); g.modes = c.modes;
+            for(const auto& r : c.rows)
+                for(size_t k = 0; k < bankKinds.size(); ++k) if(r.bank == bankKinds[k]) g.rows.push_back({r.name, BankKind(k)});
+            // Its default target, and a controller's MIDI (RFC 0024).
+            g.scenes = c.target == "scenes"; g.switches = c.target == "switches"; g.panic = c.target == "panic"; g.paged = !c.paging.empty();
+            if(c.role != "fixed") g.functions = c.functions;
+            if(profile.controller() && c.midi.channel)
+            {
+                using Message = ControlGroup::Midi::Message;
+                g.midi.device = profile.id; g.midi.port = uint32_t(c.midi.port); g.midi.channel = uint32_t(c.midi.channel);
+                g.midi.channels.assign(c.midi.channels.begin(), c.midi.channels.end());
+                g.midi.message = c.midi.pitchBend ? Message::PitchBend : c.midi.pressure ? Message::Pressure : c.midi.cc.empty() ? Message::Note : Message::CC;
+                for(const auto n : c.midi.cc.empty() ? c.midi.notes : c.midi.cc) g.midi.numbers.push_back(uint8_t(n));
+                for(const auto& e : c.midi.encodings)
+                {
+                    g.midi.encodings.push_back(Encoding::Steps); // "steps", unless it is one of the names
+                    for(size_t k = 0; k < encodings.size(); ++k) if(e == encodings[k]) g.midi.encodings.back() = Encoding(k);
+                }
+                for(const auto& [up, down] : c.midi.steps) g.midi.steps.push_back({uint8_t(up), uint8_t(down)});
+                g.midi.latch = c.midi.button == "latch";
+                g.midi.feedback = c.midi.feedback;
+            }
+            out.push_back(std::move(g));
         }
-        else { s.width = 1440; s.height = 900; }
-        p.screens.push_back(s);
-        p.reliability = "desktop";
-        p.apps = {"oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.recordings"};
-        p.alwaysAvailable = {"oscairn.performance", "oscairn.library"};
-        return p;
+        return out;
     }
 
     std::vector<std::pair<std::string, std::string>> builtInProfiles()
@@ -431,24 +431,13 @@ namespace oscairn::standalone
         return out;
     }
 
-    namespace
+    Profile readProfile(const std::string& nameOrFile)
     {
-        Profile readProfile(const std::string& nameOrFile)
-        {
-            for(const auto& [id, json] : builtInProfiles()) if(id == nameOrFile) return Profile::parse(json);
-            const auto file = juce::File::getCurrentWorkingDirectory().getChildFile(juce::String(nameOrFile));
-            require(file.existsAsFile(), "no profile named " + nameOrFile + " and no such file");
-            require(file.getSize() <= maxProfileBytes, "larger than 64 KiB");
-            return Profile::parse(file.loadFileAsString().toStdString());
-        }
-    }
-
-    Profile loadProfile(const std::string& nameOrFile)
-    {
-        if(nameOrFile.empty() || nameOrFile == "desktop") return Profile::desktop();
-        auto p = readProfile(nameOrFile);
-        require(!p.controller(), p.id + " is a controller's profile: it joins the device's when connected");
-        return p;
+        for(const auto& [id, json] : builtInProfiles()) if(id == nameOrFile) return Profile::parse(json);
+        const auto file = juce::File::getCurrentWorkingDirectory().getChildFile(juce::String(nameOrFile));
+        require(file.existsAsFile(), "no profile named " + nameOrFile + " and no such file");
+        require(file.getSize() <= maxProfileBytes, "larger than 64 KiB");
+        return Profile::parse(file.loadFileAsString().toStdString());
     }
 
     std::vector<Profile> controllerProfiles(const std::vector<std::string>& files)
@@ -503,21 +492,6 @@ namespace oscairn::standalone
         return out;
     }
 
-    void writeProfileChoices(const std::string& file, const ProfileChoices& choices)
-    {
-        auto* o = new juce::DynamicObject();
-        const juce::var root(o);
-        for(const auto& [port, profiles] : choices)
-        {
-            juce::Array<juce::var> ids;
-            for(const auto& id : profiles) ids.add(juce::String::fromUTF8(id.c_str()));
-            o->setProperty(juce::String::fromUTF8(port.c_str()), ids);
-        }
-        const juce::File f(juce::String::fromUTF8(file.c_str()));
-        f.getParentDirectory().createDirectory();
-        f.replaceWithText(juce::JSON::toString(root));
-    }
-
     std::vector<size_t> profilesFor(const std::vector<Profile>& controllers, const std::vector<std::string>& inputs, size_t input)
     {
         std::vector<size_t> out;
@@ -529,6 +503,7 @@ namespace oscairn::standalone
     {
         if(const auto chosen = choices.find(inputs[input]); chosen != choices.end())
         {
+            if(chosen->second.empty()) return {}; // none chosen
             std::vector<size_t> out;
             for(const auto& id : chosen->second)
                 for(size_t c = 0; c < controllers.size(); ++c) if(controllers[c].id == id && std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);

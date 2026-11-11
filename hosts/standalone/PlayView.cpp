@@ -250,40 +250,6 @@ namespace oscairn::standalone
         return g;
     }
 
-    std::vector<ControlGroup> controlGroups(const Profile& profile)
-    {
-        std::vector<ControlGroup> out;
-        for(const auto& c : profile.controls)
-        {
-            ControlGroup g;
-            g.role = c.role == "notes" ? ControlGroup::Role::Notes : c.role == "screen" ? ControlGroup::Role::Screen : c.role == "fixed" ? ControlGroup::Role::Fixed : ControlGroup::Role::Assign;
-            g.kind = c.kind; g.count = uint32_t(c.count); g.modes = c.modes;
-            for(const auto& r : c.rows)
-                for(size_t k = 0; k < bankKinds.size(); ++k) if(r.bank == bankKinds[k]) g.rows.push_back({r.name, BankKind(k)});
-            // Its default target, and a controller's MIDI (RFC 0024).
-            g.scenes = c.target == "scenes"; g.switches = c.target == "switches"; g.panic = c.target == "panic"; g.paged = !c.paging.empty();
-            if(c.role != "fixed") g.functions = c.functions;
-            if(profile.controller() && c.midi.channel)
-            {
-                using Message = ControlGroup::Midi::Message;
-                g.midi.device = profile.id; g.midi.port = uint32_t(c.midi.port); g.midi.channel = uint32_t(c.midi.channel);
-                g.midi.channels.assign(c.midi.channels.begin(), c.midi.channels.end());
-                g.midi.message = c.midi.pitchBend ? Message::PitchBend : c.midi.pressure ? Message::Pressure : c.midi.cc.empty() ? Message::Note : Message::CC;
-                for(const auto n : c.midi.cc.empty() ? c.midi.notes : c.midi.cc) g.midi.numbers.push_back(uint8_t(n));
-                for(const auto& e : c.midi.encodings)
-                {
-                    g.midi.encodings.push_back(Encoding::Steps); // "steps", unless it is one of the names
-                    for(size_t k = 0; k < encodings.size(); ++k) if(e == encodings[k]) g.midi.encodings.back() = Encoding(k);
-                }
-                for(const auto& [up, down] : c.midi.steps) g.midi.steps.push_back({uint8_t(up), uint8_t(down)});
-                g.midi.latch = c.midi.button == "latch";
-                g.midi.feedback = c.midi.feedback;
-            }
-            out.push_back(std::move(g));
-        }
-        return out;
-    }
-
     void PlayView::select(uint32_t part) { selected_ = part; if(!part) partControls_ = false; page_ = 0; refresh(); repaint(); }
     void PlayView::showPartControls(bool part) { partControls_ = part; page_ = 0; shape_.clear(); refresh(); }
 

@@ -6,7 +6,8 @@
 // (key 57 sounds at 220 Hz at 96 kHz); invalid rates, buffer sizes and devices refused; a held note
 // playing on across a switch and released after it; a device that fails to open leaving the last
 // one playing; the choice restored at the next start, the profile's device and then the default
-// when the device chosen is missing; a profile's fixed device; devices coming and going announced.
+// when the device chosen is missing; a profile's fixed device; devices coming and going announced;
+// the engine's MIDI inputs listed with their controller profiles (controllers.inputs).
 //   oscairn-audio-devices-test PLUGIN-DIR [WORKER]
 #include "AudioEngine.h"
 #include "oscairn/json_rpc.h"
@@ -159,6 +160,7 @@ int main( int argc, char** argv )
     char folder[] = "/tmp/oscairn-audio-devices-XXXXXX";
     if( !::mkdtemp( folder ) ) return 2;
     ::setenv( "OSCAIRN_DATA_HOME", folder, 1 ); // the saved choice: this test's, never the user's
+    ::setenv( "OSCAIRN_CONFIG_HOME", folder, 1 ); // and no controller choices of the user's taken over
     juce::ScopedJuceInitialiser_GUI juce;
     const juce::StringArray all{ "Studio", "Headphones", "Broken" };
     try
@@ -173,6 +175,10 @@ int main( int argc, char** argv )
             const auto studio = devices["outputs"][0];
             check( studio["sampleRates"].size() == 3 && double( studio["sampleRates"][2] ) == 96000 && studio["bufferSizes"].size() == 4, "a device's rates and buffer sizes" );
             check( devices["outputs"][1]["sampleRates"].size() == 1 && devices["outputs"][1]["bufferSizes"].size() == 2, "another device's, asked without opening it" );
+            // Its external controllers (RFC 0024): every MIDI input it has, as the status names them.
+            const auto ports = call( rpc, "controllers.inputs" )["result"]["inputs"];
+            const auto status = call( rpc, "session.status" )["result"];
+            check( ports.isArray() && ports.size() == status["midiInputs"].size() && status.hasProperty( "midiPortList" ), "the engine lists its MIDI inputs' controller profiles" );
 
             // A new rate: every plugin activated again at it, key 57 still at 220 Hz.
             auto set = call( rpc, "audio.set", R"({"sampleRate":96000})" )["result"];

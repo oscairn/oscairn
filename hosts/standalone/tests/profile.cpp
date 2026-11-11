@@ -179,9 +179,12 @@ int main()
             check(profileOf(both, inputs, 1, chosen) == 1 && taken.size() == 2 && taken[0].profile == 1 && taken[1].profile == 1, "the chosen profile takes the ports chosen for it");
             check(ignoredInputs(both, inputs) == std::vector<std::string>{"SMK-37 Elite -Private"} && ignoredInputs(both, inputs, chosen).empty(), "and its ports are not ignored where the stock profile's are");
             check(profileOf(both, inputs, 1, {{"SMK-37 Elite -Master", {"nonesuch"}}}) == 0, "a choice that matches no longer falls back to the first");
+            const ProfileChoices none{{"SMK-37 Elite -Master", {}}, {"SMK-37 Elite -Private", {}}};
+            check(profileOf(both, inputs, 1, none) == both.size() && matchPorts(both, inputs, "midi", none).empty() && ignoredInputs(both, inputs, none).empty(), "none chosen: no profile plays the port");
+            // The file the app kept the choices in before the engine did, read to move them once.
             const auto file = juce::File::createTempFile(".json");
             check(readProfileChoices(file.getFullPathName().toStdString()).empty(), "no choices saved: none");
-            writeProfileChoices(file.getFullPathName().toStdString(), chosen);
+            file.replaceWithText(R"({"SMK-37 Elite -Master": ["smk37-elite-custom"], "SMK-37 Elite -Private": ["smk37-elite-custom"]})");
             check(readProfileChoices(file.getFullPathName().toStdString()) == chosen, "the choices saved read back");
             file.deleteFile();
         }

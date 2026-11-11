@@ -314,9 +314,10 @@ An app is a kind of package ([RFC 0006](0006-packages-and-portability.md), [RFC 
      the shell until then. *Begun 2026-11-11:* `Oscairn Settings`
      (`hosts/standalone/apps/settings/`), granted `system` alone, with its frame (the pages that
      apply to the device's profile, OS and build) and one page, Audio (`audio.devices`,
-     `audio.set`); Apps → Settings... opens it where apps run as processes. The dialog's signing
-     keys, package repositories and MIDI controllers are not ported yet, so the dialog stays,
-     reached from the Apps menu; step 7's gate is not run for it.
+     `audio.set`); Apps → Settings... opens it where apps run as processes. Signing keys and
+     MIDI controllers (the engine's choices, `controllers.*`) are pages of it now; the package
+     repositories are not ported yet, so the dialog stays with them alone, reached from the
+     Apps menu (Package Repositories...); step 7's gate is not run for it.
   7. **Performance** last: the Play view and the sound editor are the most tied into the shell
      (`DesktopShell`, `PlayView`), always-available, and what a stage depends on.
 - **The launcher is not special.** It has no privilege; any app with `home: true` may be one,

@@ -95,9 +95,6 @@ namespace oscairn::standalone
         std::vector<std::unique_ptr<Strip>> strips_;
     };
 
-    /// A profile's control groups, as physical controls resolve them.
-    std::vector<ControlGroup> controlGroups(const Profile&);
-
     /// The Performance app on a device's screen (RFC 0030): Play, and Edit's parts views, with
     /// the top bar's actions for each.
     class PerformanceApp : public juce::Component

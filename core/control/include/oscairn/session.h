@@ -236,6 +236,22 @@ namespace oscairn
         bool note( bool on, int key, double velocity, int channel = 0 ) override;
         void allNotesOff() override { allOff_.store( true, std::memory_order_relaxed ); panic_.store( true, std::memory_order_release ); endRinging_.store( true, std::memory_order_release ); } // the queue overflow's emergency release, every plugin taking notes reset; ringOut ends the last Performance's
         void ignoreMidiInputs( const std::vector<std::string>& names ) override;
+        std::vector<MidiPort> midiPorts() override;
+        std::vector<MidiPort> chooseMidiPort( const std::string& input, const std::optional<std::vector<std::string>>& profiles ) override;
+        std::vector<MidiPort> ignoreMidiPort( const std::string& input, bool ignored ) override;
+        /// The host's controllers (AudioEngine's ControllerPorts, RFC 0024): what midiPorts(),
+        /// chooseMidiPort() and ignoreMidiPort() call; without it they refuse.
+        struct ControllerHost
+        {
+            std::function<std::vector<MidiPort>()> list;
+            std::function<std::vector<MidiPort>( const std::string&, const std::optional<std::vector<std::string>>& )> choose;
+            std::function<std::vector<MidiPort>( const std::string&, bool )> ignore;
+        };
+        void setControllerHost( ControllerHost host ) { controllerHost_ = std::move( host ); }
+        /// What the host's controllers add (RFC 0024): their groups after those setControllers()
+        /// gives, their ports beside its ports, and inputs left out beside ignoreMidiInputs()'s
+        /// (the musician's, a port that duplicates another's, a Mackie Control port the app reads).
+        void setHostControllers( std::vector<ControlGroup> groups, std::vector<ControllerPort> ports, std::vector<std::string> ignored );
         PadMap padMap() const override { return padMap_; }
         void setPadMap( const PadMap& map ) override;
         bool pad( uint32_t pad, bool on, double velocity, int channel = 0 ) override;
@@ -760,7 +776,12 @@ namespace oscairn
         std::atomic<bool> allOff_{ false }; // allNotesOff, not a queue overflow: plugins behind note effects are reset too
         std::atomic<bool> endRinging_{ false }; // allNotesOff: ringOut ends the last Performance's plugins at once
         std::atomic<uint64_t> droppedNotes_{ 0 };
-        std::vector<std::string> ignoredInputs_;      // control thread
+        std::vector<std::string> ignoredInputs_, hostIgnored_; // control thread: ignoreMidiInputs()'s, setHostControllers()'s
+        void applyIgnored();                          // both, as sources now
+        // Control thread: setControllers()'s groups and ports, and setHostControllers()'s, after them.
+        std::vector<ControlGroup> groups_, hostGroups_;
+        std::vector<ControllerPort> ports_, hostPorts_;
+        ControllerHost controllerHost_;
         std::atomic<uint64_t> ignoredSources_{ 0 };   // their sources now, a bit each, for the audio thread
         // MIDI for hardware outputs (midiOutput), audio thread.
         std::array<Graph::MidiMessage, Graph::maxMidiOut + 8> midiOut_{};

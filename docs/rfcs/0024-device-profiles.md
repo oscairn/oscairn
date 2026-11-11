@@ -27,9 +27,11 @@ Checked when built and tested; the sections below say how.
       (parsing, defaults, resolution, encodings and pickup built; the SMK37 Elite's numbers
       read with `oscairn-midi-monitor`, all but its buttons; Mackie Control ports read and fed
       back, and knob values sent back where a profile says so ([status](#mackie-control));
-      choosing between profiles that match one port built in Settings)
+      choosing between profiles that match one port, kept by the engine, in the Settings app)
   - [x] the mapping played by the engine, from the groups and ports the app sends it
         ([where the mapping runs](#where-the-mapping-runs))
+  - [x] the musician's choices of profile per port, and ports ignored, kept and played by the
+        engine, chosen on the Settings app's MIDI controllers page ([status](#choices-status))
   - [x] [identical controllers](#identical-controllers): every same-named input opens, told
         apart by MIDI channel ([status](#identical-controllers-status))
 
@@ -326,12 +328,12 @@ profiles' ids. RFC 0011's controller-mapping service decodes the encodings and d
 **A profile describes one firmware.** What a controller sends is its firmware's choice, so a
 unit running custom firmware gets a profile of its own (its own id), beside the stock one.
 When two profiles match one input, the musician chooses (a `--controller FILE` still replaces
-the built-in of its own id): the desktop's **Settings** lists each connected port a profile
-fits, the profile in use and the others that fit, and whether the port is ignored as a
-duplicate or read as Mackie Control. Until a choice is made, or when the chosen profile no
-longer fits, the first by id takes it. The choice is kept per port name in the app's
-settings (`controller-profiles.json` in its configuration folder), and the ports open again
-with it (`desktop-profile` and `desktop-gaps` test it, with port names only). Matching by the device's own identity (the firmware version in its reply to a
+the built-in of its own id): the Settings app's **MIDI controllers** page lists each MIDI
+input with its profile (Automatic, None, each that fits, or each of them by MIDI channel), an
+Ignore switch, and what the port is: played, read as Mackie Control, or left out as a
+duplicate. Until a choice is made, or when the chosen profile no longer fits, the first by id
+takes it. The engine keeps the choice per port name in its data folder (`controllers.json`)
+and plays the ports with it at once ([choices status](#choices-status)). Matching by the device's own identity (the firmware version in its reply to a
 MIDI Identity Request) is a possible later step, where the firmware reports it.
 
 Built in: `smk37-elite`, the owner's Arturia-style SMK37 Elite with its stock firmware (37 keys,
@@ -371,15 +373,31 @@ whether the slider mode buttons change what Plugin mode sends.
 
 ### Where the mapping runs
 
-The app reads the profiles and the musician's choices and matches ports, and the engine plays
-the controls (RFC 0011's [instant controls](0011-performance-ui-and-editors.md#instant-controls)).
-Whenever the connected controllers or the choices change, the app sends the engine the joined
-groups (the device's, then each controller's, with their `midi`) and which MIDI input, by name,
-is which profile's port (`controllers.set`, sent again when the engine restarts). The engine
-opens every input itself, as it does for notes, and maps each message from a bound input on
-its MIDI input thread. The app keeps only Mackie Control ports (read and fed back by the app,
-[below](#mackie-control)) and the outputs that take values back. Profiles stay the app's: the
-engine needs only what they resolve to, and a profile file never crosses the socket.
+The engine reads the controller profiles (the built-in ones, and the `--controller` files the
+app passes it by path) and the musician's choices, matches its MIDI inputs, and plays the
+controls (RFC 0011's [instant controls](0011-performance-ui-and-editors.md#instant-controls)),
+so a device without the desktop app plays its controllers the same way. The app sends the
+device's own groups (`controllers.set`, sent again when the engine restarts); whenever the
+connected inputs or the choices change, the engine joins each controller's groups after them,
+with their `midi`, binds its ports by input name, and leaves out duplicate ports and Mackie
+Control ports. It maps each message from a bound input on its MIDI input thread. The app
+matches the same way with the engine's choices (`controllers.inputs`), so its views know the
+joined groups in the engine's order, and keeps only Mackie Control ports (read and fed back by
+the app, [below](#mackie-control)) and the outputs that take values back.
+
+#### Choices status
+
+Built 2026-11-11 (`hosts/audio/ControllerPorts.h`; `controllers.inputs`, `controllers.choose`
+and `controllers.ignore` in the [control protocol](../control-protocol.md#requests-and-responses),
+each `system`'s alone). The choices and the ports the musician ignores are kept in the engine's
+data folder (`controllers.json`); an engine with none kept takes over the app's
+`controller-profiles.json` from its configuration folder once, leaving that file as it was. A
+change reaches status subscribers as `midiPortList`, which the app and the Settings app's MIDI
+controllers page follow. `engine-controller-ports` checks the listing, None, a profile, each of
+two and Automatic, a renamed port, ignoring, what is played, the choices kept across a restart,
+the old file taken over once and not again, and refusals, including to an app without
+`system`; `desktop-settings` checks the page. Inputs are names in both: no controller was
+connected.
 
 ### Identical controllers
 
@@ -425,8 +443,9 @@ fits until chosen again. The engine binds by input name, so every input of a nam
 `desktop-profile` checks two SMK37s (both `-Master` inputs bound, both `-MCP` read as Mackie,
 both `-Private` ignored), five of one name, two MODX Ms taking ports 1 and 2 in turn, a profile
 copy on channel 2 chosen with the stock one binding each `-Master` input twice, and a renamed
-port playing as the profile chosen for its name; `desktop-gaps` checks Settings' **Each of
-these, by MIDI channel** keeping both profiles for the port. `control-controller-input`
+port playing as the profile chosen for its name; `desktop-settings` checks the MIDI controllers
+page's **Each of these, by MIDI channel** keeping both profiles for the port (`desktop-gaps` did,
+for the old dialog). `control-controller-input`
 (`identical`) checks two inputs of one name both moving the same fader, and, with a second
 profile on channel 2, its fader being a control of its own (`fader:3`) playing its own
 assignment while channel 1 still plays the first's. No two identical devices were connected.

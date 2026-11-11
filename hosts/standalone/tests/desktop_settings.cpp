@@ -7,7 +7,10 @@
 // the listing, a change applied, two refusals said under what was changed, a listing again when
 // the status changes, and a fixed device; the Signing keys page on the same kind of connection:
 // "No keys yet", a key made through the old dialog's ask and listed by name and fingerprint; the
-// app's connection allowed audio.set and refused
+// MIDI controllers page against the engine's own ControllerPorts on input names (no MIDI device is
+// opened): each input with its profile menu and Ignore switch, None, a profile, each of two by
+// channel, an input ignored, a refusal said under its port, a listing again when an input comes,
+// and the choices kept in the data folder; the app's connection allowed audio.set and refused
 // graph.add; and the app started as a process of its own from its manifest. With SNAPSHOTS, the
 // app renders itself to SNAPSHOTS-settings-1400x900.png, -900x700.png, and on the KICK's
 // 1024 x 600 screen under the shell's top bar, -kick-list.png and -kick-audio.png.
@@ -16,7 +19,9 @@
 #include "../Launcher.h"
 #include "../SigningKeys.h"
 #include "../apps/settings/AudioPage.h"
+#include "../apps/settings/MidiControllersPage.h"
 #include "../apps/settings/SigningKeysPage.h"
+#include "../../audio/ControllerPorts.h"
 #include "EngineProcess.h"
 #include "oscairn/local_socket.h"
 #include "oscairn/session.h"
@@ -61,7 +66,8 @@ int main(int argc, char** argv)
         const auto& all = standalone::settings::pages();
         const auto network = std::find_if(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "network"; });
         check(network != all.end() && network->applies(standalone::loadProfile("kick")) && !network->applies(standalone::Profile::desktop()), "Network applies on the KICK (Wi-Fi), not on this computer");
-        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "keys"}, "built so far: Audio and Signing keys");
+        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "keys", "controllers"}, "built so far: Audio, Signing keys and MIDI controllers");
+        check(ids(standalone::settings::shownPages(all, standalone::loadProfile("kick"))) == std::vector<std::string>{"audio", "keys", "controllers"}, "MIDI controllers on a device too");
 #if !OSCAIRN_BLUETOOTH
         check(std::none_of(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "bluetooth"; }), "Bluetooth is left out of a build without it");
 #endif
@@ -97,6 +103,18 @@ int main(int argc, char** argv)
                 statusChanged = true;
                 return devices;
             });
+        // The engine's controllers, on input names alone: the built-in profiles and a second
+        // SMK37 profile (custom firmware) from a file, wired as AudioEngine wires them.
+        std::string stock;
+        for(const auto& [id, json] : standalone::builtInProfiles()) if(id == "smk37-elite") stock = json;
+        const auto custom = configuration.getChildFile("smk37-custom.json");
+        custom.replaceWithText(juce::String(stock).replace("\"smk37-elite\"", "\"smk37-elite-custom\"").replace("(stock firmware)", "(custom firmware)"));
+        host::ControllerPorts ports({custom.getFullPathName().toStdString()});
+        ports.setInputs({"IAC Bus 1", "SMK-37 Elite -Master"});
+        uint64_t portList = 0;
+        session->setControllerHost({[&] { return ports.list(); },
+            [&](const std::string& input, const std::optional<std::vector<std::string>>& profiles) { return ports.choose(input, profiles); },
+            [&](const std::string& input, bool ignored) { return ports.ignore(input, ignored); }});
         auto server = std::make_unique<LocalServer>(*session);
         server->listen(socket.string());
         std::atomic<bool> running = true;
@@ -105,11 +123,12 @@ int main(int argc, char** argv)
             {
                 server->poll(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()));
                 session->service();
-                if(statusChanged.exchange(false)) // as AudioEngine says it: the device, its rate and size, the list's counter
+                if(ports.changes() != portList) { portList = ports.changes(); statusChanged = true; }
+                if(statusChanged.exchange(false)) // as AudioEngine says it: the device, its rate and size, the lists' counters
                 {
                     std::lock_guard<std::mutex> l(lock);
                     auto status = session->sessionStatus();
-                    status.audioDevice = devices.output; status.sampleRate = devices.sampleRate; status.bufferSize = devices.bufferSize; status.audioDeviceList = deviceList; status.audioReady = true;
+                    status.audioDevice = devices.output; status.sampleRate = devices.sampleRate; status.bufferSize = devices.bufferSize; status.audioDeviceList = deviceList; status.midiPortList = portList; status.audioReady = true;
                     session->setHostStatus(status);
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -147,7 +166,7 @@ int main(int argc, char** argv)
                 standalone::setDesktopMode(frame, 1);
                 frame.setSize(1000, 640);
                 auto* page = dynamic_cast<standalone::settings::AudioPage*>(frame.page());
-                check(page && frame.current()->id == "audio" && frame.shown().size() == 2, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
+                check(page && frame.current()->id == "audio" && frame.shown().size() == 3, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
                 if(!page) return;
                 check(wait([&] { return page->listings() >= 1 && !page->busy(); }), "the devices are listed");
                 check(page->output.getNumItems() == 3 && page->output.getText() == "Studio" && page->output.isEnabled(), "the output devices, the one open chosen");
@@ -231,13 +250,65 @@ int main(int argc, char** argv)
                       "and by fingerprint, in groups of four: " + keys->prints[0]->getText().toStdString());
             }
 
+            // The MIDI controllers page on an app's connection granted `system` alone: the engine's
+            // choices, kept in the data folder under OSCAIRN_DATA_HOME, never the user's.
+            {
+                standalone::Engine app(engine.appConnection("oscairn.settings", manifest->permissions), false);
+                standalone::settings::Frame frame(app, standalone::Profile::desktop());
+                standalone::setDesktopMode(frame, 1);
+                frame.setSize(1000, 640);
+                check(frame.open("controllers"), "the list opens MIDI controllers");
+                auto* page = dynamic_cast<standalone::settings::MidiControllersPage*>(frame.page());
+                if(!page) return;
+                check(wait([&] { return page->listings() >= 1 && !page->busy(); }), "the inputs are listed when the page opens");
+                check(page->ports().size() == 2 && page->portRow(0).label() == "IAC Bus 1" && page->portRow(1).label() == "SMK-37 Elite -Master" && !page->noPorts.isVisible(), "a row for each input, by its name");
+                auto& iac = page->controls(0);
+                auto& master = page->controls(1);
+                check(iac.profile.getNumItems() == 2 && iac.profile.getText() == "Automatic" && page->portRow(0).explanation().startsWith("No controller profile fits"),
+                      "an input no profile fits: Automatic or None: " + page->portRow(0).explanation().toStdString());
+                check(master.profile.getNumItems() == 5 && master.profile.getText() == "Automatic (SMK37 Elite (stock firmware))" && master.profile.isEnabled() && master.ignore.isEnabled() && !master.ignore.getToggleState(),
+                      "-Master: Automatic, None, the two profiles that fit and each of them; not ignored");
+                check(page->portRow(1).explanation() == "Played by SMK37 Elite (stock firmware): its controls join.", "what the port is: " + page->portRow(1).explanation().toStdString());
+                // Each change counts in the status, which lists again; the next is made once that is done.
+                auto settle = [&] { wait([&] { return !page->busy(); }); wait([] { return false; }, 400); wait([&] { return !page->busy(); }); };
+
+                master.profile.setSelectedId(2, juce::sendNotificationSync); // None
+                check(page->busy() && !master.profile.isEnabled() && !iac.ignore.isEnabled(), "a change disables the controls while it is made");
+                check(wait([&] { return !page->busy() && !page->ports()[1].automatic && page->ports()[1].chosen.empty(); }), "None: chosen with controllers.choose");
+                check(page->controls(1).profile.getText() == "None" && page->portRow(1).explanation().startsWith("No profile"), "shown so: " + page->portRow(1).explanation().toStdString());
+                settle();
+                page->controls(1).profile.setSelectedId(4, juce::sendNotificationSync); // the custom firmware's
+                check(wait([&] { return !page->busy() && page->ports()[1].chosen == std::vector<std::string>{"smk37-elite-custom"}; }) && page->controls(1).profile.getText() == "SMK37 Elite (custom firmware)",
+                      "a profile chosen: the custom firmware's");
+                settle();
+                page->controls(1).profile.setSelectedId(5, juce::sendNotificationSync); // each of them
+                check(wait([&] { return !page->busy() && page->ports()[1].playing.size() == 2; }) && page->controls(1).profile.getText() == "Each of these, by MIDI channel",
+                      "each of them, by MIDI channel, for identical controllers: both play it");
+                settle();
+                page->controls(0).ignore.triggerClick();
+                check(wait([&] { return !page->busy() && page->ports()[0].ignored; }) && page->controls(0).ignore.getToggleState() && page->portRow(0).explanation().startsWith("Ignored") && !page->controls(0).profile.isEnabled(),
+                      "Ignore: the port left out, said so");
+                // Refused: said under its port, in the danger color.
+                settle();
+                page->choose(1, std::vector<std::string>{"nonesuch"});
+                check(wait([&] { return !page->busy() && page->portRow(1).danger(); }) && page->portRow(1).explanation().contains("nonesuch"), "a profile refused, said under it: " + page->portRow(1).explanation().toStdString());
+                // An input comes: the status's counter brings a listing, with the Mackie port read as such.
+                settle();
+                const int before = page->listings();
+                ports.setInputs({"IAC Bus 1", "SMK-37 Elite -Master", "SMK-37 Elite -MCP"});
+                check(wait([&] { return page->listings() > before && !page->busy() && page->ports().size() == 3; }), "a status change lists the inputs again");
+                check(page->portRow(2).label() == "SMK-37 Elite -MCP" && page->portRow(2).explanation().startsWith("Read as Mackie Control"), "the new port, read as Mackie Control: " + page->portRow(2).explanation().toStdString());
+                const auto kept = data.getChildFile("controllers.json").loadFileAsString();
+                check(kept.contains("smk37-elite-custom") && kept.contains("IAC Bus 1"), "the choice and the ignored port kept in the data folder");
+            }
+
             // The app as a process of its own, started from its manifest by the shell's supervisor.
             {
                 standalone::Actions actions;
                 standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_PROFILE=desktop"});
                 check(processes.open("oscairn.settings") && processes.pid("oscairn.settings") > 0 && processes.pid("oscairn.settings") != ::getpid(), "Settings runs as a process of its own");
                 check(wait([&] { return processes.log("oscairn.settings").contains("oscairn-settings: started"); }), "its stderr is in its log");
-                check(processes.log("oscairn.settings").contains("with 2 pages for desktop"), "with this computer's pages");
+                check(processes.log("oscairn.settings").contains("with 3 pages for desktop"), "with this computer's pages");
                 check(wait([&] { return processes.state("oscairn.settings") == standalone::AppProcesses::State::Running; }, 2000), "and runs");
                 processes.stop("oscairn.settings");
                 check(wait([&] { return processes.pid("oscairn.settings") < 0; }), "stopped by the shell");

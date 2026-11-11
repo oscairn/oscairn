@@ -207,6 +207,9 @@ namespace oscairn
         bool note(bool on,int key,double velocity,int channel=0) override;
         void allNotesOff() override;
         void ignoreMidiInputs(const std::vector<std::string>& names) override;
+        std::vector<MidiPort> midiPorts() override;
+        std::vector<MidiPort> chooseMidiPort(const std::string& input,const std::optional<std::vector<std::string>>& profiles) override;
+        std::vector<MidiPort> ignoreMidiPort(const std::string& input,bool ignored) override;
         void setControllers(const std::vector<ControlGroup>& groups, const std::vector<ControllerPort>& ports) override;
         void setControlView(const ControlView& view) override;
         ControllerState controllerState() const override; // as the last notification said

@@ -75,8 +75,6 @@ namespace oscairn::standalone
         Control::History history() const;
         void edit(std::function<void(Control&)> change);
         const std::string& editError() const {return editError_;}
-        // MIDI inputs the engine leaves out (a controller's duplicate ports), sent again after a restart.
-        void ignoreMidiInputs(std::vector<std::string> names);
         const std::string& pluginDir() const {return pluginDir_;}
         std::function<void()> openParts;
         std::function<void()> goHome, goBack; // the shell's (RFC 0030), for a panel's buttons
@@ -94,12 +92,16 @@ namespace oscairn::standalone
         void touched(const std::string& control){touched_=control;++touches_;}
         const std::string& lastTouched() const {return touched_;}
         uint32_t touches() const {return touches_;}
-        // The device's control groups, from its profile (RFC 0024), joined by the connected
-        // controllers' (none on the desktop without one), and which MIDI inputs are which
-        // controller's ports: the engine plays them (RFC 0011's instant controls). Sent again
-        // after a restart.
-        void setControllers(std::vector<ControlGroup> groups, std::vector<Control::ControllerPort> ports);
+        // The device's control groups, from its profile (RFC 0024), and any MIDI inputs bound to
+        // them: the engine plays them (RFC 0011's instant controls), sent again after a restart.
+        // `joined`: the connected controllers' groups, which the engine joins after them itself
+        // (its controller profiles and the musician's choices); kept here, after `groups`, for
+        // the views, so a group's place is the engine's.
+        void setControllers(std::vector<ControlGroup> groups, std::vector<Control::ControllerPort> ports, std::vector<ControlGroup> joined = {});
         const std::vector<ControlGroup>& controlGroups() const {return groups_;}
+        // The MIDI inputs and their controller profiles, as the engine plays them (controllers.inputs);
+        // none when it refuses, nothing when it cannot say now (busy or gone).
+        std::optional<std::vector<Control::MidiPort>> midiPorts() const;
         // Where each group is (page, row or mode), as the engine last said (a row button moves
         // one), and the part the knobs follow: Play's, sent to the engine when they change.
         const GroupPositions& positions() const {return positions_;}
@@ -292,7 +294,7 @@ namespace oscairn::standalone
         ScreenPage screenPage_;
         std::string touched_;
         uint32_t touches_=0;
-        std::vector<ControlGroup> groups_;
+        std::vector<ControlGroup> groups_, sent_; // all, for the views; the device's, sent
         std::vector<Control::ControllerPort> ports_;
         GroupPositions positions_;
         uint64_t engineTouches_=0;
@@ -302,7 +304,6 @@ namespace oscairn::standalone
         std::array<uint16_t,128> padChannels_{};
         PadMap padMap_;
         std::string editError_, pluginDir_;
-        std::vector<std::string> ignoredInputs_;
         std::vector<Macro> macros_;
         void refreshPads();
         std::string socketPath_,failure_;

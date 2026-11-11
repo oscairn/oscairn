@@ -148,11 +148,11 @@ A panel profile fills the display with no title or menu bar and shows its screen
 layout for a run (on the desktop, `--profile kick` shows the KICK's screen, full screen).
 
 **Apps → Settings...** opens the Settings app (below) where it runs (against an engine on a
-socket); with `--in-process`, the shell's own Settings dialog. Until every page of that dialog is
-in the app, the Apps menu also has **Signing Keys, Repositories and Controllers...**, which
-opens the dialog. The dialog lists the signing keys
-([RFC 0006](../docs/rfcs/0006-packages-and-portability.md#signatures)) by name and fingerprint,
-never a private key, and makes one. **Export Performance...** (and the Library's Export) asks
+socket); with `--in-process`, the shell's own Settings dialog, which has the package
+repositories alone. Until they are in the app too, the Apps menu also has **Package
+Repositories...**, which opens the dialog. The Settings app's Signing keys page lists the
+signing keys ([RFC 0006](../docs/rfcs/0006-packages-and-portability.md#signatures)) by name and
+fingerprint, never a private key, and makes one. **Export Performance...** (and the Library's Export) asks
 whether to sign: Not signed unless a key is chosen, or **Make a key...**; the item and the
 whole archive are then signed. Installing names the archive's signer, and whether this device
 trusts the key.
@@ -160,11 +160,14 @@ trusts the key.
 External MIDI controllers have profiles of their own ([RFC 0024](../docs/rfcs/0024-device-profiles.md#controllers)):
 `smk37-elite` (the SMK37 Elite with its stock firmware, read from a unit with the monitor below;
 its buttons not described yet) and `modx-m-usb` (estimated) are built in, and `--controller FILE`, given as
-often as wanted, adds one or replaces the built-in of its id. Where two profiles match an input,
-**Settings** chooses between them, kept per port name; until then the first by id takes it.
+often as wanted, adds one or replaces the built-in of its id; the app passes those files to the
+engine it starts (`oscairn-engine --controller FILE`), which reads the profiles itself. Where
+two profiles match an input, the Settings app's **MIDI controllers** page chooses between them
+(or none, or each by MIDI channel), and ignores a port; the engine keeps both per port name in
+its data folder and plays them at once. Until a choice is made the first by id takes it.
 A port the profile marks `ignore` (a duplicate, like the SMK37's `-Private`) is left out by
 the engine, so its notes do not play twice. While a MIDI input whose name
-matches a controller's port is connected, the app opens it too and the controller's groups
+matches a controller's port is connected, the engine plays it and the controller's groups
 join the device's: its knobs play the banks of the part Play's knobs follow (and the page Play
 shows, when they are Play's knob row, as on the desktop; else the first), its faders part
 levels, its scene buttons scenes, with pickup for absolute knobs and faders and the relative
@@ -256,9 +259,14 @@ sample rate and the buffer size from `audio.devices`, each applied with `audio.s
 message thread; where the device came from and any device passed over are said under it, a
 device the profile fixes is shown so and cannot be chosen, a refused change says why under it,
 and it is listed again when the status's `audioDevice`, `sampleRate`, `bufferSize` or
-`audioDeviceList` change. `desktop-settings` checks the pages per profile, the Audio page on an
+`audioDeviceList` change. **MIDI controllers**, everywhere: a row per MIDI input with its
+controller profile (Automatic, None, each that fits, or each of them by MIDI channel) and an
+Ignore switch, what the port is under it, changed with `controllers.choose` and
+`controllers.ignore` and listed again when the status's `midiPortList` changes.
+`desktop-settings` checks the pages per profile, the Audio page on an
 app connection granted `system` against a socket session whose audio host is a stand-in (no
-device opened), the connection allowed `audio.set` and refused `graph.add`, and the app started
+device opened), the MIDI controllers page against the engine's own controllers on input names,
+the connection allowed `audio.set` and refused `graph.add`, and the app started
 as a process. Not yet: permissions per app connection (step 4),
 packaging (step 5), sandboxing (step 6), and handing an app a fresh connection after an engine
 restart (it quits and the shell starts it again instead).

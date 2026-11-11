@@ -105,6 +105,7 @@ namespace oscairn::host
         if( devices ) devices_.addAudioDeviceType( std::move( devices ) ); // before the first scan, so the system's are never made
         juce::AudioDeviceManager::AudioDeviceSetup preferred;
         const auto& config=channelMap_.configuration();
+        controllers_=std::make_unique<ControllerPorts>(config.controllers); // a bad profile file refuses to start before any device opens
         fixed_=config.explicitOutputs; // a channel map names one device's channels: the profile's, the only one
         auto choice=readChoice();
         if(fixed_){choice.output.reset();choice.input.reset();}
@@ -188,6 +189,10 @@ namespace oscairn::host
         sender_.startThread();
         midiDevicesChanged_ = juce::MidiDeviceListConnection::make( [this] { midiDevicesDirty_ = true; } );
         session_->setAudioHost( [this] { return listDevices(); }, [this]( const Control::AudioSetting& s ) { return setDevice( s ); } );
+        // External controllers (RFC 0024): the musician's choices and ignored ports, kept here.
+        session_->setControllerHost( { [this] { return controllers_->list(); },
+            [this]( const std::string& input, const std::optional<std::vector<std::string>>& profiles ) { return controllers_->choose( input, profiles ); },
+            [this]( const std::string& input, bool ignored ) { return controllers_->ignore( input, ignored ); } } );
         seenDevices_ = deviceNames( devices_ );
         devices_.addChangeListener( this );
         devices_.addAudioCallback( this );
@@ -203,6 +208,7 @@ namespace oscairn::host
 #endif
         session_->setControllerWake( {} );
         session_->setAudioHost( {}, {} );
+        session_->setControllerHost( {} );
         cancelPendingUpdate();
         devices_.removeChangeListener( this );
         devices_.removeAudioCallback( this ); // waits for the callback to finish
@@ -355,7 +361,11 @@ namespace oscairn::host
         // shortcut: every desktop input is reported as USB; port and network kinds need the device's own input table (RFC 0012).
         for(size_t i = 0; i < midiInputs_.size(); ++i) status.midiInputs.push_back({MidiEndpoint::Kind::Usb, midiSources_[i], midiInputs_[i]->getName().toStdString()});
         for(size_t i = 0; i < midiOutputs_.size(); ++i) status.midiOutputs.push_back({MidiEndpoint::Kind::Usb, outputNumbers_[i], midiOutputs_[i]->getName().toStdString()});
+        const auto changes = controllers_->changes();
+        status.midiPortList = changes;
         session_->setHostStatus(std::move(status));
+        // The inputs or a choice changed: the controllers they make played (after the status, which names the inputs).
+        if( changes != controllerChanges_ ) { controllerChanges_ = changes; auto a = controllers_->applied(); session_->setHostControllers( std::move( a.groups ), std::move( a.ports ), std::move( a.ignored ) ); }
         if( serviced_ ) serviced_();
     }
 
@@ -467,8 +477,13 @@ namespace oscairn::host
             midiInputs_ = std::move( inputs );
             midiSources_ = std::move( sources );
         }
+        std::vector<std::string> names;
         for( auto& input : midiInputs_ )
+        {
             input->start();
+            names.push_back( input->getName().toStdString() );
+        }
+        controllers_->setInputs( std::move( names ) );
     }
 
     void AudioEngine::handleIncomingMidiMessage( juce::MidiInput* input, const juce::MidiMessage& message )

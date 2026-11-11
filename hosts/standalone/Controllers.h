@@ -10,21 +10,19 @@
 
 namespace oscairn::standalone
 {
-    /// External MIDI controllers (RFC 0024): matches the MIDI inputs whose names match a
-    /// controller's profile, joins its control groups to the device's, and tells the engine,
-    /// which plays what the controls move through RFC 0011's controller-mapping service on its
-    /// own MIDI inputs (instant controls). A Mackie Control port is read here by MackieControl
-    /// (control_surface.h), and the engine leaves it out; its LEDs, faders and names, and the
-    /// values of knobs whose profile takes them, go back on the output of the port's name.
+    /// External MIDI controllers (RFC 0024), the app's side: the engine matches its MIDI inputs
+    /// to controller profiles with the musician's choices, which it keeps (Settings' MIDI
+    /// controllers page), joins their control groups to the device's and plays what the controls
+    /// move through RFC 0011's controller-mapping service (instant controls). Matching the same
+    /// way with the engine's choices, this keeps the joined groups for the views, reads a Mackie
+    /// Control port with MackieControl (control_surface.h; the engine leaves it out), and sends
+    /// its LEDs, faders and names, and the values of knobs whose profile takes them, back on the
+    /// output of the port's name. Matched again when the MIDI devices or the engine's choices change.
     class Controllers : private juce::MidiInputCallback, private juce::Timer
     {
     public:
-        // choices: the file the musician's choices of profile per port are kept in (RFC 0024).
-        Controllers(Engine& engine, std::vector<ControlGroup> device, std::vector<Profile> profiles, std::string choices = {});
+        Controllers(Engine& engine, std::vector<ControlGroup> device, std::vector<Profile> profiles);
         ~Controllers() override;
-        const std::vector<Profile>& profiles() const { return profiles_; }
-        const ProfileChoices& choices() const { return choices_; }
-        void choose(const std::string& port, const std::vector<std::string>& profiles); // kept, and the ports opened again
 
     private:
         void open();
@@ -39,8 +37,8 @@ namespace oscairn::standalone
         Engine& engine_;
         std::vector<ControlGroup> device_;
         std::vector<Profile> profiles_;
-        std::string choicesFile_;
-        ProfileChoices choices_;
+        uint64_t portList_ = 0; // the engine's midiPortList when last matched
+        int ticks_ = 0;
         // MIDI input threads queue messages under the lock; the message thread takes them.
         struct Incoming { const juce::MidiInput* input; uint8_t bytes[3]; };
         std::mutex lock_;
@@ -48,7 +46,6 @@ namespace oscairn::standalone
         std::vector<std::unique_ptr<juce::MidiInput>> inputs_; // message thread; read under the lock
         std::vector<std::pair<std::string, uint32_t>> ports_;  // each input's controller and port
         std::vector<bool> mackie_;                             // each input: a Mackie port
-        std::vector<std::string> ignored_;                     // message thread: the inputs the engine was told to leave out
         juce::MidiDeviceListConnection changed_;
         std::atomic<bool> dirty_{false};
         // Message thread: what the surfaces and feedback read, and values set lately (read back late).

@@ -3453,6 +3453,113 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "controllers.inputs",
+              "description": "Each MIDI input with the controller profiles that fit it, the choice and what plays it"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "controllers.choose",
+              "description": "A port's controller profiles, or automatic, kept by its name"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "profiles": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The profiles' ids; empty for none; several for identical controllers told apart by MIDI channel"
+                },
+                "automatic": {
+                  "const": true,
+                  "description": "No choice: the first profile that fits plays it"
+                }
+              },
+              "required": ["input"],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "controllers.ignore",
+              "description": "Whether every message from a port is left out, kept by its name"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "ignored": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["input", "ignored"],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "engine.attach",
               "description": "The open Performance as one archive file, with its samples and the Sounds of parts still those Sounds; editedSounds adds those of edited parts. Refuses a file that exists"
             },
@@ -7213,6 +7320,9 @@
                 },
                 {
                   "$ref": "#/$defs/AudioDevices"
+                },
+                {
+                  "$ref": "#/$defs/MidiPorts"
                 }
               ]
             }
@@ -8095,6 +8205,11 @@
           "minimum": 0,
           "description": "Changes when audio devices come or go; audio.devices lists them again"
         },
+        "midiPortList": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Changes when MIDI inputs come or go, or a port's controller profiles or ignoring change; controllers.inputs lists them again"
+        },
         "audioInputs": {
           "type": "array",
           "items": {
@@ -8244,6 +8359,7 @@
         "deadlineMisses",
         "audioUnderruns",
         "audioDeviceList",
+        "midiPortList",
         "graphEventDrops",
         "midiEventDrops",
         "audioInputs",
@@ -9354,6 +9470,65 @@
         }
       },
       "required": ["outputs", "inputs", "output", "input", "sampleRate", "bufferSize", "source", "fixed", "notice"],
+      "additionalProperties": false
+    },
+    "MidiPorts": {
+      "type": "object",
+      "description": "controllers.inputs, controllers.choose and controllers.ignore: each MIDI input with its controller profiles",
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "profiles": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "name"],
+                  "additionalProperties": false
+                },
+                "description": "Those that fit it by name, then any chosen for it that do not"
+              },
+              "automatic": {
+                "type": "boolean"
+              },
+              "chosen": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "playing": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "use": {
+                "enum": ["controls", "mackie", "duplicate", ""]
+              },
+              "ignored": {
+                "type": "boolean"
+              }
+            },
+            "required": ["name", "profiles", "automatic", "chosen", "playing", "use", "ignored"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["inputs"],
       "additionalProperties": false
     },
     "AudioDevice": {

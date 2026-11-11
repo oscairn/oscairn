@@ -161,27 +161,26 @@ namespace oscairn::standalone
             catch(const std::exception&){}
     }
     // This window keeps its managed engine (it stops when every window that keeps it has quit),
-    // and gives a fresh engine (a restart, or an external one restarted) the ignored ports and
-    // Capture it did not keep, as the engine it replaced had them.
+    // and gives a fresh engine (a restart, or an external one restarted) the Capture it did not
+    // keep, as the engine it replaced had it.
     void Engine::attach()
     {
         if(process_)try{client_->call("engine.attach");}catch(const std::exception& e){std::fprintf(stderr,"oscairn: engine.attach: %s\n",e.what());}
-        // Setting the same names again changes nothing.
-        try{if(!ignoredInputs_.empty())control_->ignoreMidiInputs(ignoredInputs_);}catch(const std::exception& e){std::fprintf(stderr,"oscairn: ignored inputs: %s\n",e.what());}
         // Only when the engine's length differs: setting it starts an empty buffer, and an engine
         // still running (a timeout, another window) keeps the last seconds to capture.
         if(captureSeconds_>0)try{if(std::abs(control_->recordRetroSeconds()-captureSeconds_)>1e-9)control_->recordRetro(captureSeconds_);}catch(const std::exception& e){std::fprintf(stderr,"oscairn: capture: %s\n",e.what());}
         // The controllers and what the screen shows, which a fresh engine has not heard.
-        try{if(!groups_.empty() || !ports_.empty())control_->setControllers(groups_,ports_);}catch(const std::exception& e){std::fprintf(stderr,"oscairn: controllers: %s\n",e.what());}
+        try{if(!sent_.empty() || !ports_.empty())control_->setControllers(sent_,ports_);}catch(const std::exception& e){std::fprintf(stderr,"oscairn: controllers: %s\n",e.what());}
         engineTouches_=0;
         std::vector<std::pair<uint32_t,uint32_t>> positions;
         for(uint32_t g=0;g<positions_.size() && g<groups_.size();++g)positions.push_back({g,positions_[g]});
         sendView(true,true,std::move(positions));
     }
-    void Engine::setControllers(std::vector<ControlGroup> groups,std::vector<Control::ControllerPort> ports)
+    void Engine::setControllers(std::vector<ControlGroup> groups,std::vector<Control::ControllerPort> ports,std::vector<ControlGroup> joined)
     {
-        groups_=std::move(groups);ports_=std::move(ports);positions_.assign(groups_.size(),0);
-        command([this]{control_->setControllers(groups_,ports_);});
+        sent_=std::move(groups);ports_=std::move(ports);
+        groups_=sent_;groups_.insert(groups_.end(),joined.begin(),joined.end());positions_.assign(groups_.size(),0);
+        command([this]{control_->setControllers(sent_,ports_);});
         sendView(true,true,{});
     }
     void Engine::setControlPosition(uint32_t group,uint32_t position)
@@ -353,7 +352,11 @@ namespace oscairn::standalone
             sendChangeMessage();
         });
     }
-    void Engine::ignoreMidiInputs(std::vector<std::string> names){ignoredInputs_=std::move(names);command([this]{control_->ignoreMidiInputs(ignoredInputs_);});}
+    std::optional<std::vector<Control::MidiPort>> Engine::midiPorts() const
+    {
+        if(!connected() || !controlReady()) return {};
+        try{return control_->midiPorts();}catch(const std::exception& e){std::fprintf(stderr,"oscairn: MIDI controllers: %s\n",e.what());return std::vector<Control::MidiPort>{};} // refused: no choices
+    }
     void Engine::setPadMap(const PadMap& map){padMap_=map;command([this,map]{control_->setPadMap(map);});}
     void Engine::refreshPads(){try{padMap_=control_->padMap();}catch(const std::exception& e){std::fprintf(stderr,"oscairn: pad map: %s\n",e.what());}}
     std::string Engine::pluginId(const std::string& name) const {

@@ -128,6 +128,7 @@ namespace oscairn
             // The audio device's underruns and overruns since it started, as the host counts them (RFC 0035).
             uint64_t audioUnderruns = 0;
             uint64_t audioDeviceList = 0; // changes when the host's audio devices come or go: audioDevices() again
+            uint64_t midiPortList = 0; // changes when MIDI inputs come or go, or a port's profiles or ignoring change: midiPorts() again
         };
         virtual SessionStatus sessionStatus() const = 0;
         // The host's audio device, for Settings (RFC 0024). Each output device, and each input device
@@ -614,8 +615,38 @@ namespace oscairn
         // effect too. Any thread; never waits.
         virtual void allNotesOff() = 0;
         // MIDI inputs whose messages are left out, by their names in the session status (RFC 0024:
-        // a controller's port that duplicates another's). Replaces the last list; empty: none.
+        // a controller's port that duplicates another's). Replaces the last list; empty: none. The
+        // host's controllers leave out theirs beside these (ignoreMidiPort, a duplicate port, a
+        // Mackie Control port the app reads).
         virtual void ignoreMidiInputs( const std::vector<std::string>& names ) = 0;
+        // External controllers' MIDI inputs (RFC 0024), for Settings: each input the host has, by
+        // its name in the session status, with the controller profiles that fit it by name (then
+        // any chosen for it that do not, as for a port renamed), each by id and name; the
+        // musician's choice (automatic: none made, so the first that fits plays it; else `chosen`:
+        // empty for none, several for identical controllers told apart by MIDI channel); the
+        // profiles playing it now and what it is to them: "controls" (their controls, played by
+        // the engine), "mackie" (Mackie Control, read by the app), "duplicate" (a copy of another
+        // port, left out) or empty (none plays it); and whether the musician ignores it
+        // (ignoreMidiPort). The host keeps the choices and the ignored ports.
+        struct ControllerProfile { std::string id, name; bool operator==( const ControllerProfile& ) const = default; };
+        struct MidiPort
+        {
+            std::string name;
+            std::vector<ControllerProfile> profiles;
+            bool automatic = true;
+            std::vector<std::string> chosen, playing;
+            std::string use;
+            bool ignored = false;
+            bool operator==( const MidiPort& ) const = default;
+        };
+        virtual std::vector<MidiPort> midiPorts() = 0;
+        // A port's choice, by its name, connected or not: the profiles' ids (each one the host
+        // knows, std::invalid_argument otherwise; empty for none), or nullopt for automatic.
+        // Kept, and the ports played by it at once.
+        virtual std::vector<MidiPort> chooseMidiPort( const std::string& input, const std::optional<std::vector<std::string>>& profiles ) = 0;
+        // A port the musician ignores, or no longer does, by its name, connected or not: every
+        // message from it is left out. Kept.
+        virtual std::vector<MidiPort> ignoreMidiPort( const std::string& input, bool ignored ) = 0;
 
         // Pads (pads.h): the Performance's pad map, and playing a pad through it. A pad press
         // plays its assigned note, on its channel or else `channel`; its release ends the note

@@ -1916,10 +1916,32 @@ namespace oscairn
     void Session::ignoreMidiInputs(const std::vector<std::string>& names)
     {
         ignoredInputs_ = names;
+        applyIgnored();
+    }
+
+    void Session::applyIgnored()
+    {
         uint64_t mask = 0;
         for(const auto& input : hostStatus_.midiInputs)
-            if(input.source < maxSources && std::find(names.begin(), names.end(), input.name) != names.end()) mask |= uint64_t(1) << input.source;
+            for(const auto* names : {&ignoredInputs_, &hostIgnored_})
+                if(input.source < maxSources && std::find(names->begin(), names->end(), input.name) != names->end()) mask |= uint64_t(1) << input.source;
         ignoredSources_.store(mask, std::memory_order_release);
+    }
+
+    std::vector<Control::MidiPort> Session::midiPorts()
+    {
+        if(!controllerHost_.list) throw std::runtime_error("This engine has no MIDI controllers to choose");
+        return controllerHost_.list();
+    }
+    std::vector<Control::MidiPort> Session::chooseMidiPort(const std::string& input, const std::optional<std::vector<std::string>>& profiles)
+    {
+        if(!controllerHost_.choose) throw std::runtime_error("This engine has no MIDI controllers to choose");
+        return controllerHost_.choose(input, profiles);
+    }
+    std::vector<Control::MidiPort> Session::ignoreMidiPort(const std::string& input, bool ignored)
+    {
+        if(!controllerHost_.ignore) throw std::runtime_error("This engine has no MIDI controllers to choose");
+        return controllerHost_.ignore(input, ignored);
     }
 
     Control::AudioDevices Session::audioDevices()
@@ -1937,7 +1959,7 @@ namespace oscairn
     {
         const bool moved = status.midiInputs != hostStatus_.midiInputs, outputs = status.midiOutputs != hostStatus_.midiOutputs;
         hostStatus_ = std::move(status);
-        if(moved) ignoreMidiInputs(ignoredInputs_); // the ignored names' sources now
+        if(moved) applyIgnored(); // the ignored names' sources now
         if(outputs) setClockOutputs(clockOutputs_);
         // Selectors resolve again: inputs' for parts choosing inputs or sending MIDI from their input, outputs' for parts sending MIDI.
         const bool sending = std::any_of(parts_.begin(), parts_.end(), [](const Part& p) { return !p.midiOut.devices.empty(); });

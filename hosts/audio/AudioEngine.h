@@ -3,6 +3,7 @@
 
 #include "oscairn/session.h"
 #include "ChannelMap.h"
+#include "ControllerPorts.h"
 #include "MidiBlock.h"
 #if OSCAIRN_PANEL_ROLAND
 #include "oscairn/panel_reader.h"
@@ -77,6 +78,10 @@ namespace oscairn::host
 #endif
         std::function<void()> serviced_;
         ChannelMap channelMap_;
+        // External controllers (RFC 0024): their profiles and the musician's choices, and the
+        // changes() last played (main thread).
+        std::unique_ptr<ControllerPorts> controllers_;
+        uint64_t controllerChanges_ = 0;
         // The device the engine plays: what a restart must find again. Recorded by the constructor and
         // by audioDeviceAboutToStart, which the device manager runs under its callback lock; adopt_,
         // set by the control thread under that lock, has the next start record it (a device chosen;

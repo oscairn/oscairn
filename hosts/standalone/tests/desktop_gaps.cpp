@@ -4,8 +4,7 @@
 // session over the control socket, without an audio device or any MIDI device. With SNAPSHOTS,
 // each new view is written to SNAPSHOTS-<name>.png.
 // - A part's MIDI out on the Part page, and clock out beside the transport (RFC 0012).
-// - Signing an export, its signer, and the keys in Settings (RFC 0006).
-// - Choosing a controller's profile (RFC 0024).
+// - Signing an export and its signer (RFC 0006).
 // - Asking before an app opens (RFC 0025).
 // - The rich views a plugin describes, on the Panel and the Desktop (RFC 0019).
 // - Installing from a repository by its https:// address, or its folder (RFC 0031).
@@ -450,39 +449,6 @@ int main(int argc, char** argv)
                         choose.view.setViewPosition(0, choose.scenesHeading.getY() - 120); // the last parts and the Scenes heading
                     }
                 }
-                // The keys in Settings: names and fingerprints, never a private key.
-                standalone::Settings settings(engine);
-                standalone::setDesktopMode(settings, 1); settings.setSize(640, 560);
-                check(settings.keys().size() == 1 && settings.keys()[0].name == "stage" && settings.keys()[0].key.size() == 64 && standalone::fingerprint(made.id).length() == 19,
-                      "Settings lists the key by name and fingerprint");
-                snapshot(settings, "settings-keys");
-            }
-            // Choosing a controller's profile (RFC 0024): two profiles fit the SMK37's port, stock
-            // and custom firmware; the first by id until the musician chooses. Inputs are names
-            // only: no MIDI device is opened.
-            {
-                auto profiles = standalone::controllerProfiles();
-                std::string stock; for(const auto& [id, json] : standalone::builtInProfiles()) if(id == "smk37-elite") stock = json;
-                profiles.push_back(standalone::Profile::parse(juce::String(stock).replace("\"smk37-elite\"", "\"smk37-elite-custom\"").replace("(stock firmware)", "(custom firmware)").toStdString()));
-                const std::vector<std::string> inputs{"IAC Bus 1", "SMK-37 Elite -Private", "SMK-37 Elite -Master", "SMK-37 Elite -MCP"};
-                standalone::ProfileChoices kept;
-                standalone::Settings settings(engine);
-                standalone::setDesktopMode(settings, 1); settings.setSize(760, 640);
-                settings.setControllers({profiles, [&] { return inputs; }, [&] { return kept; }, [&](const std::string& port, const std::vector<std::string>& ids) { kept[port] = ids; }});
-                const auto& rows = settings.ports();
-                auto profileName = [&](size_t row) { return rows.size() > row ? profiles[rows[row].chosen].name : std::string(); };
-                check(rows.size() == 3 && rows[1].port == "SMK-37 Elite -Master" && rows[1].profiles.size() == 2 && profileName(1) == "SMK37 Elite (stock firmware)" && settings.profileBox(1)->isEnabled(),
-                      "the SMK37's ports listed; two profiles fit -Master, the first by id in use");
-                check(rows.size() == 3 && rows[0].note == "Ignored: a duplicate of another port" && rows[2].note == "Mackie Control" && rows[1].note == "Its controls join",
-                      "the duplicate port shown as ignored");
-                snapshot(settings, "settings-controllers");
-                if(auto* box = settings.profileBox(1)) box->setSelectedId(2, juce::sendNotificationSync);
-                check(kept["SMK-37 Elite -Master"] == std::vector<std::string>{"smk37-elite-custom"}, "choosing the custom profile keeps it for the port's name");
-                check(wait([&] { return profileName(1) == "SMK37 Elite (custom firmware)"; }), "and it is in use");
-                // Identical controllers told apart by channel: each profile that fits, together.
-                if(auto* box = settings.profileBox(1)) box->setSelectedId(3, juce::sendNotificationSync);
-                check(kept["SMK-37 Elite -Master"] == std::vector<std::string>{"smk37-elite", "smk37-elite-custom"}, "each of them, by MIDI channel, keeps both for the port's name");
-                check(wait([&] { return rows.size() > 1 && rows[1].all; }), "and the port shows both in use");
             }
             // Asking before an app opens (RFC 0025): with memory classes, a launch past what is
             // free is refused with the reason; the prepared next entry in the way can go.

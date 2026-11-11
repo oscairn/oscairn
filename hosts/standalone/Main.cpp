@@ -245,7 +245,6 @@ namespace oscairn::standalone
         }
 
         const Layout& layout() const { return layout_; }
-        void setControllers( Controllers* controllers ) { controllers_ = controllers; } // for Settings' profile choices
         // What --snapshot renders: an app's own window when --app opened one, else this window.
         juce::Component* snapshotView() const { return snapshotView_ ? snapshotView_ : getContentComponent(); }
 
@@ -334,7 +333,7 @@ namespace oscairn::standalone
                 if(profile_.offers("oscairn.recordings"))menu.addItem(8005,"Recordings");
                 menu.addSeparator();menu.addItem(8006,"Settings...");
                 // The Settings app (RFC 0022) where it runs; the shell's dialog keeps the pages not yet moved into it.
-                if(settingsApp())menu.addItem(8007,"Signing Keys, Repositories and Controllers...");
+                if(settingsApp())menu.addItem(8007,"Package Repositories...");
                 return menu;}
             if(index==4){themeItems_=theme_.installed();for(size_t i=0;i<themeItems_.size();++i)menu.addItem(3000+int(i),themeItems_[i].second,true,themeItems_[i].first==themeData().id);menu.addSeparator();menu.addItem(4000,"Manage themes...");return menu;}
             for( size_t i = 0; i < layouts_.size(); ++i )
@@ -427,16 +426,8 @@ namespace oscairn::standalone
                     addAndMakeVisible( *notice_ ); notice_->setBounds( getLocalBounds() );
                 } );
         }
-        // Settings: the signing keys, and the controllers' profiles where the app reads them.
-        Settings* settingsPane()
-        {
-            auto* pane = new Settings( engine_ );
-            if( auto* c = controllers_ )
-                pane->setControllers( { c->profiles(),
-                    [] { std::vector<std::string> names; for( const auto& d : juce::MidiInput::getAvailableDevices() ) names.push_back( d.name.toStdString() ); return names; }, // listed, not opened
-                    [c] { return c->choices(); }, [c]( const std::string& port, const std::vector<std::string>& profiles ) { c->choose( port, profiles ); } } );
-            return pane;
-        }
+        // Settings' package repositories, until the Settings app has them.
+        Settings* settingsPane() { return new Settings( engine_ ); }
         void showGroovebox(){showApp(groovebox_,"Groovebox",[this]{return new SequencerPane(engine_);},1100,760);}
         // The Recordings app (RFC 0020): the takes, kept running with its state like the others.
         void showRecordings()
@@ -805,7 +796,6 @@ namespace oscairn::standalone
         std::unique_ptr<AppSwitcher> switcher_;
         std::unique_ptr<AppWindow> groovebox_, libraryApp_, picker_, recordings_;
         std::unique_ptr<AppWindow> settings_;
-        Controllers* controllers_ = nullptr;
         std::unique_ptr<LaunchNotice> notice_; // why an app did not open (RFC 0025)
         Actions::Answer pickerAnswer_;
         std::unique_ptr<PadEditor> pads_;
@@ -848,7 +838,7 @@ namespace oscairn::standalone
                     {
                         if(i+1==args.size() || args[i+1].startsWith("--"))throw std::invalid_argument("Missing value for "+name);
                         const auto value=args[++i].unquoted().toStdString();
-                        if(host::AudioConfiguration::isOption(name)){audio.setOption(name,value);audioOptions=true;}
+                        if(host::AudioConfiguration::isOption(name)){audio.setOption(name,value);audioOptions|=name!="--controller";} // a new engine reads the controller files too; one connected to has its own
                         if(name=="--controller")controllerFiles.push_back(value);
                     }
                     else if(name=="--play") {if(i+1<args.size() && !args[i+1].startsWith("--"))++i;}
@@ -992,8 +982,7 @@ namespace oscairn::standalone
                 window_ = std::make_unique<Window>( *engine_, std::move( layouts ), Layout::parse( json ), profile,*theme_,juce::File(dir.unquoted()), mode, profileSource( args ) );
                 if( !args.contains( "--snapshot" ) )
                 {
-                    controllers_ = std::make_unique<Controllers>( *engine_, controlGroups( profile ), controllers, theme_->configuration().getChildFile( "controller-profiles.json" ).getFullPathName().toStdString() );
-                    window_->setControllers( controllers_.get() );
+                    controllers_ = std::make_unique<Controllers>( *engine_, controlGroups( profile ), controllers );
                 }
                 if( const auto app = argument( args, "--app" ); app.isNotEmpty() ) window_->openApp( app.toLowerCase() );
                 if( const auto view = argument( args, "--view" ); view.isNotEmpty() )

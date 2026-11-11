@@ -12,10 +12,9 @@ namespace oscairn::standalone
         auto key(const Assignment& a) { return std::tuple{int(a.kind), a.node, a.param, a.id}; }
     }
 
-    Controllers::Controllers(Engine& engine, std::vector<ControlGroup> device, std::vector<Profile> profiles, std::string choices)
-        : engine_(engine), device_(std::move(device)), profiles_(std::move(profiles)), choicesFile_(std::move(choices))
+    Controllers::Controllers(Engine& engine, std::vector<ControlGroup> device, std::vector<Profile> profiles)
+        : engine_(engine), device_(std::move(device)), profiles_(std::move(profiles))
     {
-        if(!choicesFile_.empty()) choices_ = readProfileChoices(choicesFile_);
         open();
         changed_ = juce::MidiDeviceListConnection::make([this] { dirty_ = true; });
         startTimer(10);
@@ -27,15 +26,14 @@ namespace oscairn::standalone
         for(auto& input : inputs_) input->stop();
     }
 
-    void Controllers::choose(const std::string& port, const std::vector<std::string>& profiles)
-    {
-        choices_[port] = profiles;
-        if(!choicesFile_.empty()) writeProfileChoices(choicesFile_, choices_);
-        dirty_ = true; // opened again at the next tick
-    }
-
     void Controllers::open()
     {
+        // The musician's choices, as the engine keeps and plays them.
+        portList_ = engine_.sessionStatus().midiPortList;
+        const auto played = engine_.midiPorts();
+        if(!played) { dirty_ = true; return; } // the engine cannot say now: asked again at the next tick
+        ProfileChoices choices;
+        for(const auto& p : *played) if(!p.automatic) choices[p.name] = p.chosen;
         {
             // Stopped outside the lock: a callback waiting for it must not block stop().
             std::vector<std::unique_ptr<juce::MidiInput>> old;
@@ -48,31 +46,31 @@ namespace oscairn::standalone
         std::vector<std::unique_ptr<juce::MidiInput>> inputs;
         std::vector<std::pair<std::string, uint32_t>> ports;
         std::vector<bool> joined(profiles_.size()), mackie;
-        std::vector<std::string> surfaceInputs;
         surfaces_.clear(); outputs_.clear(); knobs_.reset();
-        // A controller's midi ports are the engine's to read (RFC 0011's instant controls): it is
-        // told which input is which; a Mackie Control port is read here.
-        std::vector<Control::ControllerPort> bound;
-        for(const auto& m : matchPorts(profiles_, names, "midi", choices_))
+        // A controller's midi ports are the engine's to read (RFC 0011's instant controls); a
+        // Mackie Control port is read here (its profile joins whether it opens or not, as in the engine).
+        for(const auto& m : matchPorts(profiles_, names, "midi", choices))
         {
             std::fprintf(stderr, "oscairn: MIDI input \"%s\" is %s's port %d, played by the engine\n", names[m.input].c_str(), profiles_[m.profile].name.c_str(), m.port);
-            bound.push_back({names[m.input], profiles_[m.profile].id, uint32_t(m.port)}); joined[m.profile] = true;
+            joined[m.profile] = true;
         }
-        for(const auto& m : matchPorts(profiles_, names, "mackie", choices_))
+        for(const auto& m : matchPorts(profiles_, names, "mackie", choices))
+        {
+            joined[m.profile] = true;
             if(auto input = juce::MidiInput::openDevice(available[int(m.input)].identifier, this))
             {
                 std::fprintf(stderr, "oscairn: MIDI input \"%s\" is %s's port %d (mackie)\n", names[m.input].c_str(), profiles_[m.profile].name.c_str(), m.port);
-                inputs.push_back(std::move(input)); ports.push_back({profiles_[m.profile].id, uint32_t(m.port)}); joined[m.profile] = true;
+                inputs.push_back(std::move(input)); ports.push_back({profiles_[m.profile].id, uint32_t(m.port)});
                 mackie.push_back(true);
-                surfaceInputs.push_back(names[m.input]);
                 surfaces_[ports.back()].second = profiles_[m.profile].midi.ports[size_t(m.port - 1)].display;
             }
+        }
         // Back to a controller: a Mackie port's output, and a midi port's when a group on it takes values back.
         const auto outputDevices = juce::MidiOutput::getAvailableDevices();
         std::vector<std::string> outputNames;
         for(const auto& info : outputDevices) outputNames.push_back(info.name.toStdString());
         for(const auto* protocol : {"midi", "mackie"})
-            for(const auto& m : matchPorts(profiles_, outputNames, protocol, choices_))
+            for(const auto& m : matchPorts(profiles_, outputNames, protocol, choices))
             {
                 const auto& p = profiles_[m.profile];
                 const std::pair<std::string, uint32_t> key{p.id, uint32_t(m.port)};
@@ -85,15 +83,12 @@ namespace oscairn::standalone
                     outputs_[key].push_back(std::move(output));
                 }
             }
-        // The connected controllers' groups join the device's, after them (RFC 0024).
-        auto groups = device_;
+        // The connected controllers' groups join the device's, after them (RFC 0024): the engine
+        // joins them itself, and the views see them here in its order. It leaves out a port that
+        // duplicates another's and a Mackie port (its buttons are notes).
+        std::vector<ControlGroup> groups;
         for(size_t p = 0; p < profiles_.size(); ++p) if(joined[p]) for(auto& g : controlGroups(profiles_[p])) groups.push_back(std::move(g));
-        engine_.setControllers(std::move(groups), std::move(bound));
-        // A port that duplicates another's would play each note twice, and a Mackie port's buttons
-        // are notes: the engine leaves them out.
-        auto ignored = ignoredInputs(profiles_, names, choices_);
-        ignored.insert(ignored.end(), surfaceInputs.begin(), surfaceInputs.end());
-        if(ignored != ignored_) { ignored_ = ignored; engine_.ignoreMidiInputs(std::move(ignored)); }
+        engine_.setControllers(device_, {}, std::move(groups));
         { std::lock_guard lock(lock_); inputs_ = std::move(inputs); ports_ = std::move(ports); mackie_ = std::move(mackie); }
         for(auto& input : inputs_) input->start();
     }
@@ -109,6 +104,7 @@ namespace oscairn::standalone
 
     void Controllers::timerCallback()
     {
+        if(++ticks_ % 25 == 0 && engine_.sessionStatus().midiPortList != portList_) dirty_ = true; // a choice made in Settings, or the engine's inputs changed
         if(dirty_.exchange(false)) open();
         std::vector<std::tuple<std::pair<std::string, uint32_t>, Incoming, bool>> taken;
         {

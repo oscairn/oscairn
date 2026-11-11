@@ -3,6 +3,7 @@
 // Settings' pages, in the order the list shows them: each by its id, its title, where it applies
 // and how it is made (README.md beside this says how to add one).
 #include "AudioPage.h"
+#include "MidiControllersPage.h"
 #include "SigningKeysPage.h"
 
 namespace oscairn::standalone::settings
@@ -12,7 +13,7 @@ namespace oscairn::standalone::settings
         // Where a page applies, from the device's profile: a device's own image (Oscairn OS) has a
         // runtime; the desktop app on a computer has none (Profile::desktop).
         bool onDevice(const Profile& p) { return !p.platform.runtime.empty(); }
-        bool onDesktop(const Profile& p) { return p.platform.runtime.empty(); }
+        [[maybe_unused]] bool onDesktop(const Profile& p) { return p.platform.runtime.empty(); }
         template<class T> std::function<std::unique_ptr<Page>(Engine&)> made() { return [](Engine& e) { return std::make_unique<T>(e); }; }
         constexpr std::nullptr_t everywhere = nullptr, notBuilt = nullptr;
     }
@@ -24,7 +25,7 @@ namespace oscairn::standalone::settings
             // The Settings dialog's pages, which stay in the shell until ported here (RFC 0022).
             {"repositories", "Package repositories", everywhere, notBuilt},                 // RFC 0031
             {"keys", "Signing keys", everywhere, made<SigningKeysPage>()},                   // RFC 0006
-            {"controllers", "MIDI controllers", [](const Profile& p) { return onDesktop(p) || p.midi.usbHost; }, notBuilt}, // RFC 0024
+            {"controllers", "MIDI controllers", everywhere, made<MidiControllersPage>()},  // RFC 0024
             // Named by RFCs, not built yet.
             {"appearance", "Appearance", everywhere, notBuilt},                             // themes (design-language.md)
             {"content", "Installed content", everywhere, notBuilt},                         // RFC 0006

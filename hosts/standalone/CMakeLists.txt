@@ -51,7 +51,7 @@ juce_add_binary_data(oscairn_standalone_icons HEADER_NAME IconData.h NAMESPACE I
     icons/circle.svg
     icons/history.svg
     icons/audio-lines.svg
-    icons/wrap-text.svg
+    icons/tags.svg
     icons/chevrons-down-up.svg
     # Oscairn's mark (branding/README.md) and its alternate; Icons.h names the one shown.
     ../../branding/mark-on-dark.svg

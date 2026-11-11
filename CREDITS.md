@@ -74,7 +74,7 @@ authoritative.
   `circle.svg` `fc932a39beca163d5641a904884259ea2c8e838940cfa226697024b17b5c544e`,
   `history.svg` `bd6e284ca26e67a35dff106e519f74af7241bb38f0d60654c2f74be8fc2b1510`,
   `audio-lines.svg` `d4ff831aee48c9d1fb7ace29409aa67b4989ce3b71b3bc119391a90235369a8a`,
-  `wrap-text.svg` `fd8a4be9fe77ebc67761de40925bdcf38e95f26d719fd0f6e631a04a58c4794a`,
+  `tags.svg` `724af60488ee052f78f8b3a5622adb06e8c30abea41c9c48a718f808a7bcdc4a`,
   `chevrons-down-up.svg` `6a4d80c9eb419e633aa7111fb4d35e707aeed0ae938e3e9e145a4b1e2c64b3a8`.
 
 ## Sample decoding

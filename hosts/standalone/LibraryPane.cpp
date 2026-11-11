@@ -568,7 +568,7 @@ namespace oscairn::standalone
         SoundAction open; open.kind = SoundAction::LoadFromLibrary; open.libraryId = item->id;
         engine_.soundAction(std::move(open));
         tell("Opening " + text(item->name));
-        stale_ = true; // it is now the most recent
+        stale_ = true; awaiting_ = true; // it is now the most recent; once opened, say so, or why it did not open
     }
 
     void LibraryPane::send(int row)

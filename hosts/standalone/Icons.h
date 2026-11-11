@@ -73,7 +73,7 @@ namespace oscairn::standalone
             if(!color.isTransparent()) getLookAndFeel().drawButtonBackground(g, *this, findColour(on ? juce::TextButton::buttonOnColourId : juce::TextButton::buttonColourId), hover, down);
             else if(on) { g.setColour(ink(Ink::Accent).withAlpha(.22f)); g.fillRoundedRectangle(getLocalBounds().toFloat(), buttonRadius(float(getHeight()))); }
             else if(hover || down) { g.setColour(ink(Ink::Text).withAlpha(down ? .16f : .08f)); g.fillRoundedRectangle(getLocalBounds().toFloat(), 4); }
-            static const char* const names[] = {"plus", "undo-2", "redo-2", "square-arrow-out-up-right", "list", "wrap-text", "house", "arrow-left", "octagon-x", "ellipsis-vertical", "layers", "circle", "history", "star", "history", "chevrons-down-up"};
+            static const char* const names[] = {"plus", "undo-2", "redo-2", "square-arrow-out-up-right", "list", "tags", "house", "arrow-left", "octagon-x", "ellipsis-vertical", "layers", "circle", "history", "star", "history", "chevrons-down-up"};
             const float side = std::min(float(getWidth()), float(getHeight())) * .6f;
             // Record is in the danger color, filled while it records.
             const bool record = glyph_ == Glyph::Record;

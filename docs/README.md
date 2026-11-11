@@ -31,6 +31,7 @@ an implemented capability.
 | Add a desktop panel layout | [Layout format](../hosts/standalone/layouts/README.md) |
 | Configure audio, MIDI and helper processes | [Hosts](../hosts/README.md) |
 | Build the Linux image | [OS instructions](../os/README.md) |
+| Cut a release (the macOS dmg) | [Releasing](releasing.md) |
 | Try Oscairn on a KICK or a KICK emulator | [Running on a KICK](kick.md) |
 | Prepare a Roland FANTOM-0, or map its panel | [Running on a FANTOM-0](fantom-0.md), [panel map schema](panel-map.schema.json) |
 | Describe a device, or check whether a Performance fits its CPU and memory | [Device profiles](rfcs/0024-device-profiles.md), [profile schema](profile.schema.json), [resource budgets](rfcs/0025-resource-budgets.md) (both in progress) |

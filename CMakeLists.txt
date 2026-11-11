@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.28) # FetchContent_Declare EXCLUDE_FROM_ALL (plugins/), set_property(TEST ... DIRECTORY) below
 project(oscairn VERSION 0.1.0 LANGUAGES C CXX)
+# A release is named by this version and this label while there is one (docs/releasing.md):
+# Oscairn-0.1.0-alpha.1-macos-arm64.dmg, tag v0.1.0-alpha.1. Empty for a final release.
+set(OSCAIRN_PRERELEASE "alpha.1")
 if(APPLE)
     enable_language(OBJCXX) # the CLAP host's plugin windows (core/clap-host/src/Window.mm), and JUCE
 endif()

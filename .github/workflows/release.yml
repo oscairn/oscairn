@@ -1,0 +1,43 @@
+name: Release
+
+# Builds the macOS dmg (tools/release-macos.sh, docs/releasing.md). From a v* tag it is also
+# attached to a draft release, which a person publishes; nothing here publishes one.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Build the dmg
+        run: tools/release-macos.sh
+
+      - name: Check the tag names this version
+        if: github.ref_type == 'tag'
+        run: test -f "build-release/Oscairn-${GITHUB_REF_NAME#v}-macos-arm64.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oscairn-macos-arm64
+          path: build-release/*.dmg
+          if-no-files-found: error
+
+      - name: Attach it to a draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=$(case "$GITHUB_REF_NAME" in *-*) echo --prerelease;; esac)
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft $prerelease --verify-tag --title "Oscairn ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" build-release/*.dmg --clobber

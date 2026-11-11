@@ -84,6 +84,11 @@ namespace oscairn::standalone::settings
         return *rows_.back();
     }
 
+    void Page::clearRows()
+    {
+        rows_.clear(); // the controls outlive their rows: a page owns them, and addRow takes them again
+    }
+
     int Page::heightFor(int width) const
     {
         int h = 0;

@@ -17,6 +17,7 @@ namespace oscairn::standalone::settings
     public:
         Row(const juce::String& label, juce::Component& control, const juce::String& explanation = {});
         void setExplanation(const juce::String& text, bool danger = false);
+        const juce::String& label() const { return label_; }
         const juce::String& explanation() const { return explanation_; }
         bool danger() const { return danger_; }
         int heightFor(int width) const;
@@ -40,6 +41,7 @@ namespace oscairn::standalone::settings
     {
     public:
         Row& addRow(const juce::String& label, juce::Component& control, const juce::String& explanation = {});
+        void clearRows(); // drop every row (their controls, which the page owns, stay); for a list whose rows come and go
         int heightFor(int width) const; // its rows' (the hidden ones left out), for the scrolling area
         void resized() override;
         // Its height changed (a row shown or hidden, an explanation changed): the frame lays it out again.

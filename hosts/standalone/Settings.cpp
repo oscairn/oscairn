@@ -9,30 +9,6 @@ namespace oscairn::standalone
         juce::String text(const std::string& s) { return juce::String::fromUTF8(s.c_str()); }
     }
 
-    juce::String fingerprint(const std::string& id)
-    {
-        juce::String out;
-        for(size_t i = 0; i < id.size(); i += 4) out << (i ? " " : "") << text(id.substr(i, 4));
-        return out;
-    }
-
-    void askToMakeKey(Engine& engine, juce::Component* over, std::function<void(const std::string&)> made)
-    {
-        auto* w = new juce::AlertWindow("Make a signing key", "Its name, which only you see: letters, digits, '.', '-' and '_'. The private key stays on this device.", juce::MessageBoxIconType::NoIcon, over);
-        w->addTextEditor("name", "", "Name");
-        w->addButton("Make", 1, juce::KeyPress(juce::KeyPress::returnKey)); w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
-        w->enterModalState(true, juce::ModalCallbackFunction::create([&engine, w, then = std::move(made)](int result) {
-            if(result != 1) return;
-            Control::SigningKey key;
-            if(const auto error = engine.makeSigningKey(w->getTextEditorContents("name").trim().toStdString(), key); !error.empty())
-            {
-                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "No key made", text(error));
-                return;
-            }
-            if(then) then(key.name);
-        }), true);
-    }
-
     Settings::Settings(Engine& engine) : engine_(engine)
     {
         setTitle("Settings");

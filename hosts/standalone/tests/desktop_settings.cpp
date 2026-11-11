@@ -5,14 +5,18 @@
 // a wide and on a touch screen; the Audio page on an app connection granted `system` alone,
 // against a socket session whose audio host is a stand-in for AudioEngine (no device is opened):
 // the listing, a change applied, two refusals said under what was changed, a listing again when
-// the status changes, and a fixed device; the app's connection allowed audio.set and refused
+// the status changes, and a fixed device; the Signing keys page on the same kind of connection:
+// "No keys yet", a key made through the old dialog's ask and listed by name and fingerprint; the
+// app's connection allowed audio.set and refused
 // graph.add; and the app started as a process of its own from its manifest. With SNAPSHOTS, the
 // app renders itself to SNAPSHOTS-settings-1400x900.png, -900x700.png, and on the KICK's
 // 1024 x 600 screen under the shell's top bar, -kick-list.png and -kick-audio.png.
 //   oscairn_desktop_settings_test PLUGIN_DIR APPS THEMES [SNAPSHOTS]
 #include "../AppProcesses.h"
 #include "../Launcher.h"
+#include "../SigningKeys.h"
 #include "../apps/settings/AudioPage.h"
+#include "../apps/settings/SigningKeysPage.h"
 #include "EngineProcess.h"
 #include "oscairn/local_socket.h"
 #include "oscairn/session.h"
@@ -57,7 +61,7 @@ int main(int argc, char** argv)
         const auto& all = standalone::settings::pages();
         const auto network = std::find_if(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "network"; });
         check(network != all.end() && network->applies(standalone::loadProfile("kick")) && !network->applies(standalone::Profile::desktop()), "Network applies on the KICK (Wi-Fi), not on this computer");
-        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio"}, "built so far: Audio");
+        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "keys"}, "built so far: Audio and Signing keys");
 #if !OSCAIRN_BLUETOOTH
         check(std::none_of(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "bluetooth"; }), "Bluetooth is left out of a build without it");
 #endif
@@ -143,7 +147,7 @@ int main(int argc, char** argv)
                 standalone::setDesktopMode(frame, 1);
                 frame.setSize(1000, 640);
                 auto* page = dynamic_cast<standalone::settings::AudioPage*>(frame.page());
-                check(page && frame.current()->id == "audio" && frame.shown().size() == 1, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
+                check(page && frame.current()->id == "audio" && frame.shown().size() == 2, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
                 if(!page) return;
                 check(wait([&] { return page->listings() >= 1 && !page->busy(); }), "the devices are listed");
                 check(page->output.getNumItems() == 3 && page->output.getText() == "Studio" && page->output.isEnabled(), "the output devices, the one open chosen");
@@ -193,13 +197,47 @@ int main(int argc, char** argv)
                 check(!frame.open("network"), "a page not shown here is not opened");
             }
 
+            // The Signing keys page on an app's connection granted `system` alone: keys.list and
+            // keys.make reach the session's Keys/ folder under OSCAIRN_DATA_HOME, never the user's.
+            {
+                standalone::Engine app(engine.appConnection("oscairn.settings", manifest->permissions), false);
+                standalone::settings::Frame frame(app, standalone::Profile::desktop());
+                standalone::setDesktopMode(frame, 1);
+                frame.setSize(1000, 640);
+                check(frame.open("keys"), "the list opens Signing keys");
+                auto* keys = dynamic_cast<standalone::settings::SigningKeysPage*>(frame.page());
+                if(!keys) return;
+                check(wait([&] { return keys->listings() >= 1 && !keys->busy(); }), "the keys are listed when the page opens");
+                check(keys->keys().empty() && keys->noKeys.isVisible() && keys->noKeys.getText() == "No keys yet" && !keys->makeRow().danger(), "with none: No keys yet");
+
+                // Make: the old dialog's ask, answered once it is up; the trigger blocks in its
+                // modal loop, so the answer is queued and typed from inside it.
+                auto alert = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
+                const int before = keys->listings();
+                std::atomic<bool> answered = false;
+                std::function<void()> answer;
+                answer = [&] {
+                    if(answered) return;
+                    if(auto* w = alert(); w && w->getName() == "Make a signing key")
+                    { w->getTextEditor("name")->setText("stage"); w->exitModalState(1); answered = true; return; }
+                    juce::Timer::callAfterDelay(20, answer);
+                };
+                juce::Timer::callAfterDelay(20, answer);
+                keys->makeKey.triggerClick();
+                check(wait([&] { return answered.load(); }), "Make asks for the key's name");
+                check(wait([&] { return keys->listings() > before && !keys->busy(); }), "and lists the keys again once it is made");
+                check(keys->keys().size() == 1 && keys->keys()[0].name == "stage" && keys->keys()[0].key.size() == 64 && !keys->noKeys.isVisible(), "the key made is listed by name, never its private half");
+                check(keys->keyRow(0).label() == "stage" && keys->prints[0]->getText() == standalone::fingerprint(keys->keys()[0].id),
+                      "and by fingerprint, in groups of four: " + keys->prints[0]->getText().toStdString());
+            }
+
             // The app as a process of its own, started from its manifest by the shell's supervisor.
             {
                 standalone::Actions actions;
                 standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_PROFILE=desktop"});
                 check(processes.open("oscairn.settings") && processes.pid("oscairn.settings") > 0 && processes.pid("oscairn.settings") != ::getpid(), "Settings runs as a process of its own");
                 check(wait([&] { return processes.log("oscairn.settings").contains("oscairn-settings: started"); }), "its stderr is in its log");
-                check(processes.log("oscairn.settings").contains("with 1 pages for desktop"), "with this computer's pages");
+                check(processes.log("oscairn.settings").contains("with 2 pages for desktop"), "with this computer's pages");
                 check(wait([&] { return processes.state("oscairn.settings") == standalone::AppProcesses::State::Running; }, 2000), "and runs");
                 processes.stop("oscairn.settings");
                 check(wait([&] { return processes.pid("oscairn.settings") < 0; }), "stopped by the shell");

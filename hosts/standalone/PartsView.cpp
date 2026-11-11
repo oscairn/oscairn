@@ -157,6 +157,7 @@ namespace oscairn::standalone
         shape += "|off:";
         for(const auto n : graph_.disabled) shape += std::to_string(n) + ",";
         if(page_ == routingPage) for(const auto& w : graph_.wires) if(!w.enabled) shape += "w" + std::to_string(w.id) + ",";
+        if(page_ == routingPage) for(const auto& w : graph_.wires) if(w.from == graphInput && w.kind == WireKind::Notes) shape += "c" + std::to_string(w.id) + ":" + std::to_string(zoneChannel(w.zones)) + ","; // the channel choice, set elsewhere
         shape += "|scenes:" + std::to_string(scene_);
         for(const auto& s : scenes_) shape += "," + std::to_string(s.id) + ":" + s.name + ":" + std::to_string(s.scope) + ":" + std::to_string(s.glide);
         shape += "|controls";

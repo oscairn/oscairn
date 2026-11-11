@@ -336,6 +336,29 @@ int main(int argc, char** argv)
                 snapshot(view, "part-channel");
                 std::filesystem::remove_all(folder.getFullPathName().toStdString());
             }
+            // The same choice in Routing, on a note wire drawn by hand from the keys, following undo and edits from elsewhere.
+            {
+                NodeId synth = 0;
+                for(const auto& p : standalone::readParts(engine.graph()).parts) if(p.id == lead && !p.chain.empty()) synth = p.chain.front().node;
+                engine.edit([&](Control& c) { standalone::connectNodes(c, graphInput, synth, WireKind::Notes); });
+                auto keys = [&] { for(const auto& w : engine.graph().wires) if(w.owner == WireOwner::User && w.from == graphInput && w.to == synth) return w; return Wire{}; };
+                check(wait([&] { return keys().id != 0; }), "a note wire from the keys to the lead's synth");
+                standalone::PartsView view(engine, argv[2]);
+                standalone::setDesktopMode(view, 1); view.setEmbedded(true); view.setSize(1180, 820);
+                view.showRouting(synth);
+                juce::ComboBox* pick = nullptr;
+                auto wireBox = [&] { pick = nullptr; for(auto* c : view.getChildren()) if(auto* b = dynamic_cast<juce::ComboBox*>(c); b && b->getName() == "Wire channel") pick = b; return pick != nullptr; };
+                check(wait([&] { view.refresh(); return wireBox() && pick->getSelectedId() == 1; }), "Routing: the wire takes every channel at first");
+                if(pick) pick->setSelectedId(3, juce::sendNotificationSync); // Channel 2
+                check(wait([&] { return keys().zones.size() == 1 && keys().zones[0].channels == (1u << 1); }), "Channel 2: the wire passes only that channel");
+                engine.edit([](Control& c) { c.undo(); });
+                check(wait([&] { view.refresh(); return keys().zones.empty() && wireBox() && pick->getSelectedId() == 1; }), "undo: every channel again, and the choice shows it");
+                // Zones set from elsewhere (another app, wires.zones) show too.
+                engine.edit([&](Control& c) { c.setZones(keys().id, {NoteZone{0, 127, 0, 1, uint16_t(1u << 4)}}); c.commit(); });
+                check(wait([&] { view.refresh(); return wireBox() && pick->getSelectedId() == 6; }), "zones set elsewhere: the choice shows channel 5");
+                engine.edit([&](Control& c) { standalone::disconnect(c, keys().id); });
+                check(wait([&] { return keys().id == 0; }), "the wire disconnected again");
+            }
             // Clock out beside the transport (RFC 0012 step 2): cabling, kept by the engine.
             {
                 standalone::SequencerPane pane(engine);

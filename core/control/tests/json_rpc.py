@@ -43,6 +43,11 @@ try:
     assert 'hardware.capabilities' in hello['capabilities']
     assert rpc('hardware.capabilities')['result'] == {'accelerators': [], 'clocks': [], 'cpuFallback': {'micros': 0, 'reserved': 0}, 'failures': []}
     error(rpc('hardware.capabilities', {'accelerator': 'dsp0'}), -32602)
+    # The audio device (RFC 0024): an engine without one refuses to list or set it.
+    assert 'audio.devices' in hello['capabilities'] and 'audio.set' in hello['capabilities']
+    error(rpc('audio.devices'), -32005)
+    error(rpc('audio.set', {'sampleRate': 48000}), -32005)
+    error(rpc('audio.set', {'rate': 48000}), -32602)
     assert rpc('state.info', {'node':'synth'})['result'] == {'supported':True}
     presets = rpc('presets.list', {'node':'synth'})['result']['presets']  # the Basic Synth's factory presets (RFC 0005)
     assert [p['name'] for p in presets] == ['Warm', 'Bright', 'Pressure swell', 'Detuned saws', 'Square vibrato'] and presets[0]['uri'] == 'clap-preset:1:#warm'
@@ -75,7 +80,7 @@ try:
     error(rpc('sounds.select', {'node':'synth','context':prepared}), -32005)
     status = rpc('session.status')['result']
     assert status == {'audioDevice': '', 'midiInputs': [], 'midiOutputs': [], 'sampleRate': 48000,
-                      'bufferSize': 512, 'cpuLoad': 0, 'deadlineMisses': 0, 'audioUnderruns': 0, 'graphEventDrops': 0, 'midiEventDrops': 0, 'audioReady': True, 'audioInputs': [], 'audioOutputs': [], 'failures': [], 'notices': [], 'workers': []}, status
+                      'bufferSize': 512, 'cpuLoad': 0, 'deadlineMisses': 0, 'audioUnderruns': 0, 'audioDeviceList': 0, 'graphEventDrops': 0, 'midiEventDrops': 0, 'audioReady': True, 'audioInputs': [], 'audioOutputs': [], 'failures': [], 'notices': [], 'workers': []}, status
     error(rpc('session.status', {'unknown': True}), -32602)
     for ident in [None, 0, -1, 2**63 + 7, 'hello\x00\n"\\', 'é🎹', 1.5]:
         assert rpc('transport.get', ident=ident)['id'] == ident

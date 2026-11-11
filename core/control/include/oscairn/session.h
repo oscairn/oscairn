@@ -200,6 +200,10 @@ namespace oscairn
         /// From the host's main loop. A changed list of MIDI inputs re-resolves the parts'
         /// device selectors, applied at once unless edits are staged (then with them).
         void setHostStatus(SessionStatus status);
+        AudioDevices audioDevices() override;
+        AudioDevices setAudio(const AudioSetting& setting) override;
+        /// The host's audio device (AudioEngine): what audioDevices() and setAudio() call; without it they refuse.
+        void setAudioHost(std::function<AudioDevices()> list, std::function<AudioDevices(const AudioSetting&)> set) { audioList_ = std::move(list); audioSet_ = std::move(set); }
         uint64_t changeSequence() const override { return sequence_; }
         Changes changesAfter( uint64_t sequence ) const override;
 
@@ -550,6 +554,8 @@ namespace oscairn
         assets::Store assets_; // outlives the graph whose plugins resolve through it
         Graph graph_;
         SessionStatus hostStatus_;
+        std::function<AudioDevices()> audioList_;
+        std::function<AudioDevices(const AudioSetting&)> audioSet_;
         std::map<NodeId,std::string> nodes_;
         PadMap padMap_;
         MusicalKey key_; // the Performance's (RFC 0033)

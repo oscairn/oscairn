@@ -26,12 +26,14 @@ namespace oscairn::host
     ///
     /// Device ownership shared by the standalone in-process mode and engine helper.
     /// The UI and socket adapter reach the session through Control.
-    class AudioEngine : private juce::AudioIODeviceCallback, private juce::MidiInputCallback, private juce::Timer, private juce::AsyncUpdater
+    class AudioEngine : private juce::AudioIODeviceCallback, private juce::MidiInputCallback, private juce::Timer, private juce::AsyncUpdater, private juce::ChangeListener
     {
     public:
-        /// Loads the plugins from `pluginDir` and opens the default audio output.
-        /// Throws std::runtime_error if a plugin does not load or no audio output opens.
-        explicit AudioEngine( const std::string& pluginDir, AudioConfiguration audio = {} );
+        /// Loads the plugins from `pluginDir` and opens the user's saved audio device (audio.set),
+        /// else the profile's (`audio`), else the default output. `devices`: a test's device type,
+        /// listed and opened instead of the system's. Throws std::runtime_error if a plugin does not
+        /// load or no audio output opens.
+        explicit AudioEngine( const std::string& pluginDir, AudioConfiguration audio = {}, std::unique_ptr<juce::AudioIODeviceType> devices = {} );
         ~AudioEngine() override;
 
         Control& control() noexcept { return session_->control(); }
@@ -58,6 +60,11 @@ namespace oscairn::host
         void openMidiOutputs();
         void queueMidiOut( uint32_t offset, double seconds ) noexcept; // audio thread: the session's MIDI out, for the sender
         void timerCallback() override { service(); }
+        // The audio device (Control::audioDevices, setAudio), on the control thread.
+        Control::AudioDevices listDevices();
+        Control::AudioDevices setDevice( const Control::AudioSetting& setting );
+        void applyRate(); // the device restarted at another rate: every plugin activated again at it
+        void changeListenerCallback( juce::ChangeBroadcaster* ) override; // devices came or went
 
         juce::AudioDeviceManager devices_;
         std::atomic<double>      sampleRate_{ 48000.0 }; // the graph's: the sender thread reads it too
@@ -70,8 +77,20 @@ namespace oscairn::host
 #endif
         std::function<void()> serviced_;
         ChannelMap channelMap_;
+        // The device the engine plays: what a restart must find again. Recorded by the constructor and
+        // by audioDeviceAboutToStart, which the device manager runs under its callback lock; adopt_,
+        // set by the control thread under that lock, has the next start record it (a device chosen;
+        // any device restarting when not fixed).
         std::string initialDevice_;
         juce::StringArray initialInputs_,initialOutputs_;
+        bool adopt_ = false;
+        // Control thread: where the device came from ("user", "profile", "default"), a choice passed
+        // over, whether the profile fixes it (its channel map names that device's channels), the open
+        // device's name, and the devices last listed, counted in status's audioDeviceList.
+        std::string source_, notice_, opened_;
+        bool fixed_ = false;
+        juce::StringArray seenDevices_;
+        uint64_t deviceList_ = 0;
         std::atomic<bool>        started_{ false }; // the device's rate matched the graph's
         // Callbacks that came more than a buffer late, counted as underruns where the device
         // reports none of its own (audio thread; reset when the device starts).

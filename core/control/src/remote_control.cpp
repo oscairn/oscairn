@@ -969,6 +969,28 @@ namespace oscairn
     {impl_->call("transport.set","{\"clockOutputs\":"+devicesText(devices)+'}');auto state=impl_->call("transport.get");impl_->readTransport(field(state.get(),"result"));}
     void RemoteControl::setPartMidiOut(uint32_t part,const PartMidiOut& midiOut)
     {impl_->call("parts.midiOut","{\"part\":"+std::to_string(part)+",\"midiOut\":{\"devices\":"+devicesText(midiOut.devices)+",\"channel\":"+std::to_string(midiOut.channel)+"}}");impl_->refresh();}
+    namespace
+    {
+        Control::AudioDevices audioDevicesFrom(V r)
+        {
+            Control::AudioDevices d;
+            auto list=[](V v){std::vector<Control::AudioDevice> out;for(auto e:array(v)){Control::AudioDevice a{string(field(e,"name")),{},{}};for(auto x:array(field(e,"sampleRates")))a.sampleRates.push_back(number(x));
+                for(auto x:array(field(e,"bufferSizes")))a.bufferSizes.push_back(uint32_t(integer(x)));out.push_back(std::move(a));}return out;};
+            d.outputs=list(field(r,"outputs"));d.inputs=list(field(r,"inputs"));d.output=string(field(r,"output"));d.input=string(field(r,"input"));
+            d.sampleRate=number(field(r,"sampleRate"));d.bufferSize=uint32_t(integer(field(r,"bufferSize")));d.source=string(field(r,"source"));d.notice=string(field(r,"notice"));d.fixed=boolean(field(r,"fixed"));
+            return d;
+        }
+    }
+    Control::AudioDevices RemoteControl::audioDevices(){auto d=impl_->call("audio.devices","{}",10000);return audioDevicesFrom(field(d.get(),"result"));}
+    Control::AudioDevices RemoteControl::setAudio(const AudioSetting& s)
+    {
+        std::string p;
+        if(s.output)p+=",\"output\":"+quote(*s.output);
+        if(s.input)p+=",\"input\":"+quote(*s.input);
+        if(s.sampleRate)p+=",\"sampleRate\":"+encode(*s.sampleRate);
+        if(s.bufferSize)p+=",\"bufferSize\":"+std::to_string(*s.bufferSize);
+        auto d=impl_->call("audio.set",'{'+(p.empty()?p:p.substr(1))+'}',30000);return audioDevicesFrom(field(d.get(),"result"));
+    }
     MusicalKey RemoteControl::key() const {auto doc=impl_->call("harmony.get");return keyFrom(field(field(doc.get(),"result"),"key"));}
     void RemoteControl::setKey(const MusicalKey& key){impl_->call("harmony.set","{\"key\":"+keyText(key)+'}');impl_->refresh();}
     void RemoteControl::setPartKey(uint32_t part,const std::optional<MusicalKey>& key)

@@ -561,7 +561,9 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
   beat, a take recording ends, and the block size stays the engine's (`Session::setSampleRate`,
   tested offline by `sample-rate`: the Basic Synth in tune at 44.1, 48 and 96 kHz in the engine
   and in a worker, and no plugin reactivated mid-block). Not yet tried with a real device
-  changing rate (only the offline path is tested). LV2 plugins, off by default, cannot follow a
+  changing rate (only the offline path is tested). The device, rate and buffer size are the
+  user's to choose through the control API (`audio.set`, saved and restored; tested on a fake
+  device). LV2 plugins, off by default, cannot follow a
   new rate yet (the error names them). Needed: render tests of every plugin at each rate
   (192 kHz untested), and the device's ALSA configuration.
 - [ ] External MIDI and CV, clock and Link out, and setlists across several devices

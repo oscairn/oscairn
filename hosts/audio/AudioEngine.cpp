@@ -62,36 +62,89 @@ namespace oscairn::host
 #endif
             return name;
         }
+        // The user's choice (audio.set): audio.json in the data folder, only what they chose. Unreadable: none.
+        std::filesystem::path choiceFile() { return dataHome() / "audio.json"; }
+        Control::AudioSetting readChoice()
+        {
+            Control::AudioSetting s;
+            try
+            {
+                const auto v = juce::JSON::parse( juce::File( choiceFile().string() ).loadFileAsString() );
+                if( !v.isObject() || v["format"] != "oscairn.audio" ) return s;
+                if( v["output"].isString() ) s.output = v["output"].toString().toStdString();
+                if( v["input"].isString() ) s.input = v["input"].toString().toStdString();
+                if( double( v["sampleRate"] ) > 0 ) s.sampleRate = double( v["sampleRate"] );
+                if( int( v["bufferSize"] ) > 0 ) s.bufferSize = uint32_t( int( v["bufferSize"] ) );
+            }
+            catch( const std::exception& ) {} // no home folder
+            return s;
+        }
+        void writeChoice( const Control::AudioSetting& s )
+        {
+            auto* o = new juce::DynamicObject;
+            const juce::var v( o );
+            o->setProperty( "format", "oscairn.audio" );
+            o->setProperty( "version", 1 );
+            if( s.output ) o->setProperty( "output", juce::String::fromUTF8( s.output->c_str() ) );
+            if( s.input ) o->setProperty( "input", juce::String::fromUTF8( s.input->c_str() ) );
+            if( s.sampleRate ) o->setProperty( "sampleRate", *s.sampleRate );
+            if( s.bufferSize ) o->setProperty( "bufferSize", int( *s.bufferSize ) );
+            writeAtomically( choiceFile(), juce::JSON::toString( v ).toStdString() + "\n" );
+        }
+        juce::StringArray deviceNames( juce::AudioDeviceManager& devices )
+        {
+            juce::StringArray names;
+            if( auto* type = devices.getCurrentDeviceTypeObject() ) { names = type->getDeviceNames( false ); names.add( {} ); names.addArray( type->getDeviceNames( true ) ); }
+            return names;
+        }
     }
 
-    AudioEngine::AudioEngine( const std::string& pluginDir, AudioConfiguration audio ) : channelMap_(std::move(audio),maxFrames)
+    AudioEngine::AudioEngine( const std::string& pluginDir, AudioConfiguration audio, std::unique_ptr<juce::AudioIODeviceType> devices ) : channelMap_(std::move(audio),maxFrames)
     {
         useWebTransport(); // package repositories on the web (RFC 0031)
+        if( devices ) devices_.addAudioDeviceType( std::move( devices ) ); // before the first scan, so the system's are never made
         juce::AudioDeviceManager::AudioDeviceSetup preferred;
         const auto& config=channelMap_.configuration();
-        preferred.bufferSize = config.bufferFrames ? int(config.bufferFrames) : OSCAIRN_AUDIO_BUFFER_FRAMES;
+        fixed_=config.explicitOutputs; // a channel map names one device's channels: the profile's, the only one
+        auto choice=readChoice();
+        if(fixed_){choice.output.reset();choice.input.reset();}
+        preferred.bufferSize = choice.bufferSize ? int(*choice.bufferSize) : config.bufferFrames ? int(config.bufferFrames) : OSCAIRN_AUDIO_BUFFER_FRAMES;
         if( config.sampleRate ) preferred.sampleRate = config.sampleRate;
+        else if( choice.sampleRate ) preferred.sampleRate = *choice.sampleRate;
         // A profile's device opens all of its channels in each direction used, mapped or not.
         const auto inputs=config.inputs.empty()?0:std::max(ChannelMap::required(config.inputs),config.deviceChannels);
         const auto outputs=std::max(ChannelMap::required(config.outputs),config.deviceChannels);
-        const auto inputName=listedName(config.inputDevice),outputName=listedName(config.outputDevice);
-        preferred.inputDeviceName=inputName;preferred.outputDeviceName=outputName;
         preferred.useDefaultInputChannels=false;preferred.useDefaultOutputChannels=false;
         preferred.inputChannels.setRange(0,inputs,true);preferred.outputChannels.setRange(0,outputs,true);
-        const auto error = devices_.initialise(inputs,outputs,nullptr,config.inputDevice.empty() && config.outputDevice.empty(),{},&preferred);
+        // The user's choice, then the profile's device (or the options'), then the default; each passed over is noted.
+        const auto inputName=listedName(config.inputDevice),outputName=listedName(config.outputDevice);
+        struct Candidate { std::string output, input, source; };
+        std::vector<Candidate> candidates;
+        if(choice.output || (choice.input && inputs)) candidates.push_back({choice.output.value_or(outputName),inputs?choice.input.value_or(inputName):std::string(),"user"});
+        if(!outputName.empty() || !inputName.empty()) candidates.push_back({outputName,inputName,"profile"});
+        if(!fixed_ || candidates.empty()) candidates.push_back({{},{},"default"});
+        for(const auto& c:candidates)
+        {
+            preferred.inputDeviceName=c.input;preferred.outputDeviceName=c.output;
+            auto error = devices_.initialise(inputs,outputs,nullptr,c.input.empty() && c.output.empty(),{},&preferred);
+            juce::AudioDeviceManager::AudioDeviceSetup actual;devices_.getAudioDeviceSetup(actual);
+            if(error.isEmpty() && !devices_.getCurrentAudioDevice())error="no device";
+            if(error.isEmpty() && ((!c.input.empty() && actual.inputDeviceName.toStdString()!=c.input) || (!c.output.empty() && actual.outputDeviceName.toStdString()!=c.output)))
+                error="another device opened";
+            if(error.isEmpty()){source_=c.source;break;}
+            notice_+=(notice_.empty()?"":"; ")+std::string(c.source=="user"?"the device chosen":c.source=="profile"?"the profile's device":"the default device")+
+                (c.output.empty() && c.input.empty()?"":" "+(c.output.empty()?c.input:c.output))+" did not open: "+error.toStdString();
+            devices_.closeAudioDevice();
+        }
         auto*      device = devices_.getCurrentAudioDevice();
-        if( error.isNotEmpty() || !device )
-            throw std::runtime_error( "no audio output: " + ( error.isNotEmpty() ? error.toStdString() : std::string( "no device" ) ) );
+        if( source_.empty() || !device ) throw std::runtime_error( "no audio output: " + notice_ );
+        if( !notice_.empty() ) std::fprintf( stderr, "oscairn: %s\n", notice_.c_str() );
         sampleRate_ = device->getCurrentSampleRate();
         std::fprintf( stderr, "oscairn: audio output \"%s\", %.0f Hz, %d-sample buffer\n", device->getName().toRawUTF8(), sampleRate_.load(),
                       device->getCurrentBufferSizeSamples() );
         if( preferred.bufferSize > 0 && device->getCurrentBufferSizeSamples() != preferred.bufferSize )
             std::fprintf( stderr, "oscairn: requested %d frames; using the device's supported size above\n", preferred.bufferSize );
-        initialDevice_=device->getName().toStdString();initialInputs_=device->getInputChannelNames();initialOutputs_=device->getOutputChannelNames();
-        juce::AudioDeviceManager::AudioDeviceSetup actual;devices_.getAudioDeviceSetup(actual);
-        if((!config.inputDevice.empty() && actual.inputDeviceName.toStdString()!=inputName) ||
-           (!config.outputDevice.empty() && actual.outputDeviceName.toStdString()!=outputName))
-            throw std::runtime_error("Requested audio device was not opened");
+        initialDevice_=opened_=device->getName().toStdString();initialInputs_=device->getInputChannelNames();initialOutputs_=device->getOutputChannelNames();
         if(config.sampleRate && std::abs(device->getCurrentSampleRate()-config.sampleRate)>=.5)
             throw std::runtime_error("the audio device runs at "+std::to_string(int(device->getCurrentSampleRate()))+" Hz, not the "+std::to_string(config.sampleRate)+" Hz asked for");
         audioDeviceAboutToStart(device);
@@ -134,6 +187,9 @@ namespace oscairn::host
         openMidiOutputs();
         sender_.startThread();
         midiDevicesChanged_ = juce::MidiDeviceListConnection::make( [this] { midiDevicesDirty_ = true; } );
+        session_->setAudioHost( [this] { return listDevices(); }, [this]( const Control::AudioSetting& s ) { return setDevice( s ); } );
+        seenDevices_ = deviceNames( devices_ );
+        devices_.addChangeListener( this );
         devices_.addAudioCallback( this );
         service();
         startTimer( 5 ); // control ticks are independent of the panel's repaint rate
@@ -146,7 +202,9 @@ namespace oscairn::host
         panel_.reset(); // its thread plays the session's controls
 #endif
         session_->setControllerWake( {} );
+        session_->setAudioHost( {}, {} );
         cancelPendingUpdate();
+        devices_.removeChangeListener( this );
         devices_.removeAudioCallback( this ); // waits for the callback to finish
         sender_.stopThread( 1000 );
         for( auto& input : midiInputs_ )
@@ -155,16 +213,124 @@ namespace oscairn::host
         midiOutputs_.clear();
     }
 
-    void AudioEngine::service()
+    void AudioEngine::applyRate()
     {
         if( const double rate = pendingRate_.exchange( 0 ); rate > 0 )
         {
             try { session_->setSampleRate( rate ); }
-            catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: %s\n", e.what() ); }
+            catch( const std::exception& e ) { notice_ = e.what(); std::fprintf( stderr, "oscairn: %s\n", e.what() ); }
             sampleRate_ = rate;
             started_ = true;
             std::fprintf( stderr, "oscairn: audio now at %.0f Hz; plugins activated again at it\n", rate );
         }
+    }
+
+    void AudioEngine::changeListenerCallback( juce::ChangeBroadcaster* )
+    {
+        if( auto names = deviceNames( devices_ ); names != seenDevices_ ) { seenDevices_ = std::move( names ); ++deviceList_; }
+        // The device went away: the device manager opened the default instead (played when not fixed), or none.
+        auto* device = devices_.getCurrentAudioDevice();
+        if( const auto name = device ? device->getName().toStdString() : std::string(); name != opened_ )
+        {
+            notice_ = opened_ + " went away" + ( name.empty() ? std::string( "; no audio device is open" ) : fixed_ ? "; the profile fixes the device, so nothing plays" : "; " + name + " plays instead" );
+            if( !fixed_ && !name.empty() ) source_ = "default";
+            opened_ = name;
+            std::fprintf( stderr, "oscairn: %s\n", notice_.c_str() );
+        }
+    }
+
+    Control::AudioDevices AudioEngine::listDevices()
+    {
+        Control::AudioDevices d;
+        const auto& config = channelMap_.configuration();
+        juce::AudioDeviceManager::AudioDeviceSetup setup;
+        devices_.getAudioDeviceSetup( setup );
+        auto* type = devices_.getCurrentDeviceTypeObject();
+        auto* current = devices_.getCurrentAudioDevice();
+        d.output = setup.outputDeviceName.toStdString();
+        if( !config.inputs.empty() ) d.input = setup.inputDeviceName.toStdString();
+        if( current ) { d.sampleRate = current->getCurrentSampleRate(); d.bufferSize = uint32_t( current->getCurrentBufferSizeSamples() ); }
+        d.source = source_; d.notice = notice_; d.fixed = fixed_;
+        auto describe = [&]( const juce::String& name, bool input ) {
+            Control::AudioDevice a{ name.toStdString(), {}, {} };
+            // The open device answers for itself; another is made to ask it, never opened.
+            std::unique_ptr<juce::AudioIODevice> probe;
+            auto* device = current && name == ( input ? setup.inputDeviceName : setup.outputDeviceName ) ? current
+                : ( probe.reset( type->createDevice( input ? juce::String() : name, input ? name : juce::String() ) ), probe.get() );
+            if( !device ) return a;
+            for( auto r : device->getAvailableSampleRates() ) if( !config.sampleRate || std::abs( r - config.sampleRate ) < .5 ) a.sampleRates.push_back( r ); // a profile's rate is the only one
+            for( auto b : device->getAvailableBufferSizes() ) if( b > 0 ) a.bufferSizes.push_back( uint32_t( b ) );
+            return a;
+        };
+        if( type )
+        {
+            for( const auto& name : type->getDeviceNames( false ) ) if( !fixed_ || name == setup.outputDeviceName ) d.outputs.push_back( describe( name, false ) );
+            if( !config.inputs.empty() )
+                for( const auto& name : type->getDeviceNames( true ) ) if( !fixed_ || name == setup.inputDeviceName ) d.inputs.push_back( describe( name, true ) );
+        }
+        return d;
+    }
+
+    Control::AudioDevices AudioEngine::setDevice( const Control::AudioSetting& s )
+    {
+        const auto now = listDevices();
+        if( fixed_ && ( ( s.output && *s.output != now.output ) || ( s.input && *s.input != now.input ) ) )
+            throw std::invalid_argument( "The device profile fixes the audio device: " + now.output );
+        if( s.input && channelMap_.configuration().inputs.empty() ) throw std::invalid_argument( "This engine opens no audio input" );
+        auto find = []( const std::vector<Control::AudioDevice>& list, const std::string& name, const char* what ) {
+            const auto at = std::find_if( list.begin(), list.end(), [&]( const auto& a ) { return a.name == name; } );
+            if( at == list.end() ) throw std::invalid_argument( std::string( "No audio " ) + what + " is named " + name );
+            return *at;
+        };
+        const auto output = find( now.outputs, s.output.value_or( now.output ), "output" );
+        if( s.input ) find( now.inputs, *s.input, "input" );
+        auto offered = []( const auto& values ) { std::string out; for( auto v : values ) out += ( out.empty() ? "" : ", " ) + std::to_string( int64_t( v ) ); return out; };
+        if( s.sampleRate && std::none_of( output.sampleRates.begin(), output.sampleRates.end(), [&]( double r ) { return std::abs( r - *s.sampleRate ) < .5; } ) )
+            throw std::invalid_argument( std::to_string( int64_t( *s.sampleRate ) ) + " Hz is not a sample rate " + output.name + " offers (" + offered( output.sampleRates ) + ")" );
+        if( s.bufferSize && std::find( output.bufferSizes.begin(), output.bufferSizes.end(), *s.bufferSize ) == output.bufferSizes.end() )
+            throw std::invalid_argument( std::to_string( *s.bufferSize ) + " is not a buffer size " + output.name + " offers (" + offered( output.bufferSizes ) + ")" );
+
+        juce::AudioDeviceManager::AudioDeviceSetup previous;
+        devices_.getAudioDeviceSetup( previous );
+        auto next = previous;
+        if( s.output ) next.outputDeviceName = *s.output;
+        if( s.input ) next.inputDeviceName = *s.input;
+        if( s.sampleRate ) next.sampleRate = *s.sampleRate;
+        if( s.bufferSize ) next.bufferSize = int( *s.bufferSize );
+        // The device restarts (silent between), its start recording it; at another rate it stays
+        // silent until every plugin is activated again at that rate, here.
+        auto open = [&]( const juce::AudioDeviceManager::AudioDeviceSetup& setup ) {
+            { const juce::ScopedLock lock( devices_.getAudioCallbackLock() ); adopt_ = true; }
+            auto error = devices_.setAudioDeviceSetup( setup, true ).toStdString();
+            if( error.empty() && !devices_.getCurrentAudioDevice() ) error = "no device opened";
+            if( error.empty() && !started_ && pendingRate_ <= 0 ) error = "it lacks the channels this engine plays";
+            { const juce::ScopedLock lock( devices_.getAudioCallbackLock() ); adopt_ = false; }
+            if( error.empty() ) { applyRate(); if( auto* d = devices_.getCurrentAudioDevice() ) opened_ = d->getName().toStdString(); }
+            return error;
+        };
+        notice_.clear();
+        if( const auto error = open( next ); !error.empty() )
+        {
+            const auto back = open( previous );
+            if( !back.empty() ) opened_.clear();
+            throw std::runtime_error( next.outputDeviceName.toStdString() + " did not open: " + error +
+                ( back.empty() ? "; " + previous.outputDeviceName.toStdString() + " plays again, as it was" : "; nor did " + previous.outputDeviceName.toStdString() + " again: " + back ) );
+        }
+        if( s.output || s.input ) source_ = "user";
+        // Saved as the user's, over what they chose before.
+        auto choice = readChoice();
+        if( s.output ) choice.output = s.output;
+        if( s.input ) choice.input = s.input;
+        if( s.sampleRate ) choice.sampleRate = s.sampleRate;
+        if( s.bufferSize ) choice.bufferSize = s.bufferSize;
+        try { writeChoice( choice ); }
+        catch( const std::exception& e ) { notice_ = std::string( "the choice is not saved: " ) + e.what(); }
+        return listDevices();
+    }
+
+    void AudioEngine::service()
+    {
+        applyRate();
         session_->service();
         if( midiDevicesDirty_.exchange( false ) )
             { openMidiInputs(); openMidiOutputs(); }
@@ -182,6 +348,7 @@ namespace oscairn::host
             const auto xruns=device->getXRunCount();
             status.audioUnderruns=xruns>=0?uint64_t(xruns):lateCallbacks_.load(std::memory_order_relaxed);
         }
+        status.audioDeviceList=deviceList_;
         status.audioReady=started_.load();
         status.cpuLoad = devices_.getCpuUsage();
         status.midiEventDrops=droppedMidi_.load()+droppedOut_.load();
@@ -342,6 +509,8 @@ namespace oscairn::host
         const auto& config=channelMap_.configuration();
         const auto inputMask=device->getActiveInputChannels(),outputMask=device->getActiveOutputChannels();
         const double rate=device->getCurrentSampleRate();
+        // A device chosen, or one opened when the last went away and the profile fixes none, is the one played from now on.
+        if(adopt_ || !fixed_){initialDevice_=device->getName().toStdString();initialInputs_=device->getInputChannelNames();initialOutputs_=device->getOutputChannelNames();}
         bool valid=rate>0 && device->getName().toStdString()==initialDevice_ &&
             device->getInputChannelNames()==initialInputs_ && device->getOutputChannelNames()==initialOutputs_;
         for(uint32_t i=0;i<ChannelMap::required(config.inputs);++i)valid=valid && inputMask[static_cast<int>(i)];

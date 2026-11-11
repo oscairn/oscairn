@@ -32,3 +32,13 @@ if(OSCAIRN_PANEL_ROLAND)
     target_compile_definitions(oscairn_audio_host PUBLIC OSCAIRN_PANEL_ROLAND=1)
     target_link_libraries(oscairn_audio_host PUBLIC oscairn_panel)
 endif()
+
+# The audio device chosen through the control API, on a fake device type: nothing reaches a speaker.
+juce_add_console_app(oscairn_audio_devices_test PRODUCT_NAME "oscairn-audio-devices-test")
+target_sources(oscairn_audio_devices_test PRIVATE device_selection_test.cpp)
+target_compile_definitions(oscairn_audio_devices_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(oscairn_audio_devices_test PRIVATE oscairn_audio_host oscairn_control_json juce::juce_recommended_config_flags)
+add_dependencies(oscairn_audio_devices_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn-plugin-worker)
+add_test(NAME engine-audio-devices COMMAND oscairn_audio_devices_test $<TARGET_FILE_DIR:oscairn_step_sequencer>)
+add_test(NAME engine-audio-devices-worker COMMAND oscairn_audio_devices_test $<TARGET_FILE_DIR:oscairn_step_sequencer> $<TARGET_FILE:oscairn-plugin-worker>)
+set_tests_properties(engine-audio-devices engine-audio-devices-worker PROPERTIES TIMEOUT 60)

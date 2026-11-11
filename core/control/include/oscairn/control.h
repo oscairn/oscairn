@@ -127,8 +127,22 @@ namespace oscairn
             std::vector<std::string> notices;
             // The audio device's underruns and overruns since it started, as the host counts them (RFC 0035).
             uint64_t audioUnderruns = 0;
+            uint64_t audioDeviceList = 0; // changes when the host's audio devices come or go: audioDevices() again
         };
         virtual SessionStatus sessionStatus() const = 0;
+        // The host's audio device, for Settings (RFC 0024). Each output device, and each input device
+        // when the engine opens inputs, with the sample rates and buffer sizes it offers; the one open,
+        // its rate and buffer size; where the device came from: "user" (a saved choice), "profile" (the
+        // device profile's or the engine's options) or "default"; fixed: the profile's device is the only
+        // one (its channel map names that device's channels); notice: a choice passed over, and why.
+        struct AudioDevice { std::string name; std::vector<double> sampleRates; std::vector<uint32_t> bufferSizes; };
+        struct AudioDevices { std::vector<AudioDevice> outputs, inputs; std::string output, input; double sampleRate = 0; uint32_t bufferSize = 0; std::string source, notice; bool fixed = false; };
+        virtual AudioDevices audioDevices() = 0;
+        // Any of them, checked against audioDevices() (std::invalid_argument when not one offered), then
+        // applied and saved as the user's. A device that fails to open: the last one opens again and
+        // std::runtime_error says why. A new rate activates every plugin again at it.
+        struct AudioSetting { std::optional<std::string> output, input; std::optional<double> sampleRate; std::optional<uint32_t> bufferSize; };
+        virtual AudioDevices setAudio(const AudioSetting& setting) = 0;
         struct GraphState
         {
             Graph::Description topology;

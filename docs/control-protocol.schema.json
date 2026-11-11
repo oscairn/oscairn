@@ -859,6 +859,72 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "audio.devices"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "audio.set"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "output": {
+                  "type": "string"
+                },
+                "input": {
+                  "type": "string"
+                },
+                "sampleRate": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "bufferSize": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "transport.set"
             },
             "params": {
@@ -7115,6 +7181,9 @@
                 },
                 {
                   "$ref": "#/$defs/ControlResult"
+                },
+                {
+                  "$ref": "#/$defs/AudioDevices"
                 }
               ]
             }
@@ -7992,6 +8061,11 @@
           "minimum": 0,
           "description": "The audio device's underruns and overruns since it last started: ALSA's xruns, CoreAudio's overloads, or callbacks more than a buffer late where the device reports none"
         },
+        "audioDeviceList": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Changes when audio devices come or go; audio.devices lists them again"
+        },
         "audioInputs": {
           "type": "array",
           "items": {
@@ -8140,6 +8214,7 @@
         "cpuLoad",
         "deadlineMisses",
         "audioUnderruns",
+        "audioDeviceList",
         "graphEventDrops",
         "midiEventDrops",
         "audioInputs",
@@ -9207,6 +9282,73 @@
         "root",
         "scale"
       ],
+      "additionalProperties": false
+    },
+    "AudioDevices": {
+      "type": "object",
+      "description": "audio.devices and audio.set: the devices offered, the one open and where it came from",
+      "properties": {
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AudioDevice"
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AudioDevice"
+          }
+        },
+        "output": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "sampleRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bufferSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "enum": ["user", "profile", "default"]
+        },
+        "fixed": {
+          "type": "boolean"
+        },
+        "notice": {
+          "type": "string"
+        }
+      },
+      "required": ["outputs", "inputs", "output", "input", "sampleRate", "bufferSize", "source", "fixed", "notice"],
+      "additionalProperties": false
+    },
+    "AudioDevice": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "sampleRates": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "bufferSizes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "required": ["name", "sampleRates", "bufferSizes"],
       "additionalProperties": false
     },
     "HarmonyResult": {

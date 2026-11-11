@@ -119,9 +119,11 @@ Device callbacks larger than 512 are split into smaller processing calls; callba
 below 512 stay smaller. Splitting does not reduce the device's buffering latency.
 At 48 kHz, 512 frames span about 10.7 ms, excluding other device/driver latency.
 
-Neither a running UI nor the control API currently changes audio device settings. The
-profile, `--buffer-frames` or the CMake setting above chooses the startup request; a runtime
-settings UI and persistence remain follow-up work. When the device restarts at another sample
+The control API's `audio.devices` and `audio.set` ([control protocol](../docs/control-protocol.md#requests-and-responses))
+list the devices and choose the device, sample rate and buffer size while the engine runs; the
+choice is saved in the data folder (`audio.json`) and wins over the profile, `--buffer-frames`
+and the CMake setting at the next start (a profile's device with its channel map stays fixed).
+No Settings page uses them yet. When the device restarts at another sample
 rate (its rate changed from outside, for example in macOS's Audio MIDI Setup), playback is
 silent while the engine activates every plugin again at the new rate on its control thread,
 keeping their state, and then goes on (`Session::setSampleRate`); the log says

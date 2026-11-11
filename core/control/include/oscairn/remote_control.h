@@ -117,6 +117,8 @@ namespace oscairn
         bool discardSound(NodeId node,uint32_t id,bool cutTail=false) override;
         GraphState graphState() const override;
         SessionStatus sessionStatus() const override;
+        AudioDevices audioDevices() override;
+        AudioDevices setAudio(const AudioSetting& setting) override;
         NodeId add(const std::string& name,const std::string& path,const std::string& pluginId = {}) override;
         NodeId addEffectContext(const std::string& name,NodeId source) override;
         NodeId shareInstrument(const std::string& name,NodeId source) override;

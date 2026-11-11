@@ -1922,6 +1922,17 @@ namespace oscairn
         ignoredSources_.store(mask, std::memory_order_release);
     }
 
+    Control::AudioDevices Session::audioDevices()
+    {
+        if(!audioList_) throw std::runtime_error("This engine has no audio device to choose");
+        return audioList_();
+    }
+    Control::AudioDevices Session::setAudio(const AudioSetting& setting)
+    {
+        if(!audioSet_) throw std::runtime_error("This engine has no audio device to choose");
+        return audioSet_(setting);
+    }
+
     void Session::setHostStatus(SessionStatus status)
     {
         const bool moved = status.midiInputs != hostStatus_.midiInputs, outputs = status.midiOutputs != hostStatus_.midiOutputs;

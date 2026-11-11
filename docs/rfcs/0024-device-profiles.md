@@ -18,7 +18,8 @@ Checked when built and tested; the sections below say how.
       which resolve each group's defaults; the panel playing faders, rows and buttons remains)
 - [ ] 3. The engine reads it: audio block size, budgets and reliability level follow from it
       (block size, the budget (RFC 0025) and the audio device with its channel map
-      ([status](#audio-device-status)) done; reliability waits for RFC 0027)
+      ([status](#audio-device-status)) done, with the user's choice of device, rate and buffer
+      size over them; reliability waits for RFC 0027)
 - [ ] 4. Packages and Performances checked against it (with RFC 0006 and RFC 0025)
 - [ ] 5. A second product's profile (a desktop module or pedal) built from the same image
 - [ ] 6. External MIDI controllers: [controller profiles](#controllers) matched by port name,
@@ -551,6 +552,23 @@ main on 6 and 7: the engine reported the device at 48000 Hz, and the file held 1
 on 6 and 7 and zeros on the other 14; `hw:0,0` opened the kernel's dummy card by its address.
 Nothing reached a speaker. Whether `hw:1,0` on a FANTOM opens with 16 channels, and which slots
 are its outputs, needs the unit.
+
+**The user's choice** (built 2026-11-11, `audio.devices` and `audio.set` in the
+[control protocol](../control-protocol.md#requests-and-responses)): Settings lists the output
+devices (and input devices when the engine opens inputs) with the rates and buffer sizes each
+offers, and sets any of the device, the rate and the buffer size. The engine saves the choice in
+the data folder (`audio.json`) and opens it at the next start ahead of the profile's device; when
+it is missing or fails to open, the profile's device opens, then the default, and `audio.devices`
+says which (`source`: `user`, `profile` or `default`) and why (`notice`). A profile's `device`
+comes with its channel map, which names that device's channels, so it is fixed: the only device
+listed, refused for any other, and its `rate`, when given, the only rate. The block size stays
+user-settable on every product. Without `device` (the desktop's, the KICK's), any device may be
+chosen. A new rate goes through `Session::setSampleRate` as above. `engine-audio-devices` checks
+it on a fake device type (nothing reaches a speaker), with the plugins in the engine and in
+workers: the listing, key 57 at 220 Hz after a change to 96 kHz, refusals, a note held across a
+switch and released after it, a device that fails to open leaving the last one playing, the
+choice restored, the fallbacks, a fixed device, and devices coming and going reaching status
+subscribers. Not tried with real devices.
 
 ## Open questions
 

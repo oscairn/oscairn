@@ -172,6 +172,7 @@ struct Plugin {
 #endif
             if (kind==0x90 && m->data[2]) held=gate=true;
             if (m->data[1] > 127 || m->data[2] > 127) ++threadErrors;
+            if (std::getenv("KICK_FIXTURE_STUCK")) return; // deaf to MIDI's releases too: a key-up, a pedal-up, all notes off
             if (kind==0x80 || (kind==0x90 && !m->data[2])) {held=false;if(!sustain)gate=false;}
             if (kind==0xb0 && m->data[1]==64) {sustain=m->data[2]>=64;if(!sustain && !held)gate=false;}
             if (kind==0xb0 && m->data[1]==120) gate=held=false;

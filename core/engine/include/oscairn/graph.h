@@ -441,6 +441,9 @@ namespace oscairn
         /// the next block.
         void setParallel( bool parallel ) noexcept { parallel_.store( parallel, std::memory_order_relaxed ); }
         void panicInput() noexcept { panicInput_=true; } // audio thread only
+        // Audio thread only: the player's Panic. Every plugin that takes notes is reset, those behind
+        // a note effect too, whose voices the effect may no longer hold a note to end.
+        void panicNotes() noexcept { panicNotes_=true; }
         /// Audio thread, after process(): this block's samples of one of a node's audio output
         /// channels (in port order), or of an external input channel for graphInput; null when the
         /// node is not in the plan or has no such channel. Recording reads its taps here (RFC 0020).
@@ -568,7 +571,7 @@ namespace oscairn
         std::atomic<Plan*> pending_{ nullptr };
         AudioPause pause_; // see setSampleRate
         std::atomic<Listener*> listener_{ nullptr };
-        bool panicInput_=false;
+        bool panicInput_=false,panicNotes_=false;
         std::atomic<bool> parallel_{ true }; // see setParallel
         std::atomic<float> voiceBudget_{ 0 }; // see setVoiceBudget
         AudioHelpers* helpers_ = nullptr; // RFC 0034: renders a wave's plugins in this process

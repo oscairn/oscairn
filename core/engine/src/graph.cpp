@@ -1091,7 +1091,7 @@ namespace oscairn
         if(!block){clear();return true;} // setSampleRate is reactivating the plugins
         if(adopt)beginBlock();
 
-        const bool panicInput=std::exchange(panicInput_,false);
+        const bool panicInput=std::exchange(panicInput_,false),panicNotes=std::exchange(panicNotes_,false);
         auto* const listener=listener_.load(std::memory_order_acquire);
         // Live gains for this block: each slot ramps from where the last block left it.
         for(uint32_t i=1;i<liveGains;++i)
@@ -1208,7 +1208,7 @@ namespace oscairn
         // on, stay on this thread in plan order; only the plugin's rendering moves.
         auto prepare=[&](Plan::Step& step)
         {
-            const bool inputRecovery=panicInput && std::any_of(step.noteSources.begin(),step.noteSources.end(),[](const auto& s){return s.step<0;});
+            const bool inputRecovery=(panicNotes && !step.noteSources.empty()) || (panicInput && std::any_of(step.noteSources.begin(),step.noteSources.end(),[](const auto& s){return s.step<0;}));
             for(auto c:step.silentInputs)std::fill_n(step.inputBuffer.data()+size_t(c)*maxFrames_,frames,0.f);
             for(const auto& r:step.audioSources)mix(r,step.inputBuffer.data()+size_t(r.to)*maxFrames_);
 

@@ -1228,8 +1228,21 @@ namespace
     }
 
     // All notes off (RFC 0030): a held note stops at the next block, and the next note plays.
-    void allNotesOff(const char* fixture)
+    void allNotesOff(const char* fixture, const char* transpose)
     {
+        { // Behind a note effect holding nothing: a voice its synth kept past its release (as Analog's
+          // mono modes could) still ends, though the effect has no note left to choke.
+            ::setenv("KICK_FIXTURE_STUCK", "1", 1);
+            Session s(48000, frames);
+            const auto tr = s.add("transpose", transpose), synth = s.add("synth", fixture, "org.kick.test.synth"); s.setParameter(synth, 7, .5);
+            const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, tr); s.insertIntoPart(part, 1, synth); s.commit();
+            Audio x;
+            s.note(true, 60, 1); x.run(s); s.note(false, 60, 0); x.run(s); x.run(s);
+            check(near(x.l[0], .5), "behind a note effect, the stuck voice sounds on: " + std::to_string(x.l[0]));
+            s.allNotesOff(); x.run(s); x.run(s);
+            check(near(x.l[0], 0), "all notes off behind a note effect: silent: " + std::to_string(x.l[0]));
+            ::unsetenv("KICK_FIXTURE_STUCK");
+        }
         Session s(48000, frames);
         const auto synth = s.add("synth", fixture, "org.kick.test.synth"); s.setParameter(synth, 7, .5);
         const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, synth); s.commit();
@@ -2338,7 +2351,7 @@ int main(int argc, char** argv)
         stuckRingOut(temp.path);
         hardwarePanic(argv[1], temp.path);
         audition(argv[1], temp.path);
-        allNotesOff(argv[1]);
+        allNotesOff(argv[1], argv[5]);
         unavailable(argv[1], temp.path);
         sceneTransitions(argv[1], temp.path);
         budgets(argv[1], temp.path);

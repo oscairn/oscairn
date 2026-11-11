@@ -599,7 +599,8 @@ namespace oscairn
         /// release on the next block. This may release other voices on shared destinations.
         virtual bool note( bool on, int key, double velocity, int channel = 0 ) = 0;
         // All notes off (RFC 0030): every note played from the keys, MIDI inputs and the UI is
-        // released at the next block. Any thread; never waits.
+        // released at the next block, and every plugin that takes notes is reset, behind a note
+        // effect too. Any thread; never waits.
         virtual void allNotesOff() = 0;
         // MIDI inputs whose messages are left out, by their names in the session status (RFC 0024:
         // a controller's port that duplicates another's). Replaces the last list; empty: none.

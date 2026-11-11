@@ -707,6 +707,7 @@ namespace oscairn
             // release to graph-input destinations. Voices from other sources on the
             // same destinations can also be released by this emergency operation.
             graph_.panicInput();
+            if( allOff_.exchange( false, std::memory_order_acquire ) ) graph_.panicNotes();
             tail = head;
         }
         else

@@ -587,7 +587,8 @@ stepped, hidden and read-only flags. How the editors use them:
   expression works, and `NOTE_END` tells the host when a voice and its tail have finished.
   A plugin need not send `NOTE_END` for the notes it ends in `reset()`: the host treats a reset
   as ending every note it sent (CLAP's `reset()` has no output events). End every voice at once
-  in `reset()`.
+  in `reset()`: the player's Panic (`notes.panic`) resets every plugin that takes notes, behind
+  a note effect too.
 - **Chokes and per-note volume:** treat a host `NOTE_CHOKE` as a fast fade of 2–5 ms, not a
   cut, and honor `CLAP_NOTE_EXPRESSION_VOLUME`. When a part's note limit, or the shared
   budget across parts, steals a note, the host lowers its volume expression to silence over

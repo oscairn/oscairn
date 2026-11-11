@@ -519,6 +519,7 @@ Example:
 | -32005 | Pending command store or UI note queue refused a command |
 | -32006 | Message, nesting or batch limit exceeded |
 | -32007 | Recording refused; `data.reason` says why ([Recording](#recording)) |
+| -32008 | Not open to this app's connection; `data.permissions` lists what would do ([Permissions](#permissions)) |
 
 Input is limited to 65,536 bytes, 32 nested arrays/objects and 64 requests per batch.
 The adapter checks byte/depth limits before parsing and batch size before dispatching any
@@ -593,12 +594,14 @@ it. The server relays; it never interprets an action. These methods exist only o
 transport (other transports answer "Method not found"), and are not in `session.hello`'s
 capabilities.
 
-- `apps.connect {app}` makes a connection for the app named (1 to 128 letters, digits, `.`, `-`
-  and `_`) and answers `{app}` with the other end of it as a descriptor riding on the reply
-  (`SCM_RIGHTS`); `LocalClient::takeDescriptor()` gives it, close-on-exec. The caller becomes
-  the app's *host* (the shell), and the connection the app's *main* one. On an app's own
-  connection, `app` may be left out and may only name itself: the connection made then is the
-  app's too (for its jobs) but not its main one. Up to 16 app connections, counted apart from
+- `apps.connect {app, permissions?}` makes a connection for the app named (1 to 128 letters,
+  digits, `.`, `-` and `_`) and answers `{app}` with the other end of it as a descriptor riding
+  on the reply (`SCM_RIGHTS`); `LocalClient::takeDescriptor()` gives it, close-on-exec. The
+  caller becomes the app's *host* (the shell), and the connection the app's *main* one, held to
+  `permissions` (below; none when left out), which the shell takes from the app's manifest. On
+  an app's own connection, `app` may be left out and may only name itself, and `permissions` is
+  refused: the connection made then is the app's too (for its jobs), with its permissions, but
+  not its main one. Up to 16 app connections, counted apart from
   the 8 other clients. The server holds a copy of the end it hands over until the connection
   sends its first request, or for 5 seconds: one that never speaks is seen closed only then.
 - `apps.request {app?, action, argument?}` answers `{request}`. From an app it goes to its host
@@ -615,8 +618,48 @@ capabilities.
   has not answered (0 when none).
 
 Arguments and results are strings of at most 16 KiB. Notifications addressed to a connection
-(`apps.requested`, `apps.answered`, `apps.ping`, `apps.status`) need no subscription. Grants
-per app connection are RFC 0022 step 4; until then an app's connection may call every method.
+(`apps.requested`, `apps.answered`, `apps.ping`, `apps.status`) need no subscription.
+
+#### Permissions
+
+An app's connection may call only what its permissions give
+([RFC 0022](rfcs/0022-apps-and-requests.md#permissions), by
+[RFC 0026](rfcs/0026-network-control-and-web-ui.md#permissions)'s namespaces); every other
+connection, the shell's and the engine's own included, is trusted and unaffected. The table is
+`appGrants()` in `core/control/src/json_rpc.cpp`, checked before a method runs; a method not in
+it is refused to apps whatever they were granted.
+
+| Permission | Methods and topics |
+| --- | --- |
+| any app | `session.hello`, `session.status`, `subscribe`, `unsubscribe`, `hardware.capabilities`, `audio.devices`, `apps.*`; the `status` topic |
+| `play` | `notes.*`, `transport.set`, `scenes.select`, `controls.set`, `pads.play`, `pads.pressure` |
+| `play` or `edit` | reading what plays: `transport.get`, `graph.get`, `params.list`, `params.get`, `params.text`, `pads.get`, `assignments.get`, `harmony.get`, `parts.meters`, `wires.meters`, `sounds.get`, `effects.resources`, `state.info`, `window.info`, `presets.list`, `properties.list`, `properties.get`; the `transport`, `params.changed`, `graph.changed` and `controls.changed` topics |
+| `edit` | the rest of `graph`, `parts`, `wires`, `params`, `scenes`, `controls`, `pads`, `edit`, `sounds`, `properties` and `assignments`; `master.set`, `effects.create`, `instruments.share`, `harmony.set`, `state.save`, `window.show` |
+| `library` | `library.*`, `performance.*`, `budget.estimate`, `audition.*`, `assets.*`, `record.*`; the `record` topic |
+| `system` | `packages.*`, `trust.*`, `keys.*`, `plugins.*`, `controllers.set`, `controllers.view`, `midi.ignore`, `engine.attach`, `engine.release`, `budget.set`, `memory.*`, `audio.set` |
+| `play`, `edit` or `system` | `controllers.get` and the `controllers` topic, which `RemoteControl` subscribes to |
+
+`controls`, `midi`, `audio`, `background`, `network` and `files` are accepted in a grant and
+give no method yet. A refusal is error `-32008` naming the permission, with `data.permissions`
+listing those that would do (empty for a method apps may not call at all):
+
+```json
+{"jsonrpc":"2.0","id":4,"error":{"code":-32008,"message":"graph.get needs the play or edit permission","data":{"permissions":["play","edit"]}}}
+```
+
+A `subscribe` naming a topic outside the grant is refused whole. **No file paths from apps:** a
+method given a path on the engine's filesystem is refused (`-32008`, "takes no file path from an
+app"): `performance.save`, `.load`, `.prepare`, `.contents`, `.import` and `.export`,
+`budget.estimate`, `library.export`, `.contents` and `.install`, `plugins.addBuild`,
+`assets.register` and `.import`, `state.save`, `sounds.prepare`'s `state` and `preset`,
+`graph.add`, `graph.replace` and a `path` value in `properties.set`. Allowed are a Performance's
+folder in the library (as `library.query` gives it, links and `..` resolved) to the methods that
+read one, and a repository's `https://` or `http://` address. Items are named by their store
+identities (`library.load {id}`).
+
+The local socket's path stays open to any process of the user's, which then connects as a trusted
+client: grants hold an app to what the shell gave it only once its sandbox keeps it from the
+socket (RFC 0022 step 6). Rate limits per app are not built.
 
 `LocalClient::call` waits for its matching response while retaining interleaved
 notifications. The default deadline is 1 second. Timeout, malformed response, mismatched

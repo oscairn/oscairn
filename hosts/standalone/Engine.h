@@ -218,7 +218,9 @@ namespace oscairn::standalone
 
         // Apps (RFC 0022), through the engine, which relays and never interprets an action.
         // A connection for an app, to hand to it as a descriptor; -1 when refused (stderr says why).
-        int appConnection(const std::string& app);
+        // permissions: its manifest's, which the engine holds it to; an app asking for one of its
+        // own names none, and keeps its own.
+        int appConnection(const std::string& app, const std::vector<std::string>& permissions = {});
         // Asks `app` (from an app: its shell, which decides who answers) for `action`; `answer`
         // is called once, maybe later, with "" for a cancel. Answering one asked of this side.
         void appRequest(const std::string& app, const std::string& action, const std::string& argument, std::function<void(const std::string&)> answer);

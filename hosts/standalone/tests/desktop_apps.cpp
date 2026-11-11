@@ -95,7 +95,7 @@ int main(int argc, char** argv)
             actions.offer(standalone::pickPerformance, "Library", [&](const std::string&, standalone::Actions::Answer answer) { answer(picks++ == 0 ? idOf("Bass Split") : std::string()); });
             actions.offer(standalone::sendSetlistEntry, "Performance", [&](const std::string& id, standalone::Actions::Answer answer) { entry = id; answer("shown"); });
             const auto apps = standalone::findApps(juce::File(argv[2]));
-            check(apps.size() == 1 && apps[0].id == "oscairn.setlist" && apps[0].executable.existsAsFile() && apps[0].maximum == 400, "the Setlist's manifest is found in the folder, with its build for this platform");
+            check(apps.size() == 1 && apps[0].id == "oscairn.setlist" && apps[0].executable.existsAsFile() && apps[0].maximum == 400 && apps[0].permissions == std::vector<std::string>{"play", "library"}, "the Setlist's manifest is found in the folder, with its build for this platform and its permissions");
             const auto setlists = data.getChildFile("Setlists");
             auto saved = [&] { try { return standalone::readSetlist(standalone::setlistFile(setlists, "Setlist")).entries.size(); } catch(const std::exception&) { return size_t(0); } };
             {
@@ -272,7 +272,7 @@ int main(int argc, char** argv)
                 auto image = frame.createComponentSnapshot(frame.getLocalBounds());
                 const auto area = place->getBounds();
                 const auto shot = juce::File::createTempFile(".png");
-                const int connection = engine.appConnection("oscairn.setlist");
+                const int connection = engine.appConnection("oscairn.setlist", apps[0].permissions);
                 const int output = ::open(processes.logFile("oscairn.setlist").getFullPathName().toRawUTF8(), O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
                 const auto child = host::spawnChild({apps[0].executable.getFullPathName().toStdString(), "--snapshot", shot.getFullPathName().toStdString(),
                                                      "--size", std::to_string(area.getWidth()) + "x" + std::to_string(area.getHeight()), "--mode", "2"},

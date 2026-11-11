@@ -263,12 +263,13 @@ namespace oscairn
                 for(auto* list:{&s.peers,&s.joining})for(auto& p:*list)if(p->stream.fd>=0 && match(*p))found=p.get();
                 return found;
             }
-            std::string connect(JsonRpc& rpc,const std::string& named) override
+            std::string connect(JsonRpc& rpc,const std::string& named,std::optional<uint32_t> permissions) override
             {
                 auto& from=of(rpc);
                 const auto app=named.empty()?from.app:named; // an app's own, unnamed
                 if(app.empty())throw std::invalid_argument("apps.connect names the app");
                 if(!from.app.empty() && app!=from.app)throw std::invalid_argument("An app asks for connections for itself only");
+                if(!from.app.empty() && permissions)throw std::invalid_argument("An app's connections keep its own permissions");
                 if(s.passing>=0)throw std::invalid_argument("One connection per request");
                 size_t apps=0;
                 for(auto* list:{&s.peers,&s.joining})for(auto& p:*list)apps+=!p->app.empty();
@@ -285,6 +286,7 @@ namespace oscairn
                 // until the connection speaks, so it is never only in flight.
                 peer->kept=::fcntl(fds[1],F_DUPFD_CLOEXEC,0);
                 peer->rpc.relayApps(this);
+                peer->rpc.restrict(from.app.empty()?permissions.value_or(0):from.rpc.permissions().value_or(0)); // the host's grant; none when it gives none
                 s.joining.push_back(std::move(peer));s.passing=fds[1];
                 return "{\"app\":"+quote(app)+'}';
             }

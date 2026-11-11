@@ -8,6 +8,7 @@
 #include "sheredom/json.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -506,8 +507,93 @@ namespace oscairn
                 + ",\"from\":" + (p.from.sound.empty() ? std::string("null") : "{\"sound\":" + quote(p.from.sound) + ",\"revision\":" + quote(p.from.revision) + ",\"name\":" + quote(p.from.name) + ",\"modified\":" + (p.from.modified ? "true" : "false") + '}') + '}';
         }
 
+        // App permissions (RFC 0022, RFC 0026's by namespace): bit i is permissionNames[i].
+        constexpr std::array<std::string_view,10> permissionNames{"play","edit","library","system","controls","midi","audio","background","network","files"};
+        enum : uint32_t { Any = 0, Play = 1, Edit = 2, Library = 4, System = 8 };
+        // What an app's connection needs for each method, and each topic it subscribes to (by the
+        // topic's name, which no method shares): any one of these bits, Any for every app. Not
+        // here: refused to apps, whatever they were granted. Reading what plays (the graph, its
+        // values, the transport) takes Play or Edit.
+        const std::map<std::string_view,uint32_t>& appGrants()
+        {
+            static const std::map<std::string_view,uint32_t> table{
+                {"session.hello",Any},{"session.status",Any},{"subscribe",Any},{"unsubscribe",Any},{"hardware.capabilities",Any},{"audio.devices",Any},{"status",Any},
+                {"apps.connect",Any},{"apps.request",Any},{"apps.answer",Any},{"apps.pong",Any},
+                {"notes.send",Play},{"notes.panic",Play},{"transport.set",Play},{"scenes.select",Play},{"controls.set",Play},{"pads.play",Play},{"pads.pressure",Play},
+                {"transport.get",Play|Edit},{"graph.get",Play|Edit},{"params.list",Play|Edit},{"params.get",Play|Edit},{"params.text",Play|Edit},{"pads.get",Play|Edit},
+                {"assignments.get",Play|Edit},{"harmony.get",Play|Edit},{"parts.meters",Play|Edit},{"wires.meters",Play|Edit},{"sounds.get",Play|Edit},{"effects.resources",Play|Edit},
+                {"state.info",Play|Edit},{"window.info",Play|Edit},{"presets.list",Play|Edit},{"properties.list",Play|Edit},{"properties.get",Play|Edit},
+                {"transport",Play|Edit},{"params.changed",Play|Edit},{"graph.changed",Play|Edit},{"controls.changed",Play|Edit},
+                {"graph.add",Edit},{"graph.remove",Edit},{"graph.replace",Edit},{"graph.connect",Edit},{"graph.disconnect",Edit},{"graph.map",Edit},{"graph.unmap",Edit},
+                {"graph.commit",Edit},{"graph.enable",Edit},{"graph.role",Edit},{"master.set",Edit},{"effects.create",Edit},{"instruments.share",Edit},{"harmony.set",Edit},
+                {"params.set",Edit},{"params.gesture",Edit},{"properties.set",Edit},{"properties.request",Edit},{"state.save",Edit},{"window.show",Edit},
+                {"sounds.prepare",Edit},{"sounds.select",Edit},{"sounds.discard",Edit},{"pads.set",Edit},{"assignments.set",Edit},
+                {"edit.undo",Edit},{"edit.redo",Edit},{"edit.history",Edit},
+                {"parts.add",Edit},{"parts.remove",Edit},{"parts.insert",Edit},{"parts.removeNode",Edit},{"parts.move",Edit},{"parts.addSplit",Edit},{"parts.removeSplit",Edit},
+                {"parts.addLane",Edit},{"parts.removeLane",Edit},{"parts.lane",Edit},{"parts.input",Edit},{"parts.output",Edit},{"parts.send",Edit},{"parts.level",Edit},
+                {"parts.name",Edit},{"parts.solo",Edit},{"parts.pan",Edit},{"parts.midiOut",Edit},{"parts.saveSound",Edit},{"parts.loadSound",Edit},{"parts.fromSound",Edit},
+                {"wires.connect",Edit},{"wires.disconnect",Edit},{"wires.enable",Edit},{"wires.mix",Edit},{"wires.zones",Edit},
+                {"scenes.add",Edit},{"scenes.store",Edit},{"scenes.remove",Edit},{"scenes.name",Edit},{"scenes.scope",Edit},{"scenes.transition",Edit},{"scenes.untouched",Edit},
+                {"controls.add",Edit},{"controls.remove",Edit},{"controls.name",Edit},{"controls.targets",Edit},{"controls.source",Edit},
+                {"library.query",Library},{"library.favorite",Library},{"library.tag",Library},{"library.edit",Library},{"library.copy",Library},{"library.export",Library},
+                {"library.rescan",Library},{"library.contents",Library},{"library.install",Library},{"library.libraries",Library},{"library.uninstall",Library},
+                {"library.delete",Library},{"library.save",Library},{"library.load",Library},
+                {"performance.save",Library},{"performance.load",Library},{"performance.prepare",Library},{"performance.export",Library},{"performance.info",Library},
+                {"performance.setInfo",Library},{"performance.contents",Library},{"performance.import",Library},{"budget.estimate",Library},
+                {"audition.start",Library},{"audition.stop",Library},{"audition.get",Library},
+                {"assets.register",Library},{"assets.import",Library},{"assets.libraries",Library},{"assets.uninstall",Library},{"assets.collect",Library},
+                {"record.start",Library},{"record.stop",Library},{"record.retro",Library},{"record.get",Library},{"record.takes",Library},{"record.delete",Library},
+                {"record.rename",Library},{"record.play",Library},{"record",Library},
+                {"packages.list",System},{"packages.install",System},{"packages.job",System},{"packages.repositories",System},{"packages.addRepository",System},
+                {"packages.removeRepository",System},{"packages.enableRepository",System},{"packages.setDeviceRepositories",System},
+                {"trust.list",System},{"trust.set",System},{"trust.remove",System},{"keys.list",System},{"keys.make",System},
+                {"plugins.list",System},{"plugins.remove",System},{"plugins.addBuild",System},
+                {"controllers.get",Play|Edit|System},{"controllers",Play|Edit|System},{"controllers.set",System},{"controllers.view",System},{"midi.ignore",System},
+                {"engine.attach",System},{"engine.release",System},{"budget.set",System},{"audio.set",System},
+                {"memory.alwaysAvailable",System},{"memory.launch",System},{"memory.closed",System},{"memory.state",System}};
+            return table;
+        }
+        [[noreturn]] void refuse( std::string_view method, uint32_t needs )
+        {
+            std::string names, list;
+            for( size_t i = 0; i < permissionNames.size(); ++i )
+                if( needs >> i & 1 ) { names += (names.empty() ? "" : " or ") + std::string(permissionNames[i]); list += (list.empty() ? "" : ",") + quote(permissionNames[i]); }
+            throw Failure{ -32008, std::string(method) + " needs the " + names + " permission", "{\"permissions\":[" + list + "]}" };
+        }
+        // An app's call checked against its grants (above) before it runs. A path on the engine's
+        // filesystem, by the field holding one, is refused too (RFC 0022: an app names what the
+        // store holds), but a folder in the library's own (library.query's paths) to those reading
+        // a Performance, and a repository's web address.
+        void permitted( Control& c, uint32_t granted, std::string_view method, Value p )
+        {
+            const auto& table = appGrants();
+            const auto rule = table.find(method);
+            if( rule == table.end() ) throw Failure{ -32008, std::string(method) + " is not open to apps", R"({"permissions":[]})" };
+            if( rule->second && !(rule->second & granted) ) refuse(method,rule->second);
+            if( const auto topics = member(p,"topics"); method == "subscribe" && topics && topics->type == json_type_array )
+                for( auto* e = static_cast<const json_array_s*>(topics->payload)->start; e; e = e->next )
+                    if( const auto topic = e->value->type == json_type_string ? table.find(string(e->value)) : table.end(); topic != table.end() && topic->second && !(topic->second & granted) )
+                        refuse(topic->first,topic->second);
+            static const std::map<std::string_view,std::string_view> paths{
+                {"performance.save","directory"},{"performance.load","directory"},{"performance.prepare","directory"},{"budget.estimate","directory"},
+                {"performance.contents","directory"},{"performance.import","directory"},{"performance.export","file"},{"library.export","file"},
+                {"library.contents","file"},{"library.install","file"},{"plugins.addBuild","path"},{"assets.register","folder"},{"assets.import","file"},
+                {"state.save","directory"},{"sounds.prepare","state"},{"graph.add","path"},{"graph.replace","path"},
+                {"packages.list","source"},{"packages.install","source"},{"packages.addRepository","address"}};
+            const auto field = paths.find(method);
+            const auto v = field == paths.end() ? nullptr : member(p,field->second);
+            const auto text = v && v->type == json_type_string ? std::string(string(v)) : std::string();
+            const bool reads = method == "performance.load" || method == "performance.prepare" || method == "budget.estimate" || method == "performance.contents" || method == "performance.import";
+            const bool web = method.starts_with("packages.") && (text.starts_with("https://") || text.starts_with("http://"));
+            const auto preset = method == "sounds.prepare" ? member(p,"preset") : nullptr; // a preset's URI may name a file
+            const auto type = method == "properties.set" ? member(member(p,"value"),"type") : nullptr;
+            if( (v && !web && !(reads && c.inLibrary(text))) || preset || (type && type->type == json_type_string && string(type) == "path") )
+                throw Failure{ -32008, std::string(method) + " takes no file path from an app", R"({"permissions":[]})" };
+        }
+
         std::string invoke( Control& c, JsonRpc& client, std::string_view method, Value p )
         {
+            if( const auto granted = client.permissions() ) permitted(c,*granted,method,p);
             if( method == "session.hello" )
             {
                 fields(p, {});
@@ -536,7 +622,20 @@ namespace oscairn
                     if( v.size() > 16384 ) invalid("An argument or result is at most 16 KiB");
                     return v;
                 };
-                if( method == "apps.connect" ) { fields(p,{"app"}); return relay->connect(client,member(p,"app") ? name("app") : std::string()); }
+                if( method == "apps.connect" )
+                {
+                    fields(p,{"app","permissions"});
+                    std::optional<uint32_t> permissions;
+                    if( member(p,"permissions") ) permissions = 0;
+                    if( permissions )
+                        for( auto v : array(member(p,"permissions"),permissionNames.size(),0) )
+                        {
+                            const auto at = std::find(permissionNames.begin(),permissionNames.end(),string(v));
+                            if( at == permissionNames.end() ) invalid("Unknown permission");
+                            *permissions |= 1u << (at - permissionNames.begin());
+                        }
+                    return relay->connect(client,member(p,"app") ? name("app") : std::string(),permissions);
+                }
                 if( method == "apps.request" ) { fields(p,{"app","action","argument"}); return relay->request(client,member(p,"app") ? name("app") : std::string(),name("action"),text("argument")); }
                 if( method == "apps.answer" ) { fields(p,{"request","result"}); return relay->answer(client,integer(member(p,"request")),text("result")); }
                 if( method == "apps.pong" ) { fields(p,{"ping"}); return relay->pong(client,integer(member(p,"ping"))); }

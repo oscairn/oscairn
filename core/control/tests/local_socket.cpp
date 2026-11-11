@@ -149,7 +149,7 @@ namespace
         };
         auto number = [](const std::string& reply, const char* field) { const auto at = reply.find(std::string("\"") + field + "\":"); return at == std::string::npos ? 0 : std::stoi(reply.substr(at + std::strlen(field) + 3)); };
         clientWhileRendering(f, [&] {
-            check(host.call("apps.connect", R"({"app":"com.example.setlist"})").find(R"("app":"com.example.setlist")") != std::string::npos, "apps.connect answers");
+            check(host.call("apps.connect", R"({"app":"com.example.setlist","permissions":["play"]})").find(R"("app":"com.example.setlist")") != std::string::npos, "apps.connect answers");
             const int given = host.takeDescriptor();
             check(given >= 0 && (fcntl(given, F_GETFD) & FD_CLOEXEC), "the connection comes as a descriptor, close-on-exec");
             app.adopt(given);
@@ -205,6 +205,53 @@ namespace
             check(heard(host, "{\"request\":" + std::to_string(number(pending, "request")) + R"(,"result":""})"), "canceled when the app goes");
         });
         check(f.server.clients() == 2, "the host and the app's own second connection remain");
+    }
+    // Permissions (RFC 0022 step 4): an app's connection may do what its host granted and no
+    // more, names no file path but the library's own, and its own connections keep its grant;
+    // the host's stays trusted.
+    void permissions(const char* plugin)
+    {
+        TemporaryDirectory home; ::setenv("OSCAIRN_DATA_HOME", home.path, 1); // a library of its own
+        Fixture f(plugin);
+        auto fd = pair(); f.server.adopt(fd[0]);
+        LocalClient host; host.adopt(fd[1]);
+        LocalClient app, own;
+        auto has = [](const std::string& reply, const std::string& text) { return reply.find(text) != std::string::npos; };
+        clientWhileRendering(f, [&] {
+            check(has(host.call("apps.connect", R"({"app":"com.example.library","permissions":["library","bogus"]})"), "Unknown permission"), "a permission is one the engine knows");
+            host.call("apps.connect", R"({"app":"com.example.library","permissions":["library"]})");
+            app.adopt(host.takeDescriptor());
+            for(const auto* method : {"graph.get", "params.list"})
+            {
+                const auto reply = app.call(method);
+                check(has(reply, "-32008") && has(reply, std::string(method) + " needs the play or edit permission") && has(reply, R"("permissions":["play","edit"])"), std::string(method) + " refused, naming the permission: " + reply);
+            }
+            check(has(app.call("graph.add", R"({"path":"/x.clap"})"), "graph.add needs the edit permission"), "graph.add refused");
+            check(has(app.call("params.set", R"({"values":[{"node":1,"param":1,"value":0.5}]})"), "params.set needs the edit permission"), "params.set refused");
+            check(has(app.call("library.query"), R"("items":[])"), "library.query allowed");
+            check(has(app.call("packages.install", R"({"source":"https://example.com","id":"x"})"), "packages.install needs the system permission"), "packages.install refused");
+            check(has(app.call("trust.set", R"({"id":"x"})"), "trust.set needs the system permission"), "trust.set refused");
+            check(has(app.call("subscribe", R"({"topics":["status","transport"]})"), "transport needs the play or edit permission"), "a topic outside the grant is not subscribed");
+            check(has(app.call("subscribe", R"({"topics":["status"]})"), "accepted") && has(app.call("session.status"), "result") && has(app.call("session.hello"), "protocolVersion"), "every app reads what it draws");
+            check(has(app.call("debug.anything"), "debug.anything is not open to apps"), "a method not in the table is refused");
+            // Paths: none but a Performance in the library, for reading it.
+            check(has(host.call("library.save", R"({"name":"Friday"})"), "\"id\""), "the host saves a Performance");
+            const auto listed = host.call("library.query");
+            const auto at = listed.find("\"path\":\"") + 8;
+            const auto path = listed.substr(at, listed.find('"', at) - at);
+            check(!has(app.call("performance.prepare", "{\"directory\":\"" + path + "\"}"), "-32008"), "a library Performance's folder is named");
+            check(has(app.call("performance.prepare", "{\"directory\":\"" + path + "/../..\"}"), "takes no file path"), "not a way out of it");
+            check(has(app.call("performance.prepare", R"({"directory":"/tmp"})"), "takes no file path"), "nor any other folder");
+            check(has(app.call("performance.save", "{\"directory\":\"" + path + "\"}"), "takes no file path"), "nor to write");
+            // Its own connections keep its grant: never wider.
+            check(has(app.call("apps.connect", R"({"permissions":["system"]})"), "keep its own"), "an app grants itself nothing");
+            app.call("apps.connect", "{}");
+            own.adopt(app.takeDescriptor());
+            check(has(own.call("trust.list"), "needs the system permission") && has(own.call("library.query"), "items"), "its own connection has its grant");
+            // The host is unaffected.
+            check(has(host.call("graph.get"), "nodes") && has(host.call("trust.list"), "result") && has(host.call("debug.anything"), "Method not found"), "the host is trusted");
+        });
+        ::unsetenv("OSCAIRN_DATA_HOME");
     }
     // A managed engine's lifetime: it may stop once every UI that keeps it has quit normally;
     // one that leaves without releasing (a crash) keeps it until a UI attaches again, and a
@@ -827,7 +874,7 @@ int main(int argc,char** argv)
         if(argc==3 && std::string_view(argv[2])=="--path-policy"){pathPolicy(argv[1]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--named")return named(argv[1],argv[0]);
         if(argc!=2)return 2;
-        framing(argv[1]);apps(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);removedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);controllerCrash(argv[1],argv[0]);
+        framing(argv[1]);apps(argv[1]);permissions(argv[1]);lifetime(argv[1]);slowReader(argv[1]);clientAndReconnect(argv[1]);pressure(argv[1]);clientFailures();typedClient(argv[1]);knownParameters(argv[1]);graphReadLater(argv[1]);pushedDuringRead(argv[1]);removedDuringRead(argv[1]);editOverOlderRead(argv[1]);connectPipelined(argv[1]);fetches(argv[1]);controllerCrash(argv[1],argv[0]);
         std::cout<<"ok: real Unix streams, framing, backpressure, notifications, reconnect, continuing audio and client failures\n";
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

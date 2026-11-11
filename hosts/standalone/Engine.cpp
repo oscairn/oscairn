@@ -54,12 +54,14 @@ namespace oscairn::standalone
         remote_=std::make_unique<RemoteControl>(*client_);control_=remote_.get();
         startTimer(16);
     }
-    int Engine::appConnection(const std::string& app)
+    int Engine::appConnection(const std::string& app,const std::vector<std::string>& permissions)
     {
         if(!client_ || !connected())return -1;
         try
         {
-            const auto reply=client_->call("apps.connect",app.empty()?"{}":"{\"app\":"+juce::JSON::toString(juce::String::fromUTF8(app.c_str())).toStdString()+'}',2000);
+            juce::StringArray granted;
+            for(const auto& p:permissions)granted.add(juce::JSON::toString(juce::String::fromUTF8(p.c_str())));
+            const auto reply=client_->call("apps.connect",app.empty()?"{}":"{\"app\":"+juce::JSON::toString(juce::String::fromUTF8(app.c_str())).toStdString()+",\"permissions\":["+granted.joinIntoString(",").toStdString()+"]}",2000);
             const int fd=client_->takeDescriptor();
             if(fd<0)std::fprintf(stderr,"oscairn: no connection for %s: %s\n",app.c_str(),reply.c_str());
             return fd;

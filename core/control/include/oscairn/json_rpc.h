@@ -16,7 +16,9 @@ namespace oscairn
     {
     public:
         virtual ~AppRelay() = default;
-        virtual std::string connect( JsonRpc& from, const std::string& app ) = 0;
+        /// permissions: the host's grant for the app's connection (JsonRpc::restrict's bits); none
+        /// from an app, whose connections keep its own.
+        virtual std::string connect( JsonRpc& from, const std::string& app, std::optional<uint32_t> permissions ) = 0;
         virtual std::string request( JsonRpc& from, const std::string& app, const std::string& action, const std::string& argument ) = 0;
         virtual std::string answer( JsonRpc& from, uint64_t request, const std::string& result ) = 0;
         virtual std::string pong( JsonRpc& from, uint64_t ping ) = 0;
@@ -49,10 +51,16 @@ namespace oscairn
         /// The apps.* methods go to `relay`; without one they are refused.
         void relayApps( AppRelay* relay ) { apps_ = relay; }
         AppRelay* apps() const { return apps_; }
+        /// An app's connection (RFC 0022): only the methods and topics its permissions give (bit i
+        /// for docs/control-protocol.md's i-th permission, play first), no file paths, and the rest
+        /// refused (-32008). A client never restricted is trusted, as the shell's is.
+        void restrict( uint32_t permissions ) { permissions_ = permissions; }
+        std::optional<uint32_t> permissions() const { return permissions_; }
 
     private:
         Control& control_;
         AppRelay* apps_ = nullptr;
+        std::optional<uint32_t> permissions_;
         bool params_ = false, transport_ = false, graph_ = false, allChanges_ = false;
         bool status_ = false, attached_ = false, released_ = false;
         uint64_t paramsCursor_ = 0, graphCursor_ = 0;

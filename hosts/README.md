@@ -214,7 +214,8 @@ Linux installed as `share/oscairn/apps`), and the shell reads the manifests ther
 
 - **Started** when opened, or when another app sends it something (the Library's **Add to
   setlist**), with a connection the engine makes for it (`apps.connect`, [control
-  protocol](../docs/control-protocol.md#apps)) as its descriptor 3 (`OSCAIRN_CONTROL_FD`), its
+  protocol](../docs/control-protocol.md#apps)), held to its manifest's `permissions`
+  ([permissions](../docs/control-protocol.md#permissions)), as its descriptor 3 (`OSCAIRN_CONTROL_FD`), its
   data folder (`OSCAIRN_APP_DATA`, `AppData/<id>/` in the data folder) and the actions the shell
   answers (`OSCAIRN_ACTIONS`). It never sees the control socket. Its stdout and stderr are
   appended to `Logs/apps/<id>.log` in the data folder, started afresh past 1 MB when it starts.

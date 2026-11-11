@@ -2277,4 +2277,15 @@ void Session::loadPerformanceFromLibrary(const std::string& id) {
     loadPerformance(item->path);
     l.used(id);
 }
+
+bool Session::inLibrary(const std::string& path) {
+    std::error_code e;
+    const auto at=fs::weakly_canonical(path,e); // links and .. resolved: no way out
+    if(e || path.empty())return false;
+    for(const auto& root:{library().performances(),library().libraries()}){
+        const auto r=fs::weakly_canonical(root,e);
+        if(!e && std::mismatch(r.begin(),r.end(),at.begin(),at.end()).first==r.end() && at!=r)return true;
+    }
+    return false;
+}
 }

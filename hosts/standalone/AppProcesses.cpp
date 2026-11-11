@@ -73,6 +73,8 @@ namespace oscairn::standalone
             }
         if(const auto* asks = doc["asks"].getArray())
             for(const auto& a : *asks) if(named(a.toString())) m.asks.push_back(a.toString().toStdString());
+        if(const auto* permissions = doc["permissions"].getArray())
+            for(const auto& p : *permissions) m.permissions.push_back(p.toString().toStdString()); // checked by the engine, which refuses a name it does not know
         const auto memory = doc["memory"];
         if(memory["reserve"].isInt()) m.reserve = uint64_t(std::max(0, int(memory["reserve"])));
         if(memory["max"].isInt()) m.maximum = uint64_t(std::max(0, int(memory["max"])));
@@ -162,7 +164,7 @@ namespace oscairn::standalone
             say(id, juce::String(m->name) + " did not open: it " + juce::String::fromUTF8(launch.reason.c_str()) + ".");
             return false;
         }
-        const int connection = engine_.appConnection(id);
+        const int connection = engine_.appConnection(id, m->permissions);
         if(connection < 0) { engine_.appClosed(id); say(id, juce::String(m->name) + " did not start: the engine gave it no connection."); return false; }
         // Its log: appended, and started afresh past 1 MB.
         const auto file = logFile(id);

@@ -273,6 +273,9 @@ namespace oscairn
         // asNew: always a new one, with its own ID. Returns its ID.
         virtual std::string savePerformanceToLibrary(const std::string& name, bool asNew = false) = 0;
         virtual void loadPerformanceFromLibrary(const std::string& id) = 0;
+        // Whether a path is within the library's own folders (its Performances and installed
+        // libraries), which an app may name (RFC 0022); false where there is no library.
+        virtual bool inLibrary(const std::string&) { return false; }
         // Libraries (RFC 0021), from archives (package.h): a library or an exported Performance.
         // Who signed a part of an archive (RFC 0006), as this device's trust store sees it: kind
         // "plugin" (name, version and platform: its build's), "app" or "archive"; status "trusted"

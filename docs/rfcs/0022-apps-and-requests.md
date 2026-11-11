@@ -11,7 +11,11 @@ engine (`apps.*`, [control protocol](../control-protocol.md#apps)), each part of
 by `desktop-apps` on macOS (the Linux build not yet run); on a panel its window is placed over the
 shell's frame until step 6's display path. Its stdout and stderr go straight to its log file,
 rotated when it starts (not yet a pipe the shell reads), and after an engine restart it is started
-again rather than handed a fresh connection. The chooser is not built. [What an app is](#what-an-app-is) was decided 2026-11-06: native
+again rather than handed a fresh connection. The chooser is not built. Step 4's permissions are
+built (2026-11-11): the shell asks for an app's connection with its manifest's permissions, and
+the engine holds that connection, and those the app asks for itself, to them
+([control protocol](../control-protocol.md#permissions)), checked by `control-local-stream`; its
+rate limits are not. [What an app is](#what-an-app-is) was decided 2026-11-06: native
 programs in their own processes, contained like plugin workers; the build order below follows
 from it. Builds on the separation of apps from the sound
 engine ([architecture](../architecture.md#two-kinds-of-thing-plugins-and-the-ui)), the
@@ -26,7 +30,7 @@ Checked when built and tested; the sections below say how.
 - [x] 1. In-process actions: the registry; Library picks (Performances and Sounds), Setlist takes Performances
 - [x] 2. Apps as processes: started and supervised by the shell, actions over the control API, manifests (the Setlist)
 - [ ] 3. Choice and defaults
-- [ ] 4. Permissions and limits enforced per app
+- [ ] 4. Permissions and limits enforced per app (permissions and file paths built; rate limits, and the flood half of the gate, not)
 - [ ] 5. Apps in packages: signed builds, install, update, removal, data folders
 - [ ] 6. Sandboxing on Linux and macOS, and a display path that keeps apps apart on the device
 - [ ] 7. The built-in apps moved out of the desktop process, in order

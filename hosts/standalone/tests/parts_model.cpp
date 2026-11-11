@@ -111,6 +111,7 @@ int main(int argc, char** argv)
         check(channed.channel == 2 && s.parts()[1].input.zones.front().channels == (1u << 1) && channed.lowKey == 48 && channed.highKey == 72,
               "channel 2, keys kept: " + std::to_string(channed.channel));
         check(zoneChannel({{0, 127, 0, 1, uint16_t(1u << 2)}, {0, 127, 0, 1, uint16_t(1u << 5)}}) == -1 && zoneChannel({}) == 0, "several channels read as several, none as any");
+        check(zoneChannel({{0, 59, 0, 1, uint16_t(1u << 2)}, {60, 127}}) == -1, "one zone on a channel, one on all: several, not any");
         setChannel(s, lead, 0);
         channed = readParts(s.graphState()).parts[1];
         check(channed.channel == 0 && s.parts()[1].input.zones.front().channels == 0xFFFF && channed.lowKey == 48, "Any channel clears the filter, keys kept");

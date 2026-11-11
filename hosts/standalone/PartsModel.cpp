@@ -876,9 +876,9 @@ namespace oscairn::standalone
 
     int zoneChannel(const std::vector<NoteZone>& zones)
     {
-        uint16_t mask = zones.empty() ? 0xFFFF : 0; // no zones: every note passes
-        for(const auto& z : zones) mask |= z.channels;
-        return mask == 0xFFFF ? 0 : (mask & uint16_t(mask - 1)) ? -1 : std::countr_zero(unsigned(mask)) + 1;
+        const uint16_t mask = zones.empty() ? 0xFFFF : zones.front().channels; // no zones: every note passes
+        if(std::any_of(zones.begin(), zones.end(), [&](const NoteZone& z) { return z.channels != mask; })) return -1; // zones taking different channels
+        return mask == 0xFFFF ? 0 : std::has_single_bit(mask) ? std::countr_zero(mask) + 1 : -1;
     }
 
     namespace

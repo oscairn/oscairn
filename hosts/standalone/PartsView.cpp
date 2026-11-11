@@ -426,10 +426,10 @@ namespace oscairn::standalone
                                 auto choice = std::make_unique<juce::ComboBox>("Wire channel");
                                 choice->addItem("Any channel", 1);
                                 for(int ch = 1; ch <= 16; ++ch) choice->addItem("Channel " + juce::String(ch), ch + 1);
-                                choice->addItem("Several channels", 18);
+                                choice->addItem("Several channels", 18); choice->setItemEnabled(18, false); // shown, not picked
                                 choice->setSelectedId(channel > 0 ? channel + 1 : channel < 0 ? 18 : 1, juce::dontSendNotification);
                                 choice->setTooltip("Only notes on this MIDI channel play along; Any channel takes every one");
-                                choice->onChange = [this, wire = row.wire, raw = choice.get()] { const int ch = raw->getSelectedId() == 18 ? -1 : raw->getSelectedId() - 1; if(ch >= 0) edit([wire, ch](Control& c) { setWireChannel(c, wire, ch); }); };
+                                choice->onChange = [this, wire = row.wire, raw = choice.get()] { const int ch = raw->getSelectedId() - 1; edit([wire, ch](Control& c) { setWireChannel(c, wire, ch); }); };
                                 choice->setBounds(r.removeFromLeft(150).reduced(2)); addAndMakeVisible(*choice); controls_.push_back(std::move(choice));
                             }
                             if(row.user) button(r.removeFromLeft(100).reduced(2), "Disconnect", [this, wire = row.wire] { edit([wire](Control& c) { disconnect(c, wire); }); }); continue;
@@ -885,10 +885,10 @@ namespace oscairn::standalone
                     auto channel = std::make_unique<juce::ComboBox>("Input channel");
                     channel->addItem("Any channel", 1);
                     for(int ch = 1; ch <= 16; ++ch) channel->addItem("Channel " + juce::String(ch), ch + 1);
-                    channel->addItem("Several channels", 18);
+                    channel->addItem("Several channels", 18); channel->setItemEnabled(18, false); // shown, not picked
                     channel->setSelectedId(p->channel > 0 ? p->channel + 1 : p->channel < 0 ? 18 : 1, juce::dontSendNotification);
                     channel->setTooltip("Only notes on this MIDI channel play the part; Any channel takes every one");
-                    channel->onChange = [this, id, raw = channel.get()] { const int ch = raw->getSelectedId() == 18 ? -1 : raw->getSelectedId() - 1; if(ch >= 0) edit([id, ch](Control& c) { setChannel(c, id, ch); }); };
+                    channel->onChange = [this, id, raw = channel.get()] { const int ch = raw->getSelectedId() - 1; edit([id, ch](Control& c) { setChannel(c, id, ch); }); };
                     channel->setBounds(r.removeFromLeft(170).reduced(2)); addAndMakeVisible(*channel); controls_.push_back(std::move(channel));
                     break;
                 }

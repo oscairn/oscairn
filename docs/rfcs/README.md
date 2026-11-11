@@ -49,3 +49,4 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0038](0038-diagnostics-backup-and-reset.md) | Diagnostics, backup and reset | proposed |
 | [0039](0039-network-security.md) | Network security | proposed |
 | [0040](0040-ios-developer-builds.md) | iOS and iPadOS developer builds | proposed |
+| [0041](0041-windows-desktop.md) | Windows desktop, process and IPC support | proposed |

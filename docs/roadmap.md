@@ -628,7 +628,8 @@ Each starts as an RFC:
 
 - [ ] VST3 hosting
 - [ ] macOS Audio Units hosting (AUv2/AUv3 scope to decide)
-- [ ] Windows desktop, process and IPC support
+- [ ] **Windows desktop, process and IPC support** ([RFC 0041](rfcs/0041-windows-desktop.md#progress), proposed):
+  one process first, then workers over a cross-platform process, shared-memory and pipe layer
 - [ ] **iOS and iPadOS developer builds** ([RFC 0040](rfcs/0040-ios-developer-builds.md#progress), proposed):
   signed by their user, not on the App Store; one process, plugins bundled at signing time
 - [ ] the sampler workflow: slicing, resampling, looper

@@ -160,6 +160,7 @@ namespace oscairn::standalone
             explicit Sidebar(LibraryPane& p);
             LibraryPane& pane;
             IconButton list{IconButton::Glyph::List, "Show as a list"}, pills{IconButton::Glyph::Pills, "Show as pills"};
+            JoinedButtons views{{&list, &pills}, true};
             int layout(int width); // places every entry; returns the height they take
             void paint(juce::Graphics&) override;
             void mouseUp(const juce::MouseEvent&) override;
@@ -191,11 +192,14 @@ namespace oscairn::standalone
         bool stale_ = true, awaiting_ = false, compact_ = false, pills_ = false;
         juce::String message_;
         juce::TextEditor search_;
-        juce::TextButton favorites_{"Favorites"}, recent_{"Recent"}, performances_{"Performances"}, sounds_{"Sounds"}, compactButton_{"Compact"};
+        juce::TextButton performances_{"Performances"}, sounds_{"Sounds"};
+        IconButton favorites_{IconButton::Glyph::Star, "Favorites"}, recent_{IconButton::Glyph::Recent, "Recent"}, compactButton_{IconButton::Glyph::Compact, "Compact"};
+        JoinedButtons kind_{{&performances_, &sounds_}, true}, filters_{{&favorites_, &recent_}, false};
         Sidebar sidebar_{*this};
         juce::Viewport sideView_;
         juce::ListBox list_{"Performances", this};
-        juce::TextButton send_{"Add to setlist"}, part_{"New part"}, cancel_{"Cancel"}, pick_{"Choose"}, options_{"Options..."}, libraries_{"Libraries..."}, install_{juce::String::fromUTF8("Install…")}, audition_{"Audition"}, keep_{"Keep"};
+        juce::TextButton send_{"Add to setlist"}, part_{"New part"}, cancel_{"Cancel"}, pick_{"Choose"}, libraries_{"Libraries..."}, install_{juce::String::fromUTF8("Install…")}, audition_{"Audition"}, keep_{"Keep"};
+        IconButton options_{IconButton::Glyph::More, "Options"};
         std::unique_ptr<juce::FileChooser> chooser_;
         std::unique_ptr<juce::AlertWindow> editor_;
         juce::Label status_;

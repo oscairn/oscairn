@@ -52,6 +52,7 @@ float fieldRadius(float height);                 // dropdowns, text boxes, value
 float buttonRadius(float height);
 // An outline in the theme's edge style, or nothing; focus is drawn whatever the style.
 void drawEdge(juce::Graphics&,juce::Rectangle<float>,float radius,bool focus=false);
+void drawEdge(juce::Graphics&,const juce::Path&,bool focus=false);
 // A line of text placed by its ink: its lowercase letters' middle (or, all in capitals, the
 // capitals') on the box's, across the box as justified, shortened with an ellipsis to fit.
 void drawInked(juce::Graphics&,const juce::String&,juce::Rectangle<int>,const juce::Font&,juce::Justification=juce::Justification::left);

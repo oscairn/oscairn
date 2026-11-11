@@ -61,7 +61,6 @@ authoritative.
   `redo-2.svg` `512e9f81b19a3e739b240a413d61f798dbda02e788b5a81db2926543713ebbf7`,
   `square-arrow-out-up-right.svg` `968a03c02ab9ffbb4e92de4c5d2e75c7140e8c63752a63258527e764ff214998`,
   `star.svg` `ebc8483f1006df4cc16551ccbefc511e3cca2e17c7f3a727842e422fdac7a9b0`,
-  `tags.svg` `724af60488ee052f78f8b3a5622adb06e8c30abea41c9c48a718f808a7bcdc4a`,
   `undo-2.svg` `63030cafa632c7cce406680b920d286696f136b3ea58218bdb21b6897a31eea9`,
   `house.svg` `9a58539fef2871ca76cae55ae876273db11caa5d3ae9e92630ff22fc00dd9feb`,
   `arrow-left.svg` `36e308511d88b74cf4f32714a12a7259b60c0db0b62bfb0c93fb58e8cc326161`,
@@ -74,7 +73,9 @@ authoritative.
   `layers.svg` `ac5db701628c809cb3176bfaff319e7ceac602be902c3e3d0a7693e3e9bf417b`,
   `circle.svg` `fc932a39beca163d5641a904884259ea2c8e838940cfa226697024b17b5c544e`,
   `history.svg` `bd6e284ca26e67a35dff106e519f74af7241bb38f0d60654c2f74be8fc2b1510`,
-  `audio-lines.svg` `d4ff831aee48c9d1fb7ace29409aa67b4989ce3b71b3bc119391a90235369a8a`.
+  `audio-lines.svg` `d4ff831aee48c9d1fb7ace29409aa67b4989ce3b71b3bc119391a90235369a8a`,
+  `wrap-text.svg` `fd8a4be9fe77ebc67761de40925bdcf38e95f26d719fd0f6e631a04a58c4794a`,
+  `chevrons-down-up.svg` `6a4d80c9eb419e633aa7111fb4d35e707aeed0ae938e3e9e145a4b1e2c64b3a8`.
 
 ## Sample decoding
 

@@ -223,18 +223,16 @@ namespace oscairn::standalone
     LibraryPane::LibraryPane(Engine& engine, Actions& actions, Mode mode, const std::string& kind) : engine_(engine), actions_(actions), mode_(mode)
     {
         query_.kind = kind;
-        for(auto* b : {&performances_, &sounds_}) { b->setClickingTogglesState(true); b->setRadioGroupId(1); }
-        performances_.onClick = [this] { showKind("performance"); };
-        sounds_.onClick = [this] { showKind("sound"); };
+        kind_.onChoose = [this](int i) { showKind(i ? "sound" : "performance"); };
         part_.onClick = [this] { newPart(list_.getSelectedRow()); };
         search_.setJustification(juce::Justification::centredLeft); search_.setIndents(10, 0);
         search_.onTextChange = [this] { query_.text = search_.getText().toStdString(); refresh(); };
-        favorites_.setClickingTogglesState(true);
+        favorites_.setTooltip("Favorites: only the starred ones");
         favorites_.onClick = [this] { query_.favorites = favorites_.getToggleState(); refresh(); };
-        recent_.setClickingTogglesState(true);
+        recent_.setTooltip("Recent: only the ones used lately, the latest first");
         recent_.onClick = [this] { query_.recent = recent_.getToggleState(); refresh(); };
         compactButton_.setClickingTogglesState(true);
-        compactButton_.setTooltip("One line a row, to see more at once");
+        compactButton_.setTooltip("Compact: one line a row, to see more at once");
         compactButton_.onClick = [this] { setCompact(compactButton_.getToggleState()); };
         list_.setOutlineThickness(0);
         list_.setRowSelectedOnMouseDown(false); // clicks come on release, so a long press can open the menu
@@ -248,15 +246,15 @@ namespace oscairn::standalone
         keep_.onClick = [this] { stopAudition(true); };
         keep_.setTooltip("Keep what is being auditioned, as if it had been loaded");
         options_.onClick = [this] { itemMenu(list_.getSelectedRow()); };
-        options_.setTooltip("Everything for the selected item: edit, color, copy, delete. A right click or a long press on a row does the same");
+        options_.setTooltip("Options: everything for the selected item (edit, color, copy, delete). A right click or a long press on a row does the same");
         libraries_.onClick = [this] { librariesMenu(); };
         libraries_.setTooltip("The installed libraries and plugins, to uninstall one, or show a hidden tag");
         install_.onClick = [this] { installMenu(); };
         install_.setTooltip("Install from the Catalog, or from a file");
-        for(auto* c : std::initializer_list<juce::Component*>{&search_, &favorites_, &recent_, &compactButton_, &sideView_, &list_, &options_, &audition_, &status_}) addAndMakeVisible(c);
+        for(auto* c : std::initializer_list<juce::Component*>{&search_, &filters_, &compactButton_, &sideView_, &list_, &options_, &audition_, &status_}) addAndMakeVisible(c);
         addChildComponent(keep_);
-        for(auto* c : std::initializer_list<juce::Component*>{&send_, &part_, &cancel_, &pick_, &performances_, &sounds_, &libraries_, &install_}) addChildComponent(c);
-        performances_.setVisible(mode_ == Mode::Play); sounds_.setVisible(mode_ == Mode::Play); libraries_.setVisible(mode_ == Mode::Play); install_.setVisible(mode_ == Mode::Play);
+        for(auto* c : std::initializer_list<juce::Component*>{&send_, &part_, &cancel_, &pick_, &kind_, &libraries_, &install_}) addChildComponent(c);
+        kind_.setVisible(mode_ == Mode::Play); libraries_.setVisible(mode_ == Mode::Play); install_.setVisible(mode_ == Mode::Play);
         cancel_.setVisible(mode_ == Mode::Pick); pick_.setVisible(mode_ == Mode::Pick);
         if(const auto f = viewPreference(); f.existsAsFile())
         {
@@ -390,10 +388,9 @@ namespace oscairn::standalone
 
     LibraryPane::Sidebar::Sidebar(LibraryPane& p) : pane(p)
     {
-        for(auto* b : {&list, &pills}) { b->setClickingTogglesState(true); b->setRadioGroupId(1); addAndMakeVisible(b); }
+        addAndMakeVisible(views);
         list.setTooltip("The libraries and tags as a list"); pills.setTooltip("The libraries and tags as pills, to see more at once");
-        list.onClick = [this] { pane.setPills(false); };
-        pills.onClick = [this] { pane.setPills(true); };
+        views.onChoose = [this](int i) { pane.setPills(i == 1); };
     }
 
     int LibraryPane::Sidebar::layout(int width)
@@ -421,8 +418,8 @@ namespace oscairn::standalone
                 {
                     // The two views' icons at the heading's end.
                     const int side = touch ? 44 : 24;
-                    auto icons = s.bounds.withLeft(s.bounds.getRight() - 2 * side - 2).withSizeKeepingCentre(2 * side + 2, side);
-                    pills.setBounds(icons.removeFromRight(side)); icons.removeFromRight(2); list.setBounds(icons.removeFromRight(side));
+                    const int w = views.preferredWidth(side);
+                    views.setBounds(s.bounds.withLeft(s.bounds.getRight() - w).withSizeKeepingCentre(w, side));
                 }
                 area.removeFromTop(gap);
                 first = false;
@@ -662,12 +659,10 @@ namespace oscairn::standalone
         auto bar = area.removeFromTop(control);
         if(mode_ == Mode::Play)
         {
-            performances_.setBounds(bar.removeFromLeft(touch ? 150 : 120)); bar.removeFromLeft(gap);
-            sounds_.setBounds(bar.removeFromLeft(touch ? 110 : 90)); bar.removeFromLeft(gap);
+            kind_.setBounds(bar.removeFromLeft(kind_.preferredWidth(control))); bar.removeFromLeft(gap);
         }
-        compactButton_.setBounds(bar.removeFromRight(touch ? 120 : 96)); bar.removeFromRight(gap);
-        recent_.setBounds(bar.removeFromRight(touch ? 110 : 90)); bar.removeFromRight(gap);
-        favorites_.setBounds(bar.removeFromRight(touch ? 130 : 110)); bar.removeFromRight(gap);
+        compactButton_.setBounds(bar.removeFromRight(control * 4 / 3)); bar.removeFromRight(gap);
+        filters_.setBounds(bar.removeFromRight(filters_.preferredWidth(control))); bar.removeFromRight(gap);
         // A narrow screen gives the search a row of its own rather than a sliver (RFC 0019).
         if(bar.getWidth() < (touch ? 240 : 200)) { area.removeFromTop(gap); search_.setBounds(area.removeFromTop(control)); }
         else search_.setBounds(bar);
@@ -690,7 +685,7 @@ namespace oscairn::standalone
             bottom.removeFromRight(gap); install_.setBounds(bottom.removeFromRight(touch ? 120 : 90));
             bottom.removeFromRight(gap);
         }
-        options_.setBounds(bottom.removeFromRight(touch ? 130 : 100)); bottom.removeFromRight(gap);
+        options_.setBounds(bottom.removeFromRight(control * 4 / 3)); bottom.removeFromRight(gap);
         audition_.setBounds(bottom.removeFromRight(touch ? 130 : 100)); bottom.removeFromRight(gap);
         if(keep_.isVisible()) { keep_.setBounds(bottom.removeFromRight(touch ? 100 : 80)); bottom.removeFromRight(gap); }
         status_.setFont(juce::FontOptions(textSize(TextRole::Small, mode())));

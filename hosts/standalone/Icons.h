@@ -60,27 +60,69 @@ namespace oscairn::standalone
     class IconButton : public juce::Button
     {
     public:
-        enum class Glyph { Plus, Undo, Redo, Detach, List, Pills, Home, Back, Panic, More, Apps, Record, Capture };
+        enum class Glyph { Plus, Undo, Redo, Detach, List, Pills, Home, Back, Panic, More, Apps, Record, Capture, Star, Recent, Compact };
         IconButton(Glyph glyph, const juce::String& name) : juce::Button(name), glyph_(glyph) { setTitle(name); }
 
         void paintButton(juce::Graphics& g, bool hover, bool down) override
         {
-            // A transparent button color draws the icon alone, for icons inside another control;
-            // a toggle that is on is tinted with the accent, as a chosen tab is.
+            // A transparent button color draws the icon alone, for icons inside another control,
+            // a toggle that is on tinted with the accent; otherwise it is drawn as a text button is,
+            // filled with the accent when on.
             const bool on = getClickingTogglesState() && getToggleState();
-            if(on) { g.setColour(ink(Ink::Accent).withAlpha(.22f)); g.fillRoundedRectangle(getLocalBounds().toFloat(), buttonRadius(float(getHeight()))); }
-            else if(const auto color = findColour(juce::TextButton::buttonColourId); !color.isTransparent()) getLookAndFeel().drawButtonBackground(g, *this, color, hover, down);
+            const auto color = findColour(juce::TextButton::buttonColourId);
+            if(!color.isTransparent()) getLookAndFeel().drawButtonBackground(g, *this, findColour(on ? juce::TextButton::buttonOnColourId : juce::TextButton::buttonColourId), hover, down);
+            else if(on) { g.setColour(ink(Ink::Accent).withAlpha(.22f)); g.fillRoundedRectangle(getLocalBounds().toFloat(), buttonRadius(float(getHeight()))); }
             else if(hover || down) { g.setColour(ink(Ink::Text).withAlpha(down ? .16f : .08f)); g.fillRoundedRectangle(getLocalBounds().toFloat(), 4); }
-            static const char* const names[] = {"plus", "undo-2", "redo-2", "square-arrow-out-up-right", "list", "tags", "house", "arrow-left", "octagon-x", "ellipsis-vertical", "layers", "circle", "history"};
+            static const char* const names[] = {"plus", "undo-2", "redo-2", "square-arrow-out-up-right", "list", "wrap-text", "house", "arrow-left", "octagon-x", "ellipsis-vertical", "layers", "circle", "history", "star", "history", "chevrons-down-up"};
             const float side = std::min(float(getWidth()), float(getHeight())) * .6f;
             // Record is in the danger color, filled while it records.
             const bool record = glyph_ == Glyph::Record;
             drawIcon(g, names[int(glyph_)], getLocalBounds().toFloat().withSizeKeepingCentre(side, side),
-                     (on ? ink(Ink::Accent) : record || getProperties()["danger"] ? ink(Ink::Danger) : ink(Ink::Text)).withMultipliedAlpha(isEnabled() ? 1.f : .35f), record && getToggleState());
+                     (on ? (color.isTransparent() ? ink(Ink::Accent) : findColour(juce::TextButton::textColourOnId)) : record || getProperties()["danger"] ? ink(Ink::Danger) : ink(Ink::Text)).withMultipliedAlpha(isEnabled() ? 1.f : .35f), record && getToggleState());
         }
 
     private:
         Glyph glyph_;
+    };
+
+    /// Buttons joined into one control (design-language.md, Joined buttons): side by side with no
+    /// gap, only the outer ends rounded and a hairline between, each drawn by the theme as any
+    /// button is and still a button of its own, with its title, tooltip and keyboard focus.
+    /// Exclusive, one is on at a time and onChoose says which; otherwise each toggles alone and
+    /// its own onClick says so. The segments stay their owner's; this lays them out.
+    class JoinedButtons : public juce::Component
+    {
+    public:
+        JoinedButtons(std::initializer_list<juce::Button*> segments, bool exclusive) : segments_(segments)
+        {
+            for(size_t i = 0; i < segments_.size(); ++i)
+            {
+                auto* b = segments_[i];
+                b->setClickingTogglesState(true);
+                b->setConnectedEdges((i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i + 1 < segments_.size() ? juce::Button::ConnectedOnRight : 0));
+                // Only the one turned on answers: a radio group also calls onClick on the one it turns off.
+                if(exclusive) { b->setRadioGroupId(1); b->onClick = [this, b, i] { if(b->getToggleState() && onChoose) onChoose(int(i)); }; }
+                addAndMakeVisible(b);
+            }
+        }
+        std::function<void(int)> onChoose; // exclusive: the segment turned on, by its place
+        /// The width wanted at a height: a text segment its text's, an icon one a third wider than tall.
+        int preferredWidth(int height) const { int w = 0; for(auto* b : segments_) w += width(*b, height); return w; }
+        void resized() override
+        {
+            // Each its own width, the room left over (or short) shared out evenly.
+            auto area = getLocalBounds();
+            const int extra = (getWidth() - preferredWidth(getHeight())) / int(segments_.size());
+            for(size_t i = 0; i < segments_.size(); ++i) segments_[i]->setBounds(i + 1 == segments_.size() ? area : area.removeFromLeft(width(*segments_[i], getHeight()) + extra));
+        }
+
+    private:
+        static int width(juce::Button& b, int height)
+        {
+            if(auto* text = dynamic_cast<juce::TextButton*>(&b)) return text->getBestWidthForHeight(height) + height / 2;
+            return height * 4 / 3;
+        }
+        std::vector<juce::Button*> segments_;
     };
 
     /// Mute and solo, drawn the same everywhere: a small square with its letter, filled in its

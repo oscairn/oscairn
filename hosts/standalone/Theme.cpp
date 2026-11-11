@@ -106,11 +106,12 @@ bool darkTheme(){return ink(Ink::Background).getPerceivedBrightness()<.5f;}
 float buttonRadius(float height){return current.style.buttons==ThemeStyle::Buttons::Pill?height/2:current.radius;}
 // Pill themes round single-line fields like their buttons; a taller field (several lines) keeps the radius plus 3.
 float fieldRadius(float height){if(current.style.buttons!=ThemeStyle::Buttons::Pill)return std::min(height/2,current.radius);return height<=56?height/2:current.radius+3;}
-void drawEdge(juce::Graphics& g,juce::Rectangle<float> r,float radius,bool focus) {
-    if(focus){g.setColour(ink(Ink::Accent));g.drawRoundedRectangle(r,radius,2.f);return;}
+void drawEdge(juce::Graphics& g,const juce::Path& shape,bool focus) {
+    if(focus){g.setColour(ink(Ink::Accent));g.strokePath(shape,juce::PathStrokeType(2.f));return;}
     if(current.style.edges==ThemeStyle::Edges::None)return;
-    g.setColour(ink(Ink::Border).withAlpha(current.style.edges==ThemeStyle::Edges::Hairline?.6f:1.f));g.drawRoundedRectangle(r,radius,1.f);
+    g.setColour(ink(Ink::Border).withAlpha(current.style.edges==ThemeStyle::Edges::Hairline?.6f:1.f));g.strokePath(shape,juce::PathStrokeType(1.f));
 }
+void drawEdge(juce::Graphics& g,juce::Rectangle<float> r,float radius,bool focus){juce::Path p;p.addRoundedRectangle(r,radius);drawEdge(g,p,focus);}
 ThemeData ThemeData::parse(const juce::String& json) {
     require(json.getNumBytesAsUTF8()<=maxThemeBytes,"Theme exceeds 16 KiB");
     juce::var value;require(juce::JSON::parse(json,value).wasOk(),"Invalid theme JSON");
@@ -390,11 +391,18 @@ void Theme::drawTextEditorOutline(juce::Graphics& g,int width,int height,juce::T
     const auto bounds=juce::Rectangle<float>(0,0,float(width),float(height)).reduced(1);
     drawEdge(g,bounds,fieldRadius(bounds.getHeight()),editor.hasKeyboardFocus(true) && !editor.isReadOnly());
 }
+// Joined buttons (JoinedButtons) run square past a connected side, so only the control's ends are
+// rounded and its outline goes round them all, with a hairline where one meets the last.
 void Theme::drawButtonBackground(juce::Graphics& g,juce::Button& button,const juce::Colour& color,bool hover,bool down) {
+    const bool left=button.isConnectedOnLeft(),right=button.isConnectedOnRight();
     const auto bounds=button.getLocalBounds().toFloat().reduced(1);const float radius=buttonRadius(bounds.getHeight());
-    if(current.style.depth==ThemeStyle::Depth::Soft && button.isEnabled()){g.setColour(juce::Colours::black.withAlpha(darkTheme()?.35f:.12f));g.fillRoundedRectangle(bounds.translated(0,1),radius);}
+    const auto shapeOf=[&](juce::Rectangle<float> r){juce::Path p;p.addRoundedRectangle(r.getX(),r.getY(),r.getWidth(),r.getHeight(),radius,radius,!left,!right,!left,!right);return p;};
+    const auto shape=shapeOf(bounds.withLeft(left?-1.f:bounds.getX()).withRight(right?float(button.getWidth())+1:bounds.getRight()));
+    if(current.style.depth==ThemeStyle::Depth::Soft && button.isEnabled()){g.setColour(juce::Colours::black.withAlpha(darkTheme()?.35f:.12f));g.fillPath(shape,juce::AffineTransform::translation(0,1));}
     g.setColour(color.withMultipliedAlpha(button.isEnabled()?1.f:.4f).brighter(down?.15f:hover?.07f:0));
-    g.fillRoundedRectangle(bounds,radius);drawEdge(g,bounds,radius,button.hasKeyboardFocus(true));
+    g.fillPath(shape);
+    if(left){g.setColour(ink(Ink::Border).withAlpha(.6f));g.fillRect(0.f,bounds.getY(),1.f,bounds.getHeight());}
+    if(button.hasKeyboardFocus(true))drawEdge(g,shapeOf(bounds),true);else drawEdge(g,shape);
 }
 void Theme::drawRotarySlider(juce::Graphics& g,int x,int y,int width,int height,float position,float start,float end,juce::Slider& slider) {
     if(!slider.getProperties()["endless"]) {

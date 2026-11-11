@@ -381,6 +381,30 @@ int main(int argc, char** argv)
                 check(library.pills(), "the libraries and tags as pills");
                 snapshot(library, "library-pills");
                 library.setPills(false);
+                // The left column's two views, clicked: one choice, so each click turns the other off.
+                {
+                    std::function<juce::Button*(juce::Component&, const juce::String&)> find = [&](juce::Component& in, const juce::String& title) -> juce::Button* {
+                        for(auto* c : in.getChildren())
+                        {
+                            if(auto* b = dynamic_cast<juce::Button*>(c); b && b->getTitle() == title) return b;
+                            if(auto* b = find(*c, title)) return b;
+                        }
+                        return nullptr;
+                    };
+                    auto* asList = find(library, "Show as a list");
+                    auto* asPills = find(library, "Show as pills");
+                    check(asList && asPills, "the left column's two views");
+                    if(asList && asPills)
+                    {
+                        auto click = [&](juce::Button& b) { b.triggerClick(); for(int i = 0; i < 5; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); };
+                        click(*asPills);
+                        check(library.pills() && asPills->getToggleState() && !asList->getToggleState(), "Show as pills, clicked, is the one on");
+                        click(*asList);
+                        check(!library.pills() && asList->getToggleState() && !asPills->getToggleState(), "Show as a list, clicked, is the one on");
+                        click(*asList);
+                        check(!library.pills() && asList->getToggleState() && !asPills->getToggleState(), "and clicked again stays the one on");
+                    }
+                }
                 // Both views in the other built-in themes: light, outlined, and square-edged.
                 for(const char* other : {"oscairn-light", "oscairn-classic", "oscairn-block"})
                 {

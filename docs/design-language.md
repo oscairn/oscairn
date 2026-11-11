@@ -19,7 +19,8 @@ Changing either must not change the audio graph, parameters, MIDI assignments or
   theme's font scale (`textSize` in `Theme.h`). A device's panel scales its text with the
   panel. Fit or truncate labels without moving targets.
 - Buttons, dropdowns, text boxes and value boxes share the theme's corner radius and outline.
-- Use one corner radius and visible borders/focus rings. Keep a text label for every action.
+- Use one corner radius and visible borders/focus rings. Keep a text label for every action:
+  on screen, or for an icon its tooltip and accessible title.
 - Accent marks selection or an action; positive marks active playback; danger marks failures.
   State must also be conveyed by text, position, shape or accessibility state, not color alone.
 - Distinguish browsing from applying. **Replace instrument/effect** explicitly changes the
@@ -93,11 +94,23 @@ Icons are [Lucide](https://lucide.dev)'s (ISC; see [CREDITS](../CREDITS.md#inter
 kept as SVG files in `hosts/standalone/icons/` and built into the app. `drawIcon` in `Icons.h`
 draws one in a color within a box: each file is read once, drawn in black and recolored to the
 theme's ink, so an icon follows the theme like text does. `IconButton` is an icon on a button,
-with its name as the tooltip; a toggle that is on is tinted with the accent. Only plain paths,
-lines, circles and rectangles are used, which JUCE's SVG reader draws faithfully. To add one,
+with its name as the tooltip and accessible title; a toggle that is on is filled with the accent,
+as a text button is (an icon drawn alone, with no button around it, is tinted). Only plain paths,
+lines, polylines, circles and rectangles are used, which JUCE's SVG reader draws faithfully. To add one,
 copy the file unchanged from the same Lucide release, list it in the `oscairn_standalone_icons`
 target and record its hash in CREDITS. Themes do not carry icons (fonts, data and a splash
 image only).
+
+### Joined buttons
+
+Adjacent buttons that belong together, a choice of one (Performances or Sounds) or a few
+toggles of a kind (Favorites, Recent), are joined into one control: `JoinedButtons` in
+`Icons.h` lays them side by side with no gap, rounds only the control's two ends (by the theme's
+`buttons` style) and puts a hairline between segments. The theme draws each segment as any
+button, with its `edges`, `depth`, the accent when on and the disabled fade (JUCE's connected
+edges, which `drawButtonBackground` honors). Each segment stays a button of its own, focusable,
+with a title and a tooltip. A segment may be text or an icon; keep text where an icon would be
+ambiguous. Joined buttons are not tabs: tabs switch views and follow the `tabs` style.
 
 Oscairn's own mark ([branding](../branding/README.md)) is built in the same way, from the
 SVGs `branding/logo.mjs` draws: `drawBrandMark` draws it in its colors for a dark or light

@@ -240,6 +240,17 @@ namespace oscairn::standalone
             b->onClick = std::move(click); b->setBounds(at); addAndMakeVisible(*b);
             auto* raw = b.get(); controls_.push_back(std::move(b)); return raw;
         };
+        // The MIDI channel notes come in on (zoneChannel's 1..16, 0 any, -1 several), for a part's input or a note wire.
+        auto channelChoice = [this](juce::Rectangle<int> at, const juce::String& name, int channel, const juce::String& tip, std::function<void(int)> set) {
+            auto c = std::make_unique<juce::ComboBox>(name);
+            c->addItem("Any channel", 1);
+            for(int ch = 1; ch <= 16; ++ch) c->addItem("Channel " + juce::String(ch), ch + 1);
+            c->addItem("Several channels", 18); c->setItemEnabled(18, false); // shown, not picked
+            c->setSelectedId(channel > 0 ? channel + 1 : channel < 0 ? 18 : 1, juce::dontSendNotification);
+            c->setTooltip(tip);
+            c->onChange = [raw = c.get(), set = std::move(set)] { set(raw->getSelectedId() - 1); };
+            c->setBounds(at); addAndMakeVisible(*c); controls_.push_back(std::move(c));
+        };
         // Keys (and velocities): a keyboard to drag the range on, following the state.
         auto zoneEditor = [&](juce::Rectangle<int> at, std::function<std::array<int, 4>()> range, std::function<void(int, int)> keys, std::function<void(int, int)> velocities) {
             auto z = std::make_unique<ZoneEditor>();
@@ -423,14 +434,8 @@ namespace oscairn::standalone
                             {
                                 int channel = 0;
                                 for(const auto& w : graph_.wires) if(w.id == row.wire) channel = zoneChannel(w.zones);
-                                auto choice = std::make_unique<juce::ComboBox>("Wire channel");
-                                choice->addItem("Any channel", 1);
-                                for(int ch = 1; ch <= 16; ++ch) choice->addItem("Channel " + juce::String(ch), ch + 1);
-                                choice->addItem("Several channels", 18); choice->setItemEnabled(18, false); // shown, not picked
-                                choice->setSelectedId(channel > 0 ? channel + 1 : channel < 0 ? 18 : 1, juce::dontSendNotification);
-                                choice->setTooltip("Only notes on this MIDI channel play along; Any channel takes every one");
-                                choice->onChange = [this, wire = row.wire, raw = choice.get()] { const int ch = raw->getSelectedId() - 1; edit([wire, ch](Control& c) { setWireChannel(c, wire, ch); }); };
-                                choice->setBounds(r.removeFromLeft(150).reduced(2)); addAndMakeVisible(*choice); controls_.push_back(std::move(choice));
+                                channelChoice(r.removeFromLeft(150).reduced(2), "Wire channel", channel, "Only notes on this MIDI channel play along; Any channel takes every one",
+                                              [this, wire = row.wire](int ch) { edit([wire, ch](Control& c) { setWireChannel(c, wire, ch); }); });
                             }
                             if(row.user) button(r.removeFromLeft(100).reduced(2), "Disconnect", [this, wire = row.wire] { edit([wire](Control& c) { disconnect(c, wire); }); }); continue;
                         }
@@ -882,14 +887,8 @@ namespace oscairn::standalone
                 case K::Channel:
                 {
                     // Which MIDI channel plays it; the rest pass whatever channel they send on.
-                    auto channel = std::make_unique<juce::ComboBox>("Input channel");
-                    channel->addItem("Any channel", 1);
-                    for(int ch = 1; ch <= 16; ++ch) channel->addItem("Channel " + juce::String(ch), ch + 1);
-                    channel->addItem("Several channels", 18); channel->setItemEnabled(18, false); // shown, not picked
-                    channel->setSelectedId(p->channel > 0 ? p->channel + 1 : p->channel < 0 ? 18 : 1, juce::dontSendNotification);
-                    channel->setTooltip("Only notes on this MIDI channel play the part; Any channel takes every one");
-                    channel->onChange = [this, id, raw = channel.get()] { const int ch = raw->getSelectedId() - 1; edit([id, ch](Control& c) { setChannel(c, id, ch); }); };
-                    channel->setBounds(r.removeFromLeft(170).reduced(2)); addAndMakeVisible(*channel); controls_.push_back(std::move(channel));
+                    channelChoice(r.removeFromLeft(170).reduced(2), "Input channel", p->channel, "Only notes on this MIDI channel play the part; Any channel takes every one",
+                                  [this, id](int ch) { edit([id, ch](Control& c) { setChannel(c, id, ch); }); });
                     break;
                 }
                 case K::NoteLimit:

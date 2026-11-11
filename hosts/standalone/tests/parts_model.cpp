@@ -117,20 +117,6 @@ int main(int argc, char** argv)
         check(channed.channel == 0 && s.parts()[1].input.zones.front().channels == 0xFFFF && channed.lowKey == 48, "Any channel clears the filter, keys kept");
         setZone(s, lead, 0, 127, 0);
         check(s.parts()[1].input.zones.empty() && readParts(s.graphState()).parts[1].channel == 0, "no limits left: no zone");
-        // The Routing view's channel choice on a note wire from the keys.
-        {
-            const auto g = s.graphState();
-            const auto wire = std::find_if(g.wires.begin(), g.wires.end(), [&](const Wire& w) { return w.kind == WireKind::Notes && w.from == graphInput && w.part == lead; });
-            check(wire != g.wires.end(), "the lead's input wire");
-            setWireChannel(s, wire->id, 3);
-            const auto g2 = s.graphState();
-            const auto wire2 = std::find_if(g2.wires.begin(), g2.wires.end(), [&](const Wire& w) { return w.id == wire->id; });
-            check(wire2 != g2.wires.end() && wire2->zones.size() == 1 && wire2->zones[0].channels == (1u << 2), "the wire's zones take channel 3");
-            setWireChannel(s, wire->id, 0);
-            const auto g3 = s.graphState();
-            const auto wire3 = std::find_if(g3.wires.begin(), g3.wires.end(), [&](const Wire& w) { return w.id == wire->id; });
-            check(wire3 != g3.wires.end() && (wire3->zones.empty() || wire3->zones.front().channels == 0xFFFF), "and any channel again");
-        }
         // The Part page's fields, as every surface lays them out: a part that plays notes has
         // its inputs, keys and transpose; every part where it plays, its level and a send per bus.
         {
@@ -259,6 +245,16 @@ int main(int argc, char** argv)
         check(inputs[0].rows[1].level == .5 && inputs[0].rows[1].pan == -.5 && inputs[0].rows[1].mute, "a Mix row set");
         disconnect(s, inputs[0].rows[1].wire);
         check(inputsOf(s.graphState(), hall)[0].rows.size() == 1 && readParts(s.graphState()).shared.empty(), "disconnected: one source, no longer shared");
+        // The Routing view's channel choice, on a note wire drawn by hand from the keys.
+        connectNodes(s, graphInput, bassSynth, WireKind::Notes);
+        auto keys = [&] { for(const auto& w : s.graphState().wires) if(w.owner == WireOwner::User && w.from == graphInput && w.to == bassSynth) return w; return Wire{}; };
+        bool keysRow = false; for(const auto& i : inputsOf(s.graphState(), bassSynth)) for(const auto& x : i.rows) keysRow = keysRow || (x.wire == keys().id && x.keys && x.user);
+        check(keys().id && keysRow, "a note wire from the keys, its row marked so");
+        setWireChannel(s, keys().id, 3);
+        check(keys().zones.size() == 1 && keys().zones[0].channels == (1u << 2) && zoneChannel(keys().zones) == 3, "the wire takes channel 3");
+        setWireChannel(s, keys().id, 0);
+        check(keys().zones.empty(), "and any channel again: no zone");
+        disconnect(s, keys().id);
         refused = false; try { removeLoose(s, bassSynth); } catch(const std::invalid_argument&) { refused = true; }
         check(refused, "a part's plugin is removed in its part, not in Routing");
         const auto nodesBefore = s.graphState().topology.nodes.size();

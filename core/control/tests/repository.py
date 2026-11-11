@@ -381,6 +381,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
     def store():
         return rpc('plugins.list')['plugins']
 
+    def recorded():
+        return rpc('packages.installed')['packages']
+
     try:
         # Not trusted yet: refused, naming its root key so the user can choose to trust it.
         state = job('packages.list', {'source': str(good)})
@@ -421,6 +424,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
               'the newest version this device can install installs: ' + json.dumps(state)[:300])
         check(len(plugins) == 1 and plugins[0]['id'] == 'org.kick.test.synth' and plugins[0]['platforms'] == [here], 'its build is in the store: ' + json.dumps(plugins))
         check(plugins[0].get('license') == 'MIT', 'the store keeps its license: ' + json.dumps(plugins))
+        check(recorded() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good)}] and (home / 'packages.json').is_file(),
+              'the install is recorded with its version, kind and repository: ' + json.dumps(recorded()))
 
         # Refused, each with its reason, installing nothing.
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.other'})
@@ -437,6 +442,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         data[len(data) // 2] ^= 1
         blob.write_bytes(bytes(data))
         rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+        check(recorded() == [] and 'org.kick.test.synth' not in (home / 'packages.json').read_text(), 'removing its plugin removes the record: ' + json.dumps(recorded()))
         state = job('packages.install', {'source': str(tampered), 'id': 'org.kick.test.synth'})
         check(state['state'] == 'failed' and 'not the one the index names' in state['error'] and store() == [] and leftovers() == [],
               'a tampered blob is refused, leaving nothing: ' + state['error'])
@@ -475,6 +481,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         installed = rpc('library.install', {'file': str(unpacked)})
         check(installed['code'][0]['status'] == 'trusted' and len(store()) == 1 and leftovers() == [] and unpacked.is_dir() and any(unpacked.rglob('*.clap')),
               'and the unpacked one installs, read in place and left as it was')
+        check(recorded() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': ''}], 'installed from a file, it is recorded with no repository: ' + json.dumps(recorded()))
 
         # A plugin package that needs an asset library: installing it from the repository pulls
         # the newest version of the library that is at least the one it needs (RFC 0009).
@@ -495,6 +502,27 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         collected = rpc('assets.collect', {'remove': True})
         check(collected['libraries'] == ['org.kick.factory'] and not library.exists(), 'and collection removes it: ' + json.dumps(collected))
         check(not any((home / 'assets' / 'store').iterdir()), 'with its stored files')
+        check([x['id'] for x in recorded()] == ['org.kick.test.synth'], 'the package removed and the library collected are no longer recorded: ' + json.dumps(recorded()))
+
+        # An update (RFC 0031): an older version installed, the listing's newest stable version this
+        # device can install is newer, and installing it replaces the old one and its record.
+        state = job('packages.install', {'source': str(good), 'id': 'org.kick.factory', 'version': '1.0.0'})
+        check(state['state'] == 'done' and {'id': 'org.kick.factory', 'version': '1.0.0', 'kind': 'asset', 'repository': str(good)} in recorded(),
+              'an asset package installed at an older version is recorded at it: ' + json.dumps(recorded()))
+        listing = {x['id']: x for x in job('packages.list', {'source': str(good)})['packages']}
+        def key(version):
+            return tuple(int(n) for n in version.split('.'))
+        newer = [v['version'] for v in listing['org.kick.factory']['versions'] if v['channel'] == 'stable' and not v['yanked'] and not v['incompatible'] and key(v['version']) > key('1.0.0')]
+        check(newer == ['1.1.0'], 'the listing has a newer version to update to: ' + json.dumps(newer))
+        state = job('packages.install', {'source': str(good), 'id': 'org.kick.factory'})
+        check(state['state'] == 'done' and state['version'] == '1.1.0' and [x for x in recorded() if x['id'] == 'org.kick.factory'] == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good)}] and
+              sorted(e.name for e in library.iterdir() if not e.name.startswith('.')) == ['1.1.0'], 'updated, the new version replaces the old one and its record: ' + json.dumps(recorded()))
+        # Installed before installs were recorded: an asset library is derived at its version, a plugin package is not.
+        (home / 'packages.json').unlink()
+        check(recorded() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': ''}] and any(x['id'] == 'org.kick.test.synth' for x in store()),
+              'with no record, the asset library is derived and the plugin package is not: ' + json.dumps(recorded()))
+        rpc('assets.uninstall', {'library': 'org.kick.factory'})
+        check(recorded() == [], 'uninstalled, it is no longer listed: ' + json.dumps(recorded()))
 
         # The repositories this device knows (RFC 0031): the official one, built in, its root key
         # trusted for repositories only; the image's, from its profile; and the user's.

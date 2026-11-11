@@ -990,13 +990,16 @@ namespace oscairn::standalone
         });
     }
 
-    // The Catalog over the Library, as large as the screen allows; what is installed already is
-    // left out: libraries by ID, plugin packages by their plugin's.
+    // The Catalog over the Library, as large as the screen allows, each package installed marked
+    // with the newest version installed (packages.installed).
     void LibraryPane::showCatalog(const std::string& kind)
     {
-        std::set<std::string> installed;
-        for(const auto& l : engine_.libraries()) installed.insert(l.id);
-        for(const auto& p : engine_.installedPlugins()) installed.insert(p.id);
+        std::map<std::string, std::string> installed;
+        if(const auto error = engine_.packages([&](Control& c) {
+               for(const auto& p : c.installedPackages())
+                   if(auto [at, added] = installed.try_emplace(p.id, p.version); !added && repository::older(at->second, p.version)) at->second = p.version;
+           }); !error.empty())
+            tell(text(error));
         auto* content = new Catalog(engine_, kind, std::move(installed));
         setDesktopMode(*content, mode());
         if(mode() == 2) content->setSize(std::min(984, std::max(600, getWidth() - 40)), std::min(560, std::max(400, getHeight() - 40)));

@@ -46,10 +46,11 @@ Checked when built and tested; the sections below say how.
       a switch, Remove for the user's, and Add a repository..., which reads the repository
       first, asks to trust its root key by fingerprint, and keeps neither the repository nor the
       key if it then does not verify; it replaces the Library's Install from a repository...;
-      `desktop-gaps`. Not yet: releases stored in pieces (items, samples
+      `desktop-gaps`. 2026-11-11: each installed package recorded with its version, kind and
+      repository (`packages.json` in the data folder, `packages.installed`), and forgotten when
+      removed; `control-repository`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
-      (step 2), `.orepo` files, recording each installed
-      package's repository; the free-space refusal and a drive pulled midway are not tested)
+      (step 2), `.orepo` files; the free-space refusal and a drive pulled midway are not tested)
 - [ ] 2. Fetching over HTTPS: refresh, incremental index updates, mirrors, resumable downloads
       (built 2026-11-06: fetching through the host's transport, JUCE's URL streams: the system's
       HTTPS on macOS, libcurl with Mbed TLS on Linux since RFC 0039's step 1 (2026-11-07, which
@@ -71,7 +72,8 @@ Checked when built and tested; the sections below say how.
 - [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters
       (built 2026-11-07 on the desktop, [interim](#in-the-library) until the Catalog app:
       Install… with Catalog and File; the Catalog listing the enabled repositories' packages of
-      the kind shown that are not installed, searched, grayed with the reason where this device
+      the kind shown (since 2026-11-11 what is installed too, marked Installed with its version, or
+      Update to a newer version; `desktop-gaps`), searched, grayed with the reason where this device
       cannot install them (its platform and system version), a package's details and Install,
       and trusting an unknown publisher for plugins from the install question; each version's
       `types` and the packages it needs (`requires.packages`, which the index builder now
@@ -82,6 +84,9 @@ Checked when built and tested; the sections below say how.
       dialog is drawn at touch sizes there); the gate's search on an instrument with no network
       is not tested: listing still fetches the root)
 - [ ] 6. Updates: packages, Performances' locks moved on explicitly, apps
+      (built 2026-11-11 on the desktop: the Catalog's Update to the newest stable version this
+      device can install, newer than the one installed; `desktop-gaps`, `control-repository`. Not
+      yet: `packages.updates`, update lists and a card on Home, Performances' locks, apps)
 - [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source
 - [ ] 8. The official repository goes public: hosting, mirrors, policy
 
@@ -467,16 +472,19 @@ publisher, and any package newly bringing plugin or app code, also needs a maint
 The Library's **Install…** offers exactly two things (decided 2026-11-07): **Catalog** and
 **File**. File installs an archive (`.olib`) chosen from the file browser, as the Library always
 has. Catalog opens the catalog on the kind of list shown: the enabled repositories' packages
-holding items of that type (Performances, Sounds) or plugins that are not installed, searched
+holding items of that type (Performances, Sounds) or plugins, what is installed marked so, searched
 like the rest, from each repository's index as `packages.list` reads it. Opening one shows its
 page from the Catalog app's action (below). Opening a repository by its address or folder is not
 on Install…; it belongs with the repositories in Settings.
 
 **Interim, until the Catalog app exists (built 2026-11-07):** the Catalog is a view in the
 desktop Library, labeled Catalog. Its rows name each package, its version, publisher and
-summary; what this device cannot install is grayed with the reason. A package's details are its
-summary, version, license, publisher and key fingerprint, repository, download and installed
-size, and the packages it needs, with Install, which runs the install job and its questions. A
+summary; what this device cannot install is grayed with the reason. What is installed says
+**Installed** with the version installed, or **Update to** the newest stable version this device
+can install when that is newer. A package's details are its summary, version, the version
+installed, license, publisher and key fingerprint, repository, download and installed size, and
+the packages it needs, with Install (or Update; neither when what is installed is current), which
+runs the install job and its questions. A
 plugin by a publisher not trusted for plugins asks first: **Trust** the publisher (its name, key
 fingerprint and full key shown, trusted for plugins only when the user says so) and try again,
 **Install anyway** this once, or Cancel. No Show all yet, and no audio previews or screenshots

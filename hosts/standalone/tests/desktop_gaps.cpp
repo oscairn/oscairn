@@ -784,10 +784,10 @@ int main(int argc, char** argv)
                 repository::setTransport({});
             }
             // Install... (RFC 0031): exactly the Catalog and a File. The Catalog lists the enabled
-            // repositories' packages of a kind that are not installed, grayed with the reason where
-            // this device cannot install them; a package's details; Install, and for a publisher
-            // not trusted for plugins, trusting it by its name, fingerprint and full key, then
-            // trying again. The repository is a signed folder made by the index builder; the
+            // repositories' packages of a kind, grayed with the reason where this device cannot
+            // install them; a package's details; Install, and for a publisher not trusted for
+            // plugins, trusting it by its name, fingerprint and full key, then trying again; what
+            // is installed, marked so with its version, and Update to a newer version. The repository is a signed folder made by the index builder; the
             // official one is turned off and the web is a stand-in, so nothing touches the network.
             if(const char* maker = std::getenv("OSCAIRN_TEST_MAKE_REPOSITORY"))
             {
@@ -904,16 +904,61 @@ int main(int argc, char** argv)
                       "the publisher's key trusted for plugins, by its name");
                 const auto plugins = engine.installedPlugins();
                 check(std::any_of(plugins.begin(), plugins.end(), [](const auto& p) { return p.id == "org.kick.test.synth"; }), "its plugin in the store");
-                // Installed, it is no longer offered; the Desktop's Catalog, the same.
+                // Installed, it is listed as installed with its version, and its details offer
+                // nothing to install; the Desktop's Catalog, the same.
+                auto synthRow = [&] {
+                    const auto& shown = catalog->shown();
+                    const auto at = std::find_if(shown.begin(), shown.end(), [](const auto& o) { return o.package.id == "org.kick.test.synth"; });
+                    return at == shown.end() ? -1 : int(at - shown.begin());
+                };
+                auto closeCatalog = [&] { if(auto* dialog = catalog->findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0); };
                 pane.showCatalog("plugin");
                 catalog = pane.catalog();
-                check(catalog && wait([&] { return !catalog->reading(); }) && catalog->shown().size() == 1 && catalog->shown()[0].package.id == "org.kick.other", "what is installed is not offered");
-                if(catalog)
+                check(catalog && wait([&] { return !catalog->reading(); }) && catalog->shown().size() == 2 && synthRow() >= 0, "what is installed is still listed");
+                if(catalog && synthRow() >= 0)
                 {
+                    const auto& synth = catalog->shown()[size_t(synthRow())];
+                    check(synth.installed == std::optional<std::string>("1.0.0") && !synth.update && !synth.offered(), "as installed, at its version, and not offered again");
+                    catalog->open(synthRow());
+                    const auto facts = catalog->facts();
+                    std::map<juce::String, juce::String> fact(facts.begin(), facts.end());
+                    check(fact["Installed"] == "1.0.0" && !catalog->install.isVisible(), "its details say what is installed, with no Install: " + fact["Installed"].toStdString());
+                    catalog->back();
                     standalone::setDesktopMode(*catalog, 1); catalog->setSize(820, 560); settle();
                     snapshot(*catalog, "catalog-desktop");
-                    if(auto* dialog = catalog->findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
+                    closeCatalog();
                 }
+                // An older version installed: Update to the newer one installs it, and it is then current.
+                // (The record says 0.9.0, as an older version's install would have written it.)
+                {
+                    const auto recorded = data.getChildFile("packages.json");
+                    const auto was = recorded.loadFileAsString();
+                    const auto older = was.replace("\"id\":\"org.kick.test.synth\",\"version\":\"1.0.0\",\"kind\"", "\"id\":\"org.kick.test.synth\",\"version\":\"0.9.0\",\"kind\"");
+                    check(older != was && recorded.replaceWithText(older), "the install was recorded in packages.json: " + was.toStdString());
+                }
+                pane.showCatalog("plugin");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && synthRow() >= 0, "the Catalog lists it again");
+                if(catalog && synthRow() >= 0)
+                {
+                    const auto& synth = catalog->shown()[size_t(synthRow())];
+                    check(synth.installed == std::optional<std::string>("0.9.0") && synth.update && synth.offered() && synth.version.version == "1.0.0",
+                          "an older one installed is offered as an update: " + synth.installed.value_or("none") + " -> " + synth.version.version);
+                    standalone::setDesktopMode(*catalog, 1); catalog->setSize(820, 560); settle();
+                    snapshot(*catalog, "catalog-update");
+                    catalog->open(synthRow());
+                    check(catalog->install.isVisible() && catalog->install.isEnabled() && catalog->install.getButtonText() == "Update to 1.0.0", "its details offer Update to the newer version: " + catalog->install.getButtonText().toStdString());
+                    settle();
+                    snapshot(*catalog, "catalog-update-details");
+                    catalog->install.triggerClick();
+                    check(wait([&] { return pane.message().startsWith("Installing"); }) && wait([&] { return pane.message().contains("installed."); }), "Update installs it: " + pane.message().toStdString());
+                }
+                pane.showCatalog("plugin");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && synthRow() >= 0 && catalog->shown()[size_t(synthRow())].installed == std::optional<std::string>("1.0.0") &&
+                          !catalog->shown()[size_t(synthRow())].update,
+                      "updated, it is installed and current");
+                if(catalog) closeCatalog();
                 // Removed in Settings, asked first: no longer listed, its root key no longer trusted.
                 {
                     standalone::Settings settings(engine);

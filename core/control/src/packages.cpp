@@ -102,6 +102,7 @@ struct Session::PackageWork {
     bool unpacked=false;     // the thread is done and left packages, each in its folder, to move into place
     std::vector<std::pair<Package,fs::path>> packages; // the asset libraries it needs first, then the package
     bool acceptUnsignedCode=false;
+    std::string source;      // the repository's address, recorded with what it installs
     std::atomic<bool> cancel=false; // set when the session goes: a download stops
     std::thread thread;
     ~PackageWork(){cancel=true;if(thread.joinable())thread.join();for(const auto& [p,into]:packages){std::error_code e;fs::remove_all(into,e);}}
@@ -230,7 +231,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     if(id.empty())throw std::invalid_argument("which package?");
     std::vector<std::string> trusted,revoked;keys(trustedKeys(),trusted,revoked);
     auto work=std::make_shared<PackageWork>();
-    work->id=work->job.id=++packageJobs_;work->job.state="running";work->acceptUnsignedCode=acceptUnsignedCode;
+    work->id=work->job.id=++packageJobs_;work->job.state="running";work->acceptUnsignedCode=acceptUnsignedCode;work->source=addressOf(source);
     auto* w=work.get();
     packageWork_.reset();
     const auto assetRoot=assets_.root(); // read on the control thread; the job reads which libraries are installed from its own Store
@@ -324,6 +325,7 @@ Control::PackageJob Session::packageJob(uint64_t id){
             try{
                 const bool dependency=&package!=&packages.back().first; // a library the package needs, installed first
                 const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true,false,dependency);
+                recordPackage(package,true,w.job.version,w.source); // an asset library is recorded at its own version
                 done.installed.added+=installed.added;done.installed.skipped+=installed.skipped;
                 done.installed.notes.insert(done.installed.notes.end(),installed.notes.begin(),installed.notes.end());
                 done.installed.code.insert(done.installed.code.end(),installed.code.begin(),installed.code.end());

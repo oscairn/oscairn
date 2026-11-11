@@ -1288,6 +1288,19 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `publisherKey` is the key's ID only, as the index carries no public keys; the public key is
   in the package's signatures, which a listing does not fetch. An install unpacks off the
   control thread; asking about it once it has unpacked moves it into place.
+- `packages.installed` (`{}`) returns `{packages}`: the packages installed on this device
+  ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
+  `{id,version,kind,repository}`: `kind` is `plugin`, `asset` or `library` (installed as a locked
+  library), and `repository` the address of the repository it came from, empty for one installed
+  from a file. Each install records its package in `packages.json` in the data folder: from a
+  repository, or by `library.install` a plugin or asset package or one installed as a library (a
+  copy into the user's own storage installs no package). Removing what it installed
+  (`plugins.remove`, `assets.uninstall`, `assets.collect`, `library.uninstall`) removes the
+  record. Plugin packages install side by side, so one is listed once for each version still
+  installed. From a file, a library has an empty `version` and a plugin package its first
+  plugin's. What was installed before installs were recorded is listed where it can be told: an
+  asset library at its version and a locked library with an empty `version`, neither with a
+  repository; a plugin package is not, as nothing says which plugins it held.
 - `packages.repositories` (`{}`) returns `{repositories}`: the package repositories this device
   knows ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
   `{address,name,key,id,origin,enabled}`: its address (a folder's full path, or https://, kept

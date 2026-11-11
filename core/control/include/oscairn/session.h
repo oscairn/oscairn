@@ -78,6 +78,7 @@ namespace oscairn
         uint64_t listRepository(const std::string& source) override;
         uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false) override;
         PackageJob packageJob(uint64_t id) override;
+        std::vector<InstalledPackage> installedPackages() override;
         std::vector<Repository> repositories() override;
         void addRepository(const Repository& repository) override;
         void removeRepository(const std::string& address) override;
@@ -701,6 +702,9 @@ namespace oscairn
         static Signer judge(const std::string& kind, const std::vector<signing::Signature>& signatures); // against the trust store
         struct CodeRefused : std::runtime_error { std::vector<Signer> code; CodeRefused(const std::string& why, std::vector<Signer> signers) : std::runtime_error(why), code(std::move(signers)) {} }; // installUnpacked's refusal, with the signers it judged
         Installed installUnpacked(const Package& package, const std::filesystem::path& into, bool asLibrary, const std::vector<std::string>& items, bool acceptUnsignedCode, bool thisPlatformOnly, bool checkOnly = false, bool dependency = false); // checkOnly: refuse as it would, installing nothing; dependency: an asset library a plugin package brought
+        // Records in packages.json in the data folder the package an install put in place (RFC 0031): a plugin or asset package, or one installed as a locked library; not an archive copied into the user's own storage.
+        void recordPackage(const Package& package, bool asLibrary, const std::string& version, const std::string& repository);
+        void forgetRemoved(); // drops the records of packages no longer installed, after a removal
         struct PackageWork;                        // the package job off the control thread (packages.cpp)
         std::shared_ptr<PackageWork> packageWork_; // joins its thread when it goes
         uint64_t packageJobs_ = 0;

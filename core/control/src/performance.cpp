@@ -12,6 +12,7 @@
 #include <cmath>
 #include <functional>
 #include <locale>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <set>
@@ -1939,7 +1940,10 @@ Control::Archive Session::archiveContents(const std::string& file) {
 Control::Installed Session::installArchive(const std::string& file,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode) {
     const auto into=unpackFolder();
     const auto p=readPackage(file,into);
-    return installUnpacked(p,into,asLibrary,chosen,acceptUnsignedCode,false);
+    const auto out=installUnpacked(p,into,asLibrary,chosen,acceptUnsignedCode,false);
+    // From a file, no repository and no version, but a plugin package's: its first plugin's, the package's unless that plugin names its own.
+    recordPackage(p,asLibrary,p.plugins.empty()?std::string():p.plugins.front().version,{});
+    return out;
 }
 
 // What readPackage unpacked into `into`, moved into place by renames in the data folder (RFC
@@ -2132,6 +2136,7 @@ void Session::uninstallAssetLibrary(const std::string& id) {
     if(!users.empty()){std::string list;for(const auto& u:users)list+=(list.empty()?"":", ")+u;bad("the asset library "+id+" is used by "+list);}
     assets_.removeLibrary(id);
     assets_.sweep(true);
+    forgetRemoved();
 }
 
 Control::AssetCollection Session::collectAssets(bool remove) {
@@ -2145,6 +2150,83 @@ Control::AssetCollection Session::collectAssets(bool remove) {
     }
     const auto [files,bytes]=assets_.sweep(remove);
     out.files+=files;out.bytes+=bytes;
+    if(remove)forgetRemoved();
+    return out;
+}
+
+namespace {
+// packages.json in the data folder: each package installed, by ID, version, kind and the address
+// of the repository it came from (RFC 0031), with a plugin package's plugins, as nothing else says
+// which it installed: {"format":"oscairn.packages","version":1,"packages":[{"id","version","kind",
+// "repository","plugins":[{"format","id","version"}]}]}.
+struct Recorded { Control::InstalledPackage package; std::vector<std::tuple<std::string,std::string,std::string>> plugins; };
+std::mutex recordedMutex; // packages.json, read and written whole
+fs::path recordedFile(){return dataHome()/"packages.json";}
+std::vector<Recorded> readRecorded(){
+    std::vector<Recorded> out;
+    std::error_code e;
+    if(!fs::exists(recordedFile(),e))return out;
+    try{
+        const auto bytes=state_files::read(recordedFile(),16*1024*1024);
+        const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
+        for(auto r:array(field(doc.get(),"packages"),100000)){
+            Recorded x{{text(field(r,"id")),text(field(r,"version")),text(field(r,"kind")),text(field(r,"repository"))},{}};
+            for(auto p:array(field(r,"plugins"),4096))x.plugins.push_back({text(field(p,"format")),text(field(p,"id")),text(field(p,"version"))});
+            out.push_back(std::move(x));
+        }
+    }catch(const std::exception& x){std::fprintf(stderr,"oscairn: %s unreadable (%s); what it recorded is derived where it can be\n",recordedFile().string().c_str(),x.what());out.clear();}
+    return out;
+}
+void writeRecorded(const std::vector<Recorded>& all){
+    std::string out;
+    for(const auto& r:all){
+        std::string plugins;
+        for(const auto& [format,id,version]:r.plugins)plugins+=std::string(plugins.empty()?"":",")+"{\"format\":"+quote(format)+",\"id\":"+quote(id)+",\"version\":"+quote(version)+'}';
+        out+=std::string(out.empty()?"":",")+"{\"id\":"+quote(r.package.id)+",\"version\":"+quote(r.package.version)+",\"kind\":"+quote(r.package.kind)+
+             ",\"repository\":"+quote(r.package.repository)+",\"plugins\":["+plugins+"]}";
+    }
+    writeAtomically(recordedFile(),"{\"format\":\"oscairn.packages\",\"version\":1,\"packages\":["+out+"]}\n");
+}
+// Whether what a record names is still installed here: a library by its ID, an asset library at
+// its version, a plugin package by any of its plugins' builds for this device.
+bool present(const Recorded& r,const std::vector<Control::InstalledLibrary>& libraries,const assets::Store& assets){
+    if(r.package.kind=="library")return std::any_of(libraries.begin(),libraries.end(),[&](const auto& l){return l.id==r.package.id;});
+    if(r.package.kind=="asset")return assets.libraryVersion(r.package.id)==r.package.version;
+    return std::any_of(r.plugins.begin(),r.plugins.end(),[](const auto& p){return !storedPlugin(std::get<0>(p),std::get<1>(p),std::get<2>(p)).empty();});
+}
+}
+
+void Session::recordPackage(const Package& p,bool asLibrary,const std::string& version,const std::string& repository) {
+    const std::string kind=p.kind=="plugin" || p.kind=="asset"?p.kind:asLibrary?"library":"";
+    if(kind.empty())return; // copies in the user's own storage: no package is installed
+    Recorded r{{p.id,kind=="asset"?p.assetVersion:version,kind,repository},{}};
+    for(const auto& q:p.plugins)r.plugins.push_back({q.format,q.id,q.version});
+    std::lock_guard lock(recordedMutex);
+    auto all=readRecorded();
+    // A library and an asset library are installed at one version at a time; a plugin package's versions side by side.
+    std::erase_if(all,[&](const auto& x){return x.package.id==p.id && (kind!="plugin" || x.package.kind!="plugin" || x.package.version==r.package.version);});
+    all.push_back(std::move(r));
+    writeRecorded(all);
+}
+
+void Session::forgetRemoved() {
+    const auto libraries=library().installed();
+    std::lock_guard lock(recordedMutex);
+    auto all=readRecorded();
+    if(std::erase_if(all,[&](const auto& r){return !present(r,libraries,assets_);}))writeRecorded(all);
+}
+
+std::vector<Control::InstalledPackage> Session::installedPackages() {
+    const auto libraries=library().installed();
+    std::vector<InstalledPackage> out;
+    {
+        std::lock_guard lock(recordedMutex);
+        for(const auto& r:readRecorded())if(present(r,libraries,assets_))out.push_back(r.package);
+    }
+    // Installed before installs were recorded: each asset library at its version, each locked library at a version unknown.
+    auto listed=[&](const std::string& id){return std::any_of(out.begin(),out.end(),[&](const auto& p){return p.id==id;});};
+    for(const auto& id:assets_.installedLibraries())if(!listed(id))out.push_back({id,assets_.libraryVersion(id),"asset",{}});
+    for(const auto& l:libraries)if(!listed(l.id))out.push_back({l.id,{},"library",{}});
     return out;
 }
 
@@ -2154,6 +2236,7 @@ void Session::uninstallLibrary(const std::string& id) {
     if(std::none_of(all.begin(),all.end(),[&](const auto& x){return x.id==id;}))bad("no such library installed");
     fs::remove_all(l.libraries()/id); // readPackage: the ID is a plain name
     l.rescan();
+    forgetRemoved();
 }
 
 std::vector<Control::InstalledPlugin> Session::installedPlugins() {
@@ -2205,11 +2288,12 @@ void Session::removePlugin(const std::string& format,const std::string& id,const
     if(!forPlatform.empty()){
         if(!fs::is_directory(folder/forPlatform,e))bad("that plugin has no "+forPlatform+" build installed");
         fs::remove_all(folder/forPlatform);
-        if(!storedBuilds(format,id,version).empty())return;
+        if(!storedBuilds(format,id,version).empty()){forgetRemoved();return;}
     }
     // Out of the store's sight first, so a removal cut short leaves nothing half there.
     const auto gone=folder.parent_path()/("."+folder.filename().string()+".removing");
     fs::remove_all(gone,e);fs::rename(folder,gone);fs::remove_all(gone,e);
+    forgetRemoved();
 }
 
 void Session::addPluginBuild(const std::string& format,const std::string& id,const std::string& version,const std::string& forPlatform,const std::string& path) {

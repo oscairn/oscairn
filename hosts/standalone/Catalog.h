@@ -3,35 +3,42 @@
 #include "Engine.h"
 #include "Theme.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <map>
 #include <optional>
-#include <set>
 
 namespace oscairn::standalone
 {
     /// One package a repository offers, as the Catalog lists it: where from, and the version this
-    /// device would install (the newest stable one it can, not yanked), else the newest, with why.
+    /// device would install (the newest stable one it can, not yanked), else the newest, with why;
+    /// and the version installed here, if it is, offered as an update when `version` is newer.
     struct Offer
     {
         std::string source, repository; // the repository's address and name
         Control::RepositoryPackage package;
         Control::RepositoryVersion version;
         bool installable = false;
+        std::optional<std::string> installed; // the version installed here, empty when not known
+        bool update = false;                  // installed, and `version` installable and newer
         bool holds(const std::string& kind) const; // "performance", "sound" or "plugin"
+        bool offered() const { return installable && (!installed || update); } // Install, or Update
     };
-    /// The offers of these listings that are not installed (`installed`: package IDs), each once per repository.
-    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::set<std::string>& installed);
+    /// The offers of these listings, each once per repository (`installed`: the newest version
+    /// installed of each package, by ID).
+    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, std::string>& installed);
 
     /// The Catalog (RFC 0031), an interim view in the Library until the Catalog app
     /// (oscairn.catalog) exists: the enabled repositories' packages holding Performances, Sounds
-    /// or plugins that are not installed (each read as packages.list reads it: the root, and the index
+    /// or plugins (each read as packages.list reads it: the root, and the index
     /// kept from last time while it is unchanged), searched by
-    /// name, summary, tag or publisher. What this device cannot install is shown grayed with the
-    /// reason. Opening one shows its details: name, summary, version, license, publisher and key
-    /// fingerprint, repository, sizes and the packages it needs, with Install.
+    /// name, summary, tag or publisher. What is installed says so, with its version, or offers
+    /// Update to a newer one this device can install. What this device cannot install is shown
+    /// grayed with the reason. Opening one shows its details: name, summary, version, what is
+    /// installed, license, publisher and key fingerprint, repository, sizes and the packages it
+    /// needs, with Install, Update, or neither when what is installed is current.
     class Catalog : public juce::Component, private juce::ListBoxModel
     {
     public:
-        Catalog(Engine& engine, const std::string& kind, std::set<std::string> installed);
+        Catalog(Engine& engine, const std::string& kind, std::map<std::string, std::string> installed);
         // Reads each enabled repository in turn, one engine job at a time.
         void read();
         void showKind(const std::string& kind);
@@ -59,7 +66,7 @@ namespace oscairn::standalone
         int mode() const { return std::max(1, desktopMode(*this)); }
         Engine& engine_;
         std::string kind_;
-        std::set<std::string> installed_;
+        std::map<std::string, std::string> installed_;
         std::vector<std::pair<std::string, Control::PackageJob>> listings_;
         std::vector<Offer> all_, shown_;
         std::optional<Offer> opened_;

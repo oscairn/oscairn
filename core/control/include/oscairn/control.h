@@ -361,6 +361,15 @@ namespace oscairn
         virtual uint64_t listRepository(const std::string& source) = 0;
         virtual uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false) = 0;
         virtual PackageJob packageJob(uint64_t id) = 0;
+        // The packages installed here (RFC 0031), each version once: its ID, version, kind
+        // ("plugin", "asset" or "library") and the repository's address it came from. Each install
+        // records its package (packages.json in the data folder), and each removal its going.
+        // What was installed before that is derived where it can be: an asset library with its
+        // version, a locked library with none (empty version, as for a library installed from a
+        // file), neither with a repository; a plugin package is not, as nothing says which
+        // plugins it held. Plugin packages install side by side, so one may be listed at several versions.
+        struct InstalledPackage { std::string id, version, kind, repository; };
+        virtual std::vector<InstalledPackage> installedPackages() = 0;
         // The repositories this device knows (RFC 0031), each by its address (a folder, or
         // https://, with no '/' at the end), its root key (hex) and name. origin: "official" (built
         // in, its root key trusted for repositories only), "device" (its image's, from its profile)

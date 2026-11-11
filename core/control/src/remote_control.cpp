@@ -617,6 +617,11 @@ namespace oscairn
         auto d=impl_->call("packages.install","{\"source\":"+quote(source)+",\"id\":"+quote(id)+(version.empty()?std::string():",\"version\":"+quote(version))+",\"acceptUnsignedCode\":"+(acceptUnsignedCode?"true":"false")+'}');
         return uint64_t(integer(field(field(d.get(),"result"),"job")));
     }
+    std::vector<Control::InstalledPackage> RemoteControl::installedPackages() {
+        auto d=impl_->call("packages.installed","{}");std::vector<InstalledPackage> out;
+        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository"))});
+        return out;
+    }
     std::vector<Control::Repository> RemoteControl::repositories() {
         auto d=impl_->call("packages.repositories","{}");std::vector<Repository> out;
         for(auto r:array(field(field(d.get(),"result"),"repositories")))out.push_back({string(field(r,"address")),string(field(r,"name")),string(field(r,"key")),string(field(r,"origin")),boolean(field(r,"enabled"))});

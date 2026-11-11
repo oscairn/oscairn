@@ -4060,6 +4060,31 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "packages.installed",
+              "description": "The packages installed on this device: each version's ID, version, kind and repository"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "packages.repositories",
               "description": "The package repositories this device knows: the official one, its image's and the user's"
             },

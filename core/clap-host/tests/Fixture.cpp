@@ -23,6 +23,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 #include <cstring>
 #include <limits>
 #include <thread>
@@ -477,7 +483,7 @@ const clap_preset_discovery_provider_t* createPresetProvider(const clap_preset_d
     provider.destroy = [](const clap_preset_discovery_provider_t*) {};
     provider.get_metadata = [](const clap_preset_discovery_provider_t*, uint32_t kind, const char* location, const clap_preset_discovery_metadata_receiver_t* r) {
         const clap_universal_plugin_id_t midi{"clap", "org.kick.test.midi"}, synth{"clap", "org.kick.test.synth"};
-        if (const char* log = std::getenv("KICK_FIXTURE_PRESETS_LOG")) std::ofstream(log, std::ios::app) << "asked\n"; // a line per reading
+        if (const char* log = std::getenv("KICK_FIXTURE_PRESETS_LOG")) std::ofstream(log, std::ios::app) << "asked " << getpid() << "\n"; // a line per reading, with the reader's process
         if (std::getenv("KICK_FIXTURE_PRESETS_HANG")) std::this_thread::sleep_for(std::chrono::seconds(20));
         if (kind == CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN) {
             if (!r->begin_preset(r, "Quiet", "quiet")) return true;

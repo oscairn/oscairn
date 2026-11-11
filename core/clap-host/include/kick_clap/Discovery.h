@@ -19,6 +19,10 @@ ScanResult inspect(const std::filesystem::path& binary, bool presets = false, co
 // the reason in failure. Call it off any thread that must keep answering.
 bool indexPresetsWithHelper(const std::filesystem::path& helper, const std::filesystem::path& binary,
                            uint32_t timeoutMilliseconds, ScanResult& result, std::string& failure);
+// Scanner-helper side of that isolation: watch the stdin pipe runHelper hands the helper and
+// exit when its launcher dies, so a hung provider never leaves the helper running on alone.
+// Call at the start of a --worker/--presets run.
+void watchParentPipe();
 // Each binary is inspected by a fresh helper process with timeout/crash isolation; one whose
 // library offers preset discovery has its presets indexed by a second helper process with its
 // own timeout (presetTimeoutMilliseconds), so a failed index leaves its plugins listed.

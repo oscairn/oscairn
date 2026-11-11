@@ -16,6 +16,7 @@
 int main(int argc, char** argv) {
     try {
         if (argc == 3 && (std::string(argv[1]) == "--worker" || std::string(argv[1]) == "--presets")) {
+            kick::clap::watchParentPipe(); // end this helper if the launcher dies while a provider hangs
 #if defined(__linux__) && !defined(KICK_SCAN_SANITIZED)
             // Third-party code runs here: cap its memory so a runaway scan cannot starve the device.
             // macOS does not enforce address-space limits; there only the scan timeout applies.

@@ -8,12 +8,14 @@
 #include <chrono>
 #include <cstdlib>
 #include <set>
+#include <thread>
 #ifndef _WIN32
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 extern char** environ;
@@ -169,16 +171,34 @@ bool decodeScan(const std::string& source, ScanResult& result) {
         result = std::move(decoded); return true;
     } catch (...) { return false; }
 }
+// For a scanner helper process: runHelper gives it a stdin pipe whose write end only the
+// launcher holds; when the launcher dies the read ends, so a helper stuck in a hung preset
+// provider ends itself instead of outliving its launcher. Does nothing when stdin is not a
+// pipe (a manual run keeps its own input).
+void watchParentPipe() {
+#ifndef _WIN32
+    std::thread([] {
+        struct stat type;
+        if (::fstat(STDIN_FILENO, &type) != 0 || !S_ISFIFO(type.st_mode)) return;
+        char byte; ssize_t n;
+        while ((n = ::read(STDIN_FILENO, &byte, 1)) < 0 && errno == EINTR) {}
+        if (n <= 0) std::_Exit(1); // ended: the launcher is gone, nobody waits for us or our output
+    }).detach();
+#endif
+}
 #ifndef _WIN32
 // Runs the scanner helper on one binary (flag: --worker, or --presets to index presets too) with
-// a timeout, crash isolation and the last of its stderr; false with the reason in failure, which
-// starts "Cannot " only when the helper never started (scanPluginPresets asks again after those).
+// a timeout, crash isolation and the last of its stderr; its stdin is a pipe only we hold the
+// write end of, which it watches to end itself if we die, so a hung scan never outlives us.
+// False with the reason in failure, which starts "Cannot " only when the helper never started
+// (scanPluginPresets asks again after those).
 static bool runHelper(const fs::path& helper, const char* flag, const std::string& binary, uint32_t timeoutMs, const std::atomic<bool>* canceled,
                ScanResult& result, std::string& failure) {
-    int pipes[2], errors[2];
+    int pipes[2], errors[2], life[2];
     if (::pipe(pipes) != 0) { failure = "Cannot create scanner pipe"; return false; }
     if (::pipe(errors) != 0) { ::close(pipes[0]); ::close(pipes[1]); failure = "Cannot create scanner pipe"; return false; }
-    for (int fd : {pipes[0], pipes[1], errors[0], errors[1]}) ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+    if (::pipe(life) != 0) { ::close(pipes[0]); ::close(pipes[1]); ::close(errors[0]); ::close(errors[1]); failure = "Cannot create scanner pipe"; return false; }
+    for (int fd : {pipes[0], pipes[1], errors[0], errors[1], life[0], life[1]}) ::fcntl(fd, F_SETFD, FD_CLOEXEC);
     posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, pipes[1], STDOUT_FILENO);
     posix_spawn_file_actions_addclose(&actions, pipes[0]);
@@ -186,6 +206,9 @@ static bool runHelper(const fs::path& helper, const char* flag, const std::strin
     posix_spawn_file_actions_adddup2(&actions, errors[1], STDERR_FILENO);
     posix_spawn_file_actions_addclose(&actions, errors[0]);
     posix_spawn_file_actions_addclose(&actions, errors[1]);
+    posix_spawn_file_actions_adddup2(&actions, life[0], STDIN_FILENO);
+    posix_spawn_file_actions_addclose(&actions, life[0]);
+    posix_spawn_file_actions_addclose(&actions, life[1]);
     posix_spawnattr_t attributes; posix_spawnattr_init(&attributes);
     posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
     posix_spawnattr_setpgroup(&attributes, 0);
@@ -194,8 +217,8 @@ static bool runHelper(const fs::path& helper, const char* flag, const std::strin
     pid_t pid = 0;
     const auto spawned = posix_spawn(&pid, program.c_str(), &actions, &attributes, arguments, environ);
     posix_spawnattr_destroy(&attributes); posix_spawn_file_actions_destroy(&actions);
-    ::close(pipes[1]); ::close(errors[1]);
-    if (spawned != 0) { ::close(pipes[0]); ::close(errors[0]); failure = "Cannot launch kick-clap-scan helper"; return false; }
+    ::close(pipes[1]); ::close(errors[1]); ::close(life[0]);
+    if (spawned != 0) { ::close(pipes[0]); ::close(errors[0]); ::close(life[1]); failure = "Cannot launch kick-clap-scan helper"; return false; }
     ::fcntl(pipes[0], F_SETFL, ::fcntl(pipes[0], F_GETFL) | O_NONBLOCK);
     ::fcntl(errors[0], F_SETFL, ::fcntl(errors[0], F_GETFL) | O_NONBLOCK);
     std::string stderrTail; // last 2 KiB the plugin wrote to stderr, for the failure message
@@ -232,7 +255,7 @@ static bool runHelper(const fs::path& helper, const char* flag, const std::strin
         wire.append(tail, static_cast<size_t>(n));
     }
     ::close(pipes[0]);
-    drainErrors(); ::close(errors[0]);
+    drainErrors(); ::close(errors[0]); ::close(life[1]);
     while (!stderrTail.empty() && std::isspace(static_cast<unsigned char>(stderrTail.back()))) stderrTail.pop_back();
     for (auto& c : stderrTail) if (c == '\n' || c == '\r') c = ' ';
     const auto detail = stderrTail.empty() ? std::string() : ": " + stderrTail;

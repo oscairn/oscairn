@@ -5,9 +5,12 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <new>
@@ -16,6 +19,8 @@
 #include <vector>
 #ifndef _WIN32
 #include <dlfcn.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 using namespace kick::clap;
 #include "AllocationGuard.h"
@@ -71,6 +76,32 @@ int main(int argc, char** argv) {
         check(indexPresetsWithHelper(argv[2], argv[1], 5000, fresh, failure) && names(fresh.plugins[2].presets) == "Quiet;Bright;",
               "and a healthy helper indexes the plugin's presets");
     }
+#ifndef _WIN32
+    {
+        // A hung helper must not outlive the process that started it: that process, killed
+        // outright, never runs the helper's timeout, so the helper ends itself when the stdin
+        // pipe it was given closes. The fixture notes the helper's pid when the provider is asked.
+        const auto directory = std::filesystem::temp_directory_path() / ("oscairn-helper-watch-" + std::to_string(getpid()));
+        std::filesystem::remove_all(directory); std::filesystem::create_directories(directory);
+        const auto log = (directory / "asked").string();
+        setenv("KICK_FIXTURE_PRESETS_HANG", "1", 1); setenv("KICK_FIXTURE_PRESETS_LOG", log.c_str(), 1);
+        const auto launcher = fork(); // a child as the engine-to-be; SIGKILL leaves it no cleanup
+        check(launcher >= 0, "fork a launcher for the hanging preset listing");
+        if (launcher == 0) { ScanResult listed; std::string why; indexPresetsWithHelper(argv[2], argv[1], 30000, listed, why); _exit(0); }
+        int helper = 0; const auto began = std::chrono::steady_clock::now();
+        while (!helper && std::chrono::steady_clock::now() - began < std::chrono::seconds(5)) {
+            std::ifstream line(log); std::string word; int pid = 0;
+            if (line >> word >> pid) helper = pid; else std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        check(helper != 0, "the hung listing reached the fixture's provider");
+        kill(launcher, SIGKILL); int status = 0; waitpid(launcher, &status, 0);
+        bool gone = false; // kill(pid, 0): the orphaned helper answers until it is gone and reaped
+        for (int i = 0; i < 50 && !(gone = kill(helper, 0) != 0); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        check(gone, "the helper ends itself once its launcher is killed");
+        unsetenv("KICK_FIXTURE_PRESETS_HANG"); unsetenv("KICK_FIXTURE_PRESETS_LOG");
+        std::filesystem::remove_all(directory);
+    }
+#endif
     const auto crashed = scan({argv[3]}, argv[2], 1000);
     check(crashed.failures.size() == 1, "scanner crash isolation");
     check(crashed.failures[0].message.find("fixture: crashing during scan") != std::string::npos, "scanner failure keeps the plugin's error output");

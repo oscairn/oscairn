@@ -21,19 +21,22 @@ Oscairn sets out to solve both. How, and how much of it is built today:
   Effects can share one engine the same way ([RFC 0007](docs/rfcs/0007-effect-contexts.md)).
   Sound contexts are a CLAP extension (`oscairn.sound-contexts`, a draft whose
   [header](core/clap-ext/include/oscairn-clap/sound-contexts.h) any plugin can implement), so
-  third-party instruments can be built to do it too; today only Oscairn's own Basic Synth,
-  Legacy Sampler and Delay do (the deprecated Legacy Sampler is no longer bundled; build it from
+  third-party instruments can be built to do it too. Oscairn's own Basic Synth and Delay do, and
+  so do Oscairn FM, Analog and the Sampler from [the package repository](#the-package-repository)
+  (the deprecated Legacy Sampler does too, but is no longer bundled: build it from
   [oscairn/sampler](https://github.com/oscairn/sampler) to install it by hand). A third-party plugin without it still switches instantly, through a
   spare instance per prepared sound, each with its own memory.
 
   How many sounds one instance holds is the plugin's to say: the Basic Synth and the Legacy Sampler
   have eight slots (one is the default sound), fixed so that switching and playing never
   allocate memory on the audio thread; the pool for other plugins also has eight. This limit
-  is per instance, not per Performance: each part has its own instance today, so a Performance
-  of ten parts is ten instances, and a setlist's next Performance brings its own while the last
-  one rings out and goes. A ninth sound prepared on one instance is refused, saying the
+  is per instance, not per Performance. Parts whose plugin can share an instance play one
+  instance, each part its own sound of it
+  ([RFC 0021](docs/rfcs/0021-sounds-performances-and-library.md)); any other plugin has an
+  instance per part, so ten such parts are ten instances. A setlist's next Performance brings
+  its own while the last one rings out and goes. A ninth sound prepared on one instance is refused, saying the
   capacity is full; nothing is taken from a sound that is playing. Spreading sounds across a
-  second instance on its own, and parts sharing one engine, are not built yet; automatic
+  second instance on its own is not built yet; automatic
   preparation and retirement of sounds is planned with [RFC 0007](docs/rfcs/0007-effect-contexts.md).
 - **Seamless Performance changes.** Opening another Performance, from a setlist or the
   library, lets the outgoing one's held notes and tails ring out while new notes play the new
@@ -68,11 +71,17 @@ Oscairn is an independent, unofficial project. It is not affiliated with or endo
 Behringer, Klark Teknik or Music Tribe. KICK is a product of Klark Teknik; the name is used
 here only to describe compatibility.
 
-> **Status:** early, and moving quickly (November 2026). What runs today:
+> **Status:** alpha, and moving quickly (November 2026). There is no release to download yet:
+> build it from source ([Try it](#try-it)). The desktop app is tested on macOS; Linux builds and
+> passes its tests in CI, but the app itself is untested there. What runs today:
 >
 > - a graph of CLAP plugins, with optional LV2, played sample-accurately live or rendered
 >   offline, following its own tempo or an external MIDI clock, with CLAP plugins isolated
 >   in worker processes in the desktop app;
+> - **instruments and effects** to install from the Library's Catalog: Oscairn FM (based on
+>   Dexed), Analog (based on Surge XT), the Sampler (based on sfizz), effects and an
+>   arpeggiator, besides those that come with the app (the Basic Synth, Modular, Delay, an
+>   LFO, a step sequencer, and MIDI transpose, delay and splitters);
 > - **Performances** of parts and buses (splits, layers, sends, scenes with transitions,
 >   controls such as Super Knobs, undo), saved as [folders](docs/performance-format.md) and
 >   changed seamlessly while notes and tails ring out;
@@ -132,8 +141,7 @@ Enable the initial LV2 host with `-DOSCAIRN_LV2=ON` for the core, renderer or de
 Install `lilv` and `lv2` with Homebrew, or `liblilv-dev` and `lv2-dev` on Debian/Ubuntu.
 It defaults to OFF so CLAP-only builds keep their existing dependency set.
 See [LV2 hosting](core/lv2-host/README.md) for loading bundles, supported extensions,
-limits and examples. The desktop's default demo and layouts still use the three CLAP
-plugins; there is no graphical plugin browser yet.
+limits and examples. The desktop's default demo and layouts use CLAP plugins.
 
 ### The package repository
 

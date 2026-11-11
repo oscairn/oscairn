@@ -74,6 +74,25 @@ int main(int argc, char** argv)
         s.note(false, 60, 0); x.run(s);
         check(s.redo() && !s.hasNode(synth), "redo removes it again");
         check(s.undo() && s.hasNode(synth), "and undo restores it again");
+        // A key held through the removal and its undo: the plugin comes back silent, not sounding a
+        // note nothing can release; a key pressed with the undo plays, and releases.
+        auto removeHeld = [&] {
+            s.note(true, 62, 1); x.run(s); x.run(s);
+            check(near(x.l[0], .4), "a held key sounds: " + std::to_string(x.l[0]));
+            s.removeFromPart(keys, synth); s.remove(synth, UserWires::Reconnect); s.commit(); x.run(s); x.run(s);
+            check(s.undo(), "undo the removal under the held key");
+        };
+        removeHeld(); x.run(s); x.run(s);
+        check(near(x.l[0], 0), "back silent: " + std::to_string(x.l[0]));
+        s.note(false, 62, 0); x.run(s);
+        removeHeld(); s.note(true, 64, 1); x.run(s); x.run(s);
+        check(near(x.l[0], .4), "a key pressed with the undo is not lost: " + std::to_string(x.l[0]));
+        s.note(false, 64, 0); x.run(s);
+        check(near(x.l[0], 0), "and releases: " + std::to_string(x.l[0]));
+        s.note(false, 62, 0); x.run(s);
+        s.note(true, 60, 1); x.run(s); x.run(s);
+        check(near(x.l[0], .4), "a new note plays: " + std::to_string(x.l[0]));
+        s.note(false, 60, 0); x.run(s);
 
         // Replacing a plugin, undone: the old one comes back with its state.
         s.replace(synth, fixture, "org.kick.test.synth"); s.service();

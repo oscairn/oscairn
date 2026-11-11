@@ -1000,6 +1000,21 @@ namespace oscairn
                                     for(const auto& remaining:next.noteSources)value=std::max(value,remaining.route->pedal[port][channel]);
                                     return value;
                                 });
+                    // A plugin the new plan no longer runs (removed, replaced) is sent no releases for the notes it
+                    // holds: its voices stop where they are. One an undo brings back chokes them first, in its first block.
+                    auto stranded=[](Plan::Step& step,bool set){
+                        bool was=false;
+                        if(step.contexts.empty())was=step.activity && step.activity->stranded.exchange(set,std::memory_order_relaxed);
+                        else for(auto& c:step.contexts)was|=c.activity->stranded.exchange(set,std::memory_order_relaxed); // the nodes' own: the engine's goes with them
+                        return was;};
+                    for(auto& old:current_->steps)
+                        if(std::none_of(plan->steps.begin(),plan->steps.end(),[&](const auto& s){return s.host==old.host;}) &&
+                           std::any_of(old.noteSources.begin(),old.noteSources.end(),[](const auto& s){return s.route->live()!=0;}))
+                            stranded(old,true);
+                    for(auto& next:plan->steps)if(stranded(next,false)){
+                        if(next.releaseCount==next.releases.size()){next.releaseOverflow=true;continue;}
+                        auto choke=kick::clap::Event::note(false,-1,0,0,-1,-1);reinterpret_cast<clap_event_header_t*>(choke.bytes.data())->type=CLAP_EVENT_NOTE_CHOKE;
+                        next.releases[next.releaseCount++]=choke;}
                     // A tap gone: note offs for the notes it holds, and its pedals released.
                     for(auto& old:current_->taps)
                         if(std::none_of(plan->taps.begin(),plan->taps.end(),[&](const auto& t){return t.route==old.route;}))

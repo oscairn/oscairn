@@ -467,6 +467,8 @@ namespace oscairn
             // stand in until then), and the notes it gave up: faded out, and choked at the hard limit.
             std::atomic<float> rest{-1}, perNote{-1}, seedRest{-1}, seedNote{-1};
             std::atomic<uint64_t> stolen{0}, hardChokes{0};
+            // Its plugin left the plan holding notes no release reached; audio thread (Graph::beginBlock).
+            std::atomic<bool> stranded{false};
             // Audio thread, from a plugin with oscairn.voice-budget (step 4): it gives up its own
             // voices, so perNote is per voice and a note costs perNoteScale of them (its voices per
             // note); and whether it said it honors the volume expression the host's fade uses.

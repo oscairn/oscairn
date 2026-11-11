@@ -142,7 +142,7 @@ namespace oscairn::standalone
                     for(const auto& l : b.lanes) { shape += "["; boxes(l.boxes); shape += "]"; }
                 }
             };
-            for(const auto& p : *list) { shape += "|" + std::to_string(p.id) + ":" + p.name + ":" + std::to_string(p.through) + ":" + devicesName(p.devices) + ">" + devicesName(p.midiOut.devices) + "/" + std::to_string(p.midiOut.channel); boxes(p.chain); }
+            for(const auto& p : *list) { shape += "|" + std::to_string(p.id) + ":" + p.name + ":" + std::to_string(p.through) + ":" + devicesName(p.devices) + ">" + devicesName(p.midiOut.devices) + "/" + std::to_string(p.midiOut.channel) + "/ch" + std::to_string(p.channel); boxes(p.chain); }
         }
         shape += "|selected:" + std::to_string(selectedSplit_) + "/" + std::to_string(selectedLane_);
         if(page_ == routingPage)
@@ -415,7 +415,25 @@ namespace oscairn::standalone
                         // The wire on or off (a scene stores which).
                         toggle(r.removeFromLeft(64).reduced(2, 4), "On", [this, wire = row.wire] { for(const auto& w : graph_.wires) if(w.id == wire) return w.enabled; return true; },
                                [this, wire = row.wire](bool on) { edit([wire, on](Control& c) { c.setWireEnabled(wire, on); c.commit(); }); });
-                        if(input.port == notesPort) { if(row.user) button(r.removeFromLeft(100).reduced(2), "Disconnect", [this, wire = row.wire] { edit([wire](Control& c) { disconnect(c, wire); }); }); continue; }
+                        if(input.port == notesPort)
+                        {
+                            // A note wire from the keys and MIDI: which channel it takes (the same
+                            // choice as a part's input; a part's own wire is set on its page).
+                            if(row.keys && row.user)
+                            {
+                                int channel = 0;
+                                for(const auto& w : graph_.wires) if(w.id == row.wire) channel = zoneChannel(w.zones);
+                                auto choice = std::make_unique<juce::ComboBox>("Wire channel");
+                                choice->addItem("Any channel", 1);
+                                for(int ch = 1; ch <= 16; ++ch) choice->addItem("Channel " + juce::String(ch), ch + 1);
+                                choice->addItem("Several channels", 18);
+                                choice->setSelectedId(channel > 0 ? channel + 1 : channel < 0 ? 18 : 1, juce::dontSendNotification);
+                                choice->setTooltip("Only notes on this MIDI channel play along; Any channel takes every one");
+                                choice->onChange = [this, wire = row.wire, raw = choice.get()] { const int ch = raw->getSelectedId() == 18 ? -1 : raw->getSelectedId() - 1; if(ch >= 0) edit([wire, ch](Control& c) { setWireChannel(c, wire, ch); }); };
+                                choice->setBounds(r.removeFromLeft(150).reduced(2)); addAndMakeVisible(*choice); controls_.push_back(std::move(choice));
+                            }
+                            if(row.user) button(r.removeFromLeft(100).reduced(2), "Disconnect", [this, wire = row.wire] { edit([wire](Control& c) { disconnect(c, wire); }); }); continue;
+                        }
                         const auto wire = row.wire;
                         auto rowOf = [this, node, wire]() -> MixRow { for(const auto& i : inputsOf(graph_, node)) for(const auto& x : i.rows) if(x.wire == wire) return x; return {}; };
                         auto mix = [this, wire, rowOf](auto change) { return [this, wire, rowOf, change](auto value) { auto x = rowOf(); change(x, value); edit([wire, x](Control& c) { setWireMix(c, wire, x.level, x.pan, x.mute, x.solo); }); }; };
@@ -856,8 +874,22 @@ namespace oscairn::standalone
                 {
                     // Which devices play it (RFC 0012), picked from a menu.
                     auto* pick = button(r.removeFromLeft(340).reduced(2), text(devicesName(p->devices)), {});
-                    pick->setTooltip("Which keyboards and controllers play this part, whatever channel they send on");
+                    pick->setTooltip(p->channel > 0 ? "Which keyboards and controllers play this part, on channel " + juce::String(p->channel)
+                                                    : "Which keyboards and controllers play this part, whatever channel they send on");
                     pick->onClick = [this, id, pick] { devicesMenu(id, *pick); };
+                    break;
+                }
+                case K::Channel:
+                {
+                    // Which MIDI channel plays it; the rest pass whatever channel they send on.
+                    auto channel = std::make_unique<juce::ComboBox>("Input channel");
+                    channel->addItem("Any channel", 1);
+                    for(int ch = 1; ch <= 16; ++ch) channel->addItem("Channel " + juce::String(ch), ch + 1);
+                    channel->addItem("Several channels", 18);
+                    channel->setSelectedId(p->channel > 0 ? p->channel + 1 : p->channel < 0 ? 18 : 1, juce::dontSendNotification);
+                    channel->setTooltip("Only notes on this MIDI channel play the part; Any channel takes every one");
+                    channel->onChange = [this, id, raw = channel.get()] { const int ch = raw->getSelectedId() == 18 ? -1 : raw->getSelectedId() - 1; if(ch >= 0) edit([id, ch](Control& c) { setChannel(c, id, ch); }); };
+                    channel->setBounds(r.removeFromLeft(170).reduced(2)); addAndMakeVisible(*channel); controls_.push_back(std::move(channel));
                     break;
                 }
                 case K::NoteLimit:

@@ -45,6 +45,7 @@ namespace oscairn::standalone
         int reserve = 0, priority = 0;   // the shared budget's (RFC 0018): notes left it, and 0..10, lower giving way first
         int lowKey = 0, highKey = 127, transpose = 0; // the input's first zone, or all keys
         int lowVelocity = 0, highVelocity = 127;      // its velocities, as MIDI values
+        int channel = 0;                              // the MIDI channel its input zones take: 1..16, 0 any, -1 more than one set
         std::vector<PartBox> chain;
         double level = 1, pan = 0;
         bool mute = false, solo = false;
@@ -75,7 +76,7 @@ namespace oscairn::standalone
     };
     constexpr uint32_t notesPort = 0xFFFFFFFFu;
     // One source into a node's input: a row of that input's implicit Mix.
-    struct MixRow { uint32_t wire = 0; std::string source; double level = 1, pan = 0; bool mute = false, solo = false, user = false, editable = true; };
+    struct MixRow { uint32_t wire = 0; std::string source; double level = 1, pan = 0; bool mute = false, solo = false, user = false, editable = true, keys = false; }; // keys: notes from the graph input, the keys and MIDI
     struct RoutingInput { uint32_t port = 0; std::string name; std::vector<MixRow> rows; };
     struct RoutingState
     {
@@ -142,7 +143,7 @@ namespace oscairn::standalone
     // how many grid columns each takes (0: the whole row). Every surface lays out the same list.
     struct PartField
     {
-        enum class Kind { Devices, NoteLimit, Reserve, Priority, Zone, Transpose, Output, MidiOut, Level, Send };
+        enum class Kind { Devices, Channel, NoteLimit, Reserve, Priority, Zone, Transpose, Output, MidiOut, Level, Send };
         Kind kind;
         std::string label;
         int span = 1;
@@ -167,6 +168,9 @@ namespace oscairn::standalone
     void removeBox(Control&, uint32_t part, NodeId node);                         // the node, reconnecting its user wires
     void setZone(Control&, uint32_t part, int lowKey, int highKey, int transpose);
     void setVelocities(Control&, uint32_t part, int low, int high); // MIDI values 0 to 127 the part plays
+    // The MIDI channel a zone list asks for: 1..16 one channel, 0 any, -1 more than one set.
+    int zoneChannel(const std::vector<NoteZone>& zones);
+    void setChannel(Control&, uint32_t part, int channel); // 0: any; only the zones' channels change
     // Device selectors, as the Part page shows and picks them: "Built in + KeyLab 61".
     std::string devicesName(const std::vector<DeviceRule>&);
     DeviceRule ruleFor(const MidiEndpoint&);      // that device by name, or its port number
@@ -184,6 +188,7 @@ namespace oscairn::standalone
     void connectNodes(Control&, NodeId from, NodeId to, WireKind);                 // main port to main port
     void disconnect(Control&, uint32_t wire);
     void setWireMix(Control&, uint32_t wire, double level, double pan, bool mute, bool solo);
+    void setWireChannel(Control&, uint32_t wire, int channel); // a note wire's zones' channels; 0: any
     NodeId addLoose(Control&, const PluginChoice&);                                // a node in no part
     void removeLoose(Control&, NodeId node);                                       // reconnecting its user wires
     // Control lines (RFC 0011): a plugin's param-target lane drives a control (macro 0: a new one,

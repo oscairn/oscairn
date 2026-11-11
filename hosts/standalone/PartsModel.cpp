@@ -2,6 +2,7 @@
 #include "PartsModel.h"
 #include "oscairn/pads.h"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <filesystem>
 #include <limits>
@@ -81,6 +82,7 @@ namespace oscairn::standalone
                 row.lowKey = z.lowKey; row.highKey = z.highKey; row.transpose = z.transpose;
                 row.lowVelocity = int(std::lround(z.lowVelocity * 127)); row.highVelocity = int(std::lround(z.highVelocity * 127));
             }
+            row.channel = zoneChannel(p.input.zones);
             // Boxes in chain order; a split is a box holding its lanes' boxes.
             std::function<std::vector<PartBox>(const std::vector<NodeId>&)> boxes = [&](const std::vector<NodeId>& chain) {
                 std::vector<PartBox> out;
@@ -656,7 +658,7 @@ namespace oscairn::standalone
             std::string source = w.from == graphInput ? (w.kind == WireKind::Notes ? std::string("Keys & MIDI") : "Audio in") : nameOf(g, w.from);
             if(w.owner == WireOwner::Part) for(const auto& p : g.parts) if(p.id == w.part) source += " (" + p.name + ")";
             // A lane's or split's wire takes its Mix from the lane; the rest are edited here.
-            at->rows.push_back({w.id, source, w.level, w.pan, w.mute, w.solo, w.owner == WireOwner::User, w.split == 0});
+            at->rows.push_back({w.id, source, w.level, w.pan, w.mute, w.solo, w.owner == WireOwner::User, w.split == 0, w.from == graphInput});
         };
         std::vector<kick::clap::Port> ports;
         if(node == graphOutput) ports = g.topology.audioLayout.outputs;
@@ -848,7 +850,7 @@ namespace oscairn::standalone
         using K = PartField::Kind;
         std::vector<PartField> fields;
         // What plays it and how: only for a part that plays notes.
-        if(p.notes) fields.insert(fields.end(), {{K::Devices, "Plays from"}, {K::NoteLimit, "Notes at once"}, {K::Reserve, "Reserved notes"}, {K::Priority, "Priority"}, {K::Zone, "Keys and velocity", 0}, {K::Transpose, "Transpose"}});
+        if(p.notes) fields.insert(fields.end(), {{K::Devices, "Plays from"}, {K::Channel, "Channel"}, {K::NoteLimit, "Notes at once"}, {K::Reserve, "Reserved notes"}, {K::Priority, "Priority"}, {K::Zone, "Keys and velocity", 0}, {K::Transpose, "Transpose"}});
         fields.push_back({K::Output, "Plays to"});
         if(!p.bus) fields.push_back({K::MidiOut, "MIDI out"}); // a bus has no notes to send
         fields.push_back({K::Level, "Level"});
@@ -870,6 +872,52 @@ namespace oscairn::standalone
             low = std::clamp(low, 0, 127); high = std::clamp(high, low, 127);
             zone.lowVelocity = low / 127.0; zone.highVelocity = high / 127.0;
         });
+    }
+
+    int zoneChannel(const std::vector<NoteZone>& zones)
+    {
+        uint16_t mask = zones.empty() ? 0xFFFF : 0; // no zones: every note passes
+        for(const auto& z : zones) mask |= z.channels;
+        return mask == 0xFFFF ? 0 : (mask & uint16_t(mask - 1)) ? -1 : std::countr_zero(unsigned(mask)) + 1;
+    }
+
+    namespace
+    {
+        // The channels a zone list takes, with every other field kept; zones left identical are
+        // one zone (two would layer the same note), and a zone left passing everything goes,
+        // as editZone drops one.
+        void zoneChannels(std::vector<NoteZone>& zones, int channel)
+        {
+            const auto mask = uint16_t(channel ? 1u << (channel - 1) : 0xFFFF);
+            if(zones.empty() && channel) zones.push_back(NoteZone{});
+            for(auto& z : zones) z.channels = mask;
+            for(size_t i = 0; i < zones.size();)
+                if(std::find(zones.begin(), zones.begin() + long(i), zones[i]) != zones.begin() + long(i)) zones.erase(zones.begin() + long(i));
+                else ++i;
+            if(channel == 0 && zones.size() == 1 && zones.front() == NoteZone{}) zones.clear();
+        }
+    }
+
+    void setChannel(Control& c, uint32_t part, int channel)
+    {
+        const auto parts = c.graphState().parts;
+        const auto found = std::find_if(parts.begin(), parts.end(), [&](const Part& p) { return p.id == part; });
+        if(found == parts.end()) throw std::invalid_argument("unknown part");
+        auto input = found->input;
+        zoneChannels(input.zones, channel);
+        c.setPartInput(part, input);
+        c.commit();
+    }
+
+    void setWireChannel(Control& c, uint32_t wire, int channel)
+    {
+        const auto wires = c.graphState().wires;
+        const auto found = std::find_if(wires.begin(), wires.end(), [&](const Wire& w) { return w.id == wire; });
+        if(found == wires.end() || found->kind != WireKind::Notes) throw std::invalid_argument("unknown note wire");
+        auto zones = found->zones;
+        zoneChannels(zones, channel);
+        c.setZones(wire, zones);
+        c.commit();
     }
 
     std::string devicesName(const std::vector<DeviceRule>& rules)

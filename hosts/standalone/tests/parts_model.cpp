@@ -104,13 +104,39 @@ int main(int argc, char** argv)
         check(soft.lowVelocity == 64 && soft.highVelocity == 127 && soft.lowKey == 48 && soft.highKey == 72, "velocities and keys together");
         setVelocities(s, lead, 0, 127); setZone(s, lead, 0, 127, 0);
         check(s.parts()[1].input.zones.empty(), "all keys and velocities again: no zone left");
+        // The channel pick (the Part page's Channel choice): only the zones' channels change;
+        // Any channel clears the filter, and a part with one zone left passing everything keeps none.
+        setZone(s, lead, 48, 72, 0); setChannel(s, lead, 2);
+        auto channed = readParts(s.graphState()).parts[1];
+        check(channed.channel == 2 && s.parts()[1].input.zones.front().channels == (1u << 1) && channed.lowKey == 48 && channed.highKey == 72,
+              "channel 2, keys kept: " + std::to_string(channed.channel));
+        check(zoneChannel({{0, 127, 0, 1, uint16_t(1u << 2)}, {0, 127, 0, 1, uint16_t(1u << 5)}}) == -1 && zoneChannel({}) == 0, "several channels read as several, none as any");
+        setChannel(s, lead, 0);
+        channed = readParts(s.graphState()).parts[1];
+        check(channed.channel == 0 && s.parts()[1].input.zones.front().channels == 0xFFFF && channed.lowKey == 48, "Any channel clears the filter, keys kept");
+        setZone(s, lead, 0, 127, 0);
+        check(s.parts()[1].input.zones.empty() && readParts(s.graphState()).parts[1].channel == 0, "no limits left: no zone");
+        // The Routing view's channel choice on a note wire from the keys.
+        {
+            const auto g = s.graphState();
+            const auto wire = std::find_if(g.wires.begin(), g.wires.end(), [&](const Wire& w) { return w.kind == WireKind::Notes && w.from == graphInput && w.part == lead; });
+            check(wire != g.wires.end(), "the lead's input wire");
+            setWireChannel(s, wire->id, 3);
+            const auto g2 = s.graphState();
+            const auto wire2 = std::find_if(g2.wires.begin(), g2.wires.end(), [&](const Wire& w) { return w.id == wire->id; });
+            check(wire2 != g2.wires.end() && wire2->zones.size() == 1 && wire2->zones[0].channels == (1u << 2), "the wire's zones take channel 3");
+            setWireChannel(s, wire->id, 0);
+            const auto g3 = s.graphState();
+            const auto wire3 = std::find_if(g3.wires.begin(), g3.wires.end(), [&](const Wire& w) { return w.id == wire->id; });
+            check(wire3 != g3.wires.end() && (wire3->zones.empty() || wire3->zones.front().channels == 0xFFFF), "and any channel again");
+        }
         // The Part page's fields, as every surface lays them out: a part that plays notes has
         // its inputs, keys and transpose; every part where it plays, its level and a send per bus.
         {
             const auto state = readParts(s.graphState());
             std::vector<std::string> labels;
             for(const auto& f : partFields(state.parts[1], state)) labels.push_back(f.label + (f.span ? "" : " (row)"));
-            const std::vector<std::string> expected{"Plays from", "Notes at once", "Reserved notes", "Priority", "Keys and velocity (row)", "Transpose", "Plays to", "MIDI out", "Level", "Send to Room"};
+            const std::vector<std::string> expected{"Plays from", "Channel", "Notes at once", "Reserved notes", "Priority", "Keys and velocity (row)", "Transpose", "Plays to", "MIDI out", "Level", "Send to Room"};
             check(labels == expected, "a part's fields, in order");
             const auto busFields = partFields(state.buses[0], state);
             check(busFields.size() == 2 && busFields[0].kind == PartField::Kind::Output && busFields[1].kind == PartField::Kind::Level, "a bus: where it plays and its level, no send to itself");

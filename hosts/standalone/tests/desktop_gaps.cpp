@@ -289,6 +289,47 @@ int main(int argc, char** argv)
                 view.refresh(); settle();
                 snapshot(view, "part-midi-out");
             }
+            // The MIDI channel a part's input takes: Any channel, or one of 1 to 16, beside the
+            // devices pick. Only the input zones' channels change; keys and velocities stay.
+            {
+                standalone::PartsView view(engine, argv[2]);
+                standalone::setDesktopMode(view, 1); view.setEmbedded(true); view.setSize(1180, 820);
+                view.showPart(lead);
+                juce::ComboBox* pick = nullptr;
+                auto channelBox = [&] { pick = nullptr; for(auto* c : view.getChildren()) if(auto* b = dynamic_cast<juce::ComboBox*>(c); b && b->getName() == "Input channel") pick = b; return pick != nullptr; };
+                auto devicesButton = [&] { for(auto* c : view.getChildren()) if(auto* b = dynamic_cast<juce::TextButton*>(c); b && b->getTooltip().contains("play this part")) return b; return static_cast<juce::TextButton*>(nullptr); };
+                auto input = [&] { for(const auto& p : engine.graph().parts) if(p.id == lead) return p.input; return PartInput{}; };
+                engine.edit([&](Control& c) { standalone::setZone(c, lead, 48, 72, 0); });
+                check(wait([&] { view.refresh(); return channelBox() && pick->getSelectedId() == 1 && pick->getItemText(0) == "Any channel"; }) && input().zones.front().channels == 0xFFFF,
+                      "the input takes every channel at first");
+                check(devicesButton() && devicesButton()->getTooltip().contains("whatever channel they send on"), "the devices pick says so while any channel plays");
+                if(pick) pick->setSelectedId(3, juce::sendNotificationSync); // Channel 2
+                check(wait([&] { return input().zones.front().channels == (1u << 1); }) && input().zones.front().lowKey == 48 && input().zones.front().highKey == 72,
+                      "Channel 2: only that channel plays, the keys kept");
+                check(wait([&] { view.refresh(); return devicesButton() && devicesButton()->getTooltip().contains("on channel 2"); }), "and the devices pick names the channel");
+                // Zones set elsewhere to several channels show Several channels and wait for the user.
+                engine.edit([&](Control& c) {
+                    auto in = input(); in.zones = {NoteZone{48, 72, 0, 1, uint16_t(1u << 1)}, NoteZone{48, 72, 0, 1, uint16_t(1u << 5)}}; c.setPartInput(lead, in); c.commit();
+                });
+                check(wait([&] { view.refresh(); return channelBox() && pick->getSelectedId() == 18 && input().zones.size() == 2; }), "several channels shown, kept: " + (pick ? pick->getText().toStdString() : std::string()));
+                if(pick) pick->setSelectedId(5, juce::sendNotificationSync); // Channel 4
+                check(wait([&] { return input().zones.size() == 1 && input().zones[0].channels == (1u << 3); }), "picking one channel brings them together, keys kept");
+                // Saved and opened again: the same choice, the same keys.
+                const auto folder = data.getChildFile("part-channel");
+                standalone::SoundAction save; save.kind = standalone::SoundAction::SavePerformance; save.directory = folder.getFullPathName().toStdString();
+                engine.soundAction(std::move(save));
+                check(wait([&] { return !engine.soundBusy() && folder.getChildFile("performance.json").existsAsFile(); }), "the Performance saved: " + engine.soundMessage());
+                standalone::SoundAction open; open.kind = standalone::SoundAction::LoadPerformance; open.directory = folder.getFullPathName().toStdString();
+                engine.soundAction(std::move(open));
+                check(wait([&] { return !engine.soundBusy() && !engine.graph().parts.empty(); }) && input().zones.front().channels == (1u << 3),
+                      "opened again with channel 4: " + engine.soundMessage());
+                check(wait([&] { view.refresh(); return channelBox() && pick->getSelectedId() == 5; }), "and the Part page shows it");
+                if(pick) pick->setSelectedId(1, juce::sendNotificationSync); // Any channel
+                check(wait([&] { return input().zones.front().channels == 0xFFFF && input().zones.front().lowKey == 48; }), "Any channel clears the filter, keys kept");
+                view.refresh(); settle();
+                snapshot(view, "part-channel");
+                std::filesystem::remove_all(folder.getFullPathName().toStdString());
+            }
             // Clock out beside the transport (RFC 0012 step 2): cabling, kept by the engine.
             {
                 standalone::SequencerPane pane(engine);

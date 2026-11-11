@@ -290,9 +290,15 @@ set_tests_properties(parallel-render PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_
 
 add_executable(oscairn-worker-host-test engine/tests/worker_host.cpp)
 target_link_libraries(oscairn-worker-host-test PRIVATE oscairn_plugin_host)
+# A worker writing huge sizes into the shared block: the engine keeps its own.
+add_executable(oscairn-size-hostile-worker plugin-host/src/worker_main.cpp plugin-host/src/Worker.cpp engine/tests/hostile_sizes.cpp)
+target_compile_definitions(oscairn-size-hostile-worker PRIVATE OSCAIRN_HOSTILE_SIZES)
+target_include_directories(oscairn-size-hostile-worker PRIVATE plugin-host/src)
+target_link_libraries(oscairn-size-hostile-worker PRIVATE oscairn_plugin_host)
 add_test(NAME worker-host COMMAND oscairn-worker-host-test $<TARGET_FILE:oscairn-plugin-worker>
     $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-audio-fixture> $<TARGET_FILE:oscairn_transpose>
-    $<TARGET_FILE:oscairn_midi_delay> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_basic_synth>)
+    $<TARGET_FILE:oscairn_midi_delay> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_basic_synth>
+    $<TARGET_FILE:oscairn-size-hostile-worker>)
 set_tests_properties(worker-host PROPERTIES TIMEOUT 60)
 
 # Phase 4: a new sample rate activates every plugin again at it, in the engine and in workers.

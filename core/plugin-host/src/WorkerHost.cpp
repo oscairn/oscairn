@@ -399,7 +399,8 @@ namespace oscairn
                     void* memory = mmap(nullptr, bytes_, PROT_READ | PROT_WRITE, MAP_SHARED, shm_, 0);
                     if(memory == MAP_FAILED) throw std::runtime_error("Cannot map worker shared memory");
                     shared_ = new(memory) Shared();
-                    shared_->inputChannels = channels(inputs_); shared_->outputChannels = channels(outputs_) + ring; shared_->ringOutChannels = ring;
+                    inChannels_ = channels(inputs_); outChannels_ = channels(outputs_) + ring;
+                    shared_->inputChannels = inChannels_; shared_->outputChannels = outChannels_; shared_->ringOutChannels = ring;
                     shared_->maxFrames = capacity_; shared_->sampleRate = process_->rate; shared_->parameterCount = uint32_t(parameters_.size());
                     for(uint32_t i = 0; i < parameters_.size(); ++i) shared_->parameterValues[i].store(parameters_[i].defaultValue);
                     connect();
@@ -973,14 +974,14 @@ namespace oscairn
                 // While busy (until finish), a restart waits; it sets failed first, so a block that starts later sees it.
                 busy_.store(true);
                 auto& s = *shared_;
-                if(process_->failed.load() || frames > s.maxFrames || count > maxEvents || (count && !events) || (no && !outputs)) return silence();
+                if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) return silence();
                 if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; } // restarted
                 // A block the worker has not finished yet: stay silent rather than queue another.
                 if(s.done.load(std::memory_order_acquire) != sequence_) { workerMisses_.fetch_add(1, std::memory_order_relaxed); return silence(); }
-                for(uint32_t c = 0; c < s.inputChannels; ++c)
+                for(uint32_t c = 0; c < inChannels_; ++c)
                 {
-                    if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, s.input(c));
-                    else std::fill_n(s.input(c), frames, 0.f);
+                    if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, audioIn(c));
+                    else std::fill_n(audioIn(c), frames, 0.f);
                 }
                 uint32_t kept = 0;
                 s.inputBytes.used = 0;
@@ -993,7 +994,7 @@ namespace oscairn
                 s.frames = frames; s.eventCount = kept; s.hasTransport = transport != nullptr;
                 s.setLimits = limitsWaiting_ && shareLimits(s);
                 if(s.setLimits) limitsWaiting_ = false;
-                s.ringOut = s.ringOutChannels && no >= s.outputChannels;
+                s.ringOut = s.ringOutChannels && no >= outChannels_;
                 if(transport) s.transport = *transport;
                 sent_ = std::chrono::steady_clock::now();
                 requestedAt_.store(sent_.time_since_epoch().count(), std::memory_order_release);
@@ -1028,7 +1029,7 @@ namespace oscairn
                 for(uint32_t c = 0; c < no; ++c)
                 {
                     if(!outputs[c]) continue;
-                    if(c < s.outputChannels) std::copy_n(s.output(c), frames, outputs[c]);
+                    if(c < outChannels_) std::copy_n(audioOut(c), frames, outputs[c]);
                     else std::fill_n(outputs[c], frames, 0.f);
                     for(uint32_t f = 0; f < frames && faded_ + f < fadeFrames_; ++f) outputs[c][f] *= float(faded_ + f) / float(fadeFrames_);
                 }
@@ -1123,6 +1124,13 @@ namespace oscairn
             int shm_ = -1;
             Shared* shared_ = nullptr; size_t bytes_ = 0;
             uint32_t capacity_ = 0;
+            // The block's channel counts, the engine's own: the worker may write anything into the
+            // shared block, so the audio thread never reads these back from it (as its unshare and
+            // voice-report bounds do). Set with the block, kept for the worker's whole life.
+            uint32_t inChannels_ = 0, outChannels_ = 0;
+            // The audio buffers, placed by the engine's capacity_, not the block's maxFrames.
+            float* audioIn(uint32_t channel) const noexcept { return reinterpret_cast<float*>(shared_ + 1) + size_t(channel) * capacity_; }
+            float* audioOut(uint32_t channel) const noexcept { return audioIn(inChannels_ + channel); }
             // Recovery record, under control: state or snapshot, the sounds prepared and discarded
             // since, selections and parameter values.
             std::filesystem::path record_;

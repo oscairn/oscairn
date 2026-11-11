@@ -245,10 +245,33 @@ void libraryRoot(const std::string& worker, const std::string& fixture)
     std::filesystem::remove_all(dir);
 }
 
+// The sizes the shared block carries (maxFrames, inputChannels, outputChannels) are the engine's
+// own: a worker that writes huge numbers into them after every block (oscairn-size-hostile-worker)
+// must not make the engine's audio thread read or write past the shared mapping, and the plugin
+// must still render exactly what it renders in the engine.
+void hostileSizes(const std::string& worker, const std::string& fixture)
+{
+    constexpr uint32_t frames = 64;
+    auto local = oscairn::loadPlugin(fixture, "org.kick.test.effect", 48000, frames, oscairn::ProcessingMode::Offline);
+    auto remote = oscairn::loadPluginInWorker(worker, fixture, "org.kick.test.effect", 48000, frames, oscairn::ProcessingMode::Offline);
+    check(local->setParameter(7, .25) && remote->setParameter(7, .25), "set the gain in the size-hostile worker");
+    std::vector<std::vector<float>> in(2, std::vector<float>(frames));
+    std::vector<float> la(frames), ra(frames), lb(frames), rb(frames);
+    const float* inputs[]{in[0].data(), in[1].data()}; float* outA[]{la.data(), ra.data()}; float* outB[]{lb.data(), rb.data()};
+    for(uint32_t block = 0; block < 20; ++block)
+    {
+        for(uint32_t i = 0; i < frames; ++i) { in[0][i] = float(std::sin(.05 * (block * frames + i))); in[1][i] = float(std::cos(.03 * (block * frames + i))); }
+        check(local->process(inputs, 2, outA, 2, frames, nullptr, 0, nullptr) && remote->process(inputs, 2, outB, 2, frames, nullptr, 0, nullptr),
+              "block " + std::to_string(block) + " through the size-hostile worker");
+        check(la == lb && ra == rb, "block " + std::to_string(block) + ": the size-hostile worker's output matches the engine's");
+    }
+    check(remote->failure().empty(), "the size-hostile worker kept running: " + remote->failure());
+}
+
 int main(int argc, char** argv)
 {
-    if(argc < 3) { std::fprintf(stderr, "usage: %s WORKER PLUGIN...\n", argv[0]); return 2; }
-    try { libraryRoot(argv[1], argv[2]); renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc; ++i) compare(argv[1], argv[i]); }
+    if(argc < 4) { std::fprintf(stderr, "usage: %s WORKER PLUGIN... SIZE-HOSTILE-WORKER\n", argv[0]); return 2; }
+    try { libraryRoot(argv[1], argv[2]); renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc - 1; ++i) compare(argv[1], argv[i]); hostileSizes(argv[argc - 1], argv[2]); }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     return failures ? 1 : 0;
 }

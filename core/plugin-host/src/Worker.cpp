@@ -139,6 +139,9 @@ namespace oscairn::worker
 #ifdef OSCAIRN_HOSTILE_WORKER
     void hostileReport(Shared& s) noexcept; // a test's worker only: overwrites what the plugin reported
 #endif
+#ifdef OSCAIRN_HOSTILE_SIZES
+    void hostileSizes(Shared& s, uint32_t frames, uint32_t inputs, uint32_t outputs, bool wreck) noexcept; // a test's worker only: writes lies into the block's sizes, and takes them back
+#endif
 
     namespace
     {
@@ -248,6 +251,9 @@ namespace oscairn::worker
         // before it starts, as the main thread may re-read the plugin's parameters meanwhile.
         void audio(PluginHost& host, Shared& s, uint32_t blockFrames, std::vector<clap_id> ids)
         {
+#ifdef OSCAIRN_HOSTILE_SIZES
+            const uint32_t trueFrames = s.maxFrames, trueInputs = s.inputChannels, trueOutputs = s.outputChannels; // the engine's, true until the first wreck
+#endif
             std::vector<const float*> in(s.inputChannels);
             std::vector<float*> out(s.outputChannels);
             for(uint32_t c = 0; c < s.inputChannels; ++c) in[c] = s.input(c);
@@ -267,6 +273,9 @@ namespace oscairn::worker
                 if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
                 uint32_t events = 0; // SysEx pointed at this process's mapping of the pool
                 for(uint32_t i = 0; i < std::min(s.eventCount, maxEvents); ++i) if(unshare(s.events[i], s.inputBytes)) s.events[events++] = s.events[i];
+#ifdef OSCAIRN_HOSTILE_SIZES
+                hostileSizes(s, trueFrames, trueInputs, trueOutputs, false); // the plugin's host reads them
+#endif
                 const bool ok = host.process(in.data(), s.inputChannels, out.data(), s.outputChannels - (s.ringOut ? 0 : s.ringOutChannels), s.frames,
                                              events ? s.events : nullptr, events, s.hasTransport ? &s.transport : nullptr);
                 // Values the plugin reported while processing are published with the block, so the
@@ -300,6 +309,9 @@ namespace oscairn::worker
                 }
 #ifdef OSCAIRN_HOSTILE_WORKER
                 hostileReport(s);
+#endif
+#ifdef OSCAIRN_HOSTILE_SIZES
+                hostileSizes(s, trueFrames, trueInputs, trueOutputs, true); // lies, for the engine's audio thread
 #endif
                 s.done.store(seen, std::memory_order_release);
                 wake(s.done);

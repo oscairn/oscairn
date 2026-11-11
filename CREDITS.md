@@ -76,7 +76,8 @@ authoritative.
   `audio-lines.svg` `d4ff831aee48c9d1fb7ace29409aa67b4989ce3b71b3bc119391a90235369a8a`,
   `tags.svg` `724af60488ee052f78f8b3a5622adb06e8c30abea41c9c48a718f808a7bcdc4a`,
   `chevrons-down-up.svg` `6a4d80c9eb419e633aa7111fb4d35e707aeed0ae938e3e9e145a4b1e2c64b3a8`,
-  `keyboard-music.svg` `dec9747e56fc6293eda2ddf41b2c12bb577b044209eb24e247ba0f2ea7b67a54`.
+  `keyboard-music.svg` `dec9747e56fc6293eda2ddf41b2c12bb577b044209eb24e247ba0f2ea7b67a54`,
+  `settings.svg` `84c7db2736977ab865c2ca0b10684d8741551a734429c49c9495498837711fa2`.
 
 ## Sample decoding
 

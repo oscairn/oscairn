@@ -39,7 +39,7 @@ int main()
         {
             const auto p = Profile::parse(json);
             check(p.id == id && p.screen() && p.screen()->surface == "panel" && p.audio.block == 128 && p.reliability == "instrument", id + " parses as a panel instrument");
-            check(p.offers("oscairn.library") && !p.offers("oscairn.nothing"), id + " offers its apps");
+            check(p.offers("oscairn.library") && p.offers("oscairn.settings") && !p.offers("oscairn.nothing"), id + " offers its apps");
         }
         const auto kick = loadProfile("kick"), ignite = loadProfile("ignite"), qemu = loadProfile("qemu-aarch64"), modx = loadProfile("modx-m");
         check(kick.name == "Behringer KICK" && kick.screen()->layout == "kick-screen" && kick.screen()->touch, "the KICK shows its screen layout, by touch");
@@ -67,7 +67,7 @@ int main()
         check(kick.cpuBudget() == .75 && kick.memoryBudget() == 2048ull * 1024 * 1024 * 8 / 10, "an instrument's budget: 75% of the audio thread, 80% of its memory");
         const auto desktop = loadProfile("");
         check(desktop.id == "desktop" && desktop.compute.cores >= 1 && desktop.screen() && desktop.screen()->surface == "desktop" && desktop.screen()->layout == "desktop" &&
-              desktop.reliability == "desktop" && desktop.offers("oscairn.setlist"), "the desktop's own profile, from the computer");
+              desktop.reliability == "desktop" && desktop.offers("oscairn.setlist") && desktop.offers("oscairn.settings"), "the desktop's own profile, from the computer");
         bool missing = false; try { loadProfile("no-such-device"); } catch(const std::invalid_argument&) { missing = true; }
         check(missing, "an unknown profile is refused");
 

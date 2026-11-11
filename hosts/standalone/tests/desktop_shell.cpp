@@ -152,11 +152,17 @@ int main(int argc, char** argv)
                 {
                     std::string opened;
                     standalone::Launcher home(engine, {{"Performance", "piano", [] { return juce::String("Untitled: play or edit it"); }, [&] { opened = "Performance"; }},
-                                                       {"Library", "library-big", {}, [&] { opened = "Library"; }}});
+                                                       {"Library", "library-big", {}, [&] { opened = "Library"; }},
+                                                       {"Settings", "settings", [] { return juce::String("Studio"); }, [&] { opened = "Settings"; }}});
                     standalone::setDesktopMode(home, 1); home.setSize(1280, 800);
-                    check(home.apps() == 2 && home.name(1) == "Library", "Home lists its apps");
-                    home.open(1);
+                    check(home.apps() == 3 && home.name(1) == "Library" && home.name(2) == "Settings", "Home lists its apps, Settings among them");
+                    check(std::any_of(IconData::namedResourceList, IconData::namedResourceList + IconData::namedResourceListSize,
+                                      [](const char* r) { return juce::String(IconData::getNamedResourceOriginalFilename(r)) == "settings.svg"; }), "the Settings tile's gear is carried");
+                    home.open(2);
                     check(opened.empty(), "an app opens after the click, not during it");
+                    check(wait([&] { return opened == "Settings"; }), "the Settings tile opens the Settings app");
+                    opened.clear();
+                    home.open(1);
                     check(wait([&] { return opened == "Library"; }), "a tile opens its app");
                     snapshot(home, "launcher");
                 }

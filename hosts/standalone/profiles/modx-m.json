@@ -24,7 +24,7 @@
   "screens": [ { "width": 800, "height": 480, "touch": true, "diagonal": 178, "surface": "panel", "layout": "modx-m-screen" } ],
   "midi": { "din": 1, "usbDevice": true, "usbHost": true },
   "reliability": "instrument",
-  "apps": ["oscairn.performance", "oscairn.library", "oscairn.setlist"],
+  "apps": ["oscairn.performance", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
   "onScreenKeyboard": false,
   "estimated": ["platform", "compute", "audio", "controls", "screens", "midi"]
 }

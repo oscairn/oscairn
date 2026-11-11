@@ -173,9 +173,9 @@ An illustrative profile (the values are an example, not a real product's):
   A controller's profile has none.
 - **`reliability`:** its level (RFC 0027): `desktop`, `instrument` or `pass-through`.
 - **`apps`:** the apps installed with it (RFC 0022), by app ID; the user can add others. The
-  built-in ones are `oscairn.performance`, `oscairn.library`, `oscairn.setlist` and
-  `oscairn.groovebox`; Home offers the profile's, so a device that plays no Performances (a
-  recorder, a DJ deck) can leave `oscairn.performance` out.
+  built-in ones are `oscairn.performance`, `oscairn.library`, `oscairn.setlist`,
+  `oscairn.groovebox` and `oscairn.settings`; Home offers the profile's, so a device that plays no
+  Performances (a recorder, a DJ deck) can leave `oscairn.performance` out.
 - **`alwaysAvailable`** (optional, built with RFC 0025 step 6): the app IDs whose memory is
   reserved whether they run or not, so they always open; each must be in `apps`. It is the
   default of a setting the musician can change. Absent: `oscairn.performance` and

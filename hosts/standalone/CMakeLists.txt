@@ -35,6 +35,7 @@ juce_add_binary_data(oscairn_standalone_icons HEADER_NAME IconData.h NAMESPACE I
     icons/library-big.svg
     icons/list-music.svg
     icons/layout-grid.svg
+    icons/settings.svg
     icons/octagon-x.svg
     icons/ellipsis-vertical.svg
     icons/layers.svg

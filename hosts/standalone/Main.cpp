@@ -541,6 +541,11 @@ namespace oscairn::standalone
                     const auto n = int( engine_.takes().size() );
                     return n ? juce::String( n ) + ( n == 1 ? " take" : " takes" ) : juce::String( "Takes and captures" ); },
                     [this] { showRecordings(); } } );
+            if( profile_.offers( "oscairn.settings" ) && settingsApp() ) // the same as the Setlist: a process, so not with --in-process
+                apps.push_back( { "Settings", "settings", [this] {
+                    const auto device = juce::String( engine_.sessionStatus().audioDevice );
+                    return device.isNotEmpty() ? device : juce::String( "Audio, controllers, keys" ); },
+                    [this] { showSettings(); } } );
             return apps;
         }
         void showLibraryApp()
@@ -558,6 +563,11 @@ namespace oscairn::standalone
         void showSettings()
         {
             if( !admitted( "Settings", [this] { showSettings(); } ) ) return;
+            if( panel() ) // as the Setlist: its window over a frame under the top bar
+            {
+                if( bringForward( "Settings" ) ) return;
+                auto place = std::make_unique<AppPlace>( *appProcesses_, "oscairn.settings" ); auto& app = *place; openOnScreen( "Settings", "settings", app, std::move( place ) ); return;
+            }
             appProcesses_->open( "oscairn.settings", {}, inputMode_ == InputMode::Touch ? 2 : 1 );
         }
         void showSetlist()

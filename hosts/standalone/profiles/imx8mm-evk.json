@@ -10,7 +10,7 @@
   "midi": { "usbDevice": true, "usbHost": true },
   "network": { "ethernet": true },
   "reliability": "instrument",
-  "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
+  "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
   "onScreenKeyboard": true,
   "estimated": ["compute", "audio", "screens", "network"]
 }

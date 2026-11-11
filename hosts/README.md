@@ -193,8 +193,9 @@ beside Follow MIDI clock in the Groovebox, chooses the outputs the tempo, Start 
 it is the device's cabling, not saved with the Performance.
 
 The app starts at **Home** ([RFC 0030](../docs/rfcs/0030-system-shell-launcher-and-navigation.md)):
-a top bar and the apps as tiles, each with a line of its state: Performance, Library, Setlist
-and Groovebox, those the profile offers (the computer's and the KICK's offer all four). In the desktop layout, Home is the window's content: Performance opens in its place (its
+a top bar and the apps as tiles, each with a line of its state: Performance, Library, Setlist,
+Groovebox and Settings, those the profile offers (the computer's and the KICK's offer all five;
+Settings' tile is there where the app runs as a process). In the desktop layout, Home is the window's content: Performance opens in its place (its
 toolbar has a Home button), and the other apps open in their own windows; **Apps → Home** goes
 back. In a panel layout, Home covers the screen, and each app opens on the screen in a frame whose top
 bar has its name and a Home icon, unless a layout button is bound to `home`. Layout buttons bound

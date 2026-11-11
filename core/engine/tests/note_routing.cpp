@@ -249,6 +249,29 @@ int main(int argc,char** argv){try{
         check(tapOut({&off,1}).empty() && tapOut({&on,1}).empty(),"a release of nothing held, and a new note on channel 1, stay out");
     }
     {
+        // A part's zones changing while the sustain pedal holds a released note: the pedal-up ends
+        // that note even when the new zones no longer pass its channel, or the hardware synth the
+        // part plays keeps it sounding until a panic; a pedal-down stays zone-filtered.
+        NoteRoute route(16u);uint32_t nextId=1; // a MIDI destination: it ends notes itself, on the pedal-up
+        NoteZones first,second;first.count=second.count=1;first.zones[0].channels=1u<<0;second.zones[0].channels=1u<<1;
+        std::vector<Event> delivered;size_t ended=0;
+        auto emit=[&](const Event& e){delivered.push_back(e);return true;};
+        auto end=[&](const NoteRoute::Note&,uint32_t){++ended;};
+        const auto keyOn=Event::midi(0x90,60,127),keyOff=Event::midi(0x80,60,0),pedalDown=Event::midi(0xb0,64,127),pedalUp=Event::midi(0xb0,64,0);
+        check(route.route(keyOn,nextId,emit,end,&first),"a note out through channel 1's zone");
+        check(route.route(pedalDown,nextId,emit,end,&first),"pedal down through channel 1's zone");
+        check(route.route(keyOff,nextId,emit,end,&first),"the key's release reaches the device");
+        check(route.sounding()==1,"the pedal sustains it");
+        size_t mark=delivered.size();
+        check(route.route(pedalUp,nextId,emit,end,&second),"the pedal-up passes zones that no longer take channel 1");
+        check(ended==1 && route.sounding()==0,"the pedal-up ends the sustained note the old zones played");
+        check(delivered.size()==mark+1 && delivered.back().header()->type==CLAP_EVENT_MIDI &&
+            reinterpret_cast<const clap_event_midi_t*>(delivered.back().header())->data[2]==0,"and the device is told the pedal is up");
+        mark=delivered.size();
+        check(route.route(pedalDown,nextId,emit,end,&second),"a pedal-down on a channel the zones do not pass");
+        check(delivered.size()==mark,"stays dropped: only the pedal-up joins the releases");
+    }
+    {
         // A block that fills every event slot: 512 notes (kick::clap::Host::maxBlockEvents) must
         // all reach the plugin. The block's free-running beat rides along with them and gets its
         // own room; without it the 512th note overflows and panics the destination.

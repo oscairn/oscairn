@@ -720,8 +720,8 @@ What changes for the plugin:
   version stable across platforms, and keep everything the plugin needs inside its bundle;
   files it installs elsewhere do not go with it. Libraries too: a build may load only the
   system's libraries and its bundle's own (macOS: `/usr/lib/`, `/System/`, `@loader_path` and
-  `@rpath` into the bundle; Linux: glibc, libstdc++, libgcc_s, ALSA and the image's X11 and font
-  libraries, or `$ORIGIN`), so link Homebrew's or `/usr/local`'s statically or bundle them.
+  `@rpath` into the bundle; Linux: [the allowlist](#the-linux-allowlist) below), so link
+  Homebrew's or `/usr/local`'s statically or bundle them.
   `oscairn-sign plugin-package` and `oscairn-plugin-check` check it
   ([the rules](library-archive.md#plugin-packages)). When a device's store already has a different
   build of the same version for a platform, it keeps that one and notes that the incoming build
@@ -765,6 +765,45 @@ What changes for the plugin:
 - **A plugin that is not here,** in another version, or that fails to load opens as a
   stand-in: silent, its ports and parameters as saved, its state written back unchanged, so
   installing the plugin later brings the sound back.
+
+### The Linux allowlist
+
+A Linux build (`linux-arm64`, and `linux-x86_64` too) runs on the device's image, so it may
+load only what every image carries and need no newer glibc or libstdc++ than the image's:
+
+- **Libraries (`DT_NEEDED`):** glibc's `libc.so.6`, `libm.so.6`, `libdl.so.2`, `libpthread.so.0`,
+  `librt.so.1` and the loader, `ld-linux-aarch64.so.1` (`ld-linux-x86-64.so.2` on x86-64);
+  GCC's `libgcc_s.so.1` and `libstdc++.so.6`; ALSA's `libasound.so.2`; and the windowing and
+  font libraries `libX11.so.6`, `libXext.so.6`, `libXrandr.so.2`, `libXinerama.so.1`,
+  `libXcursor.so.1`, `libXrender.so.1`, `libfreetype.so.6` and `libfontconfig.so.1`. Each is in
+  both images below. Link everything else statically, even what an image happens to have for
+  the host (`libsndfile` is in the QEMU image's and not the EVK's): not `libGL` (no image has it).
+- **No RPATH or RUNPATH.** A Linux `.clap` is one file, with nothing beside it to find.
+  (`oscairn-sign` accepts `$ORIGIN` entries only so a build folder can find its own libraries;
+  any other entry is refused. Oscairn's own releases have none, and the package repository's
+  import refuses any.)
+- **Symbol versions (`DT_VERNEED`):** none newer than the image's, and no `GLIBC_PRIVATE`:
+
+  | Image | glibc | Newest `GLIBC_` | libstdc++ | Newest `GLIBCXX_` |
+  | --- | --- | --- | --- | --- |
+  | QEMU ARM64 (`oscairn_qemu_aarch64_defconfig`) | 2.44 | `GLIBC_2.44` | GCC 15.3.0's, `libstdc++.so.6.0.34` | `GLIBCXX_3.4.34` |
+  | i.MX8M Mini EVK (`oscairn_imx8mm_evk_defconfig`) | 2.44 | `GLIBC_2.44` | GCC 15.3.0's, `libstdc++.so.6.0.34` | `GLIBCXX_3.4.34` |
+
+  Both are Buildroot 2026.08.1 (`os/scripts/container-build.sh`) with its own toolchain: its
+  `package/glibc/glibc.mk` has glibc 2.44 (`2.44-57-g34106fee`), its default GCC is 15.3.0, and
+  `readelf -V` of each built image's `/lib/libc.so.6` and `/usr/lib/libstdc++.so.6` gives the
+  newest versions above. `oscairn_qemu_aarch64_rt_defconfig` has the same toolchain lines and
+  was not read built. A build made on GitHub's `ubuntu-24.04-arm` runner (glibc 2.39, GCC 13)
+  fits: Oscairn Arpeggiator and Oscairn Effects built as their CI builds them need only
+  `libc.so.6`, `libm.so.6`, `libstdc++.so.6`, `libgcc_s.so.1` and the loader, up to `GLIBC_2.38`
+  and `GLIBCXX_3.4.32`. A build made on a newer distribution than the image can need a newer
+  version, and then does not load on a device.
+
+`oscairn-sign plugin-package` refuses a build that breaks any of these, reading each ELF file
+itself (no `readelf`); `oscairn-sign verify` lists each problem as an `outside` line, which the
+package repository's checks refuse, and `oscairn-plugin-check` reports it. The libraries and
+the newest versions are in `core/control/src/libraries.cpp`, tested by `control-libraries`;
+raise the versions with the image's Buildroot, never ahead of it.
 
 ## Testing
 

@@ -2,7 +2,8 @@
 //
 // A plugin build must not load libraries from outside the system and its own bundle
 // (package.h, outsideLibraries). Tiny Mach-O and ELF files made here, thin and fat: one linking
-// a Homebrew library is refused, one linking only the system's or its own bundle's passes; the
+// a Homebrew library is refused, one linking only the system's or its own bundle's passes, one
+// needing a newer glibc or libstdc++ than the image's is refused; the
 // parser survives every truncation and thousands of random corruptions. oscairn-sign
 // plugin-package refuses such a build unless told to pack it anyway, and says so. Every plugin
 // named on the command line (Oscairn's own) passes.
@@ -64,25 +65,34 @@ namespace
         return b + body;
     }
     // A 64-bit little-endian ELF shared object: one PT_LOAD over the whole file and a PT_DYNAMIC
-    // with DT_NEEDED for each library, DT_RUNPATH when given, and the string table.
-    std::string elf(const std::vector<std::string>& needed, const std::string& runpath = {})
+    // with DT_NEEDED for each library, DT_RUNPATH when given, the string table, and when given
+    // the symbol versions it needs (DT_VERNEED: one Verneed, a Vernaux for each).
+    std::string elf(const std::vector<std::string>& needed, const std::string& runpath = {}, const std::vector<std::string>& versions = {})
     {
         std::string strings(1, '\0');
         std::vector<std::pair<uint64_t, uint64_t>> dynamic;
         for(const auto& n : needed) { dynamic.push_back({1, strings.size()}); strings += n + '\0'; }
         if(!runpath.empty()) { dynamic.push_back({29, strings.size()}); strings += runpath + '\0'; }
-        const uint64_t phoff = 64, dynAt = phoff + 2 * 56, strAt = dynAt + (dynamic.size() + 3) * 16; // and DT_STRTAB, DT_STRSZ, DT_NULL
+        std::string table;
+        for(size_t i = 0; i < versions.size(); ++i)
+        {
+            put(table, 16 + i * 16 + 8, strings.size(), 4); put(table, 16 + i * 16 + 12, i + 1 < versions.size() ? 16 : 0, 4);
+            strings += versions[i] + '\0';
+        }
+        if(!versions.empty()) { put(table, 0, 1, 2); put(table, 2, versions.size(), 2); put(table, 4, 1, 4); put(table, 8, 16, 4); put(table, 12, 0, 4); }
+        const uint64_t phoff = 64, dynAt = phoff + 2 * 56, strAt = dynAt + (dynamic.size() + (versions.empty() ? 3 : 5)) * 16; // and DT_STRTAB, DT_STRSZ, (DT_VERNEED, DT_VERNEEDNUM,) DT_NULL
         dynamic.push_back({5, strAt}); dynamic.push_back({10, strings.size()});
+        if(!versions.empty()) { dynamic.push_back({0x6ffffffe, strAt + strings.size()}); dynamic.push_back({0x6fffffff, 1}); }
         std::string b;
         b += "\x7f" "ELF"; put(b, 4, 2, 1); put(b, 5, 1, 1); put(b, 6, 1, 1);
         put(b, 16, 3, 2); put(b, 18, 183, 2); put(b, 32, phoff, 8); put(b, 52, 64, 2); put(b, 54, 56, 2); put(b, 56, 2, 2);
-        const uint64_t total = strAt + strings.size();
+        const uint64_t total = strAt + strings.size() + table.size();
         put(b, phoff, 1, 4); put(b, phoff + 8, 0, 8); put(b, phoff + 16, 0, 8); put(b, phoff + 32, total, 8); put(b, phoff + 40, total, 8);
         put(b, phoff + 56, 2, 4); put(b, phoff + 56 + 8, dynAt, 8); put(b, phoff + 56 + 16, dynAt, 8); put(b, phoff + 56 + 32, (dynamic.size() + 1) * 16, 8);
         b.resize(dynAt);
         for(const auto& [tag, value] : dynamic) { put(b, b.size(), tag, 8); put(b, b.size(), value, 8); }
         put(b, b.size(), 0, 8); put(b, b.size(), 0, 8);
-        return b + strings;
+        return b + strings + table;
     }
 }
 
@@ -139,11 +149,21 @@ int main(int argc, char** argv)
         write(lv2 / "own.so", elf({"libc.so.6", "libown.so.1"}, "$ORIGIN/lib"));
         write(lv2 / "lib/libown.so.1", elf({"libc.so.6"}));
         check(outsideLibraries(lv2).empty(), "a bundle's own library through $ORIGIN passes:" + join(outsideLibraries(lv2)));
+        // Symbol versions: up to the image's glibc and libstdc++ pass; a newer or private one does not.
+        const auto versioned = elf({"libc.so.6", "libstdc++.so.6"}, {}, {"GLIBC_2.17", "GLIBC_2.44", "GLIBCXX_3.4.34", "CXXABI_1.3.15", "GCC_3.0"});
+        write(root / "versions.so.clap", versioned);
+        check(outsideLibraries(root / "versions.so.clap").empty(), "symbol versions up to the image's pass:" + join(outsideLibraries(root / "versions.so.clap")));
+        for(const auto& version : {"GLIBC_2.45", "GLIBCXX_3.4.35", "GLIBC_3.0", "GLIBC_PRIVATE"})
+        {
+            write(root / "newer.so.clap", elf({"libc.so.6"}, {}, {"GLIBC_2.17", version}));
+            const auto found = outsideLibraries(root / "newer.so.clap");
+            check(found.size() == 1 && found[0].find(version) != std::string::npos, std::string("refused: ") + version + join(found));
+        }
 
         // Untrusted bytes: every truncation and random corruptions are reported or pass, never crash.
         std::mt19937 rng(7);
         size_t reported = 0;
-        for(const auto& sample : {system, fat({system}), elf({"libc.so.6", "libx.so"}, "$ORIGIN")})
+        for(const auto& sample : {system, fat({system}), elf({"libc.so.6", "libx.so"}, "$ORIGIN"), versioned})
         {
             for(size_t n = 0; n < sample.size(); ++n) { write(root / "cut.clap", sample.substr(0, n)); reported += !outsideLibraries(root / "cut.clap").empty(); }
             for(int i = 0; i < 3000; ++i)

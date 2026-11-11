@@ -113,7 +113,10 @@ or `readelf`, so a macOS build is checked on Linux too:
   plugins link ALSA through `juce_audio_devices` even when they never open a device), and the
   desktop's windowing and font libraries the image builds with it (`libX11.so.6`,
   `libXext.so.6`, `libXrandr.so.2`, `libXinerama.so.1`, `libXcursor.so.1`, `libXrender.so.1`,
-  `libfreetype.so.6`, `libfontconfig.so.1`). Not `libGL`: the image has none. A sanitizer build of Oscairn
+  `libfreetype.so.6`, `libfontconfig.so.1`). Not `libGL`: the image has none. And no symbol
+  version it needs (`DT_VERNEED`) is newer than every image has: up to `GLIBC_2.44` and
+  `GLIBCXX_3.4.34`, and no `GLIBC_PRIVATE`
+  ([the Linux allowlist](plugin-porting.md#the-linux-allowlist)). A sanitizer build of Oscairn
   (tests, never a release) also accepts its sanitizer's runtime (`libtsan.so`, `libasan.so`,
   `libubsan.so`, `liblsan.so`, `libclang_rt.*`) and the rpaths macOS adds to find it, since it
   links that runtime into every binary it makes; a normal build refuses them.

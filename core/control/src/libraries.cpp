@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The libraries a plugin build loads (package.h, outsideLibraries): Mach-O load commands and
-// rpaths, ELF DT_NEEDED and RPATH/RUNPATH, read from the files themselves, so a macOS build is
+// rpaths, ELF DT_NEEDED, RPATH/RUNPATH and symbol versions, read from the files themselves, so a macOS build is
 // checked on Linux CI too. Every byte is untrusted: each read is bounds-checked, counts are
 // capped, and a file that does not parse is said to, never trusted.
 #include "oscairn/package.h"
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <set>
+#include <tuple>
 
 namespace oscairn
 {
@@ -153,7 +155,29 @@ namespace oscairn
                 }
             }
 
-            // Linux: what every Oscairn image carries, or the bundle's own through $ORIGIN.
+            // A glibc or libstdc++ symbol version newer than every Oscairn image has, or a private one: what
+            // is wrong with it, or empty. The images are Buildroot 2026.08.1's glibc 2.44 and GCC 15.3's
+            // libstdc++ (docs/plugin-porting.md, "The Linux allowlist"); raise these with the image.
+            static std::string tooNew(const std::string& version)
+            {
+                for(const auto& [prefix, newest, image] : {std::tuple{"GLIBC_", std::vector<unsigned>{2, 44}, "glibc 2.44"},
+                                                           std::tuple{"GLIBCXX_", std::vector<unsigned>{3, 4, 34}, "GCC 15's libstdc++, GLIBCXX_3.4.34"}})
+                {
+                    if(version.rfind(prefix, 0) != 0) continue;
+                    std::vector<unsigned> parts;
+                    for(size_t at = std::strlen(prefix); at <= version.size();)
+                    {
+                        const auto stop = std::min(version.find('.', at), version.size());
+                        const auto digits = version.substr(at, stop - at);
+                        if(digits.empty() || digits.size() > 6 || digits.find_first_not_of("0123456789") != std::string::npos) return "needs " + version + " (not a released version)";
+                        parts.push_back(unsigned(std::stoul(digits)));
+                        at = stop + 1;
+                    }
+                    if(parts > newest) return "needs " + version + " (newer than the image's " + image + ")";
+                }
+                return {};
+            }
+            // Linux: what every Oscairn image carries, or the bundle's own through $ORIGIN, needing no newer glibc or libstdc++.
             void elf(const Bytes& b, const std::string& file, const std::string& from)
             {
                 const auto kind = uint8_t(b.data.at(4)), order = uint8_t(b.data.at(5));
@@ -175,8 +199,8 @@ namespace oscairn
                 if(dynamic == segments.end()) return; // linked statically: it loads nothing
                 if(!b.has(dynamic->offset, dynamic->size)) throw std::runtime_error("the dynamic section outside the file");
                 std::vector<uint64_t> needed, paths;
-                uint64_t table = 0, tableSize = 0;
-                bool haveTable = false;
+                uint64_t table = 0, tableSize = 0, versions = 0, versionCount = 0;
+                bool haveTable = false, haveVersions = false;
                 for(uint64_t at = dynamic->offset; at + 2 * word <= dynamic->offset + dynamic->size; at += 2 * word)
                 {
                     const auto tag = b.get(at, word, big), value = b.get(at + word, word, big);
@@ -185,18 +209,41 @@ namespace oscairn
                     else if(tag == 15 || tag == 29) paths.push_back(value); // RPATH, RUNPATH
                     else if(tag == 5) { table = value; haveTable = true; }
                     else if(tag == 10) tableSize = value;
+                    else if(tag == 0x6ffffffe) { versions = value; haveVersions = true; } // VERNEED
+                    else if(tag == 0x6fffffff) versionCount = value;                      // VERNEEDNUM
                     if(needed.size() + paths.size() > 4096) throw std::runtime_error("too many dynamic entries");
                 }
                 if(needed.empty() && paths.empty()) return;
                 if(!haveTable) throw std::runtime_error("no string table");
-                // The string table's address, as a place in the file.
-                uint64_t start = 0;
-                bool mapped = false;
-                for(const auto& s : segments)
-                    if(s.type == 1 && table >= s.address && table - s.address < s.size) { start = s.offset + (table - s.address); mapped = true; break; }
-                if(!mapped || !b.has(start, 0)) throw std::runtime_error("the string table outside the file");
+                // An address, as a place in the file.
+                auto placed = [&](uint64_t address, const char* what)
+                {
+                    for(const auto& s : segments)
+                        if(s.type == 1 && address >= s.address && address - s.address < s.size && b.has(s.offset + (address - s.address), 0)) return s.offset + (address - s.address);
+                    throw std::runtime_error(std::string(what) + " outside the file");
+                };
+                const uint64_t start = placed(table, "the string table");
                 const uint64_t end = tableSize && tableSize <= b.data.size() - start ? start + tableSize : b.data.size();
                 auto name = [&](uint64_t offset) { if(offset >= end - start) throw std::runtime_error("a name outside the string table"); return b.text(start + offset, end); };
+                // The symbol versions it needs (Verneed, each with its Vernaux list): none newer than every image's.
+                if(haveVersions)
+                {
+                    uint64_t entry = placed(versions, "the version needs");
+                    for(uint64_t i = 0; i < std::min<uint64_t>(versionCount, 4096); ++i)
+                    {
+                        uint64_t aux = entry + b.get(entry + 8, 4, big);
+                        for(uint64_t k = 0, count = b.get(entry + 2, 2, big); k < count; ++k)
+                        {
+                            if(const auto newer = tooNew(name(b.get(aux + 8, 4, big))); !newer.empty()) problem(file, newer);
+                            const auto next = b.get(aux + 12, 4, big);
+                            if(!next) break;
+                            aux += next;
+                        }
+                        const auto next = b.get(entry + 12, 4, big);
+                        if(!next) break;
+                        entry += next;
+                    }
+                }
                 std::vector<std::string> own; // $ORIGIN folders, relative to the root
                 for(const auto offset : paths)
                 {

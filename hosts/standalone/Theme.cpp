@@ -271,7 +271,7 @@ std::vector<std::pair<juce::String,juce::String>> Theme::installed() const {
     return result;
 }
 void Theme::reload() {
-    const auto id=selection_.loadFileAsString().trim();if(id==lastSelection_ && lastSelection_.isNotEmpty())return;
+    const auto id=selection_.loadFileAsString().trim();if(lastSelection_==id)return;
     lastSelection_=id;
     try{set(load(find(id.isEmpty()?defaultId():id)));error_.clear();return;}catch(const std::exception& e){error_=e.what();}
     // The selected theme is unusable: use the default theme, or the emergency theme without fonts.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <optional>
 namespace oscairn::standalone {
 enum class Ink { Background, Surface, Raised, Border, Text, Muted, Accent, Positive, Danger, Count };
 // Font files a theme carries, as paths relative to its folder. Empty only for the emergency theme.
@@ -100,6 +101,7 @@ private:
     void timerCallback() override;
     juce::File root_,builtIn_,selection_;
     juce::Typeface::Ptr regular_,bold_;
-    juce::String lastSelection_,error_;
+    std::optional<juce::String> lastSelection_; // none until the first load: an empty selection is the default theme
+    juce::String error_;
 };
 }

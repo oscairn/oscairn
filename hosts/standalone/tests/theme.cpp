@@ -55,6 +55,10 @@ int main(int argc,char** argv){try{
     {Theme fresh(root,builtIn);
         check(themeData().id=="oscairn-dark" && fresh.error().isEmpty(),"built-in default theme applied on first launch");
         check(face(fresh)=="Inter/Regular" && face(fresh,true)=="Inter/Bold","theme fonts used for regular and bold text");
+        // Nothing chosen yet: the selection is looked at each second, and the theme is not loaded
+        // again while it stays unchanged (each load made new typefaces and repainted every window).
+        {const auto before=fresh.getTypefaceForFont(juce::Font(juce::FontOptions(14.f)));juce::MessageManager::getInstance()->runDispatchLoopUntil(2500);
+         check(fresh.getTypefaceForFont(juce::Font(juce::FontOptions(14.f))).get()==before.get(),"an unchanged selection does not load the theme again");}
         const auto list=fresh.installed();
         check(list.size()==4 && std::all_of(list.begin(),list.end(),[](const auto& t){return t.first.startsWith("oscairn-");}),"built-in themes listed from their folders");
         // The mark is embedded with the icons, each version an SVG JUCE reads.

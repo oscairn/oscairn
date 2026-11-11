@@ -152,7 +152,7 @@ endif()
 juce_add_console_app(oscairn_theme_test PRODUCT_NAME "Oscairn Theme Test")
 target_sources(oscairn_theme_test PRIVATE tests/theme.cpp Theme.cpp Splash.cpp)
 target_link_libraries(oscairn_theme_test PRIVATE oscairn_standalone_icons juce::juce_gui_extra juce::juce_recommended_config_flags)
-target_compile_definitions(oscairn_theme_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_compile_definitions(oscairn_theme_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME desktop-theme COMMAND oscairn_theme_test "${CMAKE_CURRENT_SOURCE_DIR}/themes" "${CMAKE_CURRENT_SOURCE_DIR}/theme-examples/midnight")
 
 juce_add_console_app(oscairn_profile_test PRODUCT_NAME "Oscairn Profile Test")

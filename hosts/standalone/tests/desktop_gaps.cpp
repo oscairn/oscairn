@@ -307,6 +307,12 @@ int main(int argc, char** argv)
                 check(wait([&] { return input().zones.front().channels == (1u << 1); }) && input().zones.front().lowKey == 48 && input().zones.front().highKey == 72,
                       "Channel 2: only that channel plays, the keys kept");
                 check(wait([&] { view.refresh(); return devicesButton() && devicesButton()->getTooltip().contains("on channel 2"); }), "and the devices pick names the channel");
+                // One undo step, as any part edit: every channel back, the keys kept.
+                engine.edit([](Control& c) { c.undo(); });
+                check(wait([&] { view.refresh(); return !input().zones.empty() && input().zones.front().channels == 0xFFFF && input().zones.front().lowKey == 48 && channelBox() && pick->getSelectedId() == 1; }),
+                      "one undo puts every channel back, the keys kept, and the choice shows it");
+                engine.edit([](Control& c) { c.redo(); });
+                check(wait([&] { view.refresh(); return !input().zones.empty() && input().zones.front().channels == (1u << 1) && channelBox() && pick->getSelectedId() == 3; }), "and redo picks channel 2 again");
                 // Zones set elsewhere to several channels show Several channels and wait for the user.
                 engine.edit([&](Control& c) {
                     auto in = input(); in.zones = {NoteZone{48, 72, 0, 1, uint16_t(1u << 1)}, NoteZone{48, 72, 0, 1, uint16_t(1u << 5)}}; c.setPartInput(lead, in); c.commit();

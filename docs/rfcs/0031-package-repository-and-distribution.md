@@ -105,6 +105,9 @@ Checked when built and tested; the sections below say how.
 - [ ] 8. The official repository goes public: hosting, mirrors, policy
 - [ ] 9. Each version's plugins in the index; repositories' kept state keyed by their root key
       ([finding missing plugins](#finding-missing-plugins))
+      (built 2026-11-11: serials seen and kept indexes keyed by root key and repository ID,
+      version 1's moved once; `control-repository`. Not yet: each version's plugins, the index
+      builder's checks, an address-to-ID map for lookups)
 - [ ] 10. The repository hint, `pluginRepositories`, read, checked and kept in archives,
       Performances and Sounds
 - [ ] 11. `packages.lookup`, and what is missing in installs, prepares, the library and stand-ins
@@ -683,16 +686,32 @@ Each version in the index gains `plugins`, written from its manifest's `plugins`
 
 ### Kept state keyed by the root key
 
-A prerequisite, found by reading the code while designing this; not tested and not fixed here.
-`repositories.json`'s `seen`
-serials and the index kept in `Repositories/` are keyed by the repository ID that the root
-itself gives (`see()` in `core/control/src/packages.cpp`; `<repository>.index.json` in
-`repository::open`, `core/control/src/repository.cpp`). A repository the user added, whose root
-names the official repository's ID (`org.oscairn.main`) with a higher serial, would make the
-device refuse the real one's root as older, and would replace its kept index, which a lookup with
-no network then reads as the official one's. Before any lookup reads kept indexes (step 9), both
-are keyed by the root key's ID and the repository ID together, and the address of each known
-repository maps to them (today `repositories.json` keeps no address-to-ID map).
+A prerequisite, found by reading the code while designing this. Until 2026-11-11
+`repositories.json`'s `seen` serials and the index kept in `Repositories/` were keyed by the
+repository ID that the root itself gives. `control-repository` showed what that let a repository
+the user added do, its root claiming another's ID under its own root key: at the same serial, the
+real repository's listing came from the impostor's kept index (its packages under the real one's
+name); at a higher serial, the real one's root was refused as older than one seen.
+
+Built 2026-11-11: both are keyed by the root key and the repository ID together, `seen` as
+`{"<root key>": {"<repository>": serial}}` (`repositories.json` version 2, `see()` in
+`core/control/src/packages.cpp`) and the kept index as `Repositories/<root key>/<repository>.index.json`
+(`repository::open`, `core/control/src/repository.cpp`). The whole key, not its 16-digit
+fingerprint, which a forger could match with about 2^64 tries. Not by address: a mirror serves the
+same signed root, and must not start a rollback count of its own. So two repositories claiming
+one ID are both usable, each with its own serials and index, told apart by address, key and name
+in the device's list; none is refused for the ID it claims, as the device need not read a root to
+add a repository. Version 1's serials are given, on the first root read after the change, to every
+key then trusted for repositories, so none is lost; its kept indexes are dropped and read again
+whole. `control-repository` tests both.
+
+Still to do before a lookup reads kept indexes: the address of each known repository maps to its
+root key but not to the ID its root gives, so a lookup with no network cannot yet find the kept
+index for an address; and a root refused as older has already been kept by `repository::open`,
+so a lookup with no network would read that older index until the next listing. Apart from kept
+state, the desktop Catalog names each listing by the name its root gives (`packages.job`'s
+`name`), not the name in the device's list, so a repository the user added could still call
+itself "Oscairn" there (read, not tested).
 
 ### Where a device looks
 
@@ -972,7 +991,7 @@ with `system` looks it up and shows the line [above](#at-each-trigger). A client
 | A homograph address (`pаckages.oscairn.org` with a Cyrillic `а`) or `https://packages.oscairn.org@evil.example` | The format allows only lowercase ASCII letters, digits, `.` and `-` in the host, so a lookalike must be written as `xn--…`, and no user info; the key, not the address, is the repository | A plain lookalike in ASCII (`packages-oscairn.org`); the fingerprint and the signed name are shown |
 | A downgrade: a document naming an old version | Revoked versions are never offered; a yanked one asks again, showing why it was withdrawn; versions install side by side, so no other document's version changes; a lower root serial is refused, as now | An old version, neither yanked nor revoked, with a flaw found later: the publisher must yank or revoke it |
 | A hint whose key does not match | A known address with another key: the hint is not used and the known key is kept; a hinted root whose key is not the hint's: refused, nothing kept | None found |
-| A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (step 9) | Today's code, as read, is open to it; not tested: [above](#kept-state-keyed-by-the-root-key) |
+| A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (built 2026-11-11, `control-repository`) | The Catalog names each listing by the name its root gives, so one could still call itself "Oscairn" there (read, not tested): [above](#kept-state-keyed-by-the-root-key) |
 | Tracking through a hint | No fetch from a hint's address on open, prepare or install of a library; only **Look there** | A user who looks tells that host they opened it |
 | Hints as a weight | At most 4096 entries, an address at most 2048 bytes; one job at a time; one **Look there** per tap | None found |
 

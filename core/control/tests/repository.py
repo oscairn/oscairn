@@ -8,7 +8,8 @@ package repository template's index builder, signs its root, and installs from i
 an untrusted root, code from an unknown publisher, an incompatible build, a version needing a
 newer system, a tampered blob, a root whose signature does not verify and an older root are each
 refused, leaving nothing behind. An unpacked package folder installs, and one with a changed
-file is refused.
+file is refused. A root claiming the repository's ID under another root key keeps serials and a
+kept index of its own, and serials kept by ID alone (version 1) still refuse an older root.
 
 With WEB-RPC-SERVER, the same from a local web server instead. Over HTTPS (RFC 0039 step 1), a
 certificate from an authority the system does not trust is refused. The rest runs over HTTPS
@@ -86,7 +87,7 @@ def job(method, params):
 with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
     temp = Path(temporary)
     keys = {}
-    for name in ('publisher', 'root', 'index', 'other'):
+    for name in ('publisher', 'root', 'index', 'other', 'impostor', 'impostor-index'):
         _, key_id, public = run(tool, 'key', temp / f'{name}.key').split()
         keys[name] = (key_id, public)
 
@@ -143,13 +144,13 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         'format': 'oscairn.repository-publisher', 'version': 1, 'id': 'org.kick', 'name': 'KICK', 'key': keys['publisher'][1],
         'verification': 'https://kick.example/.well-known/oscairn-publisher.json'}))
 
-    def site(name, serial, *extra):
+    def site(name, serial, *extra, source=repo, index='index'):
         """The repository as the index builder makes it, signed, with its blobs under blobs/<ab>/."""
         out = temp / name
-        built = subprocess.run([sys.executable, '-I', builder, '--repo', repo, '--oscairn-sign', tool, '--cache', temp / 'cache',
+        built = subprocess.run([sys.executable, '-I', builder, '--repo', source, '--oscairn-sign', tool, '--cache', temp / 'cache',
                                 '--out', out, '--serial', str(serial), *extra], capture_output=True, text=True, timeout=300)
         assert built.returncode == 0, built.stderr
-        run(tool, 'file', temp / 'index.key', out / 'repository.json', out / 'repository.sig')
+        run(tool, 'file', temp / f'{index}.key', out / 'repository.json', out / 'repository.sig')
         for blob in (out / 'blobs.txt').read_text().split():
             (out / 'blobs' / blob[:2]).mkdir(parents=True, exist_ok=True)
             shutil.copyfile(temp / 'cache' / blob, out / 'blobs' / blob[:2] / blob)
@@ -468,6 +469,42 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         state = job('packages.list', {'source': str(older)})
         check(state['state'] == 'failed' and 'older than one this device has seen' in state['error'], 'an older root is refused: ' + state['error'])
 
+        # A repository the user added whose root claims this one's ID, with another root key and
+        # one package fewer (RFC 0031: kept state keyed by the root key). Each is its own
+        # repository: neither takes the other's serial or kept index, and each refuses its own
+        # older root.
+        fake = temp / 'impostor-submissions'
+        shutil.copytree(repo, fake)
+        shutil.rmtree(fake / 'packages' / 'org.kick.other')
+        (temp / 'impostor-index-key.pub').write_text(keys['impostor-index'][1] + '\n')
+        run(tool, 'file', temp / 'impostor.key', temp / 'impostor-index-key.pub', temp / 'impostor-index-key.sig')
+        fake_config = json.loads((fake / 'repository-config.json').read_text())
+        fake_config.update(name='Impostor', rootKey=keys['impostor'][1],
+                           indexKey={'key': keys['impostor-index'][1], 'signature': json.loads((temp / 'impostor-index-key.sig').read_text())[0]['signature']})
+        (fake / 'repository-config.json').write_text(json.dumps(fake_config))
+
+        def kept():  # each kept index: its path under Repositories/, serial and package count
+            return {str(f.relative_to(home / 'Repositories')): (json.loads(f.read_text())['serial'], len(json.loads(f.read_text())['packages']))
+                    for f in (home / 'Repositories').rglob('*.index.json')}
+
+        def lists(source, serial, count, what):
+            state = job('packages.list', {'source': str(source)})
+            check(state['state'] == 'done' and state['serial'] == serial and len(state['packages']) == count,
+                  what + ': ' + (state['error'] or f"serial {state['serial']}, {len(state['packages'])} packages, {state['name']}") + ' ' + json.dumps(kept()))
+
+        rpc('packages.addRepository', {'address': str(temp / 'impostor7'), 'key': keys['impostor'][1], 'name': 'Impostor'})
+        lists(site('impostor7', 7, source=fake, index='impostor-index'), 7, 3, 'a root claiming another repository\'s ID at its serial lists its own packages')
+        lists(good, 7, 4, 'the repository it claims to be still lists its own packages, not the impostor\'s')
+        lists(site('impostor9', 9, source=fake, index='impostor-index'), 9, 3, 'the impostor at a higher serial lists')
+        lists(good, 7, 4, 'the repository it claims to be is not refused as older')
+        check(kept().get(f"{keys['root'][1]}/org.example.test.index.json") == (7, 4) and kept().get(f"{keys['impostor'][1]}/org.example.test.index.json") == (9, 3),
+              'each kept index is kept by its root key: ' + json.dumps(kept()))
+        state = job('packages.list', {'source': str(site('impostor8', 8, source=fake, index='impostor-index'))})
+        check(state['state'] == 'failed' and 'older than one this device has seen (9)' in state['error'], 'the impostor\'s own older root is refused: ' + state['error'])
+        state = job('packages.list', {'source': str(older)})
+        check(state['state'] == 'failed' and 'older than one this device has seen (7)' in state['error'], 'and so is the real one\'s, against its own serial: ' + state['error'])
+        rpc('packages.removeRepository', {'address': str(temp / 'impostor7')})
+
         # An unpacked package folder: the same rules as the archive; hidden files are skipped.
         unpacked = temp / 'unpacked'
         with zipfile.ZipFile(synth) as z:
@@ -610,7 +647,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         known = {r['address']: r['enabled'] for r in rpc('packages.repositories')['repositories']}
         check(known == {official: True, 'https://packages.kick.example': False}, 'one switch turns each on or off: ' + json.dumps(known))
         check(json.loads((home / 'repositories.json').read_text())['enabled'] == {official: True, 'https://packages.kick.example': False} and
-              json.loads((home / 'repositories.json').read_text())['seen'].get('org.example.test') == 7, 'kept by address beside the serials seen')
+              json.loads((home / 'repositories.json').read_text())['seen'].get(keys['root'][1], {}).get('org.example.test') == 7, 'kept by address beside the serials seen')
         rpc('packages.setDeviceRepositories', {'repositories': []})
         check(publisher_key in {k['key'] for k in rpc('trust.list')['keys']}, 'not hidden, it is back')
         # The user's: by address and root key, which is trusted for repositories with it and
@@ -630,6 +667,29 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         known = rpc('packages.repositories')['repositories']
         check(len(known) == 1 and keys['root'][1] not in {k['key'] for k in rpc('trust.list')['keys']} and job('packages.list', {'source': str(good)})['state'] == 'failed',
               'removed, its root key is no longer trusted and it does not read: ' + json.dumps(known))
+    finally:
+        p.stdin.close()
+        p.wait(timeout=30)
+
+    # From version 1's layout, serials and kept indexes by the repository ID alone: each serial
+    # goes to every root key trusted for repositories, so an older root is still refused, and the
+    # old kept indexes go (an empty one here, which a listing would show if it were read).
+    home = temp / 'home-version-1'
+    (home / 'Repositories').mkdir(parents=True)
+    (home / 'repositories.json').write_text(json.dumps({'format': 'oscairn.repositories', 'version': 1, 'seen': {'org.example.test': 7},
+                                                        'added': [{'address': str(good), 'name': 'Test repository', 'key': keys['root'][1]}], 'enabled': {}}))
+    (home / 'Repositories' / 'org.example.test.index.json').write_text(json.dumps({'format': 'oscairn.repository-index', 'version': 1, 'repository': 'org.example.test', 'serial': 7, 'packages': []}))
+    p = subprocess.Popen([server, plugin, '--stdio'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8',
+                         env={**os.environ, 'OSCAIRN_DATA_HOME': str(home)})
+    try:
+        rpc('trust.set', {'key': keys['root'][1], 'name': 'Test repository', 'scope': ['repositories']})
+        state = job('packages.list', {'source': str(older)})
+        check(state['state'] == 'failed' and 'older than one this device has seen (7)' in state['error'], 'after the move, an older root is still refused: ' + state['error'])
+        lists(good, 7, 4, 'and the current one lists, not from the old kept index')
+        written = json.loads((home / 'repositories.json').read_text())
+        check(written['version'] == 2 and written['seen'] == {keys['root'][1]: {'org.example.test': 7}, official_key: {'org.example.test': 7}} and
+              written['added'][0]['address'] == str(good) and kept() == {f"{keys['root'][1]}/org.example.test.index.json": (7, 4)},
+              'the serial is kept for each trusted root key, and the old kept index is gone: ' + json.dumps(written['seen']) + ' ' + json.dumps(kept()))
     finally:
         p.stdin.close()
         p.wait(timeout=30)

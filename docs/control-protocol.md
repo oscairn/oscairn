@@ -1280,7 +1280,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `blobs/<first two hex digits>/<sha256>`, as the
   [index builder](../tools/package-repository/template/README.md) and a static host lay them
   out. From the web, the index this device read last from a repository is kept in the data
-  folder's `Repositories/` and used again while the root's `serial` is unchanged, or brought up
+  folder's `Repositories/`, by the root's key and the repository ID it gives (so a root that
+  claims another repository's ID keeps its own), and used again while the root's `serial` is unchanged, or brought up
   to date by the delta the root names from its serial; package files come from the root's
   `mirrors` in turn, then its `blobBase`, then the address itself, each checked by its SHA-256,
   the next tried when one does not verify, and a download cut short is resumed by the next
@@ -1289,8 +1290,9 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   fetches `http://` only. Its root key must be in the trust store for `repositories`; the root key's signature
   over the index key, the index key's over the root, the index's and the package file's
   SHA-256 and size, and every signature in the archive are checked, and a root with a lower
-  `serial` than one this device has seen (kept in `repositories.json` in the data folder) is
-  refused. An install takes `version`, or the newest `stable` version that is not yanked and
+  `serial` than one this device has seen from that root key under that repository ID (kept in
+  `repositories.json` in the data folder) is refused; another root key claiming the same ID has
+  serials of its own and does not touch these. An install takes `version`, or the newest `stable` version that is not yanked and
   that this device can install; one needing a newer Oscairn than this one (`requires.oscairn`)
   or bringing plugin code with no build for this device is refused. The archive must be the
   release the index names (its manifest's SHA-256) and signed by its publisher's key. It

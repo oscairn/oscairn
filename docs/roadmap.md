@@ -710,7 +710,8 @@ Each starts as an RFC:
   and offered with its asset libraries, or the stand-in says why not (no repository has it, not
   available for this platform); a repository named per plugin (`pluginRepositories`) offered for
   adding by its key's fingerprint; nothing fetched, added or installed without the user; never
-  on stage while opening, preparing or changing Performances
+  on stage while opening, preparing or changing Performances. Built 2026-11-11: its prerequisite,
+  serials seen and kept indexes keyed by root key, so a repository cannot claim another's ID
 - [ ] **Moving sounds to newer plugin versions** ([RFC 0043](rfcs/0043-moving-sounds-to-newer-plugin-versions.md#progress),
   proposed 2026-11-11): a Sound, a Performance, a library, a Setlist or everything using a plugin
   version moved to an installed newer one only by the musician's action, with a plan of what

@@ -20,12 +20,21 @@ namespace fs=std::filesystem;
 fs::path knownFile(){return dataHome()/"repositories.json";}
 std::mutex knownMutex; // repositories.json: written by job threads (serials seen) and the control thread (the list)
 
-// repositories.json: the highest serial seen of each repository, so an older root (from a stale
-// or hostile mirror) is refused; the repositories the user added; and which are turned on or off,
-// by address: {"format":"oscairn.repositories","version":1,"seen":{"<repository>":<serial>},
-// "added":[{"address","name","key"}],"enabled":{"<address>":true|false}}.
-struct Known { std::map<std::string,uint64_t> seen; std::vector<Control::Repository> added; std::map<std::string,bool> enabled; };
+// repositories.json: the highest serial seen of each repository, by its root key and the ID its
+// root gives, so an older root (from a stale or hostile mirror) is refused and a root claiming
+// another repository's ID has serials of its own; the repositories the user added; and which are
+// turned on or off, by address: {"format":"oscairn.repositories","version":2,
+// "seen":{"<root key>":{"<repository>":<serial>}},"added":[{"address","name","key"}],"enabled":{"<address>":true|false}}.
+// Version 1 kept serials by the repository ID alone ("seen":{"<repository>":<serial>}); those are
+// read as `unkeyed` and kept until the next root read (see()).
+struct Known { std::map<std::string,std::map<std::string,uint64_t>> seen; std::map<std::string,uint64_t> unkeyed; std::vector<Control::Repository> added; std::map<std::string,bool> enabled; };
 std::string str(const json_value_s* v){if(!v || v->type!=json_type_string)return {};const auto* s=static_cast<const json_string_s*>(v->payload);return {s->string,s->string_size};}
+bool serial(const json_value_s* v,uint64_t& out){
+    if(v->type!=json_type_number)return false;
+    const auto* n=static_cast<const json_number_s*>(v->payload);
+    try{out=std::stoull(std::string(n->number,n->number_size));return true;}catch(const std::exception&){return false;}
+}
+std::string name(const json_object_element_s* m){return {m->name->string,m->name->string_size};}
 Known readKnown(){
     Known out;
     std::error_code e;
@@ -35,8 +44,11 @@ Known readKnown(){
     if(!detail::jsonPreflight(bytes,4).empty())return out;
     const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
     const auto* seen=detail::member(doc.get(),"seen");
-    if(seen && seen->type==json_type_object)for(auto* m=static_cast<const json_object_s*>(seen->payload)->start;m;m=m->next)
-        if(m->value->type==json_type_number){const auto* n=static_cast<const json_number_s*>(m->value->payload);try{out.seen[std::string(m->name->string,m->name->string_size)]=std::stoull(std::string(n->number,n->number_size));}catch(const std::exception&){}}
+    uint64_t n=0;
+    if(seen && seen->type==json_type_object)for(auto* m=static_cast<const json_object_s*>(seen->payload)->start;m;m=m->next){
+        if(m->value->type==json_type_object){for(auto* r=static_cast<const json_object_s*>(m->value->payload)->start;r;r=r->next)if(serial(r->value,n))out.seen[name(m)][name(r)]=n;}
+        else if(serial(m->value,n))out.unkeyed[name(m)]=n;
+    }
     const auto* added=detail::member(doc.get(),"added");
     if(added && added->type==json_type_array)for(auto* a=static_cast<const json_array_s*>(added->payload)->start;a;a=a->next){
         Control::Repository r{str(detail::member(a->value,"address")),str(detail::member(a->value,"name")),str(detail::member(a->value,"key")),"user"};
@@ -48,8 +60,14 @@ Known readKnown(){
     return out;
 }
 void writeKnown(const Known& k){
-    std::string out="{\"format\":\"oscairn.repositories\",\"version\":1,\"seen\":{";
-    bool first=true;for(const auto& [id,n]:k.seen){out+=(first?"":",")+detail::quote(id)+":"+std::to_string(n);first=false;}
+    std::string out="{\"format\":\"oscairn.repositories\",\"version\":2,\"seen\":{";
+    bool first=true;
+    for(const auto& [key,ids]:k.seen){
+        out+=(first?"":",")+detail::quote(key)+":{";first=false;
+        bool one=true;for(const auto& [id,n]:ids){out+=(one?"":",")+detail::quote(id)+":"+std::to_string(n);one=false;}
+        out+='}';
+    }
+    for(const auto& [id,n]:k.unkeyed){out+=(first?"":",")+detail::quote(id)+":"+std::to_string(n);first=false;}
     out+="},\"added\":[";
     first=true;for(const auto& r:k.added){out+=(first?"":",")+std::string("{\"address\":")+detail::quote(r.address)+",\"name\":"+detail::quote(r.name)+",\"key\":"+detail::quote(r.key)+'}';first=false;}
     out+="],\"enabled\":{";
@@ -57,13 +75,26 @@ void writeKnown(const Known& k){
     out+="}}\n";
     writeAtomically(knownFile(),out);
 }
-// Refuses a root older than one seen, and remembers this one.
-void see(const std::string& repository,uint64_t serial){
+fs::path kept(){return dataHome()/"Repositories";} // each repository's index, read last, in a folder per root key
+// Refuses a root older than one seen from this root key under this repository ID, and remembers
+// this one. Serials kept by ID alone (version 1) are first given to every key trusted for
+// repositories, as any of them could have signed one, so no rollback protection is lost; the
+// indexes kept by ID alone go, being copies the next listing reads again whole.
+void see(const std::string& rootKey,const std::string& repository,uint64_t serial,const std::vector<std::string>& trusted){
     std::lock_guard lock(knownMutex);
     auto known=readKnown();
-    if(known.seen.count(repository) && serial<known.seen[repository])
-        throw std::runtime_error("not a usable repository: its index (serial "+std::to_string(serial)+") is older than one this device has seen ("+std::to_string(known.seen[repository])+"); a mirror may be out of date or replaying an old index");
-    known.seen[repository]=serial;
+    if(!known.unkeyed.empty()){
+        for(const auto& [id,n]:known.unkeyed)for(const auto& key:trusted){auto& s=known.seen[key][id];s=std::max(s,n);}
+        known.unkeyed.clear();
+        std::error_code e;
+        std::vector<fs::path> old;
+        for(fs::directory_iterator i(kept(),e),end;!e && i!=end;i.increment(e))if(i->is_regular_file(e))old.push_back(i->path());
+        for(const auto& f:old)fs::remove(f,e);
+    }
+    auto& seen=known.seen[rootKey];
+    if(seen.count(repository) && serial<seen[repository])
+        throw std::runtime_error("not a usable repository: its index (serial "+std::to_string(serial)+") is older than one this device has seen ("+std::to_string(seen[repository])+"); a mirror may be out of date or replaying an old index");
+    seen[repository]=serial;
     writeKnown(known);
 }
 // Oscairn's own repository: known to every device, its root key trusted for repositories only.
@@ -91,7 +122,6 @@ std::unique_ptr<repository::Source> sourceFor(const std::string& source,const st
     if(source.rfind("https://",0)==0 || source.rfind("http://",0)==0)return repository::web(source,cancel);
     return repository::folder(source);
 }
-fs::path kept(){return dataHome()/"Repositories";} // each repository's index, read last
 fs::path scratch(const char* suffix){std::random_device random;return dataHome()/(".install-"+std::to_string(random())+std::to_string(random())+suffix);}
 }
 
@@ -213,7 +243,7 @@ uint64_t Session::listRepository(const std::string& source){
         try{
             auto from=sourceFor(source,&w->cancel);
             const auto index=repository::open(*from,trusted,revoked,out.rootKey,kept());
-            see(index.repository,index.serial);
+            see(index.rootKey,index.repository,index.serial,trusted);
             out.repository=index.repository;out.name=index.name;out.serial=index.serial;
             for(const auto& p:index.packages){
                 RepositoryPackage listed{p.id,p.name,p.summary,p.license,p.publisherName,p.publisherKey,p.tags,{}};
@@ -244,7 +274,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
         try{
             auto from=sourceFor(source,&w->cancel);
             const auto index=repository::open(*from,trusted,revoked,rootKey,kept());
-            see(index.repository,index.serial);
+            see(index.rootKey,index.repository,index.serial,trusted);
             repositoryId=index.repository;name=index.name;serial=index.serial;
             // A release: fetched (or read in place), checked against the signed index and unpacked.
             auto unpack=[&](const repository::Package& package,const repository::Version& pick){

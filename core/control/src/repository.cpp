@@ -302,7 +302,9 @@ namespace oscairn::repository
         // serial, or brought up to date by the delta the root names from its serial.
         const bool plain = !index.repository.empty() && index.repository.size() <= 64 && index.repository.front() != '.' &&
                            std::all_of(index.repository.begin(), index.repository.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '_'; });
-        const auto cached = cache.empty() || !plain ? fs::path() : cache / (index.repository + ".index.json");
+        // Kept by the root key as well as the ID the root claims, so a root claiming another repository's ID keeps its own.
+        const auto folder = cache.empty() ? fs::path() : cache / index.rootKey;
+        const auto cached = cache.empty() || !plain ? fs::path() : folder / (index.repository + ".index.json");
         std::string text_;
         if(!cached.empty())
             try
@@ -385,8 +387,8 @@ namespace oscairn::repository
         if(!cached.empty())
         {
             std::error_code e;
-            fs::create_directories(cache, e);
-            const auto partial = cache / ("." + index.repository + ".partial");
+            fs::create_directories(folder, e);
+            const auto partial = folder / ("." + index.repository + ".partial");
             { std::ofstream out(partial, std::ios::binary | std::ios::trunc); out << text_; }
             fs::rename(partial, cached, e);
         }

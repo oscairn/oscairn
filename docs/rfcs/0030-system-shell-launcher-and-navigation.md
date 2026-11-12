@@ -77,6 +77,14 @@ tablet has nothing but the screen.
   any app. It gets nothing a third-party app could not.
 - **Desktop:** the computer's windows are the shell. The Apps menu and a Home window (the
   launcher, in a window) are its Home; each window's status line carries the status.
+  Quitting (Cmd-Q, the window's close button, the menu's Quit) lets the engine the app started
+  stop, so with unsaved changes (`performance.info`'s `unsaved`) it first asks "Save changes to
+  <name> before quitting?": Save, Don't Save, Cancel. An engine that stays running keeps them,
+  and is not asked about. Opening another Performance from the Library or with Open Folder... asks
+  the same; a setlist's next entry does not (on stage a dialog is wrong). A known gap: keeping an
+  audition of another Performance drops the open one's unsaved changes without asking, since Save
+  then would save the one auditioned.
+- **A device's panel** has no quit, so nothing asks there; power loss is [RFC 0028](0028-system-image-updates-boot-and-power.md#power-loss)'s.
 
 ## Home: cards and apps
 

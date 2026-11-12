@@ -32,6 +32,16 @@ namespace oscairn::standalone
     };
     /// The export's choices in a dialog over `over`; `start` gets them when Export is pressed.
     void showExport(Engine& engine, juce::Component* over, const juce::String& title, bool performance, std::function<void(bool editedSounds, const std::string& key)> start);
+    /// Save (every Save comes this way): over the open library Performance, asking for a name over
+    /// `over` only when it has never been saved there; Save As New always asks, and makes a new one.
+    /// A refusal is said. `done` gets the save's error, or empty, once the engine has saved; not
+    /// when it was refused or the name canceled.
+    void savePerformance(Engine& engine, juce::Component* over, bool asNew, std::function<void(const std::string& error)> done = {});
+    /// Before what would lose the open Performance's unsaved changes ("quitting", "opening X"):
+    /// "Save changes to <name> before <what>?" with Save, Don't Save and Cancel (Esc). `then` runs
+    /// once it is saved or not wanted, at once when nothing is unsaved or the engine does not
+    /// answer; Cancel, a failed save (said) or a canceled name stays. Returns the prompt, or null.
+    juce::Component* askToSave(Engine& engine, juce::Component* over, const juce::String& what, std::function<void()> then);
     /// An archive's install choices: locked or as the user's own, and which items, all ticked,
     /// under a heading for each kind there is (Performances, then Sounds); under Plugins, each
     /// plugin build it adds to the store with who signed it; who signed the archive, and a warning

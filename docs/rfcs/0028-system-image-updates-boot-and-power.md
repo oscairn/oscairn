@@ -68,7 +68,8 @@ app has set the budget (RFC 0025), so it is admitted as any open is; the app ask
 opens, off its message thread, and the window shows Untitled until it has opened (not with
 `--snapshot` or `--play`, nor `--in-process`, whose engine opens no Performances). One that is gone, unreadable, over the budget or
 needing a plugin that is not installed leaves Untitled open, and the app says why. An engine still
-running when the app comes back keeps what it has. Until a budget is set the engine knows none, so
+running when the app comes back keeps what it has. It opens what was saved, not edits made since:
+the desktop app asks before a quit would lose them ([RFC 0030](0030-system-shell-launcher-and-navigation.md)). Until a budget is set the engine knows none, so
 it opens nothing before the app has connected; the boot ordering above (the last Performance before
 the UI) waits for the engine to know its budget at start.
 

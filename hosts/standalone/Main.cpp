@@ -379,8 +379,11 @@ namespace oscairn::standalone
                 chooser_->launchAsync((save?juce::FileBrowserComponent::saveMode:juce::FileBrowserComponent::openMode)|juce::FileBrowserComponent::canSelectDirectories,
                     [safe=juce::Component::SafePointer<Window>(this),save](const juce::FileChooser& fc) {
                         if(!safe || fc.getResult()==juce::File())return;
-                        SoundAction action;action.kind=save?SoundAction::SavePerformance:SoundAction::LoadPerformance;
-                        action.directory=fc.getResult().getFullPathName().toStdString();safe->engine_.soundAction(std::move(action));
+                        auto go=[safe,save,folder=fc.getResult()]{
+                            if(!safe)return;
+                            SoundAction action;action.kind=save?SoundAction::SavePerformance:SoundAction::LoadPerformance;
+                            action.directory=folder.getFullPathName().toStdString();safe->engine_.soundAction(std::move(action));};
+                        if(save)go();else askToSave(safe->engine_,safe.getComponent(),"opening "+fc.getResult().getFileNameWithoutExtension(),go); // it replaces the open one
                     });return;
             }
             if(id>=7000 && id<=7002){
@@ -696,26 +699,7 @@ namespace oscairn::standalone
                 safe->engine_.soundAction(std::move(save));
             }),true);
         }
-        // Save writes over the open library Performance, asking for a name only when it has never
-        // been saved there; Save As New always asks, and makes a new one.
-        void saveToLibrary(bool asNew)
-        {
-            // Said here: every Save (the toolbar's, the top bar's, the menu's) comes this way, and
-            // a Save the engine would drop must not look saved.
-            const auto why=engine_.refusal();
-            const auto info=why.empty()?engine_.performanceInfo():std::nullopt;
-            if(!info){juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Not saved",why.empty()?"The engine is not answering. Try again in a moment.":juce::String(why));return;}
-            if(!asNew && !info->id.empty()){SoundAction save;save.kind=SoundAction::SaveToLibrary;engine_.soundAction(std::move(save));return;}
-            auto* w=new juce::AlertWindow(asNew?"Save As New":"Save","The Performance's name:",juce::MessageBoxIconType::NoIcon,this);
-            w->addTextEditor("name",juce::String::fromUTF8(info->name.c_str()),"Name");
-            w->addButton("Save",1,juce::KeyPress(juce::KeyPress::returnKey));w->addButton("Cancel",0,juce::KeyPress(juce::KeyPress::escapeKey));
-            w->enterModalState(true,juce::ModalCallbackFunction::create([safe=juce::Component::SafePointer<Window>(this),w,asNew](int result){
-                if(!safe || result!=1)return;
-                if(const auto why=safe->engine_.refusal();!why.empty()){juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Not saved",juce::String(why));return;} // busy since the name was asked
-                SoundAction save;save.kind=SoundAction::SaveToLibrary;save.asNew=asNew;save.choice.name=w->getTextEditorContents("name").trim().toStdString();
-                safe->engine_.soundAction(std::move(save));
-            }),true);
-        }
+        void saveToLibrary(bool asNew){savePerformance(engine_,this,asNew);}
         void showLibrary(){if(!library_)library_=std::make_unique<LibraryWindow>(engine_,theme_,plugins_);library_->setVisible(true);library_->toFront(true);}
         // The pad editor covers the panel, so it fits a device's single screen too.
         void showPads()
@@ -1038,6 +1022,16 @@ namespace oscairn::standalone
             }
         }
 
+        // Cmd-Q, the window's close button and the menu's Quit: a managed engine stops once let go, so
+        // unsaved changes are asked about first. An engine that stays running keeps them; --snapshot
+        // and a failed start quit without asking.
+        void systemRequestedQuit() override
+        {
+            if( asking_ ) { asking_->toFront( true ); return; }
+            if( window_ && engine_ && engine_->managed() ) asking_ = askToSave( *engine_, window_.get(), "quitting", [] { quit(); } );
+            else quit();
+        }
+
         void shutdown() override
         {
             if( starting_.valid() ) // quit while starting: the engine is let go here, once started
@@ -1117,6 +1111,7 @@ namespace oscairn::standalone
         Profile profile_;
         std::vector<Profile> controllerProfiles_;
         std::future<std::unique_ptr<Engine>> starting_;
+        juce::Component::SafePointer<juce::Component> asking_; // the quit's prompt, while it shows
     };
 }
 

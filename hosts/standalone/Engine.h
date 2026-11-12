@@ -175,6 +175,11 @@ namespace oscairn::standalone
         // Why a load, save or export asked now would be refused (the engine busy or gone), or empty.
         std::string refusal() const { return !connected() ? "The engine is not running." : soundBusy() ? "The engine is busy; try again in a moment." : std::string(); }
         bool canPrepareSounds() const { return !socketPath_.empty() || app_; }
+        // This app started the engine, which stops once no window keeps it (quitting lets it go).
+        bool managed() const { return process_ != nullptr; }
+        // The open Performance's info asked now, not polled (the last read while a job runs);
+        // nothing when the engine does not answer.
+        std::optional<Control::PerformanceInfo> performanceNow() const;
         void soundAction(SoundAction action);
         std::function<void(const std::string& notice)> onReopened; // a ReopenPerformance job done: why it did not open, or empty
         std::function<void()> openBrowser;
@@ -285,6 +290,7 @@ namespace oscairn::standalone
         RemoteControl::KnownParameters known_; // the last job's: the next lists only the plugins whose parameters changed
         std::future<SoundResult> soundJob_;
         SoundAction::Kind soundJobKind_=SoundAction::Refresh;
+        std::function<void(const std::string&)> soundJobDone_; // the running job's done
         std::deque<SoundAction> pendingSounds_; // after the job running, in order
         SoundPickerState soundPicker_;
         std::map<std::string,Editor> editors_;

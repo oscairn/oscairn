@@ -101,6 +101,44 @@ namespace oscairn::standalone
         };
     }
 
+    void savePerformance(Engine& engine, juce::Component* over, bool asNew, std::function<void(const std::string&)> done)
+    {
+        // Said here: a Save the engine would drop must not look saved.
+        const auto why = engine.refusal();
+        const auto info = why.empty() ? engine.performanceNow() : std::nullopt; // not the polled one, empty until first read
+        if(!info) { juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not saved", why.empty() ? "The engine is not answering. Try again in a moment." : juce::String(why)); return; }
+        if(!asNew && !info->id.empty()) { SoundAction save; save.kind = SoundAction::SaveToLibrary; save.done = std::move(done); engine.soundAction(std::move(save)); return; }
+        auto* w = new juce::AlertWindow(asNew ? "Save As New" : "Save", "The Performance's name:", juce::MessageBoxIconType::NoIcon, over);
+        w->addTextEditor("name", text(info->name), "Name");
+        w->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey)); w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        w->enterModalState(true, juce::ModalCallbackFunction::create([&engine, safe = juce::Component::SafePointer<juce::Component>(over), w, asNew, done = std::move(done)](int result) mutable {
+            if(!safe || result != 1) return;
+            if(const auto why = engine.refusal(); !why.empty()) { juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not saved", juce::String(why)); return; } // busy since the name was asked
+            SoundAction save; save.kind = SoundAction::SaveToLibrary; save.asNew = asNew; save.choice.name = w->getTextEditorContents("name").trim().toStdString(); save.done = std::move(done);
+            engine.soundAction(std::move(save));
+        }), true);
+    }
+
+    juce::Component* askToSave(Engine& engine, juce::Component* over, const juce::String& what, std::function<void()> then)
+    {
+        const auto info = engine.performanceNow();
+        if(!info || !info->unsaved) { then(); return nullptr; } // nothing unsaved, or the engine does not answer
+        auto* w = new juce::AlertWindow("Save changes to " + text(info->name.empty() ? "Untitled" : info->name) + " before " + what + "?",
+                                        "Your changes will be lost if you don't save them.", juce::MessageBoxIconType::WarningIcon, over);
+        w->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+        w->addButton("Don't Save", 2, juce::KeyPress('d', juce::ModifierKeys::commandModifier, 0));
+        w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        w->enterModalState(true, juce::ModalCallbackFunction::create([&engine, safe = juce::Component::SafePointer<juce::Component>(over), then = std::move(then)](int result) {
+            if(result == 2) then();
+            if(result != 1 || !safe) return;
+            savePerformance(engine, safe.getComponent(), false, [then](const std::string& error) {
+                if(error.empty()) then();
+                else juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not saved", text(error));
+            });
+        }), true);
+        return w;
+    }
+
     InstallChoices::InstallChoices(const Control::Archive& a)
     {
         juce::String unknown, revoked;
@@ -571,10 +609,14 @@ namespace oscairn::standalone
         if(!item) return;
         if(mode_ == Mode::Pick) { const auto id = item->id; stopAudition(); if(!auditioning_.id.empty()) return; if(onPicked) onPicked(id); return; }
         if(item->kind != "performance") return; // a Sound goes into a part: New part, or a part's Load Sound
-        SoundAction open; open.kind = SoundAction::LoadFromLibrary; open.libraryId = item->id;
-        engine_.soundAction(std::move(open));
-        tell("Opening " + text(item->name));
-        stale_ = true; awaiting_ = true; // it is now the most recent; once opened, say so, or why it did not open
+        // Opening replaces the open one: its unsaved changes are asked about first (not in a setlist).
+        askToSave(engine_, this, "opening " + text(item->name.empty() ? "Untitled" : item->name), [safe = juce::Component::SafePointer<LibraryPane>(this), id = item->id, name = item->name] {
+            if(!safe) return;
+            SoundAction open; open.kind = SoundAction::LoadFromLibrary; open.libraryId = id;
+            safe->engine_.soundAction(std::move(open));
+            safe->tell("Opening " + text(name));
+            safe->stale_ = true; safe->awaiting_ = true; // it is now the most recent; once opened, say so, or why it did not open
+        });
     }
 
     void LibraryPane::send(int row)

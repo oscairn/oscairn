@@ -377,11 +377,12 @@ namespace oscairn::standalone
     {
         // A preparation ahead waits its turn; anything else asked while a job runs is refused,
         // and said: a dropped Save must not look saved.
-        if(const auto why=refusal();!why.empty() && (!connected() || action.kind!=SoundAction::PrepareFromLibrary)){soundMessage_=why;return;}
+        if(const auto why=refusal();!why.empty() && (!connected() || action.kind!=SoundAction::PrepareFromLibrary)){soundMessage_=why;if(action.done)action.done(why);return;}
         if((action.kind==SoundAction::Prepare || action.kind==SoundAction::PrepareFromLibrary || action.kind==SoundAction::Replace || action.kind==SoundAction::SavePerformance || action.kind==SoundAction::LoadPerformance || action.kind==SoundAction::SaveToLibrary || action.kind==SoundAction::LoadFromLibrary || action.kind==SoundAction::SaveSound || action.kind==SoundAction::LoadSound || action.kind==SoundAction::PartFromSound || action.kind==SoundAction::ImportPerformance ||
             action.kind==SoundAction::ExportPerformance || action.kind==SoundAction::InstallArchive || action.kind==SoundAction::AuditionStart || action.kind==SoundAction::AuditionStop) && !canPrepareSounds())
         {
             soundMessage_="Preparation requires the separate engine. Relaunch without --in-process.";
+            if(action.done)action.done(soundMessage_);
             return;
         }
         soundMessage_.clear();
@@ -408,7 +409,7 @@ namespace oscairn::standalone
         }
         // A separate client belongs entirely to this worker; the UI's cached client
         // is not serviced until preparation finishes, keeping long RPC waits off the UI.
-        soundJobKind_=action.kind;
+        soundJobKind_=action.kind;soundJobDone_=std::move(action.done);action.done=nullptr;
         // The engine refuses to write over a file: an export to one the musician chose to replace
         // goes beside it first, and replaces it only once written (finishSounds), so a failed
         // or refused export keeps the old archive.
@@ -443,6 +444,8 @@ namespace oscairn::standalone
     void Engine::finishSounds()
     {
         auto result=soundJob_.get();
+        // After this is done: what it does may ask for the next job.
+        if(auto done=std::move(soundJobDone_)){soundJobDone_=nullptr;juce::MessageManager::callAsync([done=std::move(done),error=result.error]{done(error);});}
         if(!exportTarget_.empty())
         {
             std::error_code failed;
@@ -704,6 +707,12 @@ namespace oscairn::standalone
         // The Library asks on its timer while one plays: read at most four times a second.
         poll(audition_,auditionRead_,250,[&](auto done){remote_->fetchAudition(done);},[&]{return std::optional(control_->audition());},0);
         return audition_;
+    }
+    std::optional<Control::PerformanceInfo> Engine::performanceNow() const
+    {
+        if(!connected())return {};
+        if(!controlReady())return performance_;
+        try{return control_->performanceInfo();}catch(const std::exception&){return {};}
     }
     std::optional<Control::PerformanceInfo> Engine::performanceInfo() const
     {

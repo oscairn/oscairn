@@ -2,6 +2,7 @@
 #pragma once
 #include "oscairn/control.h"
 #include <array>
+#include <functional>
 
 namespace oscairn::standalone
 {
@@ -43,6 +44,7 @@ namespace oscairn::standalone
         std::string signKey;     // ExportPerformance: the signing key its items and the archive are signed with (RFC 0006); empty: not signed
         std::string importPath; // Prepare from this .sfz or .wav instead of choice
         std::string format, version, platform; // AddPluginBuild: the plugin (with pluginId) and the build's platform; directory: the build
+        std::function<void(const std::string& error)> done; // a job of the separate engine's, on the message thread once done or refused: its error, or empty
     };
     SoundPickerState readSoundPicker(Control&);
     // A .sfz file as written (its folder registered as an asset library), or a one-region SFZ

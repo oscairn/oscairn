@@ -218,6 +218,13 @@ target_compile_definitions(oscairn_keyboard_window_test PRIVATE JUCE_WEB_BROWSER
 add_dependencies(oscairn_keyboard_window_test oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
 add_test(NAME keyboard-window COMMAND oscairn_keyboard_window_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
 set_tests_properties(keyboard-window PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}")
+# Unsaved changes asked about before quitting and before the Library opens another, against a socket session.
+juce_add_console_app(oscairn_desktop_quit_test PRODUCT_NAME "Oscairn Desktop Quit Test")
+target_sources(oscairn_desktop_quit_test PRIVATE tests/desktop_quit.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_link_libraries(oscairn_desktop_quit_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_desktop_quit_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_test(NAME desktop-quit COMMAND oscairn_desktop_quit_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>")
+set_tests_properties(desktop-quit PROPERTIES TIMEOUT 60)
 # RFC 0022 step 2: the Setlist app as a process of its own, started and supervised from its manifest, against a socket session.
 juce_add_console_app(oscairn_desktop_apps_test PRODUCT_NAME "Oscairn Desktop Apps Test")
 target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)

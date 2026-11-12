@@ -235,7 +235,7 @@ namespace oscairn::standalone
             break;
         }
         case Assignment::Kind::Scene: { const auto id = t.id; engine_.edit([id](Control& c) { c.selectScene(id); }); break; }
-        case Assignment::Kind::Panic: engine_.edit([](Control& c) { c.allNotesOff(); }); break;
+        case Assignment::Kind::Panic: engine_.allNotesOff(); break;
         case Assignment::Kind::None: break;
         }
     }

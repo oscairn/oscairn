@@ -371,6 +371,7 @@ namespace oscairn::standalone
                 const bool sendsNotes = node == graphInput ? chosen->port == notesPort : info && info->noteOutputs;
                 if(sendsAudio) { auto* b = button(head.removeFromLeft(150).reduced(2), "Connect audio to...", {}); b->onClick = [this, b] { connectMenu(WireKind::Audio, *b); }; }
                 if(sendsNotes) { auto* b = button(head.removeFromLeft(150).reduced(2), "Connect notes to...", {}); b->onClick = [this, b] { connectMenu(WireKind::Notes, *b); }; }
+                if(sendsNotes && node == graphInput) keyboardButton(head.removeFromLeft(head.getHeight()).reduced(2), {}); // the keys and MIDI: any input
                 const bool lanes = info && !info->plugin.lanes.empty();
                 if(lanes) { auto* b = button(head.removeFromLeft(150).reduced(2), "Connect lane to...", {}); b->onClick = [this, b] { laneMenu(*b); }; }
                 if(node != graphInput && node != graphOutput)
@@ -883,6 +884,7 @@ namespace oscairn::standalone
                     pick->setTooltip(p->channel > 0 ? "Which keyboards and controllers play this part, on channel " + juce::String(p->channel)
                                                     : "Which keyboards and controllers play this part, whatever channel they send on");
                     pick->onClick = [this, id, pick] { devicesMenu(id, *pick); };
+                    keyboardButton(r.removeFromLeft(r.getHeight()).reduced(2), p->devices);
                     break;
                 }
                 case K::Channel:
@@ -1273,6 +1275,31 @@ namespace oscairn::standalone
     }
 
     // Kinds of device, then each connected one by name; each item adds or removes its rule.
+    void PartsView::keyboardButton(juce::Rectangle<int> at, std::vector<DeviceRule> devices)
+    {
+        if(!engine_.openKeyboard) return;
+        auto b = std::make_unique<IconButton>(IconButton::Glyph::Keyboard, "Open on-screen keyboard");
+        b->setTooltip("Open on-screen keyboard: play as one of these devices, from the mouse or the computer's keys");
+        b->onClick = [this, devices, raw = b.get()] {
+            // The inputs these rules choose, the built-in one (the on-screen keyboard's own) first.
+            const auto mask = resolveDevices(devices, endpoints_);
+            std::vector<std::string> inputs;
+            if(mask & 1) inputs.push_back({});
+            for(const auto& e : endpoints_) if(e.kind != MidiEndpoint::Kind::BuiltIn && e.source < 64 && (mask >> e.source & 1)) inputs.push_back(e.name);
+            if(inputs.size() == 1) { engine_.openKeyboard(inputs.front()); return; }
+            juce::PopupMenu menu;
+            menu.addSectionHeader("Open on-screen keyboard");
+            for(size_t i = 0; i < inputs.size(); ++i) menu.addItem(int(i) + 1, inputs[i].empty() ? juce::String("On-screen keyboard") : text(inputs[i]));
+            if(inputs.empty()) menu.addItem(-1, "No device plays this", false);
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(raw), [safe = juce::Component::SafePointer<PartsView>(this), inputs](int chosen) {
+                if(safe && chosen > 0 && size_t(chosen) <= inputs.size() && safe->engine_.openKeyboard) safe->engine_.openKeyboard(inputs[size_t(chosen) - 1]);
+            });
+        };
+        b->setBounds(at);
+        addAndMakeVisible(*b);
+        controls_.push_back(std::move(b));
+    }
+
     void PartsView::devicesMenu(uint32_t id, juce::Component& at)
     {
         const auto* p = part(id);
@@ -1285,7 +1312,7 @@ namespace oscairn::standalone
             const bool ticked = r.kind == DeviceRule::Kind::All ? p->devices.empty() : std::find(p->devices.begin(), p->devices.end(), r) != p->devices.end();
             menu.addItem(int(choices.size()), text(label), true, ticked);
         };
-        for(const auto& r : kinds) add(r, devicesName({r}));
+        for(const auto& r : kinds) add(r, r.kind == DeviceRule::Kind::BuiltIn && engine_.openKeyboard ? "Built in: the on-screen keyboard and pads" : devicesName({r}));
         menu.addSectionHeader("Connected");
         if(endpoints_.empty()) menu.addItem(-1, "No MIDI devices", false);
         for(const auto& e : endpoints_) add(ruleFor(e), e.kind == MidiEndpoint::Kind::Port ? devicesName({ruleFor(e)}) + " (" + e.name + ")" : e.name);

@@ -43,6 +43,7 @@ juce_add_binary_data(oscairn_standalone_icons HEADER_NAME IconData.h NAMESPACE I
     icons/audio-lines.svg
     icons/tags.svg
     icons/chevrons-down-up.svg
+    icons/keyboard-music.svg
     # Oscairn's mark (branding/README.md) and its alternate; Icons.h names the one shown.
     ../../branding/mark-on-dark.svg
     ../../branding/mark-on-light.svg
@@ -102,7 +103,7 @@ if(NOT APPLE)
     install(DIRECTORY "${oscairn_apps}/" DESTINATION share/oscairn/apps USE_SOURCE_PERMISSIONS)
 endif()
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp Controllers.cpp Splash.cpp Recording.cpp Settings.cpp AppProcesses.cpp)
+target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp Settings.cpp AppProcesses.cpp)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"
@@ -209,6 +210,14 @@ if(Python3_Interpreter_FOUND)
     list(APPEND gaps_environment "OSCAIRN_TEST_MAKE_REPOSITORY=${Python3_EXECUTABLE}|${CMAKE_CURRENT_SOURCE_DIR}/tests/make_repository.py|$<TARGET_FILE:oscairn-sign>|$<TARGET_FILE:kick-clap-fixture-normal>|${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py")
 endif()
 set_tests_properties(desktop-gaps PROPERTIES TIMEOUT 400 ENVIRONMENT "${gaps_environment}")
+# The on-screen keyboards, a window per MIDI input, against a socket session with a described (not opened) MIDI input.
+juce_add_console_app(oscairn_keyboard_window_test PRODUCT_NAME "Oscairn Keyboard Window Test")
+target_sources(oscairn_keyboard_window_test PRIVATE tests/keyboard_window.cpp KeyboardWindow.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_link_libraries(oscairn_keyboard_window_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_keyboard_window_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_dependencies(oscairn_keyboard_window_test oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
+add_test(NAME keyboard-window COMMAND oscairn_keyboard_window_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
+set_tests_properties(keyboard-window PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}")
 # RFC 0022 step 2: the Setlist app as a process of its own, started and supervised from its manifest, against a socket session.
 juce_add_console_app(oscairn_desktop_apps_test PRODUCT_NAME "Oscairn Desktop Apps Test")
 target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)

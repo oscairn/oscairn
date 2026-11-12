@@ -101,6 +101,21 @@ copy the file unchanged from the same Lucide release, list it in the `oscairn_st
 target and record its hash in CREDITS. Themes do not carry icons (fonts, data and a splash
 image only).
 
+### On-screen keyboards
+
+An input's keyboard (`KeyboardPanel` in `KeyboardWindow.h`) floats: a window of its own on the
+desktop, a sheet along the bottom of a device's screen, never a strip that takes room from a view,
+and never opened by itself. Its header holds its title (the input's name), the octave (− and +, the
+keys shown between), **Fixed velocity** and **Sustain** as toggles, and **Close** on a sheet. Under
+it, a 4-pixel band per part the input plays (at most six rows), in the accent, over that part's
+keys and never on them: splits side by side, layers stacked. The keys are drawn from the theme,
+never fixed colors: the faces apart on the background and rounded at the front, white keys the
+lighter of the text and surface inks softened toward the darker (so a dark theme's keys are not
+stark white), black keys the darker, with a lit front edge. A key played there is filled with the
+accent as high as its velocity, a sustained one tinted with it, a hovered one faintly with the
+text ink, and the input's own note arriving a dot in the positive color: down, velocity and
+incoming each look different by shape as well as color. Note names label the C keys in the black keys' ink, lightened.
+
 ### Joined buttons
 
 Adjacent buttons that belong together, a choice of one (Performances or Sounds) or a few

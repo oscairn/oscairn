@@ -48,6 +48,9 @@ namespace oscairn::standalone
         juce::Rectangle<int> rowBounds(size_t row) const;
         void insertMenu(size_t index, juce::Component& at, ChainPlace place = {});
         void devicesMenu(uint32_t part, juce::Component& at);
+        // A keyboard button opening the on-screen keyboard of an input these rules choose (a menu
+        // of them when several), where the profile offers on-screen keyboards.
+        void keyboardButton(juce::Rectangle<int> at, std::vector<DeviceRule> devices);
         void sceneControlsMenu(NodeId node, juce::Component& at);
         void sceneEditMenu(juce::Component& at);
         void mappingScenesMenu(uint32_t macro, size_t target, juce::Component& at);

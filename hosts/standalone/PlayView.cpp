@@ -8,7 +8,6 @@ namespace oscairn::standalone
     {
         juce::String text(const std::string& s) { return juce::String::fromUTF8(s.c_str()); }
         constexpr int sceneTiles = 8;
-        const juce::String typingKeys = "awsedftgyhujkolp;"; // the computer's keys from C up, as JUCE's keyboard has them
         // What a control drives, by name: "Rhodes, Pad level".
         std::string targetsOf(const Macro& m, const Control::GraphState& graph, const PartsState& parts)
         {
@@ -214,7 +213,11 @@ namespace oscairn::standalone
         learnDefault_.setTooltip("Back to what the knob plays by default");
         learnDefault_.onClick = [this] { learned({}); };
         learnDone_.onClick = [this] { learn(false); };
-        for(auto* c : std::initializer_list<juce::Component*>{&previous_, &next_, &performanceControls_, &partControlsButton_, &pageButton_, &learnDefault_, &learnDone_}) addChildComponent(c);
+        openKeys_.setTooltip("A keyboard in a window of its own, to play with the mouse or the computer's keys");
+        dismissHint_.setTooltip("Hide this line");
+        openKeys_.onClick = [this] { if(keyboardOpened_) keyboardOpened_(); };
+        dismissHint_.onClick = [this] { if(hintDismissed_) hintDismissed_(); offerKeyboard({}, {}); };
+        for(auto* c : std::initializer_list<juce::Component*>{&previous_, &next_, &performanceControls_, &partControlsButton_, &pageButton_, &learnDefault_, &learnDone_, &openKeys_, &dismissHint_}) addChildComponent(c);
         viewport_.setViewedComponent(&stripRow_, false);
         viewport_.setScrollBarsShown(false, true);
         addAndMakeVisible(viewport_);
@@ -223,100 +226,7 @@ namespace oscairn::standalone
         engine_.addChangeListener(this);
     }
 
-    PlayView::~PlayView()
-    {
-        engine_.removeChangeListener(this); stopTimer();
-        if(!keys_) return;
-        releaseKeys();
-        juce::Desktop::getInstance().removeFocusChangeListener(this);
-        if(window_) window_->removeKeyListener(this);
-    }
-
-    void PlayView::offerKeys(std::optional<bool> shown)
-    {
-        keysChoice_ = shown;
-        if(!keys_)
-        {
-            keys_ = std::make_unique<Keys>(engine_, 48, 25);
-            keys_->keyboard().clearKeyMappings(); // the window's keys play it, focused or not (keyPressed)
-            keys_->keyboard().setWantsKeyboardFocus(false);
-            keys_->setDescription("Plays the selected part. The computer's keys play it too: A W S E D F T G Y H U J K O L P and semicolon from middle C, Z and X an octave down and up");
-            // The part's channel, so its zones hear it; any channel, or several: the track's.
-            keys_->channel = [this] { const auto* p = partRow(selected_); return p && p->channel > 0 ? p->channel - 1 : -1; };
-            addChildComponent(*keys_);
-            juce::Desktop::getInstance().addFocusChangeListener(this);
-            parentHierarchyChanged();
-        }
-        showKeys();
-    }
-
-    void PlayView::showKeys()
-    {
-        if(!keys_) return;
-        bool connected = false;
-        for(const auto& m : engine_.sessionStatus().midiInputs) connected |= m.kind != MidiEndpoint::Kind::BuiltIn;
-        const bool shown = keysChoice_.value_or(!connected);
-        if(shown == keys_->isVisible()) return;
-        if(!shown) releaseKeys();
-        keys_->setVisible(shown);
-        resized();
-    }
-
-    void PlayView::releaseKeys()
-    {
-        typed_.clear();
-        if(keys_) keys_->release();
-    }
-
-    bool PlayView::typing() const
-    {
-        return keysShown() && isShowing() && !dynamic_cast<juce::TextEditor*>(juce::Component::getCurrentlyFocusedComponent());
-    }
-
-    bool PlayView::keyPressed(const juce::KeyPress& key, juce::Component*)
-    {
-        if(!typing() || key.getModifiers().isAnyModifierKeyDown()) return false; // the menus' shortcuts have a modifier
-        const auto code = key.getKeyCode();
-        const auto c = juce::CharacterFunctions::toLowerCase(juce::juce_wchar(code));
-        if(c == 'z' || c == 'x')
-        {
-            for(const auto& [k, note] : typed_) keys_->press(note, false); // played an octave over, released in it
-            typed_.clear();
-            octave_ = std::clamp(octave_ + (c == 'x' ? 1 : -1), -4, 4);
-            resized();
-            return true;
-        }
-        const int at = typingKeys.indexOfChar(c);
-        if(at < 0) return false;
-        if(!typed_.count(code)) { typed_[code] = 60 + 12 * octave_ + at; keys_->press(typed_[code], true); } // held: the repeats pass
-        return true;
-    }
-
-    bool PlayView::keyStateChanged(bool, juce::Component*)
-    {
-        bool used = false;
-        for(auto it = typed_.begin(); it != typed_.end();)
-            if(juce::KeyPress::isKeyCurrentlyDown(it->first)) ++it;
-            else { keys_->press(it->second, false); it = typed_.erase(it); used = true; }
-        return used;
-    }
-
-    // A text field taking focus would keep the keys' releases; focus gone, the window went behind.
-    void PlayView::globalFocusChanged(juce::Component* focused)
-    {
-        if(!focused || dynamic_cast<juce::TextEditor*>(focused)) releaseKeys();
-    }
-
-    void PlayView::parentHierarchyChanged()
-    {
-        auto* top = keys_ ? getTopLevelComponent() : nullptr;
-        if(top == window_.getComponent()) return;
-        if(window_) window_->removeKeyListener(this);
-        window_ = top;
-        if(window_) window_->addKeyListener(this);
-    }
-
-    void PlayView::visibilityChanged() { if(!isVisible()) releaseKeys(); }
+    PlayView::~PlayView() { engine_.removeChangeListener(this); stopTimer(); }
 
     void PlayView::changeListenerCallback(juce::ChangeBroadcaster*)
     {
@@ -342,6 +252,22 @@ namespace oscairn::standalone
         if(const auto i = knobGroupIndex(groups); i < groups.size()) return groups[i];
         ControlGroup g; g.kind = "knobs"; g.count = uint32_t(engine_.rowKnobs() > 0 ? engine_.rowKnobs() : 4);
         return g;
+    }
+
+    void PlayView::offerKeyboard(std::function<void()> open, std::function<void()> dismissed)
+    {
+        keyboardOpened_ = std::move(open); hintDismissed_ = std::move(dismissed);
+        showHint();
+    }
+
+    void PlayView::showHint()
+    {
+        bool connected = false;
+        for(const auto& m : engine_.sessionStatus().midiInputs) connected |= m.kind != MidiEndpoint::Kind::BuiltIn;
+        const bool shown = keyboardOpened_ && !connected;
+        if(shown == openKeys_.isVisible()) return;
+        openKeys_.setVisible(shown); dismissHint_.setVisible(shown);
+        resized(); repaint();
     }
 
     void PlayView::select(uint32_t part) { selected_ = part; if(!part) partControls_ = false; page_ = 0; refresh(); repaint(); }
@@ -410,7 +336,7 @@ namespace oscairn::standalone
         partControlsButton_.setToggleState(owner != 0, juce::dontSendNotification);
         pageButton_.setButtonText(group.rows.empty() ? "Bank " + juce::String(page_ + 1) + "/" + juce::String(banks) : text(group.rows[size_t(page_)].name)); // a row by its name
         publishRow();
-        showKeys();
+        showHint();
         repaint();
     }
 
@@ -579,14 +505,22 @@ namespace oscairn::standalone
             learnDefault_.setBounds(buttons.removeFromRight(touch ? 100 : 86));
             area.removeFromTop(touch ? 10 : 8);
         }
-        // The keyboard along the bottom: as many octaves (up to five) as fit keys a finger or a
-        // pointer can hit, around middle C and Z and X's octave.
-        if(keysShown())
+        // No MIDI device: the line offering the on-screen keyboard, over the strips.
+        hint_ = {};
+        if(hintShown())
         {
-            const int whiteKey = touch ? 36 : 22, octaves = std::clamp((area.getWidth() / whiteKey - 1) / 7, 1, 5);
-            keys_->show(std::clamp(60 - 12 * (octaves / 2) + 12 * octave_, 0, 127 - 12 * octaves), 12 * octaves + 1);
-            keys_->setBounds(area.removeFromBottom(std::clamp(area.getHeight() / 4, touch ? 110 : 80, touch ? 180 : 150)));
-            area.removeFromBottom(gap ? gap : 8);
+            const juce::Font small{juce::FontOptions(textSize(TextRole::Small, mode()))};
+            hint_ = area.removeFromTop(touch ? 44 : 24);
+            auto line = hint_;
+            line.removeFromLeft(juce::GlyphArrangement::getStringWidthInt(small, "No MIDI device.") + 8);
+            for(auto* link : {&openKeys_, &dismissHint_})
+            {
+                link->setFont(small.withStyle(juce::Font::underlined), false, juce::Justification::centredLeft);
+                link->setColour(juce::HyperlinkButton::textColourId, link == &openKeys_ ? ink(Ink::Accent) : ink(Ink::Muted));
+                link->setBounds(line.removeFromLeft(juce::GlyphArrangement::getStringWidthInt(small, link->getButtonText()) + 12));
+                line.removeFromLeft(8);
+            }
+            area.removeFromTop(touch ? 6 : 4);
         }
         // The strips: at least six across, six fitting an 800-wide screen; more scroll sideways.
         viewport_.setBounds(area);
@@ -625,6 +559,11 @@ namespace oscairn::standalone
             g.setColour(ink(Ink::Text));
             drawInked(g, learnFrom_.isEmpty() ? juce::String("Learn: move a knob on the panel") : knob + ": touch what it should play: a strip, its M, a scene or a knob",
                       banner_.reduced(14, 0).withRight(learnDefault_.getX() - 8), juce::Font(juce::FontOptions(textSize(TextRole::Body, m))));
+        }
+        if(!hint_.isEmpty())
+        {
+            g.setColour(ink(Ink::Muted));
+            drawInked(g, "No MIDI device.", hint_, small);
         }
         if(strips_.empty())
         {

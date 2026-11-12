@@ -24,6 +24,7 @@
 #include "Layout.h"
 #include "LibraryPane.h"
 #include "Launcher.h"
+#include "KeyboardWindow.h"
 #include "Panel.h"
 #include "Profile.h"
 #include "PluginBrowser.h"
@@ -144,6 +145,15 @@ namespace oscairn::standalone
             engine_.openParts=[this]{showParts();};
             engine_.goHome=[this]{showHome();};
             engine_.goBack=[this]{showHome();}; // shortcut: every app's top screen is one level down; deeper levels go back inside their apps
+            // The on-screen keyboards, where the profile offers them: windows on the desktop, a sheet over a device's screen.
+            if( profile_.onScreenKeyboard )
+            {
+                keyboards_ = std::make_unique<Keyboards>( engine_, theme_.configuration(), fullScreen_ ? this : nullptr );
+                keyboards_->channel = [this] { auto* s = shell(); return s ? s->play().selectedChannel() : -1; };
+                keyboards_->mode = [this] { return panel() || inputMode_ == InputMode::Touch ? 2 : 1; };
+                engine_.openKeyboard = [this]( const std::string& input ) { keyboards_->open( input ); };
+                engine_.onNotesOff = [this] { keyboards_->releaseAll(); };
+            }
 
             // What the built-in apps offer each other (RFC 0022): the Library picks; Play hears the
             // setlist's entry playing. Apps that are processes (the Setlist) offer theirs from
@@ -177,6 +187,8 @@ namespace oscairn::standalone
             engine_.openParts={};
             engine_.goHome={};
             engine_.goBack={};
+            engine_.openKeyboard={};
+            engine_.onNotesOff={};
 #if JUCE_MAC
             juce::MenuBarModel::setMacMainMenu( nullptr );
 #else
@@ -225,8 +237,6 @@ namespace oscairn::standalone
         }
 
         void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
-        // Behind another window, its key-ups go there: Play's keyboard lets go of its notes.
-        void activeWindowStatusChanged() override { if( !isActiveWindow() ) if( auto* s = shell() ) s->play().releaseKeys(); }
 
         void resized() override
         {
@@ -293,7 +303,7 @@ namespace oscairn::standalone
             if( panel() ) { showPerformanceApp( false ); return; }
             auto* shell = new DesktopShell( engine_, scanner(), inputMode_ );
             followSetlist( shell->play() );
-            shell->play().offerKeys( readKeysShown( theme_.configuration() ) );
+            if( keyboards_ ) keyboards_->offerHint( shell->play() );
             shell->onHome = [this] { showHome(); };
             shell->onSave = [this] { saveToLibrary( false ); };
             setContentOwned( shell, false );
@@ -356,7 +366,7 @@ namespace oscairn::standalone
             for( auto mode : { InputMode::Automatic, InputMode::Mouse, InputMode::Touch } )
                 input.addItem( 7000 + int( mode ), inputModeName( mode ), true, mode == inputMode_ );
             menu.addSubMenu( "Input", input, layout_.surface == Layout::Surface::Desktop );
-            menu.addItem( 7100, "Show Keyboard", shell() != nullptr, shell() && shell()->play().keysShown() ); // Play's
+            if( keyboards_ ) menu.addItem( 7100, "On-screen Keyboard" );
             return menu;
         }
 
@@ -379,7 +389,7 @@ namespace oscairn::standalone
                 for(auto* w:{groovebox_.get(),libraryApp_.get(),picker_.get()})
                     if(auto* content=w?w->getContentComponent():nullptr){setDesktopMode(*content,inputMode_==InputMode::Touch?2:1);content->resized();}
                 return;}
-            if(id==7100){if(auto* s=shell()){const bool shown=!s->play().keysShown();writeKeysShown(theme_.configuration(),shown);s->play().offerKeys(shown);}return;}
+            if(id==7100 && keyboards_){keyboards_->open({});return;}
             if(id==8000){openGroovebox();return;}
             if(id==8001){showLibraryApp();return;}
             if(id==8002){showSetlist();return;}
@@ -462,7 +472,7 @@ namespace oscairn::standalone
             if( !layoutBinds( "home" ) ) shell.home = [this] { showHome(); };
             if( !layoutBinds( "back" ) ) shell.back = [this] { showHome(); };
             if( panel() ) shell.apps = [this] { showSwitcher(); };
-            if( !layoutBinds( "panic" ) ) shell.notesOff = [this] { engine_.edit( []( Control& c ) { c.allNotesOff(); } ); };
+            if( !layoutBinds( "panic" ) ) shell.notesOff = [this] { engine_.allNotesOff(); };
             shell.save = [this]( bool asNew ) { saveToLibrary( asNew ); };
             shell.record = true;
             return shell;
@@ -741,6 +751,7 @@ namespace oscairn::standalone
             {
                 auto view = std::make_unique<PerformanceApp>( engine_, scanner() );
                 followSetlist( view->play() );
+                if( keyboards_ ) keyboards_->offerHint( view->play() );
                 auto& app = *view; openOnScreen( "Performance", "piano", app, std::move( view ) );
                 app.attach( running_.back().frame->bar(), [this] { saveToLibrary( false ); } );
             }
@@ -808,6 +819,7 @@ namespace oscairn::standalone
         Actions::Answer pickerAnswer_;
         std::unique_ptr<PadEditor> pads_;
         std::unique_ptr<PartsView> parts_;
+        std::unique_ptr<Keyboards> keyboards_; // none where the profile offers no on-screen keyboard
         std::vector<std::pair<juce::String,juce::String>> themeItems_;
         InputMode inputMode_;
         Layout layout_;

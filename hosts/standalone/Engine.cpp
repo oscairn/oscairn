@@ -302,20 +302,25 @@ namespace oscairn::standalone
     void Engine::setClockOutputs(std::vector<DeviceRule> v){command([this,v]{control_->setClockOutputs(v);});}
     std::vector<DeviceRule> Engine::clockOutputs()const{return control_->transportState().clockOutputs;}
     int Engine::trackChannel()const{return static_cast<int>(param("sequencer",sequencer::channel(sequenceTrack_)));}
-    void Engine::note(bool on,int key,float velocity,int channel)
+    void Engine::note(bool on,int key,float velocity,int channel,const std::string& input)
     {
         if(key<0 || key>=128 || channel>15)return;
         if(channel<0)channel=trackChannel();
-        command([this,on,key,velocity,channel]{
-            auto& held=padChannels_[static_cast<size_t>(key)];
+        command([this,on,key,velocity,channel,input]{
+            auto& held=padChannels_[input][static_cast<size_t>(key)];
             if(on){
-                if(control_->note(true,key,velocity,channel))held|=uint16_t(1u<<channel);
+                if(control_->note(true,key,velocity,channel,input))held|=uint16_t(1u<<channel);
                 else std::fprintf(stderr,"oscairn: note queue overflow\n");
             }else for(int c=0;c<16;++c)if(held&(1u<<c)){
-                if(control_->note(false,key,0,c))held&=uint16_t(~(1u<<c));
+                if(control_->note(false,key,0,c,input))held&=uint16_t(~(1u<<c));
                 else std::fprintf(stderr,"oscairn: note release queue overflow\n");
             }
         });
+    }
+    void Engine::allNotesOff()
+    {
+        if(onNotesOff)onNotesOff();
+        edit([](Control& c){c.allNotesOff();});
     }
 
     void Engine::pad(int index,bool on,float velocity)
@@ -480,7 +485,7 @@ namespace oscairn::standalone
         // Replay deferred releases on failure; successful replacement discarded their voices.
         if(loaded && result.error.empty())
         {
-            pendingControls_.clear();padChannels_.fill(0);
+            pendingControls_.clear();padChannels_.clear();
             // Read without waiting: the timer takes it, as it takes the graph the load changed.
             if(!remote_)refreshPads();
             else try{remote_->fetchPadMap([this](PadMap map){padMap_=std::move(map);});}catch(const std::exception& e){std::fprintf(stderr,"oscairn: pad map: %s\n",e.what());}

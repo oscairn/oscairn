@@ -46,7 +46,15 @@ namespace oscairn::standalone
         // Clock out (RFC 0012 step 2): the MIDI outputs the transport's clock goes to; cabling, not saved with a Performance.
         void setClockOutputs(std::vector<DeviceRule> outputs);
         std::vector<DeviceRule> clockOutputs()const;
-        void note(bool on,int key,float velocity,int channel=-1); // channel 0..15; -1: the selected track's
+        // A note into the engine's note input: channel 0..15 (-1: the selected track's); `input`, a
+        // MIDI input's name (session status), whose notes it plays as (empty: the built-in source).
+        void note(bool on,int key,float velocity,int channel=-1,const std::string& input={});
+        // All notes off (RFC 0030), from any panic button: the engine's, and onNotesOff (the
+        // on-screen keyboards let go of what they hold).
+        void allNotesOff();
+        std::function<void()> onNotesOff;
+        // An input's on-screen keyboard (empty: the built-in one), where the profile offers it; unset where it does not.
+        std::function<void(const std::string& input)> openKeyboard;
         // Pads play through the Performance's pad map (pads.h), on the selected track's MIDI
         // channel unless a pad has its own. The map is cached here and refreshed after a load.
         void pad(int index,bool on,float velocity);
@@ -302,7 +310,7 @@ namespace oscairn::standalone
         uint32_t knobPart_=0;
         int rowKnobs_=0;
         Edge rowEdge_=Edge::Bottom;
-        std::array<uint16_t,128> padChannels_{};
+        std::map<std::string,std::array<uint16_t,128>> padChannels_; // by input: each key's channels held
         PadMap padMap_;
         std::string editError_, pluginDir_;
         std::vector<Macro> macros_;

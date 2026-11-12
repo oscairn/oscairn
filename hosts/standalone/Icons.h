@@ -60,7 +60,7 @@ namespace oscairn::standalone
     class IconButton : public juce::Button
     {
     public:
-        enum class Glyph { Plus, Undo, Redo, Detach, List, Pills, Home, Back, Panic, More, Apps, Record, Capture, Star, Recent, Compact };
+        enum class Glyph { Plus, Undo, Redo, Detach, List, Pills, Home, Back, Panic, More, Apps, Record, Capture, Star, Recent, Compact, Keyboard };
         IconButton(Glyph glyph, const juce::String& name) : juce::Button(name), glyph_(glyph) { setTitle(name); }
 
         void paintButton(juce::Graphics& g, bool hover, bool down) override
@@ -73,7 +73,7 @@ namespace oscairn::standalone
             if(!color.isTransparent()) getLookAndFeel().drawButtonBackground(g, *this, findColour(on ? juce::TextButton::buttonOnColourId : juce::TextButton::buttonColourId), hover, down);
             else if(on) { g.setColour(ink(Ink::Accent).withAlpha(.22f)); g.fillRoundedRectangle(getLocalBounds().toFloat(), buttonRadius(float(getHeight()))); }
             else if(hover || down) { g.setColour(ink(Ink::Text).withAlpha(down ? .16f : .08f)); g.fillRoundedRectangle(getLocalBounds().toFloat(), 4); }
-            static const char* const names[] = {"plus", "undo-2", "redo-2", "square-arrow-out-up-right", "list", "tags", "house", "arrow-left", "octagon-x", "ellipsis-vertical", "layers", "circle", "history", "star", "history", "chevrons-down-up"};
+            static const char* const names[] = {"plus", "undo-2", "redo-2", "square-arrow-out-up-right", "list", "tags", "house", "arrow-left", "octagon-x", "ellipsis-vertical", "layers", "circle", "history", "star", "history", "chevrons-down-up", "keyboard-music"};
             const float side = std::min(float(getWidth()), float(getHeight())) * .6f;
             // Record is in the danger color, filled while it records.
             const bool record = glyph_ == Glyph::Record;

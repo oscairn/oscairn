@@ -205,12 +205,24 @@ following the Performance's controls (or the selected part's), and a strip per p
 Selected, a part's knobs follow its banks: its own controls, then its instrument's first
 parameters, then each effect's main control, as many at a time as the device has screen knobs or assignable knobs (**Bank** pages them). On a device with
 knobs, **Learn** assigns one: move it, then touch a strip, its M, a scene or a knob.
-On the desktop, a keyboard along the bottom of Play plays the selected part, on its channel, into
-the same note input as MIDI in (zones and splits apply): click or touch a key (lower on it is
-louder), drag across the keys, or type A W S E D F T G Y H U J K O L P ; from middle C, with Z
-and X for an octave down and up, while no text field has focus. It shows while no MIDI input is
-connected; **View → Show Keyboard** shows or hides it, and the choice is kept. Notes are let go
-on key-up, mouse-up (wherever the mouse is), a text field taking focus, and the window going behind.
+Each MIDI input has an on-screen keyboard (`KeyboardWindow.h`), and so does the built-in input,
+the on-screen keyboard proper, where the profile offers it (`onScreenKeyboard`, RFC 0024). Its keys
+play as that input (`notes.send`'s `input`): parts whose devices take it hear them, through their
+zones, splits and channel, and parts limited to other devices do not; the built-in one plays as
+**Built in**, which **Any device** includes. It plays on the selected part's channel when that part
+takes one. Click or touch a key (lower on it is louder, or one velocity with **Fixed velocity**), drag
+across the keys, or type A W S E D F T G Y H U J K O L P ; with Z and X for an octave down and up,
+while its window has focus and no modifier is held. **Sustain** keeps keys let go sounding. Keys
+light as the input's own notes arrive (`session.status`'s `heldNotes`), and a thin band over the
+keys marks each part the input plays, over that part's keys. On the desktop each is a floating
+window over Oscairn's own (not over other apps), its size and place kept per input in
+`keyboard.txt` in the configuration; several can be open at once; Esc or the close box closes it.
+On a device's screen it is a sheet over the app, one at a time, with Close. The keyboard button
+beside a part's devices, and on the keys and MIDI input in Routing, opens one; **View → On-screen
+Keyboard** opens the built-in one. Nothing opens by itself: while no MIDI device is connected, Play
+shows one quiet line, "No MIDI device. Open the on-screen keyboard", until a device connects or it is
+dismissed (kept). Notes are let go on key-up, mouse-up, focus leaving it, its window going behind,
+closing it, its input unplugged, and Panic.
 `--view Part|Mixer|Routing|Controls|Play` (desktop layout only) opens the Performance app on that
 view instead. Before an app opens, the shell asks the engine to admit it
 ([RFC 0025](../docs/rfcs/0025-resource-budgets.md#memory-reserved-committed-and-opportunistic));

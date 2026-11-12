@@ -119,9 +119,10 @@ open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Osca
 ```
 
 It plays through the default audio output, and any connected MIDI device plays it. With no
-MIDI device, Performance's Play view has a keyboard along the bottom: click its keys, or type
-A W S E D F T G Y H U J K O L P on the computer's keyboard (Z and X change octave);
-**View → Show Keyboard** shows or hides it. Switch
+MIDI device, **View → On-screen Keyboard** (or the link Play shows) opens a keyboard in a
+window of its own: click its keys, or type A W S E D F T G Y H U J K O L P on the computer's
+keyboard while it has focus (Z and X change octave). Each MIDI input has one too, which plays as
+that device: the keyboard button beside a part's devices opens it. Switch
 panel layouts in the View menu, or start with one:
 
 ```bash

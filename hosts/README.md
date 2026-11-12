@@ -423,8 +423,8 @@ profile's device becomes the null device with that device's channels. The user's
 device's name) with the device `fixed`, and `audio.set` refuses another device. It is only ever
 chosen by the option: a missing device still stops the engine with "no audio output". It reaches
 a managed helper as its own `--audio null`, and the helper is identified by it, so a test never
-attaches to an engine playing a real device. The `desktop-launch` test, the
-`managed_lifecycle.py` smoke test and scripted release checks use it.
+attaches to an engine playing a real device. The `desktop-launch` test and scripted release
+checks use it.
 
 The headless `audio-routing`/`audio-routing-lv2` tests check independent master/cue/record
 buses, sidechains, explicit averaging, range/cycle rejection, live edits and mixed CLAP/LV2
@@ -534,20 +534,10 @@ a reopened window quitting) and by hand with the app on macOS (quit, `kill -9`, 
 `engine-process-policy` checks ownership locks, refusal to replace unrelated files and
 bounded cleanup of an unresponsive child. `engine-process-lifecycle` checks concurrent
 launch, UI detachment, reuse, stale-socket recovery and fresh state after an engine crash
-using a device-free helper. CI requires socket permission for this test.
-
-The live managed test exercises the bundled desktop without `--connect`:
-
-```sh
-python3 hosts/engine/tests/managed_lifecycle.py \
-  build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app/Contents/MacOS/Oscairn
-```
-
-Add `--interactive-recovery` to exercise the on-screen Restart engine button instead of
-reopening another UI. This mode waits up to 60 seconds for the button click. Both modes
-use a private test runtime directory, run on the null audio device (`--audio null`), mute the
-synth before playback, save screenshots, and stop only the processes they started. Automatic startup, reattachment and the actual
-recovery button were verified on macOS with the Multi-Output Device at 48 kHz/512 samples.
+using a device-free helper. CI requires socket permission for this test. `desktop-launch` runs
+the bundled desktop without `--connect`: its managed helper starts, and stops once the app quits.
+Automatic startup, reattachment and the actual recovery button were verified on macOS with the
+Multi-Output Device at 48 kHz/512 samples.
 Separately, Jacob verified SMK37 notes, pressure response and sequencer PLAY/STOP in the
 default managed desktop's KICK layout on October 28, 2026.
 

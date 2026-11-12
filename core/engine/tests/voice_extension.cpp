@@ -18,15 +18,18 @@
 // With a hostile worker (one writing out-of-range counts, costs and levels after each block) only:
 // the engine bounds what it reads, and the budget goes on with it.
 #include "oscairn/graph.h"
+#include "oscairn/realtime.h"
 #include "AllocationGuard.h"
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 using namespace oscairn;
 using kick::clap::Event;
 static void check(bool ok,const std::string& why){if(!ok)throw std::runtime_error(why);}
@@ -94,7 +97,10 @@ int main(int argc,char** argv){try{
         check(synth.voiceReport(cost,notes,count)==4 && count==4,"four notes reported, a voice each");
         for(uint32_t i=0;i<count;++i)check(notes[i].voices==1 && notes[i].loudness>0 && notes[i].loudness<=1,"each with its level now");
     }
-    {
+    // On a real-time thread, as the engine renders: on another a loaded machine holds blocks up,
+    // which the budget counts as the voices' cost, and gives up whole notes for.
+    std::exception_ptr error;
+    std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{
         ::setenv("OSCAIRN_FIXTURE_VOICE_US","60",1);::setenv("OSCAIRN_FIXTURE_LAYERS","4",1);::setenv("OSCAIRN_FIXTURE_VOICE_BUDGET","1",1);
         Graph g(48000,frames);const auto s=g.add(argv[2]);
         g.connectNotes(graphInput,s);g.connectAudio(s,graphOutput);g.commit();
@@ -114,7 +120,8 @@ int main(int argc,char** argv){try{
         check(whole<8,"elements dropped from notes, not notes from the sound");
         for(uint32_t i=0;i<count;++i)check(notes[i].loudness>.9f,"each note keeps its loudest element");
         check(given.stolen==0 && given.hardChokes==0,"the host gave up none of its notes");
-    }
+    }catch(...){error=std::current_exception();}}).join();
+    if(error)std::rethrow_exception(error);
     std::puts("ok: one pool's policy across sounds, and elements given up before notes");
     return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

@@ -23,7 +23,7 @@ Checked when built and tested; the sections below say how.
       volume, octave, split and layer); a test profile and panel layout standing in for a
       sectioned board on the desktop, its controls played through `controllers.play`
 - [ ] 2. Declared-role functions with today's roles (cutoff, resonance, attack, release, EQ,
-      mix), dark controls, shared groups with `select:` buttons, and RFC 0042's drawbars, direction, pickup and places on a section's
+      mix) and guessed ones, dark controls, `takePositions`, shared groups with `select:` buttons, and RFC 0042's drawbars, direction, pickup and places on a section's
       own controls
 - [ ] 3. Auto-binding on open, the prompt when it is not obvious, `sections.auto`
 - [ ] 4. Sound select within a section: its category, favorites, the section display, the
@@ -36,6 +36,8 @@ Checked when built and tested; the sections below say how.
       section displays driven where the hardware takes them
 - [ ] 8. The same Performance on the desktop, on a board with other sections and on a board with
       none; a controller profile with a section of its own
+- [ ] 9. Overriding section controls: a Performance's `assignments` by section identity, the
+      device's remaps in `sections.json`, the Settings page
 
 ## Problem
 
@@ -123,6 +125,11 @@ need.
 - A Performance that arrives with no bindings binds itself when each section has exactly one
   obvious part, and asks otherwise. A wrong binding is quick to change (decided).
 - Parts beyond the sections stay playable and are edited on the screen (decided).
+- Split and layer buttons edit the bound part's keyboard zones, which stay the only split model
+  (decided).
+- A Performance can override a section control, sending the synth section's cutoff knob to a
+  control with targets in two plugins, and a device can remap one for every Performance; the
+  section default applies where neither does (decided).
 - On the desktop, and on a board without those sections, a binding is only a label on a part;
   nothing breaks (decided).
 
@@ -349,8 +356,8 @@ says which groups sit in it.
   screen knobs and the assignable controls belong to the whole board.
 - **Control identities inside a section:** `<section>/<kind identity>`, numbered within the
   section from 1 (`organ/fader:3`, `synth/knob:2`, `organ/button:1`). Pickup, RFC 0042's `places`
-  and `controllers.play` name them so. They are not override targets (`assignments.set` refuses
-  them; [open question 3](#open-questions)), and they never shift the numbering of `knob:N` and
+  and `controllers.play` name them so, and a Performance's `assignments` override them
+  ([below](#overriding-a-section-control)). They never shift the numbering of `knob:N` and
   the rest, which stays across assign groups only.
 - **`lights`** on a section's group, an answer for sections to RFC 0024's open question, kept
   small: `none` (the default), `state` (each control has a light showing its function's state:
@@ -368,11 +375,12 @@ The section vocabulary of `functions`, by where each acts ([next section](#what-
 | `on` | button | The part's `mute` (on is not muted); on an empty section, creates a part |
 | `volume` | knob, fader | The part's `level` |
 | `octaveDown`, `octaveUp` | button | The part's zones' `transpose`, by 12, from −36 to +36 |
-| `layer`, `lower`, `upper` | button | The part's zones: the whole keyboard, below the split key, from it up |
+| `layer`, `lower`, `upper` | button | The part's zones: the whole keyboard, below the boundary, from it up ([below](#split-and-layer-on-one-keybed)) |
 | `sound` | encoder | Steps through Sounds of the section's category, loading each |
 | `soundPrevious`, `soundNext` | button | The same, one step |
 | `category1` … `category8` | button | Narrows the sound select to the Nth extra tag the section lists |
 | `favorite` | button | Steps through favorites of the section's category |
+| `takePositions` | button | Sets each control of the section's groups to its physical position, ending pickup ([shared section controls](#shared-section-controls)) |
 | `select:<slot>` | button | Picks which slot of a [shared group](#shared-section-controls) its groups act on |
 | `drawbar1` … `drawbar9` | fader, knob | The part's drawbar with that index (RFC 0042) |
 | A role's name (`cutoff`, `resonance`, `attack`, `release`, `lowGain`, `midGain`, `highGain`, `level`, `mix`, and draft 7's below) | knob, fader, encoder, button | The part's parameter with that role |
@@ -407,8 +415,10 @@ group's `section` may be a **list** of slots, and the group then acts on one of 
   that is RFC 0042's `controls` mode on the assignable sliders, a different thing.
 - **Pickup** is per control and target already, so moving from the upper to the lower organ makes
   each bar wait for the lower organ's value, and RFC 0042's position marker shows where each bar
-  sits meanwhile. That is the V-STAGE's problem H-BAR MANUAL answers; whether Oscairn needs a
-  "take all positions now" button is [open question 7](#open-questions).
+  sits meanwhile. That is the V-STAGE's problem H-BAR MANUAL answers; Oscairn answers it with a
+  `takePositions` function (decided 2026-11-11), built after RFC 0042's `places`: it sets each
+  control of the group's target to where the physical control sits, ending pickup for the whole
+  group, as one undoable edit to the parameters.
 - Identities of a shared group are named by the list's first slot (`organ/fader:3`).
 
 ### What each control acts on
@@ -422,7 +432,11 @@ Three kinds, and nothing else:
   percussion. A control whose role no plugin in the part declares goes **dark**: its light off,
   its tile on the screen blank with "None in this Sound", and moving it does nothing. It is
   looked up again whenever the part's chain or parameter info changes (a Sound loaded, a plugin
-  replaced, a rescan), as banks are now.
+  replaced, a rescan), as banks are now. For a plugin that declares no roles at all, the roles
+  guessed from its parameters' names (`roleFromName`, as the banks use them) count, and the tile
+  marks such a control "guessed" (decided 2026-11-11): the rule that nothing guesses is about what
+  a Sound *is*, which the guess does not touch, and without it most third-party synths would be
+  dark in the synth section.
 - **Node roles,** for effects: the part's node carrying `insertion-a` or `insertion-b`, and the
   buses holding a `reverb` or `variation` node. Dark when the part or the Performance has none.
 
@@ -438,7 +452,7 @@ Each part property and role, decided per row:
 | Section on/off | Part property: `mute` | `Part::mute`, `parts.level`'s `mute` | Nothing; a scene's mutes switch sections, as they mute parts now |
 | Section volume | Part property: `level` | `Part::level`, a live gain | Nothing |
 | Octave | Part property: every zone's `transpose`, moved together by 12 | `NoteZone::transpose` | Nothing; held notes keep the pitch they started at, as a zone edit does now (to check in the engine when step 1 builds) |
-| Split and layer buttons | Part property: zones | `PartInput::zones` | The Performance's `splitKey` ([below](#split-and-layer-on-one-keybed)) |
+| Split and layer buttons | Part property: zones | `PartInput::zones`, `parts.input` | Nothing in the format; a device default split key ([below](#split-and-layer-on-one-keybed)) |
 | Drawbars 1 to 9, direction | Declared, RFC 0042's DRAWBAR field and `reversed` | Not built: RFC 0042's draft 6 | Nothing beyond RFC 0042 |
 | Percussion on, level, decay, harmonic | Declared role | None | `PERCUSSION`, `PERCUSSION_LEVEL`, `PERCUSSION_DECAY`, `PERCUSSION_HARMONIC` |
 | Rotary slow/fast, stop | Declared role | None | `ROTARY_SPEED`, `ROTARY_STOP` |
@@ -479,8 +493,9 @@ then steps it; to check against the first organ plugin. A host that does not kno
 reads these as `NONE`, as the header already says for unknown values.
 
 None of these join the role banks (Filter, Amp EG, EQ, Levels): they are section controls, and a
-bank of organ switches on a synth's knobs would be blank on every other Sound. Whether an "Organ"
-role bank should exist for boards with no organ section is [open question 4](#open-questions).
+bank of organ switches on a synth's knobs would be blank on every other Sound. No "Organ" role bank
+is added for boards without an organ section, for now (decided 2026-11-11): RFC 0042's drawbars
+on the sliders cover the main need.
 
 ### The binding on a part
 
@@ -504,7 +519,7 @@ keeps the binding.
   ([RFC 0011](0011-performance-ui-and-editors.md#scenes-the-full-model-decided-2026-10-31)). A
   binding is structure, like part order. A song whose chorus wants a different sound in the organ
   section uses two parts, both able to sit there, and a scene that mutes one and unmutes the
-  other; the section shows the playing one ([open question 2](#open-questions)).
+  other; the section shows the playing one (decided 2026-11-11).
 
 ### Auto-binding
 
@@ -601,13 +616,91 @@ switches seamlessly where the plugins allow
   The tags a factory library gives its Sounds are the publisher's; the musician can add tags as
   now ([RFC 0021](0021-sounds-performances-and-library.md#where-tags-are-stored)).
 
+### Overriding a section control
+
+By default a section control acts on its bound part's property or declared role, as above. The
+owner (2026-11-11): it "should be overrideable in device settings or performance controls so like
+a performance could forward synth controls to 2 of its plugins." So each section control resolves
+in three layers, the first that is set winning:
+
+1. **The Performance's override,**
+2. **the device's override,**
+3. **the section default:** the bound part's property or role.
+
+This is RFC 0011's layering ([defaults](0011-performance-ui-and-editors.md#defaults-so-nothing-must-be-programd))
+with a device layer between the Performance and the defaults, for section controls only.
+
+#### Performance overrides
+
+A Performance overrides a section control the way it overrides an assign control today: an entry
+in its `assignments`, by the control's identity (Performance format, the `assignments` row;
+`AssignmentOverride` in `core/control/include/oscairn/parts.h`). No new field: `control` accepts a
+section identity (`synth/knob:1`) beside `knob:N` and the rest, and `validPhysicalControl` and
+`assignments.set` learn them. The kinds stay those `assignments` has:
+
+- **`control`, the main case:** the knob drives one of the Performance's controls, which can have
+  any number of targets, each with its own range (`start`, `end`, end below start reversing),
+  curve, `relative` and the scenes it is off in (`controls.targets`,
+  [control protocol](../control-protocol.md#requests-and-responses)); a relative target on a
+  parameter that takes CLAP modulation is sent as modulation on top of the parameter's own value
+  (`MacroTarget::delivery`, `parts.h`). So the synth section's cutoff knob drives a control whose
+  two targets are two plugins' cutoffs, in the bound part or any other: the Super Knob mechanism,
+  reached from a section control.
+- `parameter`, `partLevel` and `partMute`, as for any override; `scene` and `panic` on a section's
+  buttons, as on `button:N`.
+
+What follows from it:
+
+- **Dark or lit follows the override's target,** not the role: a control overridden to a
+  Performance control is lit while that control exists (and an override whose target is removed is
+  left out at save, as now, so the section default comes back); one overridden to a parameter is
+  dark when its node is gone. A part-property override is never dark.
+- **Pickup and RFC 0042's two-value display** apply to the override's target value, the
+  Performance control's value for `control`, as pickup works for any target now: per control and
+  target ([RFC 0011](0011-performance-ui-and-editors.md#the-controller-mapping-service)).
+- **The screen says so.** The section's tile shows the control with its destination instead of its
+  role: "Cutoff → Brightness (2 targets)", marked **Performance**; tapping it lists the targets and
+  offers **Use the section's** (removing the override). The section's display shows the
+  destination's name while the control moves.
+- **Scenes** change which of a control's targets are active (`offIn`), as for any control; they do
+  not change the override itself, as they do not change other overrides now.
+- **A shared group** ([above](#shared-section-controls)): an override on `organ/fader:3` applies
+  whichever slot the select buttons picked; the slots' bindings decide only the default layer.
+- **Not in a Sound.** A Sound's own assignments (`part` nonzero) stay what they are: they may name
+  `wheel:2` and the other standard controls, not a section's identities, since a Sound must not
+  depend on one board's panel.
+
+So "one part per slot" reads exactly: a slot binds one part, and its controls may reach other
+parts or plugins through a Performance's override.
+
+#### Device overrides
+
+A per-device remap of a section control: "on this board, the synth section's fourth knob is
+always decay". It names only what any Performance has, so it can apply to all of them:
+
+- another section function or role name from the vocabulary (`decay` instead of `release`,
+  `effectAmount:insertion-b` instead of `effectAmount:insertion-a`), acting on the bound part as a
+  default does;
+- a Performance control by name (`control:Super Knob`, as a layout's `control:NAME` binds one),
+  dark in Performances without one of that name;
+- `none`, to leave a control doing nothing.
+
+It is stored in the data folder, per device, in `sections.json` beside `controllers.json`
+(`controllers.choose`'s), never in the profile, which describes the product, and never in a
+Performance. The same file keeps the default split key ([above](#split-and-layer-on-one-keybed))
+and each section's default Sound is kept beside favorites, as above. Settings gains a **Panel
+sections** page (an entry in the page list of `hosts/standalone/apps/settings/Pages.cpp`, shown
+only where the device's profile or a connected controller's has sections, as other pages there are
+shown by what the profile has): each section with its controls, each control's function, a changed
+one marked with **Reset**, and the default split key.
+
 ### Locked sections
 
 A fixed-engine sectioned board ([how others do it](#how-others-do-it)) is one case of this design:
 a profile whose new Performance has one part per section, each holding only Sounds of the
 section's category. So a section may be **locked** by its product's profile, for a simple stage
-instrument; an open section, the default, suits a workstation. Proposed, for the owner to decide
-([open question 9](#open-questions)):
+instrument; an open section, the default, suits a workstation (decided 2026-11-11: opt-in per
+section, device profiles only, off by default; every built-in profile and the desktop stay open):
 
 - **`locked: true`** on a section in the profile. Only a device profile may lock; a controller's
   sections are always open.
@@ -625,34 +718,55 @@ instrument; an open section, the default, suits a workstation. Proposed, for the
 - **A Performance that arrives** without a fitting part for a locked section gets one made from
   the default Sound when it opens, and its own parts stay extra parts. That makes an edit, saved
   only if the musician saves.
+- **Overrides still work.** A lock restricts the section's Sounds and its binding only; a
+  Performance's and the device's overrides of its controls ([above](#overriding-a-section-control))
+  apply as on an open section. No profile flag forbids them until a product needs one.
 - **Nowhere else:** the lock is the device's, not the Performance's. On the desktop or an open
   board the same Performance has ordinary parts with labels, and every edit is allowed.
 
 ### Split and layer on one keybed
 
-Sectioned boards play all their sections from one keybed, layered or split. In Oscairn every part
-has its own zones, so the buttons edit the bound part's zones:
+Sectioned boards play all their sections from one keybed, layered or split. In Oscairn that is
+already the parts' keyboard zones: each part's input has zones with key ranges
+(`PartInput::zones`, set by `parts.input`, saved with the part, [RFC 0012](0012-sync-external-midi-and-multi-device.md#choosing-devices-selectors)).
+So a section adds no split model (decided 2026-11-11). Its buttons edit the bound part's zones,
+and the zones stay the only truth about who plays which keys.
 
-- The Performance gains **`splitKey`**, a MIDI key, 0 to 127; absent, 60 (middle C, which
-  Oscairn names C4: `noteName` in `core/control/src/pads.cpp`, used by `ZoneEditor`). Saved with
-  the Performance, in the same format version as `section`. Scenes do not record it, as they do
-  not record zones now.
-- **`layer`** sets the part's zones to the whole keyboard; **`lower`** to keys 0 to `splitKey` −
-  1; **`upper`** to `splitKey` to 127. Each keeps the zone's velocity range, channels, curve and
-  transpose. A part with several zones (a velocity layer) has each zone's key range set alike.
-- A part whose zones are none of those three shapes (edited on the Part page) lights none of the
-  buttons; pressing one sets that shape. Moving `splitKey` moves every part whose zones are
-  `lower` or `upper` shaped.
+- **`layer`** sets the part's key range to the whole keyboard, 0 to 127; **`lower`** to 0 up to
+  the boundary − 1; **`upper`** from the boundary to 127. Each keeps the zone's velocity range,
+  channels, curve and transpose. Each press is a `parts.input` edit, undone by `edit.undo`.
+- **Which button is lit** is read from the zones every time: `layer` when the part's range is
+  0 to 127, `lower` when it starts at 0 and ends below 127, `upper` when it starts above 0 and
+  ends at 127. Anything else lights none.
+- **The boundary is not stored.** It is worked out from the zones when a button is pressed: the
+  lowest key of the first bound part (in part order) whose range is `upper`-shaped, else one above
+  the highest key of the first `lower`-shaped one, else the device's default split key. So it can
+  never disagree with the zones; if two parts' zones disagree (one ends at B3, another starts at
+  E4), each part plays what its zones say, Play shows both ranges, and the buttons use the first
+  as above.
+- **The device's default split key** is a device setting, kept with the section remaps
+  ([below](#device-overrides)), 60 when unset (middle C, which Oscairn names C4: `noteName` in
+  `core/control/src/pads.cpp`, used by `ZoneEditor`). It is never written into a Performance.
 - **Setting the split point on the panel:** holding a section's `lower` or `upper` and pressing a
-  key sets `splitKey` to that key, as the V-STAGE's SPLIT POINT does
-  ([above](#the-hardware)).
+  key moves the boundary to that key, as the V-STAGE's SPLIT POINT does
+  ([above](#the-hardware)). That is an edit of the zones themselves: every bound part whose range
+  is `lower`- or `upper`-shaped at the old boundary gets its range moved to the new one, in one
+  undoable step. The key pressed plays no note.
+- **Zones the buttons cannot express** (several zones with different key ranges, a velocity limit
+  on any zone, a range starting above 0 and ending below 127): the buttons light none, the
+  section's display and Play's tile show the range as it is ("C2–F♯3, velocity 1–90"), and a press
+  changes nothing and says "Zones set on the Part page". They show it and leave it (decided).
+  Several zones sharing one key range and full velocity (one per channel) are one range to the
+  buttons.
+- **Three or more regions** need nothing more: each part's range is its own, so a lower, middle and
+  upper part are three parts' zones, edited on the Part page; the buttons light none for the middle
+  one, as above.
 
 **An external keyboard.** A part already chooses which inputs play it (RFC 0012's selectors: the
 built-in keys, all external, USB by name). A section's part played from a second keyboard is a
 part whose input selects that keyboard; its section's buttons and knobs work the same. Its
-`lower`/`upper` buttons then split the external keyboard by the same `splitKey`, which is right
-for a second manual only when split; the Part page edits its zones otherwise. No section rule
-knows about inputs.
+`lower`/`upper` buttons edit its zones the same way, which is right for a second manual only when
+it is split; the Part page edits its zones otherwise. No section rule knows about inputs.
 
 **A controller with a section of its own.** A controller profile may declare `sections` and
 section groups too (a drawbar controller, say). Its groups join the device's
@@ -702,7 +816,7 @@ the profile has sections:
 
 ### The test panel on the desktop
 
-So that steps 1 to 8 are testable before any sectioned board runs Oscairn:
+So that steps 1 to 9 are testable before any sectioned board runs Oscairn:
 
 - **A test profile,** `hosts/standalone/profiles/sections-test.json`, marked `estimated` and named
   as a test board (not any product), with piano, organ and synth sections shaped like the boards
@@ -724,11 +838,12 @@ as `parts.*` is; the per-device default Sound is `library`, as favorites are.
 
 | Method | Takes | Returns | Permission |
 | --- | --- | --- | --- |
-| `sections.get` (new) | none | `sections`: each `{id, name, category, part}` (`part` 0 for empty), with `controls`, each `{control, function, target, value, dark}` (`control` its identity, `organ/fader:3`), and `pending`: the sections auto-binding left to ask about, each with its `candidates` | `play` or `edit` |
+| `sections.get` (new) | none | `sections`: each `{id, name, category, part}` (`part` 0 for empty), with `controls`, each `{control, function, target, value, dark, guessed, layer}` (`control` its identity, `organ/fader:3`; `layer` which layer it resolved from: `performance`, `device` or `section`), and `pending`: the sections auto-binding left to ask about, each with its `candidates` | `play` or `edit` |
 | `sections.bind` (new) | `section`, `part` (0 to empty it) | `{accepted:true}`; an edit. Refused: an unknown section, a part that does not exist | `edit` |
 | `sections.auto` (new) | optional `clear` (re-bind every section) | `{bound, pending}`: the pairs it bound and the sections still to ask about; an edit | `edit` |
 | `sections.create` (new) | `section`, optional `sound` (a library ID; absent, the default) | `{part}`: `parts.fromSound`, bound; refused over the budget, with the shortfall | `edit` |
-| `sections.splitKey` (new) | `key`, 0 to 127 | `{accepted:true}`; an edit | `edit` |
+| `sections.device` (new) | none: the device's overrides and default split key; or `remaps` (each `{control, function}`, `function` a vocabulary function, a role name, `control:NAME` or `none`, or null to reset) and optional `splitKey` (0 to 127) | The device's `remaps` and `splitKey` after the change; kept in the data folder's `sections.json` | `system`, as `controllers.choose` |
+| `assignments.set`, `assignments.get` | Accept and list section identities (`synth/knob:1`) as `control`, with the kinds they take now; a Sound's own assignment (`part` nonzero) to a section identity is refused | | `edit`; `play` or `edit`, as now |
 | `sections.setDefault` (new) | `section`, `sound` (a library ID, or empty) | `{accepted:true}`; kept per device in the library's user file | `library` |
 | `controllers.play` (new) | `control` (an identity, a section's too), and one of `position` (0 to 1), `steps` (a relative step) or `press` (true or false) | `{accepted:true}`: played as a panel control is, with pickup | `play` |
 | `controllers.get` and the `controllers` topic | RFC 0042's `places` include sections' controls by identity | | as now |
@@ -742,50 +857,52 @@ or a control moves (`controllers`), and clients read it again then.
 
 | Step | Deliverable | Gate |
 | --- | --- | --- |
-| 1. Sections and bindings | `sections` and a group's `section` in `profile.schema.json` and `Profile.cpp`; the part's `section` and the Performance's `splitKey` in the format and schema; `sections.get`, `sections.bind`, `sections.splitKey`; part-property functions; `controllers.play`; the layout's `fader` type and `as:` binding; the test profile and layout | On the desktop with `--profile sections-test --layout sections-test` and three parts: binding part 2 to the organ section makes the organ's volume fader move part 2's level and its `on` mute it; `octaveUp` transposes part 2's zones by 12; `lower` and `upper` split at `splitKey`; unbinding darkens the section; `edit.undo` restores each. `desktop-profile`: a `section` on an assign group, an unknown function, and two sections with one `id` are refused. `control-performance-format`: a saved binding and `splitKey` reload; a slot the profile lacks is kept byte for byte through load and save. `desktop-shell` snapshots the layout |
-| 2. Roles and RFC 0042's mechanisms | Declared-role functions with today's roles; dark controls; shared groups and `select:`; drawbars, direction, pickup and places on section controls | `control-physical-controls`: a synth section's `cutoff` knob plays the bound part's cutoff role, whatever plugin; a part with no cutoff role leaves it dark and a move changes nothing; a rotary role on an effect after the instrument is found. With RFC 0042's organ test plugin: the nine section faders play its drawbars, reversed; pickup holds a fader until it reaches the value and `places` reports it meanwhile; the shared sliders in `controls` mode and the section faders drive the same parameters |
+| 1. Sections and bindings | `sections` and a group's `section` in `profile.schema.json` and `Profile.cpp`; the part's `section` in the format and schema; `sections.get`, `sections.bind`; part-property functions, the split and layer buttons editing zones, the device's default split key (`sections.device`'s `splitKey`); `controllers.play`; the layout's `fader` type and `as:` binding; the test profile and layout | On the desktop with `--profile sections-test --layout sections-test` and three parts: binding part 2 to the organ section makes the organ's volume fader move part 2's level and its `on` mute it; `octaveUp` transposes part 2's zones by 12; `lower` and `upper` set part 2's zones at the boundary worked out from the other parts' zones (or the default), holding `upper` and pressing a key moves every split-shaped part's range in one undoable edit, and a part with a velocity-limited zone keeps it untouched while the buttons light none; unbinding darkens the section; `edit.undo` restores each. `desktop-profile`: a `section` on an assign group, an unknown function, and two sections with one `id` are refused. `control-performance-format`: a saved binding reloads; a slot the profile lacks is kept byte for byte through load and save. `desktop-shell` snapshots the layout |
+| 2. Roles and RFC 0042's mechanisms | Declared-role functions with today's roles; dark controls; guessed roles; shared groups and `select:`; drawbars, direction, pickup and places on section controls; `takePositions` | `control-physical-controls`: a synth section's `cutoff` knob plays the bound part's cutoff role, whatever plugin; a part with no cutoff role leaves it dark and a move changes nothing; a rotary role on an effect after the instrument is found. With RFC 0042's organ test plugin: the nine section faders play its drawbars, reversed; pickup holds a fader until it reaches the value and `places` reports it meanwhile; the shared sliders in `controls` mode and the section faders drive the same parameters; a plugin with no declared roles gets its guessed cutoff, reported `guessed`; `takePositions` sets each drawbar to its fader's position and a following move plays at once, undone by one `edit.undo` |
 | 3. Auto-binding | The rule, the sheet, the compact list, the panel's blink and confirm, the banner, `sections.auto` | A new `control-sections` test: tables covering one obvious pair, two candidates, a part matching two sections, a part with no `from`, an audio part, and list order changed with the same result; the prompt is not opened while the transport runs at `instrument`; `desktop-gaps` renders the sheet at 1024 x 600 and the compact list at 320 x 240 |
 | 4. Sound select | Category browse, favorites first, subcategories, the default Sound, `sections.create`, `sections.setDefault`, locked sections | `control-library`: the `sound` encoder steps tagged Sounds favorites first and loads each into the bound part keeping its zones, level and binding; an empty section's `on` creates a bound part with the default; over the budget it is refused naming the shortfall. With a locked organ section: a new Performance has its organ part; loading a pad into it, removing it and unbinding it are refused naming the section; on the desktop the same Performance allows all three |
 | 5. Draft 7 roles | The roles in `ui.h` as draft 7; `roleName` and the role parser know them; a test organ plugin declares percussion, rotary, vibrato/chorus and drive | `control-physical-controls`: each section button toggles or steps its role's parameter; a draft-5 plugin reads as before; an unknown role value reads as none |
 | 6. Effects per section | `effect:`, `effectAmount:` and `send:` functions | `control-physical-controls`: the button switches the part's `insertion-a` node off and on, draining as `graph.enable` does; `send:reverb` moves the part's send into the bus with a `reverb` node; with no such node, dark |
 | 7. Play and feedback | The section row on panel and compact surfaces; lights and displays sent where a group's `midi` has `feedback: true` | `desktop-shell`: Play on the test profile in every built-in theme and both input modes, keyboard alone reaching every section control; a controller profile with a section's lights gets each light's state on its output when the state changes |
 | 8. Elsewhere | Labels on the desktop and on boards without the slot; a controller profile with a section | Opening a Performance saved on the test profile on the desktop shows the labels and saves them back unchanged; on a second test profile with only `piano` and `synth`, the organ binding is kept and the prompt offers that part for an unbound section; a controller profile with an `organ` section drives the bound part beside the device's |
+| 9. Overrides | Section identities in `assignments` and `assignments.set`; the device layer, `sections.json`, `sections.device`'s `remaps`; the tile's destination and **Use the section's**; the Settings page | `control-physical-controls`: the synth section's cutoff knob overridden to a Performance control with two targets in two plugins moves both, each in its range, pickup waiting on the control's value; removing the control brings the role default back at save; a device remap to `decay` applies in every Performance and yields to a Performance override; a locked section's control is overridden as an open one's; a Sound's assignment to a section identity is refused. `control-performance-format`: the override saves and reloads. `desktop-settings`: the page lists, changes and resets a remap |
+
+## Decided
+
+By the owner, 2026-11-11, as recommended in the first draft; recorded in the sections above.
+
+- Roles guessed from parameter names count in sections, marked "guessed"
+  ([what each control acts on](#what-each-control-acts-on)).
+- A slot binds one part; its controls may reach other parts or plugins through a Performance's
+  override ([overriding a section control](#overriding-a-section-control)). A board's several
+  sounds in one section (the V-STAGE's upper, lower and pedal organ, its synth A and B) are
+  several slots sharing controls.
+- Scenes do not change bindings ([the binding on a part](#the-binding-on-a-part)).
+- No "Organ" role bank for boards without an organ section, for now.
+- The thirteen-id slot vocabulary, documented in RFC 0024 when step 1 builds, open to additions.
+- `takePositions`, after RFC 0042's `places` ([shared section controls](#shared-section-controls)).
+- A profile may lock a section: opt-in per section, device profiles only, off by default
+  ([locked sections](#locked-sections)).
+
+Changed by the owner the same day:
+
+- **Splits are the parts' keyboard zones.** No split key in the Performance; the buttons edit the
+  bound part's zones, and the boundary they use is worked out from the zones or a device default
+  ([split and layer](#split-and-layer-on-one-keybed)).
+- **Section controls can be overridden,** by a Performance and by the device, in that order before
+  the section default; a lock does not stop overrides
+  ([overriding a section control](#overriding-a-section-control)).
 
 ## Open questions
 
-1. **Guessed roles in sections.** A plugin declaring no roles gets roles guessed from exact
-   parameter names (`roleFromName`), which fill the banks today. Recommended: sections use them
-   too, marked "guessed" on the tile, so third-party synths are not dark in the synth section; the
-   owner's rule is about what a Sound *is*, which the guess does not touch. The alternative,
-   declared roles only, is stricter and leaves most third-party plugins dark.
-2. **Scenes and bindings.** Recommended: scenes never change a binding (two parts and a mute do
-   it). The alternative is a `sections` scene scope kind, which makes a section's meaning change
-   under the player's hand.
-3. **Overriding a section's control.** Recommended: no; a section's controls are dedicated, and a
-   Performance that wants a knob elsewhere uses an assign control. The alternative makes section
-   identities override targets, so a synth section's spare knob can play anything.
-4. **An Organ role bank** for boards without an organ section (percussion, rotary, vibrato on a
-   row of knobs). Recommended: not now; RFC 0042's drawbars on the sliders cover the main need.
-5. **The slot vocabulary.** Recommended: the thirteen ids above, documented in RFC 0024 when step 1
-   builds, open to additions; a profile using its own word binds only on boards that share it.
-6. **One part per slot.** Recommended: yes. A board's several sounds in one section (the
-   V-STAGE's upper, lower and pedal organ, its synth A and B) are several slots sharing controls,
-   above; a layer of two sounds the musician makes is one part with a split or two plugins in its
-   chain, which RFC 0011 already allows.
-7. **Taking all positions at once** (the V-STAGE's H-BAR MANUAL, the Nord's SYNC): a function
-   that sets each control's target to where the physical control sits, ending pickup for the whole
-   group. Recommended: yes, as a function `takePositions`, after RFC 0042's places exist; it is an
-   edit to the parameters, recorded like any move.
-8. **Three-region splits** (the CK's A/B/C, the Nord's up to three split points). Recommended: one
-   `splitKey` now; a list of up to three, with a `middle` zone button, when a board with that panel
-   is a target.
-9. **May a product profile lock a section?** ([Locked sections](#locked-sections).) Recommended:
-   yes, as an opt-in per section in a device profile, off by default. A product sold as a simple
-   stage piano-organ-synth should not be able to lose its organ by a stray edit, and fixed-engine
-   boards work that way ([how others do it](#how-others-do-it)). Every built-in profile and the
-   desktop stay open, so Oscairn's flexible parts remain the normal case. The alternative, never
-   locking, keeps one behavior everywhere but leaves such a product to look broken when its organ
-   section holds a pad.
+1. **Device remaps to a Performance control by name** (`control:Super Knob`): useful for "always
+   the Super Knob", but a name can mean different things in different Performances. Recommended:
+   allowed, shown dark where no control has the name, as layouts' `control:NAME` already works.
+2. **When two parts' zones disagree on the boundary,** the buttons use the first bound part's, in
+   part order. Recommended: keep it, and show both ranges; the alternative, refusing the buttons
+   until the zones agree, makes a quick button slow.
+3. **A profile flag forbidding overrides on a locked section.** Recommended: none until a product
+   needs it.
 
 ## Ruled out
 
@@ -795,8 +912,11 @@ or a control moves (`controllers`), and clients read it again then.
   section is a slot in the profile.
 - **A second following mechanism beside RFC 0042's:** drawbars, direction, pickup and places are
   RFC 0042's, reused; a section is only who its controls follow.
-- **Section controls reaching by plugin ID or parameter ID:** a section names roles, so it works
-  with any Sound that declares them.
+- **A section's default reaching by plugin ID or parameter ID:** a section names roles, so it
+  works with any Sound that declares them. Reaching a particular plugin is a Performance's
+  override, which names its own nodes and controls.
+- **A split model of sections' own** (a split key in the Performance, regions per section): the
+  parts' zones already are the split (decided 2026-11-11).
 - **Dropping bindings a device does not understand:** they are kept, so a Performance travels
   between boards and the desktop unchanged.
 - **Auto-binding by order** (first organ part to the first organ section): the rule binds only

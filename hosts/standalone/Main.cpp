@@ -16,7 +16,7 @@
 // --size; with --play SECONDS, the sequencer plays for that long first; with --view, the
 // desktop shows that tab (Part, Mixer, Routing or Controls) or Play. External MIDI controllers
 // with a profile (built in: smk37-elite, modx-m-usb; or --controller FILE, as many as wanted) join
-// the device's controls when their MIDI ports are connected (RFC 0024); not with --snapshot.
+// the device's controls when their MIDI ports are connected (RFC 0024); not with --snapshot or --audio null.
 
 #include "Controllers.h"
 #include "DesktopShell.h"
@@ -888,7 +888,7 @@ namespace oscairn::standalone
                 if( socket.isEmpty() && helper.empty() )
                     if( const auto missed = applyMemoryPolicy( -999 ); !missed.empty() && profile.reliability != "desktop" )
                         std::fprintf( stderr, "oscairn: %s\n", missed.c_str() );
-                profile_ = profile; controllerProfiles_ = controllers; plugins_ = dir; // for started()
+                profile_ = profile; controllerProfiles_ = controllers; plugins_ = dir; nullAudio_ = audio.nullDevice; // for started()
                 showSplash( profile );
                 // The engine starts, or is reached, off the message thread, so the splash stays
                 // drawn; an in-process engine opens its devices on the message thread, so it starts there.
@@ -987,9 +987,13 @@ namespace oscairn::standalone
                     else throw std::invalid_argument( "--input-mode must be automatic, mouse or touch" );
                 }
                 window_ = std::make_unique<Window>( *engine_, std::move( layouts ), Layout::parse( json ), profile,*theme_,juce::File(dir.unquoted()), mode, profileSource( args ) );
+                // With --audio null this process opens no MIDI port either: its engine opens none.
+                if( args.contains( "--snapshot" ) || nullAudio_ )
+                    std::fprintf( stderr, "oscairn: 0 MIDI ports open in the app\n" );
+                else
+                    controllers_ = std::make_unique<Controllers>( *engine_, controlGroups( profile ), controllers );
                 if( !args.contains( "--snapshot" ) )
                 {
-                    controllers_ = std::make_unique<Controllers>( *engine_, controlGroups( profile ), controllers );
                     // The Performance last open, now the budget is set (RFC 0028, RFC 0025), off this thread; the
                     // engine remembers it. Only a separate engine opens Performances (not --in-process); --play
                     // plays the startup instrument's sequencer, which an open would stop.
@@ -1111,6 +1115,7 @@ namespace oscairn::standalone
         std::unique_ptr<Splash> splash_;
         // Starting: the command line, what initialise found for started() and the engine on its way.
         juce::String commandLine_, plugins_;
+        bool nullAudio_ = false; // --audio null: the engine opens no MIDI device, nor does this process
         Profile profile_;
         std::vector<Profile> controllerProfiles_;
         std::future<std::unique_ptr<Engine>> starting_;

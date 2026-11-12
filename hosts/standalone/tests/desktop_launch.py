@@ -8,7 +8,8 @@ show more than one color. Stdlib only: the PNG is decoded here (zlib; 8-bit RGB/
 
 Every run passes --audio null: the helper opens the null device, which writes nowhere, and no MIDI
 device, so nothing it does can sound (and a machine without audio hardware runs it). Its log must
-say so: a helper that opened a real device or a MIDI input fails the run. It stops when the app
+say so: a helper that opened a real device or a MIDI input fails the run. The app's own process
+opens no MIDI port either (its controllers' Mackie and feedback ports): its log must say 0. It stops when the app
 quits; one left behind (the app crashed or timed out, which leaves it running by design) is
 stopped here, by the PID in its lease, only when that process is this run's."""
 import fcntl
@@ -143,6 +144,9 @@ def main():
             assert 'oscairn: audio output "null"' in log and 'oscairn: 0 MIDI inputs open' in log and \
                 'audio output "' not in log.replace('audio output "null"', '') and \
                 not re.search(r'oscairn: [1-9][0-9]* MIDI inputs open', log), f'{name}: the helper did not run on the null device alone\n{log}'
+            assert 'oscairn: 0 MIDI ports open in the app' in run.stderr and \
+                not re.search(r'oscairn: [1-9][0-9]* MIDI ports open in the app|MIDI (input|output) "', run.stderr), \
+                f'{name}: the app opened a MIDI port of its own\n{run.stderr}'
             png = os.path.join(folder, name + '.png')
             assert os.path.isfile(png) and os.path.getsize(png) > 0, f'{name}: no PNG written\n{run.stderr}'
             width, height, colors = png_pixels(png)

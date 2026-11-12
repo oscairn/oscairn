@@ -415,7 +415,9 @@ For example, the FANTOM-07's profile gives
 (`NullDevice.h`): a thread of its own plays the engine's callback at the pace of its rate and
 buffer (48 kHz unless `--sample-rate` says; the buffer as `--buffer-frames` or the profile asks),
 and the sound goes nowhere, so meters, the transport, workers and deadlines run as on a device. It
-opens no MIDI input or output either: a test sends its notes with `notes.send`. A
+opens no MIDI input or output either, nor does the desktop app's own process (its controllers'
+Mackie Control and feedback ports; its log says `0 MIDI ports open in the app`): a test sends its
+notes with `notes.send`. A
 profile's device becomes the null device with that device's channels. The user's saved choice
 (`audio.json`) is neither read nor written, `audio.devices` says `null` (its `source` and the
 device's name) with the device `fixed`, and `audio.set` refuses another device. It is only ever

@@ -91,6 +91,9 @@ namespace oscairn::standalone
         engine_.setControllers(device_, {}, std::move(groups));
         { std::lock_guard lock(lock_); inputs_ = std::move(inputs); ports_ = std::move(ports); mackie_ = std::move(mackie); }
         for(auto& input : inputs_) input->start();
+        size_t open = inputs_.size();
+        for(const auto& [port, outputs] : outputs_) open += outputs.size();
+        std::fprintf(stderr, "oscairn: %zu MIDI ports open in the app\n", open);
     }
 
     void Controllers::handleIncomingMidiMessage(juce::MidiInput* input, const juce::MidiMessage& message)

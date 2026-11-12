@@ -47,7 +47,8 @@ then ends `done`, each package `installed`.
 Scripted first-run checks of the downloaded app (launching it, snapshots, driving it over its
 socket) start it with `--audio null`, for example
 `/Applications/Oscairn.app/Contents/MacOS/Oscairn --audio null --snapshot home.png`. Its engine
-then opens the null device, which writes nowhere, and no MIDI device: no virtual output device has
+then opens the null device, which writes nowhere, and no MIDI device, and the app opens none of its
+own (no control surface or controller feedback port): no virtual output device has
 to be set up by hand, and nothing a script does can sound. Listening to it is a check of its own,
 without the option.
 

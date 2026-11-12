@@ -430,6 +430,51 @@
   ],
   "additionalProperties": false,
   "$defs": {
+    "PluginRepositories": {
+      "type": "array",
+      "maxItems": 4096,
+      "description": "Specified for Performance version 14 and Sound version 9, and the library archive's manifest (RFC 0031, the repository hint); not built: no reader takes it yet, and the version 13 reader refuses it, so it is not among the properties. For each plugin the nodes use, the package repository it is published in. At most one entry per format and id, which the reader checks",
+      "items": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "const": "clap"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The plugin's ID exactly as the nodes name it"
+          },
+          "repository": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string",
+                "maxLength": 2048,
+                "pattern": "^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%!$&'()*+,;=:@-]+)*$",
+                "description": "The repository's https:// address, as packages.repositories lists it: a lowercase ASCII host, no user info, query, fragment or / at the end"
+              },
+              "key": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "The repository's root key, its Ed25519 public key in hex, as repository.json's rootKey; not the 16-digit fingerprint"
+              }
+            },
+            "required": [
+              "address",
+              "key"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "format",
+          "id",
+          "repository"
+        ],
+        "additionalProperties": false
+      }
+    },
     "PhysicalControl": {
       "type": "string",
       "pattern": "^(knob|fader|button|wheel|strip|jog|pedal|footswitch|aftertouch|breath):[1-9][0-9]{0,2}$"

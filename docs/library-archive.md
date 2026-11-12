@@ -28,6 +28,7 @@ The manifest:
 | `items` | Each item's `kind` (`performance` or `sound`), `id` (as plain as the library's: an exported item's ID is its archive's), `name`, `path`, its folder in the archive, and `signatures` (optional) |
 | `plugins` | Each plugin's `format`, `id`, `version`, `name` and `builds`: each build's `platform` (such as `macos-arm64` or `linux-arm64`), `path` in the archive, `sha256`, its digest as a [Performance's lock](performance-format.md) gives it, `signatures` (optional) and `estimate` (optional, [RFC 0025](rfcs/0025-resource-budgets.md#status): `{cpu,memory}`, its busiest block's share of the block's time, 0 to 64, and the bytes it holds, at most 1 TiB, as `oscairn-plugin-check` measures it on that platform; installing keeps it beside the build as `estimate.json`, and a device that has not measured the plugin counts it at this) |
 | `files` | Every other entry's SHA-256, by its path |
+| `pluginRepositories` | Optional: where the plugins its items use are published ([below](#where-plugins-are-published)). Not built: no reader takes it yet |
 
 An export holds the Performance, the library Sound of each part that is still that Sound (the
 part unedited since it was loaded or saved, and the library holding that revision), and with
@@ -214,6 +215,71 @@ under **License**, the source as a link. Installing a plugin package copies `Lic
 each of its plugins' folders in the [plugin store](#the-plugin-store), beside the builds. A
 package repository's release record repeats the archive's `source`, and its checks refuse a
 record whose `source` or `license` is not the archive's.
+
+## Where plugins are published
+
+Specified 2026-11-11 ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-repository-hint)).
+**Not built:** no reader takes it yet. Today's archive reader looks up only the manifest fields it
+knows and passes over others (`core/control/src/package.cpp`), so an archive carrying it installs,
+and nothing reads it.
+
+`pluginRepositories` names, for each plugin the archive's items use, the package repository it is
+published in, so a device that lacks the plugin can offer to install it from there. It is advice:
+it adds no repository and installs nothing on its own, and a device asks before fetching anything
+from the address. The same field, with the same shape, goes in a Performance and a Sound
+([format](performance-format.md#where-plugins-are-published)); an export writes the union of its
+items' entries, and an install keeps each item's own.
+
+```json
+"pluginRepositories": [
+  {
+    "format": "clap",
+    "id": "com.example.organ",
+    "repository": {
+      "address": "https://packages.example.com",
+      "key": "9f2c4e81a07b3d5566e1f0c2b8a94d37e6015cfa28b4d9e3a7c1f60b52d8e4a9"
+    }
+  }
+]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `pluginRepositories` | Absent, or a list of at most 4096 entries; at most one per `format` and `id` |
+| `format` | `clap`, the only format repositories carry |
+| `id` | The plugin's ID exactly as the items' nodes name it, at least 1 byte |
+| `repository.address` | The repository's `https://` address, as `packages.repositories` lists it: at most 2048 bytes, the host in lowercase ASCII letters, digits, `.` and `-` (an internationalized name as `xn--`), an optional `:port`, then optional path segments; no user info, query, fragment, spaces or `/` at the end |
+| `repository.key` | The repository's root key: 64 lowercase hex digits, the Ed25519 public key itself, as the repository's `repository.json` gives it in `rootKey`. Not the 16-digit fingerprint, which a device shows people and derives from it |
+
+No version: the version is each node's. No name: a device names a repository by its signed root.
+No package ID: the repository's index says which package holds the plugin. The pattern for the
+address and key is in [performance.schema.json](performance.schema.json)'s `$defs`,
+`PluginRepositories`, which this field shares.
+
+Once built, a reader refuses the archive, as for any malformed field, when an entry is not this
+shape, a plugin is named twice, or there are more than 4096.
+
+### For converters
+
+A converter writing libraries that use published, signed packages:
+
+- Write `pluginRepositories` in `library.json`, one entry per plugin the items use that is
+  published, with the format, ID, address and key above. Today's reader passes over it.
+- Copy `key` from the repository's own `repository.json` (`rootKey`) after checking it against the
+  key the repository's owner publishes, or from `packages.repositories` on a device that uses it.
+- Do **not** write it in `performance.json` or `sound.json` yet. Those readers refuse a field they
+  do not know (`fields()` in `core/control/src/performance.cpp`), so a version 13 Performance or
+  version 8 Sound carrying it does not open. It goes there from Performance version 14 and Sound
+  version 9, when built.
+- Do not write an `http://` address, a folder path, a mirror or blob base instead of the
+  repository's address, a `/` at the end, a fingerprint instead of the key, a name, a package ID
+  or a version.
+- Do not write entries for plugins the items do not use, or two for one plugin.
+- Do not change a plugin's ID or version to match what is published: write those the saved state
+  is from.
+- Do not write a lock entry (`lock` in a document) for a build the converter has not hashed
+  itself; write none rather than guess. A device compares a locked digest with the published
+  build before installing it.
 
 ## Reading one
 

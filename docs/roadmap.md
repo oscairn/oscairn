@@ -694,6 +694,13 @@ Each starts as an RFC:
   packages not installed, grayed with the reason where they cannot install, with details,
   Install and trusting a publisher from the install question; the repositories in the desktop's
   Settings, each with a switch, Remove for the user's and Add a repository...)
+- [ ] **Finding missing plugins** ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#finding-missing-plugins),
+  proposed 2026-11-11): a plugin a library, Performance or Sound needs and this device lacks is
+  looked up by its exact format and ID in the repositories' indexes, offline from the kept ones,
+  and offered with its asset libraries, or the stand-in says why not (no repository has it, not
+  available for this platform); a repository named per plugin (`pluginRepositories`) offered for
+  adding by its key's fingerprint; nothing fetched, added or installed without the user; never
+  on stage while opening, preparing or changing Performances
 - [ ] **Keeping plugins loaded:** a memory budget, unloading the least recently used, setlist
   preparation options and a setlist check; CPU, memory and storage meters. Loaded items beyond
   the open Performance are opportunistic memory ([RFC 0025](rfcs/0025-resource-budgets.md#the-order-of-eviction)).

@@ -125,6 +125,23 @@ name, so parts, wires, scenes and controls keep it; it plays silence, is reporte
 session's `failures` saying why, and writes its saved state back byte for byte on save, so
 installing the plugin later restores it. A document that is malformed is still refused.
 
+### Where plugins are published
+
+Specified 2026-11-11 for Performance version 14 and Sound version 9
+([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-repository-hint)). **Not built:**
+no reader takes it yet, and the version 13 reader refuses a document that has it, as it refuses
+any field it does not know. So it is not among the schema's properties yet; its shape is
+`$defs/PluginRepositories` in [performance.schema.json](performance.schema.json).
+
+`pluginRepositories`, top level, optional: for each plugin the document's nodes use, the package
+repository it is published in, `{format, id, repository: {address, key}}`, exactly as in a
+[library archive](library-archive.md#where-plugins-are-published), which gives the rules and an
+example. A device that lacks the plugin may offer to install it from there, and asks before
+fetching anything from the address. Being part of the document, it is in the content `hash`.
+Saving keeps each entry whose plugin a node still uses and drops the rest; loading a Sound into
+a part or importing parts adds their entries for plugins the document has none for, never
+replacing its own. A Sound has the same field.
+
 ## Snapshot rules
 
 - Native Basic Synth stores every prepared patch, name and all 16 channel selections,
@@ -175,6 +192,7 @@ and limits as a Performance, with `format` `oscairn.sound` and version 8 (versio
 | Field | Meaning |
 | --- | --- |
 | `format`, `version`, `info`, `libraries`, `lock` | As in a Performance |
+| `pluginRepositories` | Not built (version 9): as in a Performance ([where plugins are published](#where-plugins-are-published)) |
 | `nodes` | The part's plugins only, keyed `node-1` onwards; none may share an engine of effect contexts with a plugin outside the part; an instrument sharing an instance is saved on its own (above) |
 | `wires` | The wires with both ends among those nodes: user wires, and the part's own wires for their Mix (the part's wires are rebuilt from its chain on load, taking those settings) |
 | `part` | `chain` and `splits`, as in a Performance's part; no ID, name, input, output, fader or sends |

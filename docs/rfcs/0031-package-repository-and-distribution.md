@@ -21,6 +21,12 @@ streamed installs), [decisions](#decided-2026-11-01) on paid content, large libr
 manufacturers' repositories, and [research and a proposal](#publisher-trust-and-review) on
 publisher trust and review. Those two stay open until Jacob confirms the proposal.
 
+Revised 2026-11-11 from the owner's request of that day:
+[finding missing plugins](#finding-missing-plugins) in the repositories a device knows, a
+repository named per plugin in archives, Performances and Sounds, and what the index must carry
+for it. Proposed, not built; its [open questions](#open-questions-on-finding-missing-plugins)
+are the owner's.
+
 ## Progress
 
 Checked when built and tested; the sections below say how.
@@ -96,6 +102,14 @@ Checked when built and tested; the sections below say how.
       yet: `packages.updates`, update lists and a card on Home, Performances' locks, apps)
 - [ ] 7. Offline and multi-device: fetching for a device, USB subsets, a paired computer as a source
 - [ ] 8. The official repository goes public: hosting, mirrors, policy
+- [ ] 9. Each version's plugins in the index; repositories' kept state keyed by their root key
+      ([finding missing plugins](#finding-missing-plugins))
+- [ ] 10. The repository hint, `pluginRepositories`, read, checked and kept in archives,
+      Performances and Sounds
+- [ ] 11. `packages.lookup`, and what is missing in installs, prepares, the library and stand-ins
+- [ ] 12. Offering the install: the Library, the Parts view, a hinted repository, the Setlist
+- [ ] 13. Newer versions whose publisher says they restore the saved state (if the owner accepts
+      [`restoresStateFrom`](#versions))
 
 ## Problem
 
@@ -575,6 +589,402 @@ plugin and app code needs System.
   and hash itself.
 - **Device to device:** one paired instrument can serve another its cached blobs the same way.
 
+## Finding missing plugins
+
+Proposed 2026-11-11, from the owner's request of that day. Not built: [Progress](#progress)
+steps 9 to 13.
+
+When a library, a Performance or a Sound needs a plugin that has no build on this device, the
+device looks the plugin up in the repositories it knows and offers to install it with what it
+needs, or says why it cannot. Nothing is installed, no repository is added and no address a
+document names is fetched until the user says so (owner, 2026-11-11: every install is the
+user's explicit action).
+
+### What happens today
+
+Read in the code on 2026-11-11:
+
+- A document names each plugin by format, ID and version, its path only a hint
+  ([format](../performance-format.md)). A node loads the build at its path hint or the store's
+  build of exactly that version; any other version is not taken. Otherwise it opens as a
+  stand-in that keeps its place, ports, parameters and saved state, plays silence and writes the
+  state back byte for byte on save (`resolvePlugin` and `standIn` in
+  `core/control/src/performance.cpp`, `core/plugin-host/src/unavailable_plugin.cpp`). Its
+  reason reads "`<id> <version>` is not here (not installed); its place and saved state are
+  kept", or "(version 2.0.0 installed)" when only another version is here.
+- `session.status`'s `failures` lists each failed plugin as `node`, `name` and `reason`, the
+  reason as text ([control protocol](../control-protocol.md)). The desktop's Parts view shows the
+  first: "`<name>` is silent: `<reason>`" (`hosts/standalone/PartsView.cpp`).
+- `library.install`'s `notes` say, as text, which plugin has no build for this device ("`<name>
+  <version>` has no build for this device in the archive", `performance.cpp`).
+- A Performance's lock records each plugin build's digest per platform, but loading does not
+  compare it: any build of the right version loads (`resolvePlugin`).
+- Nothing looks the plugin up anywhere. The Catalog lists packages by kind
+  (`hosts/standalone/Catalog.cpp`).
+
+### The index must say which plugins a version holds
+
+**It does not today.** The index builder writes each version's `types`, counts of items by type
+and plugins by format, and `platforms` for the version as a whole (`facts()` in
+`tools/package-repository/template/scripts/build-index.py`); the device reads the same
+(`repository::Version` in `core/control/include/oscairn/repository.h`). A package's ID is not its
+plugins' IDs: `org.oscairn.splitters` holds `org.oscairn.split` and `org.oscairn.join`, and
+setBfree's package holds its organ at 0.4.4 and its Leslie at 0.2.1
+([plugin packages](../library-archive.md#plugin-packages)). So a lookup by plugin cannot be
+answered from today's index.
+
+Each version in the index gains `plugins`, written from its manifest's `plugins`:
+
+```json
+"plugins": [
+  {"format": "clap", "id": "org.oscairn.setbfree", "version": "0.4.4", "platforms": ["linux-arm64", "macos-arm64"]},
+  {"format": "clap", "id": "org.oscairn.setbfree.leslie", "version": "0.2.1", "platforms": ["linux-arm64", "macos-arm64"]}
+]
+```
+
+- **Platforms per plugin,** since the version's `platforms` is the union over its plugins: a
+  package claims a platform only when every plugin has a build for it, but may carry builds for
+  platforms it does not claim (`read_release` in `build-index.py`).
+- **No build digests in the index.** Each would be 64 hex digits per plugin, platform and version,
+  which do not compress, against the index's target of 2 MB for 5,000 packages
+  ([size](#size)). The lock's digest is compared with the manifest when installing
+  ([versions](#versions)).
+- **About 100 bytes per plugin per version** before compression. Deltas carry it inside each
+  package record, as now.
+- **New checks in the index builder:** in one repository, a plugin's format and ID are published
+  by one publisher, the first to publish it (another publisher's package carrying it is refused,
+  as a package keeps its publisher now); and an ID that differs from a published one only in
+  letter case is refused, as the plugin store's folders for the two would be one on a
+  case-insensitive file system (as for libraries, [installing one](../library-archive.md#installing-one)).
+  A plugin ID new to a package is already a human review ([proposal](#proposal)).
+- Proposed with it, for [newer versions](#versions): each plugin's `restoresStateFrom`, from the
+  manifest, when the owner accepts it.
+
+### Kept state keyed by the root key
+
+A prerequisite, found by reading the code while designing this; not tested and not fixed here.
+`repositories.json`'s `seen`
+serials and the index kept in `Repositories/` are keyed by the repository ID that the root
+itself gives (`see()` in `core/control/src/packages.cpp`; `<repository>.index.json` in
+`repository::open`, `core/control/src/repository.cpp`). A repository the user added, whose root
+names the official repository's ID (`org.oscairn.main`) with a higher serial, would make the
+device refuse the real one's root as older, and would replace its kept index, which a lookup with
+no network then reads as the official one's. Before any lookup reads kept indexes (step 9), both
+are keyed by the root key's ID and the repository ID together, and the address of each known
+repository maps to them (today `repositories.json` keeps no address-to-ID map).
+
+### Where a device looks
+
+The **wanted plugin** is its format, ID and version and this device's platform, with the
+document's [hint](#the-repository-hint) if it has one, and the lock's digest for this platform if
+it has one.
+
+1. **The repositories that are on,** each from the index it read last, with no network. Today
+   every listing reads the root first (`repository::open`), so a lookup from the kept index alone
+   is new. A kept index was checked against a signed root when kept; the answer says which serial
+   it read, as an instrument may have no clock to date it.
+2. **Read again when the user asks** (**Look again**), or for a repository this device has never
+   read: the root, then the delta or the index, as a listing does now.
+3. **Not a repository turned off.** When the hint names one, the answer says it is off.
+4. **The hint's repository,** as [below](#the-repository-hint).
+
+**Matching** is the format and ID, byte for byte. Never by name, a similar ID, or letter case. A
+plugin is in a version when that version's `plugins` lists it.
+
+**Several repositories with it:** each is a candidate, named with its repository and publisher.
+They are listed in this order: the hint's repository; the repository this plugin's other
+installed versions came from (`packages.installed`), as updates and repair come from there; then
+the official, the device's and the user's, in `packages.repositories`' order. When the candidates'
+publisher keys differ, none is chosen for the user: each is shown with its publisher and key
+fingerprint and the user picks one.
+
+**Dependencies:** a plugin package's asset libraries, as the index names them
+(`requires.packages`), come from the same repository; `packages.install` does that today
+([asset packages](../library-archive.md#asset-packages)). The offer gives their sizes from the
+index and says which are installed already.
+
+### Versions
+
+**The exact version first.** As the index gives it:
+
+- Published, not yanked, with a build for this platform: offered.
+- **Yanked:** offered with the publisher's reason and a second question. A lock still fetches a
+  yanked version ([versions and yanking](#versions-and-yanking)), but a document, which anyone
+  can write, should not choose one silently.
+- **Revoked** (the version, its build or its publisher's key,
+  [takedown and revocation](#takedown-and-revocation)): never offered. Revocation lists are not
+  applied yet (step 4).
+- **No build for this platform:** "not available for linux-arm64" (`incompatible()` in
+  `repository.cpp` says "it has no build for this device (linux-arm64)" now).
+- **Needs a newer system:** "it needs a system update: Oscairn 1.4 or later", as `incompatible()`
+  says now.
+
+**The same build.** When the document's lock names this platform's digest for the plugin, the
+install compares it with the build in the package's manifest, read before anything is installed
+(the whole archive today, the manifest blob once releases are stored in pieces). Another digest
+installs only after a question: the version is the same, but not the build the document was saved
+with. A document with no lock entry for this platform (one a converter wrote) skips this.
+
+**Newer versions.** What the formats and plugins promise today about a newer version restoring
+an older version's state:
+
+- **CLAP:** nothing. `clap_plugin_state` has `save` and `load` and says nothing about versions
+  (`core/clap-host/third_party/clap/include/clap/ext/state.h`), and a plugin's version is "an
+  arbitrary string" (`clap/plugin.h`).
+- **Oscairn's documents:** no silent upgrades and no untested state conversions
+  ([format](../performance-format.md)). RFC 0006 never picks "an arbitrary newer release"
+  ([state portability](0006-packages-and-portability.md#state-portability-and-format-migration))
+  and never upgrades to fill a gap in repair
+  ([repairing](0006-packages-and-portability.md#repairing-missing-dependencies-on-offline-instruments)).
+- **Oscairn's own plugins:** their snapshots are versioned (`oscairn-sampler-2`, the sound
+  snapshots' draft 4), but until the first public release an incompatible change replaces a
+  format outright and old saves are not migrated
+  ([compatibility policy](../developer-guide.md#initial-development-compatibility-policy)).
+- **Packages:** the manifest has no field saying which older states a version restores
+  ([format](../library-archive.md)).
+
+So nothing makes a newer version safe for a saved state, and this design assumes nothing. A newer
+version is offered only where its publisher says so in the signed manifest: proposed, each
+plugin's **`restoresStateFrom`**, the oldest version of the same format and ID whose saved state
+this one restores, carried into the index's `plugins`. The repository's Loading check
+([checks](#checks)) would also restore a state saved by that version and refuse the release when
+it fails (proposed with the field). Even then the newer version installs side by side with any
+other (RFC 0006), and the part moves to it
+only by an explicit **Use version 2.1.0** (step 6's, not built), which opens the part with it and
+marks it edited: the saved document is unchanged until the user saves, and saving over a locked
+library item makes a new one ([control protocol](../control-protocol.md)). Without the claim, the
+offer names the newer version and says it is not offered here; the Catalog still installs it.
+Whether to add the field at all is the owner's ([open questions](#open-questions-on-finding-missing-plugins)).
+
+### The repository hint
+
+An archive, a Performance or a Sound may name, for each plugin it uses, the repository the plugin
+is published in: its `https://` address and its root key. The field is `pluginRepositories`,
+specified in the [library archive format](../library-archive.md#where-plugins-are-published) and
+the [Performance format](../performance-format.md#where-plugins-are-published); not read by the
+engine yet. On a device:
+
+- **The key is the repository, the address only where to look.** A hint whose key is a known
+  repository's is that repository, read at the address the device has, whatever address the hint
+  gives.
+- **A known address with another key:** the hint is not used, and the known repository's key is
+  never changed by it.
+- **An unknown key:** nothing is fetched from the address until the user asks. A fetch alone tells
+  whoever runs the address that this document was opened, and from where.
+- **Look there** reads the root and index at the hint's address and checks them with the hint's
+  key, without trusting it: the root's `rootKey` must be the hint's key, the index key signed by
+  it and the root by the index key, as for a trusted repository. Nothing is kept: not the key, the
+  serial or the index. It answers whether that repository lists the plugin, at which versions and
+  from which publisher.
+- **Add it** only then: `packages.addRepository` with the hint's address and key, after the same
+  confirmation by fingerprint as Settings' **Add a repository...**, naming the repository by the
+  name in its signed root, never by anything the document says. It trusts the key for
+  `repositories` only.
+- A hint the format refuses (an `http://` address, a folder, user info or a query in the address,
+  a malformed key) refuses the document as any malformed field does, so it never reaches a lookup.
+
+### Trust
+
+- **A hint vouches for nothing.** Adding its repository is the user's choice, by fingerprint, and
+  trusts it for its listing only, as any repository (RFC 0006's `repositories` purpose).
+- **Plugin code** installs as from the Catalog now: the archive must be the release the index
+  names, signed by the publisher key the index names, and a plugin from a publisher not trusted
+  for plugins asks first: **Trust** the publisher, **Install anyway** this once, or Cancel
+  ([in the Library](#in-the-library)).
+- **The same plugin from another publisher:** when this plugin's format and ID are installed here
+  from a publisher, or published by a publisher this device trusts for plugins in a repository it
+  knows, and a candidate's publisher is another, the offer says so and chooses nothing.
+
+### At each trigger
+
+The prompts, in plain words. Names, versions and sizes are examples.
+
+**Installing a library** (the Library's Install..., from File or the Catalog). When the install
+is done, if its items use plugins this device does not have, one window for all of them:
+
+> **Plugins these Sounds need**
+>
+> 12 Sounds in Vintage Keys use plugins that aren't installed.
+>
+> **Example Organ 1.2.0**: in Oscairn Packages, from Example Audio (3f9a 1c0d 2e4b 5a67).
+> 9.8 MB, and Example Tonewheels 1.0, 40 MB.
+>
+> **Old Strings 3.0**: not available for linux-arm64.
+>
+> **Bridge 1.0**: not in any repository you use.
+>
+> **Example Pad 2.0**: the library says it's at packages.example.com, a repository you don't
+> use. **Look there**
+>
+> **Install selected** · **Not now**
+
+Each row the device can install has a checkbox, on; the others say why and have none.
+**Not now** installs nothing; the items open with stand-ins, as now. **Look there**, once the
+repository is read:
+
+> **Add packages.example.com?**
+>
+> It calls itself Example Repository. Its key is 0b2e 28f9 0bb4 6adf (the full key under it).
+> It has Example Pad 2.0 from Example Audio.
+>
+> Add a repository only if you trust whoever runs it. Adding it doesn't trust its plugins: you're
+> asked about each new publisher.
+>
+> **Add and install** · **Cancel**
+
+When the read does not hold: "packages.example.com didn't answer as the library says: its key
+isn't the one the library names. It wasn't added."
+
+**Opening a Performance** never shows a window, asks or fetches, at any level. Its stand-ins say
+what the lookup found in the Parts view (below). With more than one, the Parts view's line says
+"3 plugins aren't installed" with **Show**, which lists them as the library's window does.
+
+**A stand-in in the Parts view.** The part's line, from the lookup of its plugin (each line
+starts "Example Organ 1.2.0 isn't installed, so this part is silent." and ends "Its settings are
+kept."):
+
+| What the lookup found | The rest of the line |
+| --- | --- |
+| The exact version | It's in Oscairn Packages. **Install** |
+| The exact version, yanked | It's in Oscairn Packages, but its publisher withdrew it: "reason". **Install anyway** |
+| Another build of the version (found when installing) | This is version 1.2.0, but not the build the Performance was saved with. It may sound different. **Install** · **Cancel** |
+| Only a newer version that restores its state (step 13) | Version 2.1.0 is published and says it opens sounds saved with 1.2.0. **Install and use 2.1.0** |
+| Only a newer version, no such claim | Version 2.1.0 is published, but it doesn't say it can open sounds saved with 1.2.0. |
+| No build here | It's published, but not for linux-arm64. |
+| A newer system needed | It needs a system update: Oscairn 1.4 or later. |
+| Revoked | It was revoked: "reason". |
+| Not found | It isn't in any repository you use. |
+| A repository never read | Oscairn Packages hasn't been read on this device yet. **Look again** |
+| Offline, found in the last refresh | It's in Oscairn Packages. Connect to the internet to install it, or install it from a USB drive. |
+| The hint's repository unknown | The Performance says it's at packages.example.com, a repository you don't use. **Look there** |
+| The hint's key not the known one | The Performance names packages.example.com with a different key than yours, so it wasn't used. |
+| The hint's repository turned off | It may be in packages.example.com, which is turned off in Settings. |
+
+After an install: "Example Organ 1.2.0 is installed. **Reload the Performance**". Reloading is a
+seamless open of the same Performance (RFC 0021); the stand-in is never replaced on its own.
+
+**The Setlist preparing ahead** never looks up, fetches or asks. An entry whose prepared graph
+has stand-ins reads "1 plugin isn't installed" in the list. Before the show, the Setlist's
+**Check** lists every entry's missing plugins; **Find them** asks the Catalog
+(`oscairn.install.plugins`, below), which shows the library's window for them. The Setlist app
+has `play` and `library`, not `system` (`hosts/standalone/apps/setlist/app.json`), and needs no
+more: `performance.prepare` and `library.query` are `library`'s, and its `asks` gains the action.
+
+### Offline, playing, and reliability levels
+
+- **No network is normal.** A lookup answers from the kept indexes and says which refresh it
+  read; a repository never read says so. Never an error window: the stand-in's line and the
+  library's window say it.
+- **Time unknown:** a device fetches nothing from the web until its time is set (decided
+  2026-11-08, [above](#build-order-and-gates)); the line says "Set the date and time to install
+  from the internet." A folder or USB repository still installs.
+- **An instrument that never goes online** carries the wanted plugins to a computer in RFC
+  0006's missing-content request (not built); a lookup's candidates add the repository and
+  package to it.
+- **Opening, preparing and changing Performances** never look up, fetch, ask or wait for a
+  lookup, at every level. A lookup runs as a job, off the control thread, as listings do.
+- **At `instrument` and `pass-through`** ([RFC 0027](0027-reliability-levels.md)): an install
+  is refused while the transport runs ("Stop the transport to install"). On every level, a
+  plugin installed while a Performance is open replaces its stand-in only at **Reload the
+  Performance**. Whether install jobs stay off the cores reserved for audio is to check once RFC
+  0027 step 1 reserves them.
+
+### Control API additions
+
+All under `system`, with the rest of `packages.*` (`appGrants()` in
+`core/control/src/json_rpc.cpp`); an app without it asks the Catalog app. No method takes a file
+path.
+
+- **`packages.lookup`** (new) takes optional `plugins`, `refresh` and `look`, and returns
+  `{job}`; one job runs at a time, as now (`busy`).
+  - `plugins`: each `{format,id,version}` and optional `repository` (`{address,key}`, a hint as a
+    document gives it) and `sha256` (the lock's digest for this platform). Absent: the open
+    Performance's stand-ins, with its hints and lock. At most 4096; a malformed entry is
+    `-32602`.
+  - `refresh`: read each repository's root first (the network); absent or false, the kept
+    indexes only.
+  - `look`: addresses of hints the user chose to read; each must be one of `plugins`' hints.
+  - `packages.job` then gives `lookup`: per wanted plugin `{format,id,version,status,reason,
+    candidates,hint}`. `status` is `available`, `newer`, `unavailable` (`reason`: no build for
+    the platform, a system update, revoked), `notFound` or `notRead`. Each candidate is
+    `{repository,repositoryName,serial,package,version,channel,yanked,publisher,publisherKey,
+    publisherTrusted,incompatible,size,installed,dependencies,restoresStateFrom}`, each dependency
+    `{id,version,size,installed}`. `hint` is `null` or `{address,key,state}`, `state` one of
+    `known`, `off`, `unknown`, `read` (by `look`), `mismatch` (a known address, another key) or
+    `refused` (read by `look`, and its root's key is not the hint's).
+- **`packages.install`** installs a candidate as now (`source` its repository's address, `id` its
+  package, `version`). New: optional `locked`, each `{format,id,version,sha256}`; a build whose
+  digest is not the locked one refuses the install, listing each, unless `acceptOtherBuild` is
+  true. New refusal `playing`: at `instrument` and above while the transport runs.
+- **`packages.addRepository`** unchanged; the hint's flow calls it after the user's yes.
+- **`session.status`'s `failures`:** a stand-in's entry gains `plugin` (`{format,id,version}`)
+  and `repository` (the document's hint for it, or `null`).
+- **`library.install`** returns `missing`: each plugin its items use that has no build here
+  after the install, `{format,id,version,repository,items}`, `items` the IDs of those using it.
+- **`performance.prepare`** returns `missing` the same way, without `items`.
+- **`library.query`'s items** gain `missing`, for the Setlist's check: the plugins an item names
+  that are not installed here. (`plugins.list`'s `usedBy` shows the library knows each item's
+  plugins.)
+- **`oscairn.install.plugins`** (new app action, RFC 0022), offered by the Catalog app: takes
+  `{plugins}` as `packages.lookup` does and shows the library's window for them. Until the Catalog
+  app exists, the desktop's Catalog view answers it.
+
+### What the stand-in reports
+
+The engine's reason for a stand-in does not change: it is made on the load path, which never
+looks anything up. What changes is that `failures` carries the plugin and its hint, so a client
+with `system` looks it up and shows the line [above](#at-each-trigger). A client without
+`system` (an app granted `edit`) shows the reason as now. The stand-in keeps its state as now.
+
+### Security
+
+| Threat | What stops it | What remains |
+| --- | --- | --- |
+| A hostile archive or Performance names a hostile repository | Nothing is fetched from it until the user asks; it is added only after a confirmation by fingerprint that names it by its signed root, not the document; adding trusts it for its listing only; its plugins still need the publisher question, and are to run in workers at `instrument` and above (RFC 0027, not built) | A user who adds the repository and then trusts its publisher installs what it lists, as with **Install anyway** on a file today. Revocation (step 4) is the backstop |
+| A typosquatted plugin ID | Matching is exact, never by name or similar ID; one publisher per plugin ID in a repository; an ID differing only in case refused; an ID new to a package reviewed by a person ([proposal](#proposal)); a candidate from a publisher other than the one this device already uses for that ID is shown as such, with no default | A repository the user added can list any ID; only the user's trust in its key protects |
+| A homograph address (`pаckages.oscairn.org` with a Cyrillic `а`) or `https://packages.oscairn.org@evil.example` | The format allows only lowercase ASCII letters, digits, `.` and `-` in the host, so a lookalike must be written as `xn--…`, and no user info; the key, not the address, is the repository | A plain lookalike in ASCII (`packages-oscairn.org`); the fingerprint and the signed name are shown |
+| A downgrade: a document naming an old version | Revoked versions are never offered; a yanked one asks again, showing why it was withdrawn; versions install side by side, so no other document's version changes; a lower root serial is refused, as now | An old version, neither yanked nor revoked, with a flaw found later: the publisher must yank or revoke it |
+| A hint whose key does not match | A known address with another key: the hint is not used and the known key is kept; a hinted root whose key is not the hint's: refused, nothing kept | None found |
+| A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (step 9) | Today's code, as read, is open to it; not tested: [above](#kept-state-keyed-by-the-root-key) |
+| Tracking through a hint | No fetch from a hint's address on open, prepare or install of a library; only **Look there** | A user who looks tells that host they opened it |
+| Hints as a weight | At most 4096 entries, an address at most 2048 bytes; one job at a time; one **Look there** per tap | None found |
+
+A hint in a signed item is covered by the item's signature, since the hint is part of the
+document's contents (its `hash`); unsigned documents can carry any hint, which grants nothing.
+
+### Build steps
+
+In the [build order](#build-order-and-gates) as steps 9 to 13:
+
+| Step | Deliverable | Gate |
+| --- | --- | --- |
+| 9. The index's plugins; kept state by key | `plugins` per version in the index and the device's reader; the index builder's one-publisher and letter-case checks; `seen` and the kept index keyed by root key and ID | `package-repository-index`: the Splitters package lists Split and Join with their platforms; another publisher's package with `org.oscairn.split`, and `org.oscairn.Split`, are each refused. `control-repository`: a repository whose root names the official's ID with a higher serial leaves the official's kept serial and index as they were |
+| 10. The hint | `pluginRepositories` in archives (version 3 reads it), Performances (version 14) and Sounds (version 9): read, checked, kept on save for plugins still used, carried by export, kept by install, and the document's own kept when a Sound or import brings another for the same plugin | `control-archives`, `control-parts`: a hint survives save, export and install both ways; each of an `http://` address, a folder path, user info, a query, a trailing `/`, an uppercase or 63-digit key, the same plugin twice and 4097 entries refuses the document; a hint for a plugin no node uses is gone after save |
+| 11. Lookup | `packages.lookup`; `missing` in `library.install`, `performance.prepare` and `library.query`; `failures[].plugin`; `packages.install`'s `locked` and `playing` | `control-repository`: the exact version found; a plugin of a two-plugin package found by its ID; not for linux-arm64; a system update; not found; with every request failing, an answer from the kept indexes with their serials; a hint to an unknown repository fetches nothing until `look`, which keeps nothing; a mismatched key not used; another build refused without `acceptOtherBuild`; `playing` at `instrument`; an app without `system` refused (`-32008`); no request at all during `performance.load` and `performance.prepare` with stand-ins |
+| 12. The offers | The library's window, the Parts view's line and **Reload the Performance**, **Look there** and adding, the Setlist's line and **Check**, `oscairn.install.plugins` | `desktop-gaps`: each kind of row in the library's window; **Not now** installs and adds nothing; **Install selected** installs the package and its asset library; **Look there** then **Add and install** after the fingerprint; a mismatched hint added by nothing; the stand-in's line and Reload; the Setlist's entry line and **Check** |
+| 13. Newer versions | `restoresStateFrom` in the manifest, index and checks; **Install and use** with step 6's **Use version** | A 2.0 claiming 1.0 is offered for a 1.0 document and its part moves only on the click; a false claim fails the Loading check; the saved document is unchanged until saved |
+
+### Open questions on finding missing plugins
+
+For the owner:
+
+1. **Newer versions:** add the publisher's signed `restoresStateFrom`, checked in CI, as
+   [above](#versions)? Or never offer a newer version from this flow, leaving the Catalog?
+2. **Every repository that is on, or only some?** With no hint, this design looks in every
+   repository that is on. RFC 0031 [rules out](#ruled-out) "looking in other repositories for a
+   missing package of the same name"; this design reads that as about an installed package's
+   updates and repair, which still come only from its repository, and looks up a plugin with no
+   install here by its exact identity everywhere, naming each candidate's repository and
+   publisher. Accept that reading, or limit it to the official and the device's repositories?
+3. **Yanked exact versions:** offered with a second question (this design), or not offered?
+4. **`packages.lookup`'s permission:** `system` with the rest of `packages.*` (this design), or
+   `library`, as it only reads?
+5. **Hints in Performances and Sounds** as well as archives (this design): they survive copies
+   and a plugin removed later, but change the document's content hash. Archives only instead?
+6. **One repository per plugin** in a hint (this design), or a list, a publisher's own and the
+   official, say?
+7. **Not now:** ask again at the next install of the same library (this design), or remember it?
+
 ## Trust and safety
 
 ### Keys
@@ -821,6 +1231,7 @@ serial than one it has seen ([freshness](#signatures-and-freshness)).
 | 6. Updates | Update lists, explicit lock updates, app updates | Installing a new version leaves every Performance's lock as it was until **Use version** is chosen; an app update applies only once the app is closed |
 | 7. Offline and multi-device | Fetch for a device, USB subsets, a paired computer as source | A desktop queues packages for a KICK profile and writes a USB drive with only its builds; the device installs them; the same through a paired connection |
 | 8. Public | Hosting, CDN, mirrors, the policy, the root key ceremony | The official repository serves from two mirrors, and a device survives one going away |
+| 9 to 13. Finding missing plugins | The index's plugins, the repository hint, `packages.lookup`, the offers, newer versions | Each step's gate is in [finding missing plugins](#build-steps) |
 
 **Left of steps 1 to 3 (2026-11-06).** Steps 1 and 2 are built in part (see Progress). Step 3
 waits on them. What remains, in order:
@@ -898,6 +1309,9 @@ Jacob's decisions on six of the open questions:
 - **Changing a published version,** even by its publisher.
 - **Updates that move a Performance's lock,** or that install while playing.
 - **Install scripts:** packages are files; nothing runs on install (RFC 0006).
-- **Looking in other repositories for a missing package of the same name.**
+- **Looking in other repositories for a missing package of the same name.** (Proposed
+  2026-11-11, for the owner: this stays true of an installed package's updates and repair, while
+  a plugin with no install here is looked up by its exact identity in every repository that is
+  on; [open question 2](#open-questions-on-finding-missing-plugins).)
 - **The repository's signature standing in for the publisher's:** they say different things.
 - **Telemetry** from devices to the repository.

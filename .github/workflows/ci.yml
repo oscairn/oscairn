@@ -98,6 +98,21 @@ jobs:
             build/x42-production-results/results.json
           if-no-files-found: ignore
 
+  standalone-launch:
+    # The desktop app (JUCE) is otherwise never built; this builds it and runs the desktop-launch
+    # test, which starts the real executable. macOS only: a headless Linux run needs xvfb.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Configure
+        run: cmake -S . -B build-standalone -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON
+      - name: Build
+        run: cmake --build build-standalone
+      - name: Test
+        run: ctest --test-dir build-standalone -R desktop --output-on-failure
+
   thread-sanitizer:
     runs-on: ubuntu-24.04
     steps:

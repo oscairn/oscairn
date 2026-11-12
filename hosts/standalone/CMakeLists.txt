@@ -236,6 +236,14 @@ add_dependencies(oscairn_phase3b_test oscairn_basic_synth oscairn_delay oscairn_
 add_test(NAME desktop-phase3b COMMAND oscairn_phase3b_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
 add_test(NAME desktop-phase3b-engines COMMAND oscairn_phase3b_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes" --engines)
 set_tests_properties(desktop-phase3b desktop-phase3b-engines PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 ENVIRONMENT "${worker_environment};OSCAIRN_TEST_VIEWS=$<TARGET_FILE:oscairn_views_test_plugin>")
+# The real app executable, launched: starts and renders three views to PNGs (--snapshot), in its own
+# data and config folders under the build tree. A crash at launch (as the Apps menu's null pointer
+# was) fails here; the tests above host components in-process and never run Main.cpp's startup.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME desktop-launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop_launch.py"
+        $<TARGET_FILE:oscairn_standalone> "${CMAKE_CURRENT_BINARY_DIR}/launch")
+    set_tests_properties(desktop-launch PROPERTIES TIMEOUT 420)
+endif()
 # The message thread never waits on the engine's socket for a mute, a fader drag, the views' polls or opening a Performance, which shows soon after the engine's load.
 juce_add_console_app(oscairn_ui_waits_test PRODUCT_NAME "Oscairn UI Waits Test")
 target_sources(oscairn_ui_waits_test PRIVATE tests/ui_waits.cpp PartsModel.cpp Engine.cpp SoundPickerModel.cpp)

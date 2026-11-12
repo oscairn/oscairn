@@ -14,7 +14,15 @@ juce_add_binary_data(oscairn_standalone_profiles HEADER_NAME ProfileData.h NAMES
     ../standalone/profiles/smk37-elite.json
     ../standalone/profiles/modx-m-usb.json)
 
-add_library(oscairn_audio_host STATIC AudioEngine.cpp ControllerPorts.cpp WebTransport.cpp ../standalone/Profile.cpp)
+add_library(oscairn_audio_host STATIC AudioEngine.cpp ControllerPorts.cpp ../standalone/Profile.cpp)
+# HTTPS: JUCE's URL streams, except on macOS an ephemeral NSURLSession of its own, which keeps no cache on disk.
+if(APPLE)
+    target_sources(oscairn_audio_host PRIVATE WebTransport_mac.mm)
+    set_source_files_properties(WebTransport_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(oscairn_audio_host PRIVATE "-framework Foundation")
+else()
+    target_sources(oscairn_audio_host PRIVATE WebTransport.cpp)
+endif()
 target_compile_definitions(oscairn_audio_host PUBLIC JUCE_WEB_BROWSER=0)
 target_compile_definitions(oscairn_audio_host PRIVATE OSCAIRN_AUDIO_BUFFER_FRAMES=${OSCAIRN_AUDIO_BUFFER_FRAMES})
 target_link_libraries(oscairn_audio_host PUBLIC oscairn_control oscairn_hardware juce::juce_audio_devices PRIVATE oscairn_standalone_profiles)

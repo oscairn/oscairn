@@ -214,6 +214,13 @@ int main(int argc, char** argv)
                 check(wait([&] { return !page->busy() && page->devices().fixed; }), "a fixed device is listed");
                 check(!page->output.isEnabled() && page->outputRow().explanation().startsWith("Fixed by the device profile") && !page->rate.isEnabled() && page->size.isEnabled(),
                       "shown fixed by the profile and not choosable; the buffer size still is: " + page->outputRow().explanation().toStdString());
+                // --audio null: fixed too, and said so plainly.
+                change([&] { devices.outputs = {{"null", {48000}, {128}}}; devices.output = "null"; devices.source = "null"; });
+                check(wait([&] { return !page->busy() && page->devices().source == "null"; }), "the null device is listed");
+                check(!page->output.isEnabled() && page->outputRow().explanation() == "No audio device: started with --audio null.",
+                      "the null device, said plainly: " + page->outputRow().explanation().toStdString());
+                change([&] { devices.outputs = {{"Studio", {48000}, {128, 256}}}; devices.output = "Studio"; devices.source = "profile"; });
+                check(wait([&] { return !page->busy() && page->devices().output == "Studio"; }), "the profile's device again");
 
                 // Narrow, or with touch: the list, then a page in its place with Back.
                 standalone::setDesktopMode(frame, 2);

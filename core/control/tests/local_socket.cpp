@@ -21,6 +21,7 @@
 #include <spawn.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -735,6 +736,17 @@ namespace
         bool refused=false;try{LocalServer other(f.session);other.listen(path);}catch(const std::runtime_error&){refused=true;}
         check(refused && std::filesystem::exists(path),"live endpoint never replaced");
         clientWhileRendering(f,[&]{LocalClient client;client.connect(path);check(client.call("session.hello").find("protocolVersion")!=std::string::npos,"pathname connect and accept");});
+        {
+            // A client that sends its requests and closes before it is accepted is still served,
+            // and the replies written to its closed end cost the server no SIGPIPE (which would end this test).
+            std::signal(SIGPIPE,SIG_DFL);
+            const int fd=::socket(AF_UNIX,SOCK_STREAM,0);sockaddr_un to{};to.sun_family=AF_UNIX;std::strcpy(to.sun_path,path.c_str());
+            check(fd>=0 && ::connect(fd,reinterpret_cast<const sockaddr*>(&to),sizeof(to))==0,"connect a short-lived client");
+            const std::string requests=R"({"jsonrpc":"2.0","id":1,"method":"transport.set","params":{"tempo":141}})" "\n" R"({"jsonrpc":"2.0","id":2,"method":"session.hello"})" "\n";
+            check(send(fd,requests)==ssize_t(requests.size()),"send and close");::close(fd);
+            for(int i=0;i<20;++i)f.tick();
+            check(f.session.transportState().tempo==141,"a client gone before it was accepted is still served");
+        }
         const std::string temporary=directory.child("temporary.sock");
         {LocalServer other(f.session);other.listen(temporary);}
         check(!std::filesystem::exists(temporary),"server removes its own endpoint");

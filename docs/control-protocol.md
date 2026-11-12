@@ -1291,7 +1291,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `mirrors` in turn, then its `blobBase`, then the address itself, each checked by its SHA-256,
   the next tried when one does not verify, and a download cut short is resumed by the next
   install with a range request. A server error (5xx) is asked again once, a second later; when
-  every place fails, the error names each one and its reason. On macOS this is the system's HTTPS; on Linux this build
+  every place fails, the error names each one and its reason. On macOS this is the system's HTTPS, in a session that keeps
+  no cache, cookies or HSTS store on disk; on Linux this build
   fetches `http://` only. A `source` that is a known repository's address (`packages.repositories`,
   enabled or not) is read only with the root key recorded for it: a root with any other key, even
   one trusted for another repository, fails naming both keys' IDs ("its root key is …, not the one

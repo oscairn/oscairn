@@ -26,6 +26,7 @@ import threading
 import json
 import os
 import platform as host
+import pwd
 import shutil
 import subprocess
 import sys
@@ -245,7 +246,13 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         blob_path = f'blobs/{synth_blob[:2]}/{synth_blob}'
         home = temp / 'web-home'
         home.mkdir()
-        p = subprocess.Popen([web], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', env={**os.environ, 'OSCAIRN_DATA_HOME': str(home)})
+        # Under a name of its own: macOS keeps a process's HTTP cache, cookies and HSTS store in the
+        # user's Library under its name, which a fetch must not leave behind (checked at the end).
+        renamed = temp / f'oscairn-web-{os.getpid()}'
+        shutil.copy(web, renamed)
+        library = Path(pwd.getpwuid(os.getuid()).pw_dir) / 'Library'
+        caches = [library / 'Caches' / renamed.name, library / 'HTTPStorages' / renamed.name]
+        p = subprocess.Popen([renamed], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8', env={**os.environ, 'OSCAIRN_DATA_HOME': str(home)})
 
         def fetched():
             paths = [path for path, _ in state['log']]
@@ -369,6 +376,10 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
             p.stdin.close()
             p.wait(timeout=30)
             httpd.shutdown()
+        left = [str(c) for c in caches if c.exists()]
+        for c in left:
+            shutil.rmtree(c)  # this run's, under its own name
+        check(left == [], 'fetching keeps no HTTP cache, cookies or HSTS store: ' + json.dumps(left))
         sys.exit(1 if failures else 0)
 
     good = site('site', 7)

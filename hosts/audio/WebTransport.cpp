@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Package repositories on the web (RFC 0031) through JUCE's URL streams: on macOS, the system's
-// NSURLSession; on Linux, libcurl (JUCE_USE_CURL), which verifies certificates against the
-// system's CA bundle. Every byte fetched is checked by its hash and signature in the core.
+// Package repositories on the web (RFC 0031) through JUCE's URL streams: on Linux, libcurl
+// (JUCE_USE_CURL), which verifies certificates against the system's CA bundle; macOS has
+// WebTransport_mac.mm. Every byte fetched is checked by its hash and signature in the core.
 #include "WebTransport.h"
 #include "oscairn/repository.h"
 #include <juce_core/juce_core.h>

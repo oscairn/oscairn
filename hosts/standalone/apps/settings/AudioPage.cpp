@@ -104,7 +104,8 @@ namespace oscairn::standalone::settings
         size.setEnabled(!busy_ && open && open->bufferSizes.size() > 1);
         if(busy_) return; // what is being done stays said until it is done
         // The device: why it is the one open, and anything passed over on the way.
-        juce::String said = d.fixed ? "Fixed by the device profile: its channels are wired to this device." : source(d.source);
+        juce::String said = d.source == "null" ? "No audio device: started with --audio null." // fixed too, but by the option
+                          : d.fixed ? "Fixed by the device profile: its channels are wired to this device." : source(d.source);
         if(!d.notice.empty()) said = text(d.notice) + "\n" + said;
         if(listError_.isNotEmpty()) said = "The devices could not be read: " + listError_;
         outputRow_->setExplanation(said, !d.notice.empty() || listError_.isNotEmpty());

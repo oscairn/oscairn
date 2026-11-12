@@ -42,8 +42,11 @@ namespace oscairn
             if(status<0 || flags<0 || fcntl(fd,F_SETFL,status|O_NONBLOCK)<0 || fcntl(fd,F_SETFD,flags|FD_CLOEXEC)<0)
                 systemError("configure socket");
 #ifdef SO_NOSIGPIPE
-            int yes=1;
-            if(setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&yes,sizeof(yes))<0)systemError("SO_NOSIGPIPE");
+            // An accepted socket has it from the listener already. Set again once its client has
+            // closed (which it may do before it is accepted), macOS refuses with EINVAL: what counts is that it is on.
+            int yes=1,on=0;socklen_t size=sizeof(on);
+            if(setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&yes,sizeof(yes))<0 && (getsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&on,&size)<0 || !on))
+                systemError("SO_NOSIGPIPE");
 #endif
         }
         sockaddr_un address(const std::string& path)

@@ -543,6 +543,7 @@ namespace oscairn::standalone
             if( profile_.offers( "oscairn.settings" ) && settingsApp() ) // the same as the Setlist: a process, so not with --in-process
                 apps.push_back( { "Settings", "settings", [this] {
                     const auto device = juce::String( engine_.sessionStatus().audioDevice );
+                    if( device == "null" ) return juce::String( "No audio device (--audio null)" ); // the null device's name
                     return device.isNotEmpty() ? device : juce::String( "Audio, controllers, keys" ); },
                     [this] { showSettings(); } } );
             return apps;

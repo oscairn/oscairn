@@ -364,7 +364,8 @@ namespace oscairn::standalone
         if(awaiting_) { awaiting_ = false; tell(text(engine_.soundMessage())); } // what an install or export did, or why not
         if(message_.isEmpty()) status_.setText(juce::String(result_.total) + (sound ? (result_.total == 1 ? " Sound" : " Sounds") : (result_.total == 1 ? " Performance" : " Performances")), juce::dontSendNotification);
         const bool none = result_.total == 0 && query_.text.empty() && query_.tags.empty() && !query_.favorites && !query_.recent && query_.source.empty();
-        empty.setText(sound ? "No Sounds yet." : "No Performances yet.", juce::dontSendNotification);
+        // An instrument's presets are not Sounds in the library, and an empty list must not say it has none.
+        empty.setText(sound ? "No Sounds yet. An instrument's own presets are in the sound picker, not here." : "No Performances yet.", juce::dontSendNotification);
         empty.setVisible(none); browse.setVisible(none && mode_ == Mode::Play);
         rebuildSide();
         updateButtons();

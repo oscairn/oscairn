@@ -1049,7 +1049,7 @@ int main(int argc, char** argv)
                 // The Library's empty state: no Sounds, and nothing narrowing the list, says so in
                 // one line, with a button straight to the Catalog; a search that finds nothing does not.
                 pane.showKind("sound");
-                check(wait([&] { return pane.empty.isVisible(); }) && pane.items().empty() && pane.empty.getText() == "No Sounds yet." && pane.browse.isVisible() &&
+                check(wait([&] { return pane.empty.isVisible(); }) && pane.items().empty() && pane.empty.getText() == "No Sounds yet. An instrument's own presets are in the sound picker, not here." && pane.browse.isVisible() &&
                           !pane.empty.getBounds().isEmpty() && pane.empty.getBottom() <= pane.browse.getY(),
                       "an empty Library says so, over its list, with a way to the Catalog: " + pane.empty.getText().toStdString());
                 settle();

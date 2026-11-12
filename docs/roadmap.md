@@ -468,6 +468,12 @@ Also open:
   ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#instant-controls)), values sent
   back to knobs whose profile takes them, and Mackie Control's LEDs, faders and names
   ([RFC 0024](rfcs/0024-device-profiles.md#mackie-control))
+- [ ] **Panel sections** ([RFC 0044](rfcs/0044-panel-sections.md#progress), proposed 2026-11-11):
+  a profile names its panel's piano, organ and synth sections; a Performance binds a part to
+  each, and the section's controls act on that part by declared role, dark where the Sound has
+  none; binding itself when each section has one obvious part by Sound tag, asking otherwise;
+  RFC 0042's drawbars, direction and pickup on a section's own controls; on the desktop and on
+  boards without the section, a label on the part
 - [ ] recording as an engine service: any graph input, output, part or bus and the notes
   played, to WAV/RF64 off the audio thread, with retroactive capture
   ([RFC 0020](rfcs/0020-recording.md)); started: takes of outputs, inputs, plugin ports, parts

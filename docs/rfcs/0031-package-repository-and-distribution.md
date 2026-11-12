@@ -108,8 +108,9 @@ Checked when built and tested; the sections below say how.
       Performances and Sounds
 - [ ] 11. `packages.lookup`, and what is missing in installs, prepares, the library and stand-ins
 - [ ] 12. Offering the install: the Library, the Parts view, a hinted repository, the Setlist
-- [ ] 13. Newer versions whose publisher says they restore the saved state (if the owner accepts
-      [`restoresStateFrom`](#versions))
+- [ ] 13. Newer versions whose publisher says they open the saved state (`opensStateFrom`,
+      [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim), if the
+      owner accepts it)
 
 ## Problem
 
@@ -657,8 +658,10 @@ Each version in the index gains `plugins`, written from its manifest's `plugins`
   letter case is refused, as the plugin store's folders for the two would be one on a
   case-insensitive file system (as for libraries, [installing one](../library-archive.md#installing-one)).
   A plugin ID new to a package is already a human review ([proposal](#proposal)).
-- Proposed with it, for [newer versions](#versions): each plugin's `restoresStateFrom`, from the
-  manifest, when the owner accepts it.
+- Proposed with it, for [newer versions](#versions): each plugin's `opensStateFrom`, from the
+  manifest, and `checked` when the repository's state check ran, when the owner accepts them
+  ([RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#where-it-lives-and-how-it-is-signed)).
+  Not `soundChanges`, which the device reads from the installed manifest.
 
 ### Kept state keyed by the root key
 
@@ -744,17 +747,23 @@ an older version's state:
   ([format](../library-archive.md)).
 
 So nothing makes a newer version safe for a saved state, and this design assumes nothing. A newer
-version is offered only where its publisher says so in the signed manifest: proposed, each
-plugin's **`restoresStateFrom`**, the oldest version of the same format and ID whose saved state
-this one restores, carried into the index's `plugins`. The repository's Loading check
-([checks](#checks)) would also restore a state saved by that version and refuse the release when
-it fails (proposed with the field). Even then the newer version installs side by side with any
-other (RFC 0006), and the part moves to it
-only by an explicit **Use version 2.1.0** (step 6's, not built), which opens the part with it and
-marks it edited: the saved document is unchanged until the user saves, and saving over a locked
-library item makes a new one ([control protocol](../control-protocol.md)). Without the claim, the
-offer names the newer version and says it is not offered here; the Catalog still installs it.
-Whether to add the field at all is the owner's ([open questions](#open-questions-on-finding-missing-plugins)).
+version is offered only where its publisher says so in the signed manifest: each plugin's
+**`opensStateFrom`** (proposed under the name `restoresStateFrom` first), the oldest version of the
+same format and ID whose saved state this one opens, with what sounds different in
+`soundChanges`. [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)
+defines both: what they promise (loads, the same ports, every setting kept, and the same sound
+except as `soundChanges` says), how they are signed (the package signature over the manifest), that
+a device honors them only when the old version came from the same publisher key, and what a
+machine can check of them (CI opening older versions' states in the new build and comparing
+renders) and cannot. The index carries `opensStateFrom` so this lookup can offer the newer version
+before downloading; the device trusts the claim only from the installed archive. The newer version
+installs side by side with any other (RFC 0006), and the part moves to it only by RFC 0043's
+explicit **Use 0.4.6** (`parts.useVersion`), which opens the part with it and marks it edited: the
+saved document is unchanged until the user saves, and saving over a locked library item makes a
+new one ([control protocol](../control-protocol.md)). Without the claim, the offer names the
+newer version and says it does not say it opens this state; the Catalog still installs it, and RFC
+0043 still lets the user move one item to it after a warning. Whether to add the field at all is
+the owner's ([open questions](#open-questions-on-finding-missing-plugins)).
 
 ### The repository hint
 
@@ -908,7 +917,7 @@ path.
     candidates,hint}`. `status` is `available`, `newer`, `unavailable` (`reason`: no build for
     the platform, a system update, revoked), `notFound` or `notRead`. Each candidate is
     `{repository,repositoryName,serial,package,version,channel,yanked,publisher,publisherKey,
-    publisherTrusted,incompatible,size,installed,dependencies,restoresStateFrom}`, each dependency
+    publisherTrusted,incompatible,size,installed,dependencies,opensStateFrom,checked}`, each dependency
     `{id,version,size,installed}`. `hint` is `null` or `{address,key,state}`, `state` one of
     `known`, `off`, `unknown`, `read` (by `look`), `mismatch` (a known address, another key) or
     `refused` (read by `look`, and its root's key is not the hint's).
@@ -962,14 +971,19 @@ In the [build order](#build-order-and-gates) as steps 9 to 13:
 | 10. The hint | `pluginRepositories` in archives (version 3 reads it), Performances (version 14) and Sounds (version 9): read, checked, kept on save for plugins still used, carried by export, kept by install, and the document's own kept when a Sound or import brings another for the same plugin | `control-archives`, `control-parts`: a hint survives save, export and install both ways; each of an `http://` address, a folder path, user info, a query, a trailing `/`, an uppercase or 63-digit key, the same plugin twice and 4097 entries refuses the document; a hint for a plugin no node uses is gone after save |
 | 11. Lookup | `packages.lookup`; `missing` in `library.install`, `performance.prepare` and `library.query`; `failures[].plugin`; `packages.install`'s `locked` and `playing` | `control-repository`: the exact version found; a plugin of a two-plugin package found by its ID; not for linux-arm64; a system update; not found; with every request failing, an answer from the kept indexes with their serials; a hint to an unknown repository fetches nothing until `look`, which keeps nothing; a mismatched key not used; another build refused without `acceptOtherBuild`; `playing` at `instrument`; an app without `system` refused (`-32008`); no request at all during `performance.load` and `performance.prepare` with stand-ins |
 | 12. The offers | The library's window, the Parts view's line and **Reload the Performance**, **Look there** and adding, the Setlist's line and **Check**, `oscairn.install.plugins` | `desktop-gaps`: each kind of row in the library's window; **Not now** installs and adds nothing; **Install selected** installs the package and its asset library; **Look there** then **Add and install** after the fingerprint; a mismatched hint added by nothing; the stand-in's line and Reload; the Setlist's entry line and **Check** |
-| 13. Newer versions | `restoresStateFrom` in the manifest, index and checks; **Install and use** with step 6's **Use version** | A 2.0 claiming 1.0 is offered for a 1.0 document and its part moves only on the click; a false claim fails the Loading check; the saved document is unchanged until saved |
+| 13. Newer versions | `opensStateFrom` in the index and the lookup's candidates; **Install and use** with RFC 0043's **Use 0.4.6** (the claim itself, its checks and the move are RFC 0043's steps 1, 3 and 5) | A 2.0 claiming 1.0 is offered for a 1.0 document and its part moves only on the click; a 2.0 claiming 1.0 from another publisher key is offered as without a claim; the saved document is unchanged until saved |
 
 ### Open questions on finding missing plugins
 
 For the owner:
 
-1. **Newer versions:** add the publisher's signed `restoresStateFrom`, checked in CI, as
-   [above](#versions)? Or never offer a newer version from this flow, leaving the Catalog?
+1. **Newer versions:** add the publisher's signed claim, renamed `opensStateFrom` with
+   `soundChanges`, as [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)
+   defines it, and offer **Install and use** from this flow only with it, from the same publisher
+   key as the saved version? Or never offer a newer version from this flow, leaving the Catalog and
+   RFC 0043's moves? Recommended: the first. The claim's own questions (what it promises, whether CI
+   must check it, moves without it) are RFC 0043's
+   [decisions](0043-moving-sounds-to-newer-plugin-versions.md#decisions-for-the-owner) 1, 3 and 7.
 2. **Every repository that is on, or only some?** With no hint, this design looks in every
    repository that is on. RFC 0031 [rules out](#ruled-out) "looking in other repositories for a
    missing package of the same name"; this design reads that as about an installed package's

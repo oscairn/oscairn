@@ -246,7 +246,9 @@ Linux installed as `share/oscairn/apps`), and the shell reads the manifests ther
   answers (`OSCAIRN_ACTIONS`). It never sees the control socket. Its stdout and stderr are
   appended to `Logs/apps/<id>.log` in the data folder, started afresh past 1 MB when it starts.
 - **Shown** on the desktop as its own window, brought forward when its tile or Apps menu item is
-  chosen (the shell's `oscairn.app.show` request, which every app answers). On a panel the
+  chosen (the shell's `oscairn.app.show` request, which every app answers). On macOS the shell
+  then makes the app the active app (`AppProcesses_mac.mm`), as macOS brings another process's
+  window in front of the active app's only then; when it quits, macOS hands back. On a panel the
   shell keeps a frame under its top bar and the app's window, without a title bar, is put over
   it; nothing from the app is drawn by the shell. A separate window above the shell's is
   step 2's stand-in for the device's display path (RFC 0022 step 6).
@@ -473,6 +475,21 @@ in bounded intervals, keeping JUCE timers and native device events active withou
 GUI application. Screenshots also check that reopened tempo controls display the engine's
 current tempo. The smoke test is silent; it does not establish perceptual audio quality
 or test physical MIDI inputs.
+
+## Window order test (opt-in, macOS)
+
+`desktop-window-order` starts the real app with `--audio null --app settings` in fresh folders
+and reads the window server: Settings, its own process, must be the active app with its window
+over the shell's (the shell hands activation over when an app it shows answers). It puts the
+app's windows on screen and takes the active app and keyboard focus for a few seconds, so a
+plain `ctest` skips it; set `OSCAIRN_WINDOW_TESTS=1` to run it, when nobody is using the Mac:
+
+```sh
+OSCAIRN_WINDOW_TESTS=1 ctest --test-dir build -R '^desktop-window-order$' --output-on-failure
+```
+
+It is skipped too when the shell never became the active app (another app was in use as it
+started), since then it had nothing to hand over.
 
 
 ## Managed desktop lifecycle

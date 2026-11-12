@@ -204,7 +204,13 @@ namespace oscairn::standalone
         auto* argument = new juce::DynamicObject();
         argument->setProperty("visible", r.shown); argument->setProperty("mode", r.mode);
         if(!r.bounds.isEmpty()) argument->setProperty("bounds", juce::Array<juce::var>{r.bounds.getX(), r.bounds.getY(), r.bounds.getWidth(), r.bounds.getHeight()});
-        engine_.appRequest(id, showApp, juce::JSON::toString(juce::var(argument), true).toStdString(), [](const std::string&) {});
+        engine_.appRequest(id, showApp, juce::JSON::toString(juce::var(argument), true).toStdString(), [shown = r.shown, pid = r.pid](const std::string& answer) {
+#ifdef __APPLE__
+            if(shown && answer == "shown") activateApp(pid); // its window is up: it comes in front of the shell's
+#else
+            juce::ignoreUnused(shown, pid, answer);
+#endif
+        });
     }
 
     bool AppProcesses::open(const std::string& id, juce::Rectangle<int> bounds, int mode)

@@ -23,6 +23,9 @@ namespace oscairn::standalone
     };
     AppManifest readAppManifest(const juce::File& folder); // throws std::runtime_error saying what is wrong
     std::vector<AppManifest> findApps(const juce::File& folder); // its folders holding an app.json; one that cannot be read is left out, said on stderr
+#ifdef __APPLE__
+    void activateApp(pid_t pid); // the process becomes the active app, its windows in front (AppProcesses_mac.mm)
+#endif
 
     /// The apps the shell runs as processes, which it supervises (RFC 0022's containment): each
     /// started with a connection the engine grants (descriptor 3, OSCAIRN_CONTROL_FD), its

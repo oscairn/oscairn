@@ -280,7 +280,7 @@ namespace oscairn::standalone
             if( shell() ) engine_.appClosed( "oscairn.performance" ); // Home replaces it
             setContentOwned( home, false );
         }
-        // An app by name, as its tile opens it (--app): performance, library, setlist or groovebox.
+        // An app by name, as its tile opens it (--app): performance, library, setlist, groovebox, recordings or settings.
         void openApp( const juce::String& name )
         {
             if( name == "performance" ) openPerformance();
@@ -288,7 +288,8 @@ namespace oscairn::standalone
             else if( name == "setlist" ) showSetlist();
             else if( name == "groovebox" ) openGroovebox();
             else if( name == "recordings" ) showRecordings();
-            else throw std::invalid_argument( "--app is performance, library, setlist, groovebox or recordings" );
+            else if( name == "settings" && settingsApp() ) showSettings();
+            else throw std::invalid_argument( "--app is performance, library, setlist, groovebox, recordings or settings" );
             // On the desktop those three open in windows of their own: --snapshot shows that window.
             if( !panel() )
                 snapshotView_ = name == "library" && libraryApp_ ? libraryApp_->getContentComponent()

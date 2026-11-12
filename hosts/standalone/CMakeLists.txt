@@ -104,7 +104,7 @@ if(NOT APPLE)
     install(DIRECTORY "${oscairn_apps}/" DESTINATION share/oscairn/apps USE_SOURCE_PERMISSIONS)
 endif()
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp)
+target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"
@@ -228,7 +228,7 @@ add_test(NAME desktop-quit COMMAND oscairn_desktop_quit_test "$<TARGET_FILE_DIR:
 set_tests_properties(desktop-quit PROPERTIES TIMEOUT 60)
 # RFC 0022 step 2: the Setlist app as a process of its own, started and supervised from its manifest, against a socket session.
 juce_add_console_app(oscairn_desktop_apps_test PRODUCT_NAME "Oscairn Desktop Apps Test")
-target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_desktop_apps_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_apps_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_desktop_apps_test oscairn_setlist_app oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
@@ -237,7 +237,7 @@ set_tests_properties(desktop-apps PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_e
 # The Settings app as a process of its own, held to `system`; its pages per profile; the Audio page
 # against a socket session whose audio host is a stand-in (no device is opened).
 juce_add_console_app(oscairn_desktop_settings_test PRODUCT_NAME "Oscairn Desktop Settings Test")
-target_sources(oscairn_desktop_settings_test PRIVATE tests/desktop_settings.cpp ${settings_sources} AppProcesses.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_desktop_settings_test PRIVATE tests/desktop_settings.cpp ${settings_sources} AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_include_directories(oscairn_desktop_settings_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/core/control/third_party)
 target_link_libraries(oscairn_desktop_settings_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_settings_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
@@ -261,6 +261,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME desktop-launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop_launch.py"
         $<TARGET_FILE:oscairn_standalone> "${CMAKE_CURRENT_BINARY_DIR}/launch")
     set_tests_properties(desktop-launch PROPERTIES TIMEOUT 420)
+endif()
+# macOS: Settings, opened from the real app, comes in front of its window as the active app. It
+# shows windows and takes the active app from whoever is working: skipped unless OSCAIRN_WINDOW_TESTS=1
+# is set, as desktop-phase3b-engines is without its folder, and then run alone.
+if(APPLE AND Python3_Interpreter_FOUND)
+    add_test(NAME desktop-window-order COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop_window_order.py"
+        $<TARGET_FILE:oscairn_standalone> "${CMAKE_CURRENT_BINARY_DIR}/window-order")
+    set_tests_properties(desktop-window-order PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
 endif()
 # The message thread never waits on the engine's socket for a mute, a fader drag, the views' polls or opening a Performance, which shows soon after the engine's load.
 juce_add_console_app(oscairn_ui_waits_test PRODUCT_NAME "Oscairn UI Waits Test")

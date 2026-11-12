@@ -196,6 +196,11 @@ namespace oscairn::host
         seenDevices_ = deviceNames( devices_ );
         devices_.addChangeListener( this );
         devices_.addAudioCallback( this );
+        // RFC 0031: the packages that come with the release, a repository snapshot in the app's
+        // Resources (macOS) or beside the programs (Linux), installed once per release as jobs.
+        const auto here = juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getParentDirectory();
+        const auto shipped = here.getSiblingFile( "Resources" ).getChildFile( "Preinstalled" );
+        session_->preinstall( ( shipped.isDirectory() ? shipped : here.getChildFile( "Preinstalled" ) ).getFullPathName().toStdString() );
         service();
         startTimer( 5 ); // control ticks are independent of the panel's repaint rate
     }

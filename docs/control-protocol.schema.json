@@ -4228,6 +4228,31 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "packages.preinstalled",
+              "description": "The packages that come with this release, installed from the app's repository snapshot at the engine's first start, and how that goes"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "packages.repositories",
               "description": "The package repositories this device knows: the official one, its image's and the user's"
             },

@@ -83,6 +83,7 @@ namespace oscairn
         uint64_t listRepository(const std::string& source) override;
         uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false, bool replace = false) override;
         PackageJob packageJob(uint64_t id) override;
+        Preinstall preinstalled() override;
         std::vector<InstalledPackage> installedPackages() override;
         std::vector<Repository> repositories() override;
         void addRepository(const Repository& repository) override;

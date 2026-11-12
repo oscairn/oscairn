@@ -1344,6 +1344,27 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   plugin's. What was installed before installs were recorded is listed where it can be told: an
   asset library at its version and a locked library with an empty `version`, neither with a
   repository; a plugin package is not, as nothing says which plugins it held.
+- `packages.preinstalled` (`{}`) returns `{state,release,error,job,packages}`: the packages that
+  come with this release ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#preinstalled-packages)).
+  The app ships a repository snapshot (`Contents/Resources/Preinstalled` in the macOS app,
+  `Preinstalled/` beside the programs elsewhere): a repository's signed root and index, as
+  published, and the archives of the packages it preinstalls. At the engine's first start with a
+  data folder that has not run it for this `release` (the version with its pre-release label),
+  each package whose archive the snapshot holds is installed from it, offline, one package job at
+  a time, as `packages.install` would from that folder: every signature, hash and the serial are
+  checked, and code is judged against the trust store as always. `state` is `none` (nothing to
+  do at this start), `running` or `done`; `job` is the package job running (ask `packages.job`
+  about it), else 0. Each package is `{id,name,version,state,error}`, `state` one of `waiting`,
+  `installing`, `installed`, `kept` (installed already at any version: left as it is, and updated
+  the normal way), `removed` (preinstalled by an earlier release and removed since: not installed
+  again) or `failed` (`error` says why, as "`<name>` was not set up: ...", and code from a
+  publisher this device does not trust as "its signature is not from a publisher this device
+  trusts"; tried again by the next release, not at the next start).
+  `error` says why the snapshot could not be read at all (an older serial than this device has
+  seen, an untrusted root), or which packages failed, ending "The Library's Catalog can install
+  it." `preinstalled.json` in the data folder
+  records each release that ran it and each package it installed or found installed. Asking moves
+  it on, as the engine's service tick does.
 - `packages.repositories` (`{}`) returns `{repositories}`: the package repositories this device
   knows ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
   `{address,name,key,id,origin,enabled}`: its address (a folder's full path, or https://, kept

@@ -560,6 +560,7 @@ namespace oscairn
         retireSounds(); // RFC 0021: outgoing sounds beside the incoming ones go once idle
         meter();
         recorder_.service();
+        advancePreinstall(); // RFC 0031: the packages that come with the release, one job at a time
         // Each live take's taps follow the wires: a fader moved, a plugin replaced, a Performance
         // changed. A take that no longer feeds rings of its own is dropped from the list.
         if( ( !recordTaps_.empty() || !retroTaps_.empty() ) && ( revision_ != recordRevision_ || wires_ != recordWires_ ) )

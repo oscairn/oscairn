@@ -36,6 +36,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME control-repository-web COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/core/control/tests/repository.py" $<TARGET_FILE:oscairn-json-rpc-test> $<TARGET_FILE:oscairn_basic_synth>
         $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:kick-clap-fixture-normal> "${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py" $<TARGET_FILE:oscairn_web_rpc_test>)
     set_tests_properties(control-repository-web PROPERTIES TIMEOUT 180)
+    # Preinstalling as the engine does, with a web transport that must not be used (RFC 0031).
+    add_test(NAME control-preinstall-web COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/core/control/tests/preinstall.py" $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:kick-clap-fixture-normal>
+        "${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py" $<TARGET_FILE:oscairn_web_rpc_test>)
+    set_tests_properties(control-preinstall-web PROPERTIES TIMEOUT 120)
 endif()
 
 # A FANTOM-0 panel read in the engine (panel_reader.h), for images whose profile has one.

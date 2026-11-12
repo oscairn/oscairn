@@ -81,6 +81,11 @@ namespace oscairn
         uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false, bool replace = false) override;
         PackageJob packageJob(uint64_t id) override;
         std::vector<InstalledPackage> installedPackages() override;
+        Preinstall preinstalled() override;
+        /// From the host at start, on the control thread: installs the packages the repository
+        /// snapshot in `folder` holds, unless this release did already (preinstalled.json in the
+        /// data folder); service() moves it on. Nothing happens when the folder is not there.
+        void preinstall(const std::filesystem::path& folder);
         std::vector<Repository> repositories() override;
         void addRepository(const Repository& repository) override;
         void removeRepository(const std::string& address) override;
@@ -742,6 +747,9 @@ namespace oscairn
         uint64_t packageJobs_ = 0;
         std::vector<Repository> deviceRepositories_; // the profile's, set by the app; control thread only
         bool hideOfficial_ = false;
+        std::filesystem::path preinstallFolder_; // the app's repository snapshot; control thread only
+        Preinstall preinstall_;                  // how it goes; control thread only
+        void advancePreinstall();                // service() and preinstalled(): its next step
         std::vector<Repository> shipped() const;     // the official repository and the device's: their root keys trusted for repositories without trust.json
         // Publisher keys trusted without being in trust.json, as the shipped root keys are
         // (trust.cpp): the official publisher's, unless the profile hides the official repository.

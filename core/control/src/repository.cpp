@@ -309,6 +309,7 @@ namespace oscairn::repository
         const auto folder = cache.empty() ? fs::path() : cache / index.rootKey;
         const auto cached = cache.empty() || !plain ? fs::path() : folder / (index.repository + ".index.json");
         std::string text_;
+        uint64_t keptSerial = 0;
         if(!cached.empty())
             try
             {
@@ -320,6 +321,7 @@ namespace oscairn::repository
                     const auto old = parse(before, "the kept index");
                     const auto serial = number(detail::member(old.get(), "serial"), "serial");
                     if(text(detail::member(old.get(), "repository"), "repository") != index.repository) {}
+                    else if(serial > index.serial) keptSerial = serial; // an older root, which see() refuses: the newer kept index stays
                     else if(serial == index.serial) text_ = std::move(before);
                     else
                     {
@@ -386,8 +388,8 @@ namespace oscairn::repository
             });
             index.packages.push_back(std::move(package));
         });
-        // Kept for the next refresh once it has all been read.
-        if(!cached.empty())
+        // Kept for the next refresh once it has all been read; never over a newer one.
+        if(!cached.empty() && keptSerial <= index.serial)
         {
             std::error_code e;
             fs::create_directories(folder, e);

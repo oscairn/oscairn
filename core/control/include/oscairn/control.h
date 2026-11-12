@@ -398,6 +398,19 @@ namespace oscairn
         // not that archive's; sha256 and signers are then empty.
         struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; };
         virtual std::vector<InstalledPackage> installedPackages() = 0;
+        // The packages that come with this release (RFC 0031): the app ships a snapshot of a
+        // repository (its signed root and index, and the archives of the packages it preinstalls),
+        // and at the engine's first start with a data folder that has not run it for this release,
+        // each package whose archive it holds is installed from it through the package jobs,
+        // offline, every signature and hash checked. state: "none" (nothing to do at this start),
+        // "running" or "done"; error: why the snapshot could not be read, or which packages
+        // failed. job: the package job running (packageJob), else 0. Each package's state:
+        // "waiting", "installing", "installed", "kept" (installed already, at any version: left
+        // as it is), "removed" (preinstalled before and removed since: not installed again) or
+        // "failed" (error says why; tried again by the next release). name: as the index gives it.
+        struct PreinstalledPackage { std::string id, name, version, state, error; };
+        struct Preinstall { std::string state, release, error; uint64_t job = 0; std::vector<PreinstalledPackage> packages; };
+        virtual Preinstall preinstalled() = 0;
         // The repositories this device knows (RFC 0031), each by its address (a folder, or
         // https://, with no '/' at the end), its root key (hex) and name. origin: "official" (built
         // in, its root key trusted for repositories only), "device" (its image's, from its profile)

@@ -625,6 +625,12 @@ namespace oscairn
         for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild"))});
         return out;
     }
+    Control::Preinstall RemoteControl::preinstalled() {
+        auto d=impl_->call("packages.preinstalled","{}",120000);auto r=field(d.get(),"result"); // asking may move a finished install into place
+        Preinstall out{string(field(r,"state")),string(field(r,"release")),string(field(r,"error")),uint64_t(integer(field(r,"job"))),{}};
+        for(auto x:array(field(r,"packages")))out.packages.push_back({string(field(x,"id")),string(field(x,"name")),string(field(x,"version")),string(field(x,"state")),string(field(x,"error"))});
+        return out;
+    }
     std::vector<Control::Repository> RemoteControl::repositories() {
         auto d=impl_->call("packages.repositories","{}");std::vector<Repository> out;
         for(auto r:array(field(field(d.get(),"result"),"repositories")))out.push_back({string(field(r,"address")),string(field(r,"name")),string(field(r,"key")),string(field(r,"origin")),boolean(field(r,"enabled"))});

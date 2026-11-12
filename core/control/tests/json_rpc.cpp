@@ -23,6 +23,7 @@ namespace
             session.connectNotes(oscairn::graphInput,synth);
             session.connectAudio(synth,oscairn::graphOutput);
             session.commit();
+            session.clearHistory(); // as the engine starts: its startup graph is no edit
         }
         void render( uint32_t frames = 512 )
         {

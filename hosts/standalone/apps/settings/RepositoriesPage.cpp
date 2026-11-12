@@ -100,8 +100,9 @@ namespace oscairn::standalone::settings
             if(!error.empty()) { notRead(error); return; }
             if(listed->state == "done")
             {
-                safe->progress_ = "Adding " + text(listed->name) + "..."; safe->show();
-                safe->engine_.job([address, listed](Control& control) { control.addRepository({address, listed->name, listed->rootKey, {}}); },
+                safe->progress_ = "Adding " + text(address) + "..."; safe->show();
+                // Kept under the name its root claims, which the device tells apart from any other by its key (repositories()).
+                safe->engine_.job([address, listed](Control& control) { control.addRepository({address, listed->claimedName, listed->rootKey, {}}); },
                     [safe](const std::string& why) {
                         if(!safe) return;
                         safe->busy_ = false; safe->progress_.clear();
@@ -119,11 +120,11 @@ namespace oscairn::standalone::settings
             if(!listed->rootKey.empty() && listed->error.find("not a repository this device trusts") != std::string::npos)
             {
                 safe->progress_ = "Asking whether to trust its root key..."; safe->show();
-                // Its name as its root key signed it (the engine checks the signatures before trust).
+                // The name its root claims, as its root key signed it (the engine checks the signatures before trust): a claim, beside the fingerprint.
                 auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::QuestionIcon, "Trust this repository?",
-                    "It calls itself \"" + text(listed->name) + "\", signed by the root key whose fingerprint is " + fingerprint(signing::keyId(listed->rootKey)) +
+                    "It calls itself \"" + text(listed->claimedName) + "\", signed by the root key whose fingerprint is " + fingerprint(signing::keyId(listed->rootKey)) +
                     ". Trust it only if its publisher gave you that fingerprint.", "Trust", "Cancel", safe.getComponent());
-                juce::AlertWindow::showAsync(options, [safe, address, name = listed->name, key = listed->rootKey](int chosen) {
+                juce::AlertWindow::showAsync(options, [safe, address, name = listed->claimedName, key = listed->rootKey](int chosen) {
                     if(!safe) return;
                     if(chosen != 1) { safe->busy_ = false; safe->progress_.clear(); safe->refusal_ = "Not added: its root key was not trusted."; safe->asking_ = false; safe->list(); return; }
                     safe->progress_ = "Trusting its root key..."; safe->show();

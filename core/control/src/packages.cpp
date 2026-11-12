@@ -9,6 +9,7 @@
 #include "oscairn/signing.h"
 #include "JsonInput.h"
 #include "sheredom/json.h"
+#include <cctype>
 #include <fstream>
 #include <mutex>
 #include <random>
@@ -123,6 +124,13 @@ std::unique_ptr<repository::Source> sourceFor(const std::string& source,const st
     return repository::folder(source);
 }
 fs::path scratch(const char* suffix){std::random_device random;return dataHome()/(".install-"+std::to_string(random())+std::to_string(random())+suffix);}
+// The repository this device knows a source as: by its address, else, for a folder (a copy on a
+// drive), by its verified root key; null when it knows none.
+const Control::Repository* knownAs(const std::vector<Control::Repository>& known,const std::string& source,const std::string& rootKey){
+    for(const auto& r:known)if(r.address==addressOf(source))return &r;
+    if(!web(source) && !rootKey.empty())for(const auto& r:known)if(r.key==rootKey)return &r;
+    return nullptr;
+}
 }
 
 struct Session::PackageWork {
@@ -163,6 +171,13 @@ std::vector<Control::Repository> Session::repositories(){
     out.front().enabled=!hideOfficial_;
     out.insert(out.end(),known.added.begin(),known.added.end());
     for(auto& r:out)if(const auto e=known.enabled.find(r.address);e!=known.enabled.end())r.enabled=e->second;
+    // Names as everything shows them: one read like an earlier one's (a repository the user added
+    // calling itself "Oscairn", say) is told apart by its key, or by its address where the key is the same.
+    auto plain=[](const std::string& s){std::string o;for(const char c:s)if(!std::isspace(static_cast<unsigned char>(c)))o+=char(std::tolower(static_cast<unsigned char>(c)));return o;};
+    for(size_t i=0;i<out.size();++i)for(size_t j=0;j<i;++j)if(plain(out[j].name)==plain(out[i].name)){
+        out[i].name+=" ("+(out[j].key==out[i].key?out[i].address:"key "+signing::keyId(out[i].key))+")";
+        j=size_t(-1); // compared again from the first, as the new name may read like another's
+    }
     return out;
 }
 
@@ -234,17 +249,19 @@ void Session::setDeviceRepositories(const std::vector<Repository>& list,bool hid
 uint64_t Session::listRepository(const std::string& source){
     if(packageWork_ && packageJob(packageWork_->id).state=="running")throw std::logic_error("a package job is running; wait for it to finish");
     std::vector<std::string> trusted,revoked;keys(trustedKeys(),trusted,revoked);
+    const auto known=repositories(); // read on the control thread: the names this device gives them
     auto work=std::make_shared<PackageWork>();
     work->id=work->job.id=++packageJobs_;work->job.state="running";
     auto* w=work.get();
     packageWork_.reset(); // the last job's thread is done; joined here
-    w->thread=std::thread([w,source,trusted,revoked]{
+    w->thread=std::thread([w,source,trusted,revoked,known]{
         PackageJob out;
         try{
             auto from=sourceFor(source,&w->cancel);
-            const auto index=repository::open(*from,trusted,revoked,out.rootKey,out.name,kept());
+            const auto index=repository::open(*from,trusted,revoked,out.rootKey,out.claimedName,kept());
             see(index.rootKey,index.repository,index.serial,trusted);
-            out.repository=index.repository;out.name=index.name;out.serial=index.serial;
+            if(const auto* r=knownAs(known,source,index.rootKey))out.name=r->name;
+            out.repository=index.repository;out.serial=index.serial;
             for(const auto& p:index.packages){
                 RepositoryPackage listed{p.id,p.name,p.summary,p.license,p.publisherName,p.publisherKey,p.tags,{}};
                 for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.archiveSha256,v.size,v.installed,v.types,v.dependencies});
@@ -268,15 +285,18 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     packageWork_.reset();
     const auto assetRoot=assets_.root(); // read on the control thread; the job reads which libraries are installed from its own Store
     const auto ships=shipped();
-    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships]{
-        std::string rootKey,error,chosen,repositoryId,name;uint64_t serial=0;
+    const auto known=repositories();
+    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships,known]{
+        std::string rootKey,error,chosen,repositoryId,name,claimed;uint64_t serial=0;
         std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each asset library it needs
         std::map<std::string,std::string> archives;
         try{
             auto from=sourceFor(source,&w->cancel);
-            const auto index=repository::open(*from,trusted,revoked,rootKey,name,kept());
+            const auto index=repository::open(*from,trusted,revoked,rootKey,claimed,kept());
             see(index.rootKey,index.repository,index.serial,trusted);
-            repositoryId=index.repository;name=index.name;serial=index.serial;
+            repositoryId=index.repository;serial=index.serial;
+            if(const auto* r=knownAs(known,source,index.rootKey))name=r->name;
+            const auto called=name.empty()?addressOf(source):name; // never the name its root claims
             // A release: fetched (or read in place), checked against the signed index and unpacked.
             auto unpack=[&](const repository::Package& package,const repository::Version& pick){
                 // The package file: read in place from a folder, else fetched into the data folder,
@@ -309,7 +329,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
                 return pick;
             };
             const auto package=std::find_if(index.packages.begin(),index.packages.end(),[&](const auto& p){return p.id==id;});
-            if(package==index.packages.end())throw std::runtime_error("no package "+id+" in "+index.name);
+            if(package==index.packages.end())throw std::runtime_error("no package "+id+" in "+called);
             // The version named (a yanked one too: a lock that names it still gets it), else the newest.
             const repository::Version* pick=version.empty()?newest(*package,{}):nullptr;
             if(!version.empty())for(const auto& v:package->versions)if(v.version==version)pick=&v;
@@ -325,7 +345,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
                 if(!installed.libraryRoot(d.id,d.version).empty())continue;
                 const auto library=std::find_if(index.packages.begin(),index.packages.end(),[&](const auto& p){return p.id==d.id;});
                 const auto* release=library==index.packages.end()?nullptr:newest(*library,d.version);
-                if(!release)throw std::runtime_error(id+" "+chosen+" needs the asset library "+d.id+" "+d.version+" or later, which "+index.name+" does not have");
+                if(!release)throw std::runtime_error(id+" "+chosen+" needs the asset library "+d.id+" "+d.version+" or later, which "+called+" does not have");
                 unpack(*library,*release);
                 if(unpacked.back().first.kind!="asset")throw std::runtime_error("refused: "+d.id+" is not an asset library");
             }
@@ -334,7 +354,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
         // A folder holding a copy of a repository this device ships (a USB drive, or the packages
         // that come with the app) is recorded as that repository, where updates come from.
         if(!web(source))for(const auto& s:ships)if(!rootKey.empty() && s.key==rootKey)w->source=s.address;
-        w->job.rootKey=rootKey;w->job.repository=repositoryId;w->job.name=name;w->job.serial=serial;w->job.package=id;w->job.version=chosen;
+        w->job.rootKey=rootKey;w->job.repository=repositoryId;w->job.name=name;w->job.claimedName=claimed;w->job.serial=serial;w->job.package=id;w->job.version=chosen;
         if(!error.empty()){w->job.state="failed";w->job.error=error;return;}
         std::rotate(unpacked.begin(),unpacked.begin()+1,unpacked.end()); // the libraries first, so the package finds them installed
         w->packages=std::move(unpacked);w->archives=std::move(archives);w->unpacked=true;

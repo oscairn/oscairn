@@ -649,7 +649,7 @@ namespace oscairn
     // Asking about an install that has unpacked moves it into place, which takes a moment for a large one.
     Control::PackageJob RemoteControl::packageJob(uint64_t id) {
         auto d=impl_->call("packages.job","{\"job\":"+std::to_string(id)+'}',120000);auto r=field(d.get(),"result");
-        PackageJob j{uint64_t(integer(field(r,"job"))),string(field(r,"state")),string(field(r,"error")),string(field(r,"repository")),string(field(r,"name")),string(field(r,"rootKey")),uint64_t(integer(field(r,"serial"))),{},string(field(r,"package")),string(field(r,"version")),{}};
+        PackageJob j{uint64_t(integer(field(r,"job"))),string(field(r,"state")),string(field(r,"error")),string(field(r,"repository")),string(field(r,"name")),string(field(r,"rootKey")),uint64_t(integer(field(r,"serial"))),{},string(field(r,"package")),string(field(r,"version")),{},string(field(r,"claimedName"))};
         for(auto x:array(field(r,"packages"))){
             RepositoryPackage p{string(field(x,"id")),string(field(x,"name")),string(field(x,"summary")),string(field(x,"license")),string(field(x,"publisher")),string(field(x,"publisherKey")),strings(field(x,"tags")),{}};
             for(auto v:array(field(x,"versions"))){

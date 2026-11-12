@@ -240,7 +240,7 @@ namespace oscairn::standalone
                     Control::PackageJob state;
                     if(const auto error = safe->engine_.packages([&](Control& c) { state = c.packageJob(job); }); !error.empty()) { state.state = "failed"; state.error = error; }
                     if(state.state == "running") { again(safe, job, r, std::move(left)); return; }
-                    if(state.state == "done") { safe->listings_.push_back({r.address, state}); safe->read_.add(text(state.name.empty() ? r.name : state.name)); }
+                    if(state.state == "done") { state.name = r.name; safe->listings_.push_back({r.address, state}); safe->read_.add(text(r.name)); } // this device's name for it, never the one its root claims
                     else safe->failed_.add(text(r.name) + " (" + text(state.error) + ")");
                     safe->readNext(std::move(left));
                 });

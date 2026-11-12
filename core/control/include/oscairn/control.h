@@ -377,10 +377,13 @@ namespace oscairn
         struct RepositoryVersion { std::string version, channel, yanked, incompatible, sha256; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; };
         struct RepositoryPackage { std::string id, name, summary, license, publisher, publisherKey; std::vector<std::string> tags; std::vector<RepositoryVersion> versions; };
         // state: "running", "done" or "failed" (error says why). rootKey: the repository's root key
-        // once read, and name its name once its signatures verify, so a refusal for an untrusted
-        // one can offer to trust it by both. packages: a listing's;
+        // once read. name: this device's name for the repository read (repositories(), by the
+        // source's address, or for a folder by its verified root key), empty for one it does not
+        // know; claimedName: the name its root gives itself once its signatures verify, a claim,
+        // so a refusal for an untrusted one can offer to trust it by its key's fingerprint beside
+        // "it calls itself ...". packages: a listing's;
         // package and version: what an install installed, and installed what installArchive returns.
-        struct PackageJob { uint64_t id = 0; std::string state, error, repository, name, rootKey; uint64_t serial = 0; std::vector<RepositoryPackage> packages; std::string package, version; Installed installed; };
+        struct PackageJob { uint64_t id = 0; std::string state, error, repository, name, rootKey; uint64_t serial = 0; std::vector<RepositoryPackage> packages; std::string package, version; Installed installed; std::string claimedName; };
         virtual uint64_t listRepository(const std::string& source) = 0;
         virtual uint64_t installFromRepository(const std::string& source, const std::string& id, const std::string& version = {}, bool acceptUnsignedCode = false, bool replace = false) = 0;
         virtual PackageJob packageJob(uint64_t id) = 0;
@@ -412,7 +415,10 @@ namespace oscairn
         struct Preinstall { std::string state, release, error; uint64_t job = 0; std::vector<PreinstalledPackage> packages; };
         virtual Preinstall preinstalled() = 0;
         // The repositories this device knows (RFC 0031), each by its address (a folder, or
-        // https://, with no '/' at the end), its root key (hex) and name. origin: "official" (built
+        // https://, with no '/' at the end), its root key (hex) and name: this device's for it,
+        // as kept when it was added, and the name everything shows it by; a name an earlier one
+        // in the list has already (letter case and spaces aside) gets its root key's ID after it,
+        // or its address where the key is the same, so no two read alike. origin: "official" (built
         // in, its root key trusted for repositories only), "device" (its image's, from its profile)
         // or "user". The official and device ones' keys are listed by trustedKeys without being in
         // trust.json. enabled: offered by the Library's Install...; the official one is on unless the profile hides

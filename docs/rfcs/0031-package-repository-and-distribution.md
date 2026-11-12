@@ -56,7 +56,10 @@ Checked when built and tested; the sections below say how.
       neither the repository nor the key if it then does not verify; it replaces the Library's
       Install from a repository...; `desktop-settings`. 2026-11-11: each installed package recorded with its version, kind and
       repository (`packages.json` in the data folder, `packages.installed`), and forgotten when
-      removed; `control-repository`. Not yet: releases stored in pieces (items, samples
+      removed; `control-repository`. 2026-11-11: each repository shown by the device's name for
+      it, never its root's, in the Catalog, the install questions and `packages.job`
+      (`claimedName` beside it), names alike told apart by key
+      ([names](#kept-state-keyed-by-the-root-key)); `control-repository`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
       (step 2), `.orepo` files; the free-space refusal and a drive pulled midway are not tested)
 - [ ] 2. Fetching over HTTPS: refresh, incremental index updates, mirrors, resumable downloads
@@ -861,10 +864,20 @@ whole. `control-repository` tests both.
 Still to do before a lookup reads kept indexes: the address of each known repository maps to its
 root key but not to the ID its root gives, so a lookup with no network cannot yet find the kept
 index for an address; and a root refused as older has already been kept by `repository::open`,
-so a lookup with no network would read that older index until the next listing. Apart from kept
-state, the desktop Catalog names each listing by the name its root gives (`packages.job`'s
-`name`), not the name in the device's list, so a repository the user added could still call
-itself "Oscairn" there (read, not tested).
+so a lookup with no network would read that older index until the next listing.
+
+**Names (built 2026-11-11).** A repository is shown by this device's name for it, never the name
+its root gives. Until then the desktop Catalog labeled each listing, and the install questions and
+a job's errors named the repository, by the root's `name`, so a repository the user added could
+call itself "Oscairn" there. Now `packages.job`'s `name` is the device's name for the repository
+read (by the source's address, or for a folder by its verified root key) and the root's own is
+`claimedName`, shown only in Settings' trust question, as a claim: "It calls itself "…", signed by
+the root key whose fingerprint is …". The device's name for a repository the user adds is the name
+its root claimed when the user trusted it, kept in `repositories.json`, not editable (nothing has
+needed it). `packages.repositories` lists a name that reads like an earlier one's (letter case and
+spaces aside) with ` (key <ID>)` after it, or ` (<address>)` when both have the same key; the
+official one is first, so it keeps "Oscairn". `control-repository` tests it. Names alike in other
+ways (a Cyrillic letter for a Latin one) are not caught; Settings shows each one's fingerprint.
 
 ### Where a device looks
 
@@ -1144,7 +1157,8 @@ with `system` looks it up and shows the line [above](#at-each-trigger). A client
 | A homograph address (`pаckages.oscairn.org` with a Cyrillic `а`) or `https://packages.oscairn.org@evil.example` | The format allows only lowercase ASCII letters, digits, `.` and `-` in the host, so a lookalike must be written as `xn--…`, and no user info; the key, not the address, is the repository | A plain lookalike in ASCII (`packages-oscairn.org`); the fingerprint and the signed name are shown |
 | A downgrade: a document naming an old version | Revoked versions are never offered; a yanked one asks again, showing why it was withdrawn; versions install side by side, so no other document's version changes; a lower root serial is refused, as now | An old version, neither yanked nor revoked, with a flaw found later: the publisher must yank or revoke it |
 | A hint whose key does not match | A known address with another key: the hint is not used and the known key is kept; a hinted root whose key is not the hint's: refused, nothing kept | None found |
-| A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (built 2026-11-11, `control-repository`) | The Catalog names each listing by the name its root gives, so one could still call itself "Oscairn" there (read, not tested): [above](#kept-state-keyed-by-the-root-key) |
+| A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (built 2026-11-11, `control-repository`) | None found |
+| A repository that calls itself by another's name ("Oscairn") | Shown everywhere by the device's name for it, a name like an earlier one's with its key's ID after it; its own name only as "it calls itself …" beside the fingerprint when adding it (built 2026-11-11, `control-repository`, [names](#kept-state-keyed-by-the-root-key)) | A lookalike name in other scripts; the fingerprint tells them apart |
 | Tracking through a hint | No fetch from a hint's address on open, prepare or install of a library; only **Look there** | A user who looks tells that host they opened it |
 | Hints as a weight | At most 4096 entries, an address at most 2048 bytes; one job at a time; one **Look there** per tap | None found |
 

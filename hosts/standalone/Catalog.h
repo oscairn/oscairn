@@ -19,7 +19,7 @@ namespace oscairn::standalone
     /// installs kept one) tells nothing, so it counts as installed.
     struct Offer
     {
-        std::string source, repository; // the repository's address and name
+        std::string source, repository; // the repository's address and this device's name for it (never the name its root claims)
         Control::RepositoryPackage package;
         Control::RepositoryVersion version;
         bool installable = false;

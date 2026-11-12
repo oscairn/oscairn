@@ -391,8 +391,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
     try:
         # Not trusted yet: refused, naming its root key so the user can choose to trust it.
         state = job('packages.list', {'source': str(good)})
-        check(state['state'] == 'failed' and 'not a repository this device trusts' in state['error'] and keys['root'][0] in state['error'] and state['rootKey'] == keys['root'][1] and state['name'] == 'Test repository',
-              'an untrusted repository is refused, naming its root key and its signed name: ' + state['error'])
+        check(state['state'] == 'failed' and 'not a repository this device trusts' in state['error'] and keys['root'][0] in state['error'] and state['rootKey'] == keys['root'][1] and
+              state.get('claimedName') == 'Test repository' and state['name'] == '',
+              'an untrusted repository is refused, naming its root key and the name it claims, signed; this device has no name for it: ' + state['error'])
         rpc('trust.set', {'key': keys['root'][1], 'name': 'Test repository', 'scope': ['repositories']})
         state = job('packages.list', {'source': str(good)})
         listed = {x['id']: x for x in state['packages']}
@@ -503,6 +504,22 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(state['state'] == 'failed' and 'older than one this device has seen (9)' in state['error'], 'the impostor\'s own older root is refused: ' + state['error'])
         state = job('packages.list', {'source': str(older)})
         check(state['state'] == 'failed' and 'older than one this device has seen (7)' in state['error'], 'and so is the real one\'s, against its own serial: ' + state['error'])
+
+        # A repository the user added that calls itself by the official repository's name: shown,
+        # listed and named in its jobs by this device's name for it, told apart by its key; what
+        # its root says is only a claim (claimedName).
+        fake_config['name'] = 'Oscairn'
+        (fake / 'repository-config.json').write_text(json.dumps(fake_config))
+        named = site('impostor10', 10, source=fake, index='impostor-index')
+        rpc('packages.addRepository', {'address': str(named), 'key': keys['impostor'][1], 'name': 'Oscairn'})
+        shown = {r['address']: r['name'] for r in rpc('packages.repositories')['repositories']}
+        told = f"Oscairn (key {keys['impostor'][0]})"
+        state = job('packages.list', {'source': str(named)})
+        refused = job('packages.install', {'source': str(named), 'id': 'org.example.none'})
+        check(shown.get(str(named)) == told and shown['https://packages.oscairn.org'] == 'Oscairn', 'a repository calling itself "Oscairn" is listed apart from the official one: ' + json.dumps(shown))
+        check(state['state'] == 'done' and state['name'] == told and state.get('claimedName') == 'Oscairn' and refused['name'] == told and refused['error'].endswith('in ' + told),
+              'its listing and install jobs name it by this device\'s name, not the one it claims: ' + json.dumps({k: state.get(k) for k in ('name', 'claimedName')}) + ' ' + refused['error'])
+        rpc('packages.removeRepository', {'address': str(named)})
         rpc('packages.removeRepository', {'address': str(temp / 'impostor7')})
 
         # An unpacked package folder: the same rules as the archive; hidden files are skipped.

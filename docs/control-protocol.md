@@ -1307,11 +1307,15 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   is kept and noted, unless `replace` is true: the user chose to install the repository's build
   over it, which nothing does on its own. That is refused while the open Performance plays the
   build, as `plugins.remove` is. One job runs at a time; another is refused with reason `busy`.
-- `packages.job` takes `{job}` and returns `{job,state,error,repository,name,rootKey,serial,
+- `packages.job` takes `{job}` and returns `{job,state,error,repository,name,claimedName,rootKey,serial,
   packages,package,version,installed}`. `state` is `running`, `done` or `failed`, `error`
-  saying why. `rootKey` is the repository's root key once read, and `name` its name once its
-  signatures verify (checked before trust), so a refusal for an untrusted one can offer to trust
-  it by both. A listing's `packages` are each `{id,name,summary,license,
+  saying why. `rootKey` is the repository's root key once read. `name` is this device's name for
+  the repository read, as `packages.repositories` gives it: the one at `source`'s address, or for
+  a folder the one with the verified root key; empty when the device knows none. Show a
+  repository by `name` alone. `claimedName` is the name its root gives itself, once its
+  signatures verify (checked before trust): a claim, which a refusal for an untrusted one shows
+  only as such ("it calls itself …") beside its key's fingerprint when offering to trust it. A
+  job's errors name the repository by `name`, or by `source` when that is empty. A listing's `packages` are each `{id,name,summary,license,
   publisher,publisherKey,tags,versions}`, each version `{version,channel,yanked,incompatible,
   sha256,size,installed,types,dependencies}`: `incompatible` says why this device cannot install it (empty when it can),
   `sha256` is its archive's SHA-256 as the index lists it (`archive.sha256`),
@@ -1369,7 +1373,12 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   knows ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
   `{address,name,key,id,origin,enabled}`: its address (a folder's full path, or https://, kept
   without a `/` at the end), name, root key (hex) and that key's ID, where it comes from
-  (`official`, `device` or `user`) and whether it is on. The official repository,
+  (`official`, `device` or `user`) and whether it is on. `name` is this device's name for it, the
+  one to show it by: the official one's built in, a device one's from the profile, a user one's as
+  `packages.addRepository` was given it (Settings gives the name its root claims). A name that
+  reads like one listed before it, letter case and spaces aside, is listed with ` (key <its key's
+  ID>)` after it, or ` (<address>)` when the two have the same key, so no two read alike and a
+  repository the user added never shows as `Oscairn`. The official repository,
   `https://packages.oscairn.org` (root key `6a7eceba…0841`, ID `6a2dd1acf4d4e23c`), is always
   listed first; `device` ones are those the device's image ships (its profile's `repositories`),
   then the user's. The official and device repositories' root keys are trusted for

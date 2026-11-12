@@ -1005,7 +1005,7 @@ namespace oscairn
                 for(const auto& n:j.installed.notes)notes.push_back(quote(n));
                 for(const auto& s:j.installed.code)code.push_back("{\"kind\":"+quote(s.kind)+",\"name\":"+quote(s.name)+",\"version\":"+quote(s.version)+",\"platform\":"+quote(s.platform)+
                                                                   ",\"status\":"+quote(s.status)+",\"key\":"+quote(s.key)+",\"keyName\":"+quote(s.keyName)+",\"publicKey\":"+quote(s.publicKey)+'}');
-                return "{\"job\":"+std::to_string(j.id)+",\"state\":"+quote(j.state)+",\"error\":"+quote(j.error)+",\"repository\":"+quote(j.repository)+",\"name\":"+quote(j.name)+
+                return "{\"job\":"+std::to_string(j.id)+",\"state\":"+quote(j.state)+",\"error\":"+quote(j.error)+",\"repository\":"+quote(j.repository)+",\"name\":"+quote(j.name)+",\"claimedName\":"+quote(j.claimedName)+
                        ",\"rootKey\":"+quote(j.rootKey)+",\"serial\":"+std::to_string(j.serial)+",\"packages\":"+join(packages)+",\"package\":"+quote(j.package)+",\"version\":"+quote(j.version)+
                        ",\"installed\":{\"added\":"+std::to_string(j.installed.added)+",\"skipped\":"+std::to_string(j.installed.skipped)+",\"notes\":"+join(notes)+",\"code\":"+join(code)+"}}";
             }

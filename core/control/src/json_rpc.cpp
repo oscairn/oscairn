@@ -824,7 +824,7 @@ namespace oscairn
                     try{c.setPerformanceInfo(info);}catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 } else fields(p,{});
                 const auto i=c.performanceInfo();
-                return "{\"id\":"+quote(i.id)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"tags\":"+tags(i.tags)+",\"color\":"+quote(i.color)+'}';
+                return "{\"id\":"+quote(i.id)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"tags\":"+tags(i.tags)+",\"color\":"+quote(i.color)+",\"unsaved\":"+(i.unsaved?"true":"false")+'}';
             }
             if(method=="library.query") {
                 fields(p,{"text","tags","favorites","recent","limit","kind","source","id"});Control::LibraryQuery q;

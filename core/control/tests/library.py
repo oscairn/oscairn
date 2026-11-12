@@ -39,10 +39,11 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         assert rpc('performance.reopen') == {'notice': ''}
         last = lambda: json.loads((home / 'library/last.json').read_text())['performance']
         assert rpc('library.query') == {'items': [], 'tags': [], 'total': 0, 'tagColors': [], 'hiddenTags': []}
-        assert rpc('performance.info') == {'id': '', 'name': '', 'description': '', 'tags': [], 'color': ''}
-        rpc('performance.setInfo', {'name': 'Warm Pad', 'description': 'slow strings', 'tags': ['pad', 'warm'], 'color': '#3a7bd5'})
+        assert rpc('performance.info') == {'id': '', 'name': '', 'description': '', 'tags': [], 'color': '', 'unsaved': False}
+        info = rpc('performance.setInfo', {'name': 'Warm Pad', 'description': 'slow strings', 'tags': ['pad', 'warm'], 'color': '#3a7bd5'})
+        assert info['unsaved'] is True  # info a save would write
         pad = rpc('library.save')['id']
-        assert len(pad) == 16 and rpc('performance.info')['id'] == pad
+        assert len(pad) == 16 and rpc('performance.info')['id'] == pad and rpc('performance.info')['unsaved'] is False
         assert (home / 'Performances/Warm Pad.oscairn/performance.json').is_file()
         assert last() == str((home / 'Performances/Warm Pad.oscairn').resolve())
         # Saving again keeps the ID and the folder.
@@ -64,8 +65,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         assert rpc('library.rescan') == {'items': 1}
         # Info set but not saved is gone when the saved one is opened again.
         rpc('performance.setInfo', {'name': 'Bright Lead', 'description': '', 'tags': ['lead']})
+        assert rpc('performance.info')['unsaved'] is True
         rpc('performance.load', {'directory': str(home / 'Performances/Warm Pad.oscairn')})
-        assert rpc('performance.info')['name'] == 'Warm Pad'
+        assert rpc('performance.info')['name'] == 'Warm Pad' and rpc('performance.info')['unsaved'] is False
 
         everything = rpc('library.query')
         assert everything['total'] == 1 and everything['items'][0]['name'] == 'Warm Pad' and everything['items'][0]['color'] == '#3a7bd5'

@@ -59,7 +59,7 @@ namespace oscairn
         SigningKey makeSigningKey(const std::string& name) override;
         void loadPerformance(const std::string& directory) override;
         bool preparePerformance(const std::string& directory) override;
-        PerformanceInfo performanceInfo() const override {return info_;}
+        PerformanceInfo performanceInfo() const override {auto i=info_;i.unsaved=unsaved();return i;}
         void setPerformanceInfo(const PerformanceInfo& info) override;
         LibraryResult libraryQuery(const LibraryQuery& query) override;
         void libraryFavorite(const std::string& id,bool favorite) override {library().setFavorite(id,favorite);}
@@ -165,7 +165,7 @@ namespace oscairn
         bool undo() override;
         bool redo() override;
         /// Forgets every step, as opening a Performance does; a host calls it once its startup
-        /// graph is built, so undo cannot take that apart.
+        /// graph is built, so undo cannot take that apart. What it has then counts as saved.
         void clearHistory();
         std::vector<PartMeter> partMeters() const override;
         std::vector<WireMeter> wireMeters() const override;
@@ -447,6 +447,7 @@ namespace oscairn
             std::chrono::steady_clock::time_point when;
             std::shared_ptr<const Model> before, after; // a model step; otherwise a parameter step:
             NodeId node = 0; uint32_t param = 0; double from = 0, to = 0;
+            uint64_t serial = 0; // the state it leads to, new at each change of it
         };
         // Changes made while one is alive are not edits (switching scenes, moving controls).
         struct Quiet
@@ -466,6 +467,12 @@ namespace oscairn
         bool applyParameter(NodeId node, uint32_t param, double value, double* applied = nullptr, bool bounded = true); // not an edit; bounded: see queue
         std::vector<Step> undo_, redo_;
         std::shared_ptr<const Model> baseline_;
+        // Unsaved changes: the state now (the last step's serial, or floor_ with none left) differs
+        // from the one the last save or open left (saved_; never, after an info edit).
+        uint64_t serial_ = 0, floor_ = 0, saved_ = 0;
+        uint64_t state() const { return undo_.empty() ? floor_ : undo_.back().serial; }
+        bool unsaved() const;
+        void markSaved();
         // An audition: what it set aside (the model before it, holding those plugins) and what
         // stopping puts back that the model does not hold.
         struct Auditioning
@@ -473,6 +480,7 @@ namespace oscairn
             Audition what;
             std::shared_ptr<const Model> before;
             std::vector<Step> undo, redo;
+            uint64_t floor = 0, saved = 0;
             PerformanceInfo info;
             double tempo = 120;
             Transport::ClockSource clock = Transport::ClockSource::Internal;

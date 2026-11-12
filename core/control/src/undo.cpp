@@ -127,13 +127,14 @@ namespace oscairn
             if(last.key == step.key && step.when - last.when < mergeWindow)
             {
                 if(step.after) last.after = step.after; else last.to = step.to;
-                last.when = step.when;
+                last.when = step.when; last.serial = ++serial_;
                 redo_.clear();
                 return;
             }
         }
+        step.serial = ++serial_;
         undo_.push_back(std::move(step));
-        if(undo_.size() > historyDepth) undo_.erase(undo_.begin()); // its held nodes go with it
+        if(undo_.size() > historyDepth) { floor_ = undo_.front().serial; undo_.erase(undo_.begin()); } // its held nodes go with it
         redo_.clear();
         mergeable_ = true;
         // Every step before a removal still holds the removed plugin, so count the plugins the
@@ -146,7 +147,7 @@ namespace oscairn
                     if(m) for(const auto& [id, n] : m->nodes) if(!live.count(n.second.host.get())) gone.insert(n.second.host.get());
             return gone.size();
         };
-        while(undo_.size() > 1 && held() > maxHeldPlugins) undo_.erase(undo_.begin());
+        while(undo_.size() > 1 && held() > maxHeldPlugins) { floor_ = undo_.front().serial; undo_.erase(undo_.begin()); }
     }
 
     bool Session::setParameter(NodeId node, uint32_t param, double value)
@@ -218,6 +219,19 @@ namespace oscairn
             }
             ++revision_; publish(ChangeKind::Graph); // clients see the part marked
         }
+    }
+
+    // A save or an open: what is there now is saved, and the next edit is a step of its own, so
+    // undoing it comes back to here.
+    void Session::markSaved()
+    {
+        record();
+        saved_ = state(); mergeable_ = false;
+    }
+    bool Session::unsaved() const
+    {
+        if(audition_) return (audition_->undo.empty() ? audition_->floor : audition_->undo.back().serial) != audition_->saved; // an audition is no edit
+        return state() != saved_;
     }
 
     Control::History Session::history() const

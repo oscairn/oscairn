@@ -167,6 +167,31 @@ int main(int argc, char** argv)
         s.savePerformance((temp.path / "p").string());
         s.loadPerformance((temp.path / "p").string());
         check(s.history().undo.empty() && s.history().redo.empty(), "opening a Performance clears the history");
+
+        // Unsaved changes (performance.info's unsaved): edits since the last save or open.
+        {
+            Session u(48000, frames);
+            Audio a;
+            check(!u.performanceInfo().unsaved, "a new Untitled has nothing unsaved");
+            const auto n = u.add("synth", fixture, "org.kick.test.synth"); u.commit(); a.run(u);
+            check(u.performanceInfo().unsaved, "an edit is unsaved");
+            u.savePerformance((temp.path / "u").string());
+            check(!u.performanceInfo().unsaved, "saved");
+            u.note(true, 60, 1); a.run(u); u.note(false, 60, 0); a.run(u);
+            check(!u.performanceInfo().unsaved, "playing is not a change");
+            u.setParameter(n, 7, .3);
+            check(u.performanceInfo().unsaved, "a parameter edit after the save");
+            check(u.undo() && !u.performanceInfo().unsaved, "undone back to the save: nothing unsaved");
+            check(u.undo() && u.performanceInfo().unsaved, "undone past the save");
+            check(u.redo() && !u.performanceInfo().unsaved, "redone to the save");
+            u.setParameter(n, 7, .5);
+            u.loadPerformance((temp.path / "u").string());
+            check(!u.performanceInfo().unsaved, "opening one: nothing unsaved");
+            auto info = u.performanceInfo(); info.name = "Renamed"; u.setPerformanceInfo(info);
+            check(u.performanceInfo().unsaved, "its info set is a change a save writes");
+            u.savePerformance((temp.path / "v").string());
+            check(!u.performanceInfo().unsaved, "saved elsewhere");
+        }
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(!failures) std::puts("ok: undo and redo every edit; removed plugins return with their state; playing is not an edit");

@@ -338,6 +338,7 @@ std::unique_ptr<json_value_s,decltype(&std::free)> document(const fs::path& root
 
 void Session::savePerformance(const std::string& directory) {
     info_=writeDocument(directory,info_,nullptr,nullptr);
+    markSaved();
     // A root for garbage collection (RFC 0009 step 4): what it uses stays installed.
     assets_.addRoot(directory,assetsOf(fs::path(directory)/"performance.json"));
     remember(directory);
@@ -1893,6 +1894,7 @@ void checkInfo(const Control::PerformanceInfo& info) {
 
 void Session::setPerformanceInfo(const PerformanceInfo& info) {
     checkInfo(info);
+    if(info.name!=info_.name || info.description!=info_.description || info.tags!=info_.tags || info.color!=info_.color)saved_=~uint64_t(0); // no state is saved now, until a save writes it
     const auto id=info_.id,revision=info_.revision,parent=info_.parent;const auto origin=info_.origin;info_=info;info_.id=id;info_.revision=revision;info_.parent=parent;info_.origin=origin;
 }
 
@@ -1914,6 +1916,7 @@ std::string Session::savePerformanceToLibrary(const std::string& name,bool asNew
         info_=writeDocument(fresh.string(),info_,nullptr,nullptr);
         fs::rename(folder,old);fs::rename(fresh,folder);fs::remove_all(old);
     }
+    markSaved();
     l.rescan();l.used(info_.id);
     remember(folder);
     return info_.id;

@@ -262,7 +262,9 @@ namespace oscairn
         // origin: for an item imported into the user's own storage (RFC 0021), the library it came
         // from, its ID there and the content hash of this copy as imported; empty otherwise.
         struct Origin { std::string library, item, hash; bool operator==(const Origin&) const = default; };
-        struct PerformanceInfo { std::string id, name, description; std::vector<std::string> tags; std::string color, revision, parent, hash; Origin origin; };
+        // unsaved: read only; it has changes since it was last saved or opened that a save would
+        // write: undoable edits (back to where it was saved reads as none) and its info.
+        struct PerformanceInfo { std::string id, name, description; std::vector<std::string> tags; std::string color, revision, parent, hash; Origin origin; bool unsaved = false; };
         virtual PerformanceInfo performanceInfo() const = 0;
         virtual void setPerformanceInfo(const PerformanceInfo& info) = 0; // the ID is kept as it is
         // The library (RFC 0021): the device's Performances, by tags, text, favorites and

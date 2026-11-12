@@ -1082,8 +1082,13 @@ Favorites and recently used (at most 50) are the user's, in `library/user.json`.
 library cannot read, and hidden folders, are skipped; of two files with one ID the first found
 is listed.
 
-- `performance.info` (`{}`) returns the open Performance's `{id,name,description,tags,color}`
-  (`color` is `#rrggbb` or empty); the ID is empty until the first save.
+- `performance.info` (`{}`) returns the open Performance's `{id,name,description,tags,color,unsaved}`
+  (`color` is `#rrggbb` or empty); the ID is empty until the first save. `unsaved` is true when it
+  has changes since it was last saved or opened that a save would write: an undoable edit (parts,
+  wires, plugins, parameters, scenes, controls, pads, assignments; `edit.history`'s), or its name,
+  description, tags or color set. Undoing back to where it was saved reads as none; playing, a
+  scene switched, the transport, meters and an audition are not changes, and a new Untitled is unsaved
+  only once edited. Info set is a change until the next save, whatever undo does.
   `performance.setInfo` takes `{name,description,tags}` and an optional `color` (empty when
   absent; the ID is kept) and returns the same. These are not undoable edits.
 - `library.query` takes optional `text` (case-insensitive, over name, description and tags),

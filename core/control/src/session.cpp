@@ -480,6 +480,7 @@ namespace oscairn
     void Session::clearHistory()
     {
         undo_.clear(); redo_.clear(); mergeable_ = false;
+        floor_ = saved_ = ++serial_;
         baseline_ = std::make_shared<const Model>(model());
     }
 

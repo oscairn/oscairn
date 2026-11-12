@@ -18,7 +18,7 @@ namespace oscairn
         a.what = {found.id, found.kind, found.kind == "sound" ? part : 0};
         record(); // an edit waiting for its step comes first
         a.before = std::make_shared<const Model>(model());
-        a.undo = undo_; a.redo = redo_;
+        a.undo = undo_; a.redo = redo_; a.floor = floor_; a.saved = saved_;
         a.info = info_; a.tempo = tempo_.load(); a.clock = clockSource_.load(); a.scene = scene_; a.mappingScene = mappingScene_;
         if(found.kind == "sound") loadSoundInto(part, found.path); // as loading it, but not marked used
         else
@@ -59,7 +59,7 @@ namespace oscairn
         // What was set aside sounds again: out of the leaving ones if it was still ringing.
         for(const auto& [n, named] : a.before->nodes) if(leaving_.erase(n)) graph_.setRetiring(n, a.before->disabled.count(n) != 0);
         apply(model(), *a.before);
-        undo_ = std::move(a.undo); redo_ = std::move(a.redo); mergeable_ = false;
+        undo_ = std::move(a.undo); redo_ = std::move(a.redo); floor_ = a.floor; saved_ = a.saved; mergeable_ = false;
         observed_.clear();
         for(const auto& [n, name] : nodes_) for(const auto& p : graph_.host(n).parameters()) observed_[{n, p.id}] = graph_.host(n).parameterValue(p.id);
         if(a.what.kind == "performance")

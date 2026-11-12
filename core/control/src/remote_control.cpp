@@ -550,7 +550,7 @@ namespace oscairn
         auto d=impl_->call("performance.export","{\"file\":"+quote(file)+",\"editedSounds\":"+(editedSounds?"true":"false")+signing(sign)+'}',120000);
         return strings(field(field(d.get(),"result"),"notes"));
     }
-    namespace { Control::PerformanceInfo performanceFrom(V r){return {string(field(r,"id")),string(field(r,"name")),string(field(r,"description")),strings(field(r,"tags")),string(field(r,"color"))};} }
+    namespace { Control::PerformanceInfo performanceFrom(V r){Control::PerformanceInfo i{string(field(r,"id")),string(field(r,"name")),string(field(r,"description")),strings(field(r,"tags")),string(field(r,"color"))};i.unsaved=boolean(field(r,"unsaved"));return i;} }
     Control::PerformanceInfo RemoteControl::performanceInfo() const {
         auto d=impl_->call("performance.info");return performanceFrom(field(d.get(),"result"));
     }

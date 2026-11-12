@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Opt-in live-device test of automatic desktop helper ownership.
+"""Opt-in test of automatic desktop helper ownership, on the null audio device (--audio null):
+nothing reaches a speaker and no MIDI device is opened.
 
 Pass the UI executable. --interactive-recovery waits up to 60 seconds for the
 Restart engine button to be clicked; otherwise reopening the UI starts recovery.
@@ -34,7 +35,7 @@ ident = 0
 
 def launch(name, snapshot=False):
     log = open(artifacts/(name+'.log'), 'w'); logs.append(log)
-    command = [str(ui), '--layout', 'kick']
+    command = [str(ui), '--layout', 'kick', '--audio', 'null']
     if snapshot:
         command += ['--snapshot', str(artifacts/(name+'.png'))]
     child = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT)

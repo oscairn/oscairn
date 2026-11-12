@@ -21,9 +21,10 @@ struct AudioConfiguration
     uint32_t deviceChannels=0,sampleRate=0;
     std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, panel_reader.h); empty: none
     std::vector<std::string> controllers; // controller profile files (RFC 0024), each by its full path, beside the built-in ones
+    bool nullDevice=false; // --audio null: the null device (NullDevice.h), writing nowhere, with no MIDI device opened; for tests, never a fallback
     static bool isOption(std::string_view name)
     {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames" ||
-            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--controller";}
+            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--controller" || name=="--audio";}
     void setOption(std::string_view name,const std::string& value)
     {
         if(value.empty() || value.find('\0')!=std::string::npos)throw std::invalid_argument("Empty or invalid audio option");
@@ -37,6 +38,7 @@ struct AudioConfiguration
         else if(name=="--buffer-frames")bufferFrames=number(value,16,8192,"--buffer-frames is 16 to 8192");
         else if(name=="--device-channels")deviceChannels=number(value,1,256,"--device-channels is 1 to 256");
         else if(name=="--sample-rate")sampleRate=number(value,8000,384000,"--sample-rate is 8000 to 384000");
+        else if(name=="--audio"){if(value!="null")throw std::invalid_argument("--audio takes null");nullDevice=true;}
         else throw std::invalid_argument("Unknown audio option");
     }
     void validate() const
@@ -58,6 +60,7 @@ struct AudioConfiguration
         validate();
         auto list=[](const auto& channels){std::string result;for(auto c:channels){if(!result.empty())result+=',';result+=std::to_string(c);}return result;};
         std::vector<std::string> args;
+        if(nullDevice){args.push_back("--audio");args.push_back("null");}
         if(!inputDevice.empty()){args.push_back("--input-device");args.push_back(inputDevice);}
         if(!outputDevice.empty()){args.push_back("--output-device");args.push_back(outputDevice);}
         if(!inputs.empty()){args.push_back("--audio-inputs");args.push_back(list(inputs));}

@@ -132,7 +132,9 @@ open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Osca
 Options: `--app performance|library|setlist|groovebox` (open an app instead of Home),
 `--layout desktop|kick|kick-screen|ignite|keys49|file.json`, `--profile kick` (a
 device's screen, full screen; see [running on a KICK](docs/kick.md)), and `--snapshot out.png
-[--size WxH] [--play SECONDS]` to render the window to a PNG and quit. Layouts are described in
+[--size WxH] [--play SECONDS]` to render the window to a PNG and quit, and `--audio null` (the
+engine on a device that writes nowhere, with no MIDI device opened: for tests and scripted
+checks). Layouts are described in
 [hosts/standalone/layouts](hosts/standalone/layouts/README.md).
 
 The display's sound picker prepares Basic Synth variations (or a loaded instrument's

@@ -100,7 +100,8 @@ jobs:
 
   standalone-launch:
     # The desktop app (JUCE) is otherwise never built; this builds it and runs the desktop-launch
-    # test, which starts the real executable. macOS only: a headless Linux run needs xvfb.
+    # test, which starts the real executable. macOS only: a headless Linux run needs xvfb. Its
+    # engine runs on the null audio device (--audio null), so the runner needs no audio hardware.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4

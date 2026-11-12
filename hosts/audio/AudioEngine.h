@@ -32,7 +32,8 @@ namespace oscairn::host
     public:
         /// Loads the plugins from `pluginDir` and opens the user's saved audio device (audio.set),
         /// else the profile's (`audio`), else the default output. `devices`: a test's device type,
-        /// listed and opened instead of the system's. Throws std::runtime_error if a plugin does not
+        /// listed and opened instead of the system's. With `audio.nullDevice` (--audio null) only the
+        /// null device, and no MIDI device. Throws std::runtime_error if a plugin does not
         /// load or no audio output opens.
         explicit AudioEngine( const std::string& pluginDir, AudioConfiguration audio = {}, std::unique_ptr<juce::AudioIODeviceType> devices = {} );
         ~AudioEngine() override;

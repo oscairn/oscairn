@@ -407,6 +407,19 @@ put that line in `~/.asoundrc` to name a `hw:` address. On macOS they take a Cor
 For example, the FANTOM-07's profile gives
 `--output-device hw:1,0 --audio-outputs 0,1 --device-channels 16 --sample-rate 48000`.
 
+`--audio null`, on the desktop or `oscairn-engine`, opens the null device instead of any real one
+(`NullDevice.h`): a thread of its own plays the engine's callback at the pace of its rate and
+buffer (48 kHz unless `--sample-rate` says; the buffer as `--buffer-frames` or the profile asks),
+and the sound goes nowhere, so meters, the transport, workers and deadlines run as on a device. It
+opens no MIDI input or output either: a test sends its notes with `notes.send`. A
+profile's device becomes the null device with that device's channels. The user's saved choice
+(`audio.json`) is neither read nor written, `audio.devices` says `null` (its `source` and the
+device's name) with the device `fixed`, and `audio.set` refuses another device. It is only ever
+chosen by the option: a missing device still stops the engine with "no audio output". It reaches
+a managed helper as its own `--audio null`, and the helper is identified by it, so a test never
+attaches to an engine playing a real device. The `desktop-launch` test, the
+`managed_lifecycle.py` smoke test and scripted release checks use it.
+
 The headless `audio-routing`/`audio-routing-lv2` tests check independent master/cue/record
 buses, sidechains, explicit averaging, range/cycle rejection, live edits and mixed CLAP/LV2
 ports under the allocation guard. `audio-device-channel-map` tests reordered/sparse
@@ -511,8 +524,8 @@ python3 hosts/engine/tests/managed_lifecycle.py \
 
 Add `--interactive-recovery` to exercise the on-screen Restart engine button instead of
 reopening another UI. This mode waits up to 60 seconds for the button click. Both modes
-use a private test runtime directory, mute the synth before playback, save screenshots,
-and stop only the processes they started. Automatic startup, reattachment and the actual
+use a private test runtime directory, run on the null audio device (`--audio null`), mute the
+synth before playback, save screenshots, and stop only the processes they started. Automatic startup, reattachment and the actual
 recovery button were verified on macOS with the Multi-Output Device at 48 kHz/512 samples.
 Separately, Jacob verified SMK37 notes, pressure response and sequencer PLAY/STOP in the
 default managed desktop's KICK layout on October 28, 2026.

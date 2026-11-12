@@ -6,13 +6,15 @@ and a runtime folder of its own, so it starts its own engine helper and never re
 --snapshot renders a window to a PNG and quits; the PNG must exist, have the size asked for and
 show more than one color. Stdlib only: the PNG is decoded here (zlib; 8-bit RGB/RGBA, no interlace).
 
-The helper opens the default audio output, as the app does; nothing plays: no --play, so the
-sequencer stays stopped, and no notes are sent. It stops when the app quits; one left behind (the
-app crashed or timed out, which leaves it running by design) is stopped here, by the PID in its
-lease, only when that process is this run's."""
+Every run passes --audio null: the helper opens the null device, which writes nowhere, and no MIDI
+device, so nothing it does can sound (and a machine without audio hardware runs it). Its log must
+say so: a helper that opened a real device or a MIDI input fails the run. It stops when the app
+quits; one left behind (the app crashed or timed out, which leaves it running by design) is
+stopped here, by the PID in its lease, only when that process is this run's."""
 import fcntl
 import glob
 import os
+import re
 import shutil
 import signal
 import struct
@@ -125,7 +127,7 @@ def main():
         runtime = tempfile.mkdtemp(prefix='oscairn-launch-', dir='/tmp')
         wanted = tuple(int(v) for v in extra[extra.index('--size') + 1].split('x'))
         try:
-            run = subprocess.run([app, '--snapshot', name + '.png'] + extra, cwd=folder, timeout=120,
+            run = subprocess.run([app, '--snapshot', name + '.png', '--audio', 'null'] + extra, cwd=folder, timeout=120,
                                  capture_output=True, text=True,
                                  env={**os.environ,
                                       'OSCAIRN_DATA_HOME': os.path.join(folder, 'data'),
@@ -137,6 +139,10 @@ def main():
             while engines(runtime) and time.monotonic() < deadline:
                 time.sleep(.1)
             assert not engines(runtime), f'{name}: the engine helper outlived the app'
+            log = ''.join(open(path).read() for path in glob.glob(os.path.join(runtime, '*.log')))
+            assert 'oscairn: audio output "null"' in log and 'oscairn: 0 MIDI inputs open' in log and \
+                'audio output "' not in log.replace('audio output "null"', '') and \
+                not re.search(r'oscairn: [1-9][0-9]* MIDI inputs open', log), f'{name}: the helper did not run on the null device alone\n{log}'
             png = os.path.join(folder, name + '.png')
             assert os.path.isfile(png) and os.path.getsize(png) > 0, f'{name}: no PNG written\n{run.stderr}'
             width, height, colors = png_pixels(png)

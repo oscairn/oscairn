@@ -42,6 +42,15 @@ dmg, run `Oscairn.app/Contents/MacOS/Oscairn` with `HOME`, `OSCAIRN_DATA_HOME` a
 the instruments that come with Oscairn; `packages.preinstalled` on the engine's control socket
 then ends `done`, each package `installed`.
 
+## Try it on a clean Mac
+
+Scripted first-run checks of the downloaded app (launching it, snapshots, driving it over its
+socket) start it with `--audio null`, for example
+`/Applications/Oscairn.app/Contents/MacOS/Oscairn --audio null --snapshot home.png`. Its engine
+then opens the null device, which writes nowhere, and no MIDI device: no virtual output device has
+to be set up by hand, and nothing a script does can sound. Listening to it is a check of its own,
+without the option.
+
 ## Build one locally
 
 ```sh

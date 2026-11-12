@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioEngine.h"
+#include "NullDevice.h"
 #include "WebTransport.h"
 
 #include "oscairn/midi_input.h"
@@ -102,12 +103,12 @@ namespace oscairn::host
     AudioEngine::AudioEngine( const std::string& pluginDir, AudioConfiguration audio, std::unique_ptr<juce::AudioIODeviceType> devices ) : channelMap_(std::move(audio),maxFrames)
     {
         useWebTransport(); // package repositories on the web (RFC 0031)
-        if( devices ) devices_.addAudioDeviceType( std::move( devices ) ); // before the first scan, so the system's are never made
         juce::AudioDeviceManager::AudioDeviceSetup preferred;
         const auto& config=channelMap_.configuration();
         controllers_=std::make_unique<ControllerPorts>(config.controllers); // a bad profile file refuses to start before any device opens
-        fixed_=config.explicitOutputs; // a channel map names one device's channels: the profile's, the only one
-        auto choice=readChoice();
+        // A channel map names one device's channels: the profile's, the only one. --audio null is the only one too, and no choice of the user's applies to it.
+        fixed_=config.explicitOutputs || config.nullDevice;
+        auto choice=config.nullDevice?Control::AudioSetting{}:readChoice();
         if(fixed_){choice.output.reset();choice.input.reset();}
         preferred.bufferSize = choice.bufferSize ? int(*choice.bufferSize) : config.bufferFrames ? int(config.bufferFrames) : OSCAIRN_AUDIO_BUFFER_FRAMES;
         if( config.sampleRate ) preferred.sampleRate = config.sampleRate;
@@ -117,6 +118,16 @@ namespace oscairn::host
         const auto outputs=std::max(ChannelMap::required(config.outputs),config.deviceChannels);
         preferred.useDefaultInputChannels=false;preferred.useDefaultOutputChannels=false;
         preferred.inputChannels.setRange(0,inputs,true);preferred.outputChannels.setRange(0,outputs,true);
+        if(config.nullDevice) // the device a profile names becomes the null device, with its channels; nothing else is listed
+        {
+            juce::Array<double> rates{48000,44100,88200,96000}; // the first is its default
+            if(config.sampleRate)rates.addIfNotAlreadyThere(config.sampleRate);
+            juce::Array<int> sizes{64,128,256,512};
+            if(preferred.bufferSize>0)sizes.addIfNotAlreadyThere(preferred.bufferSize);
+            devices=std::make_unique<NullType>(juce::StringArray{"null"},inputs?juce::StringArray{"null"}:juce::StringArray{},[=](const juce::String& name){
+                return new NullDevice(name,rates,sizes,int(outputs),int(inputs),true);});
+        }
+        if( devices ) devices_.addAudioDeviceType( std::move( devices ) ); // before the first scan, so the system's are never made
         // The user's choice, then the profile's device (or the options'), then the default; each passed over is noted.
         const auto inputName=listedName(config.inputDevice),outputName=listedName(config.outputDevice);
         struct Candidate { std::string output, input, source; };
@@ -124,6 +135,7 @@ namespace oscairn::host
         if(choice.output || (choice.input && inputs)) candidates.push_back({choice.output.value_or(outputName),inputs?choice.input.value_or(inputName):std::string(),"user"});
         if(!outputName.empty() || !inputName.empty()) candidates.push_back({outputName,inputName,"profile"});
         if(!fixed_ || candidates.empty()) candidates.push_back({{},{},"default"});
+        if(config.nullDevice) candidates={{"null",inputs?"null":"","null"}};
         for(const auto& c:candidates)
         {
             preferred.inputDeviceName=c.input;preferred.outputDeviceName=c.output;
@@ -286,7 +298,7 @@ namespace oscairn::host
     {
         const auto now = listDevices();
         if( fixed_ && ( ( s.output && *s.output != now.output ) || ( s.input && *s.input != now.input ) ) )
-            throw std::invalid_argument( "The device profile fixes the audio device: " + now.output );
+            throw std::invalid_argument( ( channelMap_.configuration().nullDevice ? "--audio null fixes the audio device: " : "The device profile fixes the audio device: " ) + now.output );
         if( s.input && channelMap_.configuration().inputs.empty() ) throw std::invalid_argument( "This engine opens no audio input" );
         auto find = []( const std::vector<Control::AudioDevice>& list, const std::string& name, const char* what ) {
             const auto at = std::find_if( list.begin(), list.end(), [&]( const auto& a ) { return a.name == name; } );
@@ -328,7 +340,8 @@ namespace oscairn::host
                 ( back.empty() ? "; " + previous.outputDeviceName.toStdString() + " plays again, as it was" : "; nor did " + previous.outputDeviceName.toStdString() + " again: " + back ) );
         }
         if( s.output || s.input ) source_ = "user";
-        // Saved as the user's, over what they chose before.
+        // Saved as the user's, over what they chose before; never the null device's, which is no choice of theirs.
+        if( channelMap_.configuration().nullDevice ) return listDevices();
         auto choice = readChoice();
         if( s.output ) choice.output = s.output;
         if( s.input ) choice.input = s.input;
@@ -378,7 +391,7 @@ namespace oscairn::host
     {
         std::vector<std::unique_ptr<juce::MidiOutput>> outputs;
         std::vector<uint8_t> numbers;
-        for( const auto& info : juce::MidiOutput::getAvailableDevices() )
+        for( const auto& info : channelMap_.configuration().nullDevice ? juce::Array<juce::MidiDeviceInfo>() : juce::MidiOutput::getAvailableDevices() ) // the null device: none, so a test sends nothing out
         {
             auto known = outputNumberOf_.find( info.identifier );
             if( known == outputNumberOf_.end() )
@@ -454,7 +467,7 @@ namespace oscairn::host
         }
         std::vector<std::unique_ptr<juce::MidiInput>> inputs;
         std::vector<uint8_t> sources;
-        for( const auto& info : juce::MidiInput::getAvailableDevices() )
+        for( const auto& info : channelMap_.configuration().nullDevice ? juce::Array<juce::MidiDeviceInfo>() : juce::MidiInput::getAvailableDevices() ) // the null device: none, so no note reaches a test
         {
             auto known = sourceOf_.find( info.identifier );
             if( known == sourceOf_.end() )
@@ -488,6 +501,7 @@ namespace oscairn::host
             input->start();
             names.push_back( input->getName().toStdString() );
         }
+        std::fprintf( stderr, "oscairn: %zu MIDI inputs open\n", midiInputs_.size() );
         controllers_->setInputs( std::move( names ) );
     }
 

@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// The audio device chosen through the control API (audio.devices, audio.set), on a fake device
-// type the engine opens instead of the system's, so nothing reaches a speaker. The test plays the
+// The audio device chosen through the control API (audio.devices, audio.set), on null devices
+// (NullDevice.h) the engine opens instead of the system's, so nothing reaches a speaker. The test plays the
 // device's callbacks itself. Checks: the listing; a new rate activating the plugins again at it
 // (key 57 sounds at 220 Hz at 96 kHz); invalid rates, buffer sizes and devices refused; a held note
 // playing on across a switch and released after it; a device that fails to open leaving the last
 // one playing; the choice restored at the next start, the profile's device and then the default
 // when the device chosen is missing; a profile's fixed device; devices coming and going announced;
-// the engine's MIDI inputs listed with their controller profiles (controllers.inputs).
+// the engine's MIDI inputs listed with their controller profiles (controllers.inputs). Then
+// --audio null: the null device alone, played at real-time pace by its own thread, a note sent
+// reaching the synth, no MIDI device opened, another device refused and nothing saved.
 //   oscairn-audio-devices-test PLUGIN-DIR [WORKER]
 #include "AudioEngine.h"
+#include "NullDevice.h"
 #include "oscairn/json_rpc.h"
 
 #include <juce_events/juce_events.h>
@@ -34,78 +37,28 @@ namespace
     struct FakeDevice;
     FakeDevice* playing = nullptr; // the device started, whose callbacks the test plays
 
-    struct FakeDevice : juce::AudioIODevice
+    // The null device, unpaced: the test plays its callbacks. Broken refuses to open.
+    struct FakeDevice : oscairn::host::NullDevice
     {
-        FakeDevice( const juce::String& name, juce::Array<double> rates, juce::Array<int> sizes )
-            : juce::AudioIODevice( name, "Fake" ), rates_( rates ), sizes_( sizes ) {}
+        using NullDevice::NullDevice;
         ~FakeDevice() override { close(); }
-        juce::StringArray getOutputChannelNames() override { return { "Left", "Right" }; }
-        juce::StringArray getInputChannelNames() override { return {}; }
-        juce::Array<double> getAvailableSampleRates() override { return rates_; }
-        juce::Array<int> getAvailableBufferSizes() override { return sizes_; }
-        int getDefaultBufferSize() override { return sizes_[0]; }
-        juce::String open( const juce::BigInteger&, const juce::BigInteger& outputs, double rate, int size ) override
+        juce::String open( const juce::BigInteger& inputs, const juce::BigInteger& outputs, double rate, int size ) override
         {
             if( getName() == "Broken" ) return "the fake device refuses to open";
-            outputs_ = outputs & juce::BigInteger( 3 ); rate_ = rate; size_ = size; open_ = true;
-            return {};
+            return NullDevice::open( inputs, outputs, rate, size );
         }
-        void close() override { stop(); open_ = false; }
-        bool isOpen() override { return open_; }
-        void start( juce::AudioIODeviceCallback* callback ) override
-        {
-            if( !callback || !open_ ) return;
-            callback->audioDeviceAboutToStart( this );
-            callback_ = callback; playing = this;
-        }
-        void stop() override
-        {
-            if( auto* c = std::exchange( callback_, nullptr ) ) c->audioDeviceStopped();
-            if( playing == this ) playing = nullptr;
-        }
-        bool isPlaying() override { return callback_ != nullptr; }
-        juce::String getLastError() override { return {}; }
-        int getCurrentBufferSizeSamples() override { return size_; }
-        double getCurrentSampleRate() override { return rate_; }
-        int getCurrentBitDepth() override { return 32; }
-        juce::BigInteger getActiveOutputChannels() const override { return outputs_; }
-        juce::BigInteger getActiveInputChannels() const override { return {}; }
-        int getOutputLatencyInSamples() override { return 0; }
-        int getInputLatencyInSamples() override { return 0; }
+        void start( juce::AudioIODeviceCallback* callback ) override { NullDevice::start( callback ); if( isPlaying() ) playing = this; }
+        void stop() override { NullDevice::stop(); if( playing == this ) playing = nullptr; }
         // One callback's left channel, appended to `out`.
-        void render( std::vector<float>& out )
-        {
-            std::vector<float> left( static_cast<size_t>( size_ ) ), right( static_cast<size_t>( size_ ) );
-            float* outputs[] = { left.data(), right.data() };
-            callback_->audioDeviceIOCallbackWithContext( nullptr, 0, outputs, 2, size_, {} );
-            out.insert( out.end(), left.begin(), left.end() );
-        }
-        juce::Array<double> rates_;
-        juce::Array<int> sizes_;
-        juce::BigInteger outputs_;
-        double rate_ = 0;
-        int size_ = 0;
-        bool open_ = false;
-        juce::AudioIODeviceCallback* callback_ = nullptr;
+        void render( std::vector<float>& out ) { const float* left = NullDevice::render(); out.insert( out.end(), left, left + getCurrentBufferSizeSamples() ); }
     };
-
-    struct FakeType : juce::AudioIODeviceType
+    std::unique_ptr<oscairn::host::NullType> fakes( juce::StringArray names )
     {
-        explicit FakeType( juce::StringArray names ) : juce::AudioIODeviceType( "Fake" ), names_( names ) {}
-        void scanForDevices() override {}
-        juce::StringArray getDeviceNames( bool input ) const override { return input ? juce::StringArray() : names_; }
-        int getDefaultDeviceIndex( bool ) const override { return 0; }
-        int getIndexOfDevice( juce::AudioIODevice* device, bool input ) const override { return input || !device ? -1 : names_.indexOf( device->getName() ); }
-        bool hasSeparateInputsAndOutputs() const override { return true; }
-        juce::AudioIODevice* createDevice( const juce::String& output, const juce::String& ) override
-        {
-            if( !names_.contains( output ) ) return nullptr;
-            if( output == "Headphones" ) return new FakeDevice( output, { 48000 }, { 128, 256 } );
-            return new FakeDevice( output, { 44100, 48000, 96000 }, { 64, 128, 256, 512 } );
-        }
-        void change( juce::StringArray names ) { names_ = names; callDeviceChangeListeners(); } // devices plugged in or out
-        juce::StringArray names_;
-    };
+        return std::make_unique<oscairn::host::NullType>( names, juce::StringArray(), []( const juce::String& name ) -> juce::AudioIODevice* {
+            if( name == "Headphones" ) return new FakeDevice( name, { 48000 }, { 128, 256 } );
+            return new FakeDevice( name, { 44100, 48000, 96000 }, { 64, 128, 256, 512 } );
+        } );
+    }
 
     juce::var call( oscairn::JsonRpc& rpc, const std::string& method, const std::string& params = "{}" )
     {
@@ -120,7 +73,7 @@ namespace
     {
         std::vector<float> out;
         if( !playing ) return out;
-        while( out.size() < size_t( seconds * playing->rate_ ) ) playing->render( out );
+        while( out.size() < size_t( seconds * playing->getCurrentSampleRate() ) ) playing->render( out );
         return out;
     }
     double rms( const std::vector<float>& x, size_t from )
@@ -166,7 +119,7 @@ int main( int argc, char** argv )
     try
     {
         {
-            oscairn::host::AudioEngine engine( plugins, {}, std::make_unique<FakeType>( all ) );
+            oscairn::host::AudioEngine engine( plugins, {}, fakes( all ) );
             oscairn::JsonRpc rpc( engine.control() );
             auto devices = call( rpc, "audio.devices" )["result"];
             check( names( devices["outputs"] ) == std::vector<std::string>{ "Studio", "Headphones", "Broken" }, "every output device is listed" );
@@ -199,7 +152,7 @@ int main( int argc, char** argv )
                 check( code( call( rpc, "audio.set", bad ) ) == -32602, std::string( "refused: " ) + bad );
             const auto refused = call( rpc, "audio.set", R"({"sampleRate":12345})" );
             check( text( refused["error"]["message"] ) == "12345 Hz is not a sample rate Studio offers (44100, 48000, 96000)", "the refusal says what is offered: " + text( refused["error"]["message"] ) );
-            check( text( call( rpc, "audio.devices" )["result"]["output"] ) == "Studio" && playing && playing->rate_ == 96000, "a refusal changes nothing" );
+            check( text( call( rpc, "audio.devices" )["result"]["output"] ) == "Studio" && playing && playing->getCurrentSampleRate() == 96000, "a refusal changes nothing" );
 
             // A switch with a note held: silent between, then the note plays on and is released.
             check( double( call( rpc, "audio.set", R"({"sampleRate":48000,"bufferSize":256})" )["result"]["bufferSize"] ) == 256, "the buffer size set" );
@@ -231,7 +184,7 @@ int main( int argc, char** argv )
 
         // The next start opens the saved choice.
         {
-            oscairn::host::AudioEngine engine( plugins, {}, std::make_unique<FakeType>( all ) );
+            oscairn::host::AudioEngine engine( plugins, {}, fakes( all ) );
             oscairn::JsonRpc rpc( engine.control() );
             const auto devices = call( rpc, "audio.devices" )["result"];
             check( text( devices["output"] ) == "Headphones" && text( devices["source"] ) == "user" && double( devices["sampleRate"] ) == 48000 && double( devices["bufferSize"] ) == 256 &&
@@ -241,7 +194,7 @@ int main( int argc, char** argv )
         {
             oscairn::host::AudioConfiguration profile;
             profile.setOption( "--output-device", "Studio" );
-            oscairn::host::AudioEngine engine( plugins, profile, std::make_unique<FakeType>( juce::StringArray{ "Studio", "Broken" } ) );
+            oscairn::host::AudioEngine engine( plugins, profile, fakes( { "Studio", "Broken" } ) );
             oscairn::JsonRpc rpc( engine.control() );
             const auto devices = call( rpc, "audio.devices" )["result"];
             check( text( devices["output"] ) == "Studio" && text( devices["source"] ) == "profile" && text( devices["notice"] ).find( "the device chosen Headphones did not open" ) == 0,
@@ -250,7 +203,7 @@ int main( int argc, char** argv )
         {
             oscairn::host::AudioConfiguration profile;
             profile.setOption( "--output-device", "Gone" );
-            auto fake = std::make_unique<FakeType>( juce::StringArray{ "Studio" } );
+            auto fake = fakes( { "Studio" } );
             auto* type = fake.get();
             oscairn::host::AudioEngine engine( plugins, profile, std::move( fake ) );
             oscairn::JsonRpc rpc( engine.control() );
@@ -270,7 +223,7 @@ int main( int argc, char** argv )
             profile.setOption( "--output-device", "Studio" );
             profile.setOption( "--audio-outputs", "0,1" );
             profile.setOption( "--sample-rate", "48000" );
-            oscairn::host::AudioEngine engine( plugins, profile, std::make_unique<FakeType>( all ) );
+            oscairn::host::AudioEngine engine( plugins, profile, fakes( all ) );
             oscairn::JsonRpc rpc( engine.control() );
             const auto devices = call( rpc, "audio.devices" )["result"];
             check( bool( devices["fixed"] ) && text( devices["source"] ) == "profile" && names( devices["outputs"] ) == std::vector<std::string>{ "Studio" } &&
@@ -278,6 +231,43 @@ int main( int argc, char** argv )
             check( code( call( rpc, "audio.set", R"({"output":"Headphones"})" ) ) == -32602, "another device refused" );
             check( code( call( rpc, "audio.set", R"({"sampleRate":96000})" ) ) == -32602, "another rate refused" );
             check( double( call( rpc, "audio.set", R"({"bufferSize":128})" )["result"]["bufferSize"] ) == 128, "its buffer size can change" );
+        }
+        // --audio null: only the null device, which writes nowhere, played by its own thread at the pace of its rate and buffer.
+        {
+            const auto choice = juce::File( saved.string() ).loadFileAsString();
+            oscairn::host::AudioConfiguration null;
+            null.setOption( "--audio", "null" );
+            check( null.arguments() == std::vector<std::string>{ "--audio", "null" } && !oscairn::host::AudioConfiguration{}.nullDevice, "--audio null passed on to a managed engine; off unless given" );
+            oscairn::host::AudioEngine engine( plugins, null );
+            oscairn::JsonRpc rpc( engine.control() );
+            const auto devices = call( rpc, "audio.devices" )["result"];
+            check( text( devices["output"] ) == "null" && text( devices["source"] ) == "null" && bool( devices["fixed"] ) && names( devices["outputs"] ) == std::vector<std::string>{ "null" } &&
+                   text( devices["notice"] ).empty(), "audio.devices says null, and it is the only device" );
+            juce::MessageManager::getInstance()->runDispatchLoopUntil( 50 );
+            auto status = call( rpc, "session.status" )["result"];
+            check( text( status["audioDevice"] ) == "null" && bool( status["audioReady"] ), "the null device plays" );
+            check( status["midiInputs"].size() == 0 && status["midiOutputs"].size() == 0 && call( rpc, "controllers.inputs" )["result"]["inputs"].size() == 0, "no MIDI input or output is open" );
+            // A note sent reaches the synth: the Synth part's meter moves from silence.
+            auto peak = [&] { double most = 0; const auto meters = call( rpc, "parts.meters" )["result"]["meters"]; for( const auto& m : *meters.getArray() ) most = std::max( most, double( m["peak"] ) ); return most; };
+            const auto quiet = peak();
+            call( rpc, "notes.send", R"({"on":true,"key":60,"velocity":0.8})" );
+            juce::MessageManager::getInstance()->runDispatchLoopUntil( 300 );
+            const auto playingPeak = peak();            call( rpc, "notes.send", R"({"on":false,"key":60})" );
+            check( quiet == 0 && playingPeak > .01, "a note sent moves the parts' meters: " + std::to_string( quiet ) + ", " + std::to_string( playingPeak ) );
+            // At pace: the transport's beat follows the wall clock (120 bpm, two beats a second), no block missing its deadline.
+            call( rpc, "transport.set", R"({"tempo":120,"playing":true})" );
+            const double began = juce::Time::getMillisecondCounterHiRes(), first = double( call( rpc, "transport.get" )["result"]["beat"] );
+            juce::MessageManager::getInstance()->runDispatchLoopUntil( 2000 );
+            const double beats = double( call( rpc, "transport.get" )["result"]["beat"] ) - first, seconds = ( juce::Time::getMillisecondCounterHiRes() - began ) / 1000;
+            call( rpc, "transport.set", R"({"playing":false})" );
+            check( std::abs( beats - 2 * seconds ) < .2 * seconds, "blocks rendered at real-time pace: " + std::to_string( beats ) + " beats in " + std::to_string( seconds ) + " s" );
+            status = call( rpc, "session.status" )["result"];
+            check( double( status["deadlineMisses"] ) == 0, "no deadline missed: " + text( status["deadlineMisses"] ) + " (late callbacks " + text( status["audioUnderruns"] ) + ")" );
+            // Clients cannot leave it; its buffer can change, and nothing is saved as the user's.
+            const auto refused = call( rpc, "audio.set", R"({"output":"Studio"})" );
+            check( code( refused ) == -32602 && text( refused["error"]["message"] ) == "--audio null fixes the audio device: null", "another device refused: " + text( refused["error"]["message"] ) );
+            check( double( call( rpc, "audio.set", R"({"bufferSize":256})" )["result"]["bufferSize"] ) == 256, "its buffer size can change" );
+            check( juce::File( saved.string() ).loadFileAsString() == choice, "the user's saved choice is untouched" );
         }
     }
     catch( const std::exception& e ) { std::fprintf( stderr, "FAIL: %s\n", e.what() ); ++failures; }

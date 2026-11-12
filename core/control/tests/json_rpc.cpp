@@ -121,8 +121,11 @@ int main( int argc, char** argv )
     {
         if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); return 0; }
         // Test-only line driver. Blank output represents no JSON-RPC response. After --stdio, a
-        // repository snapshot preinstalled from as the engine does at start (preinstall.py).
+        // repository snapshot preinstalled from as the engine does at start (preinstall.py), and
+        // the address and root key of the repository the device ships it from, set first as an
+        // image's profile would.
         Fixture f(argv[1]);
+        if( argc > 5 ) f.session.setDeviceRepositories({{argv[4], "Test", argv[5], {}}}, false);
         if( argc > 3 ) f.session.preinstall(argv[3]);
         for( std::string line; std::getline(std::cin,line); )
         {

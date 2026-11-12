@@ -59,7 +59,10 @@ Checked when built and tested; the sections below say how.
       removed; `control-repository`. 2026-11-11: each repository shown by the device's name for
       it, never its root's, in the Catalog, the install questions and `packages.job`
       (`claimedName` beside it), names alike told apart by key
-      ([names](#kept-state-keyed-by-the-root-key)); `control-repository`. Not yet: releases stored in pieces (items, samples
+      ([names](#kept-state-keyed-by-the-root-key)); `control-repository`. 2026-11-11: each known
+      address read only with the root key recorded for it, and the app's snapshot only with a
+      shipped one's; another key refused naming both, nothing kept
+      ([signatures](#signatures-and-freshness)); `control-repository`, `control-preinstall`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
       (step 2), `.orepo` files; the free-space refusal and a drive pulled midway are not tested)
 - [ ] 2. Fetching over HTTPS: refresh, incremental index updates, mirrors, resumable downloads
@@ -441,6 +444,23 @@ search:
 - Everything else is checked by its hash in the root.
 - **Rollback:** a device refuses a root with a lower serial than one it has seen, so a mirror
   cannot hand it an older index with a version that has since been revoked.
+- **An address is the repository recorded for it (built 2026-11-11).** Each repository a device
+  knows (the official one, built in; a device image's; the user's, in `repositories.json`) is an
+  address and a root key, and its address is read only with that key. Until then a listing or an
+  install took a root signed by any key trusted for `repositories`, so whoever served at one
+  trusted repository's address could present another trusted repository's root and listing there
+  (`control-repository` showed it listed and installed). A root with another key is now refused
+  before anything of it is checked further or kept, with both keys' IDs: "its root key is …, not
+  the one this device has for it (…); nothing from it was used". The snapshot that comes with the
+  app is read only with a shipped repository's key ([preinstalled packages](#preinstalled-packages)).
+  Mirrors change nothing: the root is fetched from the repository's own address, and the index and
+  blobs a mirror serves are checked by the hashes in that root. A folder or an address not added
+  yet (Settings reads one before asking to trust its key) may have any key trusted for
+  `repositories`; a folder copy is then named and recorded as the known repository with its key.
+  This RFC has no rotation of the root key, only of the index key, which the root key signs: a
+  repository with a new root key is a new repository to the device, trusted by its new fingerprint
+  through a system image or by the user removing and adding it again
+  ([keys](#keys-1)). So the rule stays strict. `control-repository`, `control-preinstall`.
 - **Freezing:** a stale mirror can keep serving an old, valid root. Without a clock a device
   cannot tell. It fetches the root from the repository's own address when it can and blobs
   from mirrors; with a clock it shows the root's age.
@@ -725,6 +745,10 @@ repair come from (and the same holds for a USB copy of it).
 
 Nothing is weakened for it. The snapshot is checked by the same code as a network install, against
 the same trust store: the official root key is built in for `repositories`, so the root verifies.
+Since 2026-11-11 the snapshot is read only with a shipped repository's root key (the official one,
+or one the image's profile names): a snapshot signed by a key the user trusted for a repository
+they added is refused, naming both keys ([an address is the repository recorded for
+it](#signatures-and-freshness); `control-preinstall`).
 Plugin code is judged as any install's is, against keys trusted for `plugins`; the official root
 key is never trusted for plugins. The `org.oscairn` publisher key (ID `b284be6bea2fadb1`, public
 key `db87e97d…0d69`) is built in for plugins, apps and content (`builtInKeys()` in `trust.cpp`),
@@ -1158,6 +1182,7 @@ with `system` looks it up and shows the line [above](#at-each-trigger). A client
 | A downgrade: a document naming an old version | Revoked versions are never offered; a yanked one asks again, showing why it was withdrawn; versions install side by side, so no other document's version changes; a lower root serial is refused, as now | An old version, neither yanked nor revoked, with a flaw found later: the publisher must yank or revoke it |
 | A hint whose key does not match | A known address with another key: the hint is not used and the known key is kept; a hinted root whose key is not the hint's: refused, nothing kept | None found |
 | A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (built 2026-11-11, `control-repository`) | None found |
+| Another trusted repository's root served at a known repository's address | Each known address is read only with the root key recorded for it; another key is refused naming both, nothing kept (built 2026-11-11, `control-repository`; the app's snapshot only with a shipped key, `control-preinstall`) | A folder or an address not added yet takes any key trusted for repositories, as nothing is recorded for it |
 | A repository that calls itself by another's name ("Oscairn") | Shown everywhere by the device's name for it, a name like an earlier one's with its key's ID after it; its own name only as "it calls itself …" beside the fingerprint when adding it (built 2026-11-11, `control-repository`, [names](#kept-state-keyed-by-the-root-key)) | A lookalike name in other scripts; the fingerprint tells them apart |
 | Tracking through a hint | No fetch from a hint's address on open, prepare or install of a library; only **Look there** | A user who looks tells that host they opened it |
 | Hints as a weight | At most 4096 entries, an address at most 2048 bytes; one job at a time; one **Look there** per tap | None found |
@@ -1434,7 +1459,8 @@ serial than one it has seen ([freshness](#signatures-and-freshness)).
 - **Rotation:** a new index key is made and signed by the root key the same way, the secret and
   the config are replaced, and the old key goes in `revoked.json`. A stolen index key is
   rotated at once. Replacing the root key means devices trust a new fingerprint, through a
-  system image's trust store or by the user. Key replacement for publishers is not built yet,
+  system image's trust store or by the user; until then a device refuses the new root at the
+  repository's address, as another key than the one recorded for it. Key replacement for publishers is not built yet,
   so the checks refuse a changed publisher key.
 
 ## Build order and gates

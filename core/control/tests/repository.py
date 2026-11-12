@@ -520,6 +520,26 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(state['state'] == 'done' and state['name'] == told and state.get('claimedName') == 'Oscairn' and refused['name'] == told and refused['error'].endswith('in ' + told),
               'its listing and install jobs name it by this device\'s name, not the one it claims: ' + json.dumps({k: state.get(k) for k in ('name', 'claimedName')}) + ' ' + refused['error'])
         rpc('packages.removeRepository', {'address': str(named)})
+
+        # An address is the repository recorded for it, by its key: another trusted repository's
+        # root and listing served there are refused, naming both keys, and nothing of them is
+        # read or kept (RFC 0031 has no root key rotation to allow for).
+        swap = temp / 'swap'
+        shutil.copytree(good, swap)
+        rpc('packages.addRepository', {'address': str(swap), 'key': keys['root'][1], 'name': 'Test repository'})
+        check(job('packages.list', {'source': str(swap)})['state'] == 'done', 'a repository added at a folder reads with its own root key')
+        shutil.rmtree(swap)
+        shutil.copytree(site('impostor11', 11, source=fake, index='impostor-index'), swap)
+        seen, before = json.loads((home / 'repositories.json').read_text())['seen'], kept()
+        state = job('packages.list', {'source': str(swap)})
+        install = job('packages.install', {'source': str(swap), 'id': 'org.kick.test.synth'})
+        check(state['state'] == 'failed' and keys['impostor'][0] in state['error'] and keys['root'][0] in state['error'] and state['packages'] == [] and
+              install['state'] == 'failed' and keys['impostor'][0] in install['error'] and keys['root'][0] in install['error'] and store() == [] and leftovers() == [],
+              'another trusted repository\'s root at a known address is neither listed nor installed from, naming both keys: ' + state['error'])
+        check(json.loads((home / 'repositories.json').read_text())['seen'] == seen and kept() == before,
+              'nothing of it is kept: the serials seen and the kept indexes are as they were: ' + json.dumps(kept()))
+        rpc('packages.removeRepository', {'address': str(swap)})
+        rpc('trust.set', {'key': keys['root'][1], 'name': 'Test repository', 'scope': ['repositories']})  # removing it took its key's trust for repositories
         rpc('packages.removeRepository', {'address': str(temp / 'impostor7')})
 
         # An unpacked package folder: the same rules as the archive; hidden files are skipped.

@@ -176,7 +176,9 @@ repository's root key fingerprint and the name it calls itself (signed by that k
 claim), and asks whether to trust it; nothing else is trusted until you say so. The device keeps
 that name for it and shows every repository by its own name: in Settings, the Catalog and the
 install questions. A repository whose name reads like one listed before it (one calling itself
-"Oscairn", say) is shown with its key's fingerprint after the name. Installing from a local file goes through the Library's **Install… > File**.
+"Oscairn", say) is shown with its key's fingerprint after the name. Each repository's address is
+read only with the root key recorded for it: a root signed by another key there, even one trusted
+for another repository, is refused, naming both fingerprints. Installing from a local file goes through the Library's **Install… > File**.
 
 A release comes with Oscairn's own instruments and effects already in it: FM, Analog, the
 Sampler, Effects and the Arpeggiator, with the FM cartridges and Analog's factory patches, as

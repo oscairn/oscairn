@@ -5,8 +5,9 @@ usage: preinstall.py OSCAIRN-SIGN FIXTURE.clap BUILD-INDEX.py SERVER [PLUGIN]
 
 Builds a signed repository with throwaway keys, as repository.py does, and a snapshot of it
 holding only some of its archives, one of them tampered with. SERVER is started on a fresh data
-folder with the snapshot as the app's: with PLUGIN, SERVER is oscairn-json-rpc-test (started as
-SERVER PLUGIN --stdio SNAPSHOT); without, it is oscairn-web-rpc-test (SERVER SNAPSHOT), which
+folder with the snapshot as the app's and the repository as one the device ships: with PLUGIN,
+SERVER is oscairn-json-rpc-test (started as SERVER PLUGIN --stdio SNAPSHOT ADDRESS KEY); without,
+it is oscairn-web-rpc-test (SERVER SNAPSHOT ADDRESS KEY), which
 fetches from the web as the engine does. The repository's root names mirrors and a blob base on a
 local HTTP server that logs every request, and nothing may reach it.
 
@@ -14,7 +15,8 @@ Checked: the first start installs what the snapshot holds and records it; the ta
 refused and reported while the rest still install; a second start does nothing; a package the user
 removed is not installed again by the next release, and a failed one is tried again; a newer
 version the user has installed is kept; a copy of a repository the device ships is recorded as
-that repository; a snapshot older than the repository the device has seen is refused.
+that repository; a snapshot older than the repository the device has seen is refused; a snapshot
+whose root key is not a shipped repository's is refused.
 """
 import hashlib
 import http.server
@@ -149,10 +151,12 @@ with tempfile.TemporaryDirectory(prefix='oscairn-preinstall-') as temporary:
     tampered.write_bytes(bytes(data))
 
     class Server:
-        """SERVER on a data folder, the snapshot given when `preinstalled`."""
-        def __init__(self, home, preinstalled=True):
+        """SERVER on a data folder, the snapshot given when `preinstalled`, with the test repository
+        shipped by the device (as the official one is by every device) unless not `shipped`."""
+        def __init__(self, home, preinstalled=True, shipped=True):
             command = [server, plugin, '--stdio'] if plugin else [server]
-            self.p = subprocess.Popen([str(c) for c in command + ([snapshot] if preinstalled else [])], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            given = [snapshot] + (['https://packages.example.org', keys['root'][1]] if shipped else []) if preinstalled else []
+            self.p = subprocess.Popen([str(c) for c in command + given], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                       text=True, encoding='utf-8', env={**os.environ, 'OSCAIRN_DATA_HOME': str(home)})
 
         def rpc(self, method, params=None):
@@ -292,6 +296,16 @@ with tempfile.TemporaryDirectory(prefix='oscairn-preinstall-') as temporary:
               errors['org.kick.synth'] == 'Test Synth was not set up: its signature is not from a publisher this device trusts' and
               'unsigned' not in result['error'] and s.rpc('plugins.list')['plugins'] == [],
               'code from an untrusted publisher is not set up, said plainly: ' + json.dumps(errors))
+        s.close()
+
+        # The snapshot is a copy of a repository the device ships: one whose root key this device
+        # trusts only because the user said so is refused, naming both keys, and nothing installs.
+        home = temp / 'not-shipped'
+        trusting(home).close()
+        s = Server(home, shipped=False)
+        result, _ = s.settled()
+        check(result['state'] == 'done' and keys['root'][0] in result['error'] and '6a2dd1acf4d4e23c' in result['error'] and result['packages'] == [] and
+              s.rpc('packages.installed')['packages'] == [], 'a snapshot whose root key is not a shipped repository\'s is refused, naming both keys: ' + result['error'])
         s.close()
 
         check(requests == [], 'nothing reaches the network: ' + json.dumps(requests))

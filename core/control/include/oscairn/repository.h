@@ -66,9 +66,12 @@ namespace oscairn::repository
     // its signatures verify, so a refusal for an untrusted one can offer it to the user by both
     // (an untrusted root whose signatures do not verify is refused for that). With a `cache` folder, the index last read from this repository
     // is kept there: used again while the root's serial is the same, and brought up to date by
-    // the delta the root names from its serial, else fetched whole (RFC 0031).
+    // the delta the root names from its serial, else fetched whole (RFC 0031). `expected`, when not
+    // empty, holds the only root keys this source may have (the key recorded for a known
+    // repository's address): a root with another is refused, naming both, before anything of it is
+    // checked further or kept.
     Index open(Source& source, const std::vector<std::string>& trusted, const std::vector<std::string>& revoked, std::string& rootKey,
-               std::string& name, const std::filesystem::path& cache = {});
+               std::string& name, const std::filesystem::path& cache = {}, const std::vector<std::string>& expected = {});
 
     // Why this device cannot install a version, or empty: it needs a newer system than `system`,
     // or brings code with no build for `platform`.

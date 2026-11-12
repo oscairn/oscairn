@@ -2,7 +2,8 @@
 // A control session on stdin and stdout, a JSON-RPC request per line, that fetches package
 // repositories from the web as the engine does (WebTransport); no audio device. For
 // control-repository-web (core/control/tests/repository.py), and with a repository snapshot's
-// folder, preinstalling from it as the engine does at start (core/control/tests/preinstall.py).
+// folder, preinstalling from it as the engine does at start (core/control/tests/preinstall.py),
+// after the address and root key of the repository the device ships it from, if given.
 #include "WebTransport.h"
 #include "oscairn/json_rpc.h"
 #include "oscairn/session.h"
@@ -15,6 +16,7 @@ int main(int argc, char** argv)
     oscairn::host::useWebTransport();
     oscairn::Session session(48000, 64);
     oscairn::JsonRpc rpc(session);
+    if(argc > 3) session.setDeviceRepositories({{argv[2], "Test", argv[3], {}}}, false);
     if(argc > 1) session.preinstall(argv[1]);
     for(std::string line; std::getline(std::cin, line);) std::cout << rpc.dispatch(line).value_or("") << '\n' << std::flush;
 }

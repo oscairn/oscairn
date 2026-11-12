@@ -249,7 +249,8 @@ namespace oscairn::repository
         return out;
     }
 
-    Index open(Source& source, const std::vector<std::string>& trusted, const std::vector<std::string>& revoked, std::string& rootKey, std::string& name, const fs::path& cache)
+    Index open(Source& source, const std::vector<std::string>& trusted, const std::vector<std::string>& revoked, std::string& rootKey, std::string& name, const fs::path& cache,
+               const std::vector<std::string>& expected)
     {
         const auto rootBytes = source.read("repository.json", maxRoot);
         const auto root = parse(rootBytes, "repository.json");
@@ -272,6 +273,15 @@ namespace oscairn::repository
         // signatures are checked first, so an untrusted root is offered only when it is whole,
         // with the name its key signed.
         const auto fingerprint = signing::keyId(index.rootKey);
+        // An address is the repository recorded for it, by its key: another trusted repository's
+        // root served there is not that repository, and is never read as it (RFC 0031 has no root
+        // key rotation: a new root key is trusted anew, by the user or a system image).
+        if(!expected.empty() && std::find(expected.begin(), expected.end(), index.rootKey) == expected.end())
+        {
+            std::string recorded;
+            for(const auto& k : expected) recorded += (recorded.empty() ? "" : " or ") + signing::keyId(k);
+            bad("its root key is " + fingerprint + ", not the one this device has for it (" + recorded + "); nothing from it was used");
+        }
         for(const auto* key : {&index.rootKey, &index.indexKey})
             if(std::find(revoked.begin(), revoked.end(), *key) != revoked.end()) bad("it is signed by a revoked key (" + signing::keyId(*key) + ")");
         if(!signing::verify(delegation, signing::indexMessage(index.indexKey + "\n"))) bad("its index key is not signed by its root key");

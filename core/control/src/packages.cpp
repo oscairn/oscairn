@@ -131,6 +131,16 @@ const Control::Repository* knownAs(const std::vector<Control::Repository>& known
     if(!web(source) && !rootKey.empty())for(const auto& r:known)if(r.key==rootKey)return &r;
     return nullptr;
 }
+// The only root keys a source may have: a known repository's address, the key recorded for it;
+// the snapshot that comes with the app, a shipped repository's (RFC 0031: a copy of the official
+// one, or of a device image's); anything else (a drive, an address being added), any key trusted
+// for repositories.
+std::vector<std::string> recordedKeys(const std::vector<Control::Repository>& known,const std::vector<Control::Repository>& ships,const std::string& source,const fs::path& snapshot){
+    for(const auto& r:known)if(r.address==addressOf(source))return {r.key};
+    std::vector<std::string> out;
+    if(!snapshot.empty() && source==snapshot.string())for(const auto& s:ships)out.push_back(s.key);
+    return out;
+}
 }
 
 struct Session::PackageWork {
@@ -249,16 +259,17 @@ void Session::setDeviceRepositories(const std::vector<Repository>& list,bool hid
 uint64_t Session::listRepository(const std::string& source){
     if(packageWork_ && packageJob(packageWork_->id).state=="running")throw std::logic_error("a package job is running; wait for it to finish");
     std::vector<std::string> trusted,revoked;keys(trustedKeys(),trusted,revoked);
-    const auto known=repositories(); // read on the control thread: the names this device gives them
+    const auto known=repositories(); // read on the control thread: the names this device gives them, and their keys
+    const auto expected=recordedKeys(known,shipped(),source,preinstallFolder_);
     auto work=std::make_shared<PackageWork>();
     work->id=work->job.id=++packageJobs_;work->job.state="running";
     auto* w=work.get();
     packageWork_.reset(); // the last job's thread is done; joined here
-    w->thread=std::thread([w,source,trusted,revoked,known]{
+    w->thread=std::thread([w,source,trusted,revoked,known,expected]{
         PackageJob out;
         try{
             auto from=sourceFor(source,&w->cancel);
-            const auto index=repository::open(*from,trusted,revoked,out.rootKey,out.claimedName,kept());
+            const auto index=repository::open(*from,trusted,revoked,out.rootKey,out.claimedName,kept(),expected);
             see(index.rootKey,index.repository,index.serial,trusted);
             if(const auto* r=knownAs(known,source,index.rootKey))out.name=r->name;
             out.repository=index.repository;out.serial=index.serial;
@@ -286,13 +297,14 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     const auto assetRoot=assets_.root(); // read on the control thread; the job reads which libraries are installed from its own Store
     const auto ships=shipped();
     const auto known=repositories();
-    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships,known]{
+    const auto expected=recordedKeys(known,ships,source,preinstallFolder_);
+    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships,known,expected]{
         std::string rootKey,error,chosen,repositoryId,name,claimed;uint64_t serial=0;
         std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each asset library it needs
         std::map<std::string,std::string> archives;
         try{
             auto from=sourceFor(source,&w->cancel);
-            const auto index=repository::open(*from,trusted,revoked,rootKey,claimed,kept());
+            const auto index=repository::open(*from,trusted,revoked,rootKey,claimed,kept(),expected);
             see(index.rootKey,index.repository,index.serial,trusted);
             repositoryId=index.repository;serial=index.serial;
             if(const auto* r=knownAs(known,source,index.rootKey))name=r->name;

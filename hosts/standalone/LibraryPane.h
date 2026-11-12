@@ -206,6 +206,7 @@ namespace oscairn::standalone
         std::vector<Control::InstalledLibrary> installed_;
         std::vector<Side> side_;
         bool stale_ = true, awaiting_ = false, compact_ = false, pills_ = false;
+        bool settingUp_ = true; // the packages that come with the release may be installing (RFC 0031): asked until they are not
         juce::String message_;
         juce::TextEditor search_;
         juce::TextButton performances_{"Performances"}, sounds_{"Sounds"};

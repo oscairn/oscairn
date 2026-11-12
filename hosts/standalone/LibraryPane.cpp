@@ -379,6 +379,21 @@ namespace oscairn::standalone
     {
         // Saving into the library happens on the engine's worker; look again once it is done (a refresh changes nothing).
         if(!engine_.controlReady()) { stale_ = true; return; }
+        // The packages that come with the release, installing at the engine's first start: one
+        // plain line meanwhile, then why, if any failed.
+        if(settingUp_ && mode_ == Mode::Play)
+        {
+            const auto line = text("Setting up the instruments that come with Oscairn…");
+            Control::Preinstall setup;
+            if(!engine_.packages([&](Control& c) { setup = c.preinstalled(); }).empty()) {} // asked again at the next tick
+            else if(setup.state == "running") tell(line);
+            else
+            {
+                settingUp_ = false;
+                if(!setup.error.empty()) tell(text(setup.error));
+                else if(message_ == line) { refresh(); return; }
+            }
+        }
         // An audition ended elsewhere (a Performance opened keeps it): show that.
         if(!auditioning_.id.empty() && !engine_.soundBusy())
             if(const auto now = engine_.audition(); now && now->id != auditioning_.id) { auditioning_ = *now; updateButtons(); resized(); }

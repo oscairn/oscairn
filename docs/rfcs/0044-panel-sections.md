@@ -652,8 +652,16 @@ in three layers, the first that is set winning:
 2. **the device's override,**
 3. **the section default:** the bound part's property or role.
 
+The same three layers serve RFC 0042's panel slider-mode button
+([who the sliders follow](0042-sliders-and-drawbars.md#who-the-sliders-follow-the-element-mode)),
+a `fixed` button outside any section whose profile function is `sliderMode`: that function is
+its default layer. It is named as section controls are, with `panel` in place of a slot
+(`panel/button:1`, numbered across the fixed groups that have no section), so `panel` is not a
+slot id.
+
 This is RFC 0011's layering ([defaults](0011-performance-ui-and-editors.md#defaults-so-nothing-must-be-programd))
-with a device layer between the Performance and the defaults, for section controls only.
+with a device layer between the Performance and the defaults, for section controls and that
+button only.
 
 #### Performance overrides
 

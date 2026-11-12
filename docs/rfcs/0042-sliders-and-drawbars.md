@@ -359,6 +359,15 @@ name; what it plays is now the slider set as defined above.
   buttons) moves the group through its profile's `modes` and the screen follows. Whether a
   panel's button reaches a group's mode today is to check: nothing in the app moves a fader
   mode yet, and the FANTOM-0's panel controls are still estimated (`fantom-07.json`).
+- **That button's slider mode is its default assignment, and it can be overridden** (the owner,
+  2026-11-11). The profile declares it as a `fixed` button whose function is `sliderMode`
+  (stepping the fader group through its `modes`). It is a control like any other: it resolves
+  in the layers RFC 0044 gives a section control
+  ([overriding a section control](0044-panel-sections.md#overriding-a-section-control)), with
+  the profile's `sliderMode` as the default layer, so a Performance may send it to a scene or a
+  control and a device may remap it. While it is overridden it does not switch the slider mode;
+  the player reaches the mode with Play's on-screen slider-mode button, which stays, and which
+  shows that the panel button is reassigned and to what ("CTRL → Super Knob, Performance").
 - The mode a session is in is the engine's, like positions today: kept, pushed, not saved —
   until a pin saves it (below).
 
@@ -532,6 +541,11 @@ By the owner, 2026-11-11, in this revision; recorded in the sections above.
   part 2, and the sliders follow it, as on the MODX. The owner: "It'll still be annoying but not
   worse than the modx and an actual organ plugin will have better ui." No cross-part set, no
   merging of parts, no special case for converted organs. Overflow works within one set.
+- **A panel's slider-mode button** (a CTRL/ASSIGN-style button) has slider mode as its default
+  assignment, declared by the profile, and can be overridden like any control; Play's on-screen
+  button then reaches the mode ([who the sliders follow](#who-the-sliders-follow-the-element-mode)).
+  The owner: "If that button defaults to slider mode, that's its default assignment, and it can
+  be overridden."
 
 Decided in this revision, small enough not to need the owner, each with its reason in the text:
 `element` rather than a new `controls` mode; `faderPart` in `controllers.view`; `places` raw;
@@ -539,8 +553,7 @@ only faders reversed, not a knob taking an overflow entry; value text the plugin
 
 ## Open questions
 
-- Whether a mode button that exists on the panel (the FANTOM's CTRL/ASSIGN) should also be
-  assignable as a switch while it switches modes, or the mode always wins.
+None open.
 
 ## Ruled out
 

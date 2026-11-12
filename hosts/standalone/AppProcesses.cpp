@@ -189,7 +189,14 @@ namespace oscairn::standalone
         for(const auto& action : actions_.actions()) offered += (offered.empty() ? "" : ",") + action;
         auto environment = environment_;
         environment.insert(environment.end(), {"OSCAIRN_CONTROL_FD=3", "OSCAIRN_APP_DATA=" + data.getFullPathName().toStdString(), "OSCAIRN_ACTIONS=" + offered});
-        try { r.pid = host::spawnChild({m->executable.getFullPathName().toStdString()}, output, environment, connection); }
+        std::vector<std::string> command{m->executable.getFullPathName().toStdString()};
+#ifdef __APPLE__
+        // An app stopped soon after it started (a crash, or the shell's SIGKILL) is otherwise met
+        // at its next start by AppKit's modal offer to reopen its windows, which holds it (quit
+        // included) until clicked. Apps keep their own state (AppData), so there is none to restore.
+        command.insert(command.end(), {"-ApplePersistenceIgnoreState", "YES"});
+#endif
+        try { r.pid = host::spawnChild(command, output, environment, connection); }
         catch(const std::exception& e) { r.pid = -1; say(id, juce::String(m->name) + " did not start: " + e.what()); }
         ::close(output); ::close(connection); // the child has its own
         if(r.pid < 0) { engine_.appClosed(id); return false; }

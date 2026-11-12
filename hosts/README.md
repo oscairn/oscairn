@@ -255,7 +255,9 @@ Linux installed as `share/oscairn/apps`), and the shell reads the manifests ther
 - **Crashed** (or over its manifest's `memory.max`, read every 100 ms): a notice across the top
   says so, with **Details** (its log); the app in front is started again at once and comes back
   where it was (the Setlist keeps the entry playing in its data folder). Past 3 restarts a
-  minute it stays closed, with **Open again**. An app behind is started when next opened.
+  minute it stays closed, with **Open again**. An app behind is started when next opened. On
+  macOS apps start with `-ApplePersistenceIgnoreState YES`: else AppKit meets an app stopped
+  soon after it started with a modal offer to reopen its windows, which holds it, quit included.
 - **Hung:** the engine pings each app every second. Silent 5 seconds in front: "not
   responding", with **Wait** and **Close** (which stops it and starts it again); 10 seconds
   behind: stopped.

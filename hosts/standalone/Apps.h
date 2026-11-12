@@ -19,6 +19,7 @@ namespace oscairn::standalone
         // shortcut: one app per action, the first to offer it; the choice between two is RFC 0022 step 3.
         void offer(const std::string& action, const std::string& app, Handler handler) { offers_.try_emplace(action, Offer{app, std::move(handler)}); }
         bool offered(const std::string& action) const { return offers_.count(action) != 0; }
+        void withdraw(const std::string& action) { offers_.erase(action); }
         std::vector<std::string> actions() const { std::vector<std::string> out; for(const auto& [action, offer] : offers_) out.push_back(action); return out; }
         // Asks whoever offers `action`; `answer` is called once, maybe later. False when no app offers it.
         bool request(const std::string& action, const std::string& argument, Answer answer) const

@@ -106,11 +106,15 @@ namespace oscairn::standalone
                 if(p.value.isInt() || p.value.isInt64()) measured_[p.name.toString().toStdString()] = uint64_t(std::max<juce::int64>(0, juce::int64(p.value)));
         for(const auto& m : manifests_)
             for(const auto& offer : m.offers)
+            {
+                if(actions_.offered(offer.action)) continue; // the first to offer it keeps it
+                offered_.push_back(offer.action);
                 actions_.offer(offer.action, m.name, [this, id = m.id, action = offer.action](const std::string& argument, Actions::Answer answer) {
                     const auto& r = running_[id];
                     if(r.state == State::GaveUp || (r.pid < 0 && !start(id))) { answer({}); return; }
                     engine_.appRequest(id, action, argument, std::move(answer));
                 });
+            }
         // What apps ask of the shell, which decides who answers.
         engine_.onAppRequest = [this](uint64_t request, const std::string& app, const std::string& action, const std::string& argument) {
             if(app.empty() || !find(app) || !actions_.request(action, argument, [this, request](const std::string& result) { engine_.appAnswer(request, result); }))
@@ -124,6 +128,7 @@ namespace oscairn::standalone
     {
         stopTimer();
         engine_.onAppRequest = {}; engine_.onAppStatus = {};
+        for(const auto& action : offered_) actions_.withdraw(action); // its handlers hold this
         for(auto& [id, r] : running_) if(r.pid > 0) { ::kill(r.pid, SIGTERM); }
         for(auto& [id, r] : running_) if(r.pid > 0) { host::stopChild(r.pid); engine_.appClosed(id); }
     }

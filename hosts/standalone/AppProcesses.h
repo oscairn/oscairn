@@ -90,6 +90,7 @@ namespace oscairn::standalone
 
         Engine& engine_;
         Actions& actions_;
+        std::vector<std::string> offered_; // the actions offered here, withdrawn when this goes
         std::vector<AppManifest> manifests_;
         std::vector<std::string> environment_;
         std::map<std::string, Running> running_;

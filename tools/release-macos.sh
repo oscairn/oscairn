@@ -28,7 +28,7 @@ echo "Oscairn $version ($commit)"
 
 rm -rf "$build"
 cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON -DBUILD_TESTING=OFF \
-	-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+	-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 -DOSCAIRN_SOURCE_COMMIT="$commit"
 cmake --build "$build" --target oscairn_standalone oscairn-sign
 
 stage=$build/dmg

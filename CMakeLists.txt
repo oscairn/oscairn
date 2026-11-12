@@ -3,6 +3,14 @@ project(oscairn VERSION 0.1.0 LANGUAGES C CXX)
 # A release is named by this version and this label while there is one (docs/releasing.md):
 # Oscairn-0.1.0-alpha.1-macos-arm64.dmg, tag v0.1.0-alpha.1. Empty for a final release.
 set(OSCAIRN_PRERELEASE "alpha.1")
+# The release, with its label: what the app, its apps, the CLAP host and the engine say they are
+# (OSCAIRN_RELEASE in each). Info.plist keeps the numeric version, as macOS wants.
+set(OSCAIRN_RELEASE ${PROJECT_VERSION})
+if(OSCAIRN_PRERELEASE)
+    string(APPEND OSCAIRN_RELEASE "-${OSCAIRN_PRERELEASE}")
+endif()
+# The commit a release is built from (tools/release-macos.sh sets it), for About; empty: a development build.
+set(OSCAIRN_SOURCE_COMMIT "" CACHE STRING "The commit this build's source is, for a release; empty for a development build")
 if(APPLE)
     enable_language(OBJCXX) # the CLAP host's plugin windows (core/clap-host/src/Window.mm), and JUCE
 endif()

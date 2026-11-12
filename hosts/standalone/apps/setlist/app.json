@@ -2,7 +2,7 @@
   "format": "oscairn.app",
   "version": 1,
   "id": "oscairn.setlist",
-  "appVersion": "0.1.0",
+  "appVersion": "@OSCAIRN_RELEASE@",
   "name": "Setlist",
   "requires": { "protocol": 1 },
   "builds": {

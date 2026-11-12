@@ -18,6 +18,11 @@ else()
     target_sources(kick_clap_host PRIVATE src/Window.cpp)
 endif()
 target_compile_features(kick_clap_host PUBLIC cxx_std_17)
+# What the host says it is to plugins (clap_host.version): Oscairn's release.
+if(NOT DEFINED OSCAIRN_RELEASE)
+    set(OSCAIRN_RELEASE ${PROJECT_VERSION}) # built on its own
+endif()
+target_compile_definitions(kick_clap_host PRIVATE OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
 set_target_properties(kick_clap_host PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(kick_clap_host PUBLIC include third_party/clap/include ../clap-ext/include)
 target_link_libraries(kick_clap_host PUBLIC ${CMAKE_DL_LIBS})

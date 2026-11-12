@@ -154,10 +154,22 @@ def stop(pid, runtime):
             time.sleep(.05)
 
 
+def release():
+    """The release as the top-level CMakeLists.txt names it, read as tools/release-macos.sh does."""
+    text = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'CMakeLists.txt')).read()
+    version = re.search(r'^project\(oscairn VERSION ([0-9.]+)', text, re.M).group(1)
+    label = re.search(r'^set\(OSCAIRN_PRERELEASE "(.*)"\)$', text, re.M).group(1)
+    return version + ('-' + label if label else '')
+
+
 def main():
     app, out = sys.argv[1], sys.argv[2]
     shutil.rmtree(out, ignore_errors=True)  # only this run's folders and PNGs
     os.makedirs(out)
+    # --version: the release CMake names, not a number written into the code.
+    said = subprocess.run([app, '--version'], capture_output=True, text=True, timeout=60)
+    assert said.returncode == 0 and said.stdout.strip() == 'Oscairn ' + release(), f'--version said {said.stdout!r} {said.stderr!r}, not Oscairn {release()}'
+    print(said.stdout.strip())
     # A crash at launch (as with the Apps menu and the null app processes) shows here as a nonzero
     # or signal exit before a PNG is ever written.
     runs = [('home', ['--size', '900x600']),

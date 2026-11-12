@@ -24,6 +24,8 @@ Checked when built and tested; the sections below say how.
 - [ ] 2. Bounded persistence: warnings and errors kept across a reboot or a power cut, the last boots kept, flash writes measured
 - [ ] 3. Crash reports: a minidump for any crashing process, symbolized off the device from a symbol store per release
 - [ ] 4. The diagnostics screen: versions, storage, recent problems and the deadline-miss history
+  (begun: About in the Settings app shows Oscairn's version, its source commit, the engine's
+  version and the license)
 - [ ] 5. The support file: one action, reviewed before it is written, saved to USB, the computer or the web UI
 - [ ] 6. Backup and restore of the whole device, onto the same device, another model or the desktop
 - [ ] 7. Secrets in a backup: keys, pairings and network credentials, encrypted with a passphrase

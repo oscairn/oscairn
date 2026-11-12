@@ -23,6 +23,7 @@
 #include "../AppProcesses.h"
 #include "../Launcher.h"
 #include "../SigningKeys.h"
+#include "../apps/settings/AboutPage.h"
 #include "../apps/settings/AudioPage.h"
 #include "../apps/settings/MidiControllersPage.h"
 #include "../apps/settings/RepositoriesPage.h"
@@ -76,8 +77,8 @@ int main(int argc, char** argv)
         const auto& all = standalone::settings::pages();
         const auto network = std::find_if(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "network"; });
         check(network != all.end() && network->applies(standalone::loadProfile("kick")) && !network->applies(standalone::Profile::desktop()), "Network applies on the KICK (Wi-Fi), not on this computer");
-        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "repositories", "keys", "controllers"}, "built so far: Audio, Package repositories, Signing keys and MIDI controllers");
-        check(ids(standalone::settings::shownPages(all, standalone::loadProfile("kick"))) == std::vector<std::string>{"audio", "repositories", "keys", "controllers"}, "all of them on a device too");
+        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "repositories", "keys", "controllers", "about"}, "built so far: Audio, Package repositories, Signing keys, MIDI controllers and About");
+        check(ids(standalone::settings::shownPages(all, standalone::loadProfile("kick"))) == std::vector<std::string>{"audio", "repositories", "keys", "controllers", "about"}, "all of them on a device too");
 #if !OSCAIRN_BLUETOOTH
         check(std::none_of(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "bluetooth"; }), "Bluetooth is left out of a build without it");
 #endif
@@ -176,7 +177,7 @@ int main(int argc, char** argv)
                 standalone::setDesktopMode(frame, 1);
                 frame.setSize(1000, 640);
                 auto* page = dynamic_cast<standalone::settings::AudioPage*>(frame.page());
-                check(page && frame.current()->id == "audio" && frame.shown().size() == 4, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
+                check(page && frame.current()->id == "audio" && frame.shown().size() == 5, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
                 if(!page) return;
                 check(wait([&] { return page->listings() >= 1 && !page->busy(); }), "the devices are listed");
                 check(page->output.getNumItems() == 3 && page->output.getText() == "Studio" && page->output.isEnabled(), "the output devices, the one open chosen");
@@ -231,6 +232,23 @@ int main(int argc, char** argv)
                 frame.back();
                 check(frame.listing(), "Back: the list again");
                 check(!frame.open("network"), "a page not shown here is not opened");
+            }
+
+            // About on an app's connection granted `system` alone: the release CMake names, a
+            // development build's source, the engine's version (the session's, the same build) and the license.
+            {
+                standalone::Engine app(engine.appConnection("oscairn.settings", manifest->permissions), false);
+                standalone::settings::Frame frame(app, standalone::Profile::desktop());
+                standalone::setDesktopMode(frame, 1);
+                frame.setSize(1000, 640);
+                check(frame.open("about"), "the list opens About");
+                auto* about = dynamic_cast<standalone::settings::AboutPage*>(frame.page());
+                if(!about) return;
+                check(wait([&] { return about->read(); }), "the engine's version is read");
+                check(about->version.getText() == OSCAIRN_RELEASE && juce::String(OSCAIRN_RELEASE).startsWith("0.") && about->engineVersion.getText() == OSCAIRN_RELEASE,
+                      "Oscairn's and the engine's version, the release: " + about->version.getText().toStdString() + ", " + about->engineVersion.getText().toStdString());
+                check(about->source.getText() == (juce::String(OSCAIRN_SOURCE_COMMIT).isEmpty() ? juce::String("Development build") : juce::String(OSCAIRN_SOURCE_COMMIT).substring(0, 12)), "the source: " + about->source.getText().toStdString());
+                check(about->license.getText() == "AGPL-3.0-or-later", "the license");
             }
 
             // The Signing keys page on an app's connection granted `system` alone: keys.list and
@@ -459,7 +477,7 @@ int main(int argc, char** argv)
                 standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_PROFILE=desktop"});
                 check(processes.open("oscairn.settings") && processes.pid("oscairn.settings") > 0 && processes.pid("oscairn.settings") != ::getpid(), "Settings runs as a process of its own");
                 check(wait([&] { return processes.log("oscairn.settings").contains("oscairn-settings: started"); }), "its stderr is in its log");
-                check(processes.log("oscairn.settings").contains("with 4 pages for desktop"), "with this computer's pages");
+                check(processes.log("oscairn.settings").contains("with 5 pages for desktop"), "with this computer's pages");
                 check(wait([&] { return processes.state("oscairn.settings") == standalone::AppProcesses::State::Running; }, 2000), "and runs");
                 processes.stop("oscairn.settings");
                 check(wait([&] { return processes.pid("oscairn.settings") < 0; }), "stopped by the shell");

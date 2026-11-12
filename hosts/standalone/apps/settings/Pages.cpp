@@ -2,6 +2,7 @@
 //
 // Settings' pages, in the order the list shows them: each by its id, its title, where it applies
 // and how it is made (README.md beside this says how to add one).
+#include "AboutPage.h"
 #include "AudioPage.h"
 #include "MidiControllersPage.h"
 #include "RepositoriesPage.h"
@@ -35,7 +36,7 @@ namespace oscairn::standalone::settings
             {"bluetooth", "Bluetooth", onDevice, notBuilt},                                 // RFC 0036
 #endif
             {"time", "Date and time", onDevice, notBuilt},                                  // RFC 0035
-            {"about", "About", everywhere, notBuilt},                                       // RFC 0038, its licenses RFC 0035
+            {"about", "About", everywhere, made<AboutPage>()},                              // RFC 0038, its licenses RFC 0035
         };
         return all;
     }

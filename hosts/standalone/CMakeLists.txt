@@ -64,7 +64,7 @@ juce_add_gui_app(oscairn_setlist_app
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
 target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp)
-target_compile_definitions(oscairn_setlist_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_compile_definitions(oscairn_setlist_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
 target_link_libraries(oscairn_setlist_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
     juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 if(APPLE)
@@ -73,13 +73,16 @@ if(APPLE)
 else()
     set(setlist_copy copy_if_different "$<TARGET_FILE:oscairn_setlist_app>" "${oscairn_apps}/oscairn.setlist/")
 endif()
+# Each manifest's appVersion is the release (OSCAIRN_RELEASE); not under apps/, which is Apps/ on a case-insensitive file system.
+configure_file(apps/setlist/app.json manifests/oscairn.setlist.json @ONLY)
+configure_file(apps/settings/app.json manifests/oscairn.settings.json @ONLY)
 add_custom_command(TARGET oscairn_setlist_app POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${oscairn_apps}/oscairn.setlist"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/apps/setlist/app.json" "${oscairn_apps}/oscairn.setlist/app.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/manifests/oscairn.setlist.json" "${oscairn_apps}/oscairn.setlist/app.json"
     COMMAND ${CMAKE_COMMAND} -E ${setlist_copy}
     VERBATIM)
 # The Settings app (RFC 0022's built-in apps), the same way; its pages are in apps/settings/.
-set(settings_sources apps/settings/Frame.cpp apps/settings/Pages.cpp apps/settings/AudioPage.cpp apps/settings/SigningKeysPage.cpp apps/settings/MidiControllersPage.cpp apps/settings/RepositoriesPage.cpp)
+set(settings_sources apps/settings/Frame.cpp apps/settings/Pages.cpp apps/settings/AboutPage.cpp apps/settings/AudioPage.cpp apps/settings/SigningKeysPage.cpp apps/settings/MidiControllersPage.cpp apps/settings/RepositoriesPage.cpp)
 juce_add_gui_app(oscairn_settings_app
     PRODUCT_NAME "Oscairn Settings"
     COMPANY_NAME "Oscairn"
@@ -87,7 +90,7 @@ juce_add_gui_app(oscairn_settings_app
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
 target_sources(oscairn_settings_app PRIVATE apps/settings/SettingsApp.cpp ${settings_sources} Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
-target_compile_definitions(oscairn_settings_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_compile_definitions(oscairn_settings_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")
 target_link_libraries(oscairn_settings_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
     juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 if(APPLE)
@@ -97,7 +100,7 @@ else()
 endif()
 add_custom_command(TARGET oscairn_settings_app POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${oscairn_apps}/oscairn.settings"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/apps/settings/app.json" "${oscairn_apps}/oscairn.settings/app.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/manifests/oscairn.settings.json" "${oscairn_apps}/oscairn.settings/app.json"
     COMMAND ${CMAKE_COMMAND} -E ${settings_copy}
     VERBATIM)
 if(NOT APPLE)
@@ -109,6 +112,7 @@ target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_VERSION>"
+    OSCAIRN_RELEASE="${OSCAIRN_RELEASE}"
     # The demo loads the plugins from the build tree unless --plugins says otherwise.
     OSCAIRN_PLUGIN_DIR="$<TARGET_FILE_DIR:oscairn_step_sequencer>")
 target_link_libraries(oscairn_standalone PRIVATE
@@ -240,7 +244,7 @@ juce_add_console_app(oscairn_desktop_settings_test PRODUCT_NAME "Oscairn Desktop
 target_sources(oscairn_desktop_settings_test PRIVATE tests/desktop_settings.cpp ${settings_sources} AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_include_directories(oscairn_desktop_settings_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/core/control/third_party)
 target_link_libraries(oscairn_desktop_settings_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
-target_compile_definitions(oscairn_desktop_settings_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+target_compile_definitions(oscairn_desktop_settings_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")
 add_dependencies(oscairn_desktop_settings_test oscairn_settings_app oscairn_step_sequencer)
 add_test(NAME desktop-settings COMMAND oscairn_desktop_settings_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" "${oscairn_apps}" "${CMAKE_CURRENT_SOURCE_DIR}/themes")
 set_tests_properties(desktop-settings PROPERTIES TIMEOUT 120)

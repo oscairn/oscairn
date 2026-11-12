@@ -12,6 +12,11 @@ The version is `project(oscairn VERSION …)` in the top-level `CMakeLists.txt`,
 `OSCAIRN_PRERELEASE` beside it while there is a pre-release label: `0.1.0` and `alpha.1` name
 `0.1.0-alpha.1`. The app's `Info.plist` and what packages' `requires.oscairn` is checked
 against take the numeric version only. Change both in a commit of their own before tagging.
+CMake passes the whole release (`0.1.0-alpha.1`) to the code as `OSCAIRN_RELEASE`: it is what the
+app, the Setlist and Settings apps (and their manifests' `appVersion`), the CLAP host
+(`clap_host.version`) and the engine report, what `Oscairn --version` prints and what Settings ›
+About shows. A release build also passes its commit (`OSCAIRN_SOURCE_COMMIT`), which About shows;
+any other build says it is a development build.
 
 ## Cut a release
 

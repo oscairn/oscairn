@@ -7,6 +7,7 @@
 //                      [--in-process | --connect SOCKET] [--play] [--input-mode automatic|mouse|touch]
 //                      [--app performance|library|setlist|groovebox|recordings]
 //                      [--snapshot out.png [--size WxH] [--play SECONDS] [--view TAB]]
+//   oscairn-standalone --version
 //
 // --profile names the device it runs on (RFC 0024): a built-in profile (qemu-aarch64, kick, ignite,
 // modx-m) or a file; without it, the computer's own. A panel profile fills the display with no
@@ -822,7 +823,7 @@ namespace oscairn::standalone
     {
     public:
         const juce::String getApplicationName() override { return "Oscairn"; }
-        const juce::String getApplicationVersion() override { return "0.1.0"; }
+        const juce::String getApplicationVersion() override { return OSCAIRN_RELEASE; }
         bool               moreThanOneInstanceAllowed() override { return true; }
 
         void initialise( const juce::String& commandLine ) override
@@ -831,8 +832,9 @@ namespace oscairn::standalone
             const auto args = juce::StringArray::fromTokens( commandLine, true );
             offscreen = args.contains( "--snapshot" );
 #if JUCE_MAC
-            if( offscreen ) juce::Process::setDockIconVisible( false ); // never the active app, nor in the Dock
+            if( offscreen || args.contains( "--version" ) ) juce::Process::setDockIconVisible( false ); // never the active app, nor in the Dock
 #endif
+            if( args.contains( "--version" ) ) { std::printf( "Oscairn %s\n", OSCAIRN_RELEASE ); quit(); return; }
             auto       dir  = argument( args, "--plugins" );
             if( dir.isEmpty() )
             {

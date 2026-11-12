@@ -28,7 +28,7 @@ namespace oscairn::standalone
     {
     public:
         const juce::String getApplicationName() override { return "Oscairn Settings"; }
-        const juce::String getApplicationVersion() override { return "0.1.0"; }
+        const juce::String getApplicationVersion() override { return OSCAIRN_RELEASE; }
         bool moreThanOneInstanceAllowed() override { return true; }
 
         void initialise(const juce::String& commandLine) override

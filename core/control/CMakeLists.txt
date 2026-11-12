@@ -3,12 +3,8 @@ set_source_files_properties(third_party/miniz/miniz.c third_party/monocypher/mon
 target_include_directories(oscairn_control SYSTEM PRIVATE third_party)
 target_include_directories(oscairn_control PUBLIC include)
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSION="${PROJECT_VERSION}") # what a package's requires.oscairn is checked against (RFC 0031)
-# The release, with its pre-release label: what preinstalled.json records the packages that come with it under (RFC 0031).
-set(release ${PROJECT_VERSION})
-if(OSCAIRN_PRERELEASE)
-    string(APPEND release "-${OSCAIRN_PRERELEASE}")
-endif()
-target_compile_definitions(oscairn_control PRIVATE OSCAIRN_RELEASE="${release}")
+# The release, with its pre-release label (the top-level CMakeLists.txt): what preinstalled.json records the packages that come with it under (RFC 0031).
+target_compile_definitions(oscairn_control PRIVATE OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
 target_link_libraries(oscairn_control PUBLIC oscairn_engine)
 target_compile_options(oscairn_control PRIVATE -Wall -Wextra)
 

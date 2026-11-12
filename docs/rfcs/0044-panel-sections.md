@@ -7,9 +7,9 @@ built. Builds on the physical controls, control groups, roles and banks of
 ([RFC 0021](0021-sounds-performances-and-library.md)), the system shell
 ([RFC 0030](0030-system-shell-launcher-and-navigation.md)), input selectors and zones
 ([RFC 0012](0012-sync-external-midi-and-multi-device.md#choosing-devices-selectors)) and, most of
-all, RFC 0042, "Sliders that follow a part, and organ drawbars" (proposed; its draft is under
-review on another branch and not on main yet), whose declared drawbars, pins, pickup display and
-per-part direction this RFC reuses rather than repeats ([below](#what-this-rfc-takes-from-rfc-0042)).
+all, [RFC 0042](0042-sliders-and-drawbars.md), "Sliders that follow a part, and organ drawbars"
+(proposed), whose slider set, per-Sound role declaration, pins, pickup display and per-part
+direction this RFC reuses rather than repeats ([below](#what-this-rfc-takes-from-rfc-0042)).
 
 Roland, Yamaha and Nord products are named here only to describe the kind of panel Oscairn might
 run on. Oscairn is not affiliated with or endorsed by Roland, Yamaha or Nord Keyboards.
@@ -23,8 +23,9 @@ Checked when built and tested; the sections below say how.
       volume, octave, split and layer); a test profile and panel layout standing in for a
       sectioned board on the desktop, its controls played through `controllers.play`
 - [ ] 2. Declared-role functions with today's roles (cutoff, resonance, attack, release, EQ,
-      mix) and guessed ones, dark controls, `takePositions`, shared groups with `select:` buttons, and RFC 0042's drawbars, direction, pickup and places on a section's
-      own controls
+      mix) and guessed ones, dark controls, `takePositions`, shared groups with `select:`
+      buttons, and RFC 0042's slider set, direction, pickup and places on a section's own
+      controls
 - [ ] 3. Auto-binding on open, the prompt when it is not obvious, `sections.auto`
 - [ ] 4. Sound select within a section: its category, favorites, the section display, the
       section's default Sound, an empty section's on/off creating a part, and locked sections
@@ -96,7 +97,7 @@ What exists today, read in the code and docs on 2026-11-11:
   [RFC 0016](0016-effects-suite.md#where-the-effects-go)); a part's sends are its levels into
   shared buses.
 - **The engine can play a control by identity** (`Session::controllerControl`,
-  `core/control/include/oscairn/session.h:270`), which the FANTOM-0's panel reader uses. No
+  `core/control/include/oscairn/session.h:271`), which the FANTOM-0's panel reader uses. No
   control-API method reaches it; `appGrants()` in `core/control/src/json_rpc.cpp` lists none.
 - **Panel layouts have no faders and bind no control identities.** A layout's knobs bind
   `node:param`, `tempo`, `control:NAME`, `row:N` or `encoder:N`, and its buttons the transport and
@@ -107,9 +108,9 @@ What exists today, read in the code and docs on 2026-11-11:
   says `feedback: true`, and to Mackie Control surfaces.
 
 So a part can hold a section's state, roles say what a parameter is, and RFC 0042 hands sliders
-to a part and puts drawbars on them. What is missing is a name for a place on the panel, a link
-from a part to it, controls that act on whatever part that is, and the roles an organ and a piano
-need.
+to a part and puts its slider set (drawbars, element levels) on them. What is missing is a name
+for a place on the panel, a link from a part to it, controls that act on whatever part that is,
+and the roles an organ and a piano need.
 
 ## Outcome
 
@@ -117,8 +118,9 @@ need.
   marked with the section.
 - A Performance binds a part to a section. The section's controls then act on that part, whatever
   plugin it holds (decided 2026-11-11).
-- A section's controls act by **declared role**, not by plugin: a drawbar slider is "drawbar 3",
-  a percussion button is "percussion", and the Sound says which parameter that is. A control
+- A section's controls act by **declared role**, not by plugin: a drawbar slider is "slider 3
+  of the part's set", a percussion button is "percussion", and the Sound (or, by default, its
+  plugin) says which parameter that is. A control
   whose role the loaded Sound lacks goes dark and does nothing (decided).
 - Nothing guesses what a Sound is: its tags decide its category, its roles what its controls do. A
   section's sound select browses Sounds of the section's category (decided).
@@ -277,41 +279,53 @@ flexible underneath in both cases; only the profile decides how much of that a p
 
 A section is RFC 0042's idea made permanent by hardware: RFC 0042 hands a set of sliders to the
 selected part for a while; a section hands its own controls to its bound part for as long as the
-binding stands. So this RFC defines no second way to find a part's drawbars, to reverse a slider,
-to wait for pickup or to show where a control sits. It relies on exactly these parts of RFC 0042's
-draft of 2026-11-11, and must be checked against them if that text changes:
+binding stands. So this RFC defines no second way to find a part's drawbars or levels, to say
+which parameter has a role, to reverse a slider, to wait for pickup or to show where a control
+sits. It relies on exactly these parts of RFC 0042 as revised on 2026-11-11, and must be checked
+against them if that text changes:
 
-1. **Declared drawbars:** a parameter with `OSCAIRN_FIELD_DRAWBAR` in a view, its `index` 1 to 9
-   (16' first), makes a drawbar set; a part's drawbars are those its chain declares
-   (RFC 0042, "What a Sound declares, and where").
-2. **Direction per parameter, applied per part:** the hint's `reversed`, taken from the part a set
-   of controls follows; `ResolvedControl` gains a direction and `ControllerMapping::play` turns
-   `x` into `1 − x` before pickup (RFC 0042, "Direction, and multiple organ parts").
-3. **The overflow rule:** declared slider-style controls go to sliders in order, then to the first
-   free assignable knobs, then to the screen only, and the screen shows all of them (RFC 0042,
-   "Overflow", options A and D).
-4. **Places and the two-value display:** `controllers.get` and the `controllers` topic gain
-   `places`, each `{control, position}`, and the screen shows a control's value and where the
-   physical control sits until pickup catches it, for every slider under pickup (RFC 0042,
-   "Pickup, and the two-value display", its step 1).
-5. **Pins:** a Performance or scene may pin a group's mode and part, saved beside `assignments`
-   in the next format version (RFC 0042, "The pin").
-6. **Defaults stay:** the shared sliders default to the mixer, and the `controls` fader mode hands
-   them to the selected part (RFC 0042, "Who the sliders follow").
+1. **The slider set:** a part's `level1` to `level9` roles in order, one model for an organ's
+   drawbars and a sampled or FM Sound's element or operator levels; a set is one part's and never
+   spans parts (RFC 0042,
+   [the slider set](0042-sliders-and-drawbars.md#the-slider-set-the-parts-levels-nine-wide)).
+2. **Who declares a role:** the part's own `roles` (saved in the part and in its Sound, written
+   by the Sound's author or a converter), then the plugins' `oscairn.ui` hints, then a name guess
+   where this RFC allows one, marked "guessed"; for the slider set the part's declaration is all
+   or nothing (RFC 0042,
+   [what a Sound declares](0042-sliders-and-drawbars.md#what-a-sound-declares-and-where)). The
+   role map is not an assignment, so it does not touch the rule that a Sound's own assignments
+   may not name section identities ([below](#performance-overrides)).
+3. **Direction per set, applied per part:** the part's `slidersReversed` (or its set's first
+   parameter's hint), taken from the part a set of controls follows; `ResolvedControl` gains a
+   direction and `ControllerMapping::play` turns `x` into `1 − x` before pickup, for faders only
+   (RFC 0042, [direction](0042-sliders-and-drawbars.md#direction-and-multiple-organ-parts)).
+4. **The overflow rule:** one set's entries go to sliders in order, then to the first free
+   assignable knobs, then to the screen only, and the screen shows the whole set (RFC 0042,
+   [overflow](0042-sliders-and-drawbars.md#overflow-sliders-first-then-knobs-then-the-screen),
+   options A and D).
+5. **Places and the two-value display:** `controllers.get` and the `controllers` topic gain
+   `places`, each `{control, position}`, the raw physical position, and the screen shows a
+   control's value and where the physical control sits until pickup catches it, for every slider
+   under pickup (RFC 0042,
+   [pickup](0042-sliders-and-drawbars.md#pickup-and-the-two-value-display), its step 1).
+6. **Pins:** a Performance or scene may pin a group's mode and part, saved beside `assignments`
+   (RFC 0042, [the pin](0042-sliders-and-drawbars.md#the-pin)).
+7. **Defaults stay:** the shared sliders default to the mixer, and the existing `element` fader
+   mode hands them to the selected part's slider set, following `controllers.view`'s `faderPart`
+   (RFC 0042, [who the sliders follow](0042-sliders-and-drawbars.md#who-the-sliders-follow-the-element-mode)).
 
 Where a section's controls differ from RFC 0042's sliders, it is only in **who they follow**: a
 section's controls follow its bound part always, and never the selection or a pin. A board
 that has both a section and assignable sliders (a sectioned board with a row of mixer faders, or
 an eight-fader controller beside it) keeps RFC 0042's behavior for the assignable sliders
-unchanged; when they follow the organ part, they and the organ section's own drawbars drive the
-same parameters, each under its own pickup. Controls a board shares among several sections,
+unchanged; when they follow the organ part, they and the organ section's own faders drive the
+same slider set, each under its own pickup. Controls a board shares among several sections,
 picked by select buttons, are [shared section controls](#shared-section-controls), still bound
 by the binding and never by the selection of Play.
 
-RFC 0042 declares drawbars by a view field, not a role, and leaves `OSCAIRN_ROLE_DRAWBAR_1` to `_9`
-as its open question. This RFC calls a drawbar's field and index its "role" in the loose sense
-(what the control means to every Sound) and needs nothing more: a section's drawbar control `n`
-plays the parameter whose field is DRAWBAR and index `n`.
+Drawbars are roles, as every other section control is: a section's fader with function
+`level`*n* plays entry *n* of the bound part's slider set, an organ's drawbar or a sampled
+Sound's element level alike, in the set's direction.
 
 ### Sections in the profile
 
@@ -328,7 +342,7 @@ says which groups sit in it.
 "controls": [
   { "kind": "keys", "count": 76, "role": "notes" },
   { "kind": "faders", "count": 9, "role": "fixed", "section": "organ",
-    "functions": ["drawbar1", "drawbar2", "drawbar3", "drawbar4", "drawbar5", "drawbar6", "drawbar7", "drawbar8", "drawbar9"] },
+    "functions": ["level1", "level2", "level3", "level4", "level5", "level6", "level7", "level8", "level9"] },
   { "kind": "buttons", "count": 4, "role": "fixed", "section": "organ", "lights": "state",
     "functions": ["on", "percussion", "rotarySpeed", "vibratoChorus"] },
   { "kind": "knobs", "count": 1, "role": "fixed", "section": "organ", "functions": ["volume"] },
@@ -382,7 +396,7 @@ The section vocabulary of `functions`, by where each acts ([next section](#what-
 | `favorite` | button | Steps through favorites of the section's category |
 | `takePositions` | button | Sets each control of the section's groups to its physical position, ending pickup ([shared section controls](#shared-section-controls)) |
 | `select:<slot>` | button | Picks which slot of a [shared group](#shared-section-controls) its groups act on |
-| `drawbar1` … `drawbar9` | fader, knob | The part's drawbar with that index (RFC 0042) |
+| `level1` … `level9` | fader, knob | Entry *n* of the part's slider set, its drawbar or element level, a fader in the set's direction (RFC 0042) |
 | A role's name (`cutoff`, `resonance`, `attack`, `release`, `lowGain`, `midGain`, `highGain`, `level`, `mix`, and draft 7's below) | knob, fader, encoder, button | The part's parameter with that role |
 | `effect:insertion-a`, `effect:insertion-b` | button | Switches the part's node with that node role on and off |
 | `effectAmount:insertion-a`, `effectAmount:insertion-b` | knob | That node's `mix` role |
@@ -402,7 +416,7 @@ group's `section` may be a **list** of slots, and the group then acts on one of 
 { "kind": "buttons", "count": 3, "role": "fixed", "section": ["organ", "organ-lower", "organ-pedal"],
   "lights": "state", "functions": ["select:organ", "select:organ-lower", "select:organ-pedal"] },
 { "kind": "faders", "count": 9, "role": "fixed", "section": ["organ", "organ-lower", "organ-pedal"],
-  "functions": ["drawbar1", "drawbar2", "drawbar3", "drawbar4", "drawbar5", "drawbar6", "drawbar7", "drawbar8", "drawbar9"] }
+  "functions": ["level1", "level2", "level3", "level4", "level5", "level6", "level7", "level8", "level9"] }
 ```
 
 - **`select:<slot>`** buttons pick which of a list the groups with that same list act on. Pressing
@@ -412,13 +426,14 @@ group's `section` may be a **list** of slots, and the group then acts on one of 
   now (`controllers.get`), not saved, like a group's page or mode. Its lights show it.
 - **Still bound, not followed:** each slot is bound to its own part by the Performance, and the
   select buttons choose among those bindings. Selecting a part on Play's screen does not move them;
-  that is RFC 0042's `controls` mode on the assignable sliders, a different thing.
+  that is RFC 0042's `element` mode on the assignable sliders, a different thing.
 - **Pickup** is per control and target already, so moving from the upper to the lower organ makes
   each bar wait for the lower organ's value, and RFC 0042's position marker shows where each bar
   sits meanwhile. That is the V-STAGE's problem H-BAR MANUAL answers; Oscairn answers it with a
   `takePositions` function (decided 2026-11-11), built after RFC 0042's `places`: it sets each
-  control of the group's target to where the physical control sits, ending pickup for the whole
-  group, as one undoable edit to the parameters.
+  control of the group's target to where the physical control sits (its raw place, flipped for
+  a reversed set as a move would be), ending pickup for the whole group, as one undoable edit
+  to the parameters.
 - Identities of a shared group are named by the list's first slot (`organ/fader:3`).
 
 ### What each control acts on
@@ -428,22 +443,28 @@ Three kinds, and nothing else:
 - **Part properties,** which every part has whatever it holds: on/off (mute), volume (level),
   octave (transpose), split and layer (zones), sends. These never go dark while the section has a
   part.
-- **Declared roles,** which the part's plugins declare per parameter: drawbars, cutoff,
-  percussion. A control whose role no plugin in the part declares goes **dark**: its light off,
-  its tile on the screen blank with "None in this Sound", and moving it does nothing. It is
-  looked up again whenever the part's chain or parameter info changes (a Sound loaded, a plugin
-  replaced, a rescan), as banks are now. For a plugin that declares no roles at all, the roles
-  guessed from its parameters' names (`roleFromName`, as the banks use them) count, and the tile
-  marks such a control "guessed" (decided 2026-11-11): the rule that nothing guesses is about what
-  a Sound *is*, which the guess does not touch, and without it most third-party synths would be
-  dark in the synth section.
+- **Declared roles:** drawbars and element levels (the slider set), cutoff, percussion. A role
+  is declared by the part's own `roles`, which come with its Sound, else by its plugins'
+  `oscairn.ui` hints (RFC 0042's precedence). A control whose role neither the part nor any
+  plugin in it declares goes **dark**: its light off, its tile on the screen blank with "None in
+  this Sound", and moving it does nothing. It is looked up again whenever the part's chain, its
+  `roles` or its parameter info changes (a Sound loaded, a plugin replaced, `parts.roles`, a
+  rescan), as banks are now. For a plugin that declares no roles at all, the roles guessed from
+  its parameters' names (`roleFromName`, as the banks use them) count, except a role the part's
+  `roles` names, and the tile marks such a control "guessed" (decided 2026-11-11): the rule that
+  nothing guesses is about what a Sound *is*, which the guess does not touch, and without it most
+  third-party synths would be dark in the synth section. The guess never yields a `levelN`, so a
+  slider set is never guessed.
 - **Node roles,** for effects: the part's node carrying `insertion-a` or `insertion-b`, and the
   buses holding a `reverb` or `variation` node. Dark when the part or the Performance has none.
 
-Roles are looked up across the **whole chain** in chain order, instruments first, then effects:
-unlike the role banks, which skip effect nodes (`physical_controls.cpp` around line 108), because
-a rotary speaker is often an effect after the organ. The first parameter declaring a role wins, as
-in the banks.
+A role the part's `roles` names is that parameter, on whatever node. Otherwise roles are looked
+up in the plugins' hints across the **whole chain** in chain order, instruments first, then
+effects: unlike the role banks, which skip effect nodes (`physical_controls.cpp` around line
+108), because a rotary speaker is often an effect after the organ. The first parameter declaring
+a role wins, as in the banks. The slider set is the one exception: it is RFC 0042's set, found
+as that RFC finds it, so a section's faders and the assignable sliders in `element` mode always
+play the same entries.
 
 Each part property and role, decided per row:
 
@@ -453,7 +474,7 @@ Each part property and role, decided per row:
 | Section volume | Part property: `level` | `Part::level`, a live gain | Nothing |
 | Octave | Part property: every zone's `transpose`, moved together by 12 | `NoteZone::transpose` | Nothing; held notes keep the pitch they started at, as a zone edit does now (to check in the engine when step 1 builds) |
 | Split and layer buttons | Part property: zones | `PartInput::zones`, `parts.input` | Nothing in the format; a device default split key ([below](#split-and-layer-on-one-keybed)) |
-| Drawbars 1 to 9, direction | Declared, RFC 0042's DRAWBAR field and `reversed` | Not built: RFC 0042's draft 6 | Nothing beyond RFC 0042 |
+| Drawbars or element levels 1 to 9, direction | Declared: RFC 0042's slider set, `level1` to `level9`, and its direction | `LEVEL_1` to `LEVEL_8`; the ninth, the direction and the part's `roles` not built (RFC 0042's draft 6 and format change) | Nothing beyond RFC 0042 |
 | Percussion on, level, decay, harmonic | Declared role | None | `PERCUSSION`, `PERCUSSION_LEVEL`, `PERCUSSION_DECAY`, `PERCUSSION_HARMONIC` |
 | Rotary slow/fast, stop | Declared role | None | `ROTARY_SPEED`, `ROTARY_STOP` |
 | Vibrato/chorus on, type | Declared role | None | `VIBRATO_CHORUS`, `VIBRATO_CHORUS_TYPE` |
@@ -470,32 +491,34 @@ Each part property and role, decided per row:
 ### The roles to add: `oscairn.ui` draft 7
 
 Draft 7, after RFC 0042's draft 6 (if both build in one change, one draft). The header is not
-edited by this RFC. New `oscairn_role` values, continuing after `OUTPUT_BUS` (35):
+edited by this RFC. New `oscairn_role` values, continuing after draft 6's `LEVEL_9` (36):
 
 | Role | Value | Meaning |
 | --- | --- | --- |
-| `OSCAIRN_ROLE_PERCUSSION` | 36 | Stepped, two values: the organ's percussion off and on |
-| `OSCAIRN_ROLE_PERCUSSION_LEVEL` | 37 | Its level: two values (normal, soft), or continuous |
-| `OSCAIRN_ROLE_PERCUSSION_DECAY` | 38 | Its decay: two values (slow, fast), or continuous, faster when higher |
-| `OSCAIRN_ROLE_PERCUSSION_HARMONIC` | 39 | Stepped, two values: second, third |
-| `OSCAIRN_ROLE_ROTARY_SPEED` | 40 | Stepped, two values: slow, fast; a plugin with a separate brake uses `ROTARY_STOP` |
-| `OSCAIRN_ROLE_ROTARY_STOP` | 41 | Stepped, two values: turning, stopped (the brake) |
-| `OSCAIRN_ROLE_VIBRATO_CHORUS` | 42 | Stepped, two values: the scanner vibrato off and on |
-| `OSCAIRN_ROLE_VIBRATO_CHORUS_TYPE` | 43 | Stepped: its settings in order (V1, V2, V3, C1, C2, C3), named by value text |
-| `OSCAIRN_ROLE_DRIVE` | 44 | An organ's or amp's overdrive amount |
-| `OSCAIRN_ROLE_TONE` | 45 | One brightness control, darker when lower: a piano's or electric piano's tone |
+| `OSCAIRN_ROLE_PERCUSSION` | 37 | Stepped, two values: the organ's percussion off and on |
+| `OSCAIRN_ROLE_PERCUSSION_LEVEL` | 38 | Its level: two values (normal, soft), or continuous |
+| `OSCAIRN_ROLE_PERCUSSION_DECAY` | 39 | Its decay: two values (slow, fast), or continuous, faster when higher |
+| `OSCAIRN_ROLE_PERCUSSION_HARMONIC` | 40 | Stepped, two values: second, third |
+| `OSCAIRN_ROLE_ROTARY_SPEED` | 41 | Stepped, two values: slow, fast; a plugin with a separate brake uses `ROTARY_STOP` |
+| `OSCAIRN_ROLE_ROTARY_STOP` | 42 | Stepped, two values: turning, stopped (the brake) |
+| `OSCAIRN_ROLE_VIBRATO_CHORUS` | 43 | Stepped, two values: the scanner vibrato off and on |
+| `OSCAIRN_ROLE_VIBRATO_CHORUS_TYPE` | 44 | Stepped: its settings in order (V1, V2, V3, C1, C2, C3), named by value text |
+| `OSCAIRN_ROLE_DRIVE` | 45 | An organ's or amp's overdrive amount |
+| `OSCAIRN_ROLE_TONE` | 46 | One brightness control, darker when lower: a piano's or electric piano's tone |
 
 Rules, in the header's own terms: a stepped role's values run from off or slow at its minimum; a
 button playing a two-value role toggles it; a button playing a stepped role of more values steps
 to the next and wraps. A plugin whose percussion is one parameter of several values (off, second,
 third) declares it as `PERCUSSION` with its value texts, and the section's `percussion` button
 then steps it; to check against the first organ plugin. A host that does not know draft 7
-reads these as `NONE`, as the header already says for unknown values.
+reads these as `NONE`, as the header already says for unknown values. A Sound can give these
+roles to a plugin that does not declare them, through its part's `roles` (RFC 0042), so a
+converted organ Sound's percussion and rotary reach the section without the plugin changing.
 
 None of these join the role banks (Filter, Amp EG, EQ, Levels): they are section controls, and a
 bank of organ switches on a synth's knobs would be blank on every other Sound. No "Organ" role bank
-is added for boards without an organ section, for now (decided 2026-11-11): RFC 0042's drawbars
-on the sliders cover the main need.
+is added for boards without an organ section, for now (decided 2026-11-11): RFC 0042's slider
+set on the sliders covers the main need.
 
 ### The binding on a part
 
@@ -507,9 +530,9 @@ keeps the binding.
 
 - **Saved** with the part, in the next Performance format version, one forward as the
   [initial-development policy](../developer-guide.md#initial-development-compatibility-policy)
-  allows; RFC 0042's pin and RFC 0043's `stateSavedBy` would share that version if they land
-  together. `docs/performance.schema.json`'s `Part` gains `section` (a string of at most 32 bytes,
-  lowercase letters, digits and `-`).
+  allows; RFC 0042's part `roles` and pin and RFC 0043's `stateSavedBy` would share that version
+  if they land together. `docs/performance.schema.json`'s `Part` gains `section` (a string of at
+  most 32 bytes, lowercase letters, digits and `-`).
 - **Kept whatever the device:** a slot this device does not have is kept, unread, and saved back
   as it was ([below](#the-same-performance-elsewhere)).
 - **An edit:** `sections.bind` is undone by `edit.undo` and marks the Performance edited.
@@ -582,6 +605,8 @@ cleared, and is undoable.
 | Case | What happens |
 | --- | --- |
 | Two parts of one category, one section | Asked; the other stays an extra part |
+| A two-part organ (a MODX organ converted as two parts, both tagged `organ`), one `organ` section | The same case: not obvious, so asked. The part chosen is bound and the other stays an extra part, edited on screen, its own slider set (its ninth drawbar) reached as on the MODX, by selecting it so the assignable sliders follow it in `element` mode. Nothing joins the two parts (RFC 0042) |
+| The same two-part organ, two organ-category slots sharing controls (`organ` and `organ-lower`, picked by `select:` buttons) | The next row's case: asked for each; each slot then binds one of the parts, and the select buttons switch the shared drawbars between their sets |
 | Two parts of one category, two sections of that category (`upper`, `lower` both `synth`) | Asked for each; a part chosen for one leaves the other's list |
 | A section with no part | Empty; its `on` or sound select creates one |
 | More sections than parts | The rest empty, none asked |
@@ -668,10 +693,11 @@ What follows from it:
   whichever slot the select buttons picked; the slots' bindings decide only the default layer.
 - **Not in a Sound.** A Sound's own assignments (`part` nonzero) stay what they are: they may name
   `wheel:2` and the other standard controls, not a section's identities, since a Sound must not
-  depend on one board's panel.
+  depend on one board's panel. What a Sound says for sections is its part's `roles` (RFC 0042),
+  which name its parameters, never a control.
 
-So "one part per slot" reads exactly: a slot binds one part, and its controls may reach other
-parts or plugins through a Performance's override.
+So a slot binds one part, and its controls may still reach other parts or plugins through a
+Performance's override.
 
 #### Device overrides
 
@@ -687,7 +713,7 @@ always decay". It names only what any Performance has, so it can apply to all of
 
 It is stored in the data folder, per device, in `sections.json` beside `controllers.json`
 (`controllers.choose`'s), never in the profile, which describes the product, and never in a
-Performance. The same file keeps the default split key ([above](#split-and-layer-on-one-keybed))
+Performance. The same file keeps the default split key ([below](#split-and-layer-on-one-keybed))
 and each section's default Sound is kept beside favorites, as above. Settings gains a **Panel
 sections** page (an entry in the page list of `hosts/standalone/apps/settings/Pages.cpp`, shown
 only where the device's profile or a connected controller's has sections, as other pages there are
@@ -745,7 +771,7 @@ and the zones stay the only truth about who plays which keys.
   E4), each part plays what its zones say, Play shows both ranges, and the buttons use the first
   as above.
 - **The device's default split key** is a device setting, kept with the section remaps
-  ([below](#device-overrides)), 60 when unset (middle C, which Oscairn names C4: `noteName` in
+  ([above](#device-overrides)), 60 when unset (middle C, which Oscairn names C4: `noteName` in
   `core/control/src/pads.cpp`, used by `ZoneEditor`). It is never written into a Performance.
 - **Setting the split point on the panel:** holding a section's `lower` or `upper` and pressing a
   key moves the boundary to that key, as the V-STAGE's SPLIT POINT does
@@ -798,10 +824,10 @@ the profile has sections:
   controls in the panel's order, each with its value as text and, for absolute controls, RFC 0042's
   position marker until pickup catches it. Dark controls show "None in this Sound". The tile's
   controls are touch controls as well as a mirror of the panel.
-- **A drawbar section** draws RFC 0042's drawbar row inside its tile, all nine, wherever the
-  physical drawbars are.
+- **A section with level faders** (an organ's drawbars) draws RFC 0042's slider row inside its
+  tile, the bound part's whole set, wherever the physical faders are.
 - **Tapping a tile** selects its part, so the knob row's existing part switch and RFC 0042's
-  `controls` mode follow it. **Change part** and **Sound** on the tile open the binding menu and
+  `element` mode follow it. **Change part** and **Sound** on the tile open the binding menu and
   the section's sound select (a sheet listing the category, favorites first).
 - **Extra parts** keep their strips after the bound parts', under "Other parts", and are edited on
   screen as now (Edit, the Part page).
@@ -839,14 +865,15 @@ as `parts.*` is; the per-device default Sound is `library`, as favorites are.
 | Method | Takes | Returns | Permission |
 | --- | --- | --- | --- |
 | `sections.get` (new) | none | `sections`: each `{id, name, category, part}` (`part` 0 for empty), with `controls`, each `{control, function, target, value, dark, guessed, layer}` (`control` its identity, `organ/fader:3`; `layer` which layer it resolved from: `performance`, `device` or `section`), and `pending`: the sections auto-binding left to ask about, each with its `candidates` | `play` or `edit` |
-| `sections.bind` (new) | `section`, `part` (0 to empty it) | `{accepted:true}`; an edit. Refused: an unknown section, a part that does not exist | `edit` |
+| `sections.bind` (new) | `section`, `part` (0 to empty it) | `{accepted:true}`; an edit. Refused: an unknown section, a part that does not exist, and on a locked section another part or 0, naming the section | `edit` |
 | `sections.auto` (new) | optional `clear` (re-bind every section) | `{bound, pending}`: the pairs it bound and the sections still to ask about; an edit | `edit` |
 | `sections.create` (new) | `section`, optional `sound` (a library ID; absent, the default) | `{part}`: `parts.fromSound`, bound; refused over the budget, with the shortfall | `edit` |
 | `sections.device` (new) | none: the device's overrides and default split key; or `remaps` (each `{control, function}`, `function` a vocabulary function, a role name, `control:NAME` or `none`, or null to reset) and optional `splitKey` (0 to 127) | The device's `remaps` and `splitKey` after the change; kept in the data folder's `sections.json` | `system`, as `controllers.choose` |
 | `assignments.set`, `assignments.get` | Accept and list section identities (`synth/knob:1`) as `control`, with the kinds they take now; a Sound's own assignment (`part` nonzero) to a section identity is refused | | `edit`; `play` or `edit`, as now |
 | `sections.setDefault` (new) | `section`, `sound` (a library ID, or empty) | `{accepted:true}`; kept per device in the library's user file | `library` |
 | `controllers.play` (new) | `control` (an identity, a section's too), and one of `position` (0 to 1), `steps` (a relative step) or `press` (true or false) | `{accepted:true}`: played as a panel control is, with pickup | `play` |
-| `controllers.get` and the `controllers` topic | RFC 0042's `places` include sections' controls by identity | | as now |
+| `controllers.get` and the `controllers` topic | RFC 0042's `places` (raw positions) include sections' controls by identity | | as now |
+| `parts.loadSound`, `parts.insert`, `parts.removeNode`, `graph.replace`, `parts.remove` | On a locked section's part: a Sound without the section's category, a chain edit, and removing the part are refused, naming the section | | as now |
 | `graph.get` | Each part gains `section` (or `null`) | | as now |
 | `session.hello` | Its `capabilities` list the new methods | | |
 
@@ -858,7 +885,7 @@ or a control moves (`controllers`), and clients read it again then.
 | Step | Deliverable | Gate |
 | --- | --- | --- |
 | 1. Sections and bindings | `sections` and a group's `section` in `profile.schema.json` and `Profile.cpp`; the part's `section` in the format and schema; `sections.get`, `sections.bind`; part-property functions, the split and layer buttons editing zones, the device's default split key (`sections.device`'s `splitKey`); `controllers.play`; the layout's `fader` type and `as:` binding; the test profile and layout | On the desktop with `--profile sections-test --layout sections-test` and three parts: binding part 2 to the organ section makes the organ's volume fader move part 2's level and its `on` mute it; `octaveUp` transposes part 2's zones by 12; `lower` and `upper` set part 2's zones at the boundary worked out from the other parts' zones (or the default), holding `upper` and pressing a key moves every split-shaped part's range in one undoable edit, and a part with a velocity-limited zone keeps it untouched while the buttons light none; unbinding darkens the section; `edit.undo` restores each. `desktop-profile`: a `section` on an assign group, an unknown function, and two sections with one `id` are refused. `control-performance-format`: a saved binding reloads; a slot the profile lacks is kept byte for byte through load and save. `desktop-shell` snapshots the layout |
-| 2. Roles and RFC 0042's mechanisms | Declared-role functions with today's roles; dark controls; guessed roles; shared groups and `select:`; drawbars, direction, pickup and places on section controls; `takePositions` | `control-physical-controls`: a synth section's `cutoff` knob plays the bound part's cutoff role, whatever plugin; a part with no cutoff role leaves it dark and a move changes nothing; a rotary role on an effect after the instrument is found. With RFC 0042's organ test plugin: the nine section faders play its drawbars, reversed; pickup holds a fader until it reaches the value and `places` reports it meanwhile; the shared sliders in `controls` mode and the section faders drive the same parameters; a plugin with no declared roles gets its guessed cutoff, reported `guessed`; `takePositions` sets each drawbar to its fader's position and a following move plays at once, undone by one `edit.undo` |
+| 2. Roles and RFC 0042's mechanisms | Declared-role functions with today's roles; dark controls; guessed roles; shared groups and `select:`; RFC 0042's slider set, direction, pickup and places on section controls; `takePositions` | `control-physical-controls`: a synth section's `cutoff` knob plays the bound part's cutoff role, whatever plugin; a part with no cutoff role leaves it dark and a move changes nothing; a rotary role on an effect after the instrument is found. With the Oscairn Organ and a part whose `roles` declare its drawbars as a reversed slider set (RFC 0042): the nine section faders play them, reversed; pickup holds a fader until it reaches the value and `places` reports it meanwhile; the shared sliders in `element` mode and the section faders drive the same parameters; a part whose `roles` name a parameter for `cutoff` plays it in place of the plugin's own cutoff role; a plugin with no declared roles gets its guessed cutoff, reported `guessed`; `takePositions` sets each drawbar to its fader's position and a following move plays at once, undone by one `edit.undo` |
 | 3. Auto-binding | The rule, the sheet, the compact list, the panel's blink and confirm, the banner, `sections.auto` | A new `control-sections` test: tables covering one obvious pair, two candidates, a part matching two sections, a part with no `from`, an audio part, and list order changed with the same result; the prompt is not opened while the transport runs at `instrument`; `desktop-gaps` renders the sheet at 1024 x 600 and the compact list at 320 x 240 |
 | 4. Sound select | Category browse, favorites first, subcategories, the default Sound, `sections.create`, `sections.setDefault`, locked sections | `control-library`: the `sound` encoder steps tagged Sounds favorites first and loads each into the bound part keeping its zones, level and binding; an empty section's `on` creates a bound part with the default; over the budget it is refused naming the shortfall. With a locked organ section: a new Performance has its organ part; loading a pad into it, removing it and unbinding it are refused naming the section; on the desktop the same Performance allows all three |
 | 5. Draft 7 roles | The roles in `ui.h` as draft 7; `roleName` and the role parser know them; a test organ plugin declares percussion, rotary, vibrato/chorus and drive | `control-physical-controls`: each section button toggles or steps its role's parameter; a draft-5 plugin reads as before; an unknown role value reads as none |
@@ -893,16 +920,29 @@ Changed by the owner the same day:
   the section default; a lock does not stop overrides
   ([overriding a section control](#overriding-a-section-control)).
 
+Decided by the owner later the same day, as recommended:
+
+- **A device remap may name a Performance control** (`control:Super Knob`); the control is dark in
+  a Performance with no control of that name, as layouts' `control:NAME` already works
+  ([device overrides](#device-overrides)).
+- **When parts' zones disagree on the boundary,** the buttons use the first bound part's, in part
+  order, and Play shows both ranges; refusing the buttons until the zones agree would make a quick
+  button slow ([split and layer](#split-and-layer-on-one-keybed)).
+- **No profile flag forbidding overrides on a locked section** until a product needs one
+  ([locked sections](#locked-sections)).
+
+And with RFC 0042's revision of the same day:
+
+- **Section controls use RFC 0042's slider set and role declaration:** a section's `level1` to
+  `level9` faders play the bound part's slider set, and a Sound's part `roles` declare its roles
+  before its plugins' hints ([what this RFC takes from RFC 0042](#what-this-rfc-takes-from-rfc-0042)).
+- **A slider set never spans parts.** A two-part organ (as converted from a MODX) stays two parts:
+  bound by the prompt to one organ section with the other an extra part, or to two slots sharing
+  the section's controls ([auto-binding](#auto-binding)).
+
 ## Open questions
 
-1. **Device remaps to a Performance control by name** (`control:Super Knob`): useful for "always
-   the Super Knob", but a name can mean different things in different Performances. Recommended:
-   allowed, shown dark where no control has the name, as layouts' `control:NAME` already works.
-2. **When two parts' zones disagree on the boundary,** the buttons use the first bound part's, in
-   part order. Recommended: keep it, and show both ranges; the alternative, refusing the buttons
-   until the zones agree, makes a quick button slow.
-3. **A profile flag forbidding overrides on a locked section.** Recommended: none until a product
-   needs it.
+None open.
 
 ## Ruled out
 
@@ -910,8 +950,8 @@ Changed by the owner the same day:
   2026-11-11): tags only.
 - **Fixed section types in the engine** (a piano part, an organ part): a part stays any chain, and a
   section is a slot in the profile.
-- **A second following mechanism beside RFC 0042's:** drawbars, direction, pickup and places are
-  RFC 0042's, reused; a section is only who its controls follow.
+- **A second following mechanism beside RFC 0042's:** the slider set, the role declaration,
+  direction, pickup and places are RFC 0042's, reused; a section is only who its controls follow.
 - **A section's default reaching by plugin ID or parameter ID:** a section names roles, so it
   works with any Sound that declares them. Reaching a particular plugin is a Performance's
   override, which names its own nodes and controls.

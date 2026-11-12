@@ -477,7 +477,7 @@ Also open:
   a profile names its panel's piano, organ and synth sections; a Performance binds a part to
   each, and the section's controls act on that part by declared role, dark where the Sound has
   none; binding itself when each section has one obvious part by Sound tag, asking otherwise;
-  RFC 0042's drawbars, direction and pickup on a section's own controls; on the desktop and on
+  RFC 0042's slider set, direction and pickup on a section's own controls; on the desktop and on
   boards without the section, a label on the part
 - [ ] recording as an engine service: any graph input, output, part or bus and the notes
   played, to WAV/RF64 off the audio thread, with retroactive capture

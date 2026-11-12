@@ -187,6 +187,13 @@ An illustrative profile (the values are an example, not a real product's):
   `hideOfficial`, **heavily discouraged**, which turns the official repository off by default
   and leaves its publisher's key (built in otherwise, for plugins, apps and content) untrusted.
   Hidden is never removed: Settings keeps it one switch away, and no field takes that away.
+- **`onScreenKeyboard`** (optional, added 2026-11-11): whether the on-screen keyboard is offered,
+  a keyboard per MIDI input and the built-in one, each playing as its input (a floating window on
+  the desktop, a dismissable sheet over a device's screen, never opened by itself). Absent: offered
+  unless the product has keys of its own (a `keys` group with the `notes` role), so a keyboard
+  instrument leaves it out and a keyless module or groovebox offers it for playing without a
+  controller. The built-in profiles set it: off on the FANTOM-07 and the MODX M, on for the KICK,
+  the Ignite, the i.MX8M Mini EVK and QEMU; the desktop offers it. A controller's profile has none.
 
 ### Control groups
 

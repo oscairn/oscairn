@@ -11,5 +11,6 @@
   "network": { "ethernet": true },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
+  "onScreenKeyboard": true,
   "estimated": ["compute", "audio", "screens", "network"]
 }

@@ -19,5 +19,6 @@
   "network": { "wifi": true },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
+  "onScreenKeyboard": true,
   "estimated": ["platform", "compute", "audio", "controls", "screens", "midi", "network"]
 }

@@ -103,13 +103,13 @@ namespace oscairn::standalone
         juce::var value;
         require(juce::JSON::parse(juce::String::fromUTF8(json.data(), int(json.size())), value).wasOk(), "not valid JSON");
         const auto& root = object(value, "a profile");
-        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "estimated"}, "the profile");
+        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated"}, "the profile");
         require(text(root, "format") == "oscairn.profile", "format must be oscairn.profile");
         require(root.getProperty("version").isInt() && int(root.getProperty("version")) == 2, "version must be 2");
         Profile p;
         // A controller's profile (it names ports) holds its controls and ports only.
         if(const auto m = root.getProperty("midi"); m.getDynamicObject() && m.getDynamicObject()->hasProperty("ports"))
-            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories"})
+            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard"})
                 require(!root.hasProperty(key), std::string("a controller's profile has no ") + key);
         const bool controller = root.getProperty("midi").getDynamicObject() && root.getProperty("midi").getDynamicObject()->hasProperty("ports");
         p.id = text(root, "id"); p.name = text(root, "name");
@@ -345,6 +345,8 @@ namespace oscairn::standalone
         }
         else p.reliability.clear();
         p.apps = names(root, "apps");
+        if(root.hasProperty("onScreenKeyboard")) p.onScreenKeyboard = flag(root, "onScreenKeyboard");
+        else p.onScreenKeyboard = std::none_of(p.controls.begin(), p.controls.end(), [](const Control& c) { return c.kind == "keys" && c.role == "notes"; });
         if(root.hasProperty("alwaysAvailable"))
         {
             p.alwaysAvailable = names(root, "alwaysAvailable");

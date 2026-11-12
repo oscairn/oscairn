@@ -92,6 +92,10 @@ namespace oscairn::standalone
         hardware::Capabilities hardware;
         struct Network { bool ethernet = false, wifi = false; } network;
         bool battery = false;
+        // Whether the on-screen keyboard is offered (a keyboard per MIDI input, and the built-in
+        // one): a window on the desktop, a sheet over a device's screen. Absent from the file: not
+        // where the product has keys of its own (a notes group of keys), offered everywhere else.
+        bool onScreenKeyboard = true;
         std::string reliability = "desktop"; // desktop, instrument or pass-through (RFC 0027)
         std::vector<std::string> apps;       // RFC 0022's apps installed with it
         // RFC 0025: the apps reserved whether they run or not, each in apps; absent from the file,

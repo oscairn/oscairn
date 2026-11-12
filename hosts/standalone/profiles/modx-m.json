@@ -25,5 +25,6 @@
   "midi": { "din": 1, "usbDevice": true, "usbHost": true },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.library", "oscairn.setlist"],
+  "onScreenKeyboard": false,
   "estimated": ["platform", "compute", "audio", "controls", "screens", "midi"]
 }

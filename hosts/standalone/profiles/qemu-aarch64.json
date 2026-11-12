@@ -9,5 +9,6 @@
   "screens": [ { "width": 1024, "height": 600, "touch": false, "surface": "panel", "layout": "kick-screen" } ],
   "network": { "ethernet": true },
   "reliability": "instrument",
-  "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"]
+  "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist"],
+  "onScreenKeyboard": true
 }

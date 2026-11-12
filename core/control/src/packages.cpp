@@ -267,7 +267,8 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     auto* w=work.get();
     packageWork_.reset();
     const auto assetRoot=assets_.root(); // read on the control thread; the job reads which libraries are installed from its own Store
-    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot]{
+    const auto ships=shipped();
+    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships]{
         std::string rootKey,error,chosen,repositoryId,name;uint64_t serial=0;
         std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each asset library it needs
         std::map<std::string,std::string> archives;
@@ -330,6 +331,9 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
             }
         }catch(const std::exception& x){error=x.what();for(const auto& [p,into]:unpacked){std::error_code e;fs::remove_all(into,e);}unpacked.clear();}
         std::lock_guard lock(w->mutex);
+        // A folder holding a copy of a repository this device ships (a USB drive, or the packages
+        // that come with the app) is recorded as that repository, where updates come from.
+        if(!web(source))for(const auto& s:ships)if(!rootKey.empty() && s.key==rootKey)w->source=s.address;
         w->job.rootKey=rootKey;w->job.repository=repositoryId;w->job.name=name;w->job.serial=serial;w->job.package=id;w->job.version=chosen;
         if(!error.empty()){w->job.state="failed";w->job.error=error;return;}
         std::rotate(unpacked.begin(),unpacked.begin()+1,unpacked.end()); // the libraries first, so the package finds them installed

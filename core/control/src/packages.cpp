@@ -242,7 +242,7 @@ uint64_t Session::listRepository(const std::string& source){
         PackageJob out;
         try{
             auto from=sourceFor(source,&w->cancel);
-            const auto index=repository::open(*from,trusted,revoked,out.rootKey,kept());
+            const auto index=repository::open(*from,trusted,revoked,out.rootKey,out.name,kept());
             see(index.rootKey,index.repository,index.serial,trusted);
             out.repository=index.repository;out.name=index.name;out.serial=index.serial;
             for(const auto& p:index.packages){
@@ -273,7 +273,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
         std::map<std::string,std::string> archives;
         try{
             auto from=sourceFor(source,&w->cancel);
-            const auto index=repository::open(*from,trusted,revoked,rootKey,kept());
+            const auto index=repository::open(*from,trusted,revoked,rootKey,name,kept());
             see(index.rootKey,index.repository,index.serial,trusted);
             repositoryId=index.repository;name=index.name;serial=index.serial;
             // A release: fetched (or read in place), checked against the signed index and unpacked.

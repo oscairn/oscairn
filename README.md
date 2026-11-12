@@ -169,9 +169,9 @@ with its details and Install, and a **File**. A plugin from a publisher you have
 first: signed by the key the repository lists as the publisher's, whether to trust that publisher
 (by name and fingerprint); else whether to install it anyway. **Settings** lists the repositories, each
 by its name, address and root key fingerprint, with a switch; the official one can be turned off
-but not removed. **Add a repository...** there takes an https:// address or a folder, shows the
-repository's root key fingerprint and asks whether to trust it; nothing else is trusted until you
-say so.
+but not removed. **Add a repository...** there takes an https:// address alone, shows the
+repository's root key fingerprint and the name that key signed, and asks whether to trust it;
+nothing else is trusted until you say so. Installing from a local file goes through the Library's **Install… > File**.
 
 ### The desktop app's screens
 

@@ -4,6 +4,7 @@
 // and how it is made (README.md beside this says how to add one).
 #include "AudioPage.h"
 #include "MidiControllersPage.h"
+#include "RepositoriesPage.h"
 #include "SigningKeysPage.h"
 
 namespace oscairn::standalone::settings
@@ -22,8 +23,7 @@ namespace oscairn::standalone::settings
     {
         static const std::vector<PageInfo> all{
             {"audio", "Audio", everywhere, made<AudioPage>()},
-            // The Settings dialog's pages, which stay in the shell until ported here (RFC 0022).
-            {"repositories", "Package repositories", everywhere, notBuilt},                 // RFC 0031
+            {"repositories", "Package repositories", everywhere, made<RepositoriesPage>()},   // RFC 0031
             {"keys", "Signing keys", everywhere, made<SigningKeysPage>()},                   // RFC 0006
             {"controllers", "MIDI controllers", everywhere, made<MidiControllersPage>()},  // RFC 0024
             // Named by RFCs, not built yet.

@@ -48,12 +48,13 @@ Checked when built and tested; the sections below say how.
       for plugins since 2026-11-11, step 5); a profile's `repositories` and its
       discouraged `hideOfficial`, which turns the official one off without removing it; the
       user's, added by address and root key; each on or off; `control-repository`,
-      `desktop-profile`. In the desktop's Settings (until Settings is its
-      own app, RFC 0022): the repositories by name, address and root key fingerprint, each with
-      a switch, Remove for the user's, and Add a repository..., which reads the repository
-      first, asks to trust its root key by fingerprint, and keeps neither the repository nor the
-      key if it then does not verify; it replaces the Library's Install from a repository...;
-      `desktop-gaps`. 2026-11-11: each installed package recorded with its version, kind and
+      `desktop-profile`. In Settings (the desktop's dialog, then from
+      2026-11-11 the Settings app's Package repositories page, RFC 0022): the repositories by
+      name, address and root key fingerprint, each with a switch, Remove for the user's, and Add
+      a repository..., which reads the repository first, asks to trust its root key by
+      fingerprint and the name that key signed (an https:// address alone in the app), and keeps
+      neither the repository nor the key if it then does not verify; it replaces the Library's
+      Install from a repository...; `desktop-settings`. 2026-11-11: each installed package recorded with its version, kind and
       repository (`packages.json` in the data folder, `packages.installed`), and forgotten when
       removed; `control-repository`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas

@@ -10,8 +10,9 @@ Settings is an app of its own ([RFC 0022](../../../../docs/rfcs/0022-apps-and-re
 | `Frame.h`, `Frame.cpp` | The frame (the list of pages and the page chosen, scrolling), `Page` and `Row` |
 | `Pages.cpp` | **The one list of pages**, each with where it applies |
 | `AudioPage.h`, `AudioPage.cpp` | The Audio page: the example to copy |
-| `SigningKeysPage.h`, `SigningKeysPage.cpp` | The Signing keys page: the keys and Make, asked with the dialog's own `askToMakeKey` (`../../SigningKeys.h`) |
+| `SigningKeysPage.h`, `SigningKeysPage.cpp` | The Signing keys page: the keys and Make, asked with `askToMakeKey` (`../../SigningKeys.h`) |
 | `MidiControllersPage.h`, `MidiControllersPage.cpp` | The MIDI controllers page: each MIDI input's controller profile and Ignore switch, kept by the engine |
+| `RepositoriesPage.h`, `RepositoriesPage.cpp` | The Package repositories page (RFC 0031): each by name, address and root key fingerprint, its switch and Remove, and Add by https:// address alone, trusted by fingerprint |
 
 ## Adding a page
 

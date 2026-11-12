@@ -34,7 +34,6 @@
 #include "PlayView.h"
 #include "Recording.h"
 #include "AppProcesses.h"
-#include "Settings.h"
 #include "Splash.h"
 
 #include <BinaryData.h>
@@ -347,9 +346,7 @@ namespace oscairn::standalone
                 if(profile_.offers("oscairn.library"))menu.addItem(8001,"Library");
                 if(profile_.offers("oscairn.setlist") && appProcesses_ && appProcesses_->find("oscairn.setlist"))menu.addItem(8002,"Setlist"); // the menu is first built before the app processes
                 if(profile_.offers("oscairn.recordings"))menu.addItem(8005,"Recordings");
-                menu.addSeparator();menu.addItem(8006,"Settings...");
-                // The Settings app (RFC 0022) where it runs; the shell's dialog keeps the pages not yet moved into it.
-                if(settingsApp())menu.addItem(8007,"Package Repositories...");
+                menu.addSeparator();menu.addItem(8006,"Settings...",settingsApp()); // the Settings app; nothing to open with --in-process
                 return menu;}
             if(index==4){themeItems_=theme_.installed();for(size_t i=0;i<themeItems_.size();++i)menu.addItem(3000+int(i),themeItems_[i].second,true,themeItems_[i].first==themeData().id);menu.addSeparator();menu.addItem(4000,"Manage themes...");return menu;}
             for( size_t i = 0; i < layouts_.size(); ++i )
@@ -399,9 +396,7 @@ namespace oscairn::standalone
             if(id==8003){showHome();return;}
             if(id==8004){openPerformance();return;}
             if(id==8005){showRecordings();return;}
-            if(id==8006 && settingsApp()){showSettings();return;}
-            if(id==8006 || id==8007){showApp(settings_,"Settings",[this]{return settingsPane();},1000,640);
-                if(auto* s=dynamic_cast<Settings*>(settings_->getContentComponent()))s->refresh();return;} // the ports and keys now
+            if(id==8006){if(settingsApp())showSettings();return;} // nothing to open with --in-process: the item is disabled
             if(id==5002 || id==5003){saveToLibrary(id==5003);return;}
             if(id==5004){importPerformance();return;}
             if(id==5005){exportPerformance();return;}
@@ -447,8 +442,6 @@ namespace oscairn::standalone
                     addAndMakeVisible( *notice_ ); notice_->setBounds( getLocalBounds() );
                 } );
         }
-        // Settings' package repositories, until the Settings app has them.
-        Settings* settingsPane() { return new Settings( engine_ ); }
         void showGroovebox(){showApp(groovebox_,"Groovebox",[this]{return new SequencerPane(engine_);},1100,760);}
         // The Recordings app (RFC 0020): the takes, kept running with its state like the others.
         void showRecordings()
@@ -808,7 +801,6 @@ namespace oscairn::standalone
         std::vector<RunningApp> running_;
         std::unique_ptr<AppSwitcher> switcher_;
         std::unique_ptr<AppWindow> groovebox_, libraryApp_, picker_, recordings_;
-        std::unique_ptr<AppWindow> settings_;
         std::unique_ptr<LaunchNotice> notice_; // why an app did not open (RFC 0025)
         Actions::Answer pickerAnswer_;
         std::unique_ptr<PadEditor> pads_;

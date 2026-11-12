@@ -18,8 +18,8 @@
 #include "../Panel.h"
 #include "../ParameterGrid.h"
 #include "../PartsView.h"
-#include "../Settings.h"
 #include "../Setlist.h"
+#include "../SigningKeys.h"
 #include "EngineProcess.h"
 #include "oscairn/local_socket.h"
 #include "oscairn/package.h"
@@ -722,11 +722,13 @@ int main(int argc, char** argv)
                 juce::MessageManager::getInstance()->runDispatchLoopUntil(700);
                 check(tap.count("library.query") == 0, "the Library is not read again after a refresh: " + std::to_string(tap.count("library.query")));
             }
-            // Adding a repository in Settings (RFC 0031): its https:// address or a folder's path;
-            // any other address refused before the engine is asked. The web here is a stand-in
-            // transport serving a folder, so nothing touches the network: a root whose key is not
-            // trusted asks to trust it by its fingerprint, and once trusted is read again from the
-            // same address; refused there (its index key is not signed), it is not kept, nor its key.
+            // Adding a repository at the engine (RFC 0031): the Settings page asks for https://
+            // alone (checked in desktop-settings); the engine itself takes a folder too, for the
+            // image's own and the tests' stand-ins. The web here is a stand-in transport serving a
+            // folder, so nothing touches the network: a root whose index key does not verify fails
+            // for that before its key's trust is asked about, so the page never offers it, nor a
+            // name it did not sign; trusted anyway, it fails the same, and is taken back out, key
+            // and all, when the page gives up.
             {
                 const auto rootKey = std::string(64, 'a');
                 const auto repo = data.getChildFile("repository-stand-in");
@@ -744,79 +746,33 @@ int main(int argc, char** argv)
                     sink(200, bytes.data(), bytes.size());
                     return 200;
                 });
-                auto fetches = [&] { std::lock_guard lock(fetchedMutex); return fetched.size(); };
-                auto modal = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
-                auto asking = [] { auto* d = dynamic_cast<juce::DialogWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); return d ? dynamic_cast<standalone::RepositoryAddress*>(d->getContentComponent()) : nullptr; };
-                auto said = [](juce::AlertWindow* w) { juce::String out; for(auto* c : w->getChildren()) if(auto* l = dynamic_cast<juce::Label*>(c)) out << l->getText(); return out; };
-                // A dialog answered, and gone before the next is looked for.
-                auto close = [&](juce::AlertWindow* w, int answer) {
-                    if(!w) return;
-                    juce::Component::SafePointer<juce::Component> gone(w);
-                    w->exitModalState(answer);
-                    wait([&] { return modal() != gone.getComponent() || !gone; });
+                auto listed = [&](const std::string& source) {
+                    uint64_t job = 0;
+                    engine.packages([&](Control& c) { job = c.listRepository(source); });
+                    Control::PackageJob state;
+                    wait([&] { engine.packages([&](Control& c) { state = c.packageJob(job); }); return state.state != "running"; });
+                    return state;
                 };
-                standalone::Settings settings(engine);
-                standalone::setDesktopMode(settings, 2); settings.setSize(1024, 600);
-                auto ask = [&](const juce::String& address) {
-                    settings.addRepository();
-                    auto* a = asking();
-                    if(!a) return;
-                    a->address.setText(address);
-                    a->add.triggerClick();
-                    wait([&] { return asking() == nullptr; });
-                };
-                wait([&] { return !engine.jobRunning(); });
-                settings.addRepository();
-                auto* asked = asking();
-                check(asked && asked->address.getText().isEmpty() && asked->folder.isVisible() && asked->address.getHeight() == 44,
-                      "Add a repository asks for its address, touch-sized, or a folder");
-                if(asked && argc >= 5)
-                {
-                    // On the Panel, over Settings at 1024 x 600, centered as it shows.
-                    juce::Image screen = settings.createComponentSnapshot(settings.getLocalBounds());
-                    const auto dialog = asked->createComponentSnapshot(asked->getLocalBounds());
-                    juce::Graphics(screen).drawImageAt(dialog, (screen.getWidth() - dialog.getWidth()) / 2, (screen.getHeight() - dialog.getHeight()) / 2);
-                    const juce::File out{juce::String(argv[4]) + "-repository-address.png"};
-                    out.deleteFile();
-                    juce::FileOutputStream stream(out);
-                    juce::PNGImageFormat().writeImageToStream(screen, stream);
-                }
-                if(asked) asked->cancel.triggerClick();
-                wait([&] { return asking() == nullptr; });
                 tap.reset();
-                for(const auto* refused : {"http://packages.example.test/", "packages.oscairn.org", "ftp://packages.example.test/"})
-                {
-                    ask(refused);
-                    wait([&] { auto* w = modal(); return w && w->getName() == "Not an https address"; });
-                    auto* w = modal();
-                    check(w && w->getName() == "Not an https address" && said(w).contains("https://"),
-                          std::string("an address not https:// is refused, and why: ") + refused + " (" + (w ? w->getName() + ": " + said(w) : juce::String("no dialog")).toStdString() + ")");
-                    close(w, 0);
-                }
-                check(tap.count("packages.list") == 0 && fetches() == 0, "a refused address never reaches the engine");
-                ask("https://packages.example.test");
-                check(wait([&] { auto* w = modal(); return w && w->getName() == "Trust this repository?"; }) && tap.count("packages.list") == 1,
-                      "an https:// repository is listed by the engine, and its untrusted root asks to be trusted");
-                if(auto* w = modal(); w && w->getName() == "Trust this repository?")
-                {
-                    check(said(w).contains(standalone::fingerprint(signing::keyId(rootKey))), "it shows the root key's fingerprint: " + said(w).toStdString());
-                    { std::lock_guard lock(fetchedMutex); check(!fetched.empty() && fetched[0] == "https://packages.example.test/repository.json", "its root fetched from its address"); }
-                    const auto before = fetches();
-                    close(w, 1);
-                    check(wait([&] { auto* n = modal(); return n && n->getName() == "Not read"; }) && fetches() > before && tap.count("packages.list") == 2,
-                          "trusted, it is read again from the same address");
-                    if(auto* n = modal(); n && n->getName() == "Not read") { check(said(n).contains("index key is not signed"), "and refused past the trust check: " + said(n).toStdString()); close(n, 0); }
-                }
+                auto state = listed("https://packages.example.test");
+                check(state.state == "failed" && state.error.find("index key is not signed") != std::string::npos && state.rootKey == rootKey && state.name.empty() && tap.count("packages.list") == 1,
+                      "an untrusted root that does not verify fails for that, with no name: " + state.error);
+                { std::lock_guard lock(fetchedMutex); check(!fetched.empty() && fetched[0] == "https://packages.example.test/repository.json", "its root fetched from its address"); }
+                engine.packages([&](Control& c) { c.addRepository({"https://packages.example.test", {}, rootKey, {}}); }); // trusted, as the page's Trust does
+                state = listed("https://packages.example.test");
+                check(state.state == "failed" && state.error.find("index key is not signed") != std::string::npos, "trusted, it is read again and fails the same: " + state.error);
+                engine.packages([&](Control& c) { c.removeRepository("https://packages.example.test"); });
                 std::vector<Control::TrustedKey> keys;
-                engine.packages([&](Control& c) { keys = c.trustedKeys(); });
+                std::vector<Control::Repository> known;
+                engine.packages([&](Control& c) { keys = c.trustedKeys(); known = c.repositories(); });
                 check(std::none_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == rootKey; }) &&
-                          std::none_of(settings.repositories().begin(), settings.repositories().end(), [](const auto& r) { return r.address == "https://packages.example.test"; }),
+                          std::none_of(known.begin(), known.end(), [](const auto& r) { return r.address == "https://packages.example.test"; }),
                       "one that does not verify is not kept, nor its key trusted");
-                // A folder's full path is read from the folder, not through the web; its key asks again.
+                // A folder's full path is read from the folder, not through the web.
+                auto fetches = [&] { std::lock_guard lock(fetchedMutex); return fetched.size(); };
                 const auto before = fetches();
-                ask(repo.getFullPathName());
-                check(wait([&] { auto* n = modal(); return n && n->getName() == "Trust this repository?"; }) && tap.count("packages.list") == 3 && fetches() == before, "a folder's path is read from the folder");
-                close(modal(), 0);
+                state = listed(repo.getFullPathName().toStdString());
+                check(state.state == "failed" && state.error.find("index key is not signed") != std::string::npos && fetches() == before, "a folder's path is read from the folder");
                 repository::setTransport({});
             }
             // The question when an install is refused for code not trusted here, by the three cases
@@ -904,31 +860,17 @@ int main(int argc, char** argv)
                     w->exitModalState(chosen);
                     wait([&] { return modalAlert() != gone.getComponent() || !gone; });
                 };
-                // In Settings: the official repository, on, which can be turned off but not removed;
-                // the test repository added by its folder once its root key is trusted.
-                {
-                    standalone::Settings settings(engine);
-                    standalone::setDesktopMode(settings, 2); settings.setSize(1024, 600);
-                    check(!settings.repositories().empty() && settings.repositories()[0].origin == "official" && settings.repositories()[0].enabled &&
-                              settings.repositorySwitch(0) && settings.repositorySwitch(0)->getToggleState() && settings.removeButton(0) == nullptr,
-                          "Settings lists the official repository, on, with no Remove");
-                    settings.openRepository(juce::String(site));
-                    check(wait([&] { auto* w = modalAlert(); return w && w->getName() == "Trust this repository?"; }), "a repository's untrusted root asks to be trusted");
-                    answer(modalAlert(), 1);
-                    auto listedSite = [&] { const auto& all = settings.repositories(); return all.size() == 2 && all[1].address == site && all[1].name == "Test repository" && all[1].origin == "user"; };
-                    check(wait(listedSite) && settings.removeButton(1) != nullptr && settings.repositorySwitch(1)->getToggleState(), "trusted, it is read, and listed by its name with Remove");
-                    if(auto* off = settings.repositorySwitch(0)) off->triggerClick();
-                    check(wait([&] { return !settings.repositories().empty() && !settings.repositories()[0].enabled; }), "the official repository turned off by its switch");
-                    std::vector<Control::Repository> known;
-                    engine.packages([&](Control& c) { known = c.repositories(); });
-                    check(known.size() == 2 && !known[0].enabled && known[1].enabled, "and so in the engine");
-                    settings.refresh(); settle();
-                    snapshot(settings, "settings-repositories-panel");
-                    standalone::setDesktopMode(settings, 1); settings.setSize(1000, 640); settings.resized(); settle();
-                    snapshot(settings, "settings-repositories");
-                    settings.setSize(640, 900); settings.resized(); settle();
-                    snapshot(settings, "settings-narrow");
-                }
+                // The official repository turned off, and the test repository added by its folder
+                // once its root key is trusted (what the Settings page's switches and Add do, at
+                // the engine; the page itself is checked in desktop-settings).
+                engine.packages([&](Control& c) { c.addRepository({site, "Test repository", rootKey, {}}); }); // its name, as the page has it from listing it
+                std::vector<Control::Repository> known;
+                check(wait([&] { engine.packages([&](Control& c) { known = c.repositories(); });
+                               return known.size() == 2 && known[1].address == site && known[1].name == "Test repository" && known[1].origin == "user" && known[1].enabled; }),
+                      "the test repository added as the user's, on, by its name");
+                engine.packages([&](Control& c) { c.setRepositoryEnabled("https://packages.oscairn.org", false); });
+                engine.packages([&](Control& c) { known = c.repositories(); });
+                check(known.size() == 2 && !known[0].enabled && known[1].enabled, "and the official one turned off");
                 standalone::Actions actions;
                 standalone::LibraryPane pane(engine, actions, standalone::LibraryPane::Mode::Play);
                 standalone::setDesktopMode(pane, 2); pane.setSize(1024, 600);
@@ -1149,18 +1091,15 @@ int main(int argc, char** argv)
                           !catalog->shown()[size_t(synthRow())].offered(),
                       "then it is Installed, with nothing to install");
                 if(catalog) closeCatalog();
-                // Removed in Settings, asked first: no longer listed, its root key no longer trusted.
-                {
-                    standalone::Settings settings(engine);
-                    if(auto* remove = settings.removeButton(1)) remove->triggerClick();
-                    check(wait([&] { auto* w = modalAlert(); return w && w->getName() == "Remove Test repository?"; }), "Remove asks first");
-                    answer(modalAlert(), 1);
-                    std::vector<Control::TrustedKey> trusted;
-                    check(wait([&] { return settings.repositories().size() == 1; }), "removed from the list");
-                    engine.packages([&](Control& c) { trusted = c.trustedKeys(); });
-                    check(std::none_of(trusted.begin(), trusted.end(), [&](const auto& k) { return k.key == rootKey; }), "with its root key's trust");
-                    if(auto* on = settings.repositorySwitch(0)) on->triggerClick();
-                }
+                // Removed (the page asks first; the engine's Remove takes its root key's trust
+                // with it), and the official one turned back on for the rest of the run.
+                engine.packages([&](Control& c) { c.removeRepository(site); c.setRepositoryEnabled("https://packages.oscairn.org", true); });
+                std::vector<Control::TrustedKey> trusted;
+                std::vector<Control::Repository> rest;
+                engine.packages([&](Control& c) { trusted = c.trustedKeys(); rest = c.repositories(); });
+                check(rest.size() == 1 && rest[0].origin == "official" && rest[0].enabled &&
+                          std::none_of(trusted.begin(), trusted.end(), [&](const auto& k) { return k.key == rootKey; }),
+                      "removed with its root key's trust, the official one on again");
                 repository::setTransport({});
             }
             else std::printf("OSCAIRN_TEST_MAKE_REPOSITORY not set; the Catalog not checked\n");
@@ -1910,13 +1849,6 @@ int main(int argc, char** argv)
                     frame.addAndMakeVisible(catalog);
                     show(frame, "catalog", &catalog); // a dialog of its own over the Library
                     frame.removeChildComponent(&catalog);
-                    panel.overlay(nullptr);
-                }
-                {
-                    standalone::Settings settings(engine);
-                    standalone::setDesktopMode(settings, 2);
-                    settings.refresh();
-                    show(settings, "settings");
                     panel.overlay(nullptr);
                 }
             }

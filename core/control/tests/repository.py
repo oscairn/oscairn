@@ -391,8 +391,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
     try:
         # Not trusted yet: refused, naming its root key so the user can choose to trust it.
         state = job('packages.list', {'source': str(good)})
-        check(state['state'] == 'failed' and 'not a repository this device trusts' in state['error'] and keys['root'][0] in state['error'] and state['rootKey'] == keys['root'][1],
-              'an untrusted repository is refused, naming its root key: ' + state['error'])
+        check(state['state'] == 'failed' and 'not a repository this device trusts' in state['error'] and keys['root'][0] in state['error'] and state['rootKey'] == keys['root'][1] and state['name'] == 'Test repository',
+              'an untrusted repository is refused, naming its root key and its signed name: ' + state['error'])
         rpc('trust.set', {'key': keys['root'][1], 'name': 'Test repository', 'scope': ['repositories']})
         state = job('packages.list', {'source': str(good)})
         listed = {x['id']: x for x in state['packages']}

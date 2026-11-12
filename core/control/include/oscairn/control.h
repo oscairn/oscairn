@@ -377,7 +377,8 @@ namespace oscairn
         struct RepositoryVersion { std::string version, channel, yanked, incompatible, sha256; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; };
         struct RepositoryPackage { std::string id, name, summary, license, publisher, publisherKey; std::vector<std::string> tags; std::vector<RepositoryVersion> versions; };
         // state: "running", "done" or "failed" (error says why). rootKey: the repository's root key
-        // once read, so a refusal for an untrusted one can offer to trust it. packages: a listing's;
+        // once read, and name its name once its signatures verify, so a refusal for an untrusted
+        // one can offer to trust it by both. packages: a listing's;
         // package and version: what an install installed, and installed what installArchive returns.
         struct PackageJob { uint64_t id = 0; std::string state, error, repository, name, rootKey; uint64_t serial = 0; std::vector<RepositoryPackage> packages; std::string package, version; Installed installed; };
         virtual uint64_t listRepository(const std::string& source) = 0;

@@ -10,7 +10,12 @@
 // MIDI controllers page against the engine's own ControllerPorts on input names (no MIDI device is
 // opened): each input with its profile menu and Ignore switch, None, a profile, each of two by
 // channel, an input ignored, a refusal said under its port, a listing again when an input comes,
-// and the choices kept in the data folder; the app's connection allowed audio.set and refused
+// and the choices kept in the data folder; the Package repositories page against the same session
+// with the web a stand-in transport serving a signed folder, so nothing touches the network: the
+// official repository listed with no Remove, a switch turning it off, a non-https address refused
+// before the engine is asked, and an https repository asked to be trusted by its root key's
+// fingerprint before it is added, listed with Remove, and removed again with its key's trust; the
+// app's connection allowed audio.set and refused
 // graph.add; and the app started as a process of its own from its manifest. With SNAPSHOTS, the
 // app renders itself to SNAPSHOTS-settings-1400x900.png, -900x700.png, and on the KICK's
 // 1024 x 600 screen under the shell's top bar, -kick-list.png and -kick-audio.png.
@@ -20,11 +25,16 @@
 #include "../SigningKeys.h"
 #include "../apps/settings/AudioPage.h"
 #include "../apps/settings/MidiControllersPage.h"
+#include "../apps/settings/RepositoriesPage.h"
 #include "../apps/settings/SigningKeysPage.h"
 #include "../../audio/ControllerPorts.h"
 #include "EngineProcess.h"
+#include "miniz/miniz.h"
+#include "oscairn/assets.h"
 #include "oscairn/local_socket.h"
+#include "oscairn/repository.h"
 #include "oscairn/session.h"
+#include "oscairn/signing.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <algorithm>
 #include <atomic>
@@ -66,8 +76,8 @@ int main(int argc, char** argv)
         const auto& all = standalone::settings::pages();
         const auto network = std::find_if(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "network"; });
         check(network != all.end() && network->applies(standalone::loadProfile("kick")) && !network->applies(standalone::Profile::desktop()), "Network applies on the KICK (Wi-Fi), not on this computer");
-        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "keys", "controllers"}, "built so far: Audio, Signing keys and MIDI controllers");
-        check(ids(standalone::settings::shownPages(all, standalone::loadProfile("kick"))) == std::vector<std::string>{"audio", "keys", "controllers"}, "MIDI controllers on a device too");
+        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "repositories", "keys", "controllers"}, "built so far: Audio, Package repositories, Signing keys and MIDI controllers");
+        check(ids(standalone::settings::shownPages(all, standalone::loadProfile("kick"))) == std::vector<std::string>{"audio", "repositories", "keys", "controllers"}, "all of them on a device too");
 #if !OSCAIRN_BLUETOOTH
         check(std::none_of(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "bluetooth"; }), "Bluetooth is left out of a build without it");
 #endif
@@ -166,7 +176,7 @@ int main(int argc, char** argv)
                 standalone::setDesktopMode(frame, 1);
                 frame.setSize(1000, 640);
                 auto* page = dynamic_cast<standalone::settings::AudioPage*>(frame.page());
-                check(page && frame.current()->id == "audio" && frame.shown().size() == 3, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
+                check(page && frame.current()->id == "audio" && frame.shown().size() == 4, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
                 if(!page) return;
                 check(wait([&] { return page->listings() >= 1 && !page->busy(); }), "the devices are listed");
                 check(page->output.getNumItems() == 3 && page->output.getText() == "Studio" && page->output.isEnabled(), "the output devices, the one open chosen");
@@ -302,13 +312,141 @@ int main(int argc, char** argv)
                 check(kept.contains("smk37-elite-custom") && kept.contains("IAC Bus 1"), "the choice and the ignored port kept in the data folder");
             }
 
+            // The Package repositories page on an app's connection granted `system` alone. The web
+            // is a stand-in transport serving a folder signed with keys made here, so nothing
+            // touches the network: the official repository listed with no Remove, a switch
+            // turning it off, a non-https address refused before the engine is asked, an https
+            // repository asked to be trusted by its root key's fingerprint before it is added,
+            // then listed by its name with Remove, and removed again with its key's trust.
+            {
+                const auto rootKeyFile = data.getChildFile("root.key"), indexKeyFile = data.getChildFile("index.key");
+                const auto root = signing::makeKey(rootKeyFile.getFullPathName().toStdString());
+                const auto indexKey = signing::makeKey(indexKeyFile.getFullPathName().toStdString());
+                const auto site = "https://packages.example.test";
+                const auto repo = data.getChildFile("repository-site");
+                repo.getChildFile("index").createDirectory();
+                // An index of no packages, gzipped (a zlib stream rewrapped as gzip: the reader
+                // checks the trailer's CRC and length), named in the root by its hash, as a
+                // repository's files are; then the root, then its signature by the index key.
+                const std::string indexJson = "{\"format\":\"oscairn.repository-index\",\"version\":1,\"repository\":\"org.example.test\",\"serial\":1,\"packages\":[]}";
+                std::string zlib((indexJson.size() + 128) * 2, '\0');
+                mz_ulong made = mz_ulong(zlib.size());
+                if(mz_compress2(reinterpret_cast<unsigned char*>(zlib.data()), &made, reinterpret_cast<const unsigned char*>(indexJson.data()), mz_ulong(indexJson.size()), MZ_DEFAULT_LEVEL) != MZ_OK) return;
+                std::string gz("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03", 10);
+                gz += zlib.substr(2, made - 6); // the deflate stream: past zlib's header, before its adler
+                const auto crc = mz_crc32(MZ_CRC32_INIT, reinterpret_cast<const unsigned char*>(indexJson.data()), indexJson.size());
+                for(const uint32_t word : {uint32_t(crc), uint32_t(indexJson.size())}) for(int b = 0; b < 4; ++b) gz += char((word >> (8 * b)) & 0xff);
+                const auto indexName = "index/" + assets::sha256(gz) + ".json.gz";
+                const auto write = [](const juce::File& f, const std::string& bytes) { juce::FileOutputStream out(f); out.write(bytes.data(), bytes.size()); }; // binary: gzip holds bytes no text survives
+                write(repo.getChildFile(indexName), gz);
+                const std::string rootJson = "{\"format\":\"oscairn.repository\",\"version\":1,\"repository\":\"org.example.test\",\"name\":\"Test repository\",\"serial\":1,\"rootKey\":\"" + root.publicKey +
+                                             "\",\"indexKey\":{\"key\":\"" + indexKey.publicKey + "\",\"signature\":\"" + signing::sign(root, signing::indexMessage(indexKey.publicKey + "\n")) +
+                                             "\"},\"index\":{\"path\":\"" + indexName + "\",\"sha256\":\"" + assets::sha256(gz) + "\",\"size\":" + std::to_string(gz.size()) + "}}";
+                write(repo.getChildFile("repository.json"), rootJson);
+                const auto rootSig = signing::sign(indexKey, signing::indexMessage(rootJson));
+                write(repo.getChildFile("repository.sig"), "[{\"key\":\"" + indexKey.publicKey + "\",\"signature\":\"" + rootSig + "\"}]");
+                repository::setTransport([&](const std::string& url, uint64_t, const std::function<bool(int, const char*, size_t)>& sink) {
+                    const std::string base = std::string(site) + "/";
+                    const auto file = repo.getChildFile(url.rfind(base, 0) == 0 ? url.substr(base.size()) : "missing");
+                    juce::MemoryBlock bytes;
+                    if(!file.existsAsFile() || !file.loadFileAsData(bytes)) return 404; // binary: its size and CRC must survive
+                    sink(200, static_cast<const char*>(bytes.getData()), bytes.getSize());
+                    return 200;
+                });
+
+                standalone::Engine app(engine.appConnection("oscairn.settings", manifest->permissions), false);
+                standalone::settings::Frame frame(app, standalone::Profile::desktop());
+                standalone::setDesktopMode(frame, 1);
+                frame.setSize(1000, 640);
+                check(frame.open("repositories"), "the list opens Package repositories");
+                auto* page = dynamic_cast<standalone::settings::RepositoriesPage*>(frame.page());
+                if(!page) return;
+                check(wait([&] { return page->listings() >= 1 && !page->busy(); }), "the repositories are listed when the page opens");
+                const auto official = std::string("https://packages.oscairn.org");
+                check(page->repositories().size() == 1 && page->repositories()[0].address == official && page->repositories()[0].origin == "official" && page->repositories()[0].enabled &&
+                          !page->controls(0).remove.isVisible() && page->controls(0).on.getToggleState(),
+                      "the official repository, on, with no Remove");
+                check(page->repositoryRow(0).label() == "Oscairn" && page->repositoryRow(0).explanation().contains(official) &&
+                          page->repositoryRow(0).explanation().contains(standalone::fingerprint(signing::keyId(page->repositories()[0].key))),
+                      "its address and root key fingerprint: " + page->repositoryRow(0).explanation().toStdString());
+                page->controls(0).on.triggerClick();
+                check(wait([&] { return !page->busy() && page->repositories().size() == 1 && !page->repositories()[0].enabled; }), "its switch turns the official one off");
+                page->controls(0).on.triggerClick(); // on again: added repositories are compared against it
+                check(wait([&] { return !page->busy() && page->repositories()[0].enabled; }), "and on again");
+
+                page->addRepository.triggerClick(); // a click is a message: waited for
+                check(wait([&] { return page->adding(); }) && page->askRow().isVisible() && !page->buttonRow().isVisible(), "Add a repository asks for its address");
+                for(const auto* refused : {"http://packages.example.test", "/tmp/wherever", "packages.example.test"})
+                {
+                    page->ask.address.setText(refused);
+                    page->ask.add.triggerClick();
+                    wait([&] { return page->askRow().danger(); });
+                    check(!page->busy() && page->askRow().danger() && page->askRow().explanation().contains("Not an https address"),
+                          std::string("an address that is not https:// is refused, and why: ") + refused + " (" + page->askRow().explanation().toStdString() + ")");
+                    page->ask.cancel.triggerClick(); // Cancel clears the refusal; Add asks again
+                    wait([&] { return !page->adding() && !page->askRow().danger(); });
+                    page->addRepository.triggerClick();
+                    wait([&] { return page->adding(); });
+                }
+
+                // The engine is asked, and its answer decides: an untrusted root asks to be trusted
+                // by fingerprint; trusted, it is read again and kept, and kept as the user's own.
+                auto alert = [] { return dynamic_cast<juce::AlertWindow*>(juce::ModalComponentManager::getInstance()->getModalComponent(0)); };
+                std::atomic<bool> answered = false;
+                juce::String trustSaid;
+                std::function<void()> answer;
+                answer = [&] {
+                    if(answered) return;
+                    if(auto* w = alert(); w && w->getName() == "Trust this repository?")
+                    {
+                        for(auto* c : w->getChildren()) if(auto* l = dynamic_cast<juce::Label*>(c)) trustSaid << l->getText();
+                        w->exitModalState(1); answered = true; return;
+                    }
+                    juce::Timer::callAfterDelay(20, answer);
+                };
+                juce::Timer::callAfterDelay(20, answer);
+                page->ask.address.setText(site);
+                page->ask.add.triggerClick();
+                check(wait([&] { return answered.load(); }), "an https repository whose root is not trusted asks to be trusted");
+                check(trustSaid.contains(standalone::fingerprint(signing::keyId(root.publicKey))) && trustSaid.contains("\"Test repository\""), "naming the root key's fingerprint and the name it signed: " + trustSaid.toStdString());
+                check(wait([&] { return !page->busy() && page->repositories().size() == 2 && !page->adding(); }) &&
+                          page->repositories()[1].address == site && page->repositories()[1].name == "Test repository" &&
+                          page->repositories()[1].origin == "user" && page->controls(1).remove.isVisible(),
+                      "trusted, it is read, added as the user's and listed with Remove");
+                check(page->repositoryRow(1).explanation().contains(site) && page->repositoryRow(1).explanation().contains(standalone::fingerprint(signing::keyId(root.publicKey))),
+                      "by address and fingerprint: " + page->repositoryRow(1).explanation().toStdString());
+                std::vector<Control::TrustedKey> keys;
+                engine.packages([&](Control& c) { keys = c.trustedKeys(); });
+                check(std::any_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == root.publicKey && k.scope == std::vector<std::string>{"repositories"}; }),
+                      "its root key trusted for repositories alone");
+
+                page->controls(1).on.triggerClick();
+                check(wait([&] { return !page->busy() && !page->repositories()[1].enabled; }), "its switch turns it off");
+                page->controls(1).on.triggerClick();
+                check(wait([&] { return !page->busy() && page->repositories()[1].enabled; }), "and on again");
+                // Remove asks first, and takes its root key's trust with it.
+                answered = false;
+                answer = [&] {
+                    if(answered) return;
+                    if(auto* w = alert(); w && w->getName() == "Remove Test repository?") { w->exitModalState(1); answered = true; return; }
+                    juce::Timer::callAfterDelay(20, answer);
+                };
+                juce::Timer::callAfterDelay(20, answer);
+                page->controls(1).remove.triggerClick();
+                check(wait([&] { return answered.load(); }), "Remove asks first");
+                check(wait([&] { return !page->busy() && page->repositories().size() == 1 && page->repositories()[0].origin == "official"; }), "removed: only the official one is listed");
+                engine.packages([&](Control& c) { keys = c.trustedKeys(); });
+                check(std::none_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == root.publicKey; }), "and its root key no longer trusted");
+                repository::setTransport({});
+            }
+
             // The app as a process of its own, started from its manifest by the shell's supervisor.
             {
                 standalone::Actions actions;
                 standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_PROFILE=desktop"});
                 check(processes.open("oscairn.settings") && processes.pid("oscairn.settings") > 0 && processes.pid("oscairn.settings") != ::getpid(), "Settings runs as a process of its own");
                 check(wait([&] { return processes.log("oscairn.settings").contains("oscairn-settings: started"); }), "its stderr is in its log");
-                check(processes.log("oscairn.settings").contains("with 3 pages for desktop"), "with this computer's pages");
+                check(processes.log("oscairn.settings").contains("with 4 pages for desktop"), "with this computer's pages");
                 check(wait([&] { return processes.state("oscairn.settings") == standalone::AppProcesses::State::Running; }, 2000), "and runs");
                 processes.stop("oscairn.settings");
                 check(wait([&] { return processes.pid("oscairn.settings") < 0; }), "stopped by the shell");
@@ -353,7 +491,7 @@ int main(int argc, char** argv)
                 shell.setSize(1024, 600);
                 wait([] { return false; }, 300);
                 const auto area = place->getBounds();
-                for(const auto& [name, page] : {std::pair<const char*, const char*>{"kick-list", nullptr}, {"kick-audio", "audio"}})
+                for(const auto& [name, page] : {std::pair<const char*, const char*>{"kick-list", nullptr}, {"kick-audio", "audio"}, {"kick-repositories", "repositories"}})
                 {
                     auto image = shell.createComponentSnapshot(shell.getLocalBounds());
                     std::vector<std::string> arguments{"--mode", "2", "--profile", "kick"};

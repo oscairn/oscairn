@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Catalog.h"
-#include "Settings.h"
+#include "SigningKeys.h"
 #include "oscairn/discovery.h"
 #include "oscairn/repository.h"
 

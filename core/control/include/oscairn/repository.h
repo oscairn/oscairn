@@ -62,12 +62,13 @@ namespace oscairn::repository
 
     // Reads and checks the root, the index key and the index. `trusted` holds the root keys this
     // device trusts for repositories and `revoked` the keys it has revoked (public keys, hex).
-    // rootKey is set to the root's key as soon as it is read, so a refusal for an untrusted one
-    // can offer it to the user. With a `cache` folder, the index last read from this repository
+    // rootKey is set to the root's key as soon as it is read, and name to the root's name once
+    // its signatures verify, so a refusal for an untrusted one can offer it to the user by both
+    // (an untrusted root whose signatures do not verify is refused for that). With a `cache` folder, the index last read from this repository
     // is kept there: used again while the root's serial is the same, and brought up to date by
     // the delta the root names from its serial, else fetched whole (RFC 0031).
     Index open(Source& source, const std::vector<std::string>& trusted, const std::vector<std::string>& revoked, std::string& rootKey,
-               const std::filesystem::path& cache = {});
+               std::string& name, const std::filesystem::path& cache = {});
 
     // Why this device cannot install a version, or empty: it needs a newer system than `system`,
     // or brings code with no build for `platform`.

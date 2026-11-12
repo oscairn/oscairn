@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Signing keys, shared by the Settings dialog and the Settings app's page (RFC 0006, RFC 0022):
-// both ask the engine the same two ways, and inline here keeps it one copy (as Icons.h does).
+// Signing keys, shared by the Library, the Catalog and the Settings app's page (RFC 0006, RFC
+// 0022): all ask the same way, and inline here keeps it one copy (as Icons.h does).
 #pragma once
 #include "Engine.h"
 #include <juce_gui_basics/juce_gui_basics.h>

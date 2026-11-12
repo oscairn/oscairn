@@ -1309,8 +1309,9 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   build, as `plugins.remove` is. One job runs at a time; another is refused with reason `busy`.
 - `packages.job` takes `{job}` and returns `{job,state,error,repository,name,rootKey,serial,
   packages,package,version,installed}`. `state` is `running`, `done` or `failed`, `error`
-  saying why. `rootKey` is the repository's root key once read, so a refusal for an untrusted
-  one can offer to trust it. A listing's `packages` are each `{id,name,summary,license,
+  saying why. `rootKey` is the repository's root key once read, and `name` its name once its
+  signatures verify (checked before trust), so a refusal for an untrusted one can offer to trust
+  it by both. A listing's `packages` are each `{id,name,summary,license,
   publisher,publisherKey,tags,versions}`, each version `{version,channel,yanked,incompatible,
   sha256,size,installed,types,dependencies}`: `incompatible` says why this device cannot install it (empty when it can),
   `sha256` is its archive's SHA-256 as the index lists it (`archive.sha256`),

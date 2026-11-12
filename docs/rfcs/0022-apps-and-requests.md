@@ -312,13 +312,14 @@ An app is a kind of package ([RFC 0006](0006-packages-and-portability.md), [RFC 
   4. **Recordings.**
   5. **The launcher,** with RFC 0030 step 2: cards from other processes.
   6. **Settings,** built as its own app from the start; the desktop's Settings dialog stays in
-     the shell until then. *Begun 2026-11-11:* `Oscairn Settings`
+     the shell until then. *Done 2026-11-11:* `Oscairn Settings`
      (`hosts/standalone/apps/settings/`), granted `system` alone, with its frame (the pages that
-     apply to the device's profile, OS and build) and one page, Audio (`audio.devices`,
-     `audio.set`); Apps → Settings... opens it where apps run as processes. Signing keys and
-     MIDI controllers (the engine's choices, `controllers.*`) are pages of it now; the package
-     repositories are not ported yet, so the dialog stays with them alone, reached from the
-     Apps menu (Package Repositories...); step 7's gate is not run for it.
+     apply to the device's profile, OS and build) and its pages: Audio (`audio.devices`,
+     `audio.set`), Signing keys, MIDI controllers (the engine's choices, `controllers.*`) and
+     Package repositories (`packages.*`, its **Add a repository...** taking an https:// address
+     alone); Apps → Settings... opens it where apps run as processes, and Home has its tile where
+     the profile offers it. The shell's dialog is gone, and with it the Apps menu's Package
+     Repositories...; step 7's gate is not run for it.
   7. **Performance** last: the Play view and the sound editor are the most tied into the shell
      (`DesktopShell`, `PlayView`), always-available, and what a stage depends on.
 - **The launcher is not special.** It has no privilege; any app with `home: true` may be one,

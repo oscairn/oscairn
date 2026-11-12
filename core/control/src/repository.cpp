@@ -249,7 +249,7 @@ namespace oscairn::repository
         return out;
     }
 
-    Index open(Source& source, const std::vector<std::string>& trusted, const std::vector<std::string>& revoked, std::string& rootKey, const fs::path& cache)
+    Index open(Source& source, const std::vector<std::string>& trusted, const std::vector<std::string>& revoked, std::string& rootKey, std::string& name, const fs::path& cache)
     {
         const auto rootBytes = source.read("repository.json", maxRoot);
         const auto root = parse(rootBytes, "repository.json");
@@ -268,12 +268,12 @@ namespace oscairn::repository
         each(detail::member(r, "mirrors"), [&](V m) { index.mirrors.push_back(text(m, "mirrors")); });
 
         // Trust: the root key is one this device trusts for repositories, it signed the index
-        // key, and the index key signed this root. A revoked key is never accepted.
+        // key, and the index key signed this root. A revoked key is never accepted. The
+        // signatures are checked first, so an untrusted root is offered only when it is whole,
+        // with the name its key signed.
         const auto fingerprint = signing::keyId(index.rootKey);
         for(const auto* key : {&index.rootKey, &index.indexKey})
             if(std::find(revoked.begin(), revoked.end(), *key) != revoked.end()) bad("it is signed by a revoked key (" + signing::keyId(*key) + ")");
-        if(std::find(trusted.begin(), trusted.end(), index.rootKey) == trusted.end())
-            throw std::runtime_error("not a repository this device trusts: its root key is " + fingerprint + "; trust that key for repositories to use it");
         if(!signing::verify(delegation, signing::indexMessage(index.indexKey + "\n"))) bad("its index key is not signed by its root key");
         const auto signatureBytes = source.read("repository.sig", maxSignatures);
         const auto signatureDoc = Doc{json_parse(signatureBytes.data(), signatureBytes.size()), &std::free};
@@ -287,6 +287,9 @@ namespace oscairn::repository
             byIndexKey = byIndexKey || s.key == index.indexKey;
         }
         if(!byIndexKey) bad("its root is not signed by its index key");
+        name = index.name;
+        if(std::find(trusted.begin(), trusted.end(), index.rootKey) == trusted.end())
+            throw std::runtime_error("not a repository this device trusts: its root key is " + fingerprint + "; trust that key for repositories to use it");
 
         source.places(index.mirrors, index.blobBase);
         // A file the root names by its hash and size: index/<sha256><suffix>.

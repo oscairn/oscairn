@@ -148,9 +148,8 @@ A panel profile fills the display with no title or menu bar and shows its screen
 layout for a run (on the desktop, `--profile kick` shows the KICK's screen, full screen).
 
 **Apps → Settings...** opens the Settings app (below) where it runs (against an engine on a
-socket); with `--in-process`, the shell's own Settings dialog, which has the package
-repositories alone. Until they are in the app too, the Apps menu also has **Package
-Repositories...**, which opens the dialog. The Settings app's Signing keys page lists the
+socket); with `--in-process` it is disabled, there being no app to open. The Settings app's
+Signing keys page lists the
 signing keys ([RFC 0006](../docs/rfcs/0006-packages-and-portability.md#signatures)) by name and
 fingerprint, never a private key, and makes one. **Export Performance...** (and the Library's Export) asks
 whether to sign: Not signed unless a key is chosen, or **Make a key...**; the item and the
@@ -281,10 +280,18 @@ and it is listed again when the status's `audioDevice`, `sampleRate`, `bufferSiz
 `audioDeviceList` change. **MIDI controllers**, everywhere: a row per MIDI input with its
 controller profile (Automatic, None, each that fits, or each of them by MIDI channel) and an
 Ignore switch, what the port is under it, changed with `controllers.choose` and
-`controllers.ignore` and listed again when the status's `midiPortList` changes.
+`controllers.ignore` and listed again when the status's `midiPortList` changes. **Package
+repositories**, everywhere: each repository by name, address and root key fingerprint, with an on/off
+switch and Remove for the user's own (the official and the device's can be turned off, never
+removed), and **Add a repository...** for an https:// address alone, listed first with
+`packages.list`, its root key's fingerprint and the name that key signed asked about before it
+is trusted, a non-https address refused before the engine is asked (a file goes through the
+Library's Install... > File).
 `desktop-settings` checks the pages per profile, the Audio page on an
 app connection granted `system` against a socket session whose audio host is a stand-in (no
 device opened), the MIDI controllers page against the engine's own controllers on input names,
+the Package repositories page against the same session with the web a stand-in transport serving
+a signed folder,
 the connection allowed `audio.set` and refused `graph.add`, and the app started
 as a process. Not yet: permissions per app connection (step 4),
 packaging (step 5), sandboxing (step 6), and handing an app a fresh connection after an engine

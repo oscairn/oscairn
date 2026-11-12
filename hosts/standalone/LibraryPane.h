@@ -148,6 +148,10 @@ namespace oscairn::standalone
         void tagMenu(const std::string& tag);                // hide it from the tag list, or color it
         std::string tagColor(const std::string& tag) const; // the user's color for it, or empty
         const juce::String& message() const { return message_; }
+        // Nothing of the kind shown, and nothing narrowing it: one line saying so, over the list,
+        // and in Play a button straight to the Catalog.
+        juce::Label empty;
+        juce::TextButton browse{"Browse the Catalog"};
 
         void paint(juce::Graphics&) override;
         void resized() override;

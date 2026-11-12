@@ -1046,6 +1046,23 @@ int main(int argc, char** argv)
                     const juce::File out{juce::String(argv[4]) + "-" + name + ".png"};
                     out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(screen, stream);
                 };
+                // The Library's empty state: no Sounds, and nothing narrowing the list, says so in
+                // one line, with a button straight to the Catalog; a search that finds nothing does not.
+                pane.showKind("sound");
+                check(wait([&] { return pane.empty.isVisible(); }) && pane.items().empty() && pane.empty.getText() == "No Sounds yet." && pane.browse.isVisible() &&
+                          !pane.empty.getBounds().isEmpty() && pane.empty.getBottom() <= pane.browse.getY(),
+                      "an empty Library says so, over its list, with a way to the Catalog: " + pane.empty.getText().toStdString());
+                settle();
+                snapshot(pane, "library-empty");
+                pane.search("tonewheel");
+                check(wait([&] { return !pane.empty.isVisible(); }) && !pane.browse.isVisible(), "a search that finds nothing is not the empty state");
+                pane.search("");
+                check(wait([&] { return pane.empty.isVisible(); }), "cleared, it is again");
+                pane.browse.triggerClick();
+                check(wait([&] { return pane.catalog() && !pane.catalog()->reading(); }) && pane.catalog()->sounds.getToggleState(), "the button opens the Catalog on Sounds");
+                if(auto* dialog = pane.catalog() ? pane.catalog()->findParentComponentOfClass<juce::DialogWindow>() : nullptr) dialog->exitModalState(0);
+                settle();
+                pane.showKind("performance");
                 {
                     // The app's plugins, found by the scanner with their versions as the repositories are read.
                     standalone::Catalog scanned(engine, "plugin", {}, argv[2]);

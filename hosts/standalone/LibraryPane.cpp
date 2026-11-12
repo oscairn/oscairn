@@ -254,6 +254,8 @@ namespace oscairn::standalone
         for(auto* c : std::initializer_list<juce::Component*>{&search_, &filters_, &compactButton_, &sideView_, &list_, &options_, &audition_, &status_}) addAndMakeVisible(c);
         addChildComponent(keep_);
         for(auto* c : std::initializer_list<juce::Component*>{&send_, &part_, &cancel_, &pick_, &kind_, &libraries_, &install_}) addChildComponent(c);
+        browse.onClick = [this] { showCatalog(query_.kind); };
+        addChildComponent(empty); addChildComponent(browse); // over the list
         kind_.setVisible(mode_ == Mode::Play); libraries_.setVisible(mode_ == Mode::Play); install_.setVisible(mode_ == Mode::Play);
         cancel_.setVisible(mode_ == Mode::Pick); pick_.setVisible(mode_ == Mode::Pick);
         if(const auto f = viewPreference(); f.existsAsFile())
@@ -361,6 +363,9 @@ namespace oscairn::standalone
         const bool sound = query_.kind == "sound";
         if(awaiting_) { awaiting_ = false; tell(text(engine_.soundMessage())); } // what an install or export did, or why not
         if(message_.isEmpty()) status_.setText(juce::String(result_.total) + (sound ? (result_.total == 1 ? " Sound" : " Sounds") : (result_.total == 1 ? " Performance" : " Performances")), juce::dontSendNotification);
+        const bool none = result_.total == 0 && query_.text.empty() && query_.tags.empty() && !query_.favorites && !query_.recent && query_.source.empty();
+        empty.setText(sound ? "No Sounds yet." : "No Performances yet.", juce::dontSendNotification);
+        empty.setVisible(none); browse.setVisible(none && mode_ == Mode::Play);
         rebuildSide();
         updateButtons();
         repaint();
@@ -647,6 +652,7 @@ namespace oscairn::standalone
         // The theme can change while the pane is open: colors set once would keep the old one.
         list_.setColour(juce::ListBox::backgroundColourId, ink(Ink::Surface));
         status_.setColour(juce::Label::textColourId, ink(Ink::Muted));
+        empty.setColour(juce::Label::textColourId, ink(Ink::Text));
         g.fillAll(ink(Ink::Background));
     }
 
@@ -676,6 +682,12 @@ namespace oscairn::standalone
         rebuildSide();
         area.removeFromLeft(gap);
         list_.setBounds(area);
+        {
+            auto over = area.reduced(16, 12);
+            empty.setFont(juce::FontOptions(textSize(TextRole::Body, mode())));
+            empty.setBounds(over.removeFromTop(control)); over.removeFromTop(gap);
+            browse.setBounds(over.removeFromTop(control).removeFromLeft(touch ? 220 : 180));
+        }
         if(mode_ == Mode::Pick) { pick_.setBounds(bottom.removeFromRight(110)); bottom.removeFromRight(gap); cancel_.setBounds(bottom.removeFromRight(110)); bottom.removeFromRight(gap); }
         else
         {

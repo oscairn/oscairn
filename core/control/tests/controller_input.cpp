@@ -505,8 +505,8 @@ namespace
     // morph control between a scene panned left and one panned right (the control thread, woken
     // at once, blends the scenes), and a scene with a 20 ms glide selected on the control thread
     // as a scene button's move is. Measured in blocks rendered, as above: from the move to the
-    // first block with the new right-channel level (the morph), and to the glide's first step
-    // heard and its end.
+    // first block with the new right-channel level (the morph), and from the service tick that
+    // takes a glide's first step to that step heard and to its end.
     void panLatency(const char* fixture)
     {
         constexpr uint32_t block = 128;
@@ -578,9 +578,14 @@ namespace
             done = true;
         });
         auto tick = Clock::now();
+        uint64_t ranAfter = 0, ranTo = 0; // the last service tick: the blocks rendered before it, and as it ended
         auto serve = [&] {
             if(woken.exchange(false)) s.serviceControllers();
-            if(Clock::now() >= tick) { s.service(); tick += std::chrono::milliseconds(5); }
+            if(Clock::now() >= tick)
+            {
+                ranAfter = blocks.count.load(std::memory_order_acquire); s.service(); ranTo = blocks.count.load(std::memory_order_acquire);
+                tick += std::chrono::milliseconds(5);
+            }
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         };
         while(!done) serve();
@@ -600,7 +605,10 @@ namespace
             const float from = channel();
             const auto sent = Clock::now(); const auto since = sent.time_since_epoch().count();
             s.selectScene(toRight ? right : left);
-            const auto start = blocks.count.load(std::memory_order_acquire);
+            // Counted from the tick that takes its first step, the first with a block rendered since:
+            // the blocks before it are this thread's wait for that tick, which a loaded machine stretches.
+            const auto selected = blocks.count.load(std::memory_order_acquire);
+            uint64_t start = 0;
             bool moved = false, arrived = false;
             uint64_t stepped = 0, ended = 0, next = 0, nextEnd = 0;
             auto in = [&](float l, float r) { return toRight ? r : l; };
@@ -608,7 +616,8 @@ namespace
             while(Clock::now() < sent + std::chrono::seconds(1) && !ended)
             {
                 serve();
-                if(!stepped) stepped = blocks.until(start, next, [&](float l, float r) { return std::abs(in(l, r) - from) > 1e-3; });
+                if(!start && ranAfter > selected) start = ranTo;
+                if(start && !stepped) stepped = blocks.until(start, next, [&](float l, float r) { return std::abs(in(l, r) - from) > 1e-3; });
                 if(stepped) ended = blocks.until(start + stepped - 1, nextEnd, [&](float l, float r) { return std::abs(out(l, r)) < 1e-4; });
                 if(!moved && heardAt > since && std::abs(channel() - from) > 1e-3) { moved = true; firstStep.push_back(ms(Clock::duration(heardAt - since))); }
                 if(moved && !arrived && std::abs(other()) < 1e-4) { arrived = true; glideEnd.push_back(ms(Clock::duration(heardAt - since))); }
@@ -628,7 +637,8 @@ namespace
         // Within a service tick and a block or two; generous on the worst, for a loaded test machine
         // (7 blocks: the 20 ms this once was).
         check(blocksToSound.size() == 40 && std::stoull(worstOf(blocksToSound)) <= 7, "a morph's pan heard within 7 blocks, every move: " + worstOf(blocksToSound));
-        check(blocksToStep.size() == 20 && std::stoull(worstOf(blocksToStep)) <= 7, "a glide's first step heard within 7 blocks, every glide: " + worstOf(blocksToStep));
+        // From the tick that steps it: the block in flight as it ran, at most, then the next.
+        check(blocksToStep.size() == 20 && std::stoull(worstOf(blocksToStep)) <= 2, "a glide's first step heard within 2 blocks of its service tick, every glide: " + worstOf(blocksToStep));
         check(blocksToEnd.size() == 20 && std::stoull(worstOf(blocksToEnd)) <= 30, "a glide's end heard within 30 blocks (the 80 ms this once was), every glide: " + worstOf(blocksToEnd));
     }
 }

@@ -29,7 +29,7 @@ echo "Oscairn $version ($commit)"
 rm -rf "$build"
 cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON -DBUILD_TESTING=OFF \
 	-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
-cmake --build "$build" --target oscairn_standalone
+cmake --build "$build" --target oscairn_standalone oscairn-sign
 
 stage=$build/dmg
 app=$stage/Oscairn.app
@@ -84,7 +84,17 @@ NO WARRANTY.
 Its complete source code, and the script that built this app (tools/release-macos.sh), are at
 https://github.com/oscairn/oscairn/tree/$commit
 JUCE 9.0.4, which it is built with, is at https://github.com/juce-framework/JUCE/tree/9.0.4
+
+The packages that come with it, in Oscairn.app/Contents/Resources/Preinstalled, are each under
+their own license: Packages/<package ID>/ holds each one's license texts and notices, and
+PACKAGE.txt there names its license and where its source is.
 EOF
+
+# The packages that come with the release (RFC 0031, docs/releasing.md): the official repository's
+# signed root and index, and the archives tools/preinstalled.txt lists, each checked here and again
+# by the engine when it installs them at its first start; their licenses beside the others.
+python3 -I "$here/preinstall-fetch.py" --oscairn-sign "$build/core/control/oscairn-sign" --platform macos-arm64 \
+	--out "$app/Contents/Resources/Preinstalled" --licenses "$licenses/Packages" || fail "a package to preinstall did not verify"
 
 # Nothing may come from the build tree or Homebrew: only the system's libraries, and no rpaths.
 find "$app" -type f | while read -r file; do

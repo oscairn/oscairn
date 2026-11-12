@@ -1,0 +1,12 @@
+# The packages a release ships and installs on first run (RFC 0031, "Preinstalled packages"):
+# each line a package ID and version published at https://packages.oscairn.org.
+# tools/preinstall-fetch.py fetches and checks them; tools/release-macos.sh fails if one does not
+# verify. An asset library a listed package needs must be listed too, at the version the device
+# would pick (the newest stable one).
+org.oscairn.fm 0.4.8
+org.oscairn.analog 0.4.7
+org.oscairn.sampler 0.6.3
+org.oscairn.effects 0.1.1
+org.oscairn.arpeggiator 0.1.4
+org.oscairn.fm-cartridges 1.0.0
+org.oscairn.analog-factory 1.0.0

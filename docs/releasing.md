@@ -2,8 +2,9 @@
 
 A release is, for now, one macOS disk image for Apple silicon:
 `Oscairn-<version>-macos-arm64.dmg`, holding `Oscairn.app` (with its engine, plugin worker,
-scan helper, bundled plugins, the Setlist and Settings apps and the themes), an
-`Applications` link to drag it to, and `Licenses/`.
+scan helper, bundled plugins, the Setlist and Settings apps, the themes and the
+[preinstalled packages](#preinstalled-packages)), an `Applications` link to drag it to, and
+`Licenses/`.
 
 ## The version
 
@@ -33,6 +34,14 @@ against take the numeric version only. Change both in a commit of their own befo
 The workflow can also be run by hand (Actions, Release, Run workflow) from any branch: it then
 builds the dmg as an artifact only, with no release.
 
+## The first run
+
+Try the dmg on a scratch home and data folder, never your own: with the app copied out of the
+dmg, run `Oscairn.app/Contents/MacOS/Oscairn` with `HOME`, `OSCAIRN_DATA_HOME` and
+`OSCAIRN_RUNTIME_DIR` set to folders under one scratch folder. The Library says it is setting up
+the instruments that come with Oscairn; `packages.preinstalled` on the engine's control socket
+then ends `done`, each package `installed`.
+
 ## Build one locally
 
 ```sh
@@ -48,6 +57,27 @@ anything but the system's libraries or has an rpath, signs it, and writes
 
 codesign accepts only code in `Contents/MacOS`, where the app looks for its `themes/` and
 `Apps/`; the script moves them to `Contents/Resources` and leaves links in their place.
+
+## Preinstalled packages
+
+A release ships Oscairn's own published packages, which the engine installs at its first start
+on each data folder ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#preinstalled-packages)).
+[`tools/preinstalled.txt`](../tools/preinstalled.txt) lists them, each a package ID and version
+at https://packages.oscairn.org; change it in a commit of its own, to the newest stable versions,
+before tagging. The release script runs [`tools/preinstall-fetch.py`](../tools/preinstall-fetch.py),
+which downloads the official repository's signed root and index and the listed archives into
+`Oscairn.app/Contents/Resources/Preinstalled` as a repository snapshot, and fails the release when
+anything does not verify: the root against the official root key, the index and each archive by
+hash, every signature in each archive by the publisher key the index names, a version yanked or
+without a `macos-arm64` build, or an asset library a listed package needs and the list lacks. It
+needs the network, and the archives are never committed. To check a list without building:
+
+```sh
+python3 -I tools/preinstall-fetch.py --oscairn-sign build/core/control/oscairn-sign \
+    --platform macos-arm64 --out /tmp/preinstalled --licenses /tmp/preinstalled-licenses
+```
+
+The 2026-11-11 set adds 11.8 MB of archives to the app (Analog's factory patches 7.4 MB of it).
 
 ## Signing and notarization
 
@@ -78,8 +108,13 @@ Monocypher (BSD-2-Clause or CC0), Lucide (ISC), Inter (OFL 1.1, also in each the
 JUCE's modules compile into the app: zlib, HarfBuzz, SheenBidi, LunaSVG, PlutoVG, libpng,
 libjpeg (the Independent JPEG Group's credit), libwebp, FLAC, libogg, libvorbis, Opus,
 opusfile, libopusenc and the VST3 SDK. sheredom's json.h is public domain and needs none.
-The LV2 host (jalv's ISC) is not in the macOS app. When the app starts using another JUCE
-module, check `JUCE.spdx.json` for what it vendors and add those notices to the script.
+The preinstalled packages' own licenses go in `Licenses/Packages/<package ID>/`: each package's
+license texts and notices as it carries them, and `PACKAGE.txt` with its license expression and
+its source's address and revision, which `SOURCE.txt` points to; under the GPL that is the
+directions to the source the license asks for, so a package's source repository must stay
+available as long as the release is offered. The LV2 host (jalv's ISC) is not in the macOS
+app. When the app starts using another JUCE module, check `JUCE.spdx.json` for what it vendors
+and add those notices to the script.
 
 `SOURCE.txt` points at the commit on GitHub, so a dmg is only complete once its commit is
 pushed: build releases from a pushed tag.

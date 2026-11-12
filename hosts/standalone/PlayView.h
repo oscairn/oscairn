@@ -3,6 +3,7 @@
 
 #include "Engine.h"
 #include "Launcher.h"
+#include "Panel.h" // Keys
 #include "PartsModel.h"
 #include "PartsView.h"
 #include "Profile.h"
@@ -16,7 +17,7 @@ namespace oscairn::standalone
     /// top, a row of knobs following the Performance's controls (or, switched, the selected part's
     /// own), and a strip per part and bus with its level, meters, mute and solo. Everything is
     /// one touch. Drawn in the theme's styles for sections, sliders, knobs and marks.
-    class PlayView : public juce::Component, private juce::Timer, private juce::ChangeListener
+    class PlayView : public juce::Component, private juce::Timer, private juce::ChangeListener, public juce::KeyListener, private juce::FocusChangeListener
     {
     public:
         explicit PlayView(Engine& engine);
@@ -44,10 +45,24 @@ namespace oscairn::standalone
         bool learning() const { return learning_; }
         bool canLearn() const { return engine_.rowKnobs() > 0; } // a device with knobs
         void learnTarget(const Assignment&); // touched while learning, after a knob moved
+        // The keyboard under the strips, on the desktop (a device's screen has none until this is
+        // called): shown or hidden as chosen, or with no choice while no MIDI input is connected.
+        // It plays the selected part's channel. The computer's keys play it too while no text field
+        // has focus: A W S E D F T G Y H U J K O L P ; from middle C, Z and X an octave down and up.
+        void offerKeys(std::optional<bool> shown);
+        bool keysShown() const { return keys_ && keys_->isVisible(); }
+        Keys* keys() const { return keys_.get(); }
+        void releaseKeys(); // every note it holds, off: a text field took focus, the window went behind
+        using juce::Component::keyPressed;
+        using juce::Component::keyStateChanged;
+        bool keyPressed(const juce::KeyPress&, juce::Component*) override;   // the window's keys
+        bool keyStateChanged(bool down, juce::Component*) override;          // a key let go
 
         void paint(juce::Graphics&) override;
         void resized() override;
         void mouseUp(const juce::MouseEvent&) override;
+        void parentHierarchyChanged() override; // the window whose keys play it
+        void visibilityChanged() override;
 
     private:
         class Knob;
@@ -68,6 +83,9 @@ namespace oscairn::standalone
         void gesture(const Assignment&, bool begin);
         juce::String describe(const Assignment&, double value) const;
         void learned(const Assignment&); // the knob moved to learn, to that (None: its default)
+        void globalFocusChanged(juce::Component* focused) override;
+        void showKeys(); // as chosen, or by the MIDI inputs connected
+        bool typing() const; // the computer's keys play
 
         Engine& engine_;
         Control::GraphState graph_;
@@ -93,6 +111,11 @@ namespace oscairn::standalone
         juce::Viewport viewport_;
         juce::Component stripRow_;
         std::vector<std::unique_ptr<Strip>> strips_;
+        std::unique_ptr<Keys> keys_;
+        std::optional<bool> keysChoice_;
+        int octave_ = 0;              // Z and X: octaves from middle C
+        std::map<int, int> typed_;    // the computer's keys held, by key code, and their notes
+        juce::Component::SafePointer<juce::Component> window_; // listened to for keys
     };
 
     /// The Performance app on a device's screen (RFC 0030): Play, and Edit's parts views, with

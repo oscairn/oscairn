@@ -302,10 +302,10 @@ namespace oscairn::standalone
     void Engine::setClockOutputs(std::vector<DeviceRule> v){command([this,v]{control_->setClockOutputs(v);});}
     std::vector<DeviceRule> Engine::clockOutputs()const{return control_->transportState().clockOutputs;}
     int Engine::trackChannel()const{return static_cast<int>(param("sequencer",sequencer::channel(sequenceTrack_)));}
-    void Engine::note(bool on,int key,float velocity)
+    void Engine::note(bool on,int key,float velocity,int channel)
     {
-        if(key<0 || key>=128)return;
-        const auto channel=trackChannel();
+        if(key<0 || key>=128 || channel>15)return;
+        if(channel<0)channel=trackChannel();
         command([this,on,key,velocity,channel]{
             auto& held=padChannels_[static_cast<size_t>(key)];
             if(on){

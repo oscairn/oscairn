@@ -205,6 +205,12 @@ following the Performance's controls (or the selected part's), and a strip per p
 Selected, a part's knobs follow its banks: its own controls, then its instrument's first
 parameters, then each effect's main control, as many at a time as the device has screen knobs or assignable knobs (**Bank** pages them). On a device with
 knobs, **Learn** assigns one: move it, then touch a strip, its M, a scene or a knob.
+On the desktop, a keyboard along the bottom of Play plays the selected part, on its channel, into
+the same note input as MIDI in (zones and splits apply): click or touch a key (lower on it is
+louder), drag across the keys, or type A W S E D F T G Y H U J K O L P ; from middle C, with Z
+and X for an octave down and up, while no text field has focus. It shows while no MIDI input is
+connected; **View → Show Keyboard** shows or hides it, and the choice is kept. Notes are let go
+on key-up, mouse-up (wherever the mouse is), a text field taking focus, and the window going behind.
 `--view Part|Mixer|Routing|Controls|Play` (desktop layout only) opens the Performance app on that
 view instead. Before an app opens, the shell asks the engine to admit it
 ([RFC 0025](../docs/rfcs/0025-resource-budgets.md#memory-reserved-committed-and-opportunistic));

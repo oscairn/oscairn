@@ -46,7 +46,7 @@ namespace oscairn::standalone
         // Clock out (RFC 0012 step 2): the MIDI outputs the transport's clock goes to; cabling, not saved with a Performance.
         void setClockOutputs(std::vector<DeviceRule> outputs);
         std::vector<DeviceRule> clockOutputs()const;
-        void note(bool on,int key,float velocity);
+        void note(bool on,int key,float velocity,int channel=-1); // channel 0..15; -1: the selected track's
         // Pads play through the Performance's pad map (pads.h), on the selected track's MIDI
         // channel unless a pad has its own. The map is cached here and refreshed after a load.
         void pad(int index,bool on,float velocity);

@@ -14,6 +14,36 @@
 
 namespace oscairn::standalone
 {
+    /// A piano keyboard that plays notes into the engine's note input, as MIDI in does (zones,
+    /// splits and layers apply): a panel's keys, and the desktop's under Play. A click or touch
+    /// plays a key, lower on it louder; a drag plays across the keys, several fingers at once.
+    /// Drawn in the theme.
+    class Keys : public juce::Component, private juce::MidiKeyboardState::Listener
+    {
+    public:
+        Keys( Engine& engine, int lowest, int count );
+        ~Keys() override;
+        std::function<int()> channel;    // the MIDI channel a note goes on, 0..15; unset or -1: the selected track's
+        void show( int lowest, int count ); // the keys shown, each as wide as fits
+        void press( int note, bool on, float velocity = .8f ); // a key played from elsewhere (the computer's keys), shown held
+        void release();                  // every note it holds, off
+        int lowest() const { return keyboard_.getRangeStart(); }
+        int highest() const { return keyboard_.getRangeEnd(); }
+        juce::MidiKeyboardComponent& keyboard() { return keyboard_; }
+
+        void resized() override;
+        void lookAndFeelChanged() override;
+        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override { return std::make_unique<juce::AccessibilityHandler>( *this, juce::AccessibilityRole::group ); }
+
+    private:
+        void handleNoteOn( juce::MidiKeyboardState*, int, int note, float velocity ) override;
+        void handleNoteOff( juce::MidiKeyboardState*, int, int note, float ) override;
+
+        Engine&                     engine_;
+        juce::MidiKeyboardState     state_;
+        juce::MidiKeyboardComponent keyboard_{ state_, juce::MidiKeyboardComponent::horizontalKeyboard };
+    };
+
     /// A device's front panel built from a Layout: its screen and controls, bound to the
     /// engine, drawn at the layout's design size and scaled to fit the component.
     class Panel : public juce::Component, private juce::Timer
@@ -39,7 +69,6 @@ namespace oscairn::standalone
         class Board;
         class Knob;
         class Pads;
-        class Keys;
 
         void timerCallback() override;
 

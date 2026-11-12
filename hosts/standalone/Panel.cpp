@@ -291,38 +291,65 @@ namespace oscairn::standalone
         int             step_ = -1, held_ = -1;
     };
 
-    /// A piano keyboard that plays notes.
-    class Panel::Keys : public juce::Component, private juce::MidiKeyboardState::Listener
+    Keys::Keys( Engine& engine, int lowest, int count ) : engine_( engine )
     {
-    public:
-        Keys( Engine& engine, const Layout::Control& c ) : engine_( engine )
-        {
-            state_.addListener( this );
-            keyboard_.setAvailableRange( c.note, juce::jmin( 127, c.note + c.count - 1 ) );
-            keyboard_.setLowestVisibleKey( c.note );
-            keyboard_.setKeyPressBaseOctave( c.note / 12 );
-            keyboard_.setOctaveForMiddleC( 4 );
-            addAndMakeVisible( keyboard_ );
-        }
-        ~Keys() override { state_.removeListener( this ); }
+        state_.addListener( this );
+        keyboard_.setOctaveForMiddleC( 4 );
+        show( lowest, count );
+        lookAndFeelChanged();
+        setTitle( "Keyboard" );
+        addAndMakeVisible( keyboard_ );
+    }
+    Keys::~Keys() { state_.removeListener( this ); }
 
-        void resized() override
-        {
-            keyboard_.setBounds( getLocalBounds() );
-            int whites = 0;
-            for( int n = keyboard_.getRangeStart(); n <= keyboard_.getRangeEnd(); ++n )
-                whites += juce::MidiMessage::isMidiNoteBlack( n ) ? 0 : 1;
-            keyboard_.setKeyWidth( getWidth() / (float)juce::jmax( 1, whites ) );
-        }
+    void Keys::show( int lowest, int count )
+    {
+        if( lowest == keyboard_.getRangeStart() && juce::jmin( 127, lowest + count - 1 ) == keyboard_.getRangeEnd() ) return;
+        keyboard_.setAvailableRange( lowest, juce::jmin( 127, lowest + count - 1 ) );
+        keyboard_.setLowestVisibleKey( lowest );
+        keyboard_.setKeyPressBaseOctave( lowest / 12 );
+        resized();
+    }
 
-    private:
-        void handleNoteOn( juce::MidiKeyboardState*, int, int note, float velocity ) override { engine_.note( true, note, velocity ); }
-        void handleNoteOff( juce::MidiKeyboardState*, int, int note, float ) override { engine_.note( false, note, 0.0f ); }
+    void Keys::press( int note, bool on, float velocity )
+    {
+        if( on ) state_.noteOn( 1, note, velocity );
+        else state_.noteOff( 1, note, 0.0f );
+    }
 
-        Engine&                       engine_;
-        juce::MidiKeyboardState       state_;
-        juce::MidiKeyboardComponent   keyboard_{ state_, juce::MidiKeyboardComponent::horizontalKeyboard };
-    };
+    void Keys::release()
+    {
+        keyboard_.focusLost( juce::Component::focusChangedDirectly ); // its mouse and fingers let go
+        state_.allNotesOff( 0 );
+    }
+
+    void Keys::resized()
+    {
+        keyboard_.setBounds( getLocalBounds() );
+        int whites = 0;
+        for( int n = keyboard_.getRangeStart(); n <= keyboard_.getRangeEnd(); ++n )
+            whites += juce::MidiMessage::isMidiNoteBlack( n ) ? 0 : 1;
+        keyboard_.setKeyWidth( getWidth() / (float)juce::jmax( 1, whites ) );
+    }
+
+    void Keys::lookAndFeelChanged()
+    {
+        // White keys the lighter of the text and background, in any theme, black keys the darker.
+        using K = juce::MidiKeyboardComponent;
+        const auto a = ink( Ink::Text ), b = ink( Ink::Background );
+        const auto light = a.getPerceivedBrightness() > b.getPerceivedBrightness() ? a : b, dark = light == a ? b : a;
+        keyboard_.setColour( K::whiteNoteColourId, light );
+        keyboard_.setColour( K::blackNoteColourId, dark );
+        keyboard_.setColour( K::keySeparatorLineColourId, ink( Ink::Border ) );
+        keyboard_.setColour( K::mouseOverKeyOverlayColourId, ink( Ink::Accent ).withAlpha( .25f ) );
+        keyboard_.setColour( K::keyDownOverlayColourId, ink( Ink::Accent ) );
+        keyboard_.setColour( K::textLabelColourId, dark );
+        keyboard_.setColour( K::shadowColourId, juce::Colours::transparentBlack );
+    }
+
+    // A key at its very top has no velocity: it still sounds, softly.
+    void Keys::handleNoteOn( juce::MidiKeyboardState*, int, int note, float velocity ) { engine_.note( true, note, juce::jmax( velocity, .01f ), channel ? channel() : -1 ); }
+    void Keys::handleNoteOff( juce::MidiKeyboardState*, int, int note, float ) { engine_.note( false, note, 0.0f, channel ? channel() : -1 ); }
 
     /// The panel at its design size; Panel scales it to fit.
     class Panel::Board : public juce::Component
@@ -369,7 +396,7 @@ namespace oscairn::standalone
                     component = std::move( pads );
                     break;
                 }
-                case Type::Keys: component = std::make_unique<Keys>( engine, c ); break;
+                case Type::Keys: component = std::make_unique<Keys>( engine, c.note, c.count ); break;
                 case Type::Label: break; // drawn by paint()
                 }
                 if( component )

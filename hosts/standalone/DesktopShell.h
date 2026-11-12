@@ -22,6 +22,10 @@ namespace oscairn::standalone
     void writeInputMode(const juce::File& configuration, InputMode);
     bool touchSized(InputMode);
     juce::String inputModeName(InputMode);
+    /// Whether Play's keyboard shows (View menu), a preference like the input mode; none chosen yet:
+    /// it shows while no MIDI input is connected.
+    std::optional<bool> readKeysShown(const juce::File& configuration);
+    void writeKeysShown(const juce::File& configuration, bool shown);
 
     /// The Groovebox app: the step sequencer's screen with its transport above it, in a window
     /// of its own. Apps are separate from the sound editor; Play and Stop belong to the app.

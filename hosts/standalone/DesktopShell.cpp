@@ -24,6 +24,16 @@ namespace oscairn::standalone
     // shortcut: Automatic means keyboard and mouse; detect a touch-only computer when one is tested.
     bool touchSized(InputMode mode) { return mode == InputMode::Touch; }
     juce::String inputModeName(InputMode mode) { return mode == InputMode::Touch ? "Touch" : mode == InputMode::Mouse ? "Keyboard and mouse" : "Automatic"; }
+    std::optional<bool> readKeysShown(const juce::File& configuration)
+    {
+        const auto name = configuration.getChildFile("keyboard.txt").loadFileAsString().trim();
+        return name == "shown" ? std::optional(true) : name == "hidden" ? std::optional(false) : std::nullopt;
+    }
+    void writeKeysShown(const juce::File& configuration, bool shown)
+    {
+        configuration.createDirectory();
+        configuration.getChildFile("keyboard.txt").replaceWithText(shown ? "shown\n" : "hidden\n");
+    }
 
     SequencerPane::SequencerPane(Engine& engine, bool transport) : engine_(engine), screen_(engine)
     {

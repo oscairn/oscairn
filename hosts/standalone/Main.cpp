@@ -222,6 +222,8 @@ namespace oscairn::standalone
         }
 
         void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
+        // Behind another window, its key-ups go there: Play's keyboard lets go of its notes.
+        void activeWindowStatusChanged() override { if( !isActiveWindow() ) if( auto* s = shell() ) s->play().releaseKeys(); }
 
         void resized() override
         {
@@ -288,6 +290,7 @@ namespace oscairn::standalone
             if( panel() ) { showPerformanceApp( false ); return; }
             auto* shell = new DesktopShell( engine_, scanner(), inputMode_ );
             followSetlist( shell->play() );
+            shell->play().offerKeys( readKeysShown( theme_.configuration() ) );
             shell->onHome = [this] { showHome(); };
             shell->onSave = [this] { saveToLibrary( false ); };
             setContentOwned( shell, false );
@@ -350,6 +353,7 @@ namespace oscairn::standalone
             for( auto mode : { InputMode::Automatic, InputMode::Mouse, InputMode::Touch } )
                 input.addItem( 7000 + int( mode ), inputModeName( mode ), true, mode == inputMode_ );
             menu.addSubMenu( "Input", input, layout_.surface == Layout::Surface::Desktop );
+            menu.addItem( 7100, "Show Keyboard", shell() != nullptr, shell() && shell()->play().keysShown() ); // Play's
             return menu;
         }
 
@@ -372,6 +376,7 @@ namespace oscairn::standalone
                 for(auto* w:{groovebox_.get(),libraryApp_.get(),picker_.get()})
                     if(auto* content=w?w->getContentComponent():nullptr){setDesktopMode(*content,inputMode_==InputMode::Touch?2:1);content->resized();}
                 return;}
+            if(id==7100){if(auto* s=shell()){const bool shown=!s->play().keysShown();writeKeysShown(theme_.configuration(),shown);s->play().offerKeys(shown);}return;}
             if(id==8000){openGroovebox();return;}
             if(id==8001){showLibraryApp();return;}
             if(id==8002){showSetlist();return;}

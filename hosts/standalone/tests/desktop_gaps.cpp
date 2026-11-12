@@ -71,7 +71,10 @@ namespace
             ::close(listener_); ::unlink(path_.c_str());
         }
         int count(const std::string& method) const { std::lock_guard lock(mutex_); const auto at = counts_.find(method); return at == counts_.end() ? 0 : at->second; }
-        void reset() { std::lock_guard lock(mutex_); counts_.clear(); kept_.clear(); pushed_.reset(); ++epoch_; }
+        void reset() { std::lock_guard lock(mutex_); counts_.clear(); kept_.clear(); pushed_.reset(); notes_.clear(); ++epoch_; }
+        // The notes sent since reset(), in order: on or off, key, channel and velocity.
+        struct Note { bool on; int key, channel; double velocity; };
+        std::vector<Note> notes() const { std::lock_guard lock(mutex_); return notes_; }
         // The requests on connections open since before reset(), leaving out the new ones a job opens.
         int countKept(const std::string& method) const { std::lock_guard lock(mutex_); const auto at = kept_.find(method); return at == kept_.end() ? 0 : at->second; }
         // When the engine's first controls.changed since reset() passed, if one has.
@@ -131,6 +134,8 @@ namespace
                 const auto method = field(line, "\"method\":\"", '"'), id = field(line, "\"id\":", ',');
                 std::string refusal;
                 bool hold = false;
+                if(method == "notes.send")
+                    { std::lock_guard lock(mutex_); notes_.push_back({line.find("\"on\":true") != std::string::npos, std::stoi(field(line, "\"key\":", ',')), std::stoi(field(line, "\"channel\":", '}')), std::stod(field(line, "\"velocity\":", ','))}); }
                 { std::lock_guard lock(mutex_); ++counts_[method]; if(p.epoch < epoch_) ++kept_[method]; if(const auto at = refusals_.find(method); at != refusals_.end()) refusal = at->second; hold = !p.held.empty() || stalls_.count(method); }
                 if(hold) { p.held += line; continue; }
                 const bool refused = !refusal.empty() && !id.empty();
@@ -178,6 +183,7 @@ namespace
         std::map<std::string, std::string> refusals_; // method: the error it is answered with
         std::set<std::string> stalls_;
         std::optional<std::chrono::steady_clock::time_point> pushed_;
+        std::vector<Note> notes_;
         std::thread thread_;
     };
 
@@ -225,12 +231,14 @@ int main(int argc, char** argv)
         auto server = std::make_unique<LocalServer>(*session);
         server->listen(socket.string());
         std::atomic<bool> running = true, holdRequests = false, jobHeld = false, forcedHold = false;
+        std::atomic<int> inputs = -1; // 0: the KeyLab unplugged, 1: plugged in again, on the session's thread
         std::thread control([&] {
             std::array<float, 128> l{}, r{}; float* out[2]{l.data(), r.data()};
             while(running)
             {
                 server->poll(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()));
                 session->service();
+                if(const int plugged = inputs.exchange(-1); plugged >= 0) { auto now = session->sessionStatus(); now.midiInputs = plugged ? status.midiInputs : std::vector<MidiEndpoint>{}; session->setHostStatus(now); }
                 session->process(nullptr, 0, out, 2, 128);
                 // The test leaves a job in flight: while its own connection shows, stop
                 // answering, so its calls wait, as a long engine call does. A job asked behind
@@ -336,6 +344,101 @@ int main(int argc, char** argv)
                 snapshot(view, "part-channel");
                 std::filesystem::remove_all(folder.getFullPathName().toStdString());
             }
+            // Play's keyboard on the desktop: hidden while a MIDI keyboard is connected, shown
+            // without one. A click, a drag and a computer key play the selected part's channel and
+            // let go; a text field taking focus lets go too, and keeps its keys.
+            {
+                auto channelOf = [&] { for(const auto& p : standalone::readParts(engine.graph()).parts) if(p.id == lead) return p.channel; return -2; };
+                engine.edit([&](Control& c) { standalone::setChannel(c, lead, 3); });
+                check(wait([&] { return channelOf() == 3; }), "the lead takes channel 3");
+                standalone::DesktopShell desktop(engine, argv[2], standalone::InputMode::Mouse);
+                desktop.setSize(1400, 900);
+                desktop.addToDesktop(juce::ComponentPeer::windowIsTemporary); desktop.setTopLeftPosition(-6000, -6000); desktop.setVisible(true); // showing: Play reads nothing while hidden
+                auto& play = desktop.play();
+                play.offerKeys({});
+                settle();
+                check(play.keys() && !play.keysShown(), "the KeyLab connected: no keyboard on screen");
+                inputs = 0;
+                check(wait([&] { return play.keysShown(); }), "the KeyLab unplugged: the keyboard shows");
+                play.select(lead); settle();
+                auto& board = play.keys()->keyboard();
+                check(play.keys()->lowest() <= 60 && play.keys()->highest() >= 72 && board.getKeyWidth() >= 22, "middle C and the octave over it, keys at least 22 wide");
+                snapshot(desktop, "play-keyboard");
+                auto mouse = juce::Desktop::getInstance().getMainMouseSource();
+                const auto now = juce::Time::getCurrentTime();
+                auto at = [&](int note, float down) { const auto r = board.getRectangleForKey(note); return juce::Point<float>(r.getCentreX(), r.getY() + r.getHeight() * down); };
+                auto event = [&](juce::Point<float> p, juce::Point<float> from, bool dragged) { return juce::MouseEvent(mouse, p, juce::ModifierKeys::leftButtonModifier, 1, 0, 0, 0, 0, &board, &board, now, from, now, 1, dragged); };
+                auto click = [&](int note, float down) { const auto p = at(note, down); board.mouseDown(event(p, p, false)); board.mouseUp(event(p, p, false)); };
+                auto notes = [&](size_t count) { wait([&] { return tap.notes().size() >= count; }); settle(); const auto n = tap.notes(); std::string out; for(const auto& x : n) out += std::string(x.on ? " on " : " off ") + std::to_string(x.key) + "/" + std::to_string(x.channel); return std::pair{n, out}; };
+                // The mouse with the shell on screen, over every window: JUCE's keyboard hit-tests
+                // through the window, so one off screen or covered would hear no click.
+                desktop.setAlwaysOnTop(true);
+                desktop.setTopLeftPosition(juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea.getPosition());
+                settle();
+                // A click low on middle C, then high on it: on and off on the lead's channel 3 (2 on the wire), the lower louder.
+                tap.reset();
+                click(60, .9f); click(60, .3f);
+                {
+                    const auto [n, said] = notes(4);
+                    check(n.size() == 4 && n[0].on && n[0].key == 60 && n[0].channel == 2 && !n[1].on && n[1].key == 60 && n[1].channel == 2 && n[2].on && !n[3].on, "a click plays middle C on the lead's channel and lets go:" + said);
+                    check(n.size() == 4 && n[0].velocity > n[2].velocity, "lower on the key is louder");
+                }
+                // A drag from C to D, let go off the keyboard: each key on and off, nothing held.
+                tap.reset();
+                {
+                    const auto from = at(60, .8f), to = at(62, .8f), out = to.translated(0, float(board.getHeight()) + 40);
+                    board.mouseDown(event(from, from, false)); board.mouseDrag(event(to, from, true)); board.mouseUp(event(out, from, true));
+                    const auto [n, said] = notes(4);
+                    check(n.size() == 4 && n[0].on && n[0].key == 60 && !n[1].on && n[1].key == 60 && n[2].on && n[2].key == 62 && !n[3].on && n[3].key == 62, "a drag plays across the keys, and a release off them lets go:" + said);
+                }
+                // The window going behind (Main calls this) lets go of a key held with the mouse.
+                tap.reset();
+                board.mouseDown(event(at(64, .8f), at(64, .8f), false));
+                play.releaseKeys();
+                {
+                    const auto [n, said] = notes(2);
+                    check(n.size() == 2 && n[0].on && n[0].key == 64 && !n[1].on && n[1].key == 64, "letting go of the keys releases a held click:" + said);
+                }
+                board.mouseUp(event(at(64, .8f), at(64, .8f), false));
+                desktop.setAlwaysOnTop(false); desktop.setTopLeftPosition(-6000, -6000);
+                // The computer's A plays middle C, its repeats nothing more; let go, it is off. X plays an octave up; Cmd-A is the menus'.
+                tap.reset();
+                check(play.keyPressed(juce::KeyPress('a'), nullptr) && play.keyPressed(juce::KeyPress('a'), nullptr), "A is the keyboard's");
+                check(!play.keyPressed(juce::KeyPress('a', juce::ModifierKeys::commandModifier, 0), nullptr) && !play.keyPressed(juce::KeyPress(juce::KeyPress::spaceKey), nullptr), "Cmd-A and Space are left to the menus and the views");
+                play.keyStateChanged(false, nullptr); // A is not down
+                play.keyPressed(juce::KeyPress('x'), nullptr); play.keyPressed(juce::KeyPress('a'), nullptr); play.keyStateChanged(false, nullptr);
+                play.keyPressed(juce::KeyPress('z'), nullptr);
+                {
+                    const auto [n, said] = notes(4);
+                    check(n.size() == 4 && n[0].on && n[0].key == 60 && n[0].channel == 2 && !n[1].on && n[1].key == 60 && n[2].on && n[2].key == 72 && !n[3].on && n[3].key == 72, "a computer key plays and lets go, X an octave up:" + said);
+                }
+                // A text field taking focus lets go of what is held, and its keys type, not play.
+                juce::TextEditor field;
+                desktop.addAndMakeVisible(field); field.setBounds(10, 10, 120, 24);
+                tap.reset();
+                play.keyPressed(juce::KeyPress('s'), nullptr);
+                field.grabKeyboardFocus(); settle();
+                check(play.keyPressed(juce::KeyPress('d'), nullptr) == false, "with a text field focused, D is the field's");
+                {
+                    const auto [n, said] = notes(2);
+                    check(field.hasKeyboardFocus(false) && n.size() == 2 && n[0].on && n[0].key == 62 && !n[1].on && n[1].key == 62, "focus moving to a text field lets go, and plays nothing:" + said);
+                }
+                desktop.removeChildComponent(&field);
+                // A narrow window: fewer octaves, not narrower keys.
+                desktop.setSize(500, 700); settle();
+                check(play.keys()->highest() - play.keys()->lowest() == 24 && board.getKeyWidth() >= 22, "500 wide: two octaves, keys still 22 wide: " + std::to_string(board.getKeyWidth()));
+                // Chosen in the View menu: kept in the configuration, and over what the inputs say.
+                inputs = 1;
+                check(wait([&] { return !play.keysShown(); }), "the KeyLab back: the keyboard hides");
+                play.offerKeys(true); check(play.keysShown(), "chosen shown, it shows with the KeyLab connected");
+                play.offerKeys(false); check(!play.keysShown(), "chosen hidden, it hides");
+                const auto configuration = juce::File::createTempFile("oscairn-keys-config");
+                check(!standalone::readKeysShown(configuration), "no choice made at first");
+                standalone::writeKeysShown(configuration, false);
+                check(standalone::readKeysShown(configuration) == false, "a choice is kept");
+                configuration.deleteRecursively();
+                engine.edit([&](Control& c) { standalone::setChannel(c, lead, 0); });
+                check(wait([&] { return channelOf() == 0; }), "the lead on any channel again");            }
             // The same choice in Routing, on a note wire drawn by hand from the keys, following undo and edits from elsewhere.
             {
                 NodeId synth = 0;

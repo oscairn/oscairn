@@ -288,6 +288,11 @@ namespace oscairn
         // asNew: always a new one, with its own ID. Returns its ID.
         virtual std::string savePerformanceToLibrary(const std::string& name, bool asNew = false) = 0;
         virtual void loadPerformanceFromLibrary(const std::string& id) = 0;
+        // The app's start (RFC 0028): opens the Performance last opened or saved on this device (the
+        // data folder's library/last.json), as any open, after the app has set the budget; from
+        // then on each one opened or saved is remembered. An engine that has opened, saved or edited
+        // anything keeps what it has. Returns why it did not open, Untitled staying, or empty.
+        virtual std::string reopenPerformance() = 0;
         // Whether a path is within the library's own folders (its Performances and installed
         // libraries), which an app may name (RFC 0022); false where there is no library.
         virtual bool inLibrary(const std::string&) { return false; }

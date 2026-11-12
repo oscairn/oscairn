@@ -163,12 +163,15 @@ namespace oscairn::standalone
                 // A notice of what happened goes by itself; one asking for a choice stays.
                 juce::Timer::callAfterDelay(8000,[safe=juce::Component::SafePointer<Window>(this),text=n.text]{if(safe && safe->appNotice_->text()==text)safe->appNotice_->show({});});
             };
+            // Why the last Performance did not open at start (RFC 0028), said as an app's notice is.
+            engine_.onReopened=[this](const std::string& why){if(!why.empty())appProcesses_->onNotice({{},juce::String::fromUTF8(why.c_str())});};
             show( first );
             setVisible( true );
         }
 
         ~Window() override
         {
+            engine_.onReopened={};
             engine_.openBrowser={};
             engine_.openPads={};
             engine_.openParts={};
@@ -988,6 +991,10 @@ namespace oscairn::standalone
                 if( !args.contains( "--snapshot" ) )
                 {
                     controllers_ = std::make_unique<Controllers>( *engine_, controlGroups( profile ), controllers );
+                    // The Performance last open, now the budget is set (RFC 0028, RFC 0025), off this thread; the
+                    // engine remembers it. Only a separate engine opens Performances (not --in-process); --play
+                    // plays the startup instrument's sequencer, which an open would stop.
+                    if( engine_->canPrepareSounds() && !args.contains( "--play" ) ) { SoundAction reopen; reopen.kind = SoundAction::ReopenPerformance; engine_->soundAction( reopen ); }
                 }
                 if( const auto app = argument( args, "--app" ); app.isNotEmpty() ) window_->openApp( app.toLowerCase() );
                 if( const auto view = argument( args, "--view" ); view.isNotEmpty() )

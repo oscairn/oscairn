@@ -340,6 +340,7 @@ void Session::savePerformance(const std::string& directory) {
     info_=writeDocument(directory,info_,nullptr,nullptr);
     // A root for garbage collection (RFC 0009 step 4): what it uses stays installed.
     assets_.addRoot(directory,assetsOf(fs::path(directory)/"performance.json"));
+    remember(directory);
 }
 
 // The samples a saved Performance's or Sound's plugins use, as its document lists them.
@@ -660,6 +661,7 @@ void Session::loadPerformance(const std::string& directory) {
     open(*prepared,seamless);
     if(!seamless)warm_.clear(); // it cut for want of room: none kept warm (RFC 0025)
     evictOpportunistic();
+    if(!keepInstances_)remember(root); // an audition is remembered only once kept
 }
 
 std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool playing,bool all,uint64_t incoming) {
@@ -1913,6 +1915,7 @@ std::string Session::savePerformanceToLibrary(const std::string& name,bool asNew
         fs::rename(folder,old);fs::rename(fresh,folder);fs::remove_all(old);
     }
     l.rescan();l.used(info_.id);
+    remember(folder);
     return info_.id;
 }
 
@@ -2425,6 +2428,43 @@ void Session::loadPerformanceFromLibrary(const std::string& id) {
     if(!item || item->kind!="performance")bad("no such Performance in the library");
     loadPerformance(item->path);
     l.used(id);
+}
+
+void Session::remember(const fs::path& folder) {
+    opened_=true;
+    if(last_.empty())return;
+    try{writeAtomically(last_,"{\"performance\":"+quote(fs::weakly_canonical(folder).string())+"}\n");}
+    catch(const std::exception& e){std::fprintf(stderr,"oscairn: the open Performance is not remembered: %s\n",e.what());}
+}
+
+std::string Session::reopenPerformance() {
+    // Once, in an engine that has opened, saved and edited nothing: one still running when a UI comes back keeps what it has.
+    const bool first=last_.empty();
+    last_=dataHome()/"library"/"last.json";
+    if(!first || opened_ || !undo_.empty())return {};
+    std::string folder;
+    try{const auto bytes=state_files::read(last_,64*1024);const std::unique_ptr<json_value_s,decltype(&std::free)> doc(json_parse(bytes.data(),bytes.size()),&std::free);folder=text(field(doc.get(),"performance"));}
+    catch(const std::exception&){return {};} // none remembered
+    try{
+        std::error_code e;
+        if(!fs::is_regular_file(fs::path(folder)/"performance.json",e))throw std::runtime_error("it is no longer there");
+        // Read beside Untitled first (over the budget, refused), so one needing a plugin that is not here
+        // leaves Untitled playing, not its stand-ins. shortcut: one that fits only as a cut is read at the
+        // load instead and opens with its stand-ins, as any open does; check after the load if that matters.
+        if(preparePerformance(folder) && prepared_)
+            for(const auto& [node,name]:prepared_->names)if(const auto why=prepared_->next->host(node).failure();!why.empty())
+                throw std::runtime_error("its plugin "+name+": "+why.substr(0,why.find("; its place"))); // a stand-in's place is not kept here: it is not opened
+        loadPerformance(folder);
+        clearHistory(); // undo starts from it, as from the startup instrument
+        return {};
+    }
+    catch(const std::exception& x){
+        prepared_.reset();preparedOpportunistic_=false;
+        std::string why=x.what();if(why.starts_with("Performance: "))why.erase(0,13);
+        auto notice="The last Performance, "+fs::path(folder).filename().string()+", did not open, so Untitled is open: "+why;
+        notices_.push_back(notice);std::fprintf(stderr,"oscairn: %s\n",notice.c_str());
+        return notice;
+    }
 }
 
 bool Session::inLibrary(const std::string& path) {

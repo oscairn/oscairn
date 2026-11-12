@@ -721,6 +721,9 @@ namespace oscairn
     void RemoteControl::loadPerformanceFromLibrary(const std::string& id) {
         impl_->call("library.load","{\"id\":"+quote(id)+'}',30000);impl_->refresh();
     }
+    std::string RemoteControl::reopenPerformance() {
+        auto d=impl_->call("performance.reopen","{}",30000);impl_->refresh();return string(field(field(d.get(),"result"),"notice"));
+    }
     bool RemoteControl::supportsState(NodeId node) const {
         auto d=impl_->call("state.info","{\"node\":"+std::to_string(node)+'}');return boolean(field(field(d.get(),"result"),"supported"));
     }

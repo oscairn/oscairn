@@ -462,10 +462,12 @@ namespace oscairn::standalone
             if(remote_)remote_->forgetFetches();
             takesRead_=metersRead_=wireMetersRead_=historyRead_=performanceRead_=windowsRead_=assignmentsRead_=auditionRead_=0;audition_.reset();performance_.reset(); // the open Performance and an audition show once read
         }
-        const bool loaded=soundJobKind_==SoundAction::LoadPerformance || soundJobKind_==SoundAction::LoadFromLibrary || soundJobKind_==SoundAction::AuditionStart || soundJobKind_==SoundAction::AuditionStop;
+        const bool reopened=soundJobKind_==SoundAction::ReopenPerformance;
+        const bool loaded=soundJobKind_==SoundAction::LoadPerformance || soundJobKind_==SoundAction::LoadFromLibrary || soundJobKind_==SoundAction::AuditionStart || soundJobKind_==SoundAction::AuditionStop || reopened;
         if(soundJobKind_==SoundAction::Replace || loaded)textCache_.clear();
         if(result.error.empty() && (soundJobKind_==SoundAction::SavePerformance || soundJobKind_==SoundAction::SaveToLibrary))soundMessage_="Performance saved.";
-        if(result.error.empty() && loaded)soundMessage_="Performance opened. Press Play or play a note.";
+        if(result.error.empty() && loaded && !reopened)soundMessage_="Performance opened. Press Play or play a note.";
+        if(reopened && onReopened)onReopened(result.error.empty()?result.message:result.error);
         if(result.error.empty() && soundJobKind_==SoundAction::SaveSound)soundMessage_="Sound saved.";
         if(result.error.empty() && (soundJobKind_==SoundAction::LoadSound || soundJobKind_==SoundAction::PartFromSound)){textCache_.clear();soundMessage_="Sound loaded.";}
         if(result.error.empty() && soundJobKind_==SoundAction::ImportPerformance){textCache_.clear();soundMessage_="Performance imported.";}

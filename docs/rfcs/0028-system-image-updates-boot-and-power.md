@@ -62,6 +62,16 @@ The path to first sound: kernel, the engine and its audio, the last Performance;
 rest load after. Plugins are prepared in the order the Performance needs them; worker processes
 (RFC 0010) start in parallel. Measured on each product, on every release.
 
+The last Performance, built 2026-11-11: the engine remembers the one last opened or saved in the
+data folder (`library/last.json`) and opens it when the app asks (`performance.reopen`), once the
+app has set the budget (RFC 0025), so it is admitted as any open is; the app asks as its window
+opens, off its message thread, and the window shows Untitled until it has opened (not with
+`--snapshot` or `--play`, nor `--in-process`, whose engine opens no Performances). One that is gone, unreadable, over the budget or
+needing a plugin that is not installed leaves Untitled open, and the app says why. An engine still
+running when the app comes back keeps what it has. Until a budget is set the engine knows none, so
+it opens nothing before the app has connected; the boot ordering above (the last Performance before
+the UI) waits for the engine to know its budget at start.
+
 The image also sets up memory for the engine (proposed in
 [RFC 0025](0025-resource-budgets.md#linux)): a cgroup v2 subtree delegated to it, a locked-memory
 limit (`RLIMIT_MEMLOCK`) high enough for the engine and its workers, their out-of-memory

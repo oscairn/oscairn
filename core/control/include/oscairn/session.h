@@ -66,6 +66,7 @@ namespace oscairn
         uint32_t libraryRescan() override {return library().rescan();}
         std::string savePerformanceToLibrary(const std::string& name, bool asNew = false) override;
         void loadPerformanceFromLibrary(const std::string& id) override;
+        std::string reopenPerformance() override;
         bool inLibrary(const std::string& path) override;
         Archive archiveContents(const std::string& file) override;
         Installed installArchive(const std::string& file, bool asLibrary, const std::vector<std::string>& items = {}, bool acceptUnsignedCode = false) override;
@@ -600,6 +601,11 @@ namespace oscairn
         PerformanceInfo info_; // the open Performance's; its ID is made at its first save
         std::unique_ptr<Library> library_; // made at first use, so a session without the library never reads the user's folders
         Library& library() {if(!library_)library_=std::make_unique<Library>();return *library_;}
+        // The Performance last opened or saved, remembered in last_ once reopenPerformance has set it,
+        // so tests and tools that never ask never write the user's data folder. Control thread.
+        std::filesystem::path last_;
+        bool opened_ = false; // a Performance opened or saved in this engine
+        void remember(const std::filesystem::path& folder);
         PerformanceInfo writeDocument(const std::string& directory,PerformanceInfo info,const Part* sound,std::vector<std::string>* left);
         std::vector<std::string> loadSoundInto(uint32_t part,const std::filesystem::path& folder);
         // A document's nodes (a Performance's or a Sound's), each its saved plugin or, not here, its stand-in.

@@ -168,6 +168,7 @@ namespace oscairn::standalone
         std::string refusal() const { return !connected() ? "The engine is not running." : soundBusy() ? "The engine is busy; try again in a moment." : std::string(); }
         bool canPrepareSounds() const { return !socketPath_.empty() || app_; }
         void soundAction(SoundAction action);
+        std::function<void(const std::string& notice)> onReopened; // a ReopenPerformance job done: why it did not open, or empty
         std::function<void()> openBrowser;
         // The library (RFC 0021); nothing while the engine is busy loading or saving, so ask again.
         std::optional<Control::LibraryResult> library(const Control::LibraryQuery& query) const;

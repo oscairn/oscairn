@@ -102,6 +102,7 @@ namespace oscairn::standalone
             return seamless ? std::string() : cut;
         }
         if(action.kind == SoundAction::SaveToLibrary){control.savePerformanceToLibrary(action.choice.name,action.asNew);return {};}
+        if(action.kind == SoundAction::ReopenPerformance) return control.reopenPerformance();
         if(action.kind == SoundAction::LoadFromLibrary){
             Control::LibraryQuery one; one.id = action.libraryId; one.kind = "performance";
             bool seamless = true; std::string path;

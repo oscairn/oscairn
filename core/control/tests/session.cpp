@@ -355,6 +355,84 @@ namespace
         unsetenv( "OSCAIRN_DATA_HOME" );
         std::filesystem::remove_all( home );
     }
+
+    // The app's start (RFC 0028): the Performance last opened or saved comes back, once per engine;
+    // one that cannot open leaves Untitled, saying why.
+    void reopensLast( const char* synth )
+    {
+        namespace fs = std::filesystem;
+        const auto home = fs::temp_directory_path() / ( "oscairn-session-reopen-" + std::to_string( getpid() ) );
+        fs::remove_all( home );
+        fs::create_directories( home );
+        setenv( "OSCAIRN_DATA_HOME", home.c_str(), 1 );
+        const auto last = home / "library" / "last.json", saved = home / "Saved", other = home / "Other";
+        auto read = []( const fs::path& file ) { std::ifstream in( file ); return std::string( std::istreambuf_iterator<char>( in ), {} ); };
+        auto write = []( const fs::path& file, const std::string& text ) { std::ofstream( file, std::ios::trunc ) << text; };
+        auto remembers = [&]( const fs::path& folder ) { return read( last ).find( fs::weakly_canonical( folder ).string() ) != std::string::npos; };
+        auto nodes = []( const oscairn::Session& s ) { std::vector<oscairn::NodeId> ids; for( const auto& [id, name] : s.graphState().names ) ids.push_back( id ); return ids; };
+        auto edit = [&]( const fs::path& file, const std::string& from, const std::string& to ) {
+            auto text = read( file ); const auto at = text.find( from ); check( at != std::string::npos, "the saved document holds what the test changes" );
+            if( at != std::string::npos ) write( file, text.replace( at, from.size(), to ) ); };
+        {
+            oscairn::Session session( rate, block );
+            instrument( session, synth );
+            session.savePerformance( saved.string() );
+            check( !fs::exists( last ), "an engine never asked to reopen remembers nothing in the data folder" );
+        }
+        {
+            oscairn::Session session( rate, block );
+            check( session.reopenPerformance().empty() && nodes( session ).empty(), "with nothing remembered, Untitled stays and nothing is said" );
+            session.loadPerformance( saved.string() );
+            check( remembers( saved ), "once asked, an open is remembered" );
+            session.savePerformance( other.string() );
+            check( remembers( other ), "and a save" );
+        }
+        {
+            oscairn::Session session( rate, block );
+            check( session.reopenPerformance().empty() && nodes( session ).size() == 1, "the next start opens the last one saved" );
+            const auto opened = nodes( session );
+            check( session.reopenPerformance().empty() && nodes( session ) == opened, "an engine still running when the app comes back keeps it, not reloaded" );
+            check( session.history().undo.empty(), "undo starts from the reopened Performance" );
+            check( remembers( other ), "reopening it leaves it remembered" );
+        }
+        {
+            oscairn::Session session( rate, block );
+            session.loadPerformance( saved.string() );
+            const auto opened = nodes( session );
+            check( session.reopenPerformance().empty() && nodes( session ) == opened && remembers( other ), "nor is one that opened something before the app asked" );
+        }
+        fs::remove_all( other );
+        {
+            oscairn::Session session( rate, block );
+            const auto notice = session.reopenPerformance();
+            check( notice.find( "Other" ) != std::string::npos && notice.find( "no longer there" ) != std::string::npos && nodes( session ).empty(), "a missing one leaves Untitled, saying why" );
+            const auto notices = session.sessionStatus().notices;
+            check( std::find( notices.begin(), notices.end(), notice ) != notices.end(), "and the session's notices say so too" );
+        }
+        const auto broken = home / "Broken";
+        fs::copy( saved, broken, fs::copy_options::recursive );
+        edit( broken / "performance.json", "\"version\":13", "\"version\":99" );
+        write( last, "{\"performance\":\"" + broken.string() + "\"}\n" );
+        {
+            oscairn::Session session( rate, block );
+            check( session.reopenPerformance().find( "unsupported format version" ) != std::string::npos && nodes( session ).empty(), "one in a format this build does not read leaves Untitled, saying why" );
+        }
+        const auto missing = home / "Missing";
+        fs::copy( saved, missing, fs::copy_options::recursive );
+        const auto document = read( missing / "performance.json" );
+        const auto hint = document.find( "\"pathHint\":\"" ) + 12;
+        edit( missing / "performance.json", document.substr( hint, document.find( '"', hint ) - hint ), ( home / "gone.clap" ).string() );
+        write( last, "{\"performance\":\"" + missing.string() + "\"}\n" );
+        {
+            oscairn::Session session( rate, block );
+            const auto notice = session.reopenPerformance();
+            check( notice.find( "not installed" ) != std::string::npos && nodes( session ).empty(), "one needing a plugin that is not here leaves Untitled, not stand-ins, saying why" );
+            session.loadPerformance( missing.string() );
+            check( nodes( session ).size() == 1, "while opening it by hand still gives its stand-in (RFC 0006)" );
+        }
+        unsetenv( "OSCAIRN_DATA_HOME" );
+        fs::remove_all( home );
+    }
 }
 
 int main( int argc, char** argv )
@@ -366,6 +444,7 @@ int main( int argc, char** argv )
     clockOut();
     concurrentControl( argv[2] );
     revisionsNeverRepeat( argv[2] );
-    if( failures == 0 ) std::puts( "ok: control/session audio equivalence, pressure, clock in and out, validation, overflow and concurrent rendering" );
+    reopensLast( argv[2] );
+    if( failures == 0 ) std::puts( "ok: control/session audio equivalence, pressure, clock in and out, validation, overflow, concurrent rendering and reopening the last Performance" );
     return failures ? 1 : 0;
 }

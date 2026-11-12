@@ -641,7 +641,7 @@ it is refused to apps whatever they were granted.
 | `play` or `edit` | reading what plays: `transport.get`, `graph.get`, `params.list`, `params.get`, `params.text`, `pads.get`, `assignments.get`, `harmony.get`, `parts.meters`, `wires.meters`, `sounds.get`, `effects.resources`, `state.info`, `window.info`, `presets.list`, `properties.list`, `properties.get`; the `transport`, `params.changed`, `graph.changed` and `controls.changed` topics |
 | `edit` | the rest of `graph`, `parts`, `wires`, `params`, `scenes`, `controls`, `pads`, `edit`, `sounds`, `properties` and `assignments`; `master.set`, `effects.create`, `instruments.share`, `harmony.set`, `state.save`, `window.show` |
 | `library` | `library.*`, `performance.*`, `budget.estimate`, `audition.*`, `assets.*`, `record.*`; the `record` topic |
-| `system` | `packages.*`, `trust.*`, `keys.*`, `plugins.*`, `controllers.set`, `controllers.view`, `controllers.inputs`, `controllers.choose`, `controllers.ignore`, `midi.ignore`, `engine.attach`, `engine.release`, `budget.set`, `memory.*`, `audio.set` |
+| `system` | `packages.*`, `trust.*`, `keys.*`, `plugins.*`, `controllers.set`, `controllers.view`, `controllers.inputs`, `controllers.choose`, `controllers.ignore`, `midi.ignore`, `engine.attach`, `engine.release`, `budget.set`, `performance.reopen`, `memory.*`, `audio.set` |
 | `play`, `edit` or `system` | `controllers.get` and the `controllers` topic, which `RemoteControl` subscribes to |
 
 `controls`, `midi`, `audio`, `background`, `network` and `files` are accepted in a grant and
@@ -989,6 +989,16 @@ another, loading a different one, or an empty `directory` lets it go; preparing 
 prepared, unchanged since, keeps it and returns as it did. A folder saved over
 since it was prepared is read again at the load. Preparing takes as long as a load and blocks
 other control calls meanwhile; only the load gets faster.
+`performance.reopen` takes `{}` and returns `{"notice":""}`: at the app's start, once it has set
+the budget, the engine opens the Performance last opened or saved on this device (a library item,
+or a folder saved with `performance.save`), as `performance.load` would. The engine remembers it
+in the data folder's `library/last.json` (`{"performance":"/path"}`), from this call on, at each
+`performance.load`, `performance.save`, `library.load`, `library.save` and kept audition; an engine
+never asked remembers nothing. An engine that has opened, saved or edited anything before it is
+asked, or was asked before (one still running when the app comes back), keeps what it has. One
+that is gone, in a format this build does not read, over the budget, or needing a plugin that is
+not installed is not opened: Untitled stays and `notice` (also in `session.status`'s `notices`)
+says why.
 The current note/tail audio is not saved. Resource/state/format failures use `-32005`;
 malformed RPC arguments use `-32602`. These control-thread calls can take time; remote
 wrappers allow 30 seconds, and callers must reread the graph after a timeout before retrying

@@ -2390,6 +2390,33 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "performance.reopen",
+              "description": "At the app's start: the Performance last opened or saved on this device, once per engine; the result's notice says why it did not open, or is empty"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "performance.info"
             },
             "params": {

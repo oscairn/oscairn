@@ -35,12 +35,16 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
     p = subprocess.Popen([sys.argv[1], sys.argv[2], '--stdio'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          text=True, encoding='utf-8', env={**os.environ, 'OSCAIRN_DATA_HOME': temporary})
     try:
+        # The app's start (RFC 0028): nothing to reopen yet, and from now on what opens or saves is remembered.
+        assert rpc('performance.reopen') == {'notice': ''}
+        last = lambda: json.loads((home / 'library/last.json').read_text())['performance']
         assert rpc('library.query') == {'items': [], 'tags': [], 'total': 0, 'tagColors': [], 'hiddenTags': []}
         assert rpc('performance.info') == {'id': '', 'name': '', 'description': '', 'tags': [], 'color': ''}
         rpc('performance.setInfo', {'name': 'Warm Pad', 'description': 'slow strings', 'tags': ['pad', 'warm'], 'color': '#3a7bd5'})
         pad = rpc('library.save')['id']
         assert len(pad) == 16 and rpc('performance.info')['id'] == pad
         assert (home / 'Performances/Warm Pad.oscairn/performance.json').is_file()
+        assert last() == str((home / 'Performances/Warm Pad.oscairn').resolve())
         # Saving again keeps the ID and the folder.
         assert rpc('library.save')['id'] == pad and len(list((home / 'Performances').iterdir())) == 1
         # Save with a name renames it in place: the same ID and folder.
@@ -49,8 +53,10 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         copy = rpc('library.save', {'name': 'Warm Pad 2', 'new': True})['id']
         assert copy != pad and rpc('library.query')['total'] == 2
         assert (home / 'Performances/Warm Pad 2.oscairn/performance.json').is_file()
+        assert last().endswith('Warm Pad 2.oscairn')
         rpc('library.load', {'id': pad})
-        assert rpc('performance.info')['id'] == pad
+        assert rpc('performance.info')['id'] == pad and last().endswith('Warm Pad.oscairn')
+        assert rpc('performance.reopen') == {'notice': ''} and rpc('performance.info')['id'] == pad  # asked again, it keeps what is open
         manifest = home / 'Performances/Warm Pad 2.oscairn'
         for f in sorted(manifest.rglob('*'), reverse=True):
             f.unlink() if f.is_file() else f.rmdir()
@@ -150,6 +156,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         # Importing a Performance (RFC 0021): what it holds, then one chosen part.
         exported = home / 'export.oscairn'
         rpc('performance.save', {'directory': str(exported)})
+        assert last() == str(exported.resolve())
         contents = rpc('performance.contents', {'directory': str(exported)})
         held = contents['parts']
         assert contents['scenes'] == []

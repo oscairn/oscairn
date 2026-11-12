@@ -24,7 +24,7 @@ namespace oscairn::standalone
     struct SoundAction
     {
         enum Kind { Refresh, Prepare, Select, Discard, BrightnessLocks, Replace, SavePerformance, LoadPerformance, SaveToLibrary, LoadFromLibrary, SaveSound, LoadSound, PartFromSound, ImportPerformance,
-                    ExportPerformance, InstallArchive, AuditionStart, AuditionStop, PrepareFromLibrary, AddPluginBuild } kind = Refresh;
+                    ExportPerformance, InstallArchive, AuditionStart, AuditionStop, PrepareFromLibrary, AddPluginBuild, ReopenPerformance } kind = Refresh;
         NodeId node = 0;
         std::string pluginId;
         uint32_t context = 0, track = 0;

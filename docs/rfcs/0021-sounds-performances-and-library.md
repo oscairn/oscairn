@@ -1438,6 +1438,7 @@ Not built now (RFC 0019). The view model must allow:
 | Plugin presets | Where the plugin keeps them | The plugin's |
 | Index of all of the above | Under `OSCAIRN_DATA_HOME/library/` | Cache, rebuilt by scanning |
 | Favorites, recents, hidden tags, tag colors | One user file under `OSCAIRN_DATA_HOME/library/` | User data |
+| The Performance last opened or saved, reopened at the app's start (RFC 0028) | `OSCAIRN_DATA_HOME/library/last.json` | User data |
 | Samples a Sound uses | Asset libraries (RFC 0009), referenced, never copied | Assets |
 
 The folder names are a convention, as `.oscairn` is today: the reader recognizes the

@@ -40,7 +40,12 @@ namespace oscairn
         if(!audition_) return;
         auto a = std::move(*audition_);
         audition_.reset();
-        if(keep) { library().used(a.what.id); return; } // kept: it was used; what was set aside goes (a Performance's is already ringing out)
+        if(keep) // kept: it was used; what was set aside goes (a Performance's is already ringing out)
+        {
+            library().used(a.what.id);
+            if(const auto* item = library().find(a.what.id); item && a.what.kind == "performance") remember(item->path);
+            return;
+        }
         // The tried plugins ring out where they are, as the last Performance's do after a change:
         // their sound stays, their notes drain, nothing new reaches them.
         std::set<NodeId> tried;

@@ -281,7 +281,7 @@ target_link_libraries(oscairn_ui_waits_test PRIVATE oscairn_audio_host oscairn_h
 target_compile_definitions(oscairn_ui_waits_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_ui_waits_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn-plugin-scan)
 add_test(NAME ui-waits COMMAND oscairn_ui_waits_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan>)
-set_tests_properties(ui-waits PROPERTIES TIMEOUT 120)
+set_tests_properties(ui-waits PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE) # measures the app's latency against the clock: alone
 add_test(NAME desktop-pad-editor COMMAND oscairn_pad_editor_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan>)
 # A crashing plugin in a Performance leaves the other parts playing and is reported (RFC 0010).
 juce_add_console_app(oscairn_plugin_crash_test PRODUCT_NAME "Oscairn Plugin Crash Test")

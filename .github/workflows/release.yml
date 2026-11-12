@@ -37,7 +37,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prerelease=$(case "$GITHUB_REF_NAME" in *-*) echo --prerelease;; esac)
+          prerelease=$(case "$GITHUB_REF_NAME" in (*-*) echo --prerelease;; esac)
           gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
             gh release create "$GITHUB_REF_NAME" --draft $prerelease --verify-tag --title "Oscairn ${GITHUB_REF_NAME#v}" --generate-notes
           gh release upload "$GITHUB_REF_NAME" build-release/*.dmg --clobber

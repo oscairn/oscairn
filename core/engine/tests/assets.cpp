@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/assets.h"
 #include "../../plugin-host/src/StateFiles.h"
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <thread>
 using namespace oscairn;
 namespace fs = std::filesystem;
 void check(bool ok, const std::string& why) { if(!ok) throw std::runtime_error(why); }
@@ -75,5 +77,21 @@ int main() { try {
         auto ref = assets::Ref{a, "a.wav", ""}; second.resolve(ref); check(ref.sha256.size() == 64, "a library registered by another store resolves");
         (void)b;
     }
-    std::cout << "ok: SHA-256 vectors, registered folders, content-hash resolution, path safety, import and persistence\n";
+    // An asset library staged on another thread (a package job) and moved into place whole: the
+    // store keeps its files, the staged tree is gone, and registering it reads no file again: the
+    // index holds each hash as given (the caller checked it; one given wrong shows that here).
+    {
+        assets::Store shared(temp.path / "data" / "assets");
+        write(temp.path / "unpacked/a.wav", "a"); write(temp.path / "unpacked/sub/b.wav", "b");
+        const std::string given = assets::sha256(std::string_view("not b"));
+        const std::vector<assets::Store::LibraryFile> files{{"a.wav", assets::sha256(std::string_view("a")), temp.path / "unpacked/a.wav"}, {"sub/b.wav", given, temp.path / "unpacked/sub/b.wav"}};
+        std::thread([&] { assets::Store(temp.path / "data" / "assets").stageLibrary(files, temp.path / "data" / ".staged"); }).join();
+        shared.installLibrary("org.test.staged", "1", "Staged", files, {}, temp.path / "data" / ".staged");
+        const auto installed = fs::path(shared.libraryRoot("org.test.staged", {}));
+        const auto hashes = shared.hashes("org.test.staged");
+        check(!fs::exists(temp.path / "data" / ".staged") && fs::is_regular_file(installed / "sub/b.wav") && fs::is_regular_file(shared.root() / "store" / given),
+              "a staged library is moved into place whole, its files in the store");
+        check(std::count(hashes.begin(), hashes.end(), given) == 1, "and registered with the hashes given, no file read again");
+    }
+    std::cout << "ok: SHA-256 vectors, registered folders, content-hash resolution, path safety, import and persistence, staged libraries\n";
 } catch(const std::exception& e) { std::cerr << e.what() << '\n'; return 1; } }

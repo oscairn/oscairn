@@ -229,12 +229,10 @@ namespace oscairn::assets
         if(version.empty() || (!minVersion.empty() && older(version, minVersion))) return {};
         return (root().parent_path() / "AssetLibraries" / id / version).string();
     }
-    void Store::installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files, const Terms& given)
+    void Store::stageLibrary(const std::vector<LibraryFile>& files, const fs::path& tree) const
     {
-        const auto store = root() / "store", folder = root().parent_path() / "AssetLibraries" / id;
-        const auto partial = folder / ("." + version + ".partial");
+        const auto store = root() / "store";
         std::error_code e;
-        fs::remove_all(partial, e);
         for(const auto& f : files)
         {
             checkRelative(f.path);
@@ -242,18 +240,27 @@ namespace oscairn::assets
             if(!fs::exists(kept))
             {
                 fs::create_directories(store);
-                const auto incoming = store / ("." + f.sha256 + ".partial");
+                const auto incoming = store / ("." + f.sha256 + "." + randomId() + ".partial"); // its own: another thread's Store may place the same file
                 fs::rename(f.from, incoming, e);
                 if(e) { e.clear(); fs::copy_file(f.from, incoming, fs::copy_options::overwrite_existing); }
                 fs::permissions(incoming, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read);
                 fs::rename(incoming, kept);
             }
-            const auto to = partial / f.path;
+            const auto to = tree / f.path;
             fs::create_directories(to.parent_path());
             fs::create_hard_link(kept, to, e);
             if(e) { e.clear(); fs::copy_file(kept, to); fs::permissions(to, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read); } // another file system: a copy
         }
-        fs::create_directories(partial);
+        fs::create_directories(tree);
+    }
+    void Store::installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files, const Terms& given, const fs::path& staged)
+    {
+        const auto folder = root().parent_path() / "AssetLibraries" / id;
+        const auto partial = folder / ("." + version + ".partial");
+        std::error_code e;
+        fs::remove_all(partial, e);
+        if(staged.empty()) stageLibrary(files, partial);
+        else { fs::create_directories(folder); fs::rename(staged, partial); } // made by stageLibrary off this thread, on this file system
         // The new tree into place, then the old one out: a reader sees one whole version or the other.
         std::vector<fs::path> old;
         for(const auto& entry : fs::directory_iterator(folder))
@@ -261,6 +268,13 @@ namespace oscairn::assets
         for(auto& o : old) { const auto going = folder / ("." + o.filename().string() + ".going"); fs::remove_all(going, e); fs::rename(o, going); o = going; }
         fs::rename(partial, folder / version);
         for(const auto& o : old) fs::remove_all(o, e);
+        // Each file's hash is known (the store keeps it by its SHA-256): registering takes it from
+        // the index rather than reading every file again, which on the control thread (a package
+        // job's install) kept every client waiting.
+        {
+            std::lock_guard lock(mutex_); auto& entries = index(id);
+            for(const auto& f : files) { const auto at = folder / version / f.path; entries[fs::path(f.path).generic_string()] = {fs::file_size(at), modified(at), f.sha256}; }
+        }
         registerFolder(folder / version, id);
         if(!name.empty()) { std::lock_guard lock(mutex_); RegistryLock registry(root()); loaded_ = false; load(); libraries_[id].name = name; save(); }
         // Its terms ("license<TAB>redistribute<TAB>dependency") and license texts.

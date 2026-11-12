@@ -422,6 +422,13 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
                 unpack(*library,*release);
                 if(unpacked.back().first.kind!="asset")throw std::runtime_error("refused: "+d.id+" is not an asset library");
             }
+            // An asset library's files into the store and its tree of links, made here, a file at a
+            // time: the control thread moves the tree into place whole (installUnpacked).
+            for(const auto& [got,into]:unpacked)if(got.kind=="asset"){
+                std::vector<assets::Store::LibraryFile> files;
+                for(const auto& a:got.assets)files.push_back({a.path,a.sha256,into/"Assets"/a.path});
+                installed.stageLibrary(files,into/"Staged");
+            }
         }catch(const std::exception& x){error=x.what();for(const auto& [p,into]:unpacked){std::error_code e;fs::remove_all(into,e);}unpacked.clear();}
         std::lock_guard lock(w->mutex);
         // A folder holding a copy of a repository this device ships (a USB drive, or the packages

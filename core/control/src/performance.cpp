@@ -1973,7 +1973,8 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         if(p.kind=="asset" && !checkOnly){
             std::vector<assets::Store::LibraryFile> files;
             for(const auto& a:p.assets)files.push_back({a.path,a.sha256,into/"Assets"/a.path});
-            assets_.installLibrary(p.id,p.assetVersion,p.name,files,{p.license,redistributable(p.license,p.redistribute),dependency,into/"Licenses"});
+            std::error_code e; // a package job staged its tree (packages.cpp); anything else is staged here
+            assets_.installLibrary(p.id,p.assetVersion,p.name,files,{p.license,redistributable(p.license,p.redistribute),dependency,into/"Licenses"},fs::is_directory(into/"Staged",e)?into/"Staged":fs::path());
             out.added=uint32_t(files.size());
         }
         // A plugin package's asset libraries: each one missing, or older than it needs, is said.

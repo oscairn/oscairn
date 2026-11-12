@@ -46,7 +46,12 @@ namespace oscairn::assets
         struct LibraryFile { std::string path, sha256; std::filesystem::path from; };
         // What its package says of it (LibraryTerms above).
         using Terms = LibraryTerms;
-        void installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files, const Terms& terms = {});
+        // `staged`: the tree stageLibrary made of these files (off the control thread, on the data
+        // folder's file system), moved into place whole; empty: made here.
+        void installLibrary(const std::string& id, const std::string& version, const std::string& name, const std::vector<LibraryFile>& files, const Terms& terms = {}, const std::filesystem::path& staged = {});
+        // The files into the store, as installLibrary keeps them, and a tree of links to them at
+        // `tree`: the slow part of an install (a file at a time), which may run on another thread.
+        void stageLibrary(const std::vector<LibraryFile>& files, const std::filesystem::path& tree) const;
         Terms libraryTerms(const std::string& id) const;
         // The IDs of the libraries installed from asset packages.
         std::vector<std::string> installedLibraries() const;

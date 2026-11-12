@@ -37,6 +37,15 @@ namespace oscairn::standalone
     /// The question before installing the repository's build over a different one: both builds,
     /// each by its archive's SHA-256 and signer, where known.
     juce::String replaceQuestion(const Offer& offer);
+    /// The question when an install is refused for plugin code this device does not trust (RFC
+    /// 0006, RFC 0031), told apart by each build's signer in the refusal (`installed.code`):
+    /// every one signed by `publisherKey`, the key the repository's signed index names as the
+    /// publisher's (vouched): Trust and install, trusting it for plugins, or Cancel; one signed by a
+    /// key no one vouches for: Trust this key, Install anyway (this once) or Cancel; one unsigned:
+    /// Install anyway or Cancel. Keys by their fingerprint. trust and anyway: the result of the
+    /// button that does it, -1 when there is none; keys: the public keys trusting trusts.
+    struct CodeQuestion { juce::String title, message; juce::StringArray buttons; int trust = -1, anyway = -1; std::vector<std::string> keys; };
+    CodeQuestion codeQuestion(const Control::PackageJob& refused, const std::string& publisher, const std::string& publisherKey);
 
     /// The Catalog (RFC 0031), an interim view in the Library until the Catalog app
     /// (oscairn.catalog) exists: the enabled repositories' packages holding Performances, Sounds

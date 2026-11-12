@@ -76,6 +76,45 @@ namespace oscairn::standalone
                "\n\nInstalling the repository's build replaces the installed one.";
     }
 
+    CodeQuestion codeQuestion(const Control::PackageJob& refused, const std::string& publisher, const std::string& publisherKey)
+    {
+        juce::StringArray all, unsigned_, strangers; // every build refused; those unsigned; the keys no one vouches for
+        std::vector<std::string> keys;
+        for(const auto& c : refused.installed.code)
+        {
+            if(c.status != "unknown" && c.status != "unsigned") continue; // trusted, or revoked (never installed)
+            all.addIfNotAlreadyThere(text(c.name) + " " + text(c.version));
+            if(c.status == "unsigned") unsigned_.addIfNotAlreadyThere(text(c.name) + " " + text(c.version));
+            else if(publisherKey.empty() || c.key != publisherKey) strangers.addIfNotAlreadyThere("key " + fingerprint(c.key));
+            if(c.status == "unknown" && !c.publicKey.empty() && std::find(keys.begin(), keys.end(), c.publicKey) == keys.end()) keys.push_back(c.publicKey);
+        }
+        const auto who = text(publisher.empty() ? std::string("this publisher") : publisher), repository = text(refused.name.empty() ? std::string("this repository") : refused.name);
+        const auto code = "The plugin code in this package (" + all.joinIntoString(", ") + ")";
+        const juce::String risk = "\n\nA plugin runs as a program on this device, with your access to its files and network. Install it only if you know where it came from.";
+        CodeQuestion q;
+        if(!keys.empty() && unsigned_.isEmpty() && strangers.isEmpty())
+        {
+            q.title = "Trust " + who + " to install plugins?";
+            q.message = code + " is signed by " + who + ". The repository " + repository + " lists this key as " + who + "'s.\n\nKey fingerprint: " + fingerprint(publisherKey) +
+                        "\n\nOnce trusted, plugins signed by this key install without asking.";
+            q.buttons = {"Trust and install", "Cancel"}; q.trust = 1; q.keys = keys;
+        }
+        else if(unsigned_.isEmpty())
+        {
+            q.title = "Install code from an unknown key?";
+            q.message = code + " is signed by " + strangers.joinIntoString(", ") + ", which " + repository + " does not list as " + who + "'s and this device does not trust. Anyone could have made it." + risk;
+            q.buttons = {keys.size() > 1 ? "Trust these keys" : "Trust this key", "Install anyway", "Cancel"}; q.trust = 1; q.anyway = 2; q.keys = keys;
+        }
+        else
+        {
+            q.title = "Install unsigned code?";
+            q.message = unsigned_.joinIntoString(", ") + " in this package is not signed: nothing says who made it, or that it is unchanged." +
+                        (strangers.isEmpty() ? juce::String() : " The rest is signed by " + strangers.joinIntoString(", ") + ", which no one here vouches for.") + risk;
+            q.buttons = {"Install anyway", "Cancel"}; q.anyway = 1;
+        }
+        return q;
+    }
+
     Catalog::Catalog(Engine& engine, const std::string& kind, std::map<std::string, Control::InstalledPackage> installed) : engine_(engine), kind_(kind), installed_(std::move(installed))
     {
         setTitle("Catalog");

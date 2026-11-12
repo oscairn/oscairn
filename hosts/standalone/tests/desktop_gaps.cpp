@@ -922,10 +922,35 @@ int main(int argc, char** argv)
                 close(modal(), 0);
                 repository::setTransport({});
             }
+            // The question when an install is refused for code not trusted here, by the three cases
+            // the refusal tells apart: signed by the key the repository lists as the publisher's,
+            // by a key no one vouches for, and unsigned. Only the last two offer Install anyway.
+            {
+                const std::string listed(64, 'a'), other(64, 'b'), listedId = signing::keyId(listed), otherId = signing::keyId(other);
+                auto refused = [](std::vector<Control::Signer> code) { Control::PackageJob j; j.state = "failed"; j.name = "Oscairn"; j.installed.code = std::move(code); return j; };
+                const Control::Signer byListed{"plugin", "Oscairn Arpeggiator", "0.1.4", "macos-arm64", "unknown", listedId, "", listed}, byOther{"plugin", "Arp", "1.0", "macos-arm64", "unknown", otherId, "", other},
+                    bare{"plugin", "Bare", "2.0", "macos-arm64", "unsigned", "", "", ""}, trusted{"plugin", "Synth", "1.0", "macos-arm64", "trusted", otherId, "Mine", other};
+                const auto vouched = standalone::codeQuestion(refused({byListed, trusted}), "Oscairn", listedId);
+                check(vouched.title == "Trust Oscairn to install plugins?" && vouched.buttons == juce::StringArray{"Trust and install", "Cancel"} && vouched.trust == 1 && vouched.anyway == -1 &&
+                          vouched.keys == std::vector<std::string>{listed} && vouched.message.contains("(Oscairn Arpeggiator 0.1.4) is signed by Oscairn") &&
+                          vouched.message.contains("The repository Oscairn lists this key as Oscairn's") && vouched.message.contains("Key fingerprint: " + standalone::fingerprint(listedId)) &&
+                          !vouched.message.contains(listed) && !vouched.message.contains("Synth 1.0"),
+                      "signed by the key the repository lists: trust the publisher and install, by its fingerprint: " + vouched.message.toStdString());
+                const auto stranger = standalone::codeQuestion(refused({byOther}), "Oscairn", listedId);
+                check(stranger.title == "Install code from an unknown key?" && stranger.buttons == juce::StringArray{"Trust this key", "Install anyway", "Cancel"} && stranger.trust == 1 && stranger.anyway == 2 &&
+                          stranger.keys == std::vector<std::string>{other} && stranger.message.contains("signed by key " + standalone::fingerprint(otherId) + ", which Oscairn does not list as Oscairn's") &&
+                          stranger.message.contains("Anyone could have made it") && stranger.message.contains("runs as a program on this device"),
+                      "signed by a key no one vouches for: trust that key, install anyway, or not, saying the risk: " + stranger.message.toStdString());
+                check(standalone::codeQuestion(refused({byListed}), "Oscairn", {}).title == "Install code from an unknown key?", "with no publisher key listed, no key is vouched for");
+                const auto unsignedCode = standalone::codeQuestion(refused({byListed, bare}), "Oscairn", listedId);
+                check(unsignedCode.title == "Install unsigned code?" && unsignedCode.buttons == juce::StringArray{"Install anyway", "Cancel"} && unsignedCode.anyway == 1 && unsignedCode.trust == -1 &&
+                          unsignedCode.message.startsWith("Bare 2.0 in this package is not signed: nothing says who made it") && unsignedCode.message.contains("runs as a program on this device"),
+                      "unsigned: install anyway or not, saying the risk: " + unsignedCode.message.toStdString());
+            }
             // Install... (RFC 0031): exactly the Catalog and a File. The Catalog lists the enabled
             // repositories' packages of a kind, grayed with the reason where this device cannot
             // install them; a package's details; Install, and for a publisher not trusted for
-            // plugins, trusting it by its name, fingerprint and full key, then trying again; what
+            // plugins, trusting it by its name and fingerprint, then trying again; what
             // is installed, marked so with its version, and Update to a newer version. The repository is a signed folder made by the index builder; the
             // official one is turned off and the web is a stand-in, so nothing touches the network.
             if(const char* maker = std::getenv("OSCAIRN_TEST_MAKE_REPOSITORY"))
@@ -1021,15 +1046,18 @@ int main(int argc, char** argv)
                     over(*catalog, "catalog-details");
                     catalog->install.triggerClick();
                 }
-                // Code from a publisher not trusted for plugins: trust it, shown by its key, and try again.
-                check(wait([&] { auto* w = modalAlert(); return w && w->getName() == "Install anyway?"; }), "an install of code by an unknown publisher asks first");
-                if(auto* w = modalAlert(); w && w->getName() == "Install anyway?")
+                // Code signed by the key the repository lists as its publisher's, not yet trusted
+                // for plugins here: one question, to trust that publisher, by its fingerprint.
+                const juce::String trustKick = "Trust KICK to install plugins?";
+                check(wait([&] { auto* w = modalAlert(); return w && w->getName() == trustKick; }), "an install of code by a publisher not trusted here asks first");
+                if(auto* w = modalAlert(); w && w->getName() == trustKick)
                 {
                     const auto text = alertText(w);
-                    check(w->getNumButtons() == 3 && w->getButton(0)->getButtonText() == "Trust KICK" && w->getButton(1)->getButtonText() == "Install anyway" && w->getButton(2)->getButtonText() == "Cancel",
-                          "it offers to trust the publisher, to install anyway, or not");
-                    check(text.contains("Publisher: KICK") && text.contains(standalone::fingerprint(signing::keyId(publisherKey))) && text.contains(publisherKey),
-                          "naming the publisher, its key's fingerprint and the full key: " + text.toStdString());
+                    check(w->getNumButtons() == 2 && w->getButton(0)->getButtonText() == "Trust and install" && w->getButton(1)->getButtonText() == "Cancel",
+                          "it offers to trust the publisher and install, or not; no Install anyway");
+                    check(text.contains("signed by KICK") && text.contains("The repository Test repository lists this key as KICK's") &&
+                              text.contains("Key fingerprint: " + standalone::fingerprint(signing::keyId(publisherKey))) && !text.contains(publisherKey),
+                          "naming the publisher, that the repository lists the key as theirs, and its fingerprint, not the full key: " + text.toStdString());
                     std::vector<Control::TrustedKey> keys;
                     engine.packages([&](Control& c) { keys = c.trustedKeys(); });
                     check(std::none_of(keys.begin(), keys.end(), [&](const auto& k) { return k.key == publisherKey; }), "nothing is trusted before the user says so");

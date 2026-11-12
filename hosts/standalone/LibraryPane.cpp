@@ -1013,12 +1013,12 @@ namespace oscairn::standalone
         content->onInstall = [safe = juce::Component::SafePointer<LibraryPane>(this), dialog](const Offer& o) {
             dialog->exitModalState(0);
             if(!safe) return;
-            if(!o.otherBuild || o.update) { safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher); return; }
+            if(!o.otherBuild || o.update) { safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher, o.package.publisherKey); return; }
             // Over a different build only when the user says so, having seen both.
             auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::QuestionIcon, "Install the repository's build?", replaceQuestion(o),
                                                                         "Install the repository's build", "Cancel", safe.getComponent());
             juce::AlertWindow::showAsync(options, [safe, o](int chosen) {
-                if(safe && chosen == 1) safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher, true);
+                if(safe && chosen == 1) safe->installPackage(o.source, o.package.id, o.version.version, false, o.package.publisher, o.package.publisherKey, true);
             });
         };
         content->read();
@@ -1035,48 +1035,34 @@ namespace oscairn::standalone
         });
     }
 
-    void LibraryPane::installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher, bool replace)
+    void LibraryPane::installPackage(const std::string& folder, const std::string& id, const std::string& version, bool acceptCode, const std::string& publisher, const std::string& publisherKey, bool replace)
     {
         uint64_t job = 0;
         if(const auto error = engine_.packages([&](Control& c) { job = c.installFromRepository(folder, id, version, acceptCode, replace); }); !error.empty()) { tell(text(error)); return; }
         tell("Installing " + text(id) + " " + text(version) + "...");
-        awaitPackageJob(job, [safe = juce::Component::SafePointer<LibraryPane>(this), folder, id, version, publisher, replace](const Control::PackageJob& done) {
+        awaitPackageJob(job, [safe = juce::Component::SafePointer<LibraryPane>(this), folder, id, version, publisher, publisherKey, replace](const Control::PackageJob& done) {
             if(!safe) return;
-            // Code from an unknown source asks first, as installing an archive does; signed code
-            // can instead have its publisher trusted for plugins, shown by name, fingerprint and
-            // full key, and the install tried again.
+            // Code this device does not trust asks first (codeQuestion), as installing an archive
+            // does: trust its key for plugins and try again, or install it this once.
             if(done.state == "failed" && done.error.find("unknown source") != std::string::npos)
             {
-                std::vector<std::string> keys;
-                for(const auto& c : done.installed.code)
-                    if(c.status == "unknown" && !c.publicKey.empty() && std::find(keys.begin(), keys.end(), c.publicKey) == keys.end()) keys.push_back(c.publicKey);
-                const auto who = publisher.empty() ? juce::String("this publisher") : text(publisher);
-                juce::String said = text(done.error);
-                for(const auto& k : keys) said << "\n\nPublisher: " << who << "\nKey fingerprint: " << fingerprint(signing::keyId(k)) << "\nFull key: " << text(k);
-                if(keys.empty())
-                {
-                    auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::WarningIcon, "Install anyway?", said, "Install anyway", "Cancel", safe.getComponent());
-                    juce::AlertWindow::showAsync(options, [safe, folder, id, version, replace](int chosen) { if(safe && chosen == 1) safe->installPackage(folder, id, version, true, {}, replace); });
-                }
-                else
-                {
-                    said << "\n\nTrust " << who << " to run its plugins on this device only if you know that key is theirs.";
-                    auto options = juce::MessageBoxOptions::makeOptionsYesNoCancel(juce::MessageBoxIconType::WarningIcon, "Install anyway?", said, "Trust " + who, "Install anyway", "Cancel", safe.getComponent());
-                    juce::AlertWindow::showAsync(options, [safe, folder, id, version, publisher, keys, replace](int chosen) {
-                        if(!safe) return;
-                        if(chosen == 2) { safe->installPackage(folder, id, version, true, publisher, replace); return; }
-                        if(chosen != 1) return;
-                        for(const auto& k : keys)
-                            if(const auto error = safe->engine_.packages([&](Control& c) {
-                                   // For plugins, beside whatever else the key is trusted for.
-                                   Control::TrustedKey t{"", k, publisher.empty() ? "Publisher " + signing::keyId(k) : publisher, {"plugins"}};
-                                   for(const auto& had : c.trustedKeys()) if(had.key == k) { t.name = had.name; t.scope = had.scope; t.scope.push_back("plugins"); }
-                                   c.setTrustedKey(t);
-                               }); !error.empty())
-                                { safe->tell(text(error)); return; }
-                        safe->installPackage(folder, id, version, false, publisher, replace);
-                    });
-                }
+                const auto q = codeQuestion(done, publisher, publisherKey);
+                auto options = juce::MessageBoxOptions().withIconType(juce::MessageBoxIconType::WarningIcon).withTitle(q.title).withMessage(q.message).withAssociatedComponent(safe.getComponent());
+                for(const auto& b : q.buttons) options = options.withButton(b);
+                juce::AlertWindow::showAsync(options, [safe, folder, id, version, publisher, publisherKey, replace, q](int chosen) {
+                    if(!safe || chosen == 0) return;
+                    if(chosen == q.anyway) { safe->installPackage(folder, id, version, true, publisher, publisherKey, replace); return; }
+                    if(chosen != q.trust) return;
+                    for(const auto& k : q.keys)
+                        if(const auto error = safe->engine_.packages([&](Control& c) {
+                               // For plugins, beside whatever else the key is trusted for; by the publisher's name only where the repository vouches for it.
+                               Control::TrustedKey t{"", k, signing::keyId(k) == publisherKey && !publisher.empty() ? publisher : "Key " + signing::keyId(k), {"plugins"}};
+                               for(const auto& had : c.trustedKeys()) if(had.key == k) { t.name = had.name; t.scope = had.scope; t.scope.push_back("plugins"); }
+                               c.setTrustedKey(t);
+                           }); !error.empty())
+                            { safe->tell(text(error)); return; }
+                    safe->installPackage(folder, id, version, false, publisher, publisherKey, replace);
+                });
                 safe->tell("");
                 return;
             }

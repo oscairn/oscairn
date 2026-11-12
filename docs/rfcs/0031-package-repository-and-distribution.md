@@ -513,9 +513,13 @@ nothing tells its build. A package's details are its summary, version, the versi
 installed, license, publisher and key fingerprint, repository, download and installed size, and
 the packages it needs, with Install (or Update; neither when what is installed is current), which
 runs the install job and its questions. A
-plugin by a publisher not trusted for plugins asks first: **Trust** the publisher (its name, key
-fingerprint and full key shown, trusted for plugins only when the user says so) and try again,
-**Install anyway** this once, or Cancel. No Show all yet, and no audio previews or screenshots
+plugin whose code is not trusted here asks first, by what the refusal tells
+apart. Signed by the key the repository's signed index lists as the publisher's: **Trust
+<publisher> to install plugins?**, naming the publisher, the repository that lists the key and
+its fingerprint, with **Trust and install** (the key trusted for plugins, then the install tried
+again) or Cancel. Signed by a key no one vouches for: **Trust this key**, **Install anyway** this
+once, or Cancel; unsigned: **Install anyway** or Cancel; both saying that a plugin runs as a
+program with the user's access. Nothing is trusted unless the user says so. No Show all yet, and no audio previews or screenshots
 (`details/` is not read yet). The Catalog app replaces the view and keeps its behavior.
 
 ### The Catalog app

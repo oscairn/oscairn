@@ -62,6 +62,10 @@ void drawInked(juce::Graphics&,const juce::String&,juce::Rectangle<int>,const ju
 enum class TextRole { Small, Body, Button, Title };
 int desktopMode(const juce::Component&);        // 0: not the desktop, 1: keyboard and mouse, 2: touch
 void setDesktopMode(juce::Component&, int mode);
+// On screen, as isShowing() says; or in a window --snapshot renders off screen (setOffscreen), which
+// has no peer: views that poll only while shown poll there too.
+bool showing(const juce::Component&);
+void setOffscreen(juce::Component& window);
 float textSize(TextRole, int mode);              // in pixels, with the theme's font scale
 // Per-user Oscairn appearance, shared across layouts, windows and UI processes. A theme is a
 // folder holding theme.json and its fonts. Built-in themes are the same folders, shipped beside

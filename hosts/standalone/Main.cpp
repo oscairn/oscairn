@@ -12,7 +12,7 @@
 // modx-m) or a file; without it, the computer's own. A panel profile fills the display with no
 // title bar, shows its layout and asks the audio device for its block size; --layout and the
 // audio options override it for a run. --play starts the sequencer at launch. --input-mode overrides the saved preference for this run. --snapshot
-// renders the window to a PNG and quits: at the layout's design size, or as in a window of
+// renders the window off screen (no window or splash is shown) to a PNG and quits: at the layout's design size, or as in a window of
 // --size; with --play SECONDS, the sequencer plays for that long first; with --view, the
 // desktop shows that tab (Part, Mixer, Routing or Controls) or Play. External MIDI controllers
 // with a profile (built in: smk37-elite, modx-m-usb; or --controller FILE, as many as wanted) join
@@ -85,6 +85,9 @@ namespace oscairn::standalone
             return ( given.isNotEmpty() && file.existsAsFile() ? file.getFullPathName() : given ).toStdString();
         }
 
+        // --snapshot: no window goes on the desktop; each renders off screen (setOffscreen).
+        bool offscreen = false;
+
         // The apps that run as processes: Apps/ beside this program, else share/oscairn/apps.
         juce::File appsFolder()
         {
@@ -96,8 +99,9 @@ namespace oscairn::standalone
     /// An app in a window of its own, apart from the sound editor; closing it hides it.
     class AppWindow final : public juce::DocumentWindow {
     public:
-        AppWindow(const juce::String& name, juce::Component* content, int width, int height) : DocumentWindow("Oscairn - " + name, ink(Ink::Background), DocumentWindow::allButtons)
+        AppWindow(const juce::String& name, juce::Component* content, int width, int height) : DocumentWindow("Oscairn - " + name, ink(Ink::Background), DocumentWindow::allButtons, !offscreen)
         {
+            if(offscreen) setOffscreen(*this);
             setUsingNativeTitleBar(true); setContentOwned(content, false); setResizable(true, false); centreWithSize(width, height);
         }
         std::function<void()> onClose;
@@ -117,13 +121,14 @@ namespace oscairn::standalone
     {
     public:
         Window( Engine& engine, std::vector<NamedLayout> layouts, const Layout& first, Profile profile,Theme& theme,const juce::File& plugins, InputMode mode, const std::string& profileArgument )
-            : DocumentWindow( "Oscairn", juce::Colours::black, DocumentWindow::allButtons )
+            : DocumentWindow( "Oscairn", juce::Colours::black, DocumentWindow::allButtons, !offscreen )
             , engine_( engine )
             , layouts_( std::move( layouts ) )
             , profile_( std::move( profile ) )
             , fullScreen_( profile_.screen() && profile_.screen()->surface != "desktop" ),theme_(theme),plugins_(plugins),inputMode_(mode)
         {
             const bool fullScreen = fullScreen_; // a device's screen: no title bar, no menu bar
+            if( offscreen ) setOffscreen( *this );
             setUsingNativeTitleBar( !fullScreen );
             if( fullScreen )
             {
@@ -823,6 +828,10 @@ namespace oscairn::standalone
         {
             commandLine_ = commandLine;
             const auto args = juce::StringArray::fromTokens( commandLine, true );
+            offscreen = args.contains( "--snapshot" );
+#if JUCE_MAC
+            if( offscreen ) juce::Process::setDockIconVisible( false ); // never the active app, nor in the Dock
+#endif
             auto       dir  = argument( args, "--plugins" );
             if( dir.isEmpty() )
             {
@@ -889,7 +898,7 @@ namespace oscairn::standalone
                     if( const auto missed = applyMemoryPolicy( -999 ); !missed.empty() && profile.reliability != "desktop" )
                         std::fprintf( stderr, "oscairn: %s\n", missed.c_str() );
                 profile_ = profile; controllerProfiles_ = controllers; plugins_ = dir; nullAudio_ = audio.nullDevice; // for started()
-                showSplash( profile );
+                if( !offscreen ) showSplash( profile );
                 // The engine starts, or is reached, off the message thread, so the splash stays
                 // drawn; an in-process engine opens its devices on the message thread, so it starts there.
                 const bool here = socket.isEmpty() && helper.empty();

@@ -11,7 +11,11 @@ device, so nothing it does can sound (and a machine without audio hardware runs 
 say so: a helper that opened a real device or a MIDI input fails the run. The app's own process
 opens no MIDI port either (its controllers' Mackie and feedback ports): its log must say 0. It stops when the app
 quits; one left behind (the app crashed or timed out, which leaves it running by design) is
-stopped here, by the PID in its lease, only when that process is this run's."""
+stopped here, by the PID in its lease, only when that process is this run's.
+
+--snapshot renders off screen: on macOS, the window server's list of on-screen windows is read
+throughout each run, and must never hold one of the app's (no splash, no window)."""
+import ctypes
 import fcntl
 import glob
 import os
@@ -22,6 +26,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zlib
 
@@ -79,6 +84,44 @@ def png_pixels(path):
     return width, height, {bytes(lines[i:i + channels]) for i in range(0, len(lines) - channels + 1, step)}
 
 
+def on_screen(pid):
+    """The bounds of the windows on screen that the process with this PID owns (macOS), from
+    CGWindowListCopyWindowInfo; None elsewhere."""
+    if sys.platform != 'darwin':
+        return None
+    cf = ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+    cg = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+    for name, result, args in (('CFArrayGetCount', ctypes.c_long, [ctypes.c_void_p]),
+                               ('CFArrayGetValueAtIndex', ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_long]),
+                               ('CFDictionaryGetValue', ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p]),
+                               ('CFStringCreateWithCString', ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]),
+                               ('CFNumberGetValue', ctypes.c_bool, [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]),
+                               ('CFRelease', None, [ctypes.c_void_p])):
+        getattr(cf, name).restype, getattr(cf, name).argtypes = result, args
+    cg.CGWindowListCopyWindowInfo.restype, cg.CGWindowListCopyWindowInfo.argtypes = ctypes.c_void_p, [ctypes.c_uint32, ctypes.c_uint32]
+    key = lambda text: cf.CFStringCreateWithCString(None, text, 0x08000100)  # UTF-8
+    owner, bounds = key(b'kCGWindowOwnerPID'), key(b'kCGWindowBounds')
+    numbers = [key(k) for k in (b'X', b'Y', b'Width', b'Height')]
+
+    def number(dictionary, k):
+        value = ctypes.c_double()
+        found = cf.CFDictionaryGetValue(dictionary, k)
+        return value.value if found and cf.CFNumberGetValue(found, 13, ctypes.byref(value)) else None  # kCFNumberDoubleType
+
+    found = []
+    windows = cg.CGWindowListCopyWindowInfo(1, 0)  # kCGWindowListOptionOnScreenOnly, every window
+    for i in range(cf.CFArrayGetCount(windows) if windows else 0):
+        window = cf.CFArrayGetValueAtIndex(windows, i)
+        if number(window, owner) == pid:
+            box = cf.CFDictionaryGetValue(window, bounds)
+            found.append(tuple(number(box, k) for k in numbers) if box else ())
+    if windows:
+        cf.CFRelease(windows)
+    for k in [owner, bounds] + numbers:
+        cf.CFRelease(k)
+    return found
+
+
 def engines(runtime):
     """The engine helpers still holding their lease in this runtime folder (EngineLease), by PID."""
     held = []
@@ -128,13 +171,30 @@ def main():
         runtime = tempfile.mkdtemp(prefix='oscairn-launch-', dir='/tmp')
         wanted = tuple(int(v) for v in extra[extra.index('--size') + 1].split('x'))
         try:
-            run = subprocess.run([app, '--snapshot', name + '.png', '--audio', 'null'] + extra, cwd=folder, timeout=120,
-                                 capture_output=True, text=True,
-                                 env={**os.environ,
-                                      'OSCAIRN_DATA_HOME': os.path.join(folder, 'data'),
-                                      'OSCAIRN_CONFIG_HOME': os.path.join(folder, 'config'),
-                                      'OSCAIRN_RUNTIME_DIR': runtime})
+            child = subprocess.Popen([app, '--snapshot', name + '.png', '--audio', 'null'] + extra, cwd=folder,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                     env={**os.environ,
+                                          'OSCAIRN_DATA_HOME': os.path.join(folder, 'data'),
+                                          'OSCAIRN_CONFIG_HOME': os.path.join(folder, 'config'),
+                                          'OSCAIRN_RUNTIME_DIR': runtime})
+            # Its output is read on threads, so the window list is read throughout the run.
+            run = subprocess.CompletedProcess(child.args, None, '', '')
+            readers = [threading.Thread(target=lambda: setattr(run, 'stdout', child.stdout.read())),
+                       threading.Thread(target=lambda: setattr(run, 'stderr', child.stderr.read()))]
+            for reader in readers:
+                reader.start()
+            shown, deadline = [], time.monotonic() + 120
+            while child.poll() is None:
+                if time.monotonic() > deadline:
+                    child.kill()
+                    break
+                shown += on_screen(child.pid) or []
+                time.sleep(.02)
+            run.returncode = child.wait()
+            for reader in readers:
+                reader.join()
             assert run.returncode == 0, f'{name}: the app exited with {run.returncode}\n{run.stderr}'
+            assert not shown, f'{name}: a window was on screen during the snapshot: {sorted(set(shown))}'
             # A helper whose app quit normally stops on its own, soon after.
             deadline = time.monotonic() + 10
             while engines(runtime) and time.monotonic() < deadline:

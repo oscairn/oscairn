@@ -151,7 +151,7 @@ namespace oscairn::standalone
             catch(const std::exception&) {}
         // The page shown, for a device's screen knobs.
         ScreenPage page;
-        if(level_ == Level::Parameters && isShowing())
+        if(level_ == Level::Parameters && showing(*this))
         {
             page.name = pages_[page_].name;
             for(const auto i : shown_) { Assignment a; a.kind = Assignment::Kind::Parameter; a.node = plugin_.node; a.param = params_[i].id; page.params.push_back(a); }

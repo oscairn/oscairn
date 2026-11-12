@@ -54,7 +54,7 @@ namespace oscairn::standalone
     {
         // The open Performance and its scene; the tempo and the engine's load. Nothing while
         // hidden, as in an app in the background; the constructor's call, before the timer, fills it.
-        if(!isShowing() && isTimerRunning()) return;
+        if(!showing(*this) && isTimerRunning()) return;
         if(const auto info = engine_.performanceInfo()) context_ = juce::String::fromUTF8(info->name.empty() ? "Untitled" : info->name.c_str());
         const auto& graph = engine_.graph();
         scene_.clear();

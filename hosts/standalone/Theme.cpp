@@ -287,6 +287,13 @@ int desktopMode(const juce::Component& c) {
     return 0;
 }
 void setDesktopMode(juce::Component& c,int mode){c.getProperties().set("oscairnDesktop",mode);}
+bool showing(const juce::Component& c) {
+    if(c.isShowing())return true;
+    auto* at=&c;
+    for(;at->getParentComponent();at=at->getParentComponent())if(!at->isVisible())return false;
+    return at->isVisible() && at->getProperties().contains("oscairnOffscreen");
+}
+void setOffscreen(juce::Component& window){window.getProperties().set("oscairnOffscreen",true);}
 float textSize(TextRole role,int mode) {
     const bool touch=mode==2;
     const float size=role==TextRole::Small?(touch?13.f:12.f):role==TextRole::Button?(touch?15.f:13.f):role==TextRole::Title?(touch?20.f:18.f):(touch?16.f:14.f);

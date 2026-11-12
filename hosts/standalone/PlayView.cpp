@@ -230,7 +230,7 @@ namespace oscairn::standalone
 
     void PlayView::changeListenerCallback(juce::ChangeBroadcaster*)
     {
-        if(!isShowing()) return;
+        if(!showing(*this)) return;
         if(auto values = engine_.liveValues(); values != values_) { values_ = std::move(values); showValues(); }
     }
 
@@ -275,7 +275,7 @@ namespace oscairn::standalone
 
     void PlayView::timerCallback()
     {
-        if(!isShowing()) return; // Edit's views are showing, or the app is in the background
+        if(!showing(*this)) return; // Edit's views are showing, or the app is in the background
         if(learning_ && engine_.touches() != touches_)
         {
             touches_ = engine_.touches(); learnFrom_ = text(engine_.lastTouched());
@@ -343,7 +343,7 @@ namespace oscairn::standalone
     // The device's knobs bound "row:N" play the bank shown.
     void PlayView::publishRow()
     {
-        if(!isShowing() || engine_.rowKnobs() <= 0) return;
+        if(!showing(*this) || engine_.rowKnobs() <= 0) return;
         std::vector<Engine::RowParam> row;
         for(const auto& slot : knobSlots_)
         {

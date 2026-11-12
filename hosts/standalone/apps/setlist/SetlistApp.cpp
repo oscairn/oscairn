@@ -56,7 +56,10 @@ namespace oscairn::standalone
                 else if(action == stepSetlist) { pane_->step(argument == "-1" ? -1 : 1); engine_->appAnswer(request, current()); }
                 else engine_->appAnswer(request, {}); // not offered: canceled
             };
-            window_ = std::make_unique<SetlistWindow>(*pane_);
+            if(!juce::StringArray::fromTokens(commandLine, true).contains("--snapshot")) window_ = std::make_unique<SetlistWindow>(*pane_);
+#if JUCE_MAC
+            else juce::Process::setDockIconVisible(false); // rendered off screen: no window, never the active app, nor in the Dock
+#endif
             std::fprintf(stderr, "oscairn-setlist: started (pid %d) with %s\n", int(::getpid()), pane_->setlist().name.empty() ? "no setlist" : pane_->setlist().name.c_str());
             // For tests (desktop-apps), which cannot press Add in another process: ask for a pick once started.
             if(juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEST_PICK", {}) == "1") juce::MessageManager::callAsync([this] { pane_->addFromLibrary(); });
@@ -94,6 +97,7 @@ namespace oscairn::standalone
         // frame under the top bar), with no title bar.
         void show(const std::string& argument)
         {
+            if(!window_) return; // --snapshot
             const auto how = juce::JSON::parse(juce::String::fromUTF8(argument.c_str()));
             if(!bool(how.getProperty("visible", true))) { window_->setVisible(false); return; }
             setDesktopMode(*pane_, int(how.getProperty("mode", 1)) == 2 ? 2 : 1);

@@ -1129,7 +1129,7 @@ namespace oscairn::standalone
         for(const auto& t : tiles_) shown.push_back(t.param);
         byPriority(params_, shown);
         for(const auto i : shown) { Assignment a; a.kind = Assignment::Kind::Parameter; a.node = node_; a.param = params_[i].id; page.params.push_back(a); }
-        engine_.showScreenPage(published_, isShowing() ? std::move(page) : ScreenPage{});
+        engine_.showScreenPage(published_, showing(*this) ? std::move(page) : ScreenPage{});
     }
 
     void ParameterGrid::mouseDown(const juce::MouseEvent& e)

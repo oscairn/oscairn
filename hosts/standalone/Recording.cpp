@@ -74,7 +74,7 @@ namespace oscairn::standalone
     void RecordButtons::timerCallback()
     {
         // Nothing while hidden; the constructor's call, before the timer, fills it.
-        if(!isShowing() && isTimerRunning()) return;
+        if(!showing(*this) && isTimerRunning()) return;
         const auto before = message_;
         recording_ = engine_.recordingTake();
         record_.setToggleState(recording_ != 0, juce::dontSendNotification);

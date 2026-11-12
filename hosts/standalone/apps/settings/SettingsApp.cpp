@@ -50,9 +50,13 @@ namespace oscairn::standalone
                 if(action == showApp) { show(argument); engine_->appAnswer(request, "shown"); }
                 else engine_->appAnswer(request, {}); // not offered: canceled
             };
-            window_ = std::make_unique<SettingsWindow>(*frame_);
+            const auto out = value("--snapshot");
+            if(out.isEmpty()) window_ = std::make_unique<SettingsWindow>(*frame_);
+#if JUCE_MAC
+            else juce::Process::setDockIconVisible(false); // rendered off screen: no window, never the active app, nor in the Dock
+#endif
             std::fprintf(stderr, "oscairn-settings: started (pid %d) with %d pages for %s\n", int(::getpid()), int(frame_->shown().size()), profile_.id.c_str());
-            if(const auto out = value("--snapshot"); out.isNotEmpty())
+            if(out.isNotEmpty())
             {
                 const auto size = juce::StringArray::fromTokens(value("--size"), "x", "");
                 const int mode = args.contains("--mode") ? value("--mode").getIntValue() : 1;
@@ -77,6 +81,7 @@ namespace oscairn::standalone
         // frame under the top bar), with no title bar.
         void show(const std::string& argument)
         {
+            if(!window_) return; // --snapshot
             const auto how = juce::JSON::parse(juce::String::fromUTF8(argument.c_str()));
             if(!bool(how.getProperty("visible", true))) { window_->setVisible(false); return; }
             setDesktopMode(*frame_, int(how.getProperty("mode", 1)) == 2 ? 2 : 1);

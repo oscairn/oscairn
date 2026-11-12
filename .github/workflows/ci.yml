@@ -112,7 +112,7 @@ jobs:
       - name: Build
         run: cmake --build build-standalone
       - name: Test
-        run: ctest --test-dir build-standalone -R desktop --output-on-failure
+        run: ctest --test-dir build-standalone -R "^desktop-launch$" --output-on-failure  # the others click a real window or time real audio, which a shared runner cannot do
 
   thread-sanitizer:
     runs-on: ubuntu-24.04

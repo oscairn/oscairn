@@ -211,6 +211,8 @@ int main(int argc, char** argv)
             juce::LookAndFeel::setDefaultLookAndFeel(&theme);
             theme.apply("oscairn-dark");
             auto pump = [](int ms) { const auto until = juce::Time::getMillisecondCounter() + uint32_t(ms); while(juce::Time::getMillisecondCounter() < until) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); };
+            // As long as that much of the engine's audio, which a loaded machine renders slower than the clock.
+            auto audio = [&](int ms) { const auto until = rendered.load() + uint64_t(ms) * 48; while(rendered.load() < until) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); };
             // The Panel: the Parts views on a 1024 × 600 touch screen, as the Performance app's Edit.
             standalone::PartsView view(engine, argv[2]);
             standalone::setDesktopMode(view, 2); view.setSize(1024, 600);
@@ -463,7 +465,7 @@ int main(int argc, char** argv)
             for(const int key : {48, 72})
             {
                 const auto take = record();
-                pump(200); play(key, true); pump(500); play(key, false); pump(100);
+                audio(200); play(key, true); audio(500); play(key, false); audio(100);
                 const auto r = finish(take);
                 if(r.peaks.size() != taps.size()) continue;
                 // The held note's blocks: from 40 ms after it began, for 400 ms, found on the part it plays.
@@ -484,7 +486,7 @@ int main(int argc, char** argv)
                     check(whole(0).most <= loud && whole(1).most <= loud, "and nowhere in FM or Analog: their loudest blocks " + num(whole(0).most) + " and " + num(whole(1).most));
                     check(x.silent == 0, "the shared effects sound with it in every block: bus mean " + num(x.mean));
                 }
-                pump(1500); // tails ring out before the next
+                audio(1500); // tails ring out before the next
             }
 
             // ---- 3 and 4. Edit through Oscairn's own editors, and undo each edit ----
@@ -639,15 +641,15 @@ int main(int argc, char** argv)
             check(!changed(fm, fmBefore).empty(), "an FM edit to come back with: " + join(changed(fm, fmBefore)));
             const auto take = record();
             play(48, true); play(72, true);
-            pump(500);
+            audio(500);
             const auto victims = workersWith(fmFile);
             check(victims.size() == 1, "FM's plugin is in a worker of its own: " + std::to_string(victims.size()));
             const auto killed = rendered.load();
             for(const auto v : victims) ::kill(v, SIGKILL);
             // Struck again on a fresh key in FM's zone every tenth of a second, so it is heard soon after it is back.
             std::vector<uint64_t> struck;
-            for(int k = 0; k < 10; ++k) { pump(100); play(50 + k, true); struck.push_back(rendered.load()); }
-            pump(300);
+            for(int k = 0; k < 10; ++k) { audio(100); play(50 + k, true); struck.push_back(rendered.load()); }
+            audio(300);
             const auto r = finish(take);
             for(int k = 0; k < 10; ++k) play(50 + k, false);
             play(48, false); play(72, false);

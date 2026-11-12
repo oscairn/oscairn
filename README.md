@@ -173,6 +173,15 @@ but not removed. **Add a repository...** there takes an https:// address alone, 
 repository's root key fingerprint and the name that key signed, and asks whether to trust it;
 nothing else is trusted until you say so. Installing from a local file goes through the Library's **Install… > File**.
 
+A release comes with Oscairn's own instruments and effects already in it: FM, Analog, the
+Sampler, Effects and the Arpeggiator, with the FM cartridges and Analog's factory patches, as
+the official repository published them ([preinstalled packages](docs/rfcs/0031-package-repository-and-distribution.md#preinstalled-packages)).
+The engine installs them once, at its first start, from the app itself and without the network,
+checking every signature and hash as for any install; the Library says "Setting up the
+instruments that come with Oscairn…" meanwhile. They are ordinary packages: listed as installed,
+updated from the Catalog, removable, and one you remove is not installed again. A build from
+source has none.
+
 ### The desktop app's screens
 
 **Home**, where the app starts: the apps as tiles, each with a line of its state.

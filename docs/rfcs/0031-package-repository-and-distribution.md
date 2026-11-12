@@ -116,6 +116,24 @@ Checked when built and tested; the sections below say how.
 - [ ] 13. Newer versions whose publisher says they open the saved state (`opensStateFrom`,
       [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim), if the
       owner accepts it)
+- [ ] 14. [Preinstalled packages](#preinstalled-packages): a release ships a repository snapshot
+      and the engine installs from it at its first start
+      (built 2026-11-11: the snapshot in `Contents/Resources/Preinstalled` (macOS) or
+      `Preinstalled/` beside the programs; `tools/preinstall-fetch.py` and
+      `tools/preinstalled.txt`, run by `tools/release-macos.sh`, which fails when a listed package
+      does not verify; installing at the engine's start through `packages.list` and
+      `packages.install` jobs from the snapshot folder, offline; `preinstalled.json`;
+      `packages.preinstalled`; a folder copy of a repository the device ships recorded as that
+      repository; the desktop Library's "Setting up…" line; the packages' licenses in the dmg's
+      `Licenses/Packages/`; a refusal said as "<name> was not set up"; an older root's index
+      never kept over a newer one; `control-preinstall`, `control-preinstall-web`. The dmg (44.6
+      MB, 31.7 MB without the packages) tried on a new scratch home and data folder with no
+      `trust.json`: all seven installed in 3 to 7 s with the built-in publisher key, no question,
+      recorded from `https://packages.oscairn.org` with the index's archive hashes (so the
+      Catalog says Installed), and a Performance with FM saved. The "Setting up…" line was not
+      looked at. Not yet: Linux builds of the packages and a Linux release ([known
+      gaps](#what-ships)); the device image; the starter library of Performances and
+      [its dependencies](../library-archive.md#package-dependencies), specified, not built)
 
 ## Problem
 
@@ -611,6 +629,140 @@ plugin and app code needs System.
   computer's internet. The computer is a mirror: the device still checks every signature
   and hash itself.
 - **Device to device:** one paired instrument can serve another its cached blobs the same way.
+
+## Preinstalled packages
+
+Decided by the owner 2026-11-11: the distributed macOS and Linux builds do not come blank. They
+ship the published, signed packages of Oscairn's own instruments and effects (FM, Analog, the
+Sampler, Effects, the Arpeggiator) with their asset libraries (`org.oscairn.fm-cartridges`,
+`org.oscairn.analog-factory`), and later a starter library of Performances. One mechanism, no
+"built in" kind: preinstalled packages are ordinary packages, recorded in `packages.json` like
+any install, shown as Installed in the Catalog, updated the normal way; a hardware image preloads
+the same way. Nothing installs or updates on its own after that; the first-run install of what
+ships in the box is the one exception, and it is local. Built 2026-11-11 except as
+[Progress](#progress) step 14 says.
+
+### What ships
+
+A **repository snapshot**, as a [USB drive](#offline-and-several-devices) carries one: the
+official repository's `repository.json`, `repository.sig`, index, revocations and deltas exactly
+as `packages.oscairn.org` published them at release time, and under `blobs/<ab>/<sha256>` only the
+archives of the packages the release preinstalls. It is the whole signed index with a subset of
+the blobs, not a signed subset: the release script does not hold the index key, and need not.
+`tools/preinstalled.txt` lists the packages and versions; `tools/preinstall-fetch.py` downloads
+them, checks the root against the official root key (the index key it signed, and the index key's
+signature over the root, with `oscairn-sign verify-file`), the index by the root's hash, each
+archive by the index's size and SHA-256, its manifest by the index's hash, and every signature in
+it with `oscairn-sign verify`, signed throughout by the publisher key the index names; that each
+version is stable, not yanked and has a build for the platform; and that each asset library a
+listed package needs is listed at the version a device would pick. `tools/release-macos.sh` runs
+it into `Oscairn.app/Contents/Resources/Preinstalled` and fails if anything does not verify; on
+Linux the folder is `Preinstalled/` beside the programs. The archives are not in the Git
+repository.
+
+The 2026-11-11 set, at serial 28: FM 0.4.8, Analog 0.4.7, the Sampler 0.6.3, Effects 0.1.1, the
+Arpeggiator 0.1.4, `fm-cartridges` 1.0.0 and `analog-factory` 1.0.0, 11.8 MB of archives
+(`analog-factory` alone 7.4 MB).
+
+**Known gaps** (owner, 2026-11-11):
+
+- **No Linux plugin builds yet.** Every plugin package in the official repository has a
+  `macos-arm64` build only, so a Linux release would preinstall only the asset libraries: each
+  plugin package is reported as not set up, as it cannot be installed here.
+- **`analog-factory`'s source** is named as upstream Surge XT's repository
+  (`github.com/surge-synthesizer/surge` at a commit), which the project does not control. The
+  GPL's directions to the source in `Licenses/Packages/` hold only while that repository keeps
+  the commit; a copy under the project's own account would not depend on it.
+
+### When it installs, and how
+
+At the engine's start (`AudioEngine`, so the separate engine and the in-process one alike), with
+a snapshot folder there, `Session::preinstall` reads `preinstalled.json` in the data folder. If
+this release (the version with its pre-release label) is listed, nothing happens. Otherwise, on
+the control thread and one job at a time, so neither audio nor the UI waits:
+
+1. A `packages.list` job reads the snapshot folder, as any repository is read: root, index key and
+   index verified against a root key trusted for `repositories`, the serial checked against the
+   one this device has seen and then kept.
+2. Each package whose archive the snapshot holds is a candidate, at that version. One installed
+   already, at any version, is **kept**: the user's wins, newer or older (owner, 2026-11-11), and
+   updates the normal way (a newer one is never joined by an older one beside it, as plugin versions install side
+   by side). One that `preinstalled.json` lists from an earlier release and is no longer installed
+   was **removed** by the user and stays removed.
+3. Each other one is a `packages.install` job from the folder at that version: the archive read in
+   place, its size and SHA-256 checked against the index, its manifest against the index, every
+   signature in it, its publisher's key, and its plugin code judged against the trust store as
+   always; its asset libraries come from the snapshot too. An asset library already brought by an
+   earlier package counts as installed.
+4. Each package installed or kept is added to `preinstalled.json` with the release, at once, so a
+   run cut short is not repeated for what it did; the release is added when all have been tried.
+
+`packages.preinstalled` says how it goes: `running` or `done`, the job running (so `packages.job`
+shows its progress), and each package's state and error. The engine moves it on at each service
+tick, and asking moves it on too. While another client's package job runs, it waits. The desktop
+Library's status line says "Setting up the instruments that come with Oscairn…" meanwhile, and
+the error, if any, after.
+
+**Failures** leave the app usable and say why, per package: a damaged archive, a full disk or code
+from an untrusted key fails that package (and a plugin package whose asset library failed), and
+the others still install. Each reason reads "<name> was not set up: ...": refused code reads
+"<name> was not set up: its signature is not from a publisher this device trusts", not the
+Catalog's offer to accept unsigned code, as nobody asked; the run's error ends "The Library's
+Catalog can install it." A failed package is not recorded, so the next release tries it again; it
+is not retried at every start (a damaged file in the app would fail each time), and the Catalog
+installs it meanwhile. A snapshot that cannot be read at all (an untrusted or revoked root key, a
+broken signature) fails the whole run, recorded as done for this release.
+
+**Recorded as the official repository.** An install from a folder whose verified root has the root
+key of a repository this device ships (the official one, or a device image's) records that
+repository's address in `packages.json`, not the folder's path, because that is where updates and
+repair come from (and the same holds for a USB copy of it).
+
+### Trust and rollback
+
+Nothing is weakened for it. The snapshot is checked by the same code as a network install, against
+the same trust store: the official root key is built in for `repositories`, so the root verifies.
+Plugin code is judged as any install's is, against keys trusted for `plugins`; the official root
+key is never trusted for plugins. The `org.oscairn` publisher key (ID `b284be6bea2fadb1`, public
+key `db87e97d…0d69`) is built in for plugins, apps and content (`builtInKeys()` in `trust.cpp`),
+except under a profile that hides the official repository, so the official packages install with
+no question. Preinstall never passes `acceptUnsignedCode`. The engine starts preinstalling before
+the app sets the profile's repositories (`setDeviceRepositories`), so a profile hiding the official
+repository would still have its publisher trusted for the first packages; the desktop's profile does
+not hide it, and an image that does must set its repositories before the engine preinstalls.
+
+The **serial** is the one rollback rule there is. On a new data folder the snapshot's serial is the
+first seen, and the live repository, at that serial or later, is accepted after it. A data folder
+that has already seen the live repository at a higher serial (an earlier release's user who opened
+the Catalog after this release's snapshot was taken) refuses the older snapshot like any older
+root: nothing is preinstalled, the reason is reported, and the run is recorded so it does not
+repeat. That user has the Catalog, online. `repository::open` keeps the index it read before
+`see()` checks the serial; it no longer writes an older root's index over a newer one kept under
+`Repositories/<root key>/`, so refusing the snapshot leaves the device's newer index in place.
+
+Preinstall only calls `listRepository` and `installFromRepository`, so it follows the state keyed
+by root key and repository ID ([above](#kept-state-keyed-by-the-root-key)); the change inside
+`installFromRepository` compares the verified root key with the shipped repositories' keys.
+
+### A hardware image
+
+Not built. An image (RFC 0028, RFC 0035) puts the same snapshot in its read-only system partition,
+beside the engine, and the engine installs it into the data partition at the first start, so the
+packages stay updatable and removable like any. A device image whose profile names its own
+repository (`repositories`) ships that repository's snapshot instead, or both in turn; its root
+key is trusted once the app has set the device's repositories from its profile, so the image's
+engine must have them before it preinstalls (today the app sets them after the engine starts:
+to be ordered when the image is built). A factory reset that clears the user's data clears
+`preinstalled.json` with it, so the packages come back; one that keeps the data keeps what the
+user removed removed. The image's Licenses screen lists the packages' licenses from the same
+`Licenses/Packages/` the dmg carries.
+
+### The starter library
+
+The starter library of Performances will be a library archive in the same snapshot, installed as
+a locked library like any. Its Performances use FM and Analog, so it needs to say so: a library
+archive cannot declare the packages it depends on today. The smallest addition is specified, not
+built, in [the library archive's package dependencies](../library-archive.md#package-dependencies).
 
 ## Finding missing plugins
 

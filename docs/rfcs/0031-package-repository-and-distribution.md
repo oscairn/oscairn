@@ -44,7 +44,8 @@ Checked when built and tested; the sections below say how.
       `control-repository`, `desktop-gaps`. 2026-11-07: a device's list of repositories
       (`packages.repositories`, `addRepository`, `removeRepository`, `enableRepository`,
       `setDeviceRepositories`): the official one always listed, its root key trusted for
-      repositories only and built in, never for plugins; a profile's `repositories` and its
+      repositories only and built in, never for plugins (the official publisher's key is built in
+      for plugins since 2026-11-11, step 5); a profile's `repositories` and its
       discouraged `hideOfficial`, which turns the official one off without removing it; the
       user's, added by address and root key; each on or off; `control-repository`,
       `desktop-profile`. In the desktop's Settings (until Settings is its
@@ -236,6 +237,14 @@ This keeps a 20 GB piano off the project's bandwidth.
   `repositories.hideOfficial`, is documented as discouraged in the profile schema and in the
   product documentation. Hidden means off by default, never removed: Settings always keeps the
   official repository one switch away, and no profile can take that switch out.
+- **The official publisher's key is built in (decided 2026-11-11).** `org.oscairn`'s key (ID
+  `b284be6bea2fadb1`) is trusted for plugins, apps and content out of the box, as the official
+  repository's root key is for repositories: listed by `trust.list` without being in
+  `trust.json`, so a fresh install installs Oscairn's own packages without asking. Signatures
+  are checked all the same. The user can revoke it, or remove it, which leaves an entry in
+  `trust.json` trusting it for nothing; either takes the built-in entry's place. A profile that
+  hides the official repository leaves the key out too. No other publisher's key is built in:
+  the first plugin from another publisher still asks, whatever repository lists it.
 - **Adding one** takes its address and its root key's fingerprint, typed, scanned from a QR
   code, or read from a small `.orepo` file. Nothing is added by a package or a web page.
 - **Each installed package records its repository.** Updates and repair come from there, as
@@ -522,7 +531,9 @@ apart. Signed by the key the repository's signed index lists as the publisher's:
 its fingerprint, with **Trust and install** (the key trusted for plugins, then the install tried
 again) or Cancel. Signed by a key no one vouches for: **Trust this key**, **Install anyway** this
 once, or Cancel; unsigned: **Install anyway** or Cancel; both saying that a plugin runs as a
-program with the user's access. Nothing is trusted unless the user says so. No Show all yet, and no audio previews or screenshots
+program with the user's access. Nothing else is trusted unless the user says so; the official
+publisher's key is built in ([several repositories](#several-repositories)), so Oscairn's own
+packages do not ask. No Show all yet, and no audio previews or screenshots
 (`details/` is not read yet). The Catalog app replaces the view and keeps its behavior.
 
 ### The Catalog app
@@ -1286,7 +1297,8 @@ Jacob's decisions on six of the open questions:
 
 - **Publisher trust:** a repository's listing counts as trust for content, not for code. Code is
   approved once per publisher on the device, then pinned to its key, as the
-  [proposal](#proposal) describes.
+  [proposal](#proposal) describes. (2026-11-11: but for the official publisher's key, built in;
+  see [several repositories](#several-repositories).)
 - **Review:** human review of a publisher's first submission and whenever a package newly adds
   code; automated checks after that; a verified publisher badge for publishers who prove their
   domain ([proposal](#proposal)).

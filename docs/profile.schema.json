@@ -783,7 +783,7 @@
         },
         "hideOfficial": {
           "type": "boolean",
-          "description": "Heavily discouraged (RFC 0031): the official repository off by default. It is never removed: Settings keeps it one switch away, and no profile can take that switch out"
+          "description": "Heavily discouraged (RFC 0031): the official repository off by default, and its publisher's key (org.oscairn) not trusted out of the box. It is never removed: Settings keeps it one switch away, and no profile can take that switch out"
         }
       },
       "additionalProperties": false

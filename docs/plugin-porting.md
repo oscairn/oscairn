@@ -762,7 +762,7 @@ What changes for the plugin:
   desktop asks once whether to trust you to install plugins, naming you, the repository and
   your key's fingerprint, with no Install anyway; once trusted, your later builds install
   without asking. Nothing trusts a publisher on its own: the repository listing a package does
-  not. A build
+  not, and only the Oscairn project's own key is built in. A build
   signed by a revoked key is never installed.
 - **A plugin that is not here,** in another version, or that fails to load opens as a
   stand-in: silent, its ports and parameters as saved, its state written back unchanged, so

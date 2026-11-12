@@ -9,11 +9,9 @@ part of ctest. Everything goes into a throwaway data folder (OSCAIRN_DATA_HOME);
 is opened.
 
 Through the control API (oscairn-web-rpc-test): the official repository is known and its root key
-trusted from the start, for repositories only (another source is refused until its root key is
-trusted, naming the key); it lists its packages. Analog's code
-is refused while its publisher is not trusted; FM installs accepting it, its signer shown as
-unknown; once the publisher is trusted, Analog and the effects install with their signer shown as
-trusted. Each plugin package's asset library comes with it, file for file as its archive (fetched
+trusted from the start, for repositories only, and its publisher's key for plugins, apps and
+content (another source is refused until its root key is trusted, naming the key); it lists its
+packages. Analog, FM and the effects install with no yes, their signer shown as trusted. Each plugin package's asset library comes with it, file for file as its archive (fetched
 here again and checked by its hash) holds it. Then each instrument, in the engine's process and in
 a worker, lists its factory presets, plays one for a held note offline (oscairn-installed-play),
 and must sound and stay finite.
@@ -94,7 +92,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
             check(known and known[0]['address'] == source and known[0]['key'] == ROOT_KEY and known[0]['enabled'] and known[0]['origin'] == 'official',
                   f'a fresh data folder knows the official repository first, on: {known[:1]}')
             keys = rpc('trust.list')['keys']
-            check([(k['key'], k['scope']) for k in keys] == [(ROOT_KEY, ['repositories'])], f'and trusts only its root key, for repositories only: {keys}')
+            check([(k['key'], k['scope']) for k in keys] == [(PUBLISHER_KEY, ['apps', 'content', 'plugins']), (ROOT_KEY, ['repositories'])],
+                  f'and trusts only its publisher key and its root key, built in: {keys}')
         else:
             for method, params in (('packages.list', {'source': source}), ('packages.install', {'source': source, 'id': 'org.oscairn.analog'})):
                 state = job(method, params)
@@ -110,21 +109,12 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
             check(x is not None and x['license'] and x['publisherKey'] == key_id(PUBLISHER_KEY) and any(not v['incompatible'] for v in x['versions']),
                   f"{wanted} {x['versions'][0]['version'] if x else ''} is offered, installable here, by {key_id(PUBLISHER_KEY)}, under {x['license'] if x else '?'}")
 
-        # 2. Code from a publisher not trusted for plugins needs a yes; its signer is unknown until trusted.
-        state = job('packages.install', {'source': source, 'id': 'org.oscairn.analog'})
-        check(state['state'] == 'failed' and 'unknown source' in state['error'] and key_id(PUBLISHER_KEY) in state['error'] and stored() == [],
-              'Analog from a publisher not trusted is refused, naming its key, and its plugin is not stored: ' + state['error'])
-        if (home / 'AssetLibraries').exists():
-            print('note its asset library was installed before the refusal: ' + ', '.join(sorted(f.name for f in (home / 'AssetLibraries').iterdir())))
-        state = job('packages.install', {'source': source, 'id': 'org.oscairn.fm', 'acceptUnsignedCode': True})
-        check(state['state'] == 'done' and [c['status'] for c in state['installed']['code']] == ['unknown'],
-              f"FM {state['version']} installs accepting it, its signer shown as unknown: {state['error']}{state['installed']['code']}")
-        rpc('trust.set', {'key': PUBLISHER_KEY, 'name': 'Oscairn', 'scope': ['plugins']})
-        for package in ('org.oscairn.analog', EFFECTS):
+        # 2. The official publisher is trusted out of the box: its code installs with no yes, each signer trusted.
+        for package in (*INSTRUMENTS, EFFECTS):
             state = job('packages.install', {'source': source, 'id': package})
             codes = state['installed']['code']
             check(state['state'] == 'done' and codes and all(c['status'] == 'trusted' and c['keyName'] == 'Oscairn' for c in codes),
-                  f"{package} {state['version']} installs once its publisher is trusted, each signer shown as trusted: {state['error']} " + ', '.join(f"{c['name']} {c['status']}" for c in codes))
+                  f"{package} {state['version']} installs with no yes, each signer shown as trusted: {state['error']} " + ', '.join(f"{c['name']} {c['status']}" for c in codes))
 
         # 3. The plugin store, its licenses, and each asset library file for file as its archive holds it.
         plugins = {x['id']: x for x in rpc('plugins.list')['plugins']}

@@ -14,6 +14,7 @@
 #include <memory>
 #include <atomic>
 #include <map>
+#include <optional>
 #include <deque>
 #include <set>
 #include <functional>
@@ -721,7 +722,7 @@ namespace oscairn
         static std::vector<assets::Ref> assetsOf(const std::filesystem::path& manifest);
         std::vector<std::string> exportArchive(const std::string& file, const std::string& kind, const std::function<std::vector<PartSource>(const std::filesystem::path&, Package&)>& write, bool editedSounds, const ExportSigning& sign);
         static signing::Key signingKey(const std::string& name); // Keys/<name>.key in the data folder
-        static Signer judge(const std::string& kind, const std::vector<signing::Signature>& signatures); // against the trust store
+        Signer judge(const std::string& kind, const std::vector<signing::Signature>& signatures) const; // against the trust store
         struct CodeRefused : std::runtime_error { std::vector<Signer> code; CodeRefused(const std::string& why, std::vector<Signer> signers) : std::runtime_error(why), code(std::move(signers)) {} }; // installUnpacked's refusal, with the signers it judged
         Installed installUnpacked(const Package& package, const std::filesystem::path& into, bool asLibrary, const std::vector<std::string>& items, bool acceptUnsignedCode, bool thisPlatformOnly, bool checkOnly = false, bool dependency = false, bool replace = false); // checkOnly: refuse as it would, installing nothing; dependency: an asset library a plugin package brought; replace: a different build of its plugins here is replaced, not kept
         // Records in packages.json in the data folder the package an install put in place (RFC 0031): a plugin or asset package, or one installed as a locked library; not an archive copied into the user's own storage.
@@ -734,6 +735,16 @@ namespace oscairn
         std::vector<Repository> deviceRepositories_; // the profile's, set by the app; control thread only
         bool hideOfficial_ = false;
         std::vector<Repository> shipped() const;     // the official repository and the device's: their root keys trusted for repositories without trust.json
+        // Publisher keys trusted without being in trust.json, as the shipped root keys are
+        // (trust.cpp): the official publisher's, unless the profile hides the official repository.
+        // withBuiltIn: these after trust.json's `keys`, but for a key trust.json has an entry for.
+        std::vector<TrustedKey> builtInKeys() const;
+        std::vector<TrustedKey> withBuiltIn(std::vector<TrustedKey> keys) const;
+        std::optional<std::vector<TrustedKey>> builtInKeys_; // setBuiltInKeys', in place of the official publisher's
+    public:
+        // Built-in publisher keys in place of the official one's, for a test: no one else has its private key.
+        void setBuiltInKeys(std::vector<TrustedKey> keys) { builtInKeys_ = std::move(keys); }
+    private:
         uint64_t revision_ = 0, sequence_ = 0;
         using Address = std::pair<NodeId,uint32_t>;
         struct Command { ChangeKind kind; double value; };

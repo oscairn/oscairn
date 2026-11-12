@@ -152,13 +152,15 @@ Oscairn's official package repository is at https://packages.oscairn.org. Its ro
 fingerprint is **`6a2d d1ac f4d4 e23c`** (the key itself is
 `6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841`). Trust a repository at
 that address only if it shows this fingerprint. Every Oscairn device knows this repository: its
-root key is built in, trusted to vouch for the repository's listing only, never for running a
-publisher's plugins, which still ask the first time. A product may ship other repositories in
-its profile; hiding the official one is possible but discouraged, and it always stays one switch
-away. Oscairn's own packages are signed by the
-publisher `org.oscairn`, key **`b284 be6b ea2f adb1`** (public key
+root key is built in, trusted to vouch for the repository's listing only. Oscairn's own packages
+are signed by the publisher `org.oscairn`, key **`b284 be6b ea2f adb1`** (public key
 `db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69`, also published at
-https://oscairn.org/.well-known/oscairn-publisher.json). The engine lists and installs from it
+https://oscairn.org/.well-known/oscairn-publisher.json), which is built in too, trusted for
+plugins, apps and content: Oscairn's own packages install without asking, every signature still
+checked. You can revoke or remove that key in the trust store (`trust.set`, `trust.remove`),
+and it stays off; every other publisher's plugins still ask the first time. A product may ship
+other repositories in its profile; hiding the official one is possible but discouraged, always
+stays one switch away, and leaves the official publisher's key out of the trust store too. The engine lists and installs from it
 through the control API (`packages.list`, `packages.install`; see the
 [control protocol](docs/control-protocol.md)). In the desktop app, the Library's **Install…**
 offers the **Catalog**, the packages of the repositories turned on that are not installed, each

@@ -168,19 +168,28 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         user = json.loads((home / 'library/user.json').read_text())
         assert user['favorites'] == [pad] and user['recent'][-2:] == [pad, copy]  # a gone item's stays, for if it returns
         # The trust store (RFC 0006): keys added, changed, revoked and removed, kept in trust.json;
-        # the official repository's root key built in, for repositories only (RFC 0031).
-        official = {'id': '6a2dd1acf4d4e23c', 'key': '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841', 'name': 'Oscairn', 'scope': ['repositories'], 'revoked': False}
-        assert rpc('trust.list') == {'keys': [official]}
+        # the official repository's root key built in, for repositories only, and its publisher's
+        # key for plugins, apps and content (RFC 0031).
+        publisher = {'id': 'b284be6bea2fadb1', 'key': 'db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69', 'name': 'Oscairn', 'scope': ['apps', 'content', 'plugins'], 'revoked': False}
+        root = {'id': '6a2dd1acf4d4e23c', 'key': '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841', 'name': 'Oscairn', 'scope': ['repositories'], 'revoked': False}
+        official = [publisher, root]
+        assert rpc('trust.list') == {'keys': official}
+        assert not (home / 'trust.json').exists()
         vendor = 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'
         fingerprint = hashlib.sha256(bytes.fromhex(vendor)).hexdigest()[:16]
         rpc('trust.set', {'key': vendor, 'name': 'Vendor', 'scope': ['plugins']})
         rpc('trust.set', {'key': vendor, 'name': 'Vendor Inc', 'scope': ['plugins', 'apps'], 'revoked': True})
-        assert rpc('trust.list') == {'keys': [{'id': fingerprint, 'key': vendor, 'name': 'Vendor Inc', 'scope': ['apps', 'plugins'], 'revoked': True}, official]}
+        assert rpc('trust.list') == {'keys': [{'id': fingerprint, 'key': vendor, 'name': 'Vendor Inc', 'scope': ['apps', 'plugins'], 'revoked': True}, *official]}
         assert json.loads((home / 'trust.json').read_text())['keys'][0]['name'] == 'Vendor Inc'
         rpc('trust.set', {'key': 'ab', 'name': 'x', 'scope': []}, True)
         rpc('trust.set', {'key': vendor, 'name': 'x', 'scope': ['everything']}, True)
         rpc('trust.remove', {'id': fingerprint})
-        assert rpc('trust.list') == {'keys': [official]}
+        assert rpc('trust.list') == {'keys': official}
+        # The built-in publisher key, removed, stays off: trust.json keeps it trusted for nothing.
+        rpc('trust.remove', {'id': publisher['id']})
+        assert rpc('trust.list') == {'keys': [{**publisher, 'scope': []}, root]}
+        assert json.loads((home / 'trust.json').read_text())['keys'] == [{'key': publisher['key'], 'name': 'Oscairn', 'scope': [], 'revoked': False}]
+        rpc('trust.set', {'key': publisher['key'], 'name': 'Oscairn', 'scope': ['apps', 'content', 'plugins']})
         rpc('trust.remove', {'id': fingerprint}, True)
         # Signing keys in the data folder, and an export signed with one; the private key is never sent.
         made = rpc('keys.make', {'name': 'mine'})

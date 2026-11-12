@@ -234,7 +234,13 @@ for (`plugins`, `apps`, `content`, any of them) and whether it is revoked; added
 removed through the control API (`trust.list`, `trust.set`, `trust.remove`). A product ships
 its manufacturer's key and the Oscairn project's; system updates
 ([RFC 0028](0028-system-image-updates-boot-and-power.md)) replace those entries and add
-revocations, so an offline device learns them with its next image. The user adds a key by
+revocations, so an offline device learns them with its next image. The Oscairn project's
+publisher key (`org.oscairn`, ID `b284be6bea2fadb1`) is built in, trusted for plugins, apps and
+content (decided 2026-11-11): `trust.list` lists it without its being in `trust.json`, an
+entry there for the key (revoking it, or the one `trust.remove` leaves, trusting it for nothing)
+takes its place, and a profile that hides the official repository
+([RFC 0031](0031-package-repository-and-distribution.md#several-repositories)) leaves it out.
+Being trusted never skips a check: its signatures are verified like any other. The user adds a key by
 saying yes to its fingerprint. Pairing devices (RFC 0012) to trust each other's keys for content
 is a later step; it is never trust for plugin code.
 

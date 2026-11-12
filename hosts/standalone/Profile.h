@@ -99,7 +99,7 @@ namespace oscairn::standalone
         std::vector<std::string> alwaysAvailable;
         // RFC 0031: the package repositories its image ships (each https:// address, root key and
         // name), beside the official one; hideOfficial, heavily discouraged, turns the official one
-        // off by default without removing it.
+        // off by default without removing it, and leaves its publisher's key untrusted.
         struct Repository { std::string address, key, name; };
         std::vector<Repository> repositories;
         bool hideOfficial = false;

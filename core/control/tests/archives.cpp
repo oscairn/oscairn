@@ -440,6 +440,56 @@ int main(int argc, char** argv)
             check(installed.added == 1 && installed.code.at(0).status == "revoked" && installed.notes.size() == 1 && installed.notes[0].find("revoked") != std::string::npos &&
                   !fs::exists(temp.path / "j" / "Plugins"), "a revoked key's build is refused even with a yes, and noted");
         }
+        // Built-in publisher keys (RFC 0031, decided 2026-11-11): the official publisher's is
+        // trusted out of the box, listed without being in trust.json. Its private key is no one
+        // else's, so the installs here stand the author's key in for it (setBuiltInKeys).
+        {
+            const std::string official = "db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69";
+            const Control::TrustedKey builtIn{"", authorKey, "Author", {"apps", "content", "plugins"}};
+            auto refusal = [](Session& s, const fs::path& archive) { std::string why; try { s.installArchive(archive.string(), false); } catch(const std::exception& e) { why = e.what(); } return why; };
+            {
+                device(temp.path / "builtin");
+                Session k(48000, 64);
+                const auto keys = k.trustedKeys();
+                check(std::any_of(keys.begin(), keys.end(), [&](const auto& t) { return t.key == official && t.id == "b284be6bea2fadb1" && t.name == "Oscairn" && !t.revoked &&
+                                                                                       t.scope == std::vector<std::string>{"apps", "content", "plugins"}; }) &&
+                          !fs::exists(temp.path / "builtin" / "trust.json"),
+                      "a fresh device trusts the official publisher for plugins, apps and content, built in, not written to trust.json");
+                check(refusal(k, signedArchive).find("by an unknown key " + signing::keyId(authorKey)) != std::string::npos, "a build signed by another key still asks");
+                k.setBuiltInKeys({builtIn});
+                const auto installed = k.installArchive(signedArchive.string(), false);
+                check(installed.added == 1 && installed.code.at(0).status == "trusted" && installed.code[0].keyName == "Author" && !fs::exists(temp.path / "builtin" / "trust.json"),
+                      "a build by a built-in key installs with no yes, and nothing is written to trust.json");
+                check(refusal(k, temp.path / "Changed.olib").find("signature") != std::string::npos, "an archive that does not verify is refused all the same: " + refusal(k, temp.path / "Changed.olib"));
+            }
+            {
+                device(temp.path / "builtin-revoked");
+                Session k(48000, 64);
+                k.setBuiltInKeys({builtIn});
+                k.setTrustedKey({"", authorKey, "Author", {"plugins"}, true});
+                const auto installed = k.installArchive(signedArchive.string(), false, {}, true);
+                check(installed.code.at(0).status == "revoked" && !fs::exists(temp.path / "builtin-revoked" / "Plugins"), "revoked in trust.json, the built-in key's build is refused");
+            }
+            {
+                device(temp.path / "builtin-removed");
+                Session k(48000, 64);
+                k.setBuiltInKeys({builtIn});
+                k.removeTrustedKey(signing::keyId(authorKey));
+                const auto keys = k.trustedKeys();
+                check(std::any_of(keys.begin(), keys.end(), [&](const auto& t) { return t.key == authorKey && t.scope.empty(); }) &&
+                          refusal(k, signedArchive).find("by an unknown key") != std::string::npos,
+                      "removed, it stays in trust.json trusted for nothing, and its build asks");
+            }
+            {
+                device(temp.path / "builtin-profile");
+                Session k(48000, 64);
+                k.setBuiltInKeys({builtIn});
+                k.setDeviceRepositories({}, true);
+                const auto keys = k.trustedKeys();
+                check(std::none_of(keys.begin(), keys.end(), [&](const auto& t) { return t.key == authorKey; }) && refusal(k, signedArchive).find("by an unknown key") != std::string::npos,
+                      "a profile hiding the official repository leaves the built-in publisher key out, and its build asks");
+            }
+        }
         // Device P: a plugin package, packed by oscairn-sign from a signed build, carries the plugin
         // and no items; it installs into the store, where a plugin scan looks, under the same
         // signature rules, and never as a library.

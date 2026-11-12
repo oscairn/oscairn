@@ -1255,7 +1255,14 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   its name, what it is trusted for (any of `plugins`, `apps`, `content` and `repositories`, a
   package repository's root key) and whether it is
   revoked. `trust.set` takes `{key,name,scope}` and optional `revoked`, adding the key or
-  replacing its entry; `trust.remove` takes `{id}`. Both return `{"accepted":true}`.
+  replacing its entry; `trust.remove` takes `{id}`. Both return `{"accepted":true}`. Built in
+  beside `trust.json`'s, after them: the official publisher's key (`org.oscairn`, ID
+  `b284be6bea2fadb1`), trusted for `apps`, `content` and `plugins`, then the shipped
+  repositories' root keys (`packages.repositories`). A `trust.json` entry for a built-in key
+  takes its place: `trust.set` revoking it, or the one `trust.remove` writes for the official
+  publisher's key, trusting it for nothing (`scope` `[]`), so it stays off. A profile hiding the
+  official repository (`packages.setDeviceRepositories`' `hideOfficial`) leaves the official
+  publisher's key out. A trusted key never skips a signature check.
 - `keys.list` (`{}`) returns `{keys}`, the signing keys in the data folder's `Keys/`, each
   `{name,id,key}`: its name, ID and public key; a private key is never sent. `keys.make` takes
   `{name}` (letters, digits, `.`, `-` and `_`, at most 64, not starting with `.`) and
@@ -1339,7 +1346,8 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   then the user's. The official and device repositories' root keys are trusted for
   `repositories` only, built in: `trust.list` lists them without their being in `trust.json`, and
   a `trust.set` entry for the same key (one revoking it) takes their place. Neither trusts a
-  publisher's key for `plugins`; that stays the user's decision.
+  publisher's key for `plugins`; only the official publisher's key is built in for that
+  (`trust.list`), and hiding the official repository leaves it out.
 - `packages.addRepository` takes `{address,key}` and optional `name` (default: `Repository` and
   the key's ID): an https:// (or http://) address or a folder's full path, and its root key,
   which the user has been shown by its fingerprint (as `packages.job` gives a refused listing's
@@ -1355,7 +1363,7 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
 - `packages.setDeviceRepositories` takes `{repositories}` (each `{address,key,name}`) and optional
   `hideOfficial`: the app sets them from its profile at each start; they are not kept. With
   `hideOfficial` (heavily discouraged) the official repository is off until turned on; it is
-  never removed. Each of these four returns `{"accepted":true}`.
+  never removed; and the official publisher's key is not built in (`trust.list`). Each of these four returns `{"accepted":true}`.
 - `library.uninstall` takes `{library}`; `library.delete` takes `{id}`, any item's.
 - `library.query` items carry `library`: the installed library holding them, locked, or empty
   for the user's own, and, with a budget set, `unfit` when it does not fit this device: why, from

@@ -50,12 +50,29 @@ void writeTrust(const std::vector<Control::TrustedKey>& keys){
     out+="\n]}\n";
     writeAtomically(trustFile(),out);
 }
+// The official publisher, org.oscairn, trusted out of the box for plugins, apps and content
+// (decided 2026-11-11), as the official repository's root key is for repositories.
+const Control::TrustedKey officialPublisher{"","db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69","Oscairn",{"apps","content","plugins"},false};
 }
 
-// trust.json's, then the root keys of the repositories this device ships, trusted for
-// repositories only, unless trust.json has an entry for the key (such as one revoking it).
+std::vector<Control::TrustedKey> Session::builtInKeys() const{
+    if(hideOfficial_)return {}; // a profile that hides the official repository does not vouch for its publisher either
+    auto keys=builtInKeys_.value_or(std::vector<TrustedKey>{officialPublisher});
+    for(auto& k:keys)k.id=signing::keyId(k.key);
+    return keys;
+}
+
+// trust.json's entry for a built-in key wins: one revoking it, or one left by removing it.
+std::vector<Control::TrustedKey> Session::withBuiltIn(std::vector<TrustedKey> keys) const{
+    for(const auto& k:builtInKeys())if(std::none_of(keys.begin(),keys.end(),[&](const auto& t){return t.key==k.key;}))keys.push_back(k);
+    return keys;
+}
+
+// trust.json's, then the built-in publisher keys, then the root keys of the repositories this
+// device ships, trusted for repositories only, each unless trust.json has an entry for the key
+// (such as one revoking it).
 std::vector<Control::TrustedKey> Session::trustedKeys(){
-    auto keys=readTrust();
+    auto keys=withBuiltIn(readTrust());
     for(const auto& r:shipped())
         if(std::none_of(keys.begin(),keys.end(),[&](const auto& k){return k.key==r.key;}))keys.push_back({signing::keyId(r.key),r.key,r.name,{"repositories"},false});
     return keys;
@@ -63,11 +80,11 @@ std::vector<Control::TrustedKey> Session::trustedKeys(){
 
 // Revoked by any of its signers' keys wins; then trusted by a key trusted for this kind (plugins,
 // apps, or content for an archive); else unknown, or unsigned. Signatures are already verified.
-Control::Signer Session::judge(const std::string& kind,const std::vector<signing::Signature>& signatures){
+Control::Signer Session::judge(const std::string& kind,const std::vector<signing::Signature>& signatures) const{
     Signer out;out.kind=kind;out.status=signatures.empty()?"unsigned":"unknown";
     if(signatures.empty())return out;
     const auto scope=kind=="plugin"?"plugins":kind=="app"?"apps":"content";
-    const auto keys=readTrust();
+    const auto keys=withBuiltIn(readTrust());
     out.key=signing::keyId(signatures.front().key);out.publicKey=signatures.front().key;
     for(const auto& s:signatures)for(const auto& k:keys)if(k.key==s.key){
         if(k.revoked){out.status="revoked";out.key=k.id;out.keyName=k.name;out.publicKey=k.key;return out;}
@@ -123,6 +140,13 @@ Control::SigningKey Session::makeSigningKey(const std::string& name){
 
 void Session::removeTrustedKey(const std::string& id){
     auto keys=readTrust();
+    // A built-in key is not in trust.json to remove: an entry trusting it for nothing takes its place.
+    for(const auto& b:builtInKeys())if(b.id==id){
+        auto gone=b;gone.scope.clear();
+        for(const auto& k:keys)if(k.key==b.key)gone.name=k.name;
+        std::erase_if(keys,[&](const auto& k){return k.key==b.key;});
+        keys.push_back(gone);writeTrust(keys);return;
+    }
     const auto gone=std::remove_if(keys.begin(),keys.end(),[&](const auto& k){return k.id==id;});
     if(gone==keys.end())bad("no trusted key "+id);
     keys.erase(gone,keys.end());

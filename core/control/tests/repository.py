@@ -589,6 +589,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         trusted = {k['key']: k for k in rpc('trust.list')['keys']}
         check(trusted.get(official_key, {}).get('scope') == ['repositories'] and not trusted[official_key]['revoked'] and official_key not in (home / 'trust.json').read_text(),
               'its root key is trusted for repositories only, built in rather than written to trust.json: ' + json.dumps(trusted.get(official_key)))
+        publisher_key = 'db87e97dba5b24564c782f473c543681bd87c0818bc2e41f37d1f100f3360d69'
+        check(trusted.get(publisher_key, {}).get('scope') == ['apps', 'content', 'plugins'] and publisher_key not in (home / 'trust.json').read_text(),
+              'its publisher\'s key is trusted for plugins, apps and content, built in too: ' + json.dumps(trusted.get(publisher_key)))
         error = rpc('packages.removeRepository', {'address': official}, expect_error=True)
         check('not removed' in error['message'], 'the official repository cannot be removed: ' + error['message'])
         # The image's repositories, and hiding the official one (discouraged): off by default, still listed.
@@ -599,6 +602,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
               'the image\'s repository is listed, and a hidden official one is off but still there: ' + json.dumps(known))
         trusted = {k['key']: k for k in rpc('trust.list')['keys']}
         check(trusted.get(keys['other'][1], {}).get('scope') == ['repositories'], 'the image\'s root key is trusted for repositories')
+        check(publisher_key not in trusted, 'a profile hiding the official repository leaves its publisher\'s key out')
         error = rpc('packages.removeRepository', {'address': 'https://packages.kick.example'}, expect_error=True)
         check('not removed' in error['message'], 'nor can the image\'s: ' + error['message'])
         rpc('packages.enableRepository', {'address': official, 'enabled': True})
@@ -608,6 +612,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(json.loads((home / 'repositories.json').read_text())['enabled'] == {official: True, 'https://packages.kick.example': False} and
               json.loads((home / 'repositories.json').read_text())['seen'].get('org.example.test') == 7, 'kept by address beside the serials seen')
         rpc('packages.setDeviceRepositories', {'repositories': []})
+        check(publisher_key in {k['key'] for k in rpc('trust.list')['keys']}, 'not hidden, it is back')
         # The user's: by address and root key, which is trusted for repositories with it and
         # taken away with it.
         rpc('trust.remove', {'id': keys['root'][0]})

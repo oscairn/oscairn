@@ -345,7 +345,10 @@ namespace oscairn
         // device trusts, each by its public key (64 hex digits) and ID (its fingerprint), with a
         // name, what it is trusted for (scope: any of "plugins", "apps" and "content") and whether
         // it is revoked. Setting one adds it or replaces the entry for that key (id is ignored);
-        // removing takes its ID.
+        // removing takes its ID. Listed too, built in without being in trust.json: the official
+        // publisher's key (org.oscairn), for plugins, apps and content, unless the profile hides
+        // the official repository; an entry in trust.json for it takes its place, and removing it
+        // writes one trusting it for nothing.
         struct TrustedKey { std::string id, key, name; std::vector<std::string> scope; bool revoked = false; };
         virtual std::vector<TrustedKey> trustedKeys() = 0;
         virtual void setTrustedKey(const TrustedKey& key) = 0;
@@ -396,7 +399,8 @@ namespace oscairn
         // trusts the key for repositories and lists it enabled; only the user's can be removed,
         // which takes its key's trust for repositories with it unless another listed one uses it.
         // Enabled or not is kept by address in the data folder (repositories.json). The device
-        // ones and hideOfficial are set by the app from its profile at each start.
+        // ones and hideOfficial are set by the app from its profile at each start; hideOfficial
+        // also leaves the official publisher's key out of the trust store.
         struct Repository { std::string address, name, key, origin; bool enabled = true; };
         virtual std::vector<Repository> repositories() = 0;
         virtual void addRepository(const Repository& repository) = 0;

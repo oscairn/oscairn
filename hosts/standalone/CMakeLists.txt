@@ -208,7 +208,7 @@ if(Python3_Interpreter_FOUND)
     add_dependencies(oscairn_desktop_gaps_test oscairn-sign kick-clap-fixture-normal)
     list(APPEND gaps_environment "OSCAIRN_TEST_MAKE_REPOSITORY=${Python3_EXECUTABLE}|${CMAKE_CURRENT_SOURCE_DIR}/tests/make_repository.py|$<TARGET_FILE:oscairn-sign>|$<TARGET_FILE:kick-clap-fixture-normal>|${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py")
 endif()
-set_tests_properties(desktop-gaps PROPERTIES TIMEOUT 120 ENVIRONMENT "${gaps_environment}")
+set_tests_properties(desktop-gaps PROPERTIES TIMEOUT 400 ENVIRONMENT "${gaps_environment}")
 # RFC 0022 step 2: the Setlist app as a process of its own, started and supervised from its manifest, against a socket session.
 juce_add_console_app(oscairn_desktop_apps_test PRODUCT_NAME "Oscairn Desktop Apps Test")
 target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Settings.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)

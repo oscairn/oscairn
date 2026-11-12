@@ -3,6 +3,8 @@
 #include "Engine.h"
 #include "Theme.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <atomic>
+#include <future>
 #include <map>
 #include <optional>
 
@@ -24,15 +26,21 @@ namespace oscairn::standalone
         std::optional<std::string> installed; // the version installed here, empty when not known
         bool update = false;                  // installed, and `version` installable and newer
         bool otherBuild = false;              // installed at `version`, but not this repository's build
+        bool builtIn = false;                 // not installed, but its plugins come with the app, `installed` their version
         Control::InstalledPackage record;     // what is installed, as packages.installed says
         bool holds(const std::string& kind) const; // "performance", "sound" or "plugin"
         bool offered() const { return installable && (!installed || update || otherBuild); } // Install, Update, or the repository's build
     };
     /// The offers of these listings, each once per repository (`installed`: the newest version
-    /// installed of each package, by ID).
-    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, Control::InstalledPackage>& installed);
-    /// A row's second line: its state (Update to, Installed, Installed (a different build), or why
-    /// it cannot be installed here), then its publisher and summary.
+    /// installed of each package, by ID). A plugin package not installed whose plugins all come
+    /// with the app (`bundled`: their versions, by plugin ID) is built in, at the oldest of their
+    /// versions: shown as Built in, or offered as Update to a newer version the repository has,
+    /// which installs beside the app's (RFC 0031: plugins install side by side; nothing moves on
+    /// its own).
+    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, Control::InstalledPackage>& installed,
+                              const std::map<std::string, std::string>& bundled = {});
+    /// A row's second line: its state (Update to, Built in, Installed, Installed (a different
+    /// build), or why it cannot be installed here), then its publisher and summary.
     juce::String describe(const Offer& offer);
     /// The question before installing the repository's build over a different one: both builds,
     /// each by its archive's SHA-256 and signer, where known.
@@ -52,7 +60,8 @@ namespace oscairn::standalone
     /// or plugins (each read as packages.list reads it: the root, and the index
     /// kept from last time while it is unchanged), searched by
     /// name, summary, tag or publisher. What is installed says so, with its version, or offers
-    /// Update to a newer one this device can install; a different build at the version listed
+    /// Update to a newer one this device can install; one whose plugins come with the app says
+    /// Built in, the same way; a different build at the version listed
     /// says so, offering Install the repository's build. What this device cannot install is shown
     /// grayed with the reason. Opening one shows its details: name, summary, version, what is
     /// installed, license, publisher and key fingerprint, repository, sizes and the packages it
@@ -60,9 +69,14 @@ namespace oscairn::standalone
     class Catalog : public juce::Component, private juce::ListBoxModel
     {
     public:
-        Catalog(Engine& engine, const std::string& kind, std::map<std::string, Control::InstalledPackage> installed);
-        // Reads each enabled repository in turn, one engine job at a time.
+        // scanner: the plugin scanner, to find the plugins that come with the app (the engine's
+        // plugin folder) and their versions; none: none are told apart.
+        Catalog(Engine& engine, const std::string& kind, std::map<std::string, Control::InstalledPackage> installed, std::string scanner = {});
+        ~Catalog() override { canceled_ = true; } // a scan still going stops
+        // Reads each enabled repository in turn, one engine job at a time, the app's plugins
+        // scanned meanwhile.
         void read();
+        const std::map<std::string, std::string>& bundled() const { return bundled_; } // the app's plugins found, by ID: their versions
         void showKind(const std::string& kind);
         void open(int row);  // its details
         void back();         // to the list
@@ -89,6 +103,10 @@ namespace oscairn::standalone
         Engine& engine_;
         std::string kind_;
         std::map<std::string, Control::InstalledPackage> installed_;
+        std::string scanner_;
+        std::atomic<bool> canceled_ = false; // before scan_, which waits for the scan when it goes
+        std::future<std::map<std::string, std::string>> scan_;
+        std::map<std::string, std::string> bundled_;
         std::vector<std::pair<std::string, Control::PackageJob>> listings_;
         std::vector<Offer> all_, shown_;
         std::optional<Offer> opened_;

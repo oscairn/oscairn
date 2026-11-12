@@ -947,6 +947,36 @@ int main(int argc, char** argv)
                           unsignedCode.message.startsWith("Bare 2.0 in this package is not signed: nothing says who made it") && unsignedCode.message.contains("runs as a program on this device"),
                       "unsigned: install anyway or not, saying the risk: " + unsignedCode.message.toStdString());
             }
+            // Built in: a plugin package not installed whose plugins all come with the app says so,
+            // with nothing to install, unless the repository has a newer version, offered as an update.
+            {
+                auto package = [](const std::string& id, const std::string& version) {
+                    Control::RepositoryPackage p; p.id = p.name = id; p.publisher = "Oscairn";
+                    p.versions.push_back({version, "stable", "", "", "", 0, 0, {{"clap", 1}}, {}});
+                    return p;
+                };
+                Control::PackageJob listing; listing.name = "Oscairn";
+                listing.packages = {package("org.oscairn.delay", "0.1.0"), package("org.oscairn.step-sequencer", "0.3.0"), package("org.oscairn.splitters", "0.1.0"), package("org.oscairn.fm", "0.4.8")};
+                std::map<std::string, std::string> bundled{{"org.oscairn.delay", "0.1.0"}, {"org.oscairn.step-sequencer", "0.2.0"}, {"org.oscairn.split", "0.1.0"}, {"org.oscairn.join", "0.1.0"}};
+                auto offer = [&](const std::vector<standalone::Offer>& all, const std::string& id) {
+                    const auto at = std::find_if(all.begin(), all.end(), [&](const auto& o) { return o.package.id == id; });
+                    return at == all.end() ? standalone::Offer{} : *at;
+                };
+                const auto all = standalone::offers({{"https://packages.oscairn.org", listing}}, {}, bundled);
+                const auto delay = offer(all, "org.oscairn.delay"), sequencer = offer(all, "org.oscairn.step-sequencer"), splitters = offer(all, "org.oscairn.splitters"), fm = offer(all, "org.oscairn.fm");
+                check(delay.builtIn && delay.installed == std::optional<std::string>("0.1.0") && !delay.update && !delay.offered() && standalone::describe(delay).startsWith("Built in  ") && standalone::describe(delay).endsWith("Oscairn"),
+                      "a package that comes with the app, at the repository's version: Built in, nothing to install: " + standalone::describe(delay).toStdString());
+                check(splitters.builtIn && !splitters.offered(), "one of several plugins, each with the app: Built in");
+                check(sequencer.builtIn && sequencer.installed == std::optional<std::string>("0.2.0") && sequencer.update && sequencer.offered() && standalone::describe(sequencer).startsWith("Update to 0.3.0"),
+                      "a newer version in the repository is offered as an update, never installed on its own: " + standalone::describe(sequencer).toStdString());
+                check(!fm.builtIn && !fm.installed && fm.offered(), "one not with the app is offered to install");
+                bundled.erase("org.oscairn.join");
+                check(!offer(standalone::offers({{"https://packages.oscairn.org", listing}}, {}, bundled), "org.oscairn.splitters").builtIn, "not built in unless all its plugins come with the app");
+                Control::InstalledPackage record; record.id = "org.oscairn.step-sequencer"; record.version = "0.3.0"; record.kind = "plugin";
+                const auto installed = offer(standalone::offers({{"https://packages.oscairn.org", listing}}, {{record.id, record}}, bundled), "org.oscairn.step-sequencer");
+                check(!installed.builtIn && installed.installed == std::optional<std::string>("0.3.0") && standalone::describe(installed).startsWith("Installed  "),
+                      "installed from the repository, it is Installed, as any other: " + standalone::describe(installed).toStdString());
+            }
             // Install... (RFC 0031): exactly the Catalog and a File. The Catalog lists the enabled
             // repositories' packages of a kind, grayed with the reason where this device cannot
             // install them; a package's details; Install, and for a publisher not trusted for
@@ -1016,6 +1046,15 @@ int main(int argc, char** argv)
                     const juce::File out{juce::String(argv[4]) + "-" + name + ".png"};
                     out.deleteFile(); juce::FileOutputStream stream(out); juce::PNGImageFormat().writeImageToStream(screen, stream);
                 };
+                {
+                    // The app's plugins, found by the scanner with their versions as the repositories are read.
+                    standalone::Catalog scanned(engine, "plugin", {}, argv[2]);
+                    scanned.read();
+                    const auto& found = scanned.bundled();
+                    check(wait([&] { return !scanned.reading(); }) && found.count("org.oscairn.step-sequencer") && !found.at("org.oscairn.step-sequencer").empty() &&
+                              found.count("org.oscairn.split") && scanned.shown().size() == 2,
+                          "the plugins that come with the app are found, with their versions: " + std::to_string(found.size()));
+                }
                 pane.showCatalog("plugin");
                 auto* catalog = pane.catalog();
                 check(catalog && wait([&] { return !catalog->reading(); }), "the Catalog opens and reads the repositories that are on");

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Catalog.h"
 #include "Settings.h"
+#include "oscairn/discovery.h"
 #include "oscairn/repository.h"
 
 namespace oscairn::standalone
@@ -19,8 +20,12 @@ namespace oscairn::standalone
         return false;
     }
 
-    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, Control::InstalledPackage>& installed)
+    std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, Control::InstalledPackage>& installed,
+                              const std::map<std::string, std::string>& bundled)
     {
+        // The plugins a package holds: its ID's, or those named here for a package holding several.
+        // shortcut: the index lists no plugin IDs, so a package of several is named here; when it lists them, use those.
+        const std::map<std::string, std::vector<std::string>> several{{"org.oscairn.splitters", {"org.oscairn.split", "org.oscairn.join"}}};
         std::vector<Offer> out;
         for(const auto& [source, listing] : listings)
             for(const auto& p : listing.packages)
@@ -47,6 +52,20 @@ namespace oscairn::standalone
                             o.otherBuild = true; o.version = v; o.installable = v.incompatible.empty();
                         }
                 }
+                else if(o.holds("plugin"))
+                {
+                    const auto named = several.find(p.id);
+                    std::optional<std::string> oldest;
+                    bool all = true;
+                    for(const auto& id : named == several.end() ? std::vector<std::string>{p.id} : named->second)
+                        if(const auto b = bundled.find(id); b == bundled.end()) all = false;
+                        else if(!oldest || repository::older(b->second, *oldest)) oldest = b->second;
+                    if(all)
+                    {
+                        o.builtIn = true; o.installed = oldest;
+                        o.update = pick && repository::older(*oldest, pick->version);
+                    }
+                }
                 out.push_back(std::move(o));
             }
         std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return text(a.package.name).compareIgnoreCase(text(b.package.name)) < 0; });
@@ -57,6 +76,7 @@ namespace oscairn::standalone
     {
         const auto about = text(o.package.publisher) + (o.package.summary.empty() ? juce::String() : separator + text(o.package.summary));
         return o.update ? "Update to " + text(o.version.version) + separator + about
+             : o.builtIn ? "Built in" + separator + about
              : o.otherBuild ? "Installed (a different build)" + separator + about
              : o.installed ? "Installed" + separator + about
              : o.installable ? about
@@ -115,7 +135,8 @@ namespace oscairn::standalone
         return q;
     }
 
-    Catalog::Catalog(Engine& engine, const std::string& kind, std::map<std::string, Control::InstalledPackage> installed) : engine_(engine), kind_(kind), installed_(std::move(installed))
+    Catalog::Catalog(Engine& engine, const std::string& kind, std::map<std::string, Control::InstalledPackage> installed, std::string scanner)
+        : engine_(engine), kind_(kind), installed_(std::move(installed)), scanner_(std::move(scanner))
     {
         setTitle("Catalog");
         for(auto* b : {&performances, &sounds, &plugins}) { b->setClickingTogglesState(true); b->setRadioGroupId(1); }
@@ -168,6 +189,13 @@ namespace oscairn::standalone
         listings_.clear(); read_.clear(); failed_.clear();
         if(on.empty()) { status_ = "No repository is on. Settings lists them."; repaint(); return; }
         reading_ = true;
+        // The app's plugins, by the isolated scanner, off this thread; a scan that fails finds none.
+        if(!scanner_.empty() && !scan_.valid())
+            scan_ = std::async(std::launch::async, [dir = engine_.pluginDir(), helper = scanner_, canceled = &canceled_] {
+                std::map<std::string, std::string> found;
+                try { for(const auto& d : scanPlugins({dir}, helper, canceled).plugins) found[d.id] = d.version; } catch(const std::exception&) {}
+                return found;
+            });
         readNext(std::move(on));
     }
 
@@ -175,8 +203,17 @@ namespace oscairn::standalone
     {
         if(left.empty())
         {
+            if(scan_.valid())
+            {
+                if(scan_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                {
+                    juce::Timer::callAfterDelay(100, [safe = juce::Component::SafePointer<Catalog>(this)] { if(safe) safe->readNext({}); });
+                    return;
+                }
+                bundled_ = scan_.get();
+            }
             reading_ = false;
-            all_ = offers(listings_, installed_);
+            all_ = offers(listings_, installed_, bundled_);
             status_ = read_.isEmpty() ? juce::String() : "From " + read_.joinIntoString(", ") + ".";
             if(!failed_.isEmpty()) status_ << (status_.isEmpty() ? "" : " ") << "Not read: " << failed_.joinIntoString("; ") << ".";
             filter();
@@ -250,7 +287,8 @@ namespace oscairn::standalone
             {"Needs", needs.isEmpty() ? juce::String("Nothing else") : needs.joinIntoString(", ")}};
         if(o.installed)
             out.insert(out.begin() + 2, {"Installed", o.installed->empty() ? juce::String("Its version not known")
-                                                      : text(*o.installed) + (o.otherBuild ? ", a different build: it does not match this repository's" : "")});
+                                                      : text(*o.installed) + (o.builtIn ? ", built in: it comes with the app"
+                                                                              : o.otherBuild ? ", a different build: it does not match this repository's" : "")});
         if(!o.installable) out.push_back({"On this device", text(v.incompatible.empty() ? "no version it can install" : v.incompatible)});
         return out;
     }

@@ -503,7 +503,10 @@ on Install…; it belongs with the repositories in Settings.
 desktop Library, labeled Catalog. Its rows name each package, its version, publisher and
 summary; what this device cannot install is grayed with the reason. What is installed says
 **Installed** with the version installed, or **Update to** the newest stable version this device
-can install when that is newer. Installed means the repository's build (decided 2026-11-11): the
+can install when that is newer. A plugin package whose plugins all come with the app, and
+not installed from a repository, says **Built in**, with nothing to install, or **Update to** a
+newer version the repository has, which installs beside the app's, as plugins install side by
+side ([updates](#updates)); nothing changes on its own. Installed means the repository's build (decided 2026-11-11): the
 same ID and version installed with different content (a user's own build that kept the ID, or
 one installed some other way), told by the archive's SHA-256 recorded at install, says
 **Installed (a different build)**, and its details say the installed build does not match this

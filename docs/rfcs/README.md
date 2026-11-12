@@ -50,5 +50,6 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0039](0039-network-security.md) | Network security | proposed |
 | [0040](0040-ios-developer-builds.md) | iOS and iPadOS developer builds | proposed |
 | [0041](0041-windows-desktop.md) | Windows desktop, process and IPC support | proposed |
+| [0042](0042-sliders-and-drawbars.md) | Sliders that follow a part, and organ drawbars | proposed |
 | [0043](0043-moving-sounds-to-newer-plugin-versions.md) | Moving sounds to newer plugin versions, and removing unused ones | proposed |
 | [0044](0044-panel-sections.md) | Panel sections: dedicated piano, organ and synth controls over flexible parts | proposed |

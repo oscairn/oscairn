@@ -468,6 +468,10 @@ Also open:
   ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#instant-controls)), values sent
   back to knobs whose profile takes them, and Mackie Control's LEDs, faders and names
   ([RFC 0024](rfcs/0024-device-profiles.md#mackie-control))
+- [ ] **Sliders that follow a part, and organ drawbars** ([RFC 0042](rfcs/0042-sliders-and-drawbars.md#progress), proposed):
+  sliders default to the mixer and a mode hands them to the selected part; a Sound declares its
+  nine drawbars and their direction, the ninth goes to the first free knob, the screen shows all
+  nine at value and at physical position
 - [ ] **Panel sections** ([RFC 0044](rfcs/0044-panel-sections.md#progress), proposed 2026-11-11):
   a profile names its panel's piano, organ and synth sections; a Performance binds a part to
   each, and the section's controls act on that part by declared role, dark where the Sound has

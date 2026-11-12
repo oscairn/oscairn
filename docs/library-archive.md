@@ -22,7 +22,7 @@ The manifest:
 | `name` | Its name |
 | `kind` | `library`, `performance` for an exported Performance, `sound` for an exported Sound (its ID and name are that item's), `plugin` for a [plugin package](#plugin-packages): plugin builds and no items, or `asset` for an [asset package](#asset-packages). Any other kind is refused |
 | `assets` | An asset package's library: its `version` and `files` ([asset packages](#asset-packages)); `null` for every other kind |
-| `dependencies` | `{"assets": [...]}`: the asset libraries a plugin package needs, each `{id, version}`, the least version; empty for every other kind |
+| `dependencies` | `{"assets": [...]}`: the asset libraries a plugin package needs, each `{id, version}`, the least version; empty for every other kind. `packages`, beside it: the packages a library, Performance or Sound needs ([below](#package-dependencies)). Not built: no reader takes it yet |
 | `license` | Its license, an SPDX expression (at most 256 bytes); empty when it names none. A plugin package names one |
 | `source` | `null`, or where its source is: `{url, revision}`, an `https://` address and the exact commit or tag (at most 2048 and 128 bytes, no spaces or control characters) |
 | `items` | Each item's `kind` (`performance` or `sound`), `id` (as plain as the library's: an exported item's ID is its archive's), `name`, `path`, its folder in the archive, and `signatures` (optional) |
@@ -280,6 +280,56 @@ A converter writing libraries that use published, signed packages:
 - Do not write a lock entry (`lock` in a document) for a build the converter has not hashed
   itself; write none rather than guess. A device compares a locked digest with the published
   build before installing it.
+
+## Package dependencies
+
+Specified 2026-11-11 ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-starter-library)),
+for the starter library of Performances that comes with Oscairn and any library whose items use FM,
+Analog or another published plugin. **Not built:** no reader or writer takes it yet. Today's reader
+reads only `assets` in `dependencies` (`core/control/src/package.cpp`), so an archive carrying it
+installs, and nothing reads it. No format version change: an older reader passes over it.
+
+A library, an exported Performance or an exported Sound names the packages its items need,
+plugin packages and asset libraries alike, each by package ID and the least version:
+
+```json
+"dependencies": {
+  "assets": [],
+  "packages": [
+    {"id": "org.oscairn.fm", "version": "0.4.8"},
+    {"id": "org.oscairn.analog-factory", "version": "1.0.0",
+     "repository": {"address": "https://packages.oscairn.org", "key": "6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841"}}
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `packages` | Absent, or a list of at most 256 entries, one per `id`; only in kinds `library`, `performance` and `sound` (a plugin package keeps naming its asset libraries in `assets`) |
+| `id` | The package's ID in its repository, as plain as a library's ID |
+| `version` | The least version that works, as plain as an asset library's version. The items' own plugin versions stay in their documents; this says which package brings them |
+| `repository` | Optional: where the package is published, with the shape and rules of `pluginRepositories`' `repository` (an `https://` address and the root key). Absent: the repositories the device knows, in `packages.repositories`' order |
+
+Once built, a reader refuses the archive, as for any malformed field, when an entry is not this
+shape, an ID is named twice, or there are more than 256.
+
+**Writing it.** `library.export` writes one entry for each package recorded in `packages.json`
+that holds a plugin the items use (by format, ID and version) or the asset library their documents
+reference, at the version installed, with the repository it was recorded from when that is an
+`https://` address. A plugin or library not installed from a package gets no entry; its plugin is
+still named in the items, as now.
+
+**Installing with it.** `library.contents` lists the entries, each with the version installed
+here, if any (`packages.installed`; a plugin package at that version or later, an asset library at
+that version or later). `library.install` installs the items as now, whatever is missing, which
+open as stand-ins until it is there, and its notes name each missing package. Nothing more is
+installed on its own: the install dialog offers each missing one ("Needs Oscairn FM 0.4.8 or later
+from Oscairn: Install"), which is a `packages.install` from the named repository, or the first
+known one whose index has the ID, at the newest stable version that is at least the one named, its
+own asset libraries coming with it as now. A package repository's index builder writes the entries
+into the release's `requires.packages`, so the Catalog shows what a library needs before it is
+installed and the Dependencies check covers it. In a preinstalled snapshot the starter library's
+packages are in the same snapshot, and libraries are installed after the packages they need.
 
 ## Reading one
 

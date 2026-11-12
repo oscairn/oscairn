@@ -829,6 +829,18 @@ int main(int argc, char** argv)
                 const auto installed = offer(standalone::offers({{"https://packages.oscairn.org", listing}}, {{record.id, record}}, bundled), "org.oscairn.step-sequencer");
                 check(!installed.builtIn && installed.installed == std::optional<std::string>("0.3.0") && standalone::describe(installed).startsWith("Installed  "),
                       "installed from the repository, it is Installed, as any other: " + standalone::describe(installed).toStdString());
+                // Withdrawn by a revocation list (RFC 0031): never the version offered; what is
+                // installed and withdrawn says who withdrew it and why, offering the update, nothing more.
+                auto withdrawnListing = listing;
+                for(auto& p : withdrawnListing.packages)
+                    if(p.id == "org.oscairn.fm") { p.versions.push_back({"0.4.9", "stable", "", "", "", 0, 0, {{"clap", 1}}, {}, {"Oscairn", "a test withdrawal", "2026-11-11"}}); }
+                const auto newer = offer(standalone::offers({{"https://packages.oscairn.org", withdrawnListing}}, {}, bundled), "org.oscairn.fm");
+                check(newer.version.version == "0.4.8" && newer.offered(), "a withdrawn version is never the one offered, a newer one included: " + newer.version.version);
+                Control::InstalledPackage gone; gone.id = "org.oscairn.fm"; gone.version = "0.4.7"; gone.kind = "plugin"; gone.withdrawn = {"Oscairn", "a test withdrawal", "2026-11-11"};
+                const auto stays = offer(standalone::offers({{"https://packages.oscairn.org", listing}}, {{gone.id, gone}}, bundled), "org.oscairn.fm");
+                check(standalone::describe(stays) == "Withdrawn by Oscairn: a test withdrawal  " + juce::String::fromUTF8("·") + "  Update to 0.4.8" &&
+                          standalone::withdrawnSaying(stays) == "org.oscairn.fm 0.4.7 was withdrawn by Oscairn: a test withdrawal" && stays.offered(),
+                      "an installed version withdrawn since says so, by whom and why, offering the update: " + standalone::describe(stays).toStdString());
             }
             // Install... (RFC 0031): exactly the Catalog and a File. The Catalog lists the enabled
             // repositories' packages of a kind, grayed with the reason where this device cannot

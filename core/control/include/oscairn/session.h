@@ -751,6 +751,7 @@ namespace oscairn
         Preinstall preinstall_;                  // how it goes; control thread only
         void advancePreinstall();                // service() and preinstalled(): its next step
         std::vector<Repository> shipped() const;     // the official repository and the device's: their root keys trusted for repositories without trust.json
+        void markWithdrawn(std::vector<InstalledPackage>& packages); // each one's withdrawal, by the revocation lists last read (packages.cpp)
         // Publisher keys trusted without being in trust.json, as the shipped root keys are
         // (trust.cpp): the official publisher's, unless the profile hides the official repository.
         // withBuiltIn: these after trust.json's `keys`, but for a key trust.json has an entry for.

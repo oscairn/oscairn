@@ -102,7 +102,7 @@ namespace oscairn::repository
                 // (decided 2026-11-08); a drive or a computer over USB needs no TLS and still works.
                 if(!timeKnown()) throw std::runtime_error("this device does not know the time yet: set it (from the network, a paired computer or by hand) before installing from the web");
                 std::vector<std::string> from{base_ + path};
-                if(path.rfind("index/", 0) == 0) for(const auto& m : mirrors_) from.push_back(m + path);
+                if(path.rfind("index/", 0) == 0 || path.rfind("revocations/", 0) == 0) for(const auto& m : mirrors_) from.push_back(m + path);
                 std::string why;
                 for(const auto& url : from)
                 {
@@ -206,6 +206,45 @@ namespace oscairn::repository
     }
 
     std::string blobPath(const std::string& sha256) { return "blobs/" + sha256.substr(0, 2) + "/" + sha256; }
+
+    bool plainId(const std::string& id)
+    {
+        return !id.empty() && id.size() <= 64 && id.front() != '.' &&
+               std::all_of(id.begin(), id.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '_'; });
+    }
+
+    Revocations revocations(const std::string& json)
+    {
+        const auto doc = parse(json, "the revocation list");
+        V d = doc.get();
+        if(text(detail::member(d, "format"), "revocation list: format") != "oscairn.repository-revocations" || number(detail::member(d, "version"), "revocation list: version") != 1)
+            bad("the revocation list is not format oscairn.repository-revocations, version 1");
+        Revocations out;
+        // Each of the three lists must be there, each entry whole: nothing is read as "nothing revoked".
+        auto entries = [&](const char* list, std::vector<Revoked>& into, auto read) {
+            const V l = detail::member(d, list);
+            if(!l || l->type != json_type_array) bad(std::string("the revocation list has no `") + list + "` list");
+            each(l, [&](V e) {
+                if(!e || e->type != json_type_object) bad(std::string("an entry in `") + list + "` is not an object");
+                Revoked r;
+                read(e, r);
+                r.reason = text(detail::member(e, "reason"), "revocation list: reason");
+                r.date = text(detail::member(e, "date"), "revocation list: date");
+                const auto& t = r.date;
+                if(r.reason.empty() || t.size() != 10 || t[4] != '-' || t[7] != '-' ||
+                   !std::all_of(t.begin(), t.end(), [](char c) { return c == '-' || (c >= '0' && c <= '9'); }))
+                    bad(std::string("an entry in `") + list + "` has no reason, or a date that is not YYYY-MM-DD");
+                into.push_back(std::move(r));
+            });
+        };
+        entries("keys", out.keys, [](V e, Revoked& r) { r.key = text(detail::member(e, "key"), "revocation list: key"); if(!hex(r.key, 64)) bad("a revoked key is not 64 lowercase hex digits"); });
+        entries("versions", out.versions, [](V e, Revoked& r) {
+            r.id = text(detail::member(e, "id"), "revocation list: id"); r.version = text(detail::member(e, "version"), "revocation list: version");
+            if(r.id.empty() || r.version.empty()) bad("a withdrawn version has no package ID or version");
+        });
+        entries("builds", out.builds, [](V e, Revoked& r) { r.sha256 = text(detail::member(e, "sha256"), "revocation list: sha256"); if(!hex(r.sha256, 64)) bad("a revoked build's sha256 is not 64 lowercase hex digits"); });
+        return out;
+    }
 
     bool older(const std::string& a, const std::string& b) { return assets::older(a, b); } // asset libraries' minimum versions compare the same way
 
@@ -311,10 +350,36 @@ namespace oscairn::repository
             if(gz.size() != size || assets::sha256(gz) != sha) bad(path + " is not the one its root names (changed or damaged)");
             return gunzip(gz, maxIndex);
         };
+        // The revocation list, named by its hash in this signed root and so signed with it, rides the
+        // root's serial (an older root, which see() refuses, cannot bring back an older list). One
+        // missing or malformed refuses the repository: it never reads as "nothing revoked".
+        {
+            const V listed = detail::member(r, "revocations");
+            if(!listed || listed->type != json_type_object) bad("its root names no revocation list");
+            const auto path = text(detail::member(listed, "path"), "revocations.path"), sha = text(detail::member(listed, "sha256"), "revocations.sha256");
+            const auto size = number(detail::member(listed, "size"), "revocations.size");
+            if(!hex(sha, 64) || path != "revocations/" + sha + ".json" || size > maxRoot * 4) bad("its root names its revocation list wrongly");
+            // The list kept from the last read (beside the kept index) when it is this one, by its hash: a refresh with nothing new fetches the root alone.
+            if(!cache.empty() && plainId(index.repository))
+            {
+                std::error_code e;
+                const auto keptList = cache / index.rootKey / (index.repository + ".revocations.json");
+                if(fs::is_regular_file(keptList, e) && fs::file_size(keptList, e) == size)
+                {
+                    std::ifstream in(keptList, std::ios::binary);
+                    std::string before((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                    if(assets::sha256(before) == sha) index.revocationsJson = std::move(before);
+                }
+            }
+            if(index.revocationsJson.empty()) index.revocationsJson = source.read(path, size);
+            if(index.revocationsJson.size() != size || assets::sha256(index.revocationsJson) != sha) bad(path + " is not the one its root names (changed or damaged)");
+            index.revoked = revocations(index.revocationsJson);
+            for(const auto& k : index.revoked.keys)
+                if(k.key == index.rootKey || k.key == index.indexKey) bad("its own revocation list revokes the key that signed it (" + signing::keyId(k.key) + ")");
+        }
         // The index this device read last from this repository, if any: used again at the same
         // serial, or brought up to date by the delta the root names from its serial.
-        const bool plain = !index.repository.empty() && index.repository.size() <= 64 && index.repository.front() != '.' &&
-                           std::all_of(index.repository.begin(), index.repository.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '_'; });
+        const bool plain = plainId(index.repository);
         // Kept by the root key as well as the ID the root claims, so a root claiming another repository's ID keeps its own.
         const auto folder = cache.empty() ? fs::path() : cache / index.rootKey;
         const auto cached = cache.empty() || !plain ? fs::path() : folder / (index.repository + ".index.json");

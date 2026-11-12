@@ -1303,9 +1303,17 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   SHA-256 and size, and every signature in the archive are checked, and a root with a lower
   `serial` than one this device has seen from that root key under that repository ID (kept in
   `repositories.json` in the data folder) is refused; another root key claiming the same ID has
-  serials of its own and does not touch these. An install takes `version`, or the newest `stable` version that is not yanked and
+  serials of its own and does not touch these. The revocation list the root names
+  ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-revocation-list)) is checked by
+  its SHA-256 and size and read with it; one missing or malformed fails the job for that repository,
+  and one revoking the root's own root or index key refuses the root. It is kept beside the index
+  once the serial is taken. An install takes `version`, or the newest `stable` version that is neither yanked nor withdrawn and
   that this device can install; one needing a newer Oscairn than this one (`requires.oscairn`)
-  or bringing plugin code with no build for this device is refused. The archive must be the
+  or bringing plugin code with no build for this device is refused, and so is a withdrawn one, even
+  when `version` names it: its version withdrawn by this repository's list, or its publisher's key
+  or a key that signed a build in it revoked by this repository's list or the official one's, or a
+  build in it revoked by either ("refused: <id> <version> was withdrawn by <repository>: <reason>").
+  The archive must be the
   release the index names (its manifest's SHA-256) and signed by its publisher's key. It
   installs as `library.install` installs a locked library (a plugin package's builds into
   the store), with only this device's plugin builds, under the same rules for code. A different
@@ -1323,7 +1331,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   only as such ("it calls itself …") beside its key's fingerprint when offering to trust it. A
   job's errors name the repository by `name`, or by `source` when that is empty. A listing's `packages` are each `{id,name,summary,license,
   publisher,publisherKey,tags,versions}`, each version `{version,channel,yanked,incompatible,
-  sha256,size,installed,types,dependencies}`: `incompatible` says why this device cannot install it (empty when it can),
+  sha256,size,installed,types,dependencies,withdrawn}`: `incompatible` says why this device cannot install it (empty when it can),
+  `withdrawn` is `null`, or `{repository,reason,date}` when a revocation list withdraws it (its
+  version by this repository's list, or its publisher's key by this repository's or the official
+  one's), `repository` being this device's name for the repository whose list it is; a client
+  never offers it,
   `sha256` is its archive's SHA-256 as the index lists it (`archive.sha256`),
   `size` and `installed` are this platform's download and installed bytes, `types` how many
   items of each type (`oscairn.performance`, `oscairn.sound`, `oscairn.asset`) and plugins of each
@@ -1337,7 +1349,7 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   control thread; asking about it once it has unpacked moves it into place.
 - `packages.installed` (`{}`) returns `{packages}`: the packages installed on this device
   ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
-  `{id,version,kind,repository,sha256,signers,otherBuild}`: `kind` is `plugin`, `asset` or
+  `{id,version,kind,repository,sha256,signers,otherBuild,withdrawn}`: `kind` is `plugin`, `asset` or
   `library` (installed as a locked library), and `repository` the address of the repository it
   came from, empty for one installed from a file. `sha256` is the SHA-256 of the archive it was
   installed from, as the repository's index lists it (or the file's), so a client can tell the
@@ -1345,7 +1357,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `sha256`; `signers` the IDs of the keys that signed that archive. Both are empty when not known:
   installed before installs recorded them, or (`sha256` only) from a package folder. `otherBuild`
   is true when the install kept a different build of its plugins already here, so what is
-  installed is not that archive's; its `sha256` and `signers` are then empty. Each install records its package in `packages.json` in the data folder: from a
+  installed is not that archive's; its `sha256` and `signers` are then empty. `withdrawn` is `null`,
+  or `{repository,reason,date}` when the revocation list last read from the repository it came
+  from withdraws its version or revokes a key in `signers`, or the official repository's revokes
+  such a key: a client tells the user ("<name> <version> was withdrawn by <repository>: <reason>")
+  and offers to remove or replace it. Nothing removes or disables it. Each install records its package in `packages.json` in the data folder: from a
   repository, or by `library.install` a plugin or asset package or one installed as a library (a
   copy into the user's own storage installs no package). Removing what it installed
   (`plugins.remove`, `assets.uninstall`, `assets.collect`, `library.uninstall`) removes the

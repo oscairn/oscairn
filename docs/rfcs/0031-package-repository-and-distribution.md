@@ -83,6 +83,14 @@ Checked when built and tested; the sections below say how.
       is down, per-platform fetches (releases are still whole archives))
 - [ ] 3. Publishing: the `oscairn publish` command, checks, immutable versions and yanking
 - [ ] 4. Revocation lists and the takedown process
+      (built 2026-11-11: the list's format specified ([the revocation list](#the-revocation-list));
+      read with the root, by its hash, a missing or malformed one refusing the repository; kept per
+      root key after the serial is taken; withdrawn versions and revoked keys' packages listed as
+      withdrawn and never installed, the official list's keys and builds applying to every
+      repository; what is installed reported (`packages.installed`'s `withdrawn`, the Catalog),
+      never removed; `control-repository`, `desktop-gaps`. Not yet: the takedown policy, the
+      official list in system images, revoked builds in what is installed, remembering revoked
+      index keys; the official list applying to another repository is not tested)
 - [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters
       (built 2026-11-07 on the desktop, [interim](#in-the-library) until the Catalog app:
       Install… with Catalog and File; the Catalog listing the enabled repositories' packages of
@@ -538,6 +546,9 @@ publisher, and any package newly bringing plugin or app code, also needs a maint
 - **Yanking** marks a version with a reason. It is not offered for new installs or updates, and
   is shown as yanked where installed, but a lock that names it still fetches it, so a
   Performance that uses it keeps working. A publisher can yank their own versions.
+- **Withdrawing** is the repository's, through its revocation list: a withdrawn version is never
+  installed, even when a lock names it, and where it is installed the user is told
+  ([the difference](#the-revocation-list)). Only maintainers withdraw.
 - **Removal** of files happens only through a takedown (below), never as a publisher's routine
   act, as npm restricts unpublishing.
 
@@ -942,8 +953,8 @@ index and says which are installed already.
   yanked version ([versions and yanking](#versions-and-yanking)), but a document, which anyone
   can write, should not choose one silently.
 - **Revoked** (the version, its build or its publisher's key,
-  [takedown and revocation](#takedown-and-revocation)): never offered. Revocation lists are not
-  applied yet (step 4).
+  [takedown and revocation](#takedown-and-revocation)): never offered. Revocation lists are
+  applied since 2026-11-11 ([the revocation list](#the-revocation-list)).
 - **No build for this platform:** "not available for linux-arm64" (`incompatible()` in
   `repository.cpp` says "it has no build for this device (linux-arm64)" now).
 - **Needs a newer system:** "it needs a system update: Oscairn 1.4 or later", as `incompatible()`
@@ -1184,6 +1195,8 @@ with `system` looks it up and shows the line [above](#at-each-trigger). A client
 | A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (built 2026-11-11, `control-repository`) | None found |
 | Another trusted repository's root served at a known repository's address | Each known address is read only with the root key recorded for it; another key is refused naming both, nothing kept (built 2026-11-11, `control-repository`; the app's snapshot only with a shipped key, `control-preinstall`) | A folder or an address not added yet takes any key trusted for repositories, as nothing is recorded for it |
 | A repository that calls itself by another's name ("Oscairn") | Shown everywhere by the device's name for it, a name like an earlier one's with its key's ID after it; its own name only as "it calls itself …" beside the fingerprint when adding it (built 2026-11-11, `control-repository`, [names](#kept-state-keyed-by-the-root-key)) | A lookalike name in other scripts; the fingerprint tells them apart |
+| A version or a publisher key found harmful after publishing | The repository's revocation list, signed with its root: withdrawn versions and revoked keys' packages never offered or installed, the official list's keys and builds everywhere; what is installed reported (built 2026-11-11, `control-repository`) | Installed copies keep working until the user removes them, by design; a revoked build in what is installed is not reported; a device that never reads the repository learns nothing |
+| An older revocation list replayed, or one stripped | The list rides the root's serial, refused when lower; a missing or malformed list refuses the repository (built 2026-11-11, `control-repository`) | A stolen index key can sign a newer root with a list leaving itself out: revoked index keys are not remembered yet |
 | Tracking through a hint | No fetch from a hint's address on open, prepare or install of a library; only **Look there** | A user who looks tells that host they opened it |
 | Hints as a weight | At most 4096 entries, an address at most 2048 bytes; one job at a time; one **Look there** per tap | None found |
 
@@ -1247,11 +1260,13 @@ publishers' keys for content, not for code: a new code publisher is approved onc
 
 ### Takedown and revocation
 
-- **The revocation list** is signed by the repository's index key and named in the root:
-  revoked publisher keys, revoked build digests and revoked package versions, each with a
-  reason. A device applies it on every refresh: a revoked build stays on disk but does not
-  load, and what used it opens with a stand-in saying why (RFC 0006). The official list also
-  travels in system images.
+- **The revocation list** is named in the root and so signed with it: revoked publisher keys,
+  revoked build digests and withdrawn package versions, each with a reason and a date. Specified
+  and applied on devices 2026-11-11 ([below](#the-revocation-list)). Revised the same day from
+  the owner's request: what is installed is never deleted or disabled silently, so a revoked build
+  no longer stops loading on refresh; the user is told, where they look, and offered to remove or
+  replace it, and nothing interrupts on stage. The official list is to travel in system images
+  too (not built).
 - **Takedown for safety** (malware, a build that harms devices): the version is revoked and its
   blobs removed.
 - **Takedown for rights** (a copyright claim): the blobs are removed from the repository and
@@ -1259,6 +1274,106 @@ publishers' keys for content, not for code: a new code publisher is approved onc
   revoked: that is a legal matter between the parties, not a safety one.
 - A published policy says who decides, how to report, and how a publisher appeals. Every
   takedown is a commit in the submissions repository, so the record is public.
+
+### The revocation list
+
+Specified and built on devices 2026-11-11 (step 4; the takedown policy and system images are
+not). Until then the root named a list and the index builder wrote `revoked.json` into it, but
+no entry format was specified beyond a `reason`, and nothing applied it.
+
+**Format.** `revocations/<sha256>.json`, what the maintainers keep as `revoked.json`:
+
+```json
+{
+  "format": "oscairn.repository-revocations",
+  "version": 1,
+  "keys": [
+    {"key": "3f9a1c0d2e4b5a67…(64 hex digits)", "reason": "Its private key was published", "date": "2026-11-11"}
+  ],
+  "versions": [
+    {"id": "com.example.organ", "version": "2.1.0", "reason": "This build deletes files in the user's home folder", "date": "2026-11-11"}
+  ],
+  "builds": [
+    {"sha256": "9b1c…(64 hex digits)", "reason": "Malware found by a scanner", "date": "2026-11-12"}
+  ]
+}
+```
+
+- `keys`: a publisher key revoked, as its whole Ed25519 public key in lowercase hex, not its
+  16-digit ID. An old index key goes here too when it is replaced ([keys](#keys-1)).
+- `versions`: a package version withdrawn, by package ID and version.
+- `builds` (optional to use, always present): a plugin build revoked by its digest, as an
+  archive's manifest lists it (`bundleDigest`, the digest a Performance's lock records).
+- Each entry has a `reason`, shown to users, never empty, and the `date` it was decided,
+  `YYYY-MM-DD`. All three lists are present, empty when nothing is in them. Anything else (a
+  list missing or not a list, an entry without its fields, a key or digest not 64 lowercase hex
+  digits, a date in another form) is malformed.
+
+**Signed.** The list is not signed on its own. The root names it by path, SHA-256 and size
+(`revocations`, `{path, sha256, size}`), and the root is signed by the index key, which the root
+key signs: the same chain that covers the index. A device reads the list from the repository's
+address or a mirror, checks its size and hash against the root, then reads it.
+
+**Withdrawn is not yanked.**
+
+| | Yanked | Withdrawn |
+| --- | --- | --- |
+| Who | The publisher, in the release record (`yanked`, the index's) | The repository's maintainers, in the revocation list |
+| Means | Advice: there is a better version | Do not install this |
+| Offered for a new install or an update | No | No |
+| Installed when a lock or `version` names it | Yes, so a Performance keeps working | No, never |
+| Installed already | Shown as yanked | Reported with the repository and reason; kept, never removed or disabled, offered to remove or replace |
+
+A revoked key withdraws every version of every package its key signed; a revoked build withdraws
+every archive holding it.
+
+**Whose list applies where.** A repository's list applies to its own packages: its versions, the
+publisher keys it lists, the builds in them. The official repository's `keys` and `builds` apply
+to every repository's packages too, as the project's way to stop a key or a build everywhere; its
+`versions` apply to its own, since a package ID and version name a release only within one
+repository. No other repository's list reaches beyond its own packages: otherwise a repository the
+user added could withdraw the official one's packages, or any publisher's everywhere. The trust
+store's own revoked keys (`trust.json`) apply as before, to everything.
+
+**On a device.**
+
+- **Read with the root**, after its signatures and trust: one missing or malformed refuses that
+  repository ("its root names no revocation list", "the revocation list has no `keys` list"), never
+  read as nothing revoked. A list revoking the root's own root or index key refuses the root.
+- **Kept** beside the kept index, `Repositories/<root key>/<repository>.revocations.json`, only
+  after the root's serial is taken (`see()`), so an older root never replaces it, and read again
+  from there while the root names the same hash, so a refresh with nothing new still fetches the
+  root alone. The official
+  repository's kept list is what other repositories' installs check; a device that has never read
+  the official repository has none to apply.
+- **Listing:** each version says `withdrawn` (`{repository, reason, date}`, the repository by this
+  device's name for it), or `null`. The Catalog never offers it, nor picks it as the newest or an
+  update, and says "Cannot be installed here: withdrawn by <repository>: <reason>".
+- **Installing:** a withdrawn version is refused even when named, a revoked key's packages and an
+  archive holding a revoked build too: "refused: <id> <version> was withdrawn by <repository>:
+  <reason>". The newest version and asset libraries skip withdrawn ones.
+- **Installed already:** `packages.installed` gives each package `withdrawn` by the lists last read
+  of the repository it came from and the official one: its version, or a key that signed its
+  archive. Nothing removes or disables it, and nothing interrupts: the Catalog's row says
+  "Withdrawn by <repository>: <reason>", with Update to a newer version when there is one, and its
+  details say "<name> <version> was withdrawn by <repository>: <reason>", how to replace it, and to
+  remove it from the Library's list. A revoked build in what is installed is not reported:
+  `packages.json` does not record build digests.
+- **Rollback:** the list rides the root's serial, which a device refuses to see go down per root
+  key and repository ID ([kept state](#kept-state-keyed-by-the-root-key)), so an older list comes
+  only with an older root, refused before anything is kept.
+
+`control-repository` tests a withdrawn version listed so, refused when named and not chosen as the
+newest; an installed one reported and kept; a revoked key's package refused; an older root (and its
+list) refused, the newer list still kept; a list without its date, one whose `keys` is not a list
+and a root naming none each refusing the repository, keeping nothing. `desktop-gaps` tests the
+Catalog's offer and wording. Not tested: the official list applying to another repository (its key
+cannot sign a test repository).
+
+Not built: the takedown policy; the official list in system images; a revoked build stopping to
+load, which the revision above drops; remembering an index key a list revoked, so that a stolen index key
+signing a later root with a list that leaves itself out is still refused (today the serial alone
+protects a device that saw the revocation only until the thief publishes a higher serial).
 
 ### What scanning can do
 
@@ -1470,7 +1585,7 @@ serial than one it has seen ([freshness](#signatures-and-freshness)).
 | 1. Format and folders | `repository.json`, index, deltas and blobs; `oscairn repo build`; installing from a folder repository, a folder package and an `.olib` read in place; streamed installs | A device with no network installs a package from a USB folder; a changed blob, a root with a bad signature and a root with a lower serial are each refused; a folder package with a changed file is refused and leaves nothing behind; an `.olib` on USB installs with free space of only its installed size plus its largest entry; pulling the drive midway leaves the device as it was |
 | 2. HTTPS | Refresh with deltas, mirrors, resumable downloads, per-platform fetch | A refresh with one changed package downloads the root and one delta; a mirror serving a tampered blob is refused and the next mirror used; an interrupted download resumes |
 | 3. Publishing | `oscairn publish`, the submissions repository, CI checks, immutable versions, yanking | A signed release published through a pull request installs on a device; an unsigned one, a re-used version and a missing claimed platform build each fail in CI; a yanked version is not offered but its lock still fetches it |
-| 4. Revocation and takedown | Revocation lists, the takedown policy | A build revoked in the list stops loading on refresh and its Performance opens with a stand-in; the same from a system image on an offline device |
+| 4. Revocation and takedown | Revocation lists, the takedown policy | A withdrawn version and a revoked key's package are not offered or installed, and one installed is reported and kept (revised 2026-11-11 from "a revoked build stops loading on refresh": nothing installed is disabled silently); the same from a system image on an offline device |
 | 5. Discovery | Install…, the Catalog app and its actions, compatibility filters, `packages.*` | A search by type on an instrument answers from the local index with no network; a package without a build for the device is grayed with the reason |
 | 6. Updates | Update lists, explicit lock updates, app updates | Installing a new version leaves every Performance's lock as it was until **Use version** is chosen; an app update applies only once the app is closed |
 | 7. Offline and multi-device | Fetch for a device, USB subsets, a paired computer as source | A desktop queues packages for a KICK profile and writes a USB drive with only its builds; the device installs them; the same through a paired connection |

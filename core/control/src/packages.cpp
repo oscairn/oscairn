@@ -9,9 +9,12 @@
 #include "oscairn/signing.h"
 #include "JsonInput.h"
 #include "sheredom/json.h"
+#include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iterator>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <thread>
 
@@ -141,6 +144,52 @@ std::vector<std::string> recordedKeys(const std::vector<Control::Repository>& kn
     if(!snapshot.empty() && source==snapshot.string())for(const auto& s:ships)out.push_back(s.key);
     return out;
 }
+// Each repository's revocation list as last read, beside its kept index:
+// Repositories/<root key>/<repository>.revocations.json, written only once see() has taken the
+// root's serial, so an older root never replaces it.
+void keepRevocations(const repository::Index& index){
+    if(!repository::plainId(index.repository))return;
+    std::lock_guard lock(knownMutex);
+    std::error_code e;
+    fs::create_directories(kept()/index.rootKey,e);
+    writeAtomically(kept()/index.rootKey/(index.repository+".revocations.json"),index.revocationsJson);
+}
+// The lists last read from repositories with this root key, one per repository ID its roots gave.
+// One that no longer reads (damaged on disk) is left out until the next listing keeps it again.
+std::vector<repository::Revocations> keptRevocations(const std::string& rootKey){
+    std::vector<repository::Revocations> out;
+    if(signing::keyId(rootKey).empty())return out; // a path from a key: 64 hex digits only
+    std::lock_guard lock(knownMutex);
+    std::error_code e;
+    for(fs::directory_iterator i(kept()/rootKey,e),end;!e && i!=end;i.increment(e)){
+        const auto file=i->path();
+        if(!file.filename().string().ends_with(".revocations.json") || fs::file_size(file,e)>(4u<<20) || e)continue;
+        std::ifstream in(file,std::ios::binary);
+        try{out.push_back(repository::revocations({std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>()}));}catch(const std::runtime_error&){}
+    }
+    return out;
+}
+// The revocation lists that apply to a release (RFC 0031): those of the repository it is from
+// (`own`, by this device's name for it), for its version, a key that signed it or a build in it;
+// and the official repository's, for a key or a build, as the official list speaks for every
+// repository. Another repository's list speaks only for its own packages, so one the user added
+// cannot withdraw what the official one or another lists.
+struct Lists { std::vector<repository::Revocations> own, official; std::string ownName, officialName; };
+// Why a release is withdrawn by them, or an empty reason: signers are key IDs, builds digests.
+Control::Withdrawal withdrawal(const Lists& l,const std::string& id,const std::string& version,const std::vector<std::string>& signers,const std::vector<std::string>& builds={}){
+    auto by=[&](const std::vector<repository::Revocations>& lists,const std::string& name,bool versions)->std::optional<Control::Withdrawal>{
+        for(const auto& r:lists){
+            if(versions)for(const auto& v:r.versions)if(v.id==id && v.version==version)return Control::Withdrawal{name,v.reason,v.date};
+            for(const auto& k:r.keys)if(std::count(signers.begin(),signers.end(),signing::keyId(k.key)))return Control::Withdrawal{name,k.reason,k.date};
+            for(const auto& b:r.builds)if(std::count(builds.begin(),builds.end(),b.sha256))return Control::Withdrawal{name,b.reason,b.date};
+        }
+        return std::nullopt;
+    };
+    if(auto w=by(l.own,l.ownName,true))return *w;
+    if(auto w=by(l.official,l.officialName,false))return *w;
+    return {};
+}
+std::string withdrawnSaying(const std::string& id,const std::string& version,const Control::Withdrawal& w){return id+" "+version+" was withdrawn by "+w.repository+": "+w.reason;}
 }
 
 struct Session::PackageWork {
@@ -265,17 +314,20 @@ uint64_t Session::listRepository(const std::string& source){
     work->id=work->job.id=++packageJobs_;work->job.state="running";
     auto* w=work.get();
     packageWork_.reset(); // the last job's thread is done; joined here
-    w->thread=std::thread([w,source,trusted,revoked,known,expected]{
+    w->thread=std::thread([w,source,trusted,revoked,known,expected,officialName=known.front().name]{
         PackageJob out;
         try{
             auto from=sourceFor(source,&w->cancel);
             const auto index=repository::open(*from,trusted,revoked,out.rootKey,out.claimedName,kept(),expected);
             see(index.rootKey,index.repository,index.serial,trusted);
+            keepRevocations(index);
             if(const auto* r=knownAs(known,source,index.rootKey))out.name=r->name;
             out.repository=index.repository;out.serial=index.serial;
+            const Lists lists{{index.revoked},index.rootKey==official.key?std::vector<repository::Revocations>{}:keptRevocations(official.key),out.name.empty()?addressOf(source):out.name,officialName};
             for(const auto& p:index.packages){
                 RepositoryPackage listed{p.id,p.name,p.summary,p.license,p.publisherName,p.publisherKey,p.tags,{}};
-                for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.archiveSha256,v.size,v.installed,v.types,v.dependencies});
+                for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.archiveSha256,v.size,v.installed,v.types,v.dependencies,
+                                                                        withdrawal(lists,p.id,v.version,{p.publisherKey})});
                 out.packages.push_back(std::move(listed));
             }
             out.state="done";
@@ -298,7 +350,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     const auto ships=shipped();
     const auto known=repositories();
     const auto expected=recordedKeys(known,ships,source,preinstallFolder_);
-    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships,known,expected]{
+    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships,known,expected,officialName=known.front().name]{
         std::string rootKey,error,chosen,repositoryId,name,claimed;uint64_t serial=0;
         std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each asset library it needs
         std::map<std::string,std::string> archives;
@@ -306,9 +358,11 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
             auto from=sourceFor(source,&w->cancel);
             const auto index=repository::open(*from,trusted,revoked,rootKey,claimed,kept(),expected);
             see(index.rootKey,index.repository,index.serial,trusted);
+            keepRevocations(index);
             repositoryId=index.repository;serial=index.serial;
             if(const auto* r=knownAs(known,source,index.rootKey))name=r->name;
             const auto called=name.empty()?addressOf(source):name; // never the name its root claims
+            const Lists lists{{index.revoked},index.rootKey==official.key?std::vector<repository::Revocations>{}:keptRevocations(official.key),called,officialName};
             // A release: fetched (or read in place), checked against the signed index and unpacked.
             auto unpack=[&](const repository::Package& package,const repository::Version& pick){
                 // The package file: read in place from a folder, else fetched into the data folder,
@@ -330,13 +384,18 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
                     throw std::runtime_error("refused: the package file for "+package.id+" "+pick.version+" is not the release the index names");
                 if(got.signature.key.empty() || signing::keyId(got.signature.key)!=package.publisherKey)
                     throw std::runtime_error("refused: "+package.id+" "+pick.version+" is not signed by its publisher's key "+package.publisherKey);
+                // Withdrawn by what it holds too: a key that signed a build in it, or a build by its digest.
+                std::vector<std::string> signers{package.publisherKey},builds;
+                for(const auto& plugin:got.plugins)for(const auto& b:plugin.builds){builds.push_back(b.sha256);for(const auto& s:b.signatures)signers.push_back(signing::keyId(s.key));}
+                if(const auto w=withdrawal(lists,package.id,pick.version,signers,builds);!w.reason.empty())throw std::runtime_error("refused: "+withdrawnSaying(package.id,pick.version,w));
                 archives[package.id]=pick.archiveSha256;
             };
-            // The newest stable version this device can install that is not yanked, and at least `least`.
+            // The newest stable version this device can install that is neither yanked nor withdrawn, and at least `least`.
             auto newest=[&](const repository::Package& package,const std::string& least){
                 const repository::Version* pick=nullptr;
                 for(const auto& v:package.versions)
                     if(v.yanked.empty() && (v.channel.empty() || v.channel=="stable") && repository::incompatible(v,OSCAIRN_VERSION,platform()).empty() &&
+                       withdrawal(lists,package.id,v.version,{package.publisherKey}).reason.empty() &&
                        (least.empty() || !repository::older(v.version,least)) && (!pick || repository::older(pick->version,v.version)))pick=&v;
                 return pick;
             };
@@ -347,6 +406,8 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
             if(!version.empty())for(const auto& v:package->versions)if(v.version==version)pick=&v;
             if(!pick && version.empty())for(const auto& v:package->versions)if(!pick || repository::older(pick->version,v.version))pick=&v; // none fits: say why the newest does not
             if(!pick)throw std::runtime_error(version.empty()?"no version of "+id+" to install":"no version "+version+" of "+id);
+            // A withdrawn version is never installed, even named: unlike a yanked one, which a lock still gets.
+            if(const auto w=withdrawal(lists,id,pick->version,{package->publisherKey});!w.reason.empty())throw std::runtime_error("refused: "+withdrawnSaying(id,pick->version,w));
             if(const auto why=repository::incompatible(*pick,OSCAIRN_VERSION,platform());!why.empty())throw std::runtime_error(id+" "+pick->version+" cannot be installed here: "+why);
             chosen=pick->version;
             unpack(*package,*pick);
@@ -373,6 +434,21 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     });
     packageWork_=std::move(work);
     return packageJobs_;
+}
+
+// What is installed and withdrawn since (RFC 0031), by the lists last read: said, never acted on.
+void Session::markWithdrawn(std::vector<InstalledPackage>& packages){
+    const auto known=repositories();
+    const Lists base{{},keptRevocations(official.key),{},known.front().name};
+    std::map<std::string,std::vector<repository::Revocations>> byKey;
+    for(auto& p:packages){
+        auto lists=base;
+        for(const auto& r:known)if(r.address==p.repository){
+            if(!byKey.count(r.key))byKey[r.key]=keptRevocations(r.key);
+            lists.own=byKey[r.key];lists.ownName=r.name;break;
+        }
+        p.withdrawn=withdrawal(lists,p.id,p.version,p.signers);
+    }
 }
 
 Control::PackageJob Session::packageJob(uint64_t id){

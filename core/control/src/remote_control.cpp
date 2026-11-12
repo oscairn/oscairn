@@ -620,9 +620,10 @@ namespace oscairn
                                               ",\"replace\":"+(replace?"true":"false")+'}');
         return uint64_t(integer(field(field(d.get(),"result"),"job")));
     }
+    namespace { Control::Withdrawal withdrawal(V x){V w=detail::member(x,"withdrawn");return w && w->type==json_type_object?Control::Withdrawal{string(field(w,"repository")),string(field(w,"reason")),string(field(w,"date"))}:Control::Withdrawal{};} }
     std::vector<Control::InstalledPackage> RemoteControl::installedPackages() {
         auto d=impl_->call("packages.installed","{}");std::vector<InstalledPackage> out;
-        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild"))});
+        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild")),withdrawal(x)});
         return out;
     }
     Control::Preinstall RemoteControl::preinstalled() {
@@ -653,7 +654,7 @@ namespace oscairn
         for(auto x:array(field(r,"packages"))){
             RepositoryPackage p{string(field(x,"id")),string(field(x,"name")),string(field(x,"summary")),string(field(x,"license")),string(field(x,"publisher")),string(field(x,"publisherKey")),strings(field(x,"tags")),{}};
             for(auto v:array(field(x,"versions"))){
-                RepositoryVersion version{string(field(v,"version")),string(field(v,"channel")),string(field(v,"yanked")),string(field(v,"incompatible")),string(field(v,"sha256")),uint64_t(integer(field(v,"size"))),uint64_t(integer(field(v,"installed"))),{},{}};
+                RepositoryVersion version{string(field(v,"version")),string(field(v,"channel")),string(field(v,"yanked")),string(field(v,"incompatible")),string(field(v,"sha256")),uint64_t(integer(field(v,"size"))),uint64_t(integer(field(v,"installed"))),{},{},withdrawal(v)};
                 if(V types=field(v,"types");types && types->type==json_type_object)
                     for(auto* m=static_cast<const json_object_s*>(types->payload)->start;m;m=m->next)version.types.push_back({std::string(m->name->string,m->name->string_size),integer(m->value)});
                 for(auto d:array(field(v,"dependencies")))version.dependencies.push_back({string(field(d,"id")),string(field(d,"version"))});

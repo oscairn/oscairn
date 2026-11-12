@@ -134,7 +134,37 @@ publisher's ID:
 ### Revocations
 
 `revoked.json` lists revoked publisher keys, plugin build digests and package versions, each
-with a `reason`. Maintainers change it, following the takedown policy.
+with a `reason`. Maintainers change it, following the takedown policy. The format, as devices
+read it ([RFC 0031](../../../docs/rfcs/0031-package-repository-and-distribution.md#takedown-and-revocation)):
+
+```json
+{
+  "format": "oscairn.repository-revocations",
+  "version": 1,
+  "keys": [{"key": "<64 hex digits>", "reason": "Its private key was published", "date": "2026-11-11"}],
+  "versions": [{"id": "com.example.organ", "version": "2.1.0", "reason": "Its build deletes user files", "date": "2026-11-11"}],
+  "builds": [{"sha256": "<64 hex digits>", "reason": "Malware found by a scanner", "date": "2026-11-11"}]
+}
+```
+
+- `keys`: publisher keys revoked, each a whole public key (not its 16-digit ID). Every package
+  the key signed is withdrawn on devices: from this repository's listing, and from every
+  repository's when this is the official one. An old index key goes here too when it is
+  replaced; a device refuses a root whose own list revokes the key that signed it.
+- `versions`: package versions withdrawn (`id` and `version`), in this repository only.
+  Withdrawn is not yanked: a yanked version is the publisher's advice, not offered but still
+  installed when a lock names it; a withdrawn version is never offered or installed, even when
+  named, and devices that have it installed are told, not changed.
+- `builds`: plugin builds revoked by their digest, as the archive's manifest lists it; an
+  archive holding one is never installed (from any repository, when this is the official one).
+- Every entry has a non-empty `reason`, shown to users, and the `date` it was decided
+  (`YYYY-MM-DD`). All three lists are present, empty when there is nothing in them.
+
+The index builder publishes the file as `revocations/<sha256>.json`, named in the signed root by
+its path, SHA-256 and size, so the index key's signature over the root covers it and it comes
+with the root's serial: no older list can be served without its older root, which devices
+refuse. A root without one, or with one a device cannot read, makes that repository unusable on
+devices until fixed.
 
 ## For maintainers
 

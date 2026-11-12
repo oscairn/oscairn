@@ -374,7 +374,13 @@ namespace oscairn
         // Performance plays it. sha256: the version's archive SHA-256, as the index lists it.
         // types: how many items of each type (oscairn.sound, oscairn.performance...) and plugins of
         // each format (clap, lv2) it holds; dependencies: the packages it needs, each ID and least version.
-        struct RepositoryVersion { std::string version, channel, yanked, incompatible, sha256; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; };
+        // withdrawn: why a repository's revocation list (RFC 0031) withdraws it, by this device's name
+        // for that repository, empty reason when it does not: the version itself withdrawn by the
+        // repository listing it, or its publisher's key revoked by that repository or by the official
+        // one. A withdrawn version is never installed, even when named; yanked is the publisher's
+        // advice, and a version named still installs.
+        struct Withdrawal { std::string repository, reason, date; };
+        struct RepositoryVersion { std::string version, channel, yanked, incompatible, sha256; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; Withdrawal withdrawn; };
         struct RepositoryPackage { std::string id, name, summary, license, publisher, publisherKey; std::vector<std::string> tags; std::vector<RepositoryVersion> versions; };
         // state: "running", "done" or "failed" (error says why). rootKey: the repository's root key
         // once read. name: this device's name for the repository read (repositories(), by the
@@ -398,8 +404,11 @@ namespace oscairn
         // it, or the file's), and signers, the key IDs that signed the archive; both empty when not
         // known (recorded before installs kept them), sha256 also from a package folder. otherBuild:
         // the install kept a different build of its plugins already here, so what is installed is
-        // not that archive's; sha256 and signers are then empty.
-        struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; };
+        // not that archive's; sha256 and signers are then empty. withdrawn: the revocation list of the
+        // repository it came from, or the official one's, withdraws this version or revokes a key that
+        // signed it, as each was last read (empty reason when not): said, never acted on, so the user
+        // can remove or replace it; nothing removes or disables it.
+        struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; Withdrawal withdrawn; };
         virtual std::vector<InstalledPackage> installedPackages() = 0;
         // The packages that come with this release (RFC 0031): the app ships a snapshot of a
         // repository (its signed root and index, and the archives of the packages it preinstalls),

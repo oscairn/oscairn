@@ -763,7 +763,12 @@ What changes for the plugin:
   your key's fingerprint, with no Install anyway; once trusted, your later builds install
   without asking. Nothing trusts a publisher on its own: the repository listing a package does
   not, and only the Oscairn project's own key is built in. A build
-  signed by a revoked key is never installed.
+  signed by a revoked key is never installed. A repository's revocation list can withdraw a
+  version of your package or revoke your key: that version, or everything your key signed, is
+  then never offered or installed from it (from any repository when the official one revokes your
+  key), and devices that have it installed keep it and tell their user who withdrew it and why
+  ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-revocation-list)). To retire a
+  bad release yourself, yank it: a yanked version still installs where a lock names it.
 - **A plugin that is not here,** in another version, or that fails to load opens as a
   stand-in: silent, its ports and parameters as saved, its state written back unchanged, so
   installing the plugin later brings the sound back.

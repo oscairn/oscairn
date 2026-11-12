@@ -2298,6 +2298,7 @@ std::vector<Control::InstalledPackage> Session::installedPackages() {
     auto listed=[&](const std::string& id){return std::any_of(out.begin(),out.end(),[&](const auto& p){return p.id==id;});};
     for(const auto& id:assets_.installedLibraries())if(!listed(id))out.push_back({id,assets_.libraryVersion(id),"asset",{}});
     for(const auto& l:libraries)if(!listed(l.id))out.push_back({l.id,{},"library",{}});
+    markWithdrawn(out);
     return out;
 }
 

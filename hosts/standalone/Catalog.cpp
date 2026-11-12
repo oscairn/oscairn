@@ -11,6 +11,20 @@ namespace oscairn::standalone
         juce::String text(const std::string& s) { return juce::String::fromUTF8(s.c_str()); }
         const juce::String separator = juce::String::fromUTF8("  ·  ");
         juce::String bytes(uint64_t n) { return juce::File::descriptionOfSizeInBytes(int64_t(n)); }
+        // Why a version cannot be installed here: this device, or a revocation list withdrawing it.
+        juce::String whyNot(const Control::RepositoryVersion& v)
+        {
+            if(!v.incompatible.empty()) return text(v.incompatible);
+            if(!v.withdrawn.reason.empty()) return "withdrawn by " + text(v.withdrawn.repository) + ": " + text(v.withdrawn.reason);
+            return "no version it can install";
+        }
+    }
+
+    juce::String withdrawnSaying(const Offer& o)
+    {
+        const auto& w = o.record.withdrawn;
+        if(w.reason.empty()) return {};
+        return text(o.package.name.empty() ? o.package.id : o.package.name) + " " + text(o.record.version) + " was withdrawn by " + text(w.repository) + ": " + text(w.reason);
     }
 
     bool Offer::holds(const std::string& kind) const
@@ -36,7 +50,7 @@ namespace oscairn::standalone
                 for(const auto& v : p.versions)
                 {
                     if(!newest || repository::older(newest->version, v.version)) newest = &v;
-                    if(v.incompatible.empty() && v.yanked.empty() && (v.channel.empty() || v.channel == "stable") && (!pick || repository::older(pick->version, v.version))) pick = &v;
+                    if(v.incompatible.empty() && v.yanked.empty() && v.withdrawn.reason.empty() && (v.channel.empty() || v.channel == "stable") && (!pick || repository::older(pick->version, v.version))) pick = &v;
                 }
                 Offer o{source, listing.name, p, pick ? *pick : *newest, pick != nullptr};
                 // Installed at a version not known (a library installed before installs were recorded): no update can be told.
@@ -49,7 +63,7 @@ namespace oscairn::standalone
                     for(const auto& v : p.versions)
                         if(!o.update && !r.version.empty() && v.version == r.version && (r.otherBuild || (!r.sha256.empty() && !v.sha256.empty() && r.sha256 != v.sha256)))
                         {
-                            o.otherBuild = true; o.version = v; o.installable = v.incompatible.empty();
+                            o.otherBuild = true; o.version = v; o.installable = v.incompatible.empty() && v.withdrawn.reason.empty();
                         }
                 }
                 else if(o.holds("plugin"))
@@ -75,12 +89,15 @@ namespace oscairn::standalone
     juce::String describe(const Offer& o)
     {
         const auto about = text(o.package.publisher) + (o.package.summary.empty() ? juce::String() : separator + text(o.package.summary));
+        // What is installed and withdrawn since says so first, in place of the rest: nothing else is done about it.
+        if(o.installed && !o.record.withdrawn.reason.empty())
+            return "Withdrawn by " + text(o.record.withdrawn.repository) + ": " + text(o.record.withdrawn.reason) + (o.update ? separator + "Update to " + text(o.version.version) : juce::String());
         return o.update ? "Update to " + text(o.version.version) + separator + about
              : o.builtIn ? "Built in" + separator + about
              : o.otherBuild ? "Installed (a different build)" + separator + about
              : o.installed ? "Installed" + separator + about
              : o.installable ? about
-                             : "Cannot be installed here: " + text(o.version.incompatible.empty() ? "no version it can install" : o.version.incompatible);
+                             : "Cannot be installed here: " + whyNot(o.version);
     }
 
     juce::String replaceQuestion(const Offer& o)
@@ -256,7 +273,7 @@ namespace oscairn::standalone
         const auto& o = *opened_;
         install.setButtonText(o.update ? "Update to " + text(o.version.version) : o.otherBuild ? juce::String("Install the repository's build") : juce::String("Install"));
         install.setEnabled(o.installable);
-        install.setTooltip(o.installable ? juce::String() : text(o.version.incompatible.empty() ? "No version this device can install" : o.version.incompatible));
+        install.setTooltip(o.installable ? juce::String() : whyNot(o.version));
         for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &search, &list}) c->setVisible(false);
         backButton.setVisible(true); install.setVisible(!o.installed || o.update || o.otherBuild); // installed and current: nothing to install
         resized(); repaint();
@@ -289,7 +306,11 @@ namespace oscairn::standalone
             out.insert(out.begin() + 2, {"Installed", o.installed->empty() ? juce::String("Its version not known")
                                                       : text(*o.installed) + (o.builtIn ? ", built in: it comes with the app"
                                                                               : o.otherBuild ? ", a different build: it does not match this repository's" : "")});
-        if(!o.installable) out.push_back({"On this device", text(v.incompatible.empty() ? "no version it can install" : v.incompatible)});
+        if(!o.installable) out.push_back({"On this device", whyNot(v)});
+        // Said, and what the user can do about it; never removed or disabled for them.
+        if(const auto said = withdrawnSaying(o); said.isNotEmpty())
+            out.insert(out.begin(), {"Withdrawn", said + (o.update ? ". Update to " + text(v.version) + " replaces it" : juce::String()) +
+                                                      ". To remove it, use the Library's list of " + (o.record.kind == "plugin" ? "plugins" : o.record.kind == "asset" ? "asset libraries" : "libraries") + "."});
         return out;
     }
 

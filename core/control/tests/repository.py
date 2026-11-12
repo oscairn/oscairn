@@ -259,8 +259,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
             listing = job('packages.list', {'source': base})
             paths = fetched()
             check(listing['state'] == 'done' and listing['serial'] == 7 and len(listing['packages']) == 4, 'a repository on the web lists what it offers: ' + listing['error'])
-            check(paths[:2] == ['/repository.json', '/repository.sig'] and len(paths) == 3 and paths[2].startswith('/index/') and paths[2].endswith('.json.gz'),
-                  'the first refresh fetches the root and the whole index: ' + json.dumps(paths))
+            # The revocation list too, since 2026-11-11: read with the root, then kept, so later refreshes with the same list do not fetch it.
+            check(paths[:2] == ['/repository.json', '/repository.sig'] and len(paths) == 4 and paths[2].startswith('/revocations/') and paths[3].startswith('/index/') and paths[3].endswith('.json.gz'),
+                  'the first refresh fetches the root, its revocation list and the whole index: ' + json.dumps(paths))
             listing = job('packages.list', {'source': base})
             paths = fetched()
             check(listing['state'] == 'done' and paths == ['/repository.json', '/repository.sig'], 'a refresh with nothing new fetches the root alone: ' + json.dumps(paths))
@@ -572,7 +573,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         check(state['state'] == 'done' and records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good),
-                                                          'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False}],
+                                                          'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False, 'withdrawn': None}],
               'from the repository, the listed archive hash and its signer are recorded: ' + json.dumps(records()))
         again = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         check(again['state'] == 'done' and again['installed']['notes'] == [] and records()[0]['sha256'] == listed['1.0.0'], 'the same build again changes nothing')
@@ -604,7 +605,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         rpc('graph.commit')
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth', 'replace': True})
         check(state['state'] == 'done' and state['installed']['notes'] == [] and stored.read_bytes() == fixture.read_bytes() and
-              records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good), 'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False}],
+              records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good), 'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False, 'withdrawn': None}],
               'asked to, the repository\'s build replaces it and is recorded as the repository\'s: ' + json.dumps(records()))
 
         # A plugin package that needs an asset library: installing it from the repository pulls
@@ -645,7 +646,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         # A record written before the archive hash was (no sha256) still reads, with none.
         (home / 'packages.json').write_text(json.dumps({'format': 'oscairn.packages', 'version': 1, 'packages': [
             {'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'plugins': []}]}))
-        check(records() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'sha256': '', 'signers': [], 'otherBuild': False}],
+        check(records() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': str(good), 'sha256': '', 'signers': [], 'otherBuild': False, 'withdrawn': None}],
               'an older record reads, with no archive hash: ' + json.dumps(records()))
         (home / 'packages.json').unlink()
         check(recorded() == [{'id': 'org.kick.factory', 'version': '1.1.0', 'kind': 'asset', 'repository': ''}] and any(x['id'] == 'org.kick.test.synth' for x in store()),
@@ -727,6 +728,92 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(written['version'] == 2 and written['seen'] == {keys['root'][1]: {'org.example.test': 7}, official_key: {'org.example.test': 7}} and
               written['added'][0]['address'] == str(good) and kept() == {f"{keys['root'][1]}/org.example.test.index.json": (7, 4)},
               'the serial is kept for each trusted root key, and the old kept index is gone: ' + json.dumps(written['seen']) + ' ' + json.dumps(kept()))
+    finally:
+        p.stdin.close()
+        p.wait(timeout=30)
+
+    # Revocation lists (RFC 0031): the list a repository's signed root names by its hash withdraws
+    # versions and revokes publisher keys for that repository's packages. A withdrawn version is
+    # never offered or installed, even named; one installed already is reported, never removed; a
+    # revoked key's packages are refused; an older list comes only with an older root, which is
+    # refused; a missing or malformed list refuses the repository.
+    home = temp / 'home-revocations'
+    home.mkdir()
+    at = temp / 'revoking'  # the repository's address, holding each site in turn
+
+    def publish(name, serial, revoked=None, change=None):
+        (repo / 'revoked.json').write_text(json.dumps({'format': 'oscairn.repository-revocations', 'version': 1, 'keys': [], 'builds': [], 'versions': [], **(revoked or {})}))
+        out = site(name, serial)
+        if change:  # the root changed after it was built, and signed again
+            root = json.loads((out / 'repository.json').read_text())
+            change(out, root)
+            (out / 'repository.json').write_text(json.dumps(root))
+            run(tool, 'file', temp / 'index.key', out / 'repository.json', out / 'repository.sig')
+        shutil.rmtree(at, ignore_errors=True)
+        shutil.copytree(out, at)
+        return out
+
+    def withdrawn(state, package):
+        return {v['version']: v.get('withdrawn', 'absent') for x in state['packages'] if x['id'] == package for v in x['versions']}
+
+    def record(package):
+        return next((r for r in records() if r['id'] == package), {})
+
+    revocations = home / 'Repositories' / keys['root'][1] / 'org.example.test.revocations.json'
+
+    def kept_list():  # the revocation list this device keeps for the repository, as last read
+        return revocations.read_text() if revocations.is_file() else ''
+    p = subprocess.Popen([server, plugin, '--stdio'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding='utf-8',
+                         env={**os.environ, 'OSCAIRN_DATA_HOME': str(home)})
+    try:
+        rpc('trust.set', {'key': keys['publisher'][1], 'name': 'KICK', 'scope': ['plugins']})
+        publish('revoking20', 20)
+        rpc('packages.addRepository', {'address': str(at), 'key': keys['root'][1], 'name': 'Test repository'})
+        state = job('packages.install', {'source': str(at), 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+        check(state['state'] == 'done' and record('org.kick.test.synth').get('withdrawn', 'absent') is None, 'installed while nothing is revoked, nothing is withdrawn: ' + json.dumps(records()))
+
+        withdrawal = {'reason': 'a test withdrawal', 'date': '2026-11-11'}
+        publish('revoking21', 21, {'versions': [{'id': 'org.kick.test.synth', 'version': '1.0.0', **withdrawal}]})
+        state = job('packages.list', {'source': str(at)})
+        check(state['state'] == 'done' and withdrawn(state, 'org.kick.test.synth') == {'1.0.0': {'repository': 'Test repository', **withdrawal}, '2.0.0': None},
+              'a version the list withdraws is listed as withdrawn, by this device\'s name for the repository, so it is not offered: ' + json.dumps(withdrawn(state, 'org.kick.test.synth')))
+        named = job('packages.install', {'source': str(at), 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+        newest = job('packages.install', {'source': str(at), 'id': 'org.kick.test.synth'})
+        check(named['state'] == 'failed' and 'org.kick.test.synth 1.0.0 was withdrawn by Test repository: a test withdrawal' in named['error'] and
+              newest['state'] == 'failed' and 'withdrawn' not in newest['error'] and newest['version'] != '1.0.0',
+              'a withdrawn version is never installed, even named, nor chosen as the newest: ' + named['error'] + ' / ' + newest['error'])
+        check(record('org.kick.test.synth').get('withdrawn') == {'repository': 'Test repository', **withdrawal} and [x['id'] for x in store()] == ['org.kick.test.synth'],
+              'the version installed already is reported as withdrawn, and not removed: ' + json.dumps(record('org.kick.test.synth')))
+
+        revocation = {'reason': 'a test key revocation', 'date': '2026-11-12'}
+        publish('revoking22', 22, {'versions': [{'id': 'org.kick.test.synth', 'version': '1.0.0', **withdrawal}], 'keys': [{'key': keys['publisher'][1], **revocation}]})
+        state = job('packages.list', {'source': str(at)})
+        refused = job('packages.install', {'source': str(at), 'id': 'org.kick.factory', 'version': '1.1.0'})
+        check(state['state'] == 'done' and withdrawn(state, 'org.kick.factory') == {'1.0.0': {'repository': 'Test repository', **revocation}, '1.1.0': {'repository': 'Test repository', **revocation}} and
+              refused['state'] == 'failed' and 'org.kick.factory 1.1.0 was withdrawn by Test repository: a test key revocation' in refused['error'] and
+              not (home / 'AssetLibraries' / 'org.kick.factory').exists(),
+              'a publisher key the list revokes withdraws every package it signs, and none installs: ' + refused['error'])
+
+        shutil.rmtree(at)
+        shutil.copytree(temp / 'revoking21', at)
+        state = job('packages.list', {'source': str(at)})
+        check(state['state'] == 'failed' and 'older than one this device has seen (22)' in state['error'] and keys['publisher'][1] in kept_list(),
+              'an older list comes only with its older root, which is refused; the newer list stays kept: ' + state['error'])
+
+        def malformed(out, root):
+            bad = b'{"format":"oscairn.repository-revocations","version":1,"keys":"none","builds":[],"versions":[]}'
+            sha = hashlib.sha256(bad).hexdigest()
+            (out / 'revocations' / f'{sha}.json').write_bytes(bad)
+            root['revocations'] = {'path': f'revocations/{sha}.json', 'sha256': sha, 'size': len(bad)}
+        before = kept_list()
+        for name, revoked, change, why in (('revoking23', {'versions': [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'reason': 'no date'}]}, None, 'revocation list: date'),
+                                           ('revoking23b', None, malformed, 'has no `keys` list'),
+                                           ('revoking23c', None, lambda out, root: root.pop('revocations'), 'names no revocation list')):
+            publish(name, 23, revoked, change)
+            state = job('packages.list', {'source': str(at)})
+            check(state['state'] == 'failed' and why in state['error'], 'a revocation list that is malformed or missing refuses the repository: ' + state['error'])
+        check(json.loads((home / 'repositories.json').read_text())['seen'][keys['root'][1]]['org.example.test'] == 22 and kept_list() == before,
+              'and nothing of such a root is kept: ' + json.dumps(json.loads((home / 'repositories.json').read_text())['seen']))
     finally:
         p.stdin.close()
         p.wait(timeout=30)

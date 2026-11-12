@@ -58,13 +58,26 @@ namespace oscairn::repository
         std::vector<std::pair<std::string, std::string>> dependencies; // requires.packages: each package ID and the least version
     };
     struct Package { std::string id, name, summary, license, publisherId, publisherName, publisherKey; std::vector<std::string> tags; std::vector<Version> versions; };
-    struct Index { std::string repository, name, rootKey, indexKey, blobBase; uint64_t serial = 0; std::vector<std::string> mirrors; std::vector<Package> packages; };
+    // A repository's revocation list (RFC 0031, revocations/<sha256>.json, named in its root by its
+    // hash and so signed with it): each entry with its reason and date (YYYY-MM-DD). keys: publisher
+    // keys revoked (`key`, 64 hex digits); versions: package versions withdrawn (`id`, `version`);
+    // builds: plugin builds revoked by their digest as manifests list it (`sha256`).
+    struct Revoked { std::string key, id, version, sha256, reason, date; };
+    struct Revocations { std::vector<Revoked> keys, versions, builds; };
+    // A revocation list's JSON read and checked; one that is not whole and well formed is refused.
+    Revocations revocations(const std::string& json);
+    struct Index { std::string repository, name, rootKey, indexKey, blobBase; uint64_t serial = 0; std::vector<std::string> mirrors; std::vector<Package> packages;
+                   Revocations revoked; std::string revocationsJson; }; // its revocation list, read and as published
+    // Whether a repository ID can name a file: letters, digits, '.', '-' and '_', at most 64, not starting with '.'.
+    bool plainId(const std::string& id);
 
     // Reads and checks the root, the index key and the index. `trusted` holds the root keys this
     // device trusts for repositories and `revoked` the keys it has revoked (public keys, hex).
     // rootKey is set to the root's key as soon as it is read, and name to the root's name once
     // its signatures verify, so a refusal for an untrusted one can offer it to the user by both
-    // (an untrusted root whose signatures do not verify is refused for that). With a `cache` folder, the index last read from this repository
+    // (an untrusted root whose signatures do not verify is refused for that). The revocation list the
+    // root names is read and checked by its hash: one missing or malformed refuses the repository, as
+    // does one revoking the root's own root or index key. With a `cache` folder, the index last read from this repository
     // is kept there: used again while the root's serial is the same, and brought up to date by
     // the delta the root names from its serial, else fetched whole (RFC 0031). `expected`, when not
     // empty, holds the only root keys this source may have (the key recorded for a known

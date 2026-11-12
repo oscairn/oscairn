@@ -339,9 +339,15 @@ int main(int argc, char** argv)
                 const auto indexName = "index/" + assets::sha256(gz) + ".json.gz";
                 const auto write = [](const juce::File& f, const std::string& bytes) { juce::FileOutputStream out(f); out.write(bytes.data(), bytes.size()); }; // binary: gzip holds bytes no text survives
                 write(repo.getChildFile(indexName), gz);
+                // Its revocation list, empty, named by its hash too: a root naming none is refused (RFC 0031).
+                const std::string revocations = "{\"format\":\"oscairn.repository-revocations\",\"version\":1,\"keys\":[],\"versions\":[],\"builds\":[]}";
+                const auto revocationsName = "revocations/" + assets::sha256(revocations) + ".json";
+                repo.getChildFile("revocations").createDirectory();
+                write(repo.getChildFile(revocationsName), revocations);
                 const std::string rootJson = "{\"format\":\"oscairn.repository\",\"version\":1,\"repository\":\"org.example.test\",\"name\":\"Test repository\",\"serial\":1,\"rootKey\":\"" + root.publicKey +
                                              "\",\"indexKey\":{\"key\":\"" + indexKey.publicKey + "\",\"signature\":\"" + signing::sign(root, signing::indexMessage(indexKey.publicKey + "\n")) +
-                                             "\"},\"index\":{\"path\":\"" + indexName + "\",\"sha256\":\"" + assets::sha256(gz) + "\",\"size\":" + std::to_string(gz.size()) + "}}";
+                                             "\"},\"index\":{\"path\":\"" + indexName + "\",\"sha256\":\"" + assets::sha256(gz) + "\",\"size\":" + std::to_string(gz.size()) + "},\"revocations\":{\"path\":\"" + revocationsName + "\",\"sha256\":\"" + assets::sha256(revocations) +
+                                             "\",\"size\":" + std::to_string(revocations.size()) + "}}";
                 write(repo.getChildFile("repository.json"), rootJson);
                 const auto rootSig = signing::sign(indexKey, signing::indexMessage(rootJson));
                 write(repo.getChildFile("repository.sig"), "[{\"key\":\"" + indexKey.publicKey + "\",\"signature\":\"" + rootSig + "\"}]");

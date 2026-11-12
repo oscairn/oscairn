@@ -926,6 +926,8 @@ namespace oscairn
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return R"({"accepted":true})";
             }
+            // A revocation list's withdrawal (RFC 0031): null when there is none.
+            auto withdrawn=[](const Control::Withdrawal& w){return w.reason.empty()?std::string("null"):"{\"repository\":"+quote(w.repository)+",\"reason\":"+quote(w.reason)+",\"date\":"+quote(w.date)+'}';};
             // Package repositories (RFC 0031): jobs off the control thread, asked about by number.
             if(method=="packages.list" || method=="packages.install") {
                 const bool install=method=="packages.install";
@@ -946,7 +948,7 @@ namespace oscairn
                 try{for(const auto& x:c.installedPackages()){
                     std::vector<std::string> signers;for(const auto& k:x.signers)signers.push_back(quote(k));
                     out.push_back("{\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"kind\":"+quote(x.kind)+",\"repository\":"+quote(x.repository)+
-                                  ",\"sha256\":"+quote(x.sha256)+",\"signers\":"+join(signers)+",\"otherBuild\":"+(x.otherBuild?"true":"false")+'}');
+                                  ",\"sha256\":"+quote(x.sha256)+",\"signers\":"+join(signers)+",\"otherBuild\":"+(x.otherBuild?"true":"false")+",\"withdrawn\":"+withdrawn(x.withdrawn)+'}');
                 }}
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return "{\"packages\":"+join(out)+'}';
@@ -997,7 +999,7 @@ namespace oscairn
                         std::vector<std::string> needs;
                         for(const auto& [id,least]:v.dependencies)needs.push_back("{\"id\":"+quote(id)+",\"version\":"+quote(least)+'}');
                         versions.push_back("{\"version\":"+quote(v.version)+",\"channel\":"+quote(v.channel)+",\"yanked\":"+quote(v.yanked)+",\"incompatible\":"+quote(v.incompatible)+",\"sha256\":"+quote(v.sha256)+
-                                           ",\"size\":"+std::to_string(v.size)+",\"installed\":"+std::to_string(v.installed)+",\"types\":{"+types+"},\"dependencies\":"+join(needs)+'}');
+                                           ",\"size\":"+std::to_string(v.size)+",\"installed\":"+std::to_string(v.installed)+",\"types\":{"+types+"},\"dependencies\":"+join(needs)+",\"withdrawn\":"+withdrawn(v.withdrawn)+'}');
                     }
                     packages.push_back("{\"id\":"+quote(x.id)+",\"name\":"+quote(x.name)+",\"summary\":"+quote(x.summary)+",\"license\":"+quote(x.license)+",\"publisher\":"+quote(x.publisher)+
                                        ",\"publisherKey\":"+quote(x.publisherKey)+",\"tags\":"+join(tags)+",\"versions\":"+join(versions)+'}');

@@ -178,7 +178,11 @@ that name for it and shows every repository by its own name: in Settings, the Ca
 install questions. A repository whose name reads like one listed before it (one calling itself
 "Oscairn", say) is shown with its key's fingerprint after the name. Each repository's address is
 read only with the root key recorded for it: a root signed by another key there, even one trusted
-for another repository, is refused, naming both fingerprints. Installing from a local file goes through the Library's **Install… > File**.
+for another repository, is refused, naming both fingerprints. Each repository's signed root names
+its revocation list: a version it withdraws, or a package signed by a publisher key it revokes, is
+never offered or installed (the official repository's revoked keys count for every repository).
+What you installed before is kept and never disabled; the Catalog says who withdrew it and why,
+and offers an update when there is one. Installing from a local file goes through the Library's **Install… > File**.
 
 A release comes with Oscairn's own instruments and effects already in it: FM, Analog, the
 Sampler, Effects and the Arpeggiator, with the FM cartridges and Analog's factory patches, as

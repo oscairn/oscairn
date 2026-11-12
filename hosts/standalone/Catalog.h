@@ -40,8 +40,14 @@ namespace oscairn::standalone
     std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, Control::InstalledPackage>& installed,
                               const std::map<std::string, std::string>& bundled = {});
     /// A row's second line: its state (Update to, Built in, Installed, Installed (a different
-    /// build), or why it cannot be installed here), then its publisher and summary.
+    /// build), or why it cannot be installed here, a withdrawn version included), then its publisher
+    /// and summary; for what is installed and withdrawn since (packages.installed's withdrawn), who
+    /// withdrew it and why, and Update to when there is a newer version.
     juce::String describe(const Offer& offer);
+    /// "<name> <version> was withdrawn by <repository>: <reason>" for what is installed and
+    /// withdrawn since (RFC 0031), else empty. Shown in the Catalog only: nothing interrupts, and
+    /// nothing is removed or disabled; its details say how to replace or remove it.
+    juce::String withdrawnSaying(const Offer& offer);
     /// The question before installing the repository's build over a different one: both builds,
     /// each by its archive's SHA-256 and signer, where known.
     juce::String replaceQuestion(const Offer& offer);

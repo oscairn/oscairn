@@ -225,12 +225,14 @@ int main(int argc, char** argv)
         auto server = std::make_unique<LocalServer>(*session);
         server->listen(socket.string());
         std::atomic<bool> running = true, holdRequests = false, jobHeld = false, forcedHold = false;
+        std::atomic<size_t> leaving = 0; // the last Performance's plugins still ringing out
         std::thread control([&] {
             std::array<float, 128> l{}, r{}; float* out[2]{l.data(), r.data()};
             while(running)
             {
                 server->poll(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()));
                 session->service();
+                leaving = session->leaving();
                 session->process(nullptr, 0, out, 2, 128);
                 // The test leaves a job in flight: while its own connection shows, stop
                 // answering, so its calls wait, as a long engine call does. A job asked behind
@@ -648,6 +650,12 @@ int main(int argc, char** argv)
             // before the engine answers, and the edit never waits on the socket: a stalled reply
             // does not hold it, and a drag reads no graph back.
             {
+                // The opened Performance's predecessor rings out until idle on the engine's audio
+                // timeline, then goes, a graph change every client reads: ended now, and read,
+                // not in the edits counted below.
+                const bool ringing = leaving > 0; const auto revision = engine.graph().revision;
+                engine.allNotesOff();
+                check(wait([&] { return leaving == 0 && (!ringing || engine.graph().revision > revision); }), "the last Performance's plugins rung out and read: " + std::to_string(leaving));
                 check(wait([&] { return !engine.jobRunning() && !engine.soundBusy(); }), "the engine is free for the faders");
                 auto part = [&] { for(const auto& p : engine.graph().parts) if(p.id == lead) return p; return Part{}; };
                 auto level = [&](double v, bool m) { engine.edit([&, v, m](Control& c) { c.setPartLevel(lead, v, m); c.commit(); }); };

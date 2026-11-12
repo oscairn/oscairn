@@ -205,7 +205,7 @@ namespace oscairn
         Transport::ClockSource clockSource() const override;
         TransportState transportState() const override;
         void setClockOutputs(const std::vector<DeviceRule>& devices) override;
-        bool note(bool on,int key,double velocity,int channel=0) override;
+        bool note(bool on,int key,double velocity,int channel=0,const std::string& input={}) override;
         void allNotesOff() override;
         void ignoreMidiInputs(const std::vector<std::string>& names) override;
         std::vector<MidiPort> midiPorts() override;

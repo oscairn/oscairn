@@ -235,7 +235,7 @@ namespace oscairn
         void recordRename( uint32_t take, const std::string& name ) override;
         void recordPlay( uint32_t take ) override;
         Recorder& recorder() noexcept { return recorder_; } // its ring length, disk reserve and test hooks
-        bool note( bool on, int key, double velocity, int channel = 0 ) override;
+        bool note( bool on, int key, double velocity, int channel = 0, const std::string& input = {} ) override;
         void allNotesOff() override { allOff_.store( true, std::memory_order_relaxed ); panic_.store( true, std::memory_order_release ); endRinging_.store( true, std::memory_order_release ); } // the queue overflow's emergency release, every plugin taking notes reset; ringOut ends the last Performance's
         void ignoreMidiInputs( const std::vector<std::string>& names ) override;
         std::vector<MidiPort> midiPorts() override;
@@ -367,7 +367,7 @@ namespace oscairn
         bool liveOnly(const std::vector<Part>& before, const std::vector<Wire>& wiresBefore, double masterLevel, double masterPan) const;
         void enable(NodeId node, bool enabled);  // the flags and the graph's retiring count; wires are the caller's
         void ringOut();                          // service(): an off plugin that has rung out stops sounding
-        bool enqueue(const kick::clap::Event& event);
+        bool enqueue(const kick::clap::Event& event, uint8_t source = builtInSource);
         void syncWires();
         std::vector<Graph::MidiTap> midiTaps(const Graph& graph, const std::vector<Part>& parts, const std::vector<Wire>& wires) const; // parts' MIDI out
         std::vector<Graph::Harmony> harmonies(const std::vector<Part>& parts, const MusicalKey& key) const; // parts' oscairn.harmony (RFC 0033)
@@ -788,7 +788,12 @@ namespace oscairn
         // Single producer (control), single consumer (audio). A process call drains
         // only the published snapshot, so a busy producer cannot extend its deadline.
         std::array<kick::clap::Event, noteQueueCapacity> notes_{};
+        std::array<uint8_t, noteQueueCapacity> noteSources_{}; // each queued note's source (note(input))
         std::atomic<size_t> noteHead_{ 0 }, noteTail_{ 0 };
+        // The keys held on each source, two words of bits each: set and cleared by the audio
+        // thread as notes enter the graph, read by sessionStatus(); a panic clears them.
+        std::array<std::atomic<uint64_t>, maxSources * 2> heldKeys_{};
+        void holdKeys( const kick::clap::Event& event, uint8_t source ) noexcept;
         std::atomic<bool> panic_{ false };
         std::atomic<bool> allOff_{ false }; // allNotesOff, not a queue overflow: plugins behind note effects are reset too
         std::atomic<bool> endRinging_{ false }; // allNotesOff: ringOut ends the last Performance's plugins at once

@@ -8,6 +8,7 @@
 #include "JsonInput.h"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -247,14 +248,24 @@ namespace oscairn
         return { statusPlaying_.load(), statusTempo_.load(), statusBeat_.load(), clockOutputs_ };
     }
 
-    bool Session::note( bool on, int key, double velocity, int channel )
+    bool Session::note( bool on, int key, double velocity, int channel, const std::string& input )
     {
         if( key < 0 || key > 127 || channel < 0 || channel > 15 || !std::isfinite( velocity ) || velocity < 0 || velocity > 1 )
             throw std::invalid_argument( "invalid note key, channel or velocity" );
-        return enqueue( kick::clap::Event::note( on && velocity > 0, key, velocity, 0, channel ) );
+        on = on && velocity > 0;
+        uint8_t source = builtInSource;
+        if( !input.empty() )
+        {
+            const auto& inputs = hostStatus_.midiInputs;
+            const auto it = std::find_if( inputs.begin(), inputs.end(), [&]( const MidiEndpoint& e ) { return e.name == input; } );
+            if( it != inputs.end() ) source = it->source;
+            else if( on ) throw std::invalid_argument( "no MIDI input named " + input );
+            else source = untaggedSource; // gone since its note on: the release reaches every zone
+        }
+        return enqueue( kick::clap::Event::note( on, key, velocity, 0, channel ), source );
     }
 
-    bool Session::enqueue( const kick::clap::Event& event )
+    bool Session::enqueue( const kick::clap::Event& event, uint8_t source )
     {
         const auto head = noteHead_.load( std::memory_order_relaxed );
         if( head - noteTail_.load( std::memory_order_acquire ) == notes_.size() )
@@ -264,8 +275,38 @@ namespace oscairn
             return false;
         }
         notes_[head % notes_.size()] = event;
+        noteSources_[head % notes_.size()] = source;
         noteHead_.store( head + 1, std::memory_order_release );
         return true;
+    }
+
+    // Audio thread: a note entering the graph from a source, on or off in that source's keys.
+    void Session::holdKeys( const kick::clap::Event& event, uint8_t source ) noexcept
+    {
+        if( source >= maxSources && source != untaggedSource ) return;
+        const auto* h = event.header();
+        if( h->space_id != CLAP_CORE_EVENT_SPACE_ID ) return;
+        int key = -1;
+        bool on = false;
+        if( ( h->type == CLAP_EVENT_NOTE_ON || h->type == CLAP_EVENT_NOTE_OFF || h->type == CLAP_EVENT_NOTE_CHOKE ) && h->size == sizeof( clap_event_note_t ) )
+            { key = reinterpret_cast<const clap_event_note_t*>( h )->key; on = h->type == CLAP_EVENT_NOTE_ON; }
+        else if( h->type == CLAP_EVENT_MIDI && h->size == sizeof( clap_event_midi_t ) )
+        {
+            const auto& m = *reinterpret_cast<const clap_event_midi_t*>( h );
+            const auto kind = m.data[0] & 0xf0;
+            if( kind != 0x90 && kind != 0x80 ) return;
+            key = m.data[1]; on = kind == 0x90 && m.data[2] > 0;
+        }
+        if( key < 0 || key > 127 ) return;
+        const auto bit = uint64_t( 1 ) << ( key & 63 );
+        if( source == untaggedSource ) // a release reaching every zone (its input gone) lets go of the key on every source
+        {
+            if( !on ) for( size_t s = 0; s < maxSources; ++s ) heldKeys_[s * 2 + size_t( key >> 6 )].fetch_and( ~bit, std::memory_order_relaxed );
+            return;
+        }
+        auto& word = heldKeys_[size_t( source ) * 2 + size_t( key >> 6 )];
+        if( on ) word.fetch_or( bit, std::memory_order_relaxed );
+        else word.fetch_and( ~bit, std::memory_order_relaxed );
     }
 
     void Session::setPadMap( const PadMap& map )
@@ -375,6 +416,14 @@ namespace oscairn
             if(const auto cpu = host.cpuSeconds(); cpu > 0) { const auto st = host.statistics(); result.workers.push_back({node, name, cpu, host.residentBytes(), st.lastMicroseconds, st.maximumMicroseconds}); }
         }
         result.notices = notices_;
+        for( size_t source = 0; source < maxSources; ++source )
+        {
+            Control::SessionStatus::HeldNotes held{ uint8_t( source ), {} };
+            for( size_t w = 0; w < 2; ++w )
+                for( auto bits = heldKeys_[source * 2 + w].load( std::memory_order_relaxed ); bits; bits &= bits - 1 )
+                    held.keys.push_back( uint8_t( w * 64 + size_t( std::countr_zero( bits ) ) ) );
+            if( !held.keys.empty() ) result.heldNotes.push_back( std::move( held ) );
+        }
         return result;
     }
 
@@ -718,11 +767,12 @@ namespace oscairn
             graph_.panicInput();
             if( allOff_.exchange( false, std::memory_order_acquire ) ) graph_.panicNotes();
             tail = head;
+            for( auto& word : heldKeys_ ) word.store( 0, std::memory_order_relaxed );
         }
         else
             while( tail != head )
             {
-                mergedSources_[count] = builtInSource;
+                mergedSources_[count] = noteSources_[tail % notes_.size()];
                 merged_[count++] = notes_[tail % notes_.size()];
                 ++tail;
             }
@@ -735,6 +785,7 @@ namespace oscairn
             mergedSources_[count] = sources.empty() ? untaggedSource : sources[i];
             merged_[count++] = events[i];
         }
+        for( size_t i = 0; i < count; ++i ) holdKeys( merged_[i], mergedSources_[i] );
 
         const auto t = transport_.current();
         statusPlaying_.store( ( t.flags & CLAP_TRANSPORT_IS_PLAYING ) != 0 );

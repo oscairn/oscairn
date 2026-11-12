@@ -196,6 +196,8 @@ namespace oscairn
             for(auto [list,key]:{std::pair{&status.midiInputs,"midiInputs"},{&status.midiOutputs,"midiOutputs"}})
                 for(auto e:array(field(v,key)))
                     list->push_back({MidiEndpoint::Kind(named(endpointKinds,string(field(e,"kind")))),uint8_t(integer(field(e,"source"))),string(field(e,"name")),static_cast<uint32_t>(integer(field(e,"port")))});
+            status.heldNotes.clear();
+            if(V held=detail::member(v,"heldNotes"))for(auto h:array(held)){status.heldNotes.push_back({uint8_t(integer(field(h,"source"))),{}});for(auto k:array(field(h,"keys")))status.heldNotes.back().keys.push_back(uint8_t(integer(k)));}
         }
         static GraphState readGraph(V root)
         {
@@ -909,8 +911,8 @@ namespace oscairn
         v.masterLevel=g.masterLevel;v.masterPan=g.masterPan;
         return v;
     }
-    bool RemoteControl::note(bool on,int key,double velocity,int channel)
-    {try{impl_->call("notes.send",std::string("{\"on\":")+(on?"true":"false")+",\"key\":"+std::to_string(key)+",\"velocity\":"+encode(velocity)+",\"channel\":"+std::to_string(channel)+'}');return true;}catch(const RpcError& e){if(e.code==-32005)return false;throw;}}
+    bool RemoteControl::note(bool on,int key,double velocity,int channel,const std::string& input)
+    {try{impl_->call("notes.send",std::string("{\"on\":")+(on?"true":"false")+",\"key\":"+std::to_string(key)+",\"velocity\":"+encode(velocity)+",\"channel\":"+std::to_string(channel)+(input.empty()?std::string():",\"input\":"+quote(input))+'}');return true;}catch(const RpcError& e){if(e.code==-32005)return false;throw;}}
     namespace { std::vector<AssignmentOverride> assignmentsFrom(V r)
     {
         std::vector<AssignmentOverride> out;

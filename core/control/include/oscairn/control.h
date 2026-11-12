@@ -129,6 +129,11 @@ namespace oscairn
             uint64_t audioUnderruns = 0;
             uint64_t audioDeviceList = 0; // changes when the host's audio devices come or go: audioDevices() again
             uint64_t midiPortList = 0; // changes when MIDI inputs come or go, or a port's profiles or ignoring change: midiPorts() again
+            // The keys held now on each source that has any (a MIDI input's source, or 0 for the
+            // built-in keys, pads and UI notes), in ascending order: what an input's on-screen
+            // keyboard lights. Read from the last rendered block.
+            struct HeldNotes { uint8_t source = 0; std::vector<uint8_t> keys; bool operator==(const HeldNotes&) const = default; };
+            std::vector<HeldNotes> heldNotes;
         };
         virtual SessionStatus sessionStatus() const = 0;
         // The host's audio device, for Settings (RFC 0024). Each output device, and each input device
@@ -618,7 +623,11 @@ namespace oscairn
         /// bypasses this queue and enters Session::process with sample offsets.
         /// False means overflow; the session discards queued UI notes and broadcasts
         /// release on the next block. This may release other voices on shared destinations.
-        virtual bool note( bool on, int key, double velocity, int channel = 0 ) = 0;
+        /// `input`: a MIDI input's name in the session status, whose notes these are as if it
+        /// sent them (its parts' device selectors apply); empty: the built-in source. A name not
+        /// there refuses a note on; a note off for it reaches every zone, so an input unplugged
+        /// while a note was held still lets it go.
+        virtual bool note( bool on, int key, double velocity, int channel = 0, const std::string& input = {} ) = 0;
         // All notes off (RFC 0030): every note played from the keys, MIDI inputs and the UI is
         // released at the next block, and every plugin that takes notes is reset, behind a note
         // effect too. Any thread; never waits.

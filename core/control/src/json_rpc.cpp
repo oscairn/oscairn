@@ -225,7 +225,8 @@ namespace oscairn
                 ",\"cpuLoad\":" + encode(s.cpuLoad) + ",\"deadlineMisses\":" + std::to_string(s.deadlineMisses) + ",\"audioUnderruns\":" + std::to_string(s.audioUnderruns) + ",\"audioDeviceList\":" + std::to_string(s.audioDeviceList) + ",\"midiPortList\":" + std::to_string(s.midiPortList) + ",\"graphEventDrops\":" + std::to_string(s.graphEventDrops) + ",\"midiEventDrops\":" + std::to_string(s.midiEventDrops) +
                 ",\"failures\":" + [&]{ std::vector<std::string> f; for(const auto& x : s.failures) f.push_back("{\"node\":" + std::to_string(x.node) + ",\"name\":" + quote(x.name) + ",\"reason\":" + quote(x.reason) + '}'); return join(f); }() +
                 ",\"notices\":" + [&]{ std::vector<std::string> n; for(const auto& x : s.notices) n.push_back(quote(x)); return join(n); }() +
-                ",\"workers\":" + [&]{ std::vector<std::string> w; for(const auto& x : s.workers) w.push_back("{\"node\":" + std::to_string(x.node) + ",\"name\":" + quote(x.name) + ",\"cpu\":" + encode(x.cpu) + ",\"memory\":" + std::to_string(x.memory) + ",\"block\":" + encode(x.block) + ",\"blockMax\":" + encode(x.blockMax) + '}'); return join(w); }() + '}';
+                ",\"workers\":" + [&]{ std::vector<std::string> w; for(const auto& x : s.workers) w.push_back("{\"node\":" + std::to_string(x.node) + ",\"name\":" + quote(x.name) + ",\"cpu\":" + encode(x.cpu) + ",\"memory\":" + std::to_string(x.memory) + ",\"block\":" + encode(x.block) + ",\"blockMax\":" + encode(x.blockMax) + '}'); return join(w); }() +
+                ",\"heldNotes\":" + [&]{ std::vector<std::string> h; for(const auto& x : s.heldNotes) { std::vector<std::string> keys; for(const auto k : x.keys) keys.push_back(std::to_string(k)); h.push_back("{\"source\":" + std::to_string(x.source) + ",\"keys\":" + join(keys) + '}'); } return join(h); }() + '}';
         }
         // RFC 0011 parts and wires, as graph.get reports them.
         std::string zonesJson( const std::vector<NoteZone>& zones )
@@ -1822,13 +1823,15 @@ namespace oscairn
             }
             if( method == "notes.send" )
             {
-                fields(p, {"on","key","velocity","channel"});
+                fields(p, {"on","key","velocity","channel","input"});
                 const bool on = boolean(member(p,"on"));
                 const auto key = integer(member(p,"key"),127);
                 const auto channel = member(p,"channel") ? integer(member(p,"channel"),15) : 0;
                 const auto velocity = member(p,"velocity") ? number(member(p,"velocity")) : (on ? 1.0 : 0.0);
                 if( velocity < 0 || velocity > 1 ) invalid("Velocity must be between 0 and 1");
-                if( !c.note(on,static_cast<int>(key),velocity,static_cast<int>(channel)) )
+                const auto input = member(p,"input") ? std::string(string(member(p,"input"))) : std::string();
+                if( member(p,"input") && input.empty() ) invalid("Empty input name");
+                if( !c.note(on,static_cast<int>(key),velocity,static_cast<int>(channel),input) )
                     throw Failure{ -32005, "UI note queue full; emergency release scheduled" };
                 return R"({"accepted":true})";
             }

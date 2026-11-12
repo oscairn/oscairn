@@ -80,7 +80,7 @@ try:
     error(rpc('sounds.select', {'node':'synth','context':prepared}), -32005)
     status = rpc('session.status')['result']
     assert status == {'audioDevice': '', 'midiInputs': [], 'midiOutputs': [], 'sampleRate': 48000,
-                      'bufferSize': 512, 'cpuLoad': 0, 'deadlineMisses': 0, 'audioUnderruns': 0, 'audioDeviceList': 0, 'midiPortList': 0, 'graphEventDrops': 0, 'midiEventDrops': 0, 'audioReady': True, 'audioInputs': [], 'audioOutputs': [], 'failures': [], 'notices': [], 'workers': []}, status
+                      'bufferSize': 512, 'cpuLoad': 0, 'deadlineMisses': 0, 'audioUnderruns': 0, 'audioDeviceList': 0, 'midiPortList': 0, 'graphEventDrops': 0, 'midiEventDrops': 0, 'audioReady': True, 'audioInputs': [], 'audioOutputs': [], 'failures': [], 'notices': [], 'workers': [], 'heldNotes': []}, status
     error(rpc('session.status', {'unknown': True}), -32602)
     for ident in [None, 0, -1, 2**63 + 7, 'hello\x00\n"\\', 'é🎹', 1.5]:
         assert rpc('transport.get', ident=ident)['id'] == ident
@@ -110,6 +110,7 @@ try:
     error(rpc('notes.send', {'on': 1, 'key': 60}), -32602)
     error(rpc('notes.send', {'on': True, 'key': 60.5}), -32602)
     error(rpc('notes.send', {'on': True, 'key': 60, 'velocity': 1.01}), -32602)
+    error(rpc('notes.send', {'on': True, 'key': 60, 'input': 'No such input'}), -32602)
     error(rpc('transport.set', {'tempo': '100'}), -32602)
     error(raw('{"jsonrpc":"2.0","id":1,"method":"transport.set","params":{"tempo":1e999}}'), -32602)
     error(rpc('transport.set', {'tempo': 0}), -32602)

@@ -77,13 +77,48 @@ namespace
         if( energy < 1 || std::abs(wire.left[36]) > 1e-6f ) throw std::runtime_error("Missing note or unreleased voice");
         std::cout << "ok: JSON and typed control render identical audio without render allocations\n";
     }
+    // notes.send as a MIDI input (its input field): a zone limited to that input hears it and not
+    // the built-in source, the status lists each source's held keys, and a release for an input
+    // gone still lets go.
+    void sources( const char* path )
+    {
+        using oscairn::MidiEndpoint;
+        Fixture f(path);
+        oscairn::Control::SessionStatus status;
+        status.midiInputs = {{MidiEndpoint::Kind::Usb, 3, "KeyLab 61"}, {MidiEndpoint::Kind::Usb, 4, "Other"}};
+        f.session.setHostStatus(status);
+        uint32_t wire = 0;
+        for( const auto& w : f.session.graphState().wires ) if( w.from == oscairn::graphInput && w.to == f.synth ) wire = w.id;
+        oscairn::NoteZone zone; zone.sources = 1ull << 3; // the KeyLab's notes only
+        f.session.setZones(wire, {zone}); f.session.commit();
+        auto energy = [&]( unsigned blocks ) { double e = 0; for( unsigned i = 0; i < blocks; ++i ) { f.render(); for( const float x : f.left ) e += double(x) * x; } return e; };
+        auto held = [&] { std::string out; for( const auto& h : f.session.sessionStatus().heldNotes ) { out += std::to_string(h.source) + ":"; for( const auto k : h.keys ) out += std::to_string(k) + ","; out += ";"; } return out; };
+        auto refused = [&]( const std::string& params ) { const auto r = f.rpc.dispatch(R"({"jsonrpc":"2.0","id":1,"method":"notes.send","params":)" + params + '}'); return r && r->find("-32602") != std::string::npos; };
+        energy(4);
+        f.call("notes.send", R"({"on":true,"key":60,"velocity":0.8})");
+        if( energy(40) > 1e-9 ) throw std::runtime_error("A built-in note played a zone limited to the KeyLab");
+        if( held() != "0:60,;" ) throw std::runtime_error("The built-in source's held key not listed: " + held());
+        f.call("notes.send", R"({"on":false,"key":60})");
+        f.call("notes.send", R"({"on":true,"key":62,"velocity":0.8,"input":"KeyLab 61"})");
+        if( energy(40) < 1e-3 ) throw std::runtime_error("A note sent as the KeyLab missed its zone");
+        if( held() != "3:62,;" ) throw std::runtime_error("The KeyLab's held key not listed: " + held());
+        if( const auto r = f.rpc.dispatch(R"({"jsonrpc":"2.0","id":1,"method":"session.status"})"); !r || r->find(R"("heldNotes":[{"source":3,"keys":[62]}])") == std::string::npos )
+            throw std::runtime_error("session.status has no heldNotes: " + r.value_or(""));
+        if( !refused(R"({"on":true,"key":64,"input":"Nope"})") || !refused(R"({"on":true,"key":64,"input":""})") || !refused(R"({"on":true,"key":64,"input":3})") )
+            throw std::runtime_error("A note on for an input not there, or an empty or numeric name, was not refused");
+        f.session.setHostStatus({}); // the KeyLab unplugged with its key held: the release still reaches the zone
+        f.call("notes.send", R"({"on":false,"key":62,"input":"KeyLab 61"})");
+        energy(400);
+        if( !held().empty() || std::abs(f.left[511]) > 1e-6f ) throw std::runtime_error("A release for an input gone did not let go: " + held());
+        std::cout << "ok: notes sent as a MIDI input play its zones, and each source's held keys are listed\n";
+    }
 }
 int main( int argc, char** argv )
 {
     if( argc < 2 ) return 2;
     try
     {
-        if( argc == 2 ) { equivalence(argv[1]); return 0; }
+        if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); return 0; }
         // Test-only line driver. Blank output represents no JSON-RPC response.
         Fixture f(argv[1]);
         for( std::string line; std::getline(std::cin,line); )

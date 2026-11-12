@@ -79,6 +79,7 @@ namespace oscairn::standalone
             juce::Rectangle<int> bounds; int mode = 1;
             std::deque<double> crashes;       // when, in seconds, within the last minute
             juce::String why;                 // a stop of ours to report as the crash's reason
+            std::deque<std::pair<double, uint64_t>> readings; // its memory, when read (seconds) and bytes, over the last few seconds
         };
         bool start(const std::string& id);
         void show(const std::string& id);

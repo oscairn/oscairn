@@ -4,6 +4,7 @@
 #include "Theme.h"
 #include "oscairn/library.h"
 #include "oscairn/package.h"
+#include <algorithm>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -22,6 +23,9 @@ namespace oscairn::standalone
         constexpr uint32_t frontSilence = 5000, behindSilence = 10000; // ms, RFC 0022's hang rule
         constexpr size_t restartsPerMinute = 3, logTail = 64 * 1024;
         constexpr int64_t logRotation = 1024 * 1024;
+        // Memory counts once it has lasted this long (seconds): a shorter spike, such as the graphics
+        // memory a window takes for about a second when much of it is drawn afresh, is not an app's use.
+        constexpr double sustained = 3;
         double seconds() { return juce::Time::getMillisecondCounterHiRes() / 1000.0; }
         bool named(const juce::String& s)
         {
@@ -184,7 +188,7 @@ namespace oscairn::standalone
         catch(const std::exception& e) { r.pid = -1; say(id, juce::String(m->name) + " did not start: " + e.what()); }
         ::close(output); ::close(connection); // the child has its own
         if(r.pid < 0) { engine_.appClosed(id); return false; }
-        r.state = State::Running; r.waited = r.stopping = false; r.why = {};
+        r.state = State::Running; r.waited = r.stopping = false; r.why = {}; r.readings.clear();
         if(r.shown) show(id);
         return true;
     }
@@ -327,7 +331,12 @@ namespace oscairn::standalone
             // start (RFC 0025), saved when it grows by a MiB; over the manifest's maximum, stopped
             // and reported as a crash.
             const auto* m = find(id);
-            const auto used = m ? footprint(r.pid) : 0;
+            // What it has used throughout the last `sustained` seconds (the least it read), once it
+            // has run that long: what stops it and what it is measured using.
+            const auto now = seconds();
+            r.readings.emplace_back(now, m ? footprint(r.pid) : 0);
+            while(r.readings.size() > 1 && r.readings[1].first <= now - sustained) r.readings.pop_front();
+            const auto used = r.readings.front().first <= now - sustained ? std::min_element(r.readings.begin(), r.readings.end(), [](const auto& a, const auto& b) { return a.second < b.second; })->second : 0;
             if(auto& peak = measured_[id]; m && used > (m->reserve << 20) && used >= peak + (1 << 20))
             {
                 if(peak <= (m->reserve << 20))

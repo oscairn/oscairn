@@ -216,9 +216,18 @@ measured; per-app limits wait for apps as processes (RFC 0022 step 2).
 **Manifests** (step 8, built 2026-11-09; `AppProcesses`): an app that is a process reserves its
 manifest's `memory.reserve` (the Setlist's 60 MiB), or the most it was measured using on this
 device where that is more, up to its `max`. The supervisor reads each app's footprint every
-100 ms (the same reading that stops it past its maximum); past its reservation it says so on
-stderr and keeps the peak in `app-memory.json` in the data folder, saved when it grows by a
-MiB, so its next start reserves that. Every start, whether Home, the Apps menu or an action
+100 ms and counts what it has used throughout the last 3 seconds (the least of those readings),
+once it has run that long; that one figure stops it past its maximum and is what it is
+measured using. A spike shorter than that is not an app's use: on macOS a window takes
+hundreds of MB of graphics memory for about a second when much of it is drawn afresh
+(measured 2026-11-11 on the Settings app at 900 × 640 points on a Retina display: 357 MB
+showing a page, 390 to 402 MB changing to MIDI controllers, about 55 MB a second later; at
+2900 × 1600, 535 MB for under a second, then 125 MB), and the shell cannot read another
+process's graphics memory apart (`task_for_pid` is refused), so it waits for memory to last. A
+real overage is stopped 3 seconds later than at once; on Linux the app's cgroup, when built,
+stops it at its maximum at once. Past its reservation it says so on stderr and keeps the
+highest such figure in `app-memory.json` in the data folder, saved when it grows by a MiB, so
+its next start reserves that. Every start, whether Home, the Apps menu or an action
 another app asked for, is admitted by the engine (`launchApp`) first; refused, the supervisor's
 notice gives the engine's reason ("Setlist did not open: it needs 60 MiB, 34 free for apps")
 and nothing starts. The reservation is let go (`appClosed`) when the app is stopped, closes its

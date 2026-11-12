@@ -65,6 +65,11 @@ namespace oscairn::standalone
                 if(const auto marker = stateFile().getSiblingFile("leaked"); !marker.exists() && marker.create().wasOk())
                     { static std::vector<std::unique_ptr<uint64_t[]>> leaked; uint64_t x = 88172645463325252ull; // varied, so the system cannot compress it away
                       for(int i = 0; i < mb; ++i) { leaked.emplace_back(new uint64_t[1 << 17]); for(int j = 0; j < (1 << 17); ++j) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; leaked.back()[size_t(j)] = x; } } }
+            // For tests: hold that many MB for a second after each start, then let it go: a spike, not a use.
+            if(const int mb = juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEST_SPIKE", {}).getIntValue(); mb > 0)
+                { auto spike = std::make_shared<std::vector<std::unique_ptr<uint64_t[]>>>(); uint64_t x = 88172645463325252ull;
+                  for(int i = 0; i < mb; ++i) { spike->emplace_back(new uint64_t[1 << 17]); for(int j = 0; j < (1 << 17); ++j) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; spike->back()[size_t(j)] = x; } }
+                  juce::Timer::callAfterDelay(1000, [spike] { spike->clear(); std::fprintf(stderr, "oscairn-setlist: the test's spike let go\n"); }); }
             const auto args = juce::StringArray::fromTokens(commandLine, true);
             if(const int at = args.indexOf("--snapshot"); at >= 0 && at + 1 < args.size())
             {

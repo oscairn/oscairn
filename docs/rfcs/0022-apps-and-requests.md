@@ -232,7 +232,8 @@ path:
 - **Memory:** on Linux the app's cgroup `apps/<app>` holds `memory.min` at its reservation and
   `memory.max` at its declared maximum ([RFC 0025](0025-resource-budgets.md#linux)), with an
   `RLIMIT_AS` backstop as for workers; on macOS, where no limit is enforceable by the kernel
-  (RFC 0010 step 6), the supervisor reads its footprint every 100 ms. Over its maximum it is
+  (RFC 0010 step 6), the supervisor reads its footprint every 100 ms. Over its maximum for 3
+  seconds (a shorter spike, such as a window's graphics drawn afresh, is not counted) it is
   stopped and reported like a crash, and its measured peak raises its reservation at the next
   start, as RFC 0025 says.
 - **CPU:** on Linux its cgroup runs at a lower `cpu.weight` than the shell, on cores apart from

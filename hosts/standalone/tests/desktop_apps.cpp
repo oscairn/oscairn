@@ -5,7 +5,8 @@
 // device. A send from the shell's side and a pick from the app's cross the process boundary
 // through the engine; the app killed comes back with its state; hung, the shell says it is not
 // responding and Close starts it again; killed again and again, it stays closed; leaking past
-// its memory maximum, it is stopped and comes back; hung behind, it is stopped after 10 seconds.
+// its memory maximum, it is stopped and comes back, while a second's spike past it is neither
+// stopped nor measured; hung behind, it is stopped after 10 seconds.
 // Through all of it the engine plays on, and the app's stderr is
 // in its log. With SNAPSHOTS, the KICK's 1024 × 600 screen with the Setlist shown under the top
 // bar is written to SNAPSHOTS-setlist-panel.png.
@@ -207,10 +208,31 @@ int main(int argc, char** argv)
                 std::string answer = "?";
                 actions.request(standalone::sendPerformance, idOf("Bass Split"), [&](const std::string& a) { answer = a; });
                 check(wait([&] { return !notices.empty(); }) && notices.front().text.contains("used more than its 1 MB of memory and was stopped"), "over its memory maximum it is stopped, and the shell says why");
-                check(wait([&] { return answer != "?"; }) && answer.empty(), "the request out to it is canceled");
+                // Stopped once over it for 3 seconds, it may take the send first, or it is canceled with it: either way, answered.
+                check(wait([&] { return answer != "?"; }), "the request out to it is answered: " + (answer.empty() ? std::string("canceled") : answer));
                 check(wait([&] { return processes.state("oscairn.setlist") == standalone::AppProcesses::State::GaveUp; }), "and, stopped each time it starts, it stays closed");
                 check(playing(), "sound went on");
                 folder.getParentDirectory().deleteRecursively(false);
+            }
+
+            // A spike past its maximum for a second (500 MB held, then let go), as a window's graphics
+            // take when much of it is drawn afresh: not stopped, and not measured as its use.
+            {
+                data.getChildFile("app-memory.json").deleteFile();
+                std::vector<standalone::AppProcesses::Notice> notices;
+                standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_TEST_SPIKE=500"});
+                processes.onNotice = [&](const standalone::AppProcesses::Notice& n) { notices.push_back(n); std::fprintf(stderr, "  notice: %s\n", n.text.toRawUTF8()); };
+                processes.setFront("oscairn.setlist");
+                std::string answer = "?";
+                actions.request(standalone::sendPerformance, idOf("Bass Split"), [&](const std::string& a) { answer = a; });
+                check(wait([&] { return processes.log("oscairn.setlist").contains("the test's spike let go"); }), "the app spiked past its maximum and let it go");
+                const auto pid = processes.pid("oscairn.setlist");
+                wait([] { return false; }, 4000);
+                check(notices.empty() && processes.pid("oscairn.setlist") == pid && processes.state("oscairn.setlist") == standalone::AppProcesses::State::Running, "a spike past its maximum does not stop it");
+                check(processes.reservation("oscairn.setlist") < 400ull << 20, "nor is it measured as its use: " + std::to_string(processes.reservation("oscairn.setlist") >> 20) + " MiB");
+                processes.stop("oscairn.setlist");
+                wait([&] { return processes.pid("oscairn.setlist") < 0; });
+                data.getChildFile("app-memory.json").deleteFile();
             }
 
             // RFC 0025 step 8: an app that is a process holds its manifest's reservation (the

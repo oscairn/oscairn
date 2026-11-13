@@ -748,7 +748,7 @@ at boot and Roland's `go.sh` is not touched. In order, each step printed and log
 `var/oscairn/log/oscairn-fantom.log` in the bundle (the bundle's `var/log` is Buildroot's link to
 its `/tmp`, which `stop-chroot.sh` unmounts):
 
-1. It refuses to run while another start runs or Oscairn's engine already runs.
+1. It refuses to run while another start runs or Oscairn's app or engine already runs.
 2. It mounts the chroot (`start-chroot.sh`), before anything else changes, so that the next two
    steps follow each other at once.
 3. If Roland's app runs (`systemctl is-active weston-term`, or a process `mi078`), it stops it
@@ -760,25 +760,33 @@ its `/tmp`, which `stop-chroot.sh` unmounts):
    running is kept.
 5. It sets every CPU's `scaling_governor` to `performance`, recording what each had in
    `var/oscairn/run/governors` ([the engine's load](#with-rolands-app-stopped)).
-6. It starts the engine through `oscairn-engine-run` with the profile's options from
-   `etc/default/oscairn-engine` (written from the profile when the bundle is built: `hw:1,0`,
-   six channels, 48 kHz, main on 0 and 1, 128 frames, the keys on `/dev/ttyGS0`, the panel and
-   its map, the profile's id for its control groups, WRITE, MENU and TEMPO on `gpio-keys`), its
-   output in `var/oscairn/log/oscairn-engine.log`. It clears `var/oscairn/run/stopped` first
-   (below).
-7. It waits for the engine's control socket and asks it for `session.status`
-   (`oscairn-control-request`), all within 20 seconds, and prints the answer, or the end of the
-   engine's log and an error.
+6. It starts **the app** on the display, as the instrument's normal start: `/usr/bin/Oscairn
+   --profile fantom-07 --plugins /usr/lib/clap` in the chroot, with `DISPLAY=:0` (Weston and
+   Xwayland keep running when Roland's app stops, and Xwayland's abstract socket reaches into
+   the chroot) and the locked-memory limit raised, its output in
+   `var/oscairn/log/oscairn-app.log`. The app starts its own engine with the profile's audio
+   device, keys, panel and input keys, and sends it the profile's control groups. It does so for
+   a profile with a screen (`OSCAIRN_HEADLESS=0` and `OSCAIRN_PROFILE` in
+   `etc/default/oscairn-engine`, written from the profile when the bundle is built). With
+   `--engine-only`, or for a profile without a screen, it starts **the engine alone** through
+   `oscairn-engine-run` with the profile's options from the same file (`hw:1,0`, six channels,
+   48 kHz, main on 0 and 1, 128 frames, the keys on `/dev/ttyGS0`, the panel and its map, the
+   profile's id for its control groups, WRITE, MENU and TEMPO on `gpio-keys`), its output in
+   `var/oscairn/log/oscairn-engine.log`: the startup Performance with nothing on the screen,
+   played by the keys and the panel, for measuring the engine alone and for tests. Either way it
+   clears `var/oscairn/run/stopped` first (below).
+7. It waits for the engine's control socket (the app's engine's is `engine-*.sock` in the
+   bundle's `/tmp/oscairn-0`; the engine alone's `run/oscairn/engine.sock`) and asks it for
+   `session.status` (`oscairn-control-request`), within 20 seconds for the engine alone and 40
+   for the app, and prints the answer, or the end of the log and an error.
 
 Between Roland's app stopping and the engine opening `/dev/ttyGS0` nothing reads the keys' link,
 and Roland's sound engine queues what is not read; after a long gap on the unit it was left with
 notes stuck on. The few seconds the script takes were harmless. Roland's engine is
 told Local Switch off by the engine as it opens the keys' link (the profile's
-`keyboard.localOff`), after Roland's app has stopped; the script has marked places for what is
-not done yet: the app on the
-display (Xwayland's `:0` from the chroot, which worked when started by hand on November 12) and
-USB MIDI (`modprobe snd-usb-audio`, outside the chroot; that night the kernel loaded it by
-itself when a keyboard was plugged in). `--dry-run` checks what it can without
+`keyboard.localOff`), after Roland's app has stopped; the script has a marked place for what is
+not done yet: USB MIDI (`modprobe snd-usb-audio`, outside the chroot; on November 12 the kernel
+loaded it by itself when a keyboard was plugged in). `--dry-run` checks what it can without
 changing anything (another start, Roland's app, who holds the panel) and prints the rest.
 `--cold` is for a boot on which Roland's app never ran ([Starting at power-on](#starting-at-power-on-not-done)):
 nothing to stop, Roland's app running is a failure, and the panel is taken at once. It has a
@@ -788,8 +796,8 @@ needed none, and the word did not revive a panel that had gone silent; whether a
 Roland's app never woke waits for it is not known, and is to be tried on the unit before the
 step is enabled.
 
-`oscairn-fantom-stop` stops the engine, puts the governors back, and unmounts the chroot. Before
-stopping the engine it leaves `var/oscairn/run/stopped`, which says the stop was on purpose, for
+`oscairn-fantom-stop` stops the app (which stops its engine) and any engine left, puts the
+governors back, and unmounts the chroot. Before stopping them it leaves `var/oscairn/run/stopped`, which says the stop was on purpose, for
 `oscairn-fantom-boot` ([Starting at power-on](#starting-at-power-on-not-done)). It
 does not turn Local Switch back on: a power cycle does. It
 leaves the panel holder running, so the panel goes on reporting; `--panel` stops the holder too,
@@ -801,7 +809,8 @@ instrument to Roland's system.
 ```sh
 cd /home/root/oscairn
 ./oscairn-fantom-start --dry-run
-./oscairn-fantom-start
+./oscairn-fantom-start              # the app on the display, and its engine
+./oscairn-fantom-start --engine-only    # or the engine alone
 ./oscairn-fantom-stop               # the holder keeps the panel
 ./oscairn-fantom-stop --panel       # the panel silent until power-on
 ```
@@ -825,20 +834,21 @@ to take that last line's place, after everything before it has run:
    bootloader's update mode, so MENU is the choice key), or the file
    `var/oscairn/stock-next-boot` in the bundle (removed as it is honored: one boot of Roland's
    app), or MENU that cannot be read. It then starts Roland's app as `go.sh` does.
-2. **Otherwise Oscairn:** `oscairn-fantom-start --cold`.
+2. **Otherwise Oscairn:** `oscairn-fantom-start --cold`, which starts the app on the display
+   and, through it, the engine.
 3. **The fallback:** if that fails, the engine not answering `session.status` within 20 seconds
    among the failures, it runs `oscairn-fantom-stop --panel` and starts Roland's app, logging
    why. It never starts Roland's app while a process still holds `/dev/i2c-slave-2`.
 4. **It stays while Oscairn runs.** `go.sh` is the main process of `weston-term.service`
    (`ExecStart=/home/root/go.sh`, `After=weston.service`). If the boot script returned, `go.sh`
    would end, and systemd, with a unit's default settings (`KillMode=control-group`), would stop
-   the unit and kill everything left in its control group: the panel holder and the engine,
+   the unit and kill everything left in its control group: the panel holder, the app and the engine,
    which `setsid` takes out of the session but not out of the control group. The panel would
    then stay silent until the next power-on. So it waits in the foreground, looking each second
-   for the engine (by its process name). If the engine ends and `var/oscairn/run/stopped` is not
-   there, the engine is taken to have failed: the fallback, as in 3. If it is there,
+   for the app and the engine (by their process names). If both have ended and
+   `var/oscairn/run/stopped` is not there, Oscairn is taken to have failed: the fallback, as in 3. If it is there,
    `oscairn-fantom-stop` was run by hand: Roland's app is not started, and it goes on waiting
-   while the panel holder runs (an engine started again by hand with `oscairn-fantom-start`
+   while the panel holder runs (Oscairn started again by hand with `oscairn-fantom-start`
    clears the file and is watched the same way). Once neither runs (`oscairn-fantom-stop
    --panel`), it returns: nothing is left for systemd to stop. A loop in the unit's own process
    was chosen over `systemd-run --scope`, which would move Oscairn into a scope of its own but
@@ -960,13 +970,29 @@ pickup and the dead band never came into it. The engine now takes the groups fro
 itself, `--device-profile fantom-07` (built in under its id), which `engine-args.py` adds to
 the engine's options for a profile with a panel, until an app sends its own. The engine's
 start-up Performance has two parts, Synth (the Basic Synth into the Delay, which the keys play)
-and Groovebox (the step sequencer, playing the same synth); slider 1 is the Synth part's
-level. A slider picks up:
-the Synth part starts at full level, so slider 1 does nothing until it has been brought up to
-the top, and then follows. `engine-panel-startup` checks it: the engine on the null device,
-slider 1's messages decoded through the shipped map by a reader on a pipe, nothing played
-without the profile, the Synth part's level following with it. No default Performance needs
-opening for this. Not yet run on the unit.
+and Groovebox (the step sequencer, playing the same synth): it has parts, and slider 1 is the
+Synth part's level. A slider picks up: the Synth part starts at full level, so slider 1 does
+nothing until it has been brought up to the top, and then follows. `engine-panel-startup`
+checks it: the engine on the null device, slider 1's messages decoded through the shipped map
+by a reader on a pipe, nothing played without the profile, the Synth part's level following
+with it. No default Performance needs opening for this. The engine alone with the profile's
+groups is not yet run on the unit; with the app, which sends them, the sliders played the part
+levels on November 13. The instrument's normal start is the app, which `oscairn-fantom-start`
+now starts ([Starting Oscairn on the unit](#starting-oscairn-on-the-unit)); the engine alone
+(`--engine-only`) is the headless engine with the startup Performance, for measurements and
+tests.
+
+### The app's own file
+
+The app finds its engine (`oscairn-engine`), its plugin scanner, its themes and, without
+`--plugins`, its plugins (`../lib/clap`) beside its own program file. JUCE takes that file on
+Linux from `argv[0]` against the working directory, so the app started by its bare name through
+`PATH` looked for `oscairn-engine` in the working directory, and for its plugins at a build
+machine's path compiled in as the last resort. It now reads Linux's own record of it
+(`/proc/self/exe`, [Executable.h](../hosts/standalone/Executable.h)), which in the chroot is
+`/usr/bin/Oscairn`, so it finds `/usr/bin/oscairn-engine` and `/usr/lib/clap` however it is
+started (`desktop-executable-file` starts a program by its bare name from `/`). The start script
+still gives the full path and `--plugins /usr/lib/clap`.
 
 ### The map
 
@@ -1213,67 +1239,93 @@ owner's research (mostly stock), so these measurements are not on pure stock fir
   They are recorded as seen; what they are is not known.
 - **The app on the screen:** [The screen](#what-oscairn-has).
 
+The next evening (November 13), with a bundle built from the commit that made the app's window
+full screen, and the app started by hand from the chroot (`/usr/bin/Oscairn --profile fantom-07
+--play --plugins /usr/lib/clap`, the panel holder already running):
+
+- **The window fills the screen** under Roland's Weston: the offset and border of the first run
+  are gone.
+- **The sliders play the part levels** with the app running; the slider on the screen follows
+  with a little lag. (The engine alone had no control groups then: [The reader](#the-reader).)
+- **Started by its bare name** through `PATH`, the app failed with `configure helper launch: No
+  such file or directory`, and without `--plugins` it looked for its plugins at a path of the
+  build machine; both came from one cause, fixed since ([the app's own file](#the-apps-own-file)).
+  `Oscairn --help` printed `Unknown argument: --help` and then crashed; it now prints the
+  usage and quits. Why an unknown argument crashed it, beyond `--help`, was not looked into.
+- **Timing** (`oscairn-engine-timing`, 128 frames, the `performance` governor):
+
+  | | Callback p50 | Callback max | Lateness max | Deadline misses | Underruns |
+  |---|---|---|---|---|---|
+  | The engine alone | | 1.4 ms | 0.36 ms | 0 | 0 |
+  | With the app drawing, 40 s | about 1 ms | 6.3 ms | 3.75 ms | 2 | 0 |
+
+  With the app drawing, the engine and two workers all stalled at the same instant, for about 3
+  to 6 ms. The kernel alone (`cyclictest -m -p 80 -i 2667 -D 30`): at most 48 µs on core 0 and
+  38 µs on core 1, 6 µs on average.
+- **Memory,** with the threads' 1 MiB stacks: the engine alone 47 MB resident (142 MB before);
+  as the app's engine, playing the Groovebox, 96 MB; the app 38 MB; each worker about 10 MB.
+  Available: 517 MB with the engine alone, 440 MB with the app.
+- **The engine restarted** with the holder kept running: the new engine attached, and the holder
+  never let go of the device.
+
 ## Next session
 
 From the bundle's folder, as root, soon after power-on with Roland's app running. The timing
 tools are in the bundle: `oscairn-engine-timing` (installed with the engine) and `cyclictest`
-(`BR2_PACKAGE_RT_TESTS`), both run inside the chroot.
+(`BR2_PACKAGE_RT_TESTS`), both run inside the chroot. `oscairn-fantom-start` now starts the app
+on the display; `--engine-only` the engine alone.
 
-1. **The kernel alone,** with Roland's app stopped and no engine: start Oscairn once (it stops
-   Roland's app and takes the panel), stop the engine, keeping the holder, and measure each core:
+1. **The engine alone, then with its audio threads off core 0,** a minute each, holding a chord
+   on the keys (every interrupt is on core 0):
 
    ```sh
-   ./oscairn-fantom-start
+   ./oscairn-fantom-start --engine-only
+   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
    ./oscairn-fantom-stop
-   ./start-chroot.sh cyclictest -m -q -p 80 -i 1000 -t 1 -a 0 -D 60
-   ./start-chroot.sh cyclictest -m -q -p 80 -i 1000 -t 1 -a 1 -D 60
+   OSCAIRN_AUDIO_THREAD_CORES=1-3 ./oscairn-fantom-start --engine-only
+   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ./oscairn-fantom-stop
    ```
 
-2. **The engine alone,** at rest for a minute, then a minute holding a chord on the keys:
+2. **The app drawing, then the same with its engine's audio threads off core 0,** touching and
+   scrolling the screen while it measures; the app's engine listens in the bundle's
+   `/tmp/oscairn-0` (the start script prints the socket):
 
    ```sh
    ./oscairn-fantom-start
-   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
-   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
-   ```
-
-3. **The engine with its audio threads off core 0,** the same two minutes:
-
-   ```sh
+   ./start-chroot.sh sh -c 'oscairn-engine-timing /tmp/oscairn-0/engine-*.sock --seconds 60'
    ./oscairn-fantom-stop
    OSCAIRN_AUDIO_THREAD_CORES=1-3 ./oscairn-fantom-start
-   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
-   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ./start-chroot.sh sh -c 'oscairn-engine-timing /tmp/oscairn-0/engine-*.sock --seconds 60'
+   ./oscairn-fantom-stop
    ```
 
-   The start script hands the variable to the engine (it also takes it from
-   `etc/default/oscairn-engine`, where `engine-args.py` writes the profile's
+   The start script hands the variable to the app, which hands it to its engine and workers (it
+   also takes it from `etc/default/oscairn-engine`, where `engine-args.py` writes the profile's
    `compute.audioThreadCores`, empty for the FANTOM-07). The profile does not set it until a
    difference is measured: to keep it, add `"audioThreadCores": [1, 2, 3]` to the profile's
    `compute` (or set `OSCAIRN_AUDIO_THREAD_CORES='1-3'` in `etc/default/oscairn-engine`).
 
-4. **With the app drawing,** in the same engine (or after step 2's start, without the variable),
-   the app connected to it on the screen, and the screen touched and scrolled while it measures:
+3. **The kernel beside them,** for comparison, with nothing of Oscairn running but the holder:
 
    ```sh
-   ./start-chroot.sh env DISPLAY=:0 /usr/bin/Oscairn --plugins /usr/lib/clap --profile fantom-07 --connect /run/oscairn/engine.sock &
-   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ./start-chroot.sh cyclictest -m -q -p 80 -i 2667 -t 1 -a 0 -D 60
+   ./start-chroot.sh cyclictest -m -q -p 80 -i 2667 -t 1 -a 1 -D 60
    ```
 
-   The command is not yet tried as written (on November 12 the app was started from the chroot
-   with `DISPLAY=:0`).
-
-5. **The panel and the slider:** hold a key and move slider 1 to the top, then down: the Synth
-   part's level follows from the top on. The engine's log should say `control groups from the
-   profile fantom-07`. Press WRITE, MENU and TEMPO: nothing is played by them yet, and nothing
-   about them should be logged. Run `oscairn-panel-dump` beside the engine and stop it: the holder's log
+4. **The panel and the slider without the app:** `./oscairn-fantom-start --engine-only`, hold a
+   key and move slider 1 to the top, then down: the Synth part's level follows from the top on.
+   The engine's log should say `control groups from the profile fantom-07`. Press WRITE, MENU
+   and TEMPO: nothing is played by them yet, and nothing about them should be logged. Run
+   `oscairn-panel-dump` beside the engine and stop it: the holder's log
    (`var/oscairn/log/oscairn-panel-holder.log`) should show one reader attaching and, as it
    stops, `a reader detached` at once, not at the next message. Push E1 to E6 in the dump: each
-   should name `pushE1` to `pushE6`. Read the pads' printed labels.
-6. **Before changing `go.sh`:** `systemctl show weston-term -p Type -p KillMode -p RemainAfterExit`
+   should name `pushE1` to `pushE6`. Read the pads' printed labels, and press the pads in the
+   app: pad 1 of the pad map is the bottom left.
+5. **Before changing `go.sh`:** `systemctl show weston-term -p Type -p KillMode -p RemainAfterExit`
    ([Starting at power-on](#starting-at-power-on-not-done)).
 
-Send back each command's output and the three logs in `var/oscairn/log`.
+Send back each command's output and the logs in `var/oscairn/log`.
 
 ## What needs the owner at the instrument
 

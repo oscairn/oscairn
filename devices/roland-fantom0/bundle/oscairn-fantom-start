@@ -1,0 +1,168 @@
+#!/bin/sh
+# Starts Oscairn on a Roland FANTOM-0 from the chroot bundle this script sits in
+# (docs/fantom-0.md, "Starting Oscairn on the unit"). Run by hand, as root, from outside the
+# chroot; nothing starts it at boot and Roland's go.sh is not touched. In order:
+#
+#   1. refuses to run while another start runs or Oscairn's engine already runs;
+#   2. mounts the bundle's /proc, /sys, /dev, /run and /tmp (start-chroot.sh), so the panel
+#      holder can start the moment Roland's application has gone;
+#   3. stops Roland's application (systemctl stop weston-term) if it runs, and waits until its
+#      process (mi078) is gone;
+#   4. at once takes the panel: checks that no process holds /dev/i2c-slave-2 and starts
+#      oscairn-panel-holder, which holds it until the system goes down. The panel only keeps
+#      reporting while something holds the device: left unheld for about a minute it went
+#      silent until the next power-on, so the gap between Roland's application letting go and
+#      the holder taking over must stay under about a second. A holder already running is kept;
+#   5. holds every CPU at its top frequency (the performance governor) while Oscairn runs,
+#      recording what each had for oscairn-fantom-stop;
+#   6. starts the engine (oscairn-engine-run) with the profile's options
+#      (etc/default/oscairn-engine, written from the profile when the bundle was built): the
+#      audio device, the keys on /dev/ttyGS0 and the panel, which it reads from the holder;
+#   7. reports whether the engine came up, with its log's last lines.
+#
+# Between Roland's application stopping and the engine opening /dev/ttyGS0 nothing reads the
+# keys' link; Roland's sound engine then queues what is not read, and after a long gap on the
+# unit it was left with notes stuck on. A few seconds, as this script takes, were harmless.
+#
+# Each step is logged here and to var/oscairn/log/oscairn-fantom.log in the bundle (the bundle's
+# var/log is a link to its /tmp, which stop-chroot.sh unmounts). oscairn-fantom-stop stops it.
+#
+#   ./oscairn-fantom-start [--dry-run]
+#
+# --dry-run checks what it can without changing anything (another start, Roland's application,
+# who holds the panel) and prints the steps it would take instead of taking them.
+set -u
+root=$(cd "$(dirname "$0")" && pwd)
+dry=""
+case "${1:-}" in
+--dry-run) dry=1 ;;
+"") ;;
+*) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
+esac
+# Stand-ins for a test, off the unit; on the unit these are left unset.
+panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
+proc=${OSCAIRN_PROC:-/proc}
+state=$root/var/oscairn
+log=$state/log/oscairn-fantom.log
+[ -n "$dry" ] || mkdir -p "$state/log" "$state/run" || exit 1
+
+say() {
+	echo "oscairn-fantom-start: $*"
+	[ -n "$dry" ] || echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$log"
+}
+fail() { say "$*"; exit 1; }
+# Runs a step, or under --dry-run prints it.
+run() { if [ -n "$dry" ]; then say "would run: $*"; else "$@"; fi; }
+nap() { sleep 0.1 2>/dev/null || sleep 1; }
+# Processes by name, and processes holding a path open (through the bundle's /dev too).
+named() { for c in "$proc"/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = "$1" ] && { p=${c#"$proc"/}; echo "${p%%/*}"; }; done; }
+holding() {
+	for f in "$proc"/[0-9]*/fd/*; do
+		case "$(readlink "$f" 2>/dev/null)" in *"$1") p=${f#"$proc"/}; echo "${p%%/*}" ;; esac
+	done | sort -u
+}
+holder_running() { grep -q '@oscairn-panel$' "$proc/net/unix" 2>/dev/null; }
+
+# 1. Once only.
+if [ -z "$dry" ]; then
+	mkdir "$state/run/start.lock" 2>/dev/null || fail "another oscairn-fantom-start is running (or left $state/run/start.lock behind)"
+	trap 'rmdir "$state/run/start.lock" 2>/dev/null' EXIT
+fi
+engine=$(named oscairn-engine)
+[ -z "$engine" ] || fail "Oscairn's engine already runs (pid $engine); oscairn-fantom-stop stops it"
+
+# 2. The chroot's mounts first: mounting changes nothing Roland's application uses, and done
+# now it is not in the gap below.
+say "mounting the bundle's /proc, /sys, /dev, /run and /tmp"
+run "$root/start-chroot.sh" true || fail "start-chroot.sh failed"
+
+# 3. Roland's application.
+if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston-term; then
+	say "stopping Roland's application (systemctl stop weston-term)"
+	run systemctl stop weston-term || fail "systemctl stop weston-term failed"
+elif [ -n "$(named mi078)" ]; then
+	fail "Roland's application (mi078) runs, but not as weston-term: stop it first"
+fi
+if [ -z "$dry" ]; then
+	i=0
+	while [ -n "$(named mi078)" ]; do
+		i=$((i + 1))
+		[ $i -le 150 ] || fail "Roland's application (mi078) has not ended after 15 seconds; the panel is not taken"
+		nap
+	done
+fi
+say "Roland's application is not running"
+
+# 4. The panel, at once.
+if holder_running; then
+	say "the panel holder already runs: kept"
+else
+	others=$(holding "$panel")
+	[ -z "$others" ] || fail "process $(echo $others) holds $panel; not opening it (a second open can crash the kernel)"
+	say "taking the panel: oscairn-panel-holder $panel"
+	if [ -z "$dry" ]; then
+		: > "$state/log/oscairn-panel-holder.log"
+		"$root/start-chroot.sh" /usr/bin/oscairn-panel-holder "$panel" >> "$state/log/oscairn-panel-holder.log" 2>&1 &
+		i=0
+		until grep -q "holding $panel" "$state/log/oscairn-panel-holder.log"; do
+			i=$((i + 1))
+			if [ $i -gt 50 ] || ! kill -0 $! 2>/dev/null; then
+				tail -n 5 "$state/log/oscairn-panel-holder.log"
+				fail "the panel holder did not take $panel"
+			fi
+			nap
+		done
+		say "the panel is held (var/oscairn/log/oscairn-panel-holder.log)"
+	else
+		say "would run: $root/start-chroot.sh /usr/bin/oscairn-panel-holder $panel"
+	fi
+fi
+
+# Roland's own engine under Oscairn: it keeps its Local Switch after its app stops (seen on the
+# unit), so with Local Switch set to OFF in Roland's menu beforehand it stays silent and nothing
+# need be sent. Sending it from here (system parameter 0xCF to 0xEF, as traced) is not built.
+say "Roland's engine sounds the keys too unless Local Switch was set to OFF in Roland's menu (MENU > SYSTEM > MIDI) before this"
+
+# -- Not done yet; each goes here when it is known: --------------------------------------------
+# Oscairn's app on the display: Weston and Xwayland keep running; the app as an X11 client on :0
+#   from the chroot (Xwayland's abstract socket) is untried.
+# USB MIDI on USB MEMORY: modprobe snd-usb-audio, outside the chroot (Roland's module).
+# ------------------------------------------------------------------------------------------------
+
+# 5. The CPUs at their top frequency: on the unit, with ondemand at 128 frames the engine took
+# 0.23 of a block at rest, with performance 0.20 (docs/fantom-0.md). A sysfs setting: it is back
+# at power-on, and oscairn-fantom-stop puts back what is recorded here.
+saved=$state/run/governors
+for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
+	[ -w "$g" ] || continue
+	if [ -n "$dry" ]; then say "would set $g to performance (now $(cat "$g"))"; continue; fi
+	grep -q "^$g " "$saved" 2>/dev/null || echo "$g $(cat "$g")" >> "$saved"
+	echo performance > "$g" && say "$g: performance" || say "cannot set $g; continuing"
+done
+
+# 6. The engine, with the profile's options.
+[ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"
+[ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
+say "starting the engine: oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
+if [ -n "$dry" ]; then
+	say "would run: $root/start-chroot.sh oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
+	exit 0
+fi
+rm -f "$root/run/oscairn/engine.sock"
+eval "set -- $OSCAIRN_ENGINE_ARGS"
+"$root/start-chroot.sh" env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" oscairn-engine-run "$@" \
+	>> "$state/log/oscairn-engine.log" 2>&1 &
+echo $! > "$state/run/engine.pid"
+
+# 7. Whether it came up.
+i=0
+until [ -S "$root/run/oscairn/engine.sock" ]; do
+	i=$((i + 1))
+	if [ $i -gt 150 ] || ! kill -0 "$(cat "$state/run/engine.pid")" 2>/dev/null; then
+		tail -n 20 "$state/log/oscairn-engine.log"
+		fail "the engine did not start (var/oscairn/log/oscairn-engine.log)"
+	fi
+	nap
+done
+tail -n 5 "$state/log/oscairn-engine.log"
+say "the engine runs (pid $(cat "$state/run/engine.pid")); its control socket is $root/run/oscairn/engine.sock"

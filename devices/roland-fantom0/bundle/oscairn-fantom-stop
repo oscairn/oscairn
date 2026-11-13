@@ -1,0 +1,79 @@
+#!/bin/sh
+# Stops what oscairn-fantom-start started (docs/fantom-0.md, "Starting Oscairn on the unit"):
+# the engine, the CPUs' governors as they were, then the chroot's mounts. Run by hand, as root,
+# from outside the chroot.
+#
+# The panel holder is left running unless --panel is given: the panel only keeps reporting while
+# something holds its device, and left unheld it went silent until the next power-on, so stopping
+# the holder silences the panel. Roland's application is not started again: started after a stop
+# it shows "program version error". A power cycle returns the instrument to Roland's system.
+#
+#   ./oscairn-fantom-stop [--panel] [--dry-run]
+set -u
+root=$(cd "$(dirname "$0")" && pwd)
+dry="" panel=""
+for a in "$@"; do
+	case "$a" in
+	--dry-run) dry=1 ;;
+	--panel) panel=1 ;;
+	*) echo "usage: $0 [--panel] [--dry-run]" >&2; exit 2 ;;
+	esac
+done
+proc=${OSCAIRN_PROC:-/proc}
+state=$root/var/oscairn
+log=$state/log/oscairn-fantom.log
+
+say() {
+	echo "oscairn-fantom-stop: $*"
+	[ -n "$dry" ] || { mkdir -p "$state/log" && echo "$(date '+%Y-%m-%d %H:%M:%S') stop: $*" >> "$log"; }
+}
+nap() { sleep 0.1 2>/dev/null || sleep 1; }
+named() { for c in "$proc"/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = "$1" ] && { p=${c#"$proc"/}; echo "${p%%/*}"; }; done; }
+# Ends processes: SIGTERM, then SIGKILL after `$1` tenths of a second.
+end() {
+	tenths=$1; shift
+	[ -n "$*" ] || return 0
+	if [ -n "$dry" ]; then say "would run: kill $*"; return 0; fi
+	kill "$@" 2>/dev/null
+	i=0
+	for p in "$@"; do
+		while kill -0 "$p" 2>/dev/null; do
+			i=$((i + 1))
+			[ $i -le "$tenths" ] || { say "pid $p did not end; killing it"; kill -9 "$p" 2>/dev/null; break; }
+			nap
+		done
+	done
+}
+
+engine=$(named oscairn-engine)
+if [ -n "$engine" ]; then
+	say "stopping the engine (pid $(echo $engine))"
+	end 100 $engine
+else
+	say "the engine is not running"
+fi
+rm -f "$state/run/engine.pid" 2>/dev/null
+
+saved=$state/run/governors
+if [ -f "$saved" ]; then
+	while read -r g was; do
+		if [ -n "$dry" ]; then say "would set $g back to $was"; else echo "$was" > "$g" && say "$g: $was again"; fi
+	done < "$saved"
+	[ -n "$dry" ] || rm -f "$saved"
+fi
+
+holder=$(named oscairn-panel-h) # the kernel keeps 15 characters of a process's name
+if [ -n "$panel" ] && [ -n "$holder" ]; then
+	say "stopping the panel holder (pid $(echo $holder)); the panel stays silent until the next power-on"
+	end 30 $holder
+elif [ -n "$holder" ]; then
+	say "the panel holder keeps running (pid $(echo $holder)), so the panel keeps reporting; --panel stops it"
+fi
+
+say "unmounting the bundle's mounts"
+if [ -n "$dry" ]; then
+	say "would run: $root/stop-chroot.sh"
+elif ! "$root/stop-chroot.sh"; then
+	[ -n "$panel" ] || say "expected while the panel holder runs: it keeps the bundle's /dev in use"
+fi
+say "Roland's application is not started again (restarted, it shows \"program version error\"); a power cycle returns the instrument to Roland's system"

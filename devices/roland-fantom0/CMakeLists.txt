@@ -35,6 +35,12 @@ target_compile_options(oscairn-bmc-link-test PRIVATE -Wall -Wextra)
 add_test(NAME engine-bmc-link COMMAND oscairn-bmc-link-test)
 set_tests_properties(engine-bmc-link PROPERTIES TIMEOUT 30)
 
+# The bundle's start and stop scripts, dry, in a stand-in bundle (they read /proc).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME devices-fantom-start COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/fantom_start.sh ${CMAKE_CURRENT_SOURCE_DIR}/bundle)
+    set_tests_properties(devices-fantom-start PROPERTIES TIMEOUT 30)
+endif()
+
 if(OSCAIRN_ROLAND_FANTOM0)
     # The engine's panel and keys (hosts/audio's DeviceReaders.h).
     add_library(oscairn_roland_fantom0 STATIC src/DeviceReaders.cpp src/BmcLink.cpp)

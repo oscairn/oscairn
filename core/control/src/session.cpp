@@ -441,7 +441,7 @@ namespace oscairn
                 auto since = [](uint64_t now, uint64_t then) { return now - std::min(then, now); };
                 t.workers.push_back({node, name, r->roundTrip.read(), st.allowanceMicroseconds, since(st.lateBlocks, base.lateBlocks), since(st.silentBlocks, base.silentBlocks),
                                      r->collect.read(), r->wake.read(), r->run.read(), since(st.busyBlocks, base.busyBlocks), since(st.missPanics, base.missPanics),
-                                     since(st.minorFaults, base.minorFaults), since(st.majorFaults, base.majorFaults)});
+                                     since(st.minorFaults, base.minorFaults), since(st.majorFaults, base.majorFaults), r->cpu.read(), since(st.involuntarySwitches, base.involuntarySwitches)});
                 if(reset) { r->reset(); timingBase_[node] = st; }
             }
         if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); std::erase_if(timingBase_, [&](const auto& b) { return !nodes_.count(b.first); }); }

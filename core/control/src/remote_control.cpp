@@ -529,11 +529,11 @@ namespace oscairn
     Control::Timing RemoteControl::engineTiming(bool reset) {
         auto d=impl_->call("engine.timing",reset?"{\"reset\":true}":"{}");auto r=field(d.get(),"result");
         auto histogram=[](V v){Histogram h;size_t i=0;for(auto n:array(field(v,"buckets")))if(i<h.buckets)h.counts[i++]=integer(n);
-            h.maxNs=int64_t(std::llround(number(field(v,"max"))*1e3));h.maxAt=int64_t(std::llround(number(field(v,"maxAt"))*1e9));return h;};
+            h.maxNs=int64_t(std::llround(number(field(v,"max"))*1e3));h.maxAt=int64_t(std::llround(number(field(v,"maxAt"))*1e9));h.maxCpuNs=int64_t(std::llround(number(field(v,"maxCpu"))*1e3));return h;};
         auto snapshot=[&](V v){return BlockTiming::Snapshot{histogram(field(v,"steady")),histogram(field(v,"startup")),number(field(v,"seconds"))};};
         Timing t{snapshot(field(r,"callback")),snapshot(field(r,"lateness")),{}};
         for(auto w:array(field(r,"workers")))t.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),snapshot(field(w,"roundTrip")),number(field(w,"allowance")),uint64_t(integer(field(w,"late"))),uint64_t(integer(field(w,"silent"))),
-            snapshot(field(w,"collect")),snapshot(field(w,"wake")),snapshot(field(w,"run")),uint64_t(integer(field(w,"busy"))),uint64_t(integer(field(w,"missPanics"))),uint64_t(integer(field(w,"minorFaults"))),uint64_t(integer(field(w,"majorFaults")))});
+            snapshot(field(w,"collect")),snapshot(field(w,"wake")),snapshot(field(w,"run")),uint64_t(integer(field(w,"busy"))),uint64_t(integer(field(w,"missPanics"))),uint64_t(integer(field(w,"minorFaults"))),uint64_t(integer(field(w,"majorFaults"))),snapshot(field(w,"cpu")),uint64_t(integer(field(w,"involuntarySwitches")))});
         return t;
     }
     Control::Estimate RemoteControl::estimate(const std::string& directory) {

@@ -253,7 +253,7 @@ public:
             result.lastMicroseconds+=v.lastMicroseconds;result.maximumMicroseconds+=v.maximumMicroseconds;
             result.deadlineMisses+=v.deadlineMisses;result.controlSilences+=v.controlSilences;result.idleBlocks+=v.idleBlocks;result.restarts+=v.restarts;
             result.lateBlocks+=v.lateBlocks;result.silentBlocks+=v.silentBlocks;result.allowanceMicroseconds=std::max(result.allowanceMicroseconds,v.allowanceMicroseconds);
-            result.busyBlocks+=v.busyBlocks;result.missPanics+=v.missPanics;result.minorFaults+=v.minorFaults;result.majorFaults+=v.majorFaults;}
+            result.busyBlocks+=v.busyBlocks;result.missPanics+=v.missPanics;result.minorFaults+=v.minorFaults;result.majorFaults+=v.majorFaults;result.involuntarySwitches+=v.involuntarySwitches;}
         result.droppedEvents+=drops_.load();result.processErrors+=errors_.load();return result;
     }
     bool process(const float* const*,uint32_t,float* const* outputs,uint32_t no,uint32_t frames,const Event* events,uint32_t count,const clap_event_transport_t* transport) noexcept override {

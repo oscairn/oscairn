@@ -47,9 +47,10 @@ namespace oscairn::worker
         std::atomic<double> lastMicroseconds{0}, maximumMicroseconds{0};
         // The worker's, for the timing report: when its audio thread ran for the last block and when
         // it was done with it, in steady_clock nanoseconds (the clock is the system's, the same in
-        // both processes); and its audio thread's page faults so far (Linux).
-        int64_t wokeAt = 0, doneAt = 0;
-        std::atomic<uint64_t> minorFaults{0}, majorFaults{0};
+        // both processes); the CPU time its audio thread used between the two (CLOCK_THREAD_CPUTIME_ID),
+        // in nanoseconds; and its audio thread's page faults and involuntary context switches so far (Linux).
+        int64_t wokeAt = 0, doneAt = 0, cpuNs = 0;
+        std::atomic<uint64_t> minorFaults{0}, majorFaults{0}, involuntarySwitches{0};
         kick::clap::Event events[maxEvents];
         kick::clap::Event outputs[maxOutputEvents];
         std::atomic<double> parameterValues[maxParameters];

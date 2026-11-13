@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <thread>
 #include <poll.h>
 #include <sys/mman.h>
@@ -29,6 +30,13 @@
 
 namespace oscairn::worker
 {
+    // The calling thread's CPU time in nanoseconds (0 if the clock fails).
+    static int64_t threadCpuNanoseconds() noexcept
+    {
+        timespec t{};
+        return clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t) == 0 ? int64_t(t.tv_sec) * 1'000'000'000 + t.tv_nsec : 0;
+    }
+
     bool waitWhileEqual(std::atomic<uint32_t>& word, uint32_t value, std::chrono::nanoseconds timeout) noexcept
     {
         const auto until = std::chrono::steady_clock::now() + timeout;
@@ -310,6 +318,7 @@ namespace oscairn::worker
                 if(next == seen) continue;
                 seen = next;
                 const auto woke = std::chrono::steady_clock::now();
+                const auto cpuAtWake = threadCpuNanoseconds();
                 if(s.panic.exchange(0, std::memory_order_acq_rel)) host.panic();
                 // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
                 if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
@@ -357,6 +366,7 @@ namespace oscairn::worker
 #endif
                 s.wokeAt = std::chrono::nanoseconds(woke.time_since_epoch()).count();
                 s.doneAt = std::chrono::nanoseconds(std::chrono::steady_clock::now().time_since_epoch()).count();
+                s.cpuNs = threadCpuNanoseconds() - cpuAtWake;
                 s.done.store(seen, std::memory_order_release);
                 wake(s.done);
 #ifdef RUSAGE_THREAD
@@ -365,6 +375,7 @@ namespace oscairn::worker
                 {
                     s.minorFaults.store(uint64_t(u.ru_minflt), std::memory_order_relaxed);
                     s.majorFaults.store(uint64_t(u.ru_majflt), std::memory_order_relaxed);
+                    s.involuntarySwitches.store(uint64_t(u.ru_nivcsw), std::memory_order_relaxed);
                 }
 #endif
             }

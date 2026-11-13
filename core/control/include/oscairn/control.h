@@ -231,8 +231,8 @@ namespace oscairn
         // period; early counts as 0), as the host reports them, and each plugin in a worker's block
         // round trips and their parts (WorkerTiming), its allowance (microseconds) and its blocks past
         // it, played late and silenced, of those the silent ones not handed over because it was busy,
-        // the panics sent it right after a block it did not render, and its audio thread's page faults,
-        // since the last reset. reset: after reading, a new window starts with the next block.
+        // the panics sent it right after a block it did not render, and its audio thread's page faults and
+        // involuntary context switches, since the last reset; cpu is the audio thread's CPU time per block. reset: after reading, a new window starts with the next block.
         struct Timing
         {
             BlockTiming::Snapshot callback, lateness;
@@ -240,6 +240,7 @@ namespace oscairn
             {
                 NodeId node = 0; std::string name; BlockTiming::Snapshot roundTrip; double allowance = 0; uint64_t late = 0, silent = 0;
                 BlockTiming::Snapshot collect, wake, run; uint64_t busy = 0, missPanics = 0, minorFaults = 0, majorFaults = 0;
+                BlockTiming::Snapshot cpu; uint64_t involuntarySwitches = 0;
             };
             std::vector<Worker> workers;
         };

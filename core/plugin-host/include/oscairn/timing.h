@@ -28,6 +28,7 @@ namespace oscairn
         }
         std::array<uint64_t, buckets> counts{};
         int64_t maxNs = 0, maxAt = 0;
+        int64_t maxCpuNs = 0; // the thread CPU time of the block that took maxNs, for a measurement recorded with one (WorkerTiming::run)
         uint64_t count() const noexcept { uint64_t n = 0; for(auto c : counts) n += c; return n; }
         // The value at or below which the fraction q of the values lie, in microseconds: the upper
         // bound of the bucket that holds it, no more than the largest value; 0 when empty.
@@ -56,8 +57,8 @@ namespace oscairn
         static constexpr uint32_t warmupBlocks = 512;
         struct Snapshot { Histogram steady, startup; double seconds = 0; }; // seconds: from the window's first block to its last
 
-        // The recording thread. `at`: when, in nanoseconds on its clock.
-        void record(int64_t ns, int64_t at) noexcept
+        // The recording thread. `at`: when, in nanoseconds on its clock. `cpuNs`: kept beside the largest value.
+        void record(int64_t ns, int64_t at, int64_t cpuNs = 0) noexcept
         {
             if(const auto r = resets_.load(std::memory_order_acquire); r != resetDone_.load(std::memory_order_relaxed))
             {
@@ -66,7 +67,7 @@ namespace oscairn
             }
             if(const auto w = warmups_.load(std::memory_order_relaxed); w != warmupSeen_) { warmupSeen_ = w; warmupLeft_ = warmupBlocks; }
             if(!started_) { origin_ = at; started_ = true; }
-            (warmupLeft_ ? (--warmupLeft_, startup_) : steady_).add(ns, at - origin_);
+            (warmupLeft_ ? (--warmupLeft_, startup_) : steady_).add(ns, at - origin_, cpuNs);
             last_.store(at - origin_, std::memory_order_relaxed);
         }
         // Any thread: what the window holds (empty while a reset waits for the next block).
@@ -85,19 +86,19 @@ namespace oscairn
         struct Live
         {
             std::array<std::atomic<uint64_t>, Histogram::buckets> counts{};
-            std::atomic<int64_t> maxNs{0}, maxAt{0};
-            void add(int64_t ns, int64_t at) noexcept
+            std::atomic<int64_t> maxNs{0}, maxAt{0}, maxCpuNs{0};
+            void add(int64_t ns, int64_t at, int64_t cpuNs) noexcept
             {
                 auto& c = counts[Histogram::bucket(ns)];
                 c.store(c.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
-                if(ns > maxNs.load(std::memory_order_relaxed)) { maxNs.store(ns, std::memory_order_relaxed); maxAt.store(at, std::memory_order_relaxed); }
+                if(ns > maxNs.load(std::memory_order_relaxed)) { maxNs.store(ns, std::memory_order_relaxed); maxAt.store(at, std::memory_order_relaxed); maxCpuNs.store(cpuNs, std::memory_order_relaxed); }
             }
-            void clear() noexcept { for(auto& c : counts) c.store(0, std::memory_order_relaxed); maxNs.store(0, std::memory_order_relaxed); maxAt.store(0, std::memory_order_relaxed); }
+            void clear() noexcept { for(auto& c : counts) c.store(0, std::memory_order_relaxed); maxNs.store(0, std::memory_order_relaxed); maxAt.store(0, std::memory_order_relaxed); maxCpuNs.store(0, std::memory_order_relaxed); }
             Histogram read() const noexcept
             {
                 Histogram h;
                 for(size_t i = 0; i < h.buckets; ++i) h.counts[i] = counts[i].load(std::memory_order_relaxed);
-                h.maxNs = maxNs.load(std::memory_order_relaxed); h.maxAt = maxAt.load(std::memory_order_relaxed);
+                h.maxNs = maxNs.load(std::memory_order_relaxed); h.maxAt = maxAt.load(std::memory_order_relaxed); h.maxCpuNs = maxCpuNs.load(std::memory_order_relaxed);
                 return h;
             }
         };
@@ -117,11 +118,13 @@ namespace oscairn
     // the engine's thread came for the result (the round trip less the engine's wait), long when that
     // thread was busy elsewhere or not running. wake: from the hand-over until the worker's audio thread
     // ran; run: from then until the worker was done with the block; both as the worker stamped them,
-    // recorded once the engine sees the block done, if only as it hands over the next.
+    // recorded once the engine sees the block done, if only as it hands over the next. cpu: the CPU
+    // time the worker's audio thread used in that run; run's largest value keeps the cpu of the same
+    // block (maxCpuNs), the pair that tells a block computing from one not scheduled.
     struct WorkerTiming
     {
-        BlockTiming roundTrip, collect, wake, run;
-        void reset() noexcept { roundTrip.reset(); collect.reset(); wake.reset(); run.reset(); }
-        void warmUp() noexcept { roundTrip.warmUp(); collect.warmUp(); wake.warmUp(); run.warmUp(); }
+        BlockTiming roundTrip, collect, wake, run, cpu;
+        void reset() noexcept { roundTrip.reset(); collect.reset(); wake.reset(); run.reset(); cpu.reset(); }
+        void warmUp() noexcept { roundTrip.warmUp(); collect.warmUp(); wake.warmUp(); run.warmUp(); cpu.warmUp(); }
     };
 }

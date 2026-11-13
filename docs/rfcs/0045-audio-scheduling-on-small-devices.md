@@ -486,7 +486,11 @@ Steps 2 and 11; built marked as such.
   `collect` (until the engine's thread came for the block), `wake` (until the worker's audio
   thread ran) and `run` (the worker's whole block, the panic's reset included), each a histogram
   in `engine.timing`; with each worker's audio-thread page faults (`minorFaults`, `majorFaults`).
-  Tested by `control-worker-timing`: one block stalled in the plugin, every part apart.
+  The audio thread's own CPU time per block (`cpu`, a histogram beside `run`, whose largest value
+  carries the cpu of the same block as `maxCpu`) and its involuntary context switches
+  (`involuntarySwitches`) tell a run that was computing from one that was not scheduled.
+  Tested by `control-worker-timing`: one block stalled in the plugin, every part apart, the cpu far
+  below the run for a stall that sleeps and close to it for one that spins.
 - The callback's duration and lateness, and the device's underruns, as now.
 
 ## Decisions for the owner

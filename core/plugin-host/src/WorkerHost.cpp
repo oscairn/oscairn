@@ -831,6 +831,7 @@ namespace oscairn
                 s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process_->budget).count();
                 s.busyBlocks = busyBlocks_.load(std::memory_order_relaxed); s.missPanics = missPanics_.load(std::memory_order_relaxed);
                 s.minorFaults = shared_->minorFaults.load(std::memory_order_relaxed); s.majorFaults = shared_->majorFaults.load(std::memory_order_relaxed);
+                s.involuntarySwitches = shared_->involuntarySwitches.load(std::memory_order_relaxed);
                 s.controlSilences = shared_->controlSilences.load(); s.idleBlocks = shared_->idleBlocks.load();
                 s.restarts = process_->restarted.load(std::memory_order_relaxed);
                 return s;
@@ -907,7 +908,8 @@ namespace oscairn
                 timed_ = sequence_;
                 const int64_t sent = std::chrono::nanoseconds(sent_.time_since_epoch()).count(), at = std::chrono::nanoseconds(now.time_since_epoch()).count();
                 timing_.wake.record(s.wokeAt - sent, at);
-                timing_.run.record(s.doneAt - s.wokeAt, at);
+                timing_.run.record(s.doneAt - s.wokeAt, at, s.cpuNs);
+                timing_.cpu.record(s.cpuNs, at);
             }
             std::mutex& controlFor()
             {

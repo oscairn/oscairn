@@ -102,6 +102,7 @@ namespace
         for(V n : array(field(v, "buckets"))) if(i < h.buckets) h.counts[i++] = uint64_t(number(n));
         h.maxNs = int64_t(number(field(v, "max")) * 1e3);
         h.maxAt = int64_t(number(field(v, "maxAt")) * 1e9);
+        h.maxCpuNs = int64_t(number(field(v, "maxCpu")) * 1e3);
         return h;
     }
 
@@ -152,12 +153,12 @@ int main(int argc, char** argv)
         add("callback duration", field(r, "callback"));
         add("callback lateness", field(r, "lateness"));
         // Each worker's round trip, then its parts: until the engine came for the block (collect), until
-        // the worker's audio thread ran (wake), and the worker's run.
+        // the worker's audio thread ran (wake), and the worker's run and the CPU time its audio thread used in it.
         for(V w : array(field(r, "workers")))
         {
             const auto name = text(field(w, "name")) + " (" + std::to_string(int(number(field(w, "node")))) + ")";
             add(name + " round trip", field(w, "roundTrip"));
-            for(const char* part : {"collect", "wake", "run"}) add(name + " " + part, field(w, part));
+            for(const char* part : {"collect", "wake", "run", "cpu"}) add(name + " " + part, field(w, part));
         }
 
         std::printf("engine timing over %.1f s (the window: %.1f s)%s; times in microseconds, a percentile as its bucket's upper bound\n",
@@ -166,11 +167,20 @@ int main(int argc, char** argv)
                     after.first - before.first, after.second - before.second, after.first, after.second);
         // Each worker's blocks past its allowance in the window: played late, or silenced (heard as a dropout),
         // of those not handed over because the worker was busy; the panics that followed a block it did not
-        // render (each ends the part's notes); its audio thread's page faults.
+        // render (each ends the part's notes); its audio thread's page faults and involuntary context switches;
+        // and its worst block, run beside the CPU time of that same block (startup or steady, the longer run).
         for(V w : array(field(r, "workers")))
-            std::printf("%s (%d): allowance %.0f, past it %.0f played late and %.0f silenced (%.0f not handed: busy), %.0f panics after a miss, page faults %.0f minor %.0f major\n",
+            std::printf("%s (%d): allowance %.0f, past it %.0f played late and %.0f silenced (%.0f not handed: busy), %.0f panics after a miss, page faults %.0f minor %.0f major, %.0f involuntary context switches\n",
                         text(field(w, "name")).c_str(), int(number(field(w, "node"))), number(field(w, "allowance")), number(field(w, "late")), number(field(w, "silent")),
-                        number(field(w, "busy")), number(field(w, "missPanics")), number(field(w, "minorFaults")), number(field(w, "majorFaults")));
+                        number(field(w, "busy")), number(field(w, "missPanics")), number(field(w, "minorFaults")), number(field(w, "majorFaults")),
+                        number(field(w, "involuntarySwitches")));
+        for(V w : array(field(r, "workers")))
+        {
+            const auto steady = histogram(field(field(w, "run"), "steady")), startup = histogram(field(field(w, "run"), "startup"));
+            const auto& worst = startup.maxNs > steady.maxNs ? startup : steady;
+            std::printf("%s (%d): worst block ran %.0f us, its audio thread used %.0f us of CPU, at %.2f s\n",
+                        text(field(w, "name")).c_str(), int(number(field(w, "node"))), worst.maxNs / 1e3, worst.maxCpuNs / 1e3, worst.maxAt / 1e9);
+        }
         std::printf("startup: the first %.0f blocks after a start (engine, device, Performance load, worker restart)\n\n", number(field(r, "warmupBlocks")));
         std::printf("%-24s %-8s %8s %7s %7s %7s %9s %8s\n", "measurement", "", "blocks", "p50", "p99", "p99.9", "max", "max at s");
         for(const auto& row : rows) { summary("steady", row.name, row.steady); if(row.startup.count()) summary("startup", "", row.startup); }

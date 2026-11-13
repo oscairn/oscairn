@@ -691,13 +691,13 @@ namespace oscairn
             if(method=="engine.timing") {
                 fields(p,{"reset"});const auto t=c.engineTiming(member(p,"reset") && boolean(member(p,"reset")));
                 auto histogram=[](const Histogram& h){std::string b;for(auto n:h.counts)b+=(b.empty()?"":",")+std::to_string(n);
-                    return "{\"count\":"+std::to_string(h.count())+",\"max\":"+encode(double(h.maxNs)/1e3)+",\"maxAt\":"+encode(double(h.maxAt)/1e9)+",\"buckets\":["+b+"]}";};
+                    return "{\"count\":"+std::to_string(h.count())+",\"max\":"+encode(double(h.maxNs)/1e3)+",\"maxAt\":"+encode(double(h.maxAt)/1e9)+",\"maxCpu\":"+encode(double(h.maxCpuNs)/1e3)+",\"buckets\":["+b+"]}";};
                 auto snapshot=[&](const BlockTiming::Snapshot& s){return "{\"seconds\":"+encode(s.seconds)+",\"steady\":"+histogram(s.steady)+",\"startup\":"+histogram(s.startup)+'}';};
                 std::string bounds,workers;
                 for(size_t i=0;i+1<Histogram::buckets;++i)bounds+=(bounds.empty()?"":",")+std::to_string(Histogram::upperMicroseconds(i));
                 for(const auto& w:t.workers)workers+=std::string(workers.empty()?"":",")+"{\"node\":"+std::to_string(w.node)+",\"name\":"+quote(w.name)+",\"roundTrip\":"+snapshot(w.roundTrip)+",\"allowance\":"+encode(w.allowance)+",\"late\":"+std::to_string(w.late)+",\"silent\":"+std::to_string(w.silent)+
                     ",\"collect\":"+snapshot(w.collect)+",\"wake\":"+snapshot(w.wake)+",\"run\":"+snapshot(w.run)+",\"busy\":"+std::to_string(w.busy)+",\"missPanics\":"+std::to_string(w.missPanics)+
-                    ",\"minorFaults\":"+std::to_string(w.minorFaults)+",\"majorFaults\":"+std::to_string(w.majorFaults)+'}';
+                    ",\"minorFaults\":"+std::to_string(w.minorFaults)+",\"majorFaults\":"+std::to_string(w.majorFaults)+",\"cpu\":"+snapshot(w.cpu)+",\"involuntarySwitches\":"+std::to_string(w.involuntarySwitches)+'}';
                 return "{\"warmupBlocks\":"+std::to_string(BlockTiming::warmupBlocks)+",\"bucketBounds\":["+bounds+"],\"callback\":"+snapshot(t.callback)+
                     ",\"lateness\":"+snapshot(t.lateness)+",\"workers\":["+workers+"]}";
             }

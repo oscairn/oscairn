@@ -85,6 +85,11 @@ out=$(OSCAIRN_WORKER_DEADLINE=1 "$bundle/oscairn-fantom-start" --dry-run --engin
 check "OSCAIRN_WORKER_DEADLINE handed to the engine, after the spin" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_SPIN_US=200 OSCAIRN_WORKER_DEADLINE=1 oscairn-engine-run'"
 out=$(OSCAIRN_SHARING=cpu "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "OSCAIRN_SHARING handed to the engine" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_SPIN_US=200 OSCAIRN_SHARING=cpu oscairn-engine-run'"
+echo "OSCAIRN_PLUGIN_HOSTS='3'" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "OSCAIRN_PLUGIN_HOSTS from the profile's file" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_SPIN_US=200 OSCAIRN_PLUGIN_HOSTS=3 oscairn-engine-run'"
+out=$(OSCAIRN_PLUGIN_HOSTS=0 OSCAIRN_OWN_HOST=org.oscairn.analog "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "or 0 from the environment, a worker per instance to compare; OSCAIRN_OWN_HOST after it" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_SPIN_US=200 OSCAIRN_PLUGIN_HOSTS=0 OSCAIRN_OWN_HOST=org.oscairn.analog oscairn-engine-run'"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
 # The first-party plugins' device settings: OSCAIRN_SAMPLER_*, _ANALOG_*, _FM_*, _ARPEGGIATOR_*, _EFFECTS_*.

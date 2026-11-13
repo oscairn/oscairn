@@ -76,6 +76,18 @@
           "type": "boolean",
           "description": "each plugin worker waits for its block until its wave's deadline (the audio callback's, less what the waves after it take) in place of its allowance; omitted or false: the allowance (RFC 0045 step 6)"
         },
+        "pluginHosts": {
+          "type": "integer",
+          "description": "how many plugin hosts the plugins in workers share, each a worker process holding any plugins, an instance placed at its load in the one with the least measured cost; omitted or 0: a worker per plugin instance (RFC 0045)",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "ownHost": {
+          "type": "array",
+          "description": "plugin IDs given a worker of their own with plugin hosts all the same (RFC 0045)",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "maxItems": 64
+        },
         "workerSpin": {
           "type": "integer",
           "description": "how long, in microseconds, an audio thread waiting on a plugin worker spins before it sleeps: the engine for a block's result and a worker around its next block, both only when every worker's audio thread has a core; held to half the allowance; omitted or 0: it sleeps at once (RFC 0045)",

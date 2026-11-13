@@ -109,6 +109,10 @@ int main()
               refused(replaced(json, cores, cores + ", \"workerSpin\": -1")), "the spin before sleeping on a worker, in microseconds; none named, none");
         check(Profile::parse(replaced(json, cores, cores + ", \"workerDeadline\": true")).compute.workerDeadline && !Profile::parse(json).compute.workerDeadline &&
               refused(replaced(json, cores, cores + ", \"workerDeadline\": 1")), "waiting to the deadline, true or false; none named, the allowance");
+        check(Profile::parse(replaced(json, cores, cores + ", \"pluginHosts\": 3, \"ownHost\": [\"org.example.a\"]")).compute.pluginHosts == 3 &&
+              Profile::parse(replaced(json, cores, cores + ", \"ownHost\": [\"org.example.a\"]")).compute.ownHost == std::vector<std::string>{"org.example.a"} &&
+              Profile::parse(json).compute.pluginHosts == 0 && refused(replaced(json, cores, cores + ", \"pluginHosts\": 65")) && refused(replaced(json, cores, cores + ", \"ownHost\": \"a\"")),
+              "the plugin hosts, 0 to 64, and the plugins given workers of their own; none named, a worker per instance");
         check(refused(replaced(json, "\"width\": 1024", "\"width\": 0")), "a screen with no size");
         check(refused("[1, 2]"), "not an object");
         // Control groups: a role each; rows or paging for an assign group of knobs; modes for faders only.

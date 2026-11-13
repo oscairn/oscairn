@@ -18,6 +18,9 @@
                          in place of its allowance; empty: the allowance
     OSCAIRN_WORKER_SPIN_US  compute.workerSpin, how long an audio thread waiting on a worker spins
                          before it sleeps, in microseconds; empty: none
+    OSCAIRN_PLUGIN_HOSTS  compute.pluginHosts, the plugin hosts the plugins in workers share;
+                         empty: a worker per plugin instance
+    OSCAIRN_OWN_HOST     compute.ownHost as plugin IDs separated by commas, given workers of their own
 
     engine-args.py PROFILE.json
 """
@@ -75,6 +78,8 @@ def settings(profile):
         "OSCAIRN_WORKER_BUDGET_US": str((profile.get("compute") or {}).get("workerAllowance") or ""),
         "OSCAIRN_WORKER_DEADLINE": "1" if (profile.get("compute") or {}).get("workerDeadline") else "",
         "OSCAIRN_WORKER_SPIN_US": str((profile.get("compute") or {}).get("workerSpin") or ""),
+        "OSCAIRN_PLUGIN_HOSTS": str((profile.get("compute") or {}).get("pluginHosts") or ""),
+        "OSCAIRN_OWN_HOST": ",".join((profile.get("compute") or {}).get("ownHost", [])),
     }
 
 

@@ -28,7 +28,9 @@ namespace oscairn::standalone
         // workerSpin (optional): how long, in microseconds, an audio thread waiting on a worker spins before it
         // sleeps (OSCAIRN_WORKER_SPIN_US, realtime.h's spinWindow); 0: it sleeps at once. workerDeadline (optional):
         // each worker waits to its wave's deadline in place of its allowance (OSCAIRN_WORKER_DEADLINE, RFC 0045 step 6).
-        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; std::vector<int> audioThreadCores; int workerAllowance = 0, workerSpin = 0; bool workerDeadline = false; } compute;
+        // pluginHosts (optional): the plugin hosts the plugins in workers share (OSCAIRN_PLUGIN_HOSTS, RFC 0045); 0: a
+        // worker per plugin instance. ownHost (optional): plugin IDs given a worker of their own all the same (OSCAIRN_OWN_HOST).
+        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; std::vector<int> audioThreadCores; int workerAllowance = 0, workerSpin = 0; bool workerDeadline = false; int pluginHosts = 0; std::vector<std::string> ownHost; } compute;
         // `device` (optional): the audio device the engine opens instead of the default: its name (an
         // ALSA address such as hw:1,0 or PCM name on Linux, a device's name on macOS), its channel
         // count (all opened in each direction used; 0: those mapped), the rate it must run at (0:

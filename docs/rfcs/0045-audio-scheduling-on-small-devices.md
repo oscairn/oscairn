@@ -525,6 +525,155 @@ Proposed (step 7):
   wherever the image's partition is not there to do it. Pre-release formats break freely, so no
   compatibility reading.
 
+## Plugin hosts and resident instances
+
+Status: design, approved by the owner 2026-11-13 ("the resident host processes thing sounds like
+a good idea ... go"); not built. Constraints from him: crash isolation between the engine and
+every plugin stays; the engine treats every plugin alike (no first-party fast path); any CLAP
+plugin works. Placing plugins in the engine's process is not the path.
+
+### What a block costs today
+
+One process per plugin instance (RFC 0010), each with one real-time audio thread. Per block the
+engine, for every worker: writes the block into the shared memory, wakes the worker's futex,
+later sleeps on the worker's done word unless it is done already, and copies the result out.
+ST Final is ten nodes in nine processes: nine hand-overs and up to nine engine waits per block,
+nine FIFO 70 threads beside the engine's FIFO 80 and three graph helpers on four cores, and three
+waves one after another for its longest chain (arpeggiator, Analog, delay; or an instrument, its
+insert and a send effect), each a wake-up and a wait.
+
+Measured:
+
+| | unit, ST Final at rest (7114a440) | container, ST Final's shape (oscairn-worker-bench, fixture plugins at 150 us a block) |
+|---|---|---|
+| processes / real-time threads | 9 workers + engine / 9 + 1 + 3 helpers | 10 workers + bench / 10 + 1 + 3 |
+| hand-overs a block | 9 | 10 |
+| worker wake p50 | 32 to 64 us with the wake-up latency request (330 to 400 before) | 32 to 64 us |
+| callback p50 / max | 1,024 to 2,048 us / 4.1 to 5.8 ms | 1,024 us / 1.8 to 2.2 ms (quiet host) |
+| engine CPU | ~94 % of a core: audio thread ~45 %, main thread ~38 % | audio thread 5 %, main thread 2.6 % (Apple M-series host) |
+| memory | Sampler workers 34 to 60 MB each, effects ~15, arpeggiator 9; ~480 MB locked for one Performance; swap 229 of 256 MB used | 8.4 MB resident per locked fixture worker, 23 MB the engine |
+
+The main thread's share was mostly the 5 ms service tick asking every worker for its main-thread
+work (cut to every 20 ms on a device, commit "Engine main thread: each worker serviced at most
+every 20 ms"). The audio thread's 45 % is not reproduced by the fixture graph (5 % here, a faster
+CPU, plugins with few parameters and no voices); it is the next thing to profile on the unit with
+`perf` (`perf record -g -t <engine audio tid>`), unverified where it goes.
+
+### The options
+
+- **A. Hand-overs that do not sleep.** The engine polls for a result, and a worker polls for its
+  next block, instead of a futex sleep and wake. A hand-over becomes a cache-line transfer
+  (sub-microsecond) instead of a wake-up (32 to 64 us at p50 on the unit now, up to 380 us). It
+  works only while the real-time threads that poll are no more than the cores: a FIFO thread
+  polling keeps every other thread of its priority off its core. Built, bounded, behind
+  `compute.workerSpin` ([spinning before sleeping](#spinning-before-sleeping)): the engine always
+  may; workers only while every worker's thread has a core, so not for ST Final's nine.
+- **B. A few resident plugin hosts.** About cores minus one host processes (three on the
+  FANTOM-07), each able to hold many plugin instances of any plugin, with one real-time audio
+  thread that renders the nodes the engine assigned it, in graph order. The engine assigns each
+  part's chain to one host (arpeggiator, instrument, insert in one host: no hand-over between
+  them), balances the chains over the hosts by measured cost (not by plugin identity), and hands
+  each host one block per wave it has work in, not one per node.
+- **A+B.** With three hosts on four cores, every host's thread has a core: A's polling becomes safe
+  for every Performance, and a hand-over costs about nothing.
+- **C. One deadline per callback.** Built and on for every variant (the hard rule; step 6 behind
+  its setting).
+- **E. A host-wide voice budget** from the plugins' reported voices and `voice_cost` (RFC 0018,
+  `oscairn.voice-budget`; the Sampler 0.8.3 reports real counts and honors limits): shed voices
+  across parts before a block is missed. Exists per plugin today (`Graph::setVoiceBudget`, the
+  Session's measurements); to be fed from the hosts' measured block times.
+
+Expected (an estimate, not measured) for ST Final on the unit with A+B: three host processes in
+place of nine; at most three hand-overs a wave and two waves (instruments with their inserts, then
+the send effects) in place of three; no sleeping on either side; callback at rest the plugins' own
+work plus a few tens of microseconds; memory about 25 to 40 MB less per process removed (the
+locked runtime, allocator arenas and thread stacks of each process: 8.4 MB for a fixture worker in
+the container, 9 MB for the arpeggiator's worker on the unit), and one copy of each plugin's code
+and, for the Sampler, a chance to share its sample pool between its instances in one host.
+
+### Isolation
+
+Today a plugin's crash takes down its own process and only it. With hosts it takes down its host
+and every instance in it; the engine survives as now, the host is restarted and each of its
+instances restored from its recovery record as a worker is today (state, prepared sounds,
+selections, parameter values: `WorkerHost::restore`). What is lost is the granularity: one
+plugin's crash silences the other parts in its host for the restart (hundreds of milliseconds).
+A policy covers what needs more: a plugin can be given a host of its own (a profile or user list,
+the same shape as `OSCAIRN_WORKER_EXTRA_BLOCK`'s IDs; and automatically a plugin that crashed in a
+shared host, for the rest of the session), so a suspect or third-party plugin behaves exactly as
+today. Memory limits become per host (the sum of its instances' declarations, RFC 0025); "too
+slow" applies to a host's block and is answered by moving a chain to another host before any
+restart. Every plugin goes through the same host; the engine knows no plugin by name.
+
+### Resident instances (the agreed "resident engines")
+
+What happens today, from `Session::read` (performance.cpp): a node of the incoming Performance
+reuses, in order, a shared engine it can join, a playing instance that can prepare its sounds
+beside, an effect context, or a free instance (silent 3 s, same plugin, version, path, build
+digest and placement); otherwise it loads a fresh one, a new process. On a seamless change every
+free playing instance is marked to be kept (`readTaking`'s "middle rule", RFC 0021), so that
+switching back finds each Performance's instances holding their state; `take` skips kept ones,
+so every incoming node loads fresh: nine new processes for ST Final, about 5 s on the unit. Only
+a cut offers them. Outgoing instances ring out into `warm_` (at most 32, least recently used
+first); with memory classes on, `evictOpportunistic` lets warm ones go when memory is needed, but
+the FANTOM-07's profile has no `osMemory`/`performanceMemory`, so its memory classes are off and
+warm instances are bounded by count alone.
+
+The smallest change, before hosts: `take` takes a kept playing instance when no other is free,
+before a new process is started (the save and put-back of its state already exist), and the
+FANTOM-07's profile names `osMemory` and `performanceMemory` so warm instances are let go by
+memory, in the background (`evictOpportunistic`, the pressure trigger). With hosts, residency is
+the hosts' normal state: the hosts start with the engine and stay; an instance stays loaded in its
+host across changes; opening a Performance loads its state into a matching free instance, starts a
+new instance in a host (no new process) only when none is free, and lets unused instances go in
+the background only when the memory budget would be exceeded.
+
+### Migration, in stages that each leave main working
+
+1. Independent of hosts: the deadline rule, the engine's main-thread service cut, the sharing
+   stopgap (`OSCAIRN_SHARING=cpu`), the spin (built 2026-11-13); admission per core (RFC 0025,
+   next).
+2. A worker process that holds several instances of different plugins: `Op::Init` loads the first,
+   a new `Op::Load` adds another node (the node index, shared block and control protocol are per
+   node already: a worker holds a root and its effect contexts today); one audio thread per
+   process serving every node with a request pending, in order, behind one doorbell word, so a
+   wave's hand-overs to one host are one wake-up. The engine places nodes on a fixed pool of
+   hosts (a placement step in `loadPlugin`, by measured cost with the Session's measurements);
+   a plugin on the own-host list gets a host of its own. Default stays one per instance until
+   measured.
+3. Chains rendered in a host: the graph fuses a part's chain whose nodes share a host into one
+   step, the host routing each node's output to the next itself (events and parameters still per
+   node, meters from the host's per-node peaks).
+4. Residency across changes with background replacement (above).
+5. A+B's polling everywhere, now safe; the host-wide voice budget fed from hosts' block times.
+
+What oscairn-worker-bench measures before and after each stage: hand-overs a block, real-time
+threads, the callback's distribution, engine CPU (audio and main thread), resident memory of all
+processes; on the unit, `oscairn-engine-timing` per worker (to become per host) and `top`.
+
+## The device A/B plan
+
+On bundle c4bc60da or later, engine alone (`--engine-only`), the performance governor as the
+start script sets it. For each configuration, each Performance ("Rd 73 Chill", "# Organ", "ST
+Final"): open it, wait 10 s, then `oscairn-engine-timing /run/oscairn/engine.sock --seconds 20`
+at rest and again with four keys held (ST Final: its arpeggiator running), and `top -b -n 2 -d 5`.
+Stop with `./oscairn-fantom-stop` between configurations.
+
+| configuration | start | expected if it helps |
+|---|---|---|
+| baseline | `OSCAIRN_CPU_LATENCY=keep OSCAIRN_WORKER_SPIN_US=0 ./oscairn-fantom-start --engine-only` | wake p50 256 to 512 us, as measured before |
+| + wake-up latency request | `OSCAIRN_WORKER_SPIN_US=0 ./oscairn-fantom-start --engine-only` | wake p50 under 64 us (seen on 7114a440) |
+| + spin (profile default 200) | `./oscairn-fantom-start --engine-only` | Rd 73 Chill: wake p50 near 0, round trip p50 drops by the wake; ST Final: no worker spin (more workers than cores), the engine's waits shorter by its own wake-up |
+| + deadline allowance | `OSCAIRN_WORKER_DEADLINE=1 ./oscairn-fantom-start --engine-only` | fewer silent blocks for the instrument in a chain; callback max never above 2.27 ms from waiting |
+| + parts not shared | `OSCAIRN_SHARING=cpu ./oscairn-fantom-start --engine-only` | ST Final's five Sampler parts in five workers every time; no worker above its allowance at rest |
+
+Read from `oscairn-engine-timing`: each worker's `wake` and `round trip` p50/p99/max, `silenced`
+and `not handed: busy`, the callback's duration p50 and max, the deadline misses over the
+interval; from `top`, the engine's and each worker's CPU and the free memory and swap. The
+deadline rule and the main thread's 20 ms service are always on in these builds; their effect
+shows against bundle c4bc60da's figures: the engine's main thread well under 38 % of a core, and
+no callback longer than the period from a worker's wait.
+
 ## Share by default, split under load
 
 ### Where it is decided today

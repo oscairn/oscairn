@@ -78,6 +78,30 @@ check "and to the app" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_EXTRA_BLOCK=org
 check "and not set when the environment has none" "! \"$bundle/oscairn-fantom-start\" --dry-run --engine-only 2>&1 | grep -q OSCAIRN_CPU_LATENCY"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
+# The first-party plugins' device settings: OSCAIRN_SAMPLER_*, _ANALOG_*, _FM_*, _ARPEGGIATOR_*, _EFFECTS_*.
+out=$(OSCAIRN_SAMPLER_MAX_VOICES=28 OSCAIRN_FM_POLYPHONY=16 FOO=1 OSCAIRN_SECRET=x "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "a plugin variable from the environment reaches the engine line" "echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid env OSCAIRN_FM_POLYPHONY=16 OSCAIRN_SAMPLER_MAX_VOICES=28 oscairn-engine-run --output-device'"
+check "an unrelated variable does not" "! echo \"\$out\" | grep -q -e FOO -e OSCAIRN_SECRET"
+printf "OSCAIRN_SAMPLER_MAX_VOICES=40\nOSCAIRN_ANALOG_FAST_OSC=1\n" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "a plugin variable from the defaults file reaches the engine line" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_ANALOG_FAST_OSC=1 OSCAIRN_SAMPLER_MAX_VOICES=40 oscairn-engine-run'"
+out=$(OSCAIRN_SAMPLER_MAX_VOICES=28 "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "the environment wins over the file" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_ANALOG_FAST_OSC=1 OSCAIRN_SAMPLER_MAX_VOICES=28 oscairn-engine-run'"
+out=$(OSCAIRN_SAMPLER_MAX_VOICES= "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "an empty one in the environment leaves the file's" "echo \"\$out\" | grep -q 'OSCAIRN_SAMPLER_MAX_VOICES=40 oscairn-engine-run'"
+printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the app too" "echo \"\$out\" | grep -q 'setsid env DISPLAY=:0 OSCAIRN_ANALOG_FAST_OSC=1 OSCAIRN_SAMPLER_MAX_VOICES=40 sh -c'"
+for bad in 'a b' 'a;b' "a'b" 'a"b' 'a$b' 'a`b`' 'a|b' 'a&b' 'a>b' 'a*b'; do
+	out=$(OSCAIRN_EFFECTS_MODE="$bad" "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1); status=$?
+	check "the value '$bad' is refused" "[ $status = 1 ] && echo \"\$out\" | grep -q 'OSCAIRN_EFFECTS_MODE: the value must hold only' && ! echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid'"
+done
+echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
+printf "OSCAIRN_FM_POLYPHONY='a b'\n" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1); status=$?
+check "a value from the file with a space is refused too" "[ $status = 1 ] && echo \"\$out\" | grep -q 'OSCAIRN_FM_POLYPHONY: the value must hold only'"
+echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
+
 out=$(OSCAIRN_PANEL_DEVICE="$bundle/no-panel" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "the panel absent: it says so and goes on" "[ $status = 0 ] && echo \"\$out\" | grep -q 'the panel device $bundle/no-panel is not here: the panel will not be read' && echo \"\$out\" | grep -q 'oscairn-panel-holder $bundle/no-panel'"
 

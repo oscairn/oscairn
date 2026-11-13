@@ -24,6 +24,11 @@ if [ -n "$profile" ]; then
 	# What the session runs the engine with when there is no display (headless).
 	python3 "$here/../../../scripts/engine-args.py" "$here/../../../../hosts/standalone/profiles/$profile.json" \
 		> "$target/etc/default/oscairn-engine"
+	# A board's own defaults for it (the FANTOM bundle's overlay), after the profile's.
+	if [ -f "$target/etc/default/oscairn-engine-device" ]; then
+		cat "$target/etc/default/oscairn-engine-device" >> "$target/etc/default/oscairn-engine"
+		rm -f "$target/etc/default/oscairn-engine-device"
+	fi
 	args=$(sed -n 's/^OSCAIRN_KERNEL_ARGS="\(.*\)"$/\1/p' "$target/etc/default/oscairn-cores")
 	printf '%s\n' "$args" > "$BINARIES_DIR/kernel-args"
 	extlinux=$target/boot/extlinux/extlinux.conf

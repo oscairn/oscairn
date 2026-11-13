@@ -1316,6 +1316,24 @@ on the display; `--engine-only` the engine alone.
    way, for the app and for `--engine-only`: its own environment's value first, else the file's.
    For example `OSCAIRN_WORKER_BUDGET_US=2000 ./oscairn-fantom-start`.
 
+   The first-party plugins read their own device settings from the environment when an instance
+   is created (`OSCAIRN_SAMPLER_MAX_VOICES`, `OSCAIRN_SAMPLER_MEMORY`, `OSCAIRN_ANALOG_FAST_OSC`,
+   `OSCAIRN_FM_POLYPHONY` and so on), and the workers inherit the engine's environment, which
+   `start-chroot.sh` empties. So the start script hands on every variable named
+   `OSCAIRN_SAMPLER_*`, `OSCAIRN_ANALOG_*`, `OSCAIRN_FM_*`, `OSCAIRN_ARPEGGIATOR_*` or
+   `OSCAIRN_EFFECTS_*` in the same way: its own environment's value first, else the file's (an
+   empty one counts as unset), for the app and for `--engine-only`; no other variable passes. A
+   value with anything but letters, digits and `. , : / = @ % + _ -` (a space, a quote, `;`) is
+   refused with a message and a nonzero exit, not quoted. For example
+   `OSCAIRN_SAMPLER_MAX_VOICES=64 ./oscairn-fantom-start --dry-run` shows it on the engine's line.
+
+   The bundle's `etc/default/oscairn-engine` also holds the FANTOM's device defaults, from
+   `os/buildroot/board/fantom-bundle/overlay/etc/default/oscairn-engine-device` (which
+   `post-build.sh` appends after the profile's): `OSCAIRN_SAMPLER_MAX_VOICES=28` (the Sampler
+   costs about 45 us a voice on this CPU against a 1.33 ms allowance) and
+   `OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog` (arpeggiated Analog patches overlap about 8
+   voices at about 2 ms per block, until its faster oscillator ships).
+
    Oscairn's engine and workers turn transparent huge pages off for themselves at their start
    (`prctl(PR_SET_THP_DISABLE)`; khugepaged's scan, every 10.24 s, stalled a worker's audio thread
    for 5 to 23 ms, [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md); confirmation trial

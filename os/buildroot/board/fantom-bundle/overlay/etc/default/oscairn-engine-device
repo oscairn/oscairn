@@ -1,0 +1,6 @@
+# The FANTOM-0's device defaults, appended to /etc/default/oscairn-engine by post-build.sh
+# (oscairn-fantom-start hands them to the engine and its workers).
+# Sampler: about 45 us per voice on this CPU against a 1.33 ms allowance.
+OSCAIRN_SAMPLER_MAX_VOICES=28
+# Analog: arpeggiated patches overlap about 8 voices at about 2 ms per block until its faster oscillator ships.
+OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog

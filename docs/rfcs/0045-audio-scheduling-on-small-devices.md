@@ -637,6 +637,22 @@ instances) and the publish at the cue. `oscairn-engine-timing` prints both, so a
 unit shows where its time goes. `control-performance-switch` checks the counts against what the
 change did and that the stages fit in the read.
 
+Reuse before a new process, built 2026-11-13: `take` (`Session::read`) offers, last, the free
+playing instances the middle rule keeps, before a new instance is loaded; the rule now only
+orders them ([RFC 0021](0021-sounds-performances-and-library.md#free-instances-across-a-change-and-instances-kept-warm)).
+When a still-ringing instance may be taken: never on a seamless change (free means silent three
+seconds with nothing sounding into it, as before); on a cut, any. A node whose instance still
+sounds gets a new one beside it on a seamless change, which admission allowed only where both
+fit; otherwise the change is a cut (RFC 0025). The reused instance is reset and given the node's
+state through the existing restore (its own state saved first and put back if the load fails);
+one that does not take the state is let go for a fresh one, as before; the graph gives it new
+note routes and, at its first budgeted block, its voice limits (by the graph's code, not tested);
+`session.status` counts its late and silent blocks from the takeover. Measured in
+`control-performance-switch` (M3 Max, other builds running, two runs): 34 plain fixture
+instruments in workers 522 to 665 ms all loaded, 191 to 224 ms all taken over (the loads 432 ms
+of the first, against 63 ms of state saves); in the engine's process 26 to 33 ms and 120 to 160 ms,
+the state save of each playing instance (RFC 0021's put-back) costing more than loading it.
+
 ### Migration, in stages that each leave main working
 
 1. Independent of hosts: the deadline rule, the engine's main-thread service cut, the sharing

@@ -1130,7 +1130,7 @@ namespace
         x.run(s);
         check(s.leaving() == 0 && near(x.l[0], 0), "with no key held, gone 30 s after the change: " + std::to_string(x.l[0]));
         change(62);
-        check(s.leaving() == 2 && near(x.l[0], .25), "a third stuck voice rings on, beside the B it left: " + std::to_string(x.l[0]));
+        check(s.leaving() == 1 && near(x.l[0], .25), "a third stuck voice rings on; A took over the silent B it left (RFC 0045): " + std::to_string(x.l[0]));
         s.allNotesOff(); x.run(s); x.run(s);
         check(s.leaving() == 0 && near(x.l[0], 0), "a panic ends it at once: " + std::to_string(x.l[0]));
         ::unsetenv("KICK_FIXTURE_STUCK");

@@ -945,9 +945,11 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         const auto w=want(plugin);if(!w)return std::nullopt;
         auto fits=[&](size_t i){return free[i].host && free[i].host->failure().empty() && same(*w,*free[i].host,free[i].loaded);}; // one kept warm may have failed since
         // One that holds this node's state already first (switching back), then kept warm, least recently
-        // used first, then a playing one only where keeping it warm would not fit (the middle rule).
+        // used first, then a playing one keeping it warm would not fit (the middle rule), and last, before
+        // a new process is started, a playing one it would keep (RFC 0045's resident instances).
         for(size_t i=0;i<free.size();++i)if(free[i].loaded.source==source(key) && fits(i))return i;
         for(size_t i=0;i<free.size();++i)if(!free[i].keep && fits(i))return i;
+        for(size_t i=0;i<free.size();++i)if(fits(i))return i;
         return std::nullopt;};
     // RFC 0021: a native instrument of the open Performance with the same plugin, build, placement and
     // ports has the node's sounds prepared beside its own; the node takes it over at the cue. Not in an
@@ -1328,6 +1330,8 @@ void Session::retireShared(const SoundContext& node) {
 // Publishes a read Performance in place of the open one.
 void Session::open(Prepared& p,bool seamless) {
     auto& next=p.next;auto& wires=p.wires;auto& disabled=p.disabled;
+    // The instances it reused: session.status counts their late and silent blocks from here, as a fresh one's.
+    std::vector<const PluginHost*> reused(p.warm.begin(),p.warm.end());for(const auto n:p.taken)reused.push_back(graph_.node(n).host.get());
     // A part's input wires hear the devices its selector chooses here (RFC 0012); files keep selectors, not sources.
     for(auto& w:wires)if(w.owner==WireOwner::Part && w.kind==WireKind::Notes && w.from==graphInput)
         for(const auto& part:p.parts)if(part.id==w.part && (!part.input.devices.empty() || part.input.maxNotes || part.input.reserve || part.input.priority)){
@@ -1380,6 +1384,8 @@ void Session::open(Prepared& p,bool seamless) {
         ++revision_;++sequence_;history_.swap(history);
     });
     std::erase_if(loaded_,[&](const auto& l){return !graph_.contains(l.first);});
+    std::erase_if(reusedBase_,[&](const auto& b){return std::none_of(nodes_.begin(),nodes_.end(),[&](const auto& n){return &graph_.host(n.first)==b.first;});});
+    for(const auto* h:reused)reusedBase_[h]=h->statistics();
     // The outgoing sounds ring out, then go (retireSounds).
     // Those an earlier change left keep their routes, now the incoming node's from channels 2 and 3.
     for(auto& b:p.beside)if(b->chokes)for(auto& r:retiringSounds_)if(r.node==b->was){if(r.older)r.node=0;else{r.node=b->now;r.older=true;}}

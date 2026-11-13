@@ -416,7 +416,12 @@ namespace oscairn
             result.deadlineMisses += st.deadlineMisses; result.lateBlocks += st.lateBlocks; result.silentBlocks += st.silentBlocks;
             if(auto why = host.failure(); !why.empty()) result.failures.push_back({node, name, std::move(why)});
             if(const auto cpu = host.cpuSeconds(); cpu > 0)
-                result.workers.push_back({node, name, cpu, host.residentBytes(), st.lastMicroseconds, st.maximumMicroseconds, st.allowanceMicroseconds, st.lateBlocks, st.silentBlocks});
+            {
+                // Since it was loaded, or taken over by this Performance (RFC 0045's resident instances).
+                const auto base = reusedBase_.count(&host) ? reusedBase_.at(&host) : kick::clap::Statistics{};
+                result.workers.push_back({node, name, cpu, host.residentBytes(), st.lastMicroseconds, st.maximumMicroseconds, st.allowanceMicroseconds,
+                                          st.lateBlocks - std::min(base.lateBlocks, st.lateBlocks), st.silentBlocks - std::min(base.silentBlocks, st.silentBlocks)});
+            }
         }
         result.notices = notices_;
         for( size_t source = 0; source < maxSources; ++source )

@@ -206,6 +206,13 @@ limits its users hear: one tail carries over (a second change cuts the first cha
 note through it. What the plugin must do:
 [sound-snapshots](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-snapshots.md).
 
+Any other plugin is usually reused across a change rather than loaded again: an instance of the
+outgoing Performance, or one kept loaded since an earlier one, is reset (CLAP `reset`) and given
+the incoming node's state, before Oscairn would start a new instance
+([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#resident-instances-the-agreed-resident-engines)).
+After that reset and state load it must sound exactly as a fresh instance given the same state:
+nothing of what it played or held before may carry over.
+
 A plugin carried over whole into a Performance change (one the next Performance does not take
 over) rings out until it is idle, but no longer than 30 seconds after the change with no note
 held through it, or 2 minutes with one held; a panic ends it at once

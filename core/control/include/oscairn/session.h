@@ -840,6 +840,7 @@ namespace oscairn
         // engine.timing's callback histograms (blockTimes, audio thread) and the last callback's start.
         BlockTiming callbackTiming_, latenessTiming_;
         std::map<const PluginHost*, kick::clap::Statistics> timingBase_; // control thread: each worker's counts at the last reset
+        std::map<const PluginHost*, kick::clap::Statistics> reusedBase_; // control thread: a reused instance's counts when a Performance took it over (session.status)
         int64_t lastStart_ = 0;
         std::atomic<bool> audioStarted_{ false };
         std::atomic<bool> statusPlaying_{ false };

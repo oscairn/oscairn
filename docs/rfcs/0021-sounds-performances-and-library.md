@@ -64,7 +64,7 @@ Checked when built and tested; the sections below say how.
 - [x] Pooled instruments restore a snapshot in the instances they have ([design](#free-instances-across-a-change-and-instances-kept-warm))
 - [x] Free instances taken over across a change ([design](#free-instances-across-a-change-and-instances-kept-warm))
 - [x] Instances kept warm once rung out, bounded and evicted under pressure ([design](#free-instances-across-a-change-and-instances-kept-warm))
-- [x] The middle rule: a playing instance taken over only where keeping it warm would not fit ([design](#free-instances-across-a-change-and-instances-kept-warm))
+- [x] The middle rule: a playing instance taken over only where keeping it warm would not fit; since 2026-11-13 also before a new instance is loaded ([design](#free-instances-across-a-change-and-instances-kept-warm))
 - [x] A failed load puts back the state of the playing instances it took over ([design](#free-instances-across-a-change-and-instances-kept-warm))
 - [x] Native sound contexts across a change: the incoming node's sounds prepared beside the
       outgoing ones in the playing instance, selected at the cue ([design](#native-sound-contexts-across-a-change))
@@ -984,6 +984,23 @@ Performances' memory and a slower first switch. Precisely, when a Performance is
 Since a seamless change was admitted with both Performances together, keeping fits whenever the
 estimates hold; the memory test decides only when an instance's resident memory has outgrown its
 estimate.
+
+**Reuse before a new instance (2026-11-13, [RFC 0045](0045-audio-scheduling-on-small-devices.md#resident-instances-the-agreed-resident-engines)).**
+The rule above now orders the instances offered rather than withholding any: a node takes one
+holding its state, then one kept warm, then a free playing one the rule would not keep, and last,
+before a new instance is loaded, a free playing one the rule would keep. On the FANTOM-07 a new
+instance is a process start and a plugin load: "ST Final" started nine and took about 5 s to
+open. A state load into a running instance saves the start and the load. What is given up: switching back
+finds the instances holding the other Performance's state, so the state is loaded again instead
+of the instance only being reset (`keptStates` counts fewer). A free instance is still only one
+silent for three seconds with nothing sounding into it: a seamless change never takes one whose
+tail can be heard, and a node whose instance still sounds gets a new one beside it (the seamless
+overlap). Where the two do not fit together the change is a cut ([RFC 0025](0025-resource-budgets.md)),
+which takes any outgoing instance, a sounding one too. `control-performance-switch` checks: A to
+B, B to A and A to B again load nothing (8 of 8 reused), output identical to a fresh load each
+time; a note held through a seamless change keeps its instance, which rings out, beside one
+loaded fresh; a cut with a note held takes that instance too and sounds as B opened fresh; 34
+parts with one sounding take the 33 free instances and load one.
 
 **Halfway through a switch.** The choice is made once, before the read, from the figures
 admission used to call the change seamless; it is not made again as instances load. Between the

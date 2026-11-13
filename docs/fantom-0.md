@@ -1364,9 +1364,9 @@ on the display; `--engine-only` the engine alone.
    `OSCAIRN_CPU_LATENCY=keep ./oscairn-fantom-start` hands the variable on the same way and asks for
    nothing, for comparing.
 
-   The profile sets `compute.workerSpin` to 200: the engine's thread spins up to 200 us for each
-   worker's result before it sleeps, and, while every worker's audio thread has a core of its own
-   (three workers or fewer beside the engine), each worker spins from 200 us before its next block
+   The profile sets `compute.workerSpin` to 200: while every worker's audio thread has a core of
+   its own (three workers or fewer beside the engine), the engine's thread spins up to 200 us for
+   each worker's result before it sleeps, and each worker spins from 200 us before its next block
    is due ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#spinning-before-sleeping)).
    `OSCAIRN_WORKER_SPIN_US=0 ./oscairn-fantom-start` turns it off for comparing.
 

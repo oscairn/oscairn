@@ -40,8 +40,9 @@ namespace oscairn::worker
     // RFC 0045's bounded spin: a waiting audio thread polls a word for up to this long before it
     // sleeps, so a block done (or handed over) within it costs no wake-up. OSCAIRN_WORKER_SPIN_US (the
     // profile's compute.workerSpin), whole microseconds above 0, held to half the allowance; anything
-    // else, or a worker's spin with more audio threads than cores to give them (`threads` > `cores`,
-    // as a spinning thread keeps its core from another of its priority), none.
+    // else, or a spin with more audio threads than cores to give them (`threads` > `cores`, as a
+    // spinning thread keeps its core from another of its priority), none: a worker's, and since
+    // 2026-11-13 the engine's for a worker's result too.
     std::chrono::nanoseconds spinWindow(const char* microseconds, std::chrono::nanoseconds allowance, uint32_t threads = 1, uint32_t cores = 1) noexcept;
     // The CPUs this process may run on (its affinity on Linux), at least 1.
     uint32_t usableCores() noexcept;

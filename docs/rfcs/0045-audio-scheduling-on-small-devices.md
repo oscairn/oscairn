@@ -452,7 +452,12 @@ by default, 200 on the FANTOM-07):
 
 - **The engine** polls `done` for up to the spin window before it sleeps, within the allowance
   (`WorkerHost::finish`). One thread, the engine's, which has nothing else to do then: a worker
-  done within the window costs the engine no wake-up. Real time only.
+  done within the window costs the engine no wake-up. Real time only. Since 2026-11-13 only while
+  every worker's audio thread and the engine's have a core each, as for the workers below, and
+  never for an extra-block worker's block: on the unit ST Final's engine audio thread went from 430
+  to 450 ticks per 10 s to 655 (about 65 % of a core) with the spin on, the engine polling up to
+  200 us for an outstanding worker in each of its waves while nine workers shared four cores, the
+  core it polled on one they needed (an explanation that fits, not measured apart).
 - **A worker** sleeps until the window before its next block is due (a period after the last one
   came, read from the block it rendered), then polls `request` until the block comes or as long
   again after, then sleeps as before. It spins only around a block the engine is about to hand

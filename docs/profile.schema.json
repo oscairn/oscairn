@@ -78,7 +78,7 @@
         },
         "workerSpin": {
           "type": "integer",
-          "description": "how long, in microseconds, an audio thread waiting on a plugin worker spins before it sleeps: the engine for a block's result, a worker around its next block when every worker's audio thread has a core; held to half the allowance; omitted or 0: it sleeps at once (RFC 0045)",
+          "description": "how long, in microseconds, an audio thread waiting on a plugin worker spins before it sleeps: the engine for a block's result and a worker around its next block, both only when every worker's audio thread has a core; held to half the allowance; omitted or 0: it sleeps at once (RFC 0045)",
           "minimum": 0,
           "maximum": 1000000
         },

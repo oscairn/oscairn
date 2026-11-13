@@ -1143,9 +1143,12 @@ namespace oscairn
                 }
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
                 const auto checked = std::chrono::steady_clock::now();
-                // RFC 0045's spin: polled for up to the spin window (within the allowance) before sleeping.
+                // RFC 0045's spin: polled for up to the spin window (within the allowance) before sleeping, only while every
+                // worker's audio thread and this one have a core each: otherwise the core this thread spins on is one a
+                // worker it waits for may need (ST Final's nine workers on the FANTOM-07's four cores: none).
                 bool spun = false;
-                if(!ready && process_->mode == ProcessingMode::Realtime && !extraBlock()) // a delayed block is waited for late in the callback: no spin
+                if(!ready && process_->mode == ProcessingMode::Realtime && !extraBlock() // a delayed block is waited for late in the callback: no spin
+                   && Process::audioThreads.load(std::memory_order_relaxed) + 1 <= Process::cores())
                     for(const auto until = checked + std::min(std::chrono::nanoseconds(process_->spinNs.load(std::memory_order_relaxed)), std::chrono::nanoseconds(budget) - (checked - sent));
                         !(spun = s.done.load(std::memory_order_acquire) == sequence_) && std::chrono::steady_clock::now() < until;) relax();
                 const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (std::chrono::steady_clock::now() - sent));

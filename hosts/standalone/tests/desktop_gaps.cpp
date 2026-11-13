@@ -918,7 +918,20 @@ int main(int argc, char** argv)
                 pane.search("");
                 check(wait([&] { return pane.empty.isVisible(); }), "cleared, it is again");
                 pane.browse.triggerClick();
-                check(wait([&] { return pane.catalog() && !pane.catalog()->reading(); }) && pane.catalog()->sounds.getToggleState(), "the button opens the Catalog on Sounds");
+                // No repository on has a Sound package: it opens on the first tab with something, the rest still a click away.
+                check(wait([&] { return pane.catalog() && !pane.catalog()->reading(); }) && pane.catalog()->performances.getToggleState() && !pane.catalog()->shown().empty() &&
+                          pane.catalog()->sounds.isVisible(),
+                      "the button opens the Catalog on the first tab with something, Performances, not an empty Sounds");
+                if(auto* catalog = pane.catalog())
+                {
+                    catalog->sounds.triggerClick(); settle();
+                    check(catalog->shown().empty() && catalog->emptySaying() == "No Sound packages in the repositories you have on. Look under Performances or Plugins.",
+                          "an empty tab says what it is, pointing to the tabs that have something: " + catalog->emptySaying().toStdString());
+                    over(*catalog, "catalog-empty-tab");
+                    catalog->search.setText("tonewheel organ", true); settle();
+                    check(catalog->emptySaying() == "Nothing here matches the search.", "a search that finds nothing says so: " + catalog->emptySaying().toStdString());
+                    catalog->search.setText("", true);
+                }
                 if(auto* dialog = pane.catalog() ? pane.catalog()->findParentComponentOfClass<juce::DialogWindow>() : nullptr) dialog->exitModalState(0);
                 settle();
                 pane.showKind("performance");
@@ -1111,6 +1124,28 @@ int main(int argc, char** argv)
                           !catalog->shown()[size_t(synthRow())].offered(),
                       "then it is Installed, with nothing to install");
                 if(catalog) closeCatalog();
+                // Every tab empty: no repository on, or none read (the official one's web here a
+                // stand-in that finds nothing). Each says so, and where repositories are managed.
+                engine.packages([&](Control& c) { c.setRepositoryEnabled(site, false); });
+                {
+                    standalone::Catalog none(engine, "performance", {});
+                    none.read();
+                    check(wait([&] { return !none.reading(); }) && none.shown().empty() &&
+                              none.emptySaying() == "No package repository is on. Repositories are turned on and added in the Settings app, on its Package repositories page.",
+                          "with no repository on, it says so, and where they are: " + none.emptySaying().toStdString());
+                    standalone::setDesktopMode(none, 1); settle();
+                    snapshot(none, "catalog-none-on");
+                }
+                engine.packages([&](Control& c) { c.setRepositoryEnabled("https://packages.oscairn.org", true); });
+                {
+                    standalone::Catalog offline(engine, "performance", {});
+                    offline.read();
+                    check(wait([&] { return !offline.reading(); }) && offline.shown().empty() && offline.status().startsWith("Not read: ") &&
+                              offline.emptySaying() == "No repository could be read: check the connection. Repositories are turned on and added in the Settings app, on its Package repositories page.",
+                          "with none read, it says so: " + offline.emptySaying().toStdString());
+                    standalone::setDesktopMode(offline, 1); settle();
+                    snapshot(offline, "catalog-offline");
+                }
                 // Removed (the page asks first; the engine's Remove takes its root key's trust
                 // with it), and the official one turned back on for the rest of the run.
                 engine.packages([&](Control& c) { c.removeRepository(site); c.setRepositoryEnabled("https://packages.oscairn.org", true); });

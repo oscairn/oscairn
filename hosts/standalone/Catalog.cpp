@@ -18,6 +18,9 @@ namespace oscairn::standalone
             if(!v.withdrawn.reason.empty()) return "withdrawn by " + text(v.withdrawn.repository) + ": " + text(v.withdrawn.reason);
             return "no version it can install";
         }
+        // The tabs, in the order a Catalog opened on an empty one looks for one with something to show.
+        const std::vector<std::pair<std::string, juce::String>> tabs{{"performance", "Performances"}, {"sound", "Sounds"}, {"plugin", "Plugins"}};
+        juce::String noun(const std::string& kind) { return kind == "performance" ? "Performance" : kind == "sound" ? "Sound" : "plugin"; }
     }
 
     juce::String withdrawnSaying(const Offer& o)
@@ -204,6 +207,7 @@ namespace oscairn::standalone
             status_ = text(error); repaint(); return;
         }
         listings_.clear(); read_.clear(); failed_.clear();
+        noneOn_ = on.empty();
         if(on.empty()) { status_ = "No repository is on. Settings lists them."; repaint(); return; }
         reading_ = true;
         // The app's plugins, by the isolated scanner, off this thread; a scan that fails finds none.
@@ -233,7 +237,12 @@ namespace oscairn::standalone
             all_ = offers(listings_, installed_, bundled_);
             status_ = read_.isEmpty() ? juce::String() : "From " + read_.joinIntoString(", ") + ".";
             if(!failed_.isEmpty()) status_ << (status_.isEmpty() ? "" : " ") << "Not read: " << failed_.joinIntoString("; ") << ".";
-            filter();
+            // Opened on a tab with nothing to show, it moves to the first that has something.
+            auto has = [&](const std::string& kind) { return std::any_of(all_.begin(), all_.end(), [&](const auto& o) { return o.holds(kind); }); };
+            if(search.isEmpty() && !has(kind_))
+                for(const auto& [kind, label] : tabs)
+                    if(has(kind)) { kind_ = kind; break; }
+            showKind(kind_);
             return;
         }
         const auto r = left.front();
@@ -264,6 +273,21 @@ namespace oscairn::standalone
             }
         };
         Poll::again(this, job, r, std::move(left));
+    }
+
+    juce::String Catalog::emptySaying() const
+    {
+        if(reading_ || !shown_.empty()) return {};
+        const juce::String where = "Repositories are turned on and added in the Settings app, on its Package repositories page.";
+        if(noneOn_) return "No package repository is on. " + where;
+        if(all_.empty()) return (read_.isEmpty() ? "No repository could be read: check the connection. " : "The repositories you have on offer no packages. ") + where;
+        if(search.getText().isNotEmpty()) return "Nothing here matches the search.";
+        juce::StringArray elsewhere;
+        for(const auto& [kind, label] : tabs)
+            if(kind != kind_ && std::any_of(all_.begin(), all_.end(), [&](const auto& o) { return o.holds(kind); })) elsewhere.add(label);
+        const auto last = elsewhere.size() > 1 ? " or " + elsewhere[elsewhere.size() - 1] : juce::String();
+        if(last.isNotEmpty()) elsewhere.remove(elsewhere.size() - 1);
+        return "No " + noun(kind_) + " packages in the repositories you have on." + (elsewhere.isEmpty() ? juce::String() : " Look under " + elsewhere.joinIntoString(", ") + last + ".");
     }
 
     void Catalog::open(int row)
@@ -361,6 +385,14 @@ namespace oscairn::standalone
         list.setBounds(area);
     }
 
+    void Catalog::paintOverChildren(juce::Graphics& g)
+    {
+        if(opened_ || !list.isVisible()) return;
+        // Wrapped: it can be two sentences.
+        g.setColour(ink(Ink::Text)); g.setFont(juce::FontOptions(textSize(TextRole::Body, mode())));
+        g.drawFittedText(emptySaying(), list.getBounds().reduced(16, 12).removeFromTop(mode() == 2 ? 80 : 60), juce::Justification::topLeft, 3, 1.0f);
+    }
+
     void Catalog::paint(juce::Graphics& g)
     {
         g.fillAll(ink(Ink::Background));
@@ -370,11 +402,7 @@ namespace oscairn::standalone
                          label(juce::FontOptions(textSize(TextRole::Small, m), juce::Font::bold)), small(juce::FontOptions(textSize(TextRole::Small, m)));
         g.setColour(ink(Ink::Muted));
         drawInked(g, status_, statusArea_, small);
-        if(!opened_)
-        {
-            if(shown_.empty() && !reading_) drawInked(g, "Nothing to show here.", list.getBounds().reduced(16, 12).removeFromTop(30), small);
-            return;
-        }
+        if(!opened_) return;
         g.setColour(ink(Ink::Text));
         drawInked(g, text(opened_->package.name.empty() ? opened_->package.id : opened_->package.name), headingArea_, title);
         // Each fact a row: its name in a column, the value beside it.

@@ -80,7 +80,7 @@ namespace oscairn::standalone
         Catalog(Engine& engine, const std::string& kind, std::map<std::string, Control::InstalledPackage> installed, std::string scanner = {});
         ~Catalog() override { canceled_ = true; } // a scan still going stops
         // Reads each enabled repository in turn, one engine job at a time, the app's plugins
-        // scanned meanwhile.
+        // scanned meanwhile. Opened on a tab with nothing to show, it then shows the first that has.
         void read();
         const std::map<std::string, std::string>& bundled() const { return bundled_; } // the app's plugins found, by ID: their versions
         void showKind(const std::string& kind);
@@ -90,12 +90,16 @@ namespace oscairn::standalone
         const Offer* opened() const { return opened_ ? &*opened_ : nullptr; }
         const juce::String& status() const { return status_; }
         bool reading() const { return reading_; }
+        // Why nothing is listed, once read: no repository on, none read, a search, or a tab with
+        // nothing, pointing to the tabs that have something; empty while something is listed.
+        juce::String emptySaying() const;
         std::function<void(const Offer&)> onInstall;
         juce::TextEditor search;
         juce::TextButton performances{"Performances"}, sounds{"Sounds"}, plugins{"Plugins"}, close{"Close"}, backButton{"Back"}, install{"Install"};
         juce::ListBox list{"Catalog", this};
         std::vector<std::pair<juce::String, juce::String>> facts() const; // the opened package's details, each named
         void paint(juce::Graphics&) override;
+        void paintOverChildren(juce::Graphics&) override; // why nothing is listed, over the list
         void resized() override;
 
     private:
@@ -118,7 +122,7 @@ namespace oscairn::standalone
         std::optional<Offer> opened_;
         juce::StringArray read_, failed_;
         juce::String status_;
-        bool reading_ = false;
+        bool reading_ = false, noneOn_ = false;
         juce::Rectangle<int> headingArea_, statusArea_;
     };
 }

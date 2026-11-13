@@ -680,8 +680,14 @@ page from the Catalog app's action (below). Opening a repository by its address 
 on Install…; it belongs with the repositories in Settings.
 
 **Interim, until the Catalog app exists (built 2026-11-07):** the Catalog is a view in the
-desktop Library, labeled Catalog. Its rows name each package, its version, publisher and
-summary; what this device cannot install is grayed with the reason. What is installed says
+desktop Library, labeled Catalog. Opened on a tab with nothing to show (the empty Library's
+**Browse the Catalog** on Sounds, say, when no repository on has a Sound package), it moves to the
+first tab that has something, the others a click away (decided 2026-11-12). A tab with nothing
+says so and where to look ("No Sound packages in the repositories you have on. Look under
+Performances or Plugins."); with no repository on, or none read, it says that, and that
+repositories are turned on and added on the Settings app's Package repositories page. Its rows
+name each package, its version, publisher and summary; what this device cannot install is grayed
+with the reason. What is installed says
 **Installed** with the version installed, or **Update to** the newest stable version this device
 can install when that is newer. A plugin package whose plugins all come with the app, and
 not installed from a repository, says **Built in**, with nothing to install, or **Update to** a

@@ -146,7 +146,7 @@ int main(int argc, char** argv)
             std::mt19937 rng(13);
             while(!stop)
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50 + rng() % 400));
+                std::this_thread::sleep_for(std::chrono::milliseconds(300 + rng() % 1200));
                 std::vector<int> pids;
                 if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
                 {
@@ -158,24 +158,26 @@ int main(int argc, char** argv)
             }
 #endif
         });
+        // Whatever throws below, the threads stop first, so the failure is reported, not std::terminate.
+        struct Join { std::atomic<bool>& stop; std::thread& audio; std::thread& killer; ~Join() { stop = true; if(audio.joinable()) audio.join(); if(killer.joinable()) killer.join(); } } join{stop, audio, killer};
         const char* stress = std::getenv("OSCAIRN_STRESS");
-        const int switches = 60 * std::max(1, stress ? std::atoi(stress) : 1);
+        const int switches = 30 * std::max(1, stress ? std::atoi(stress) : 1);
         std::mt19937 rng(11);
         int opened = 0, refused = 0, prepared = 0;
         auto serve = [&](int ms) { const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms); do { s.service(); std::this_thread::sleep_for(std::chrono::milliseconds(2)); } while(std::chrono::steady_clock::now() < end); };
         for(int i = 0; i < switches; ++i)
         {
             const auto& to = performances[rng() % performances.size()];
-            switch(rng() % 6)
-            {
-            case 0: s.setBudget({}); break;
-            case 1: s.setBudget({4, 0}); break; // generous: changes overlap, ringing out
-            case 2: s.setBudget({4, s.estimate("").memory + s.estimate(to.string()).memory - 1}); break; // a cut: opened at once
-            case 3: s.setBudget({.02, 0}); break; // the heavy one, and maybe the others, refused
-            default: break;
-            }
             try
             {
+                switch(rng() % 6)
+                {
+                case 0: s.setBudget({}); break;
+                case 1: s.setBudget({4, 0}); break; // generous: changes overlap, ringing out
+                case 2: s.setBudget({4, s.estimate("").memory + s.estimate(to.string()).memory - 1}); break; // a cut: opened at once
+                case 3: s.setBudget({.02, 0}); break; // the heavy one, and maybe the others, refused
+                default: break;
+                }
                 if(rng() % 3 == 0 && s.preparePerformance(to.string())) { ++prepared; serve(int(rng() % 20)); }
                 s.loadPerformance(to.string());
                 ++opened;

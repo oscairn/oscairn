@@ -7,6 +7,7 @@
 // data folder (OSCAIRN_APP_DATA), so started again after a crash it comes back where it was.
 //   Oscairn Setlist [--snapshot out.png --size WxH [--mode 1|2]]
 #include "../../DeviceScreen.h"
+#include "../../TextKeyboard.h"
 #include "../../Setlist.h"
 #include "../../Engine.h"
 #include "../../Theme.h"
@@ -46,6 +47,7 @@ namespace oscairn::standalone
             for(const auto& action : juce::StringArray::fromTokens(juce::SystemStats::getEnvironmentVariable("OSCAIRN_ACTIONS", {}), ",", ""))
                 if(action.isNotEmpty() && action != sendPerformance && action != stepSetlist) // not its own
                     actions_.offer(action.toStdString(), "shell", [this, a = action.toStdString()](const std::string& argument, Actions::Answer answer) { engine_->appRequest({}, a, argument, std::move(answer)); });
+            if(juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEXT_ENTRY", {}) == "onScreen") setTextEntryOnScreen(true); // the shell's screen has no typing keyboard
             pane_ = std::make_unique<SetlistPane>(*engine_, actions_);
             setDesktopMode(*pane_, 1);
             restore();

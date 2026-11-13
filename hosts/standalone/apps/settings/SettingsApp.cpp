@@ -9,6 +9,7 @@
 #include "Frame.h"
 #include "../../Apps.h"
 #include "../../DeviceScreen.h"
+#include "../../TextKeyboard.h"
 #include <cstdlib>
 #include <unistd.h>
 
@@ -48,6 +49,7 @@ namespace oscairn::standalone
             frame_ = std::make_unique<settings::Frame>(*engine_, profile_);
             setDesktopMode(*frame_, profile_.screen() && profile_.screen()->touch ? 2 : 1); // until the shell says how it is shown
             if(profile_.screen() && profile_.screen()->surface != "desktop") setDense(*frame_); // a device's screen (RFC 0019)
+            if(profile_.screen() && profile_.screen()->textOnScreen()) setTextEntryOnScreen(true); // as the shell does: no typing keyboard
             if(profile_.screen() && !profile_.screen()->theme.empty()) theme_->setScreenTheme(profile_.screen()->theme); // as the shell shows it
             engine_->onAppRequest = [this](uint64_t request, const std::string&, const std::string& action, const std::string& argument) {
                 if(action == showApp) { show(argument); engine_->appAnswer(request, "shown"); }

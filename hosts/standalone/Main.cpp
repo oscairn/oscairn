@@ -38,6 +38,7 @@
 #include "Recording.h"
 #include "AppProcesses.h"
 #include "Splash.h"
+#include "TextKeyboard.h"
 #include "Executable.h"
 
 #include <BinaryData.h>
@@ -151,6 +152,7 @@ namespace oscairn::standalone
             if( !fullScreen ) // a device's screen has no menu bar
                 setMenuBar( this );
 #endif
+            if( profile_.screen() && profile_.screen()->textOnScreen() ) setTextEntryOnScreen( true ); // no typing keyboard: text fields bring up their own
             engine_.setControllers( controlGroups( profile_ ), {} );
             engine_.openBrowser=[this]{showLibrary();};
             engine_.openPads=[this]{showPads();};
@@ -180,7 +182,7 @@ namespace oscairn::standalone
             actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
             const auto binary=executableFile().getParentDirectory();
             // Apps run as processes only against an engine on a socket (not --in-process).
-            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString(),"OSCAIRN_PROFILE="+profileArgument,"OSCAIRN_SCREEN_THEME="+(profile_.screen()?profile_.screen()->theme:std::string())});
+            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString(),"OSCAIRN_PROFILE="+profileArgument,"OSCAIRN_SCREEN_THEME="+(profile_.screen()?profile_.screen()->theme:std::string()),"OSCAIRN_TEXT_ENTRY="+(profile_.screen()&&profile_.screen()->textOnScreen()?std::string("onScreen"):std::string("keyboard"))});
             appNotice_=std::make_unique<AppNotice>(*appProcesses_);
             menuItemsChanged(); // the Apps menu again, now that it knows the Setlist app
             Component::addChildComponent(*appNotice_);

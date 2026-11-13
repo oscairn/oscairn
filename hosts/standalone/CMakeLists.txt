@@ -63,7 +63,7 @@ juce_add_gui_app(oscairn_setlist_app
     BUNDLE_ID org.oscairn.setlist
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
-target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp DeviceScreen.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp)
+target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp DeviceScreen.cpp TextKeyboard.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp)
 target_compile_definitions(oscairn_setlist_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
 target_link_libraries(oscairn_setlist_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
     juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
@@ -89,7 +89,7 @@ juce_add_gui_app(oscairn_settings_app
     BUNDLE_ID org.oscairn.settings
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
-target_sources(oscairn_settings_app PRIVATE apps/settings/SettingsApp.cpp DeviceScreen.cpp ${settings_sources} Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
+target_sources(oscairn_settings_app PRIVATE apps/settings/SettingsApp.cpp DeviceScreen.cpp TextKeyboard.cpp ${settings_sources} Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
 target_compile_definitions(oscairn_settings_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")
 target_link_libraries(oscairn_settings_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
     juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
@@ -107,7 +107,7 @@ if(NOT APPLE)
     install(DIRECTORY "${oscairn_apps}/" DESTINATION share/oscairn/apps USE_SOURCE_PERMISSIONS)
 endif()
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DeviceScreen.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
+target_sources(oscairn_standalone PRIVATE Main.cpp DeviceScreen.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp TextKeyboard.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"
@@ -229,6 +229,13 @@ target_link_libraries(oscairn_keyboard_window_test PRIVATE oscairn_standalone_ic
 target_compile_definitions(oscairn_keyboard_window_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_keyboard_window_test oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
 add_test(NAME keyboard-window COMMAND oscairn_keyboard_window_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
+# On-screen text entry (RFC 0019): the keyboard that comes up over a text field on a screen with no typing keyboard.
+juce_add_console_app(oscairn_text_keyboard_test PRODUCT_NAME "Oscairn Text Keyboard Test")
+target_sources(oscairn_text_keyboard_test PRIVATE tests/text_keyboard.cpp TextKeyboard.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp Recording.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_link_libraries(oscairn_text_keyboard_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_text_keyboard_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_test(NAME text-keyboard COMMAND oscairn_text_keyboard_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" "${CMAKE_CURRENT_SOURCE_DIR}/themes")
+set_tests_properties(text-keyboard PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}" RUN_SERIAL TRUE)
 # Alone: it holds a key through clicks and typing that need its window to stay the active one,
 # and a window that stops being active, or a keyboard that loses focus, lets go of its keys
 # (KeyboardWindow.cpp), as it must; another test's window coming to the front in a parallel run

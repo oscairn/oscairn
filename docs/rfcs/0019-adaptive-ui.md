@@ -248,6 +248,35 @@ FANTOM-07's profile: before, the window was 32 pixels inside Weston's frame (its
 0, 0, 1280 × 720, `_NET_WM_STATE_FULLSCREEN`, and Settings a child of it at 0, 74 (under the top
 bar), 1280 × 646. On the FANTOM-07 itself (Weston 6.0.1), untried.
 
+### Text entry
+
+A screen with no typing keyboard says so in its profile (`textEntry: "onScreen"` on the screen,
+[RFC 0024](0024-device-profiles.md); absent: a keyboard is there, as on every desktop, Touch mode
+included). There, any editable text field that takes focus brings up a keyboard docked along the
+bottom of its window, full width, five rows of touch-size keys (`TextKeyboard.h`, one component for
+the shell and for the Settings and Setlist apps, which the shell tells through
+`OSCAIRN_TEXT_ENTRY`): the Library's and the Catalog's search, the Save, Save As, Edit, Export
+and signing-key names, the setlist, page and slot names, the repository address and the plugin
+browser's searches. Nothing at those fields changes: the keyboard listens for focus, so a field
+added later gets it.
+
+It types through the editor's own key handling (`keyPressed`), so search-as-you-type, an input
+filter, a length limit and a password mask act as for real typing; Done presses Return in the
+editor and then in what holds it (an alert's default button), Cancel puts back the text the editor
+had when the keyboard came up, and Clear empties it. It goes on Done, on Cancel, when focus leaves
+the field, and on a tap on anything that is not a text field or the keyboard. The keyboard may
+cover the field, so a line above the keys shows the text, its selection and caret (masked for a
+password), and a dialog it covers moves up while it shows. Keys: letters, Shift (one letter) and
+Caps, a numbers and symbols layer (`. , / : ; - _ @ # & ' " ? ! ( ) % +` and the digits), Space,
+Backspace (it and the cursor keys repeat while held), the cursor keys, Clear, Cancel and Done. Each
+key is named for the accessibility tree.
+
+Skipped: other layouts than US QWERTY, autocorrect, suggestions, swipe typing, accented letters
+and a numeric pad (no field here wants only digits yet). `text-keyboard` checks it on the
+FANTOM-07's screen size (the Library's search filtering as keys are tapped, Shift, Caps,
+Backspace, the cursor keys, the symbols layer, Done and Cancel, an alert over the Setlist pane),
+and that a desktop profile shows nothing. Not tried on the device.
+
 ### Compact
 
 Not built now. To keep it possible:

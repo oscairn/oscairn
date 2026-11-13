@@ -116,6 +116,14 @@ accent as high as its velocity, a sustained one tinted with it, a hovered one fa
 text ink, and the input's own note arriving a dot in the positive color: down, velocity and
 incoming each look different by shape as well as color. Note names label the C keys in the black keys' ink, lightened.
 
+### Text keyboard
+
+Where a screen has no typing keyboard (the profile's `textEntry`), a text field's focus brings up
+`TextKeyboard` (`TextKeyboard.h`), docked along the bottom of its window: a surface-ink band with a
+hairline above it, a line over the keys with the field's text, selection and caret, and rows of
+the theme's buttons, each a touch target tall with `denseGap` between them and `denseMargin`
+round. Done is in the accent. It uses the theme's colors and no assets of its own.
+
 ### Joined buttons
 
 Adjacent buttons that belong together, a choice of one (Performances or Sounds) or a few

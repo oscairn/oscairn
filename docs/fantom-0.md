@@ -644,6 +644,11 @@ What stops when Roland's app is stopped, from what it was seen to do:
   is reachable from the chroot), drew, played its groovebox through the outputs, and took touch;
   the owner heard glitches while it was drawing, and about 310 MB of memory remained available
   with the app, the engine and three workers running.
+- **Typing:** the unit has no typing keyboard, so its screen's profile says `textEntry: "onScreen"`
+  and every text field (the Library's search, names, tags, repository addresses) brings up an
+  on-screen keyboard along the bottom of the screen, taking under 55% of its height with 44-unit
+  (6.5 mm) keys ([RFC 0019](rfcs/0019-adaptive-ui.md#text-entry)). Checked off screen by
+  `text-keyboard`; on the instrument, untried.
 - **One window on the screen.** Under Roland's Weston 6.0.1 with Xwayland, the first run showed
   the window offset with a border at the top and left and its right and bottom edges off the
   screen: Weston's window manager put it in a frame with a 32-pixel shadow margin. The Plugins

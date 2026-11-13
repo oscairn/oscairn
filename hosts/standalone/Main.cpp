@@ -871,9 +871,20 @@ namespace oscairn::standalone
             const auto args = juce::StringArray::fromTokens( commandLine, true );
             offscreen = args.contains( "--snapshot" );
 #if JUCE_MAC
-            if( offscreen || args.contains( "--version" ) ) juce::Process::setDockIconVisible( false ); // never the active app, nor in the Dock
+            if( offscreen || args.contains( "--version" ) || args.contains( "--help" ) ) juce::Process::setDockIconVisible( false ); // never the active app, nor in the Dock
 #endif
             if( args.contains( "--version" ) ) { std::printf( "Oscairn %s\n", OSCAIRN_RELEASE ); quit(); return; }
+            // Printed, with nothing opened or shown: the arguments at the top of this file.
+            if( args.contains( "--help" ) )
+            {
+                std::printf( "Oscairn [--profile NAME|FILE] [--controller FILE]... [--layout NAME|FILE] [--plugins DIR]\n"
+                             "        [--in-process | --connect SOCKET] [--play] [--input-mode automatic|mouse|touch]\n"
+                             "        [--app performance|library|setlist|groovebox|recordings|settings|plugins]\n"
+                             "        [--snapshot OUT.png [--size WxH] [--play SECONDS] [--view TAB]]\n"
+                             "        [the engine's audio options: oscairn-engine --help]\n"
+                             "Oscairn --version\n" );
+                quit(); return;
+            }
             auto       dir  = argument( args, "--plugins" );
             if( dir.isEmpty() )
             {

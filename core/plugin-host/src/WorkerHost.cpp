@@ -758,7 +758,12 @@ namespace oscairn
             uint32_t noteOutputPorts() const noexcept override { return noteOutputs_; }
             bool usesClapNotes(uint32_t port) const noexcept override { return port < clapNotes_.size() && clapNotes_[port]; }
             // While down, a panic would reach the restarted worker and drop its first block's events.
-            void panic() noexcept override { if(!process_->failed.load()) shared_->panic.store(1, std::memory_order_release); }
+            // With the extra block the worker may still be rendering the last block, which a panic now must not reach: it waits for the next one.
+            void panic() noexcept override
+            {
+                if(process_->failed.load()) return;
+                if(extra_) panicLater_.store(true, std::memory_order_release); else shared_->panic.store(1, std::memory_order_release);
+            }
             bool inWorker() const noexcept override { return true; }
             bool reset() override { return request(Op::Reset).u8() != 0; }
             // Every node of the worker is reconfigured by its own call, each setting the worker's rate.
@@ -1111,6 +1116,7 @@ namespace oscairn
                 }
                 else playedOk_ = previous_ == Previous::none; // a first block is silent; one not started was silenced
                 played_ = last;
+                if(panicLater_.exchange(false, std::memory_order_acq_rel) && !process_->failed.load()) shared_->panic.store(1, std::memory_order_release); // the worker is idle: the panic is the next block's
                 // shortcut: a block longer than the worker's is silenced here; a realtime block never is, only an offline one (not delayed).
                 const bool fits = frames <= process_->frames;
                 const auto channels = std::min(no, outChannels_);
@@ -1228,7 +1234,7 @@ namespace oscairn
             std::chrono::steady_clock::time_point sent_{};
             // The extra block (RFC 0045): two buffers of the worker's block, the one the last block went to
             // and the one this block goes to; what became of the last block, and what this call plays.
-            bool extra_ = false;
+            bool extra_ = false; std::atomic<bool> panicLater_{false};
             std::vector<float> held_; std::vector<float*> heldPointers_;
             enum class Previous { none, started, notStarted } previous_ = Previous::none;
             bool handed_ = false, playedOk_ = true;

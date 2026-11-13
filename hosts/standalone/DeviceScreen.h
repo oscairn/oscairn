@@ -13,4 +13,8 @@ namespace oscairn::standalone
     // asked, with or without a native window (--snapshot has none).
     void fillScreen(juce::Component& window);
     bool fillsScreen(const juce::Component& window);
+    // An app that is a process (RFC 0022), shown as the shell asks (AppProcesses::show): hidden;
+    // placed where the shell's frame is, with no title bar, at the shell's scale (on X11 inside
+    // the shell's window, a child of it, which no window manager moves); else its own window.
+    void placeAppWindow(juce::DocumentWindow& window, const juce::var& how);
 }

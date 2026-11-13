@@ -974,6 +974,55 @@ int main(int argc, char** argv)
                 }
                 if(auto* dialog = pane.catalog() ? pane.catalog()->findParentComponentOfClass<juce::DialogWindow>() : nullptr) dialog->exitModalState(0);
                 settle();
+                // A device's screen (RFC 0019): one window, and nothing opens as a window of its
+                // own. The Library in its frame at the FANTOM-07's size: Back touch-size, on the
+                // screen; the Catalog, an alert and a menu open inside the window, with touch-size
+                // close and buttons. The window is never on the desktop, nor is anything else.
+                {
+                    const auto fantom = standalone::loadProfile("fantom-07");
+                    const auto* s = fantom.screen();
+                    const int touch = standalone::Profile::Screen::touchTarget;
+                    juce::Component screen; // as the app's window shows it, at the screen's size in design units
+                    screen.setSize(juce::roundToInt(s->width / s->scale()), juce::roundToInt(s->height / s->scale()));
+                    standalone::setDeviceScreen(&screen, touch);
+                    const int desktop = juce::Desktop::getInstance().getNumComponents(), windows = juce::TopLevelWindow::getNumTopLevelWindows();
+                    auto named = [](auto&& self, juce::Component& in, const juce::String& name) -> juce::Component* {
+                        if(in.getName() == name) return &in;
+                        for(auto* c : in.getChildren()) if(auto* found = self(self, *c, name)) return found;
+                        return nullptr; };
+                    auto onScreen = [&](juce::Component& c) { return screen.getLocalBounds().contains(screen.getLocalArea(&c, c.getLocalBounds())); };
+                    auto touchSize = [&](juce::Component* c) { return c && c->getWidth() >= touch && c->getHeight() >= touch && onScreen(*c); };
+                    standalone::LibraryPane library(engine, actions, standalone::LibraryPane::Mode::Play);
+                    standalone::TopBar::Shell shell; shell.home = [] {}; shell.back = [] {};
+                    standalone::AppFrame frame(engine, "Library", library, shell);
+                    standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(library, 2);
+                    screen.addAndMakeVisible(frame); frame.setBounds(screen.getLocalBounds());
+                    settle();
+                    check(touchSize(named(named, frame, "Back")), "the Library on the device's screen, its Back touch-size on it");
+                    library.showCatalog("performance");
+                    auto* catalog = library.catalog();
+                    auto* dialog = catalog ? catalog->findParentComponentOfClass<juce::DialogWindow>() : nullptr;
+                    check(dialog && dialog->getParentComponent() == &screen && !dialog->isOnDesktop() && onScreen(*dialog) && touchSize(dialog->getCloseButton()),
+                          "the Catalog opens inside the screen, its close touch-size on it");
+                    if(dialog) dialog->exitModalState(0);
+                    settle();
+                    juce::AlertWindow::showAsync(juce::MessageBoxOptions().withTitle("Remove").withMessage("Remove it?").withButton("Remove").withButton("Keep"), [](int) {});
+                    settle(); // shown from the message loop
+                    juce::AlertWindow* alert = nullptr;
+                    for(auto* c : screen.getChildren()) if(auto* a = dynamic_cast<juce::AlertWindow*>(c)) alert = a;
+                    bool buttons = alert != nullptr;
+                    if(alert) for(auto* c : alert->getChildren()) if(auto* b = dynamic_cast<juce::TextButton*>(c)) buttons = buttons && touchSize(b);
+                    juce::String sizes; if(alert) { sizes << alert->getBounds().toString() << " in " << screen.getLocalBounds().toString(); for(auto* c : alert->getChildren()) if(auto* t = dynamic_cast<juce::TextButton*>(c)) sizes << "; " << t->getBounds().toString(); }
+                    check(alert && !alert->isOnDesktop() && onScreen(*alert) && buttons, "an alert opens inside the screen, its buttons touch-size: " + sizes.toStdString());
+                    if(alert) alert->exitModalState(0);
+                    settle();
+                    check(theme.getParentComponentForMenuOptions(juce::PopupMenu::Options()) == &screen, "a menu opens inside the screen");
+                    check(juce::Desktop::getInstance().getNumComponents() == desktop && juce::TopLevelWindow::getNumTopLevelWindows() == windows,
+                          "no window of its own: " + std::to_string(juce::Desktop::getInstance().getNumComponents() - desktop) + " on the desktop, " + std::to_string(juce::TopLevelWindow::getNumTopLevelWindows() - windows) + " more top-level");
+                    snapshot(screen, "device-library");
+                    screen.removeChildComponent(&frame);
+                    standalone::setDeviceScreen(nullptr);
+                }
                 pane.showKind("performance");
                 {
                     // The app's plugins, found by the scanner with their versions as the repositories are read.

@@ -181,6 +181,52 @@ physical minimum, since a computer's density is not known. Given a path it write
 (their mutes, sends and faders are not all 44 units yet); a split's lane buttons; the scale on a
 device's own screen, which only the hardware shows.
 
+#### One window on a device's screen
+
+Built 2026-11-12, after the FANTOM-07 showed the app under its own display server (Weston with
+Xwayland, whose window manager places and decorates X windows): the window came up offset, with
+a border showing what was behind it and its right and bottom edges off the screen, and the
+plugin browser and the Catalog came up as windows of their own with a close button too small to
+tap. A profile whose screen's `surface` is not `desktop` (a panel or compact screen) now gets
+one window and nothing else:
+
+- **The window fills the display under any window manager.** On X11 it is at the display's
+  origin and size, undecorated (`_MOTIF_WM_HINTS`), and asks for full screen in EWMH's way:
+  `_NET_WM_STATE_FULLSCREEN` in its `_NET_WM_STATE` before it is mapped, and asked again on the
+  root window once it is (JUCE 9's `setFullScreen` and kiosk mode only set the bounds on Linux,
+  or maximize a window with a native title bar). Oscairn's images have no window manager and
+  the window is where it is put; Weston's, a desktop's or any EWMH window manager makes it full
+  screen, without the shadow margin Weston puts round other windows. It has no border of its
+  own, and the layout follows the size the window is actually given. The splash does the same.
+- **Everything else opens inside it.** The plugin browser (the screen's Plugins button) is an
+  app on the screen, under the top bar, like the Library; the Library's pick (Load Sound, a
+  setlist's Add) opens over the app that asked, in a frame whose Back cancels. Dialogs (the
+  Catalog, Install, Export, Import, the Details of an app's log), alerts and text prompts are
+  added to the window instead of the desktop (`keepInScreen`, the theme's `createAlertWindow`),
+  centered and no larger than it, a dialog's title bar 44 units with only its close button,
+  alerts' buttons 44 units tall; menus open inside it too. The apps that are processes (Settings
+  and Setlist, RFC 0022) are placed in the frame under the top bar, at the shell's scale, and on
+  X11 as a child window of the shell's, which no window manager moves, decorates or puts behind
+  it; their own dialogs open inside them. Plugins' own windows are not built on Linux.
+- **Not converted:** file choosers (Import sample or SFZ on the screen, the plugin browser's
+  Install theme and Add folder, the Library's Export, Install from a file and a plugin's build
+  for another platform). JUCE asks zenity or kdialog where one is installed, a window of another
+  program's, and otherwise draws its own dialog as a window of its own; neither has a place on
+  an instrument, which needs a file browser of its own for USB storage
+  ([RFC 0037](0037-storage-and-file-transfer.md)).
+
+`desktop-launch` checks it from the real app, off screen: with the FANTOM-07's profile, at Home,
+in the Library and in the plugin browser, there is one top-level window, full screen and
+undecorated (on the desktop, the Library is a second window). `desktop-gaps` puts the Library,
+in its frame, on a screen of the FANTOM-07's size and opens the Catalog, an alert and a menu: each
+opens inside it, nothing goes on the desktop, and Back, the Catalog's close and the alert's
+buttons are 44 units on the screen. Under Weston 13 (headless, desktop shell without a panel)
+with Xwayland in the CI image, by hand with `xprop` and `xwininfo` at 1280 × 720 and the
+FANTOM-07's profile: before, the window was 32 pixels inside Weston's frame (its shadow margin),
+1280 × 721, with no `_NET_WM_STATE`, and Settings a window of its own at 819 × 410; now it is at
+0, 0, 1280 × 720, `_NET_WM_STATE_FULLSCREEN`, and Settings a child of it at 0, 74 (under the top
+bar), 1280 × 646. On the FANTOM-07 itself (Weston 6.0.1), untried.
+
 ### Compact
 
 Not built now. To keep it possible:

@@ -5,13 +5,13 @@
 //
 //   oscairn-standalone [--profile NAME|path.json] [--controller path.json]... [--layout NAME|path.json] [--plugins DIR]
 //                      [--in-process | --connect SOCKET] [--play] [--input-mode automatic|mouse|touch]
-//                      [--app performance|library|setlist|groovebox|recordings]
+//                      [--app performance|library|setlist|groovebox|recordings|settings|plugins]
 //                      [--snapshot out.png [--size WxH] [--play SECONDS] [--view TAB]]
 //   oscairn-standalone --version
 //
 // --profile names the device it runs on (RFC 0024): a built-in profile (qemu-aarch64, kick, ignite,
 // modx-m) or a file; without it, the computer's own. A panel profile fills the display with no
-// title bar, full screen under any window manager; shows its layout and asks the audio device for its block size; --layout and the
+// title bar, full screen under any window manager, everything else inside it; shows its layout and asks the audio device for its block size; --layout and the
 // audio options override it for a run. --play starts the sequencer at launch. --input-mode overrides the saved preference for this run. --snapshot
 // renders the window off screen (no window or splash is shown) to a PNG and quits: at the layout's design size, or as in a window of
 // --size; with --play SECONDS, the sequencer plays for that long first; with --view, the
@@ -112,7 +112,8 @@ namespace oscairn::standalone
 
     class LibraryWindow final : public juce::DocumentWindow {
     public:
-        LibraryWindow(Engine& engine,Theme& theme,const juce::File& plugins):DocumentWindow("Oscairn - Plugins and appearance",ink(Ink::Background),DocumentWindow::allButtons) {
+        LibraryWindow(Engine& engine,Theme& theme,const juce::File& plugins):DocumentWindow("Oscairn - Plugins and appearance",ink(Ink::Background),DocumentWindow::allButtons,!offscreen) {
+            if(offscreen)setOffscreen(*this);
             setUsingNativeTitleBar(true);setContentOwned(new PluginBrowser(engine,theme,plugins),true);
             setResizable(true,false);setResizeLimits(900,620,1800,1200);centreWithSize(1060,760);setVisible(true);
         }
@@ -138,6 +139,8 @@ namespace oscairn::standalone
                 // A dense screen scales everything, dialogs and menus too, so a touch target keeps
                 // its physical size (RFC 0019).
                 juce::Desktop::getInstance().setGlobalScaleFactor( profile_.screen()->scale() );
+                // Nothing else opens as a window of its own: dialogs, alerts and menus open inside this one.
+                setDeviceScreen( this, Profile::Screen::touchTarget );
             }
 #if JUCE_MAC
             juce::MenuBarModel::setMacMainMenu( this );
@@ -289,7 +292,7 @@ namespace oscairn::standalone
             if( shell() ) engine_.appClosed( "oscairn.performance" ); // Home replaces it
             setContentOwned( home, false );
         }
-        // An app by name, as its tile opens it (--app): performance, library, setlist, groovebox, recordings or settings.
+        // An app by name, as its tile opens it (--app): performance, library, setlist, groovebox, recordings or settings; or plugins.
         void openApp( const juce::String& name )
         {
             if( name == "performance" ) openPerformance();
@@ -298,10 +301,12 @@ namespace oscairn::standalone
             else if( name == "groovebox" ) openGroovebox();
             else if( name == "recordings" ) showRecordings();
             else if( name == "settings" && settingsApp() ) showSettings();
-            else throw std::invalid_argument( "--app is performance, library, setlist, groovebox, recordings or settings" );
-            // On the desktop those three open in windows of their own: --snapshot shows that window.
+            else if( name == "plugins" ) showLibrary(); // as the Plugins button opens it
+            else throw std::invalid_argument( "--app is performance, library, setlist, groovebox, recordings, settings or plugins" );
+            // On the desktop those four open in windows of their own: --snapshot shows that window.
             if( !panel() )
                 snapshotView_ = name == "library" && libraryApp_ ? libraryApp_->getContentComponent()
+                              : name == "plugins" && library_ ? library_->getContentComponent()
                               : name == "groovebox" && groovebox_ ? groovebox_->getContentComponent()
                               : name == "recordings" && recordings_ ? recordings_->getContentComponent() : nullptr;
         }
@@ -617,13 +622,30 @@ namespace oscairn::standalone
             pane->onPicked=[this](const std::string& id){
                 auto pending=std::move(pickerAnswer_);pickerAnswer_={};
                 // The window goes after this click has finished with it.
-                juce::MessageManager::callAsync([safe=juce::Component::SafePointer<Window>(this)]{if(safe && !safe->pickerAnswer_)safe->picker_.reset();});
+                juce::MessageManager::callAsync([safe=juce::Component::SafePointer<Window>(this)]{if(safe && !safe->pickerAnswer_)safe->closePicker();});
                 if(pending)pending(id);
             };
-            picker_=std::make_unique<AppWindow>(kind=="sound"?"Choose a Sound":"Choose a Performance",pane,760,620);
+            closePicker();
+            const juce::String title=kind=="sound"?"Choose a Sound":"Choose a Performance";
+            if(auto* p=panel()){
+                // Over the screen, in a frame whose Back cancels; what was over it comes back after.
+                auto cancel=barShell();cancel.home=cancel.back=[pane]{pane->onPicked({});};cancel.apps={};
+                pickerPane_.reset(pane);pickerFrame_=std::make_unique<AppFrame>(engine_,title,*pane,cancel);
+                setDesktopMode(*pickerFrame_,2);setDesktopMode(*pane,2);
+                pickerUnder_=p->overlaid();p->overlay(pickerFrame_.get());
+                return;
+            }
+            picker_=std::make_unique<AppWindow>(title,pane,760,620);
             picker_->onClose=[pane]{pane->onPicked({});};
             setDesktopMode(*pane,inputMode_==InputMode::Touch?2:1);
             picker_->setVisible(true);picker_->toFront(true);
+        }
+        void closePicker()
+        {
+            picker_.reset();
+            if(!pickerFrame_)return;
+            if(auto* p=panel())p->overlay(pickerUnder_.getComponent());
+            pickerFrame_.reset();pickerPane_.reset();
         }
         // Another Performance's parts and scenes into this one (RFC 0021): the Library picks it,
         // then its parts and scenes are listed, all ticked; the chosen ones come, parts with what
@@ -643,7 +665,7 @@ namespace oscairn::standalone
                 options.dialogTitle="Import from "+juce::String::fromUTF8(item->name.c_str());
                 options.content.setOwned(content);options.componentToCentreAround=safe.getComponent();options.useNativeTitleBar=true;options.resizable=false;
                 options.dialogBackgroundColour=ink(Ink::Background); // JUCE's default is light grey, under the theme's text
-                auto* dialog=options.launchAsync();
+                auto* dialog=launchDialog(options);
                 content->cancel.onClick=[dialog]{dialog->exitModalState(0);};
                 content->import.onClick=[safe,dialog,content,path=item->path]{
                     auto parts=ImportChoices::ticked(content->parts,content->partIds),scenes=ImportChoices::ticked(content->scenes,content->sceneIds);
@@ -706,6 +728,7 @@ namespace oscairn::standalone
             auto* w=new juce::AlertWindow(asNew?"Save Sound As New":"Save Sound","The Sound's name:",juce::MessageBoxIconType::NoIcon,this);
             w->addTextEditor("name",juce::String::fromUTF8(name.c_str()),"Name");
             w->addButton("Save",1,juce::KeyPress(juce::KeyPress::returnKey));w->addButton("Cancel",0,juce::KeyPress(juce::KeyPress::escapeKey));
+            keepInScreen(*w);
             w->enterModalState(true,juce::ModalCallbackFunction::create([safe=juce::Component::SafePointer<Window>(this),w,part,asNew](int result){
                 if(!safe || result!=1)return;
                 SoundAction save;save.kind=SoundAction::SaveSound;save.part=part;save.asNew=asNew;save.choice.name=w->getTextEditorContents("name").trim().toStdString();
@@ -713,7 +736,16 @@ namespace oscairn::standalone
             }),true);
         }
         void saveToLibrary(bool asNew){savePerformance(engine_,this,asNew);}
-        void showLibrary(){if(!library_)library_=std::make_unique<LibraryWindow>(engine_,theme_,plugins_);library_->setVisible(true);library_->toFront(true);}
+        // Plugins and appearance: on a panel's screen as its apps are (the Plugins button), else a window.
+        void showLibrary()
+        {
+            if(panel())
+            {
+                if(bringForward("Plugins"))return;
+                auto browser=std::make_unique<PluginBrowser>(engine_,theme_,plugins_);auto& app=*browser;openOnScreen("Plugins","layers",app,std::move(browser));return;
+            }
+            if(!library_)library_=std::make_unique<LibraryWindow>(engine_,theme_,plugins_);library_->setVisible(true);library_->toFront(true);
+        }
         // The pad editor covers the panel, so it fits a device's single screen too.
         void showPads()
         {
@@ -811,6 +843,10 @@ namespace oscairn::standalone
         std::vector<RunningApp> running_;
         std::unique_ptr<AppSwitcher> switcher_;
         std::unique_ptr<AppWindow> groovebox_, libraryApp_, picker_, recordings_;
+        // The Library's pick over a panel's screen (the pane before the frame that shows it), and what it covers.
+        std::unique_ptr<juce::Component> pickerPane_;
+        std::unique_ptr<AppFrame> pickerFrame_;
+        juce::Component::SafePointer<juce::Component> pickerUnder_;
         std::unique_ptr<LaunchNotice> notice_; // why an app did not open (RFC 0025)
         Actions::Answer pickerAnswer_;
         std::unique_ptr<PadEditor> pads_;
@@ -1089,7 +1125,7 @@ namespace oscairn::standalone
             const bool panel = profile.screen() && profile.screen()->surface != "desktop";
             splash_->setBounds( panel ? display->logicalBounds.toNearestInt() : display->userBounds.toNearestInt().withSizeKeepingCentre( 420, 300 ) );
             splash_->addToDesktop( panel ? 0 : juce::ComponentPeer::windowHasDropShadow );
-            if( panel ) fillScreen( *splash_ );
+            if( panel ) { fillScreen( *splash_ ); setDeviceScreen( splash_.get(), Profile::Screen::touchTarget ); } // a failure's alert opens inside it
             splash_->setVisible( true );
             splash_->toFront( true ); // over other apps' windows, as a starting app is
         }

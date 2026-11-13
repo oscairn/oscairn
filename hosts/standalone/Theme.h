@@ -66,6 +66,15 @@ void setDesktopMode(juce::Component&, int mode);
 // has no peer: views that poll only while shown poll there too.
 bool showing(const juce::Component&);
 void setOffscreen(juce::Component& window);
+// A device's screen (RFC 0019): one window, and nothing else opens as a window of its own. The
+// window dialogs, alerts and menus open inside, with `touch` (design units) the smallest a
+// control is there; null: the desktop, where each dialog is a window. keepInScreen puts a dialog
+// (a window JUCE made) inside it before it shows: centered, no larger, as a touch screen draws it,
+// a title bar `touch` tall with only its close button. launchDialog: LaunchOptions::launchAsync so.
+void setDeviceScreen(juce::Component* window,int touch=44);
+juce::Component* deviceScreen();
+void keepInScreen(juce::Component& dialog);
+juce::DialogWindow* launchDialog(juce::DialogWindow::LaunchOptions& options);
 float textSize(TextRole, int mode);              // in pixels, with the theme's font scale
 // Per-user Oscairn appearance, shared across layouts, windows and UI processes. A theme is a
 // folder holding theme.json and its fonts. Built-in themes are the same folders, shipped beside
@@ -95,6 +104,10 @@ public:
     void drawTextEditorOutline(juce::Graphics&,int,int,juce::TextEditor&) override;
     void drawButtonBackground(juce::Graphics&,juce::Button&,const juce::Colour&,bool,bool) override;
     void drawRotarySlider(juce::Graphics&,int,int,int,int,float,float,float,juce::Slider&) override;
+    // On a device's screen (setDeviceScreen): alerts and menus inside it, alerts' buttons touch-size.
+    juce::AlertWindow* createAlertWindow(const juce::String&,const juce::String&,const juce::String&,const juce::String&,const juce::String&,juce::MessageBoxIconType,int,juce::Component*) override;
+    int getAlertWindowButtonHeight() override;
+    juce::Component* getParentComponentForMenuOptions(const juce::PopupMenu::Options&) override;
 private:
     struct Loaded { ThemeData data; juce::Typeface::Ptr regular,bold; std::shared_ptr<juce::Drawable> splash; };
     Loaded load(const juce::File& folder) const;

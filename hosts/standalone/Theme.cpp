@@ -294,6 +294,35 @@ bool showing(const juce::Component& c) {
     return at->isVisible() && at->getProperties().contains("oscairnOffscreen");
 }
 void setOffscreen(juce::Component& window){window.getProperties().set("oscairnOffscreen",true);}
+namespace{juce::Component::SafePointer<juce::Component> screenWindow;int touchSize=44;}
+void setDeviceScreen(juce::Component* window,int touch){screenWindow=window;touchSize=touch;}
+juce::Component* deviceScreen(){return screenWindow.getComponent();}
+void keepInScreen(juce::Component& dialog) {
+    auto* screen=deviceScreen();
+    if(!screen || &dialog==screen || dialog.getParentComponent()==screen)return;
+    if(auto* window=dynamic_cast<juce::DocumentWindow*>(&dialog)){
+        window->setUsingNativeTitleBar(false);window->setTitleBarHeight(touchSize);
+        window->setTitleBarButtonsRequired(juce::DocumentWindow::closeButton,false);
+    }
+    setDesktopMode(dialog,2);
+    screen->addChildComponent(dialog); // off the desktop: no window of its own
+    dialog.setBounds(screen->getLocalBounds().withSizeKeepingCentre(std::min(dialog.getWidth(),screen->getWidth()),std::min(dialog.getHeight(),screen->getHeight())));
+}
+juce::DialogWindow* launchDialog(juce::DialogWindow::LaunchOptions& options) {
+    auto* dialog=options.create();keepInScreen(*dialog);
+    dialog->enterModalState(true,nullptr,true);
+    return dialog;
+}
+juce::AlertWindow* Theme::createAlertWindow(const juce::String& title,const juce::String& message,const juce::String& button1,const juce::String& button2,const juce::String& button3,juce::MessageBoxIconType icon,int buttons,juce::Component* associated) {
+    auto* alert=LookAndFeel_V4::createAlertWindow(title,message,button1,button2,button3,icon,buttons,associated);
+    if(alert)keepInScreen(*alert);
+    return alert;
+}
+int Theme::getAlertWindowButtonHeight(){return deviceScreen()?touchSize:LookAndFeel_V4::getAlertWindowButtonHeight();}
+juce::Component* Theme::getParentComponentForMenuOptions(const juce::PopupMenu::Options& options) {
+    auto* parent=LookAndFeel_V4::getParentComponentForMenuOptions(options);
+    return parent?parent:deviceScreen();
+}
 float textSize(TextRole role,int mode) {
     const bool touch=mode==2;
     const float size=role==TextRole::Small?(touch?13.f:12.f):role==TextRole::Button?(touch?15.f:13.f):role==TextRole::Title?(touch?20.f:18.f):(touch?16.f:14.f);

@@ -201,6 +201,7 @@ namespace oscairn::standalone
         dialog_->addTextEditor("name", nameOf(*t), "Name");
         dialog_->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
         dialog_->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        keepInScreen(*dialog_);
         dialog_->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<RecordingsPane>(this)](int chosen) {
             if(!safe || !safe->dialog_) return;
             const auto window = std::move(safe->dialog_);

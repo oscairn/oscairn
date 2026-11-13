@@ -46,9 +46,10 @@ namespace oscairn::standalone
         const std::vector<AppManifest>& apps() const { return manifests_; }
         const AppManifest* find(const std::string& id) const;
         // Started if it is not running, and shown: where the shell says on the screen (a panel's
-        // frame, in screen coordinates), or as its own window when bounds are empty. mode: 1
+        // frame, in screen coordinates; with `parent`, a native window of the shell's (X11), in
+        // that window's, inside it), or as its own window when bounds are empty. mode: 1
         // mouse, 2 touch. False when it cannot run (no build here, or no connection).
-        bool open(const std::string& id, juce::Rectangle<int> bounds = {}, int mode = 1);
+        bool open(const std::string& id, juce::Rectangle<int> bounds = {}, int mode = 1, juce::int64 parent = 0);
         void hide(const std::string& id);
         void setFront(const std::string& id); // the app in front (the hang rule's 5 seconds), or none
         State state(const std::string& id) const;
@@ -79,7 +80,7 @@ namespace oscairn::standalone
             pid_t pid = -1;
             State state = State::Closed;
             bool shown = false, waited = false, stopping = false;
-            juce::Rectangle<int> bounds; int mode = 1;
+            juce::Rectangle<int> bounds; int mode = 1; juce::int64 parent = 0;
             std::deque<double> crashes;       // when, in seconds, within the last minute
             juce::String why;                 // a stop of ours to report as the crash's reason
             std::deque<std::pair<double, uint64_t>> readings; // its memory, when read (seconds) and bytes, over the last few seconds

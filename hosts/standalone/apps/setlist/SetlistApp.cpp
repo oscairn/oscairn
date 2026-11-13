@@ -6,6 +6,7 @@
 // them; Performances sent to it come the same way. Its state (the entry playing) is kept in its
 // data folder (OSCAIRN_APP_DATA), so started again after a crash it comes back where it was.
 //   Oscairn Setlist [--snapshot out.png --size WxH [--mode 1|2]]
+#include "../../DeviceScreen.h"
 #include "../../Setlist.h"
 #include "../../Engine.h"
 #include "../../Theme.h"
@@ -99,15 +100,9 @@ namespace oscairn::standalone
         {
             if(!window_) return; // --snapshot
             const auto how = juce::JSON::parse(juce::String::fromUTF8(argument.c_str()));
-            if(!bool(how.getProperty("visible", true))) { window_->setVisible(false); return; }
             setDesktopMode(*pane_, int(how.getProperty("mode", 1)) == 2 ? 2 : 1);
-            if(const auto* b = how["bounds"].getArray(); b && b->size() == 4)
-            {
-                window_->setUsingNativeTitleBar(false); window_->setTitleBarHeight(0); window_->setResizable(false, false);
-                window_->setBounds(int((*b)[0]), int((*b)[1]), int((*b)[2]), int((*b)[3]));
-            }
+            placeAppWindow(*window_, how);
             pane_->resized();
-            window_->setVisible(true); window_->toFront(true);
         }
         std::string current() const
         {

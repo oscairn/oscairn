@@ -115,7 +115,7 @@ namespace oscairn::standalone
         options.dialogTitle = title;
         options.content.setOwned(content); options.componentToCentreAround = over; options.useNativeTitleBar = true; options.resizable = false;
         options.dialogBackgroundColour = ink(Ink::Background); // JUCE's default is light grey, under the theme's text
-        auto* dialog = options.launchAsync();
+        auto* dialog = launchDialog(options);
         content->cancel.onClick = [dialog] { dialog->exitModalState(0); };
         content->go.onClick = [dialog, content, then = std::move(start)] {
             const bool edited = content->editedSounds.getToggleState(); const auto key = content->key();
@@ -134,6 +134,7 @@ namespace oscairn::standalone
         auto* w = new juce::AlertWindow(asNew ? "Save As New" : "Save", "The Performance's name:", juce::MessageBoxIconType::NoIcon, over);
         w->addTextEditor("name", text(info->name), "Name");
         w->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey)); w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        keepInScreen(*w);
         w->enterModalState(true, juce::ModalCallbackFunction::create([&engine, safe = juce::Component::SafePointer<juce::Component>(over), w, asNew, done = std::move(done)](int result) mutable {
             if(!safe || result != 1) return;
             if(const auto why = engine.refusal(); !why.empty()) { juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Not saved", juce::String(why)); return; } // busy since the name was asked
@@ -151,6 +152,7 @@ namespace oscairn::standalone
         w->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
         w->addButton("Don't Save", 2, juce::KeyPress('d', juce::ModifierKeys::commandModifier, 0));
         w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        keepInScreen(*w);
         w->enterModalState(true, juce::ModalCallbackFunction::create([&engine, safe = juce::Component::SafePointer<juce::Component>(over), then = std::move(then)](int result) {
             if(result == 2) then();
             if(result != 1 || !safe) return;
@@ -851,6 +853,7 @@ namespace oscairn::standalone
         editor_->addTextEditor("tags", tagText(item.tags), "Tags, separated by commas");
         editor_->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
         editor_->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        keepInScreen(*editor_);
         editor_->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<LibraryPane>(this), item](int chosen) {
             if(!safe || !safe->editor_) return;
             const auto window = std::move(safe->editor_);
@@ -1048,7 +1051,7 @@ namespace oscairn::standalone
             options.dialogTitle = "Install " + text(archive.name);
             options.content.setOwned(content); options.componentToCentreAround = safe.getComponent(); options.useNativeTitleBar = true; options.resizable = false;
             options.dialogBackgroundColour = ink(Ink::Background); // JUCE's default is light grey, under the theme's text
-            auto* dialog = options.launchAsync();
+            auto* dialog = launchDialog(options);
             content->cancel.onClick = [dialog] { dialog->exitModalState(0); };
             content->go.onClick = [safe, dialog, content, file] {
                 SoundAction install; install.kind = SoundAction::InstallArchive; install.directory = file; install.asNew = content->locked.getToggleState(); install.acceptCode = content->asks;
@@ -1101,7 +1104,7 @@ namespace oscairn::standalone
         options.dialogTitle = "Catalog";
         options.content.setOwned(content); options.componentToCentreAround = this; options.useNativeTitleBar = true; options.resizable = false;
         options.dialogBackgroundColour = ink(Ink::Background);
-        auto* dialog = options.launchAsync();
+        auto* dialog = launchDialog(options);
         catalog_ = content;
         content->close.onClick = [dialog] { dialog->exitModalState(0); };
         content->onInstall = [safe = juce::Component::SafePointer<LibraryPane>(this), dialog](const Offer& o) {

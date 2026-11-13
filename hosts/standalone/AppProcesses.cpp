@@ -210,7 +210,12 @@ namespace oscairn::standalone
         const auto& r = running_[id];
         auto* argument = new juce::DynamicObject();
         argument->setProperty("visible", r.shown); argument->setProperty("mode", r.mode);
-        if(!r.bounds.isEmpty()) argument->setProperty("bounds", juce::Array<juce::var>{r.bounds.getX(), r.bounds.getY(), r.bounds.getWidth(), r.bounds.getHeight()});
+        if(!r.bounds.isEmpty())
+        {
+            argument->setProperty("bounds", juce::Array<juce::var>{r.bounds.getX(), r.bounds.getY(), r.bounds.getWidth(), r.bounds.getHeight()});
+            argument->setProperty("scale", juce::Desktop::getInstance().getGlobalScaleFactor()); // the units of bounds
+            if(r.parent) argument->setProperty("parent", r.parent);
+        }
         engine_.appRequest(id, showApp, juce::JSON::toString(juce::var(argument), true).toStdString(), [shown = r.shown, pid = r.pid](const std::string& answer) {
 #ifdef __APPLE__
             if(shown && answer == "shown") activateApp(pid); // its window is up: it comes in front of the shell's
@@ -220,11 +225,11 @@ namespace oscairn::standalone
         });
     }
 
-    bool AppProcesses::open(const std::string& id, juce::Rectangle<int> bounds, int mode)
+    bool AppProcesses::open(const std::string& id, juce::Rectangle<int> bounds, int mode, juce::int64 parent)
     {
         if(!find(id)) return false;
         auto& r = running_[id];
-        r.shown = true; r.bounds = bounds; r.mode = mode;
+        r.shown = true; r.bounds = bounds; r.mode = mode; r.parent = parent;
         if(r.state == State::GaveUp) r.crashes.clear(); // opened by hand: it may try again
         setFront(id);
         if(r.pid < 0) return start(id);
@@ -268,7 +273,7 @@ namespace oscairn::standalone
         auto& r = running_[id];
         r.crashes.clear();
         say(id, {});
-        if(r.pid < 0) open(id, r.bounds, r.mode);
+        if(r.pid < 0) open(id, r.bounds, r.mode, r.parent);
     }
 
     void AppProcesses::stop(const std::string& id)
@@ -284,7 +289,16 @@ namespace oscairn::standalone
     void AppPlace::place()
     {
         const bool showing = isShowing() && !getScreenBounds().isEmpty();
-        if(showing && (!placed_ || getScreenBounds() != where_)) { where_ = getScreenBounds(); placed_ = apps_.open(id_, where_, 2); }
+#if JUCE_LINUX || JUCE_BSD
+        // Inside the shell's window, as a child of it: no window manager places it (or puts it behind a full-screen shell).
+        auto* top = getTopLevelComponent();
+        const auto where = top->getLocalArea(this, getLocalBounds());
+        const auto parent = juce::int64(top->getPeer() ? reinterpret_cast<uintptr_t>(top->getPeer()->getNativeHandle()) : 0);
+#else
+        const auto where = getScreenBounds();
+        const juce::int64 parent = 0;
+#endif
+        if(showing && (!placed_ || where != where_)) { where_ = where; placed_ = apps_.open(id_, where_, 2, parent); }
         else if(!showing && placed_) { placed_ = false; apps_.hide(id_); }
     }
 
@@ -381,7 +395,7 @@ namespace oscairn::standalone
             text->moveCaretToEnd();
             juce::DialogWindow::LaunchOptions o;
             o.content.setOwned(text); o.dialogTitle = "What it wrote"; o.dialogBackgroundColour = ink(Ink::Background); o.useNativeTitleBar = true; o.resizable = true;
-            o.launchAsync();
+            launchDialog(o);
         };
         wait_.onClick = [this] { apps_.wait(notice_.app); };
         close_.onClick = [this] { const auto app = notice_.app; show({}); apps_.close(app); };

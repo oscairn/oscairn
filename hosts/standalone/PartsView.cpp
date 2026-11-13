@@ -1131,6 +1131,7 @@ namespace oscairn::standalone
                 auto* w = new juce::AlertWindow("Rename " + text(scene.name), juce::String(), juce::MessageBoxIconType::NoIcon, safe.getComponent());
                 w->addTextEditor("name", text(scene.name), "Name");
                 w->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey)); w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+                keepInScreen(*w);
                 w->enterModalState(true, juce::ModalCallbackFunction::create([safe, w, id](int result) {
                     const auto name = w->getTextEditorContents("name").trim().toStdString();
                     if(safe && result == 1 && !name.empty()) safe->edit([id, name](Control& c) { c.setSceneName(id, name); });

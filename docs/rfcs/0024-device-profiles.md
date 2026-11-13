@@ -531,7 +531,7 @@ desktop reliability, every app.
 
 The app takes `--profile NAME|FILE` (the image's `/etc/default/oscairn` passes `qemu-aarch64`,
 replacing `--layout kick-screen --fullscreen`, now gone). A panel or compact surface fills the
-screen with no title or menu bar; the screen's layout is shown unless `--layout` says otherwise;
+screen with no title or menu bar, full screen under any window manager, with nothing else opening as a window of its own ([RFC 0019](0019-adaptive-ui.md#one-window-on-a-devices-screen)); the screen's layout is shown unless `--layout` says otherwise;
 the profile's `apps` are the Apps menu; its `audio.block` is the block the audio device is asked
 for, passed to the managed engine as `--buffer-frames` (16 to 8192; given on the command line it
 wins). `desktop-profile` checks the built-in profiles, the desktop's, nine refusals and the block

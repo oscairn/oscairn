@@ -7,6 +7,7 @@
 
 namespace oscairn::standalone
 {
+    void setDeviceScreen(juce::Component* window, int touch); // Theme.h, whose names X11's macros (None) break
 #if JUCE_LINUX || JUCE_BSD
     namespace
     {
@@ -59,4 +60,30 @@ namespace oscairn::standalone
     }
 
     bool fillsScreen(const juce::Component& window) { return window.getProperties().contains("oscairnFullScreen"); }
+
+    void placeAppWindow(juce::DocumentWindow& window, const juce::var& how)
+    {
+        if(!bool(how.getProperty("visible", true))) { window.setVisible(false); return; }
+        if(const auto* b = how["bounds"].getArray(); b && b->size() == 4)
+        {
+            // The shell's scale, so its coordinates and sizes are this window's.
+            if(const auto scale = float(double(how.getProperty("scale", 1.0))); scale > 0 && scale != juce::Desktop::getInstance().getGlobalScaleFactor())
+                juce::Desktop::getInstance().setGlobalScaleFactor(scale);
+            window.setUsingNativeTitleBar(false); window.setTitleBarHeight(0); window.setResizable(false, false);
+#if JUCE_LINUX || JUCE_BSD
+            // Inside the shell's window, its bounds in the shell's: a child X window, which a
+            // window manager neither moves nor decorates nor puts behind the shell's.
+            if(const auto parent = juce::int64(how.getProperty("parent", 0)); parent != 0 && juce::int64(window.getProperties()["oscairnParent"]) != parent)
+            {
+                // Its own style, unchanged: JUCE adds a window to the desktop again (no parent) when its style changes.
+                window.removeFromDesktop();
+                window.addToDesktop(window.getDesktopWindowStyleFlags(), reinterpret_cast<void*>(uintptr_t(parent)));
+                window.getProperties().set("oscairnParent", parent);
+                setDeviceScreen(&window, 44); // its dialogs and menus inside it too, at the touch target (Profile::Screen::touchTarget)
+            }
+#endif
+            window.setBounds(int((*b)[0]), int((*b)[1]), int((*b)[2]), int((*b)[3]));
+        }
+        window.setVisible(true); window.toFront(true);
+    }
 }

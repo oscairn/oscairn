@@ -149,6 +149,7 @@ namespace oscairn::standalone
             auto* w = new juce::AlertWindow("New setlist", "Its name:", juce::MessageBoxIconType::NoIcon, this);
             w->addTextEditor("name", "", "Name");
             w->addButton("Make", 1, juce::KeyPress(juce::KeyPress::returnKey)); w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            keepInScreen(*w);
             w->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<SetlistPane>(this), w](int result) {
                 if(safe && result == 1 && w->getTextEditorContents("name").trim().isNotEmpty()) safe->create(w->getTextEditorContents("name").trim().toStdString());
             }), true);

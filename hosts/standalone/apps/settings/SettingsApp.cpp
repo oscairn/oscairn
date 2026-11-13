@@ -8,6 +8,7 @@
 //   Oscairn Settings [--profile NAME|FILE] [--snapshot out.png --size WxH [--mode 1|2] [--page ID]]
 #include "Frame.h"
 #include "../../Apps.h"
+#include "../../DeviceScreen.h"
 #include <cstdlib>
 #include <unistd.h>
 
@@ -83,15 +84,9 @@ namespace oscairn::standalone
         {
             if(!window_) return; // --snapshot
             const auto how = juce::JSON::parse(juce::String::fromUTF8(argument.c_str()));
-            if(!bool(how.getProperty("visible", true))) { window_->setVisible(false); return; }
             setDesktopMode(*frame_, int(how.getProperty("mode", 1)) == 2 ? 2 : 1);
-            if(const auto* b = how["bounds"].getArray(); b && b->size() == 4)
-            {
-                window_->setUsingNativeTitleBar(false); window_->setTitleBarHeight(0); window_->setResizable(false, false);
-                window_->setBounds(int((*b)[0]), int((*b)[1]), int((*b)[2]), int((*b)[3]));
-            }
+            placeAppWindow(*window_, how);
             frame_->resized();
-            window_->setVisible(true); window_->toFront(true);
         }
 
         std::unique_ptr<Theme> theme_;

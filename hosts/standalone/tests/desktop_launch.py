@@ -176,7 +176,7 @@ def main():
     # Each with the top-level windows it makes and how its main window would ask the window
     # system for its place, as the app says once off screen: on the desktop the Library is a
     # window of its own; a device's screen is one window, full screen and undecorated, which its
-    # apps open inside (RFC 0019).
+    # apps and the plugin browser open inside (RFC 0019).
     desktop, device = 'a desktop window', 'full screen, undecorated'
     # The FANTOM-07's profile without its audio device, whose 48 kHz the null device does not run at.
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'profiles', 'fantom-07.json')) as f:
@@ -189,7 +189,8 @@ def main():
             ('library', ['--app', 'library', '--size', '900x600'], 2, desktop),
             ('kick', ['--profile', 'kick', '--size', '1024x600'], 1, device),
             ('fantom', ['--profile', fantom, '--size', '1280x720'], 1, device),
-            ('fantom-library', ['--profile', fantom, '--app', 'library', '--size', '1280x720'], 1, device)]
+            ('fantom-library', ['--profile', fantom, '--app', 'library', '--size', '1280x720'], 1, device),
+            ('fantom-plugins', ['--profile', fantom, '--app', 'plugins', '--size', '1280x720'], 1, device)]
     for name, extra, windows, main_window in runs:
         folder = tempfile.mkdtemp(prefix=name + '-', dir=out)
         os.makedirs(os.path.join(folder, 'data'))

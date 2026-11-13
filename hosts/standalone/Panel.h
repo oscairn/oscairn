@@ -74,6 +74,7 @@ namespace oscairn::standalone
         /// Puts a view over the screen (the Parts views), scaled with the panel like the screen,
         /// so the panel's knobs and buttons stay in reach; null removes it.
         void overlay( juce::Component* view );
+        juce::Component* overlaid() const { return overlay_; }
         /// A stretching layout's size in design units on its screen (RFC 0019): the screen's pixels
         /// over its profile's scale, so the panel reflows to that size and scales to fill the
         /// component, with nothing cut off and no bars. The layout's own size until it is set.

@@ -46,8 +46,8 @@ none of it settles is in
   `PMDWSwitchOn` and `PMDWSwitchOff` (encoders, analog controls, switches pressed and released),
   and analog sources `HOLD`, `WHEEL1`, `WHEEL2`, `BENDER` and `SLIDER1` to `SLIDER8`. Where the
   kind, the ID, the value and the step sit in the bytes, and each control's ID, are now read
-  from Roland's test tool and app ([The map](#the-map)); none of it has been seen on a unit
-  yet. Three buttons are not on the panel bus at all: WRITE, MENU and TEMPO are GPIO keys
+  from Roland's test tool and app ([The map](#the-map)); one message read on the unit agrees
+  with the layout and slider 1's ID. Three buttons are not on the panel bus at all: WRITE, MENU and TEMPO are GPIO keys
   (below).
 - **Keys:** a separate keyboard CPU scans them. Seen on the unit with Roland's app stopped and
   nothing sent to the BMC side: key events arrive on the USB serial line `/dev/ttyGS0`, as MIDI
@@ -281,11 +281,15 @@ played into `hw:1,0` while a program kept reading `/dev/ttyGS0`.
 - **The panel is silent.** A plain read-only `read()` of `/dev/i2c-slave-2` returns 0 bytes at
   once (end of file), and moving a slider, the lever and a button raised no interrupt on the
   panel bus, where with Roland's app running a slider raises about 200 a second
-  ([Panel, buttons and lights](#panel-buttons-and-lights)). Inferred, not confirmed: the bus
-  receives only while a reader holds the device the way Roland's programs do
-  ([Panel messages](#panel-messages)), and perhaps only after the host's start words (the two
-  kind-0 words to 0x75 that Roland's app sends,
-  [What the app does that the hardware depends on](#what-the-app-does-that-the-hardware-depends-on)).
+  ([Panel, buttons and lights](#panel-buttons-and-lights)).
+- **The panel speaks to a reader that waits as Roland's do.** Opened for reading and writing,
+  `ioctl(fd, 0, 0)` blocks until the panel has sent a message and returns 0; then `read(fd, buf,
+  4)` gives that one 4-byte message, and a second read without another `ioctl` gives 0. No start
+  words were sent first. The wait gives way to no ordinary signal (a SIGALRM with a handler never
+  ran; the call stayed blocked for minutes until a control moved), but it does end for a fatal
+  one (systemd stopping Roland's app while it waited there). The first message read, `84 09 00
+  02`, as slider 1 had just been pulled down, decodes through the shipped map as analog ID 9,
+  `fader:1`, value 2 ([The map](#the-map)).
 - **The audio link runs without Roland's app.** `aplay -D hw:1,0` played a 6-channel, S32_LE,
   48 kHz file to its end, and the link's DMA interrupts kept their rate throughout: the BMCs
   clock the link by themselves.
@@ -401,9 +405,11 @@ files stay off the repository.
   them, which is what ties the test tool's order to the bus.
 - **How Roland reads the device** (both): open it for reading and writing, call `ioctl` with
   request 0, then read 4 bytes at a time for as long as a read gives 4, and call `ioctl`
-  again. Inferred: the `ioctl` is the driver's wait for a message. **Oscairn's reader does not
-  do that**: it opens read-only and non-blocking, polls, and reads up to 256 bytes. Whether
-  the driver serves it that way is unknown, and is the first thing the dump on a unit shows.
+  again. Seen on the unit: the `ioctl` is the driver's wait for a message, it gives way to no
+  ordinary signal, and each wait is followed by one 4-byte message, a second read giving 0
+  ([With Roland's app stopped](#with-rolands-app-stopped)). Oscairn's reader now does the same
+  ([The panel reader](#the-panel-reader)); before, it opened the device read-only and polled
+  it, and such a read ends at once.
 - **Other kinds exist** (the app): kind 0 words go to the panel as commands, kinds 0x14 and
   0x15 are analog words the app also passes to the sound engine, and 0x0F another the app
   handles itself. What sends them, and when, was not read.
@@ -613,8 +619,20 @@ name, which a chroot does not hide (untried).
 ## The panel reader
 
 `oscairn::PanelReader` ([core/control/include/oscairn/panel_reader.h](../core/control/include/oscairn/panel_reader.h))
-reads the device on a thread of its own, polling with a 100 ms timeout, so it never blocks the
-audio or message thread and stops within that. A byte with bit 7 set starts a message; bytes
+polls on a thread of its own with a 100 ms timeout, so it never blocks the audio or message
+thread and stops within that. The device is read as Roland's programs read it
+([Panel messages](#panel-messages)): opened for reading and writing (never written to), then
+`ioctl(fd, 0, 0)`, the driver's wait for a message, one 4-byte read, and the wait again. That wait
+gives way to no signal but a fatal one, so a thread could not be stopped while in it: the reader
+forks a helper process that opens the device and does that loop, writing each message to a pipe
+the reader polls, and stopping kills it (a fatal signal, which ends the wait). The helper closes
+the engine's other descriptors (its audio device, its sockets) once it has the device open, and
+on Linux dies with the engine. Where the `ioctl` fails, or wakes 100 times running with nothing
+to read, the reader logs it once and opens the device again read-only, polling it, as it did
+before; the pipe ending otherwise starts the helper again after a second. The helper's loop is
+the one seen working on the unit by hand; the reader and the dump themselves have not run there
+yet (a line `ioctl 0 on /dev/i2c-slave-2: ...` in the log is the fallback). A byte with bit 7 set
+starts a message; bytes
 before one are skipped and a message cut short by the next one's first byte is dropped, so it
 finds its place again after garbage or a lost byte, and messages split across reads join up.
 Each message is decoded through the **panel map** and handed to the engine, which plays the
@@ -649,7 +667,9 @@ an identity above, or a fixed control's function from the profile (`enter`, `pla
 value is divided by `max` (or the layout's `analogMax`) for 0 to 1; an encoder's delta is
 multiplied by `step` (or `encoderStep`).
 
-The shipped map's layout and IDs are **read from Roland's programs, not yet seen on a unit**:
+The shipped map's layout and IDs are **read from Roland's programs**, and one message read on
+the unit, slider 1 at 2, decodes as the map says
+([With Roland's app stopped](#with-rolands-app-stopped)); the rest is not yet seen on a unit:
 the layout from the factory test tool (`qctest`), which prints each message's kind, number and
 value, and from the app (`mi078`), which reads the same bits; the IDs from the test tool's
 tables of names, which the app's own table of switch numbers matches entry for entry. Its
@@ -837,11 +857,12 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
      A bend then refutes that the app is the only path.
    - **Look at the lamps.** Expected: they stay as they were, and pressing buttons changes none.
 6. **The panel's layout and IDs:** [Checking the panel map on a unit](#checking-the-panel-map-on-a-unit),
-   with `oscairn-panel-dump` in the bundle. Expected now to show nothing: on November 12 a plain
-   read of the device ended at once and the panel bus stayed quiet with Roland's app stopped
-   ([With Roland's app stopped](#with-rolands-app-stopped)), so the dump's log will say the
-   device ended and is being opened again. The reader has to read the device as Roland does, and
-   the panel may need the host's start words first, before the map can be checked.
+   with `oscairn-panel-dump` in the bundle, which now reads the device as Roland's programs do
+   ([The panel reader](#the-panel-reader)), the way that gave a first message by hand on
+   November 12 ([With Roland's app stopped](#with-rolands-app-stopped)). Lines appearing as
+   controls move confirm the reader; a log line `ioctl 0 on /dev/i2c-slave-2` means it fell
+   back and is not reading the panel: send it back. Ctrl-C should end the dump at once, its
+   helper with it (`ps` shows no `oscairn-panel-dump` left).
 7. **Oscairn's key reader.** The format is confirmed (November 12, with Roland's app stopped:
    [With Roland's app stopped](#with-rolands-app-stopped)); what is left is Oscairn reading it.
    With nothing else reading `/dev/ttyGS0`, start the engine in the bundle with

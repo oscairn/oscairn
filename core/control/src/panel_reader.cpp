@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,7 +16,13 @@
 #include <poll.h>
 #include <set>
 #include <stdexcept>
+#include <sys/ioctl.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 namespace oscairn
 {
@@ -90,6 +97,7 @@ namespace oscairn
             return f;
         }
         constexpr std::array<const char*, 4> kindNames{"encoder", "analog", "switchOn", "switchOff"};
+
     }
 
     const char* kindName(PanelMap::Kind k)
@@ -202,8 +210,14 @@ namespace oscairn
 
     void PanelReader::standardError(const std::string& line) { std::fprintf(stderr, "oscairn: panel: %s\n", line.c_str()); }
 
-    PanelReader::PanelReader(std::string path, PanelMap map, Sink sink, Log log)
-        : path_(std::move(path)), owned_(true), sink_(std::move(sink)), log_(std::move(log)), map_(std::make_shared<const PanelMap>(std::move(map))), thread_([this] { run(); }) {}
+    PanelReader::PanelReader(std::string path, PanelMap map, Sink sink, Log log, Device device)
+        : path_(std::move(path)), device_(std::move(device)), owned_(true), roland_(true), sink_(std::move(sink)), log_(std::move(log)),
+          map_(std::make_shared<const PanelMap>(std::move(map)))
+    {
+        if(!device_.open) device_.open = [](const std::string& p, int flags) { return ::open(p.c_str(), flags); };
+        if(!device_.wait) device_.wait = [](int fd) { return ::ioctl(fd, 0, 0); };
+        thread_ = std::thread([this] { run(); });
+    }
 
     PanelReader::PanelReader(int fd, PanelMap map, Sink sink, Log log)
         : fd_(fd), sink_(std::move(sink)), log_(std::move(log)), map_(std::make_shared<const PanelMap>(std::move(map))), thread_([this] { run(); }) {}
@@ -213,6 +227,7 @@ namespace oscairn
         { std::lock_guard lock(lock_); stop_ = true; }
         stopped_.notify_all();
         thread_.join();
+        if(helper_ > 0) { ::kill(helper_, SIGKILL); ::waitpid(helper_, nullptr, 0); } // a fatal signal ends the driver's wait
         if(owned_ && fd_ >= 0) ::close(fd_);
     }
 
@@ -231,6 +246,77 @@ namespace oscairn
         return !stopped_.wait_for(lock, std::chrono::seconds(1), [this] { return stop_.load(); });
     }
 
+    // The helper process, after fork: system calls only (the engine's other threads are not here).
+    // It ends with what went wrong as its exit status: an open's errno; 128 and the ioctl's errno;
+    // 254 a failed read; 255 a hundred wakes in a row with nothing to read.
+    void PanelReader::helper(int out)
+    {
+#ifdef __linux__
+        ::prctl(PR_SET_PDEATHSIG, SIGKILL); // not left waiting in the driver when the engine goes
+#endif
+        struct sigaction fallback{};
+        fallback.sa_handler = SIG_DFL;
+        ::sigaction(SIGPIPE, &fallback, nullptr); // the engine gone: the next write ends it
+        const int fd = device_.open(path_, O_RDWR | O_NOCTTY | O_CLOEXEC); // read and write, as Roland's programs open it; never written
+        if(fd < 0) ::_exit(errno & 127 ? errno & 127 : 127);
+        rlimit files{};
+        const int most = ::getrlimit(RLIMIT_NOFILE, &files) == 0 && files.rlim_cur < 65536 ? int(files.rlim_cur) : 65536;
+        for(int i = 3; i < most; ++i) // the engine's descriptors (audio devices, sockets) are not held open here
+            if(i != fd && i != out && std::find(device_.keep.begin(), device_.keep.end(), i) == device_.keep.end()) ::close(i);
+        for(int empty = 0;;)
+        {
+            if(device_.wait(fd) < 0)
+            {
+                if(errno == EINTR) continue;
+                ::_exit(128 + (errno & 63));
+            }
+            uint8_t message[4];
+            const auto n = ::read(fd, message, sizeof message); // one message after each wait; a second read gives 0
+            if(n > 0) { empty = 0; if(::write(out, message, size_t(n)) != n) ::_exit(0); continue; }
+            if(n < 0 && errno != EAGAIN && errno != EINTR) ::_exit(254);
+            if(++empty == 100) ::_exit(255);
+        }
+    }
+
+    bool PanelReader::spawn()
+    {
+        int p[2];
+        if(::pipe(p) != 0) return false;
+        ::fcntl(p[0], F_SETFD, FD_CLOEXEC);
+        ::fcntl(p[1], F_SETFD, FD_CLOEXEC);
+        const pid_t pid = ::fork();
+        if(pid == 0) { ::close(p[0]); helper(p[1]); }
+        ::close(p[1]);
+        if(pid < 0) { ::close(p[0]); return false; }
+        helper_ = pid;
+        fd_ = p[0];
+        return true;
+    }
+
+    // The helper ended (its pipe did): why, from its exit status. False when it could not open the device.
+    bool PanelReader::reap()
+    {
+        int status = 0;
+        const auto pid = helper_;
+        helper_ = -1;
+        if(::waitpid(pid, &status, 0) != pid || !WIFEXITED(status))
+        {
+            if(log_) log_("the helper reading " + path_ + " ended; starting it again");
+            return true;
+        }
+        const int code = WEXITSTATUS(status);
+        if(code >= 128)
+        {
+            if(log_) log_(code == 255 ? "ioctl 0 on " + path_ + " woke 100 times with nothing to read; reading it read-only and polling instead"
+                          : code == 254 ? path_ + ": a read failed; reading it read-only and polling instead"
+                          : "ioctl 0 on " + path_ + ": " + std::strerror(code - 128) + "; reading it read-only and polling instead");
+            roland_ = false;
+            return true;
+        }
+        errno = code;
+        return false;
+    }
+
     void PanelReader::run()
     {
         bool reported = false; // an open failure, once until it opens
@@ -238,16 +324,13 @@ namespace oscairn
         {
             if(fd_ < 0)
             {
-                fd_ = ::open(path_.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-                if(fd_ < 0)
+                if(roland_ ? !spawn() : (fd_ = device_.open(path_, O_RDONLY | O_NONBLOCK | O_CLOEXEC)) < 0)
                 {
                     if(!reported && log_) log_("cannot open " + path_ + ": " + std::strerror(errno));
                     reported = true;
                     if(!pause()) return;
                     continue;
                 }
-                if(reported && log_) log_("opened " + path_);
-                reported = false;
                 have_ = 0; // a message cut by the reopen is not joined to the next
             }
             pollfd p{fd_, POLLIN, 0};
@@ -255,11 +338,28 @@ namespace oscairn
             if(ready == 0 || (ready < 0 && errno == EINTR)) continue;
             uint8_t buffer[256];
             const auto n = ready > 0 ? ::read(fd_, buffer, sizeof buffer) : -1;
-            if(n > 0) { bytes(buffer, size_t(n)); continue; }
+            if(n > 0)
+            {
+                if(reported && log_) log_("reading " + path_);
+                reported = false;
+                bytes(buffer, size_t(n));
+                continue;
+            }
             if(n < 0 && (errno == EAGAIN || errno == EINTR)) continue;
             if(!owned_) return; // a descriptor given: its end is the end
-            if(log_) log_(path_ + (n == 0 ? " ended" : std::string(": ") + std::strerror(errno)) + "; opening it again");
+            const int error = errno;
             ::close(fd_); fd_ = -1;
+            if(helper_ > 0)
+            {
+                const bool roland = roland_;
+                if(!reap())
+                {
+                    if(!reported && log_) log_("cannot open " + path_ + ": " + std::strerror(errno));
+                    reported = true;
+                }
+                if(roland && !roland_) continue; // fell back: opened again at once, read-only
+            }
+            else if(log_) log_(path_ + (n == 0 ? " ended" : std::string(": ") + std::strerror(error)) + "; opening it again");
             if(!pause()) return;
         }
     }

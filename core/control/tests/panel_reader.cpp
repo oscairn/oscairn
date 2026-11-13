@@ -5,19 +5,24 @@
 // through the map's layout (fields of whole bytes, or of parts of them), an unknown ID reported
 // with its bytes, and a new map taking effect;
 // then the controls they name played in a Session as a MIDI controller's are (controller_input.h),
-// heard at the next block; and oscairn-panel-dump reading a pty. Also: the FANTOM-07's map
+// heard at the next block; a device by path opened and waited on as Roland reads its panel, by a
+// helper process, through a seam; and oscairn-panel-dump reading a pty. Also: the FANTOM-07's map
 // decodes messages in Roland's layout, and a broken map is refused.
 #include "oscairn/panel_reader.h"
 #include "oscairn/session.h"
 
+#include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <fstream>
 #include <mutex>
+#include <poll.h>
 #include <sstream>
 #include <string>
 #include <termios.h>
@@ -162,6 +167,61 @@ namespace
         ::close(fds[1]); ::close(fds[0]);
     }
 
+    // A device by path, read as Roland's programs read theirs, through the seam (no driver here):
+    // the helper process opens it for reading and writing, then waits, then reads, and is killed
+    // while it waits when the reader stops. Then a wait that fails: logged once, and the device
+    // opened again read-only and polled. The seam's calls happen in the helper, so they are traced
+    // through a pipe the helper keeps.
+    void rolandWay()
+    {
+        int fds[2], trace[2];
+        check(::pipe(fds) == 0 && ::pipe(trace) == 0, "pipes");
+        ::fcntl(fds[0], F_SETFL, O_NONBLOCK);
+        ::fcntl(trace[0], F_SETFL, O_NONBLOCK);
+        auto call = [w = trace[1]](const char* c) { if(::write(w, c, std::strlen(c)) < 0) {} };
+        auto traced = [&] { std::string all; char b[256]; ssize_t n; while((n = ::read(trace[0], b, sizeof b)) > 0) all.append(b, size_t(n)); return all; };
+        PanelReader::Device device{
+            [&, call](const std::string&, int flags) {
+                call((flags & O_ACCMODE) == O_RDWR ? (flags & O_NONBLOCK ? "open read-write non-blocking\n" : "open read-write\n")
+                                                   : (flags & O_NONBLOCK ? "open read-only non-blocking\n" : "open read-only\n"));
+                return ::dup(fds[0]); // the reader or helper closes its own
+            },
+            [call](int fd) { call("wait\n"); pollfd p{fd, POLLIN, 0}; return ::poll(&p, 1, -1) < 0 ? -1 : 0; }, // blocks, as the driver's ioctl does
+            {trace[1]}};
+        Heard heard;
+        auto sink = [&](const PanelEvent& e) { std::lock_guard g(heard.lock); heard.events.push_back(e); };
+        auto log = [&](const std::string& line) { std::lock_guard g(heard.lock); heard.log.push_back(line); };
+        std::chrono::steady_clock::time_point stopping;
+        {
+            PanelReader reader("/dev/i2c-slave-2", PanelMap::parse(mapJson(controls)), sink, log, device);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            put(fds[1], message(1, 3, 500));
+            check(heard.wait(1), "a message read after the wait");
+            put(fds[1], message(2, 5, 0));
+            check(heard.wait(2), "and the next after the next wait");
+            check(heard.at(0).control == "fader:1" && heard.at(1).control == "button:101", "the messages decoded");
+            stopping = std::chrono::steady_clock::now();
+        }
+        check(std::chrono::steady_clock::now() - stopping < std::chrono::milliseconds(500), "stopping kills the helper waiting");
+        const auto first = traced();
+        check(first.starts_with("open read-write\nwait\nwait\n"), "opened read-write, without O_NONBLOCK, then a wait before each message:\n" + first);
+
+        heard.events.clear();
+        device.wait = [call](int) { call("wait\n"); errno = ENOTTY; return -1; };
+        {
+            PanelReader reader("/dev/i2c-slave-2", PanelMap::parse(mapJson(controls)), sink, log, device);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            put(fds[1], message(1, 3, 250));
+            check(heard.wait(1), "a message read after the fallback");
+            std::lock_guard h(heard.lock);
+            check(std::count_if(heard.log.begin(), heard.log.end(), [](const std::string& l) { return l.find("ioctl 0 on /dev/i2c-slave-2: ") != std::string::npos; }) == 1,
+                  "the failed wait logged once");
+        }
+        const auto second = traced();
+        check(second == "open read-write\nwait\nopen read-only non-blocking\n", "a failed wait: opened again read-only and polled:\n" + second);
+        for(int fd : {fds[0], fds[1], trace[0], trace[1]}) ::close(fd);
+    }
+
     // The panel's controls played in a Session the way a MIDI controller's are: two faders on the
     // parts' levels, a knob (an encoder) on A's gain, the zone buttons on the parts' mutes.
     void session(const char* fixture)
@@ -254,6 +314,7 @@ int main(int argc, char** argv)
     if(argc != 4) { std::fprintf(stderr, "usage: oscairn-panel-reader-test FIXTURE MAP PANEL_DUMP\n"); return 2; }
     maps(argv[2]);
     framing();
+    rolandWay();
     session(argv[1]);
     dump(argv[3]);
     if(failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }

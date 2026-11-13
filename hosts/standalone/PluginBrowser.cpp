@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginBrowser.h"
+#include "Executable.h"
 #include "oscairn/package.h"
 #include <algorithm>
 namespace oscairn::standalone {
@@ -32,7 +33,7 @@ PluginBrowser::~PluginBrowser(){stopTimer();canceled_=true;if(scan_.valid())scan
 void PluginBrowser::themes(){themes_=theme_.installed();appearance_.clear(juce::dontSendNotification);for(size_t i=0;i<themes_.size();++i){appearance_.addItem(themes_[i].second,int(i)+1);if(themes_[i].first==themeData().id)appearance_.setSelectedId(int(i)+1,juce::dontSendNotification);}}
 void PluginBrowser::scan() {
     if(scan_.valid())return;canceled_=false;scanButton_.setButtonText("Cancel scan");folderButton_.setEnabled(false);messages_.setText("Scanning in isolated workers. Playback continues.");
-    const auto helper=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getSiblingFile("oscairn-plugin-scan").getFullPathName().toStdString();
+    const auto helper=executableFile().getSiblingFile("oscairn-plugin-scan").getFullPathName().toStdString();
     auto roots=roots_;for(const auto& store:pluginStoreFolders())roots.push_back(store); // what archives and plugin packages installed, looked for again each scan
     scan_=std::async(std::launch::async,[this,roots,helper]{return scanPlugins(roots,helper,&canceled_);});
 }

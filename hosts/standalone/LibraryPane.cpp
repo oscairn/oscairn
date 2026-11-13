@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "LibraryPane.h"
+#include "Executable.h"
 #include "PerformanceColors.h"
 #include "SigningKeys.h"
 #include "oscairn/package.h"
@@ -1096,7 +1097,7 @@ namespace oscairn::standalone
            }); !error.empty())
             tell(text(error));
         // The scanner beside the app, as the plugin browser finds it, to tell which packages come with the app.
-        const auto scanner = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getSiblingFile("oscairn-plugin-scan");
+        const auto scanner = executableFile().getSiblingFile("oscairn-plugin-scan");
         auto* content = new Catalog(engine_, kind, std::move(installed), scanner.existsAsFile() ? scanner.getFullPathName().toStdString() : std::string());
         setDesktopMode(*content, mode());
         if(mode() == 2) content->setSize(std::min(984, std::max(600, getWidth() - 40)), std::min(560, std::max(400, getHeight() - 40)));

@@ -37,6 +37,7 @@
 #include "Recording.h"
 #include "AppProcesses.h"
 #include "Splash.h"
+#include "Executable.h"
 
 #include <BinaryData.h>
 #include <oscairn/plugin_host.h>
@@ -93,7 +94,7 @@ namespace oscairn::standalone
         // The apps that run as processes: Apps/ beside this program, else share/oscairn/apps.
         juce::File appsFolder()
         {
-            const auto binary = juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getParentDirectory();
+            const auto binary = executableFile().getParentDirectory();
             return binary.getChildFile( "Apps" ).isDirectory() ? binary.getChildFile( "Apps" ) : binary.getSiblingFile( "share" ).getChildFile( "oscairn/apps" );
         }
     }
@@ -170,7 +171,7 @@ namespace oscairn::standalone
             actions_.offer(pickPerformance,"Library",[this](const std::string&,Actions::Answer answer){showPicker(std::move(answer),"performance");});
             actions_.offer(pickSound,"Library",[this](const std::string&,Actions::Answer answer){showPicker(std::move(answer),"sound");});
             actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
-            const auto binary=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+            const auto binary=executableFile().getParentDirectory();
             // Apps run as processes only against an engine on a socket (not --in-process).
             appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString(),"OSCAIRN_PROFILE="+profileArgument});
             appNotice_=std::make_unique<AppNotice>(*appProcesses_);
@@ -754,7 +755,7 @@ namespace oscairn::standalone
             addAndMakeVisible( *pads_ );
             if( getContentComponent() ) pads_->setBounds( getContentComponent()->getBounds() );
         }
-        static std::string scanner() { return juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getSiblingFile( "oscairn-plugin-scan" ).getFullPathName().toStdString(); }
+        static std::string scanner() { return executableFile().getSiblingFile( "oscairn-plugin-scan" ).getFullPathName().toStdString(); }
         void showParts()
         {
             if( !panel() && !shell() ) openPerformance(); // from Home: the Performance app has them
@@ -876,7 +877,7 @@ namespace oscairn::standalone
             auto       dir  = argument( args, "--plugins" );
             if( dir.isEmpty() )
             {
-                const auto binaryDir=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+                const auto binaryDir=executableFile().getParentDirectory();
                 const auto bundled=binaryDir.getChildFile("plugins");
                 const auto installed=binaryDir.getSiblingFile("lib").getChildFile("clap");
                 dir=bundled.isDirectory()?bundled.getFullPathName():installed.isDirectory()?installed.getFullPathName():juce::String(OSCAIRN_PLUGIN_DIR);
@@ -913,7 +914,7 @@ namespace oscairn::standalone
                 if(!args.contains("--connect") && !profile.panel.device.empty())
                 {
 #if OSCAIRN_ROLAND_FANTOM0
-                    const auto exe=juce::File::getSpecialLocation(juce::File::currentExecutableFile);
+                    const auto exe=executableFile();
                     if(!args.contains("--panel-device"))audio.panelDevice=profile.panel.device;
                     if(!args.contains("--panel-map"))audio.panelMap=juce::File::isAbsolutePath(profile.panel.map)?profile.panel.map
                         :exe.getParentDirectory().getSiblingFile("share/oscairn/panels").getChildFile(profile.panel.map).getFullPathName().toStdString();
@@ -954,7 +955,7 @@ namespace oscairn::standalone
                     throw std::invalid_argument("choose --in-process or --connect");
                 std::string helper;
                 if(socket.isEmpty() && !args.contains("--in-process"))
-                    helper=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getSiblingFile("oscairn-engine").getFullPathName().toStdString();
+                    helper=executableFile().getSiblingFile("oscairn-engine").getFullPathName().toStdString();
                 // RFC 0025: the reliability level reaches the engine and its workers, which lock their
                 // memory and take their places in the out-of-memory order on Linux; this process when it is the engine.
                 setenv( "OSCAIRN_RELIABILITY", profile.reliability.c_str(), 1 );
@@ -971,7 +972,7 @@ namespace oscairn::standalone
                 const bool here = socket.isEmpty() && helper.empty();
                 // RFC 0005: as in the separate engine, a plugin's preset listing runs in the scan
                 // helper beside this program, not on this (the message) thread.
-                if( const auto scan = juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getSiblingFile( "oscairn-plugin-scan" );
+                if( const auto scan = executableFile().getSiblingFile( "oscairn-plugin-scan" );
                     here && placementPolicy().scan.empty() && scan.existsAsFile() )
                 {
                     auto policy = placementPolicy();

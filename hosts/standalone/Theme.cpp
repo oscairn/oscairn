@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Theme.h"
+#include "Executable.h"
 #include "Icons.h"
 #include <cmath>
 #include <stdexcept>
@@ -169,7 +170,7 @@ ThemeData ThemeData::parse(const juce::String& json) {
 Theme::Theme(juce::File root,juce::File builtIn) {
     if(builtIn==juce::File()) {
         // Beside the app (macOS bundle, build tree) or installed under share/ (Linux devices).
-        const auto binary=juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+        const auto binary=executableFile().getParentDirectory();
         builtIn=binary.getChildFile("themes").isDirectory()?binary.getChildFile("themes"):binary.getSiblingFile("share").getChildFile("oscairn/themes");
     }
     builtIn_=builtIn;

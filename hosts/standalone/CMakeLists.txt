@@ -166,6 +166,13 @@ target_sources(oscairn_profile_test PRIVATE tests/profile.cpp DesktopProfile.cpp
 target_link_libraries(oscairn_profile_test PRIVATE oscairn_audio_host juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_profile_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
 add_test(NAME desktop-profile COMMAND oscairn_profile_test)
+# The app's own file when it is started by its bare name through PATH (Executable.h; Linux).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    juce_add_console_app(oscairn_executable_file_test PRODUCT_NAME "oscairn-executable-file-test")
+    target_sources(oscairn_executable_file_test PRIVATE tests/executable_file.cpp)
+    target_link_libraries(oscairn_executable_file_test PRIVATE juce::juce_core juce::juce_recommended_config_flags)
+    add_test(NAME desktop-executable-file COMMAND oscairn_executable_file_test)
+endif()
 
 # The pad editor against a session served on a socket, without an audio device.
 juce_add_console_app(oscairn_pad_editor_test PRODUCT_NAME "Oscairn Pad Editor Test")

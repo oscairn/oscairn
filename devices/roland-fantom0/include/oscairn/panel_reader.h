@@ -101,7 +101,9 @@ namespace oscairn
     // SIGINT, waits on it, reads 4 bytes at a time until a read gives less, and sends each message
     // to every attached reader (none attached: dropped). It never writes to the device, polls it or
     // opens it again. A reader attaching raises SIGIO, which wakes the wait to take it in (or the
-    // next message does). Returns 0 when stopped, 1 when refused or failed; logs each step.
+    // next message does); a reader going raises SIGIO too, and the holder drops it at once (or, if
+    // it went just before a wait began, at the next message). Returns 0 when stopped, 1 when
+    // refused or failed; logs each step.
     int holdPanel(const std::string& path, const std::string& socket, const std::function<void(const std::string&)>& log, PanelDevice device = {});
 
     // Reads a panel on a thread of its own, so it never blocks anything else; frames its bytes into
@@ -116,8 +118,9 @@ namespace oscairn
         using Log = std::function<void(const std::string&)>; // empty: no log
         static void standardError(const std::string& line);
         // The panel holder at `socket` (panelHolderSocket on the unit): attached to again a second
-        // after it cannot be reached or ends. The device itself is never opened here.
-        PanelReader(std::string socket, PanelMap map, Sink sink, Log log = standardError);
+        // after it cannot be reached or ends. The device itself is never opened here. `attached`:
+        // a connection to it already made (connectPanelHolder), owned from here; -1: none yet.
+        PanelReader(std::string socket, PanelMap map, Sink sink, Log log = standardError, int attached = -1);
         // An open descriptor, not owned (tests: a pipe or a pty): read until it ends.
         PanelReader(int fd, PanelMap map, Sink sink, Log log = standardError);
         ~PanelReader(); // stops and joins

@@ -298,6 +298,10 @@ namespace
             check(heard.wait(3), "one wake: the three queued messages read and passed on");
             check(heard.at(0).value == 100 && heard.at(1).value == 200 && heard.at(2).control == "button:101", "in order");
         }
+        // The reader gone: its hang-up wakes the wait, and the holder drops it with no message
+        // from the device.
+        check(bench.saw("a reader detached (0 left)", 1000), "a reader that goes is dropped at once:\n" + bench.read());
+        check(bench.count("seam: open") == 1, "the device still open");
         // The engine restarting: its reader goes, a new one attaches, the device stays open.
         {
             PanelReader reader(bench.socket, PanelMap::parse(mapJson(controls)), sink, {});
@@ -425,6 +429,7 @@ namespace
         check(text.find("81 03 01 7a  analog    id 3     value 250    fader:1") != std::string::npos, "a decoded message's line:\n" + text);
         check(text.find("82 4d 00 00  switchOn  id 77    value 0      -") != std::string::npos, "an unknown one's line");
         check(text.find("analog     3      1       250     250     fader:1") != std::string::npos, "the table");
+        check(bench.saw("a reader detached (0 left)", 1000) && bench.count("a reader attached") == 1, "the dump is one reader on the holder, dropped as it ends:\n" + bench.read());
         ::kill(pid, SIGTERM);
         check(ended(pid, 2000) == 0, "the holder stopped");
         ::unlink(mapFile);

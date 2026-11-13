@@ -54,9 +54,10 @@ int main(int argc, char** argv)
     }
     catch(const std::exception& e) { std::fprintf(stderr, "oscairn-panel-dump: %s\n", e.what()); return 2; }
     // The device is the holder's alone: a second open can crash the kernel, and a reader that
-    // opened and closed it would leave the panel unheld after.
-    if(const int probe = connectPanelHolder(socket); probe >= 0) ::close(probe);
-    else
+    // opened and closed it would leave the panel unheld after. The connection made here is the
+    // reader's, so the holder has one reader from the dump, not a probe and then a reader.
+    const int attached = connectPanelHolder(socket);
+    if(attached < 0)
     {
         std::fprintf(stderr, "oscairn-panel-dump: no panel holder at %s; start oscairn-panel-holder first (docs/fantom-0.md, \"The panel holder\")\n", socket.c_str());
         return 1;
@@ -75,7 +76,8 @@ int main(int argc, char** argv)
             auto& s = seen[{int(e.kind), e.id}];
             if(!s.count++) s.low = s.high = e.value;
             s.low = std::min(s.low, e.value); s.high = std::max(s.high, e.value); s.control = e.control;
-        }, [](const std::string& line) { if(!line.starts_with("unknown message") && !line.starts_with("attached")) std::fprintf(stderr, "oscairn-panel-dump: %s\n", line.c_str()); }); // unknown ones are on stdout already
+        }, [](const std::string& line) { if(!line.starts_with("unknown message") && !line.starts_with("attached")) std::fprintf(stderr, "oscairn-panel-dump: %s\n", line.c_str()); }, // unknown ones are on stdout already
+           attached);
         const auto start = std::chrono::steady_clock::now();
         while(!stopping && (seconds <= 0 || std::chrono::steady_clock::now() - start < std::chrono::duration<double>(seconds)))
             std::this_thread::sleep_for(std::chrono::milliseconds(50));

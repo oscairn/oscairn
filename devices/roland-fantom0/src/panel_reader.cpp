@@ -112,7 +112,7 @@ namespace oscairn
 
         volatile std::sig_atomic_t holderStop = 0;
         void stopHolder(int) { holderStop = 1; }
-        void wakeHolder(int) {} // a reader attaching: the wait ends, and the holder takes it in
+        void wakeHolder(int) {} // a reader attaching or going: the wait ends, and the holder takes it in or drops it
 
     }
 
@@ -347,9 +347,27 @@ namespace oscairn
             {
                 if(readers.size() >= 8) { ::close(c); say("a ninth reader turned away"); continue; }
                 ::fcntl(c, F_SETFD, FD_CLOEXEC);
-                ::fcntl(c, F_SETFL, O_NONBLOCK);
+                ::fcntl(c, F_SETOWN, ::getpid());
+                ::fcntl(c, F_SETFL, O_NONBLOCK | O_ASYNC); // its hang-up raises SIGIO, as an attach does
                 readers.push_back(c);
                 say("a reader attached (" + std::to_string(readers.size()) + " now)");
+            }
+        };
+        auto drop = [&](size_t i) {
+            ::close(readers[i]);
+            readers.erase(readers.begin() + ptrdiff_t(i));
+            say("a reader detached (" + std::to_string(readers.size()) + " left)");
+        };
+        // Readers that have gone: their end of the socket closed. Readers send nothing; anything
+        // they do send is read and dropped.
+        auto reap = [&] {
+            for(size_t i = 0; i < readers.size();)
+            {
+                pollfd p{readers[i], POLLIN, 0};
+                uint8_t junk[64];
+                const ssize_t n = ::poll(&p, 1, 0) == 1 ? ::recv(readers[i], junk, sizeof junk, 0) : 1;
+                if(n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) drop(i);
+                else ++i;
             }
         };
         int status = 0;
@@ -359,6 +377,7 @@ namespace oscairn
             if(device.wait(fd) < 0 && errno != EINTR) { say(std::string("waiting on ") + path + ": " + std::strerror(errno)); status = 1; break; }
             if(holderStop) break;
             attach();
+            reap();
             uint8_t message[4]; // the driver copies 4 bytes whatever the count asks
             while(::read(fd, message, sizeof message) == 4) // one message a read; 0 once none is queued
                 for(size_t i = 0; i < readers.size();)
@@ -366,9 +385,7 @@ namespace oscairn
                     const auto n = ::send(readers[i], message, sizeof message, 0);
                     if(n == ssize_t(sizeof message)) { ++i; continue; }
                     if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) { if(!dropped++) say("a reader is not keeping up; its messages are dropped"); ++i; continue; }
-                    ::close(readers[i]);
-                    readers.erase(readers.begin() + ptrdiff_t(i));
-                    say("a reader detached (" + std::to_string(readers.size()) + " left)");
+                    drop(i);
                 }
         }
         for(const int r : readers) ::close(r);
@@ -380,8 +397,8 @@ namespace oscairn
 
     void PanelReader::standardError(const std::string& line) { std::fprintf(stderr, "oscairn: panel: %s\n", line.c_str()); }
 
-    PanelReader::PanelReader(std::string socket, PanelMap map, Sink sink, Log log)
-        : path_(std::move(socket)), owned_(true), sink_(std::move(sink)), log_(std::move(log)), map_(std::make_shared<const PanelMap>(std::move(map)))
+    PanelReader::PanelReader(std::string socket, PanelMap map, Sink sink, Log log, int attached)
+        : path_(std::move(socket)), fd_(attached), owned_(true), sink_(std::move(sink)), log_(std::move(log)), map_(std::make_shared<const PanelMap>(std::move(map)))
     {
         thread_ = std::thread([this] { run(); });
     }

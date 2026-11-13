@@ -47,7 +47,7 @@ def main(tool):
             made[name] = (key_id, public)
 
         # A signed archive: one CLAP build for linux-arm64, signed by the publisher, and the whole.
-        def archive(path, signed=True, key="publisher", plugin="com.example.organ", content=b"not really a plugin"):
+        def archive(path, signed=True, key="publisher", plugin="com.example.organ", content=b"not really a plugin", absent=None):
             build = temp / "Organ.clap"
             build.write_bytes(content)
             Path(str(build) + ".sig").unlink(missing_ok=True)
@@ -62,7 +62,8 @@ def main(tool):
                 "items": [],
                 "plugins": [{"format": "clap", "id": plugin, "version": "2.1.0", "name": "Example Organ", "builds": [
                     {"platform": "linux-arm64", "path": inside, "sha256": digest,
-                     "signatures": json.loads(Path(str(build) + ".sig").read_text()) if signed else []}]}],
+                     "signatures": json.loads(Path(str(build) + ".sig").read_text()) if signed else []}] +
+                    ([{"platform": absent, "path": inside.replace("linux-arm64", absent), "sha256": digest, "signatures": []}] if absent else [])}],
                 "files": {inside: hashlib.sha256(build.read_bytes()).hexdigest(), "Licenses/COPYING": hashlib.sha256(copying).hexdigest()},
             }
             with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -203,6 +204,10 @@ def main(tool):
         refused(dict(release, archive=dict(release["archive"], sha256=hashlib.sha256(brew).hexdigest(), size=len(brew))),
                 "loads a library from outside the system and its bundle", "a build linking a Homebrew library is refused", brew)
         refused(dict(release, archive=dict(release["archive"], size=2**31)), "under 2 GiB", "an archive too large for a release asset is refused")
+        # An archive made for one device, leaving out a build its manifest lists, is not a submission.
+        partial = archive(temp / "partial.olib", signed=False, absent="windows-x86_64").read_bytes()
+        refused(dict(release, archive=dict(release["archive"], sha256=hashlib.sha256(partial).hexdigest(), size=len(partial))),
+                "leaves out the windows-x86_64 build", "an archive leaving out a build is refused as a submission", partial)
 
         # A package keeps its publisher, and publisher IDs do not nest: the owner of `io.github`
         # cannot publish a new release of `io.github.alice.synth`, whose releases come from

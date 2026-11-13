@@ -53,8 +53,8 @@ namespace
         while(const auto n = std::fread(buffer, 1, sizeof buffer, p)) out.append(buffer, n);
         return {::pclose(p), out};
     }
-    // A copy of an archive whose manifest each(a) rewrote; other entries are copied whole.
-    void rewriteArchive(const fs::path& from, const fs::path& to, const std::function<std::string(std::string)>& each)
+    // A copy of an archive whose manifest each(a) rewrote; other entries are copied whole, those keep() takes.
+    void rewriteArchive(const fs::path& from, const fs::path& to, const std::function<std::string(std::string)>& each, const std::function<bool(const std::string&)>& keep = {})
     {
         mz_zip_archive in{}, out{};
         mz_zip_reader_init_file(&in, from.c_str(), 0);
@@ -62,7 +62,7 @@ namespace
         for(mz_uint i = 0; i < mz_zip_reader_get_num_files(&in); ++i)
         {
             mz_zip_archive_file_stat st; mz_zip_reader_file_stat(&in, i, &st);
-            if(std::string(st.m_filename) != "library.json") { mz_zip_writer_add_from_zip_reader(&out, &in, i); continue; }
+            if(std::string(st.m_filename) != "library.json") { if(!keep || keep(st.m_filename)) mz_zip_writer_add_from_zip_reader(&out, &in, i); continue; }
             std::string m(size_t(st.m_uncomp_size), '\0'); mz_zip_reader_extract_to_mem(&in, i, m.data(), m.size(), 0);
             m = each(m);
             mz_zip_writer_add_mem(&out, "library.json", m.data(), m.size(), MZ_DEFAULT_COMPRESSION);
@@ -228,6 +228,34 @@ int main(int argc, char** argv)
                 check(again.skipped == 1 && items(c, "sound").size() == 2, "installing unpacks inside the data folder, not the read-only OS temp folder");
             }
             else std::puts("skipped: unpacking outside a read-only OS temp folder (root writes there anyway)");
+        }
+        // Device C2 (RFC 0031): an archive made for another device, as a repository exports one:
+        // its manifest lists only the other platform's build, which it leaves out. Its items
+        // install, and its plugin is said to have no build for this device, as before.
+        {
+            device(temp.path / "c2");
+            const auto made = temp.path / "Elsewhere.olib";
+            std::string here, there; // the two builds' paths
+            const auto exported = readPackage(archive, {}); // kept: a range over a temporary's member would dangle
+            for(const auto& b : exported.plugins.at(0).builds) (b.platform == platform() ? here : there) = b.path;
+            rewriteArchive(archive, made, [&](std::string m) {
+                auto cut = [&](size_t start, size_t end) { if(m[end] == ',') ++end; else if(m[start - 1] == ',') --start; m.erase(start, end - start); };
+                const auto build = m.find("{\"platform\":\"" + platform() + "\"");
+                cut(build, m.find('}', build) + 1); // unsigned: no braces inside
+                for(auto file = m.find("\"" + here); file != std::string::npos; file = m.find("\"" + here)) // its files (a bundle's several)
+                    cut(file, m.find('"', m.find("\":\"", file) + 3) + 1);
+                return m;
+            }, [&](const std::string& name) { return name.rfind(here, 0) != 0 && name.rfind(there, 0) != 0; });
+            const auto read = readPackage(made, {});
+            check(read.plugins.at(0).builds.empty() && read.plugins[0].absent == std::vector<std::string>{other}, "another platform's build may be left out of an archive");
+            Session c(48000, 64);
+            const auto installed = c.installArchive(made.string(), false, {}, true);
+            check(installed.added == 2 && std::any_of(installed.notes.begin(), installed.notes.end(), [](const auto& n) { return n.find("has no build for this device in the archive") != std::string::npos; }) &&
+                  !fs::exists(temp.path / "c2" / "Plugins" / "clap"), "its items install, and its plugin has no build for this device");
+            // This device's build listed and left out: the archive made for another device, refused.
+            rewriteArchive(archive, temp.path / "Other.olib", [](std::string m) { return m; }, [&](const std::string& name) { return name.rfind(here, 0) != 0; });
+            std::string why; try { c.installArchive((temp.path / "Other.olib").string(), false, {}, true); } catch(const std::exception& e) { why = e.what(); }
+            check(why.find("no " + platform() + " build") != std::string::npos && why.find("another device") != std::string::npos, "this device's build left out is refused: " + why);
         }
         // An install or export cut short by a crash leaves its hidden folder in the data folder;
         // the library clears those over a day old when it starts, and leaves newer ones, which

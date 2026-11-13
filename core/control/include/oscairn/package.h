@@ -26,7 +26,9 @@ namespace oscairn
         // platform: its busiest block's share of the block's time and the bytes it holds; 0 for
         // none. A device counts a plugin it has not measured itself at this, not at a default.
         struct Build { std::string platform, path, sha256; std::vector<signing::Signature> signatures = {}; double cpu = 0; uint64_t memory = 0; };
-        struct Plugin { std::string format, id, version, name; std::vector<Build> builds; };
+        // absent: the platforms whose builds the manifest lists and the archive leaves out, as an
+        // archive made for one device may (RFC 0031); those builds are not in `builds`.
+        struct Plugin { std::string format, id, version, name; std::vector<Build> builds; std::vector<std::string> absent = {}; };
         std::string id, name;
         // "library"; "performance" or "sound" for an exported item; "plugin" for a plugin package,
         // which holds plugin builds and no items; "asset" for an asset package, which holds an
@@ -126,5 +128,9 @@ namespace oscairn
     // build's over its listed digest, library.sig over the manifest, each item's over its content
     // hash). On refusal `into` is removed. With `into` empty, nothing is extracted: the same
     // checks but the hashes and the items' signatures (listed, unchecked), and the manifest.
-    Package readPackage(const std::filesystem::path& archive, const std::filesystem::path& into);
+    // A build the manifest lists for a platform other than `device` may be absent, with the files
+    // under its path: such a build is left out of `builds` and its platform named in `absent`
+    // (RFC 0031, an archive made for one device). One for `device` must be there; an empty
+    // `device` allows any to be absent. A build that is there is checked whole either way.
+    Package readPackage(const std::filesystem::path& archive, const std::filesystem::path& into, const std::string& device = platform());
 }

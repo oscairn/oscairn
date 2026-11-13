@@ -142,6 +142,24 @@ int main()
         // A build's platform names a folder in the plugin store: one that climbs out would replace what is there.
         refuse("a plugin build for no known platform", {{"library.json", withBuild(bundleDigest(staged / build), "../../../Performances")}, sound, {binary, "code"}});
         check(!fs::exists(root / "escape.txt") && !fs::exists("/tmp/escape.txt"), "nothing escaped");
+        // An archive made for one device (RFC 0031): another platform's build may be absent, with
+        // the files under it; this device's may not, nor may a build that is there not match.
+        {
+            const std::string elsewhere = platform() == "linux-arm64" ? "macos-arm64" : "linux-arm64";
+            craft(root / "Elsewhere.olib", {{"library.json", withBuild(bundleDigest(staged / build), elsewhere)}, sound});
+            const auto got = readPackage(root / "Elsewhere.olib", root / "elsewhere-out");
+            check(got.plugins.size() == 1 && got.plugins[0].builds.empty() && got.plugins[0].absent == std::vector<std::string>{elsewhere} && got.files.size() == 1,
+                  "another platform's build left out is read, without it or its files");
+            check(readPackage(root / "Elsewhere.olib", {}, "").plugins.at(0).absent.size() == 1, "and with no platform required");
+            bool own = false; try { readPackage(root / "Elsewhere.olib", {}, elsewhere); } catch(const std::runtime_error& e) { own = std::string(e.what()).find("another device") != std::string::npos; }
+            check(own, "a build for the platform required, left out, is refused");
+            bool unsignable = false; try { signPackage(root / "Elsewhere.olib", signing::makeKey(root / "elsewhere.key")); } catch(const std::runtime_error& e) { unsignable = std::string(e.what()).find("whole release") != std::string::npos; }
+            check(unsignable, "it is not signed again, which would rewrite its manifest without the builds it leaves out");
+            refuse("another platform's build that is there with another digest", {{"library.json", withBuild(std::string(64, '0'), elsewhere)}, sound, {binary, "code"}});
+            auto twoFiles = withBuild(bundleDigest(staged / build), elsewhere);
+            twoFiles.insert(twoFiles.find("\"files\":{") + 9, "\"" + build + "/Contents/more\":\"" + assets::sha256("more") + "\",");
+            refuse("another platform's build half there", {{"library.json", twoFiles}, sound, {binary, "code"}});
+        }
         // The package's ID names the library's folder, and an exported item's ID is its package's:
         // either one that is not a plain folder name is refused (as JSON: a\b is "a\\b"). Windows
         // drops a trailing dot from a folder's name, so the folder would not be the ID.

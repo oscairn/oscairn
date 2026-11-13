@@ -225,14 +225,17 @@ namespace oscairn
         fs::remove_all(unpacked, ignored); fs::remove(signedCopy, ignored);
         try
         {
-            writePackage(signedCopy, readPackage(archive, unpacked), unpacked, &key);
+            const auto p = readPackage(archive, unpacked, "");
+            // Rewritten from what it holds, its manifest would lose the builds it leaves out: sign the whole release instead.
+            if(std::any_of(p.plugins.begin(), p.plugins.end(), [](const auto& q) { return !q.absent.empty(); })) bad("it leaves out builds its manifest lists (an archive made for one device); sign the whole release");
+            writePackage(signedCopy, p, unpacked, &key);
             fs::rename(signedCopy, archive);
         }
         catch(...) { fs::remove_all(unpacked, ignored); fs::remove(signedCopy, ignored); throw; }
         fs::remove_all(unpacked, ignored);
     }
 
-    Package readPackage(const fs::path& archive, const fs::path& into)
+    Package readPackage(const fs::path& archive, const fs::path& into, const std::string& device)
     {
         const bool extract = !into.empty();
         if(extract && fs::exists(into)) throw std::runtime_error(into.string() + " already exists");
@@ -356,7 +359,9 @@ namespace oscairn
                 item.signatures = signatures(detail::member(e->value, "signatures"));
                 p.items.push_back(std::move(item));
             }
-            // Plugins: each build in the archive, under Plugins/.
+            // Plugins: each build in the archive, under Plugins/, but another platform's, which an
+            // archive made for one device may leave out (RFC 0031).
+            std::set<std::string> absentPaths;
             const V plugins = detail::member(d, "plugins");
             if(!plugins || plugins->type != json_type_array) bad("it lists no plugins");
             for(auto* e = static_cast<const json_array_s*>(plugins->payload)->start; e; e = e->next)
@@ -371,7 +376,7 @@ namespace oscairn
                     Package::Build build{text(detail::member(b->value, "platform")), text(detail::member(b->value, "path")), text(detail::member(b->value, "sha256"))};
                     const auto inside = names.lower_bound(build.path + "/");
                     const bool there = names.count(build.path) || (inside != names.end() && inside->rfind(build.path + "/", 0) == 0);
-                    if(!safe(build.path) || build.path.rfind("Plugins/", 0) != 0 || !there || build.sha256.size() != 64)
+                    if(!safe(build.path) || build.path.rfind("Plugins/", 0) != 0 || build.sha256.size() != 64)
                         bad("a plugin build is not in the archive: " + build.path);
                     // The store only finds .clap and .lv2 bundles; a bare library file installs but is never loaded.
                     const std::string suffix = plugin.format == "lv2" ? ".lv2" : ".clap";
@@ -394,6 +399,11 @@ namespace oscairn
                     }
                     for(const auto& s : build.signatures)
                         if(!signing::verify(s, signing::buildMessage(plugin.format, plugin.id, plugin.version, build.platform, build.sha256))) bad("a plugin build's signature does not verify: " + build.path);
+                    if(!there)
+                    {
+                        if(device.empty() || build.platform != device) { plugin.absent.push_back(build.platform); absentPaths.insert(build.path); continue; }
+                        bad("it has no " + device + " build of " + plugin.id + " though its manifest lists one (" + build.path + "): it may be the archive made for another device");
+                    }
                     plugin.builds.push_back(std::move(build));
                 }
                 p.plugins.push_back(std::move(plugin));
@@ -472,6 +482,10 @@ namespace oscairn
             if(!files || files->type != json_type_object) bad("it lists no files");
             for(auto* e = static_cast<const json_object_s*>(files->payload)->start; e; e = e->next)
                 p.files[std::string(e->name->string, e->name->string_size)] = text(e->value);
+            // An absent build's files are absent with it: only what the archive holds is listed here.
+            std::erase_if(p.files, [&](const auto& f) {
+                return std::any_of(absentPaths.begin(), absentPaths.end(), [&](const auto& a) { return f.first == a || f.first.rfind(a + "/", 0) == 0; });
+            });
             for(const auto& a : p.assets)
             {
                 const auto listed = p.files.find("Assets/" + a.path);

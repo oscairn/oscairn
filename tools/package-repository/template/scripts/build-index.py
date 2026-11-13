@@ -171,13 +171,15 @@ def verify(tool, archive, where, problems):
     if run.returncode != 0:
         problems.add(where, f"the archive is refused: {run.stderr.strip()}")
         return None
-    report = {"archive": None, "builds": [], "outside": []}
+    report = {"archive": None, "builds": [], "outside": [], "absent": []}
     for line in run.stdout.splitlines():
         words = line.split()
         if words[:1] == ["archive"] and len(words) == 3:
             report["archive"] = (words[1], words[2])
         elif words[:1] == ["build"] and len(words) == 6:
             report["builds"].append((words[1], words[2], words[3], words[4], words[5].split(",")))
+        elif words[:1] == ["absent"] and len(words) == 5:
+            report["absent"].append(words[1:])  # format, ID, version, platform
         elif words[:1] == ["outside"] and len(words) >= 6:
             report["outside"].append(line.split(None, 5)[1:])  # format, ID, version, platform, what
     return report
@@ -253,6 +255,8 @@ def read_release(path, root, publishers, tool, cache, problems):
     for fmt, plugin, version, platform, signers in report["builds"]:
         if signer not in signers:
             problems.add(path, f"the {platform} build of {fmt} {plugin} {version} is not signed by its publisher's key {signer}")
+    for fmt, plugin, version, platform in report["absent"]:  # an archive made for one device is not a submission
+        problems.add(path, f"the archive leaves out the {platform} build of {fmt} {plugin} {version} its manifest lists; submit the whole release")
     for fmt, plugin, version, platform, what in report["outside"]:
         problems.add(path, f"the {platform} build of {fmt} {plugin} {version} loads a library from outside the system and its bundle, which a device does not have: {what}")
     plugins = {(b[0], b[1], b[2]) for b in report["builds"]}

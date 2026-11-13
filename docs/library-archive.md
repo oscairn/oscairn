@@ -357,16 +357,31 @@ nothing behind:
 - a manifest that is not version 3 (there is no reader for version 2), whose ID or an item's
   is not plain (as `id` above says), whose kind is not one above, a plugin package that lists an
   item or no plugin, or that names an item whose folder or document is not there, or
-  whose document's ID is not the one listed, or a plugin build not under `Plugins/`, not there,
-  or for a platform other than `linux-arm64`, `linux-x86_64`, `macos-arm64`, `macos-x86_64` and
-  `windows-x86_64`, or whose path is not a `.clap` or `.lv2` bundle (the store finds builds by
-  that extension);
+  whose document's ID is not the one listed, or a plugin build not under `Plugins/`, not there
+  when it is for this device's platform (below), or for a platform other than `linux-arm64`,
+  `linux-x86_64`, `macos-arm64`, `macos-x86_64` and `windows-x86_64`, or whose path is not a
+  `.clap` or `.lv2` bundle (the store finds builds by that extension);
 - a file whose SHA-256 is not the one `files` lists, a file `files` does not list or one it
-  lists that is not there, and a plugin build whose digest is not its own;
+  lists that is not there (but under an absent build, below), and a plugin build whose digest is
+  not its own;
 - a signature that does not verify, at any level, or a malformed one.
 
+**An archive made for one device** (decided 2026-11-12,
+[RFC 0031](rfcs/0031-package-repository-and-distribution.md#ready-made-archives-per-platform)):
+a build the manifest lists for **another** platform may be absent, and so may every file `files`
+lists under its path. Such an archive keeps the release's manifest and `library.sig` unchanged,
+listing every platform's builds, so its identity and signatures are the release's. A build for
+the reading device's own platform that the manifest lists must be there and match, and a build
+that is there must match whatever its platform: one half there (some of its files) is refused as
+a file missing. An archive whose manifest lists no build for this device's platform installs its
+items as before, its plugin said to have no build for this device. Installing reports nothing
+about the absent builds and puts none in the store; `oscairn-sign verify` lists each as an
+`absent <format> <id> <version> <platform>` line, and with `--platform` requires that platform's
+builds. A package repository's submissions hold every build their manifest lists.
+
 Reading only the manifest (an archive's contents, before installing) checks the archive's and
-the builds' signatures; items' signatures are checked when the archive is extracted.
+the builds' signatures, an absent build's too; items' signatures are checked when the archive is
+extracted.
 
 ## Signatures
 

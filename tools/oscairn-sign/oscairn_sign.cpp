@@ -59,11 +59,14 @@ namespace
                    "      path, SHA-256 and size, into an asset package; with --key, signed whole.\n"
                    "      --redistribute says whether others may pass it on in their exports; without it,\n"
                    "      an SPDX license allows that and a LicenseRef- one does not\n"
-                   "  oscairn-sign verify [--into <folder>] <archive.olib>\n"
+                   "  oscairn-sign verify [--into <folder>] [--platform <platform>] <archive.olib>\n"
                    "      check every signature and hash in an archive and say who signed what, and each\n"
                    "      build's libraries from outside the system and its bundle (lines \"outside ...\");\n"
-                   "      <folder>, which must not exist yet, is where it is unpacked to check (default: a\n"
-                   "      folder in the OS temp folder; pick one on the file system with room for it)\n"
+                   "      a build the manifest lists and the archive leaves out, as an archive made for one\n"
+                   "      device does, is a line \"absent <format> <id> <version> <platform>\"; with\n"
+                   "      --platform, that platform's builds must be there. <folder>, which must not exist\n"
+                   "      yet, is where it is unpacked to check (default: a folder in the OS temp folder;\n"
+                   "      pick one on the file system with room for it)\n"
                    "  oscairn-sign file <key-file> <file> <signature-file>\n"
                    "      sign a repository's file (its root, or its index key), writing <signature-file>\n"
                    "  oscairn-sign verify-file <file> <signature-file>\n"
@@ -267,11 +270,20 @@ int main(int argc, char** argv)
                         key ? (", signed by " + signing::keyId(key->publicKey)).c_str() : "");
             return 0;
         }
-        if(a.size() >= 2 && a[0] == "verify" && (a.size() == 2 || (a.size() == 4 && a[1] == "--into")))
+        if(a.size() >= 2 && a[0] == "verify")
         {
+            std::vector<std::string> rest(a.begin() + 1, a.end());
+            fs::path into;
+            std::string device; // none: another platform's build may be absent, whatever this machine is
+            while(rest.size() > 2 && (rest[0] == "--into" || rest[0] == "--platform"))
+            {
+                if(rest[0] == "--into") into = rest[1]; else device = rest[1];
+                rest.erase(rest.begin(), rest.begin() + 2);
+            }
+            if(rest.size() != 1 || (!device.empty() && !knownPlatform(device))) return usage();
             std::random_device random;
-            const auto into = a.size() == 4 ? fs::path(a[2]) : fs::temp_directory_path() / ("oscairn-verify-" + std::to_string(random()) + std::to_string(random()));
-            const auto p = readPackage(a.back(), into); // throws on any signature or hash that does not hold
+            if(into.empty()) into = fs::temp_directory_path() / ("oscairn-verify-" + std::to_string(random()) + std::to_string(random()));
+            const auto p = readPackage(rest[0], into, device); // throws on any signature or hash that does not hold
             std::vector<std::string> outside; // "<format> <id> <version> <platform> <problem>", each build's
             try
             {
@@ -284,7 +296,10 @@ int main(int argc, char** argv)
             std::printf("archive %s %s\n", p.id.c_str(), p.signature.key.empty() ? "unsigned" : signing::keyId(p.signature.key).c_str());
             for(const auto& i : p.items) std::printf("item %s %s %s\n", i.kind.c_str(), i.id.c_str(), signers(i.signatures).c_str());
             for(const auto& plugin : p.plugins)
+            {
                 for(const auto& b : plugin.builds) std::printf("build %s %s %s %s %s\n", plugin.format.c_str(), plugin.id.c_str(), plugin.version.c_str(), b.platform.c_str(), signers(b.signatures).c_str());
+                for(const auto& platform : plugin.absent) std::printf("absent %s %s %s %s\n", plugin.format.c_str(), plugin.id.c_str(), plugin.version.c_str(), platform.c_str());
+            }
             for(const auto& o : outside) std::printf("outside %s\n", o.c_str());
             return 0;
         }

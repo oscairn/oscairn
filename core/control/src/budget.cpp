@@ -6,6 +6,8 @@
 #include "oscairn/session.h"
 #include "oscairn/library.h"
 #include "oscairn/package.h"
+#include "oscairn/sound_context.h"
+#include "oscairn/realtime.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include "sheredom/json.h"
 #include "JsonInput.h"
@@ -46,7 +48,7 @@ namespace oscairn
         // note before a block counts as at rest (a release tail is not).
         constexpr double restBlocks = 4000, fastBlocks = 400, fallBlocks = 60000, quietSeconds = .5;
         constexpr uint32_t enoughSamples = 100, seedSamples = 4;
-        constexpr int measurementsVersion = 2; // 1: the old estimator's, a high-water mark of wall times; discarded
+        constexpr int measurementsVersion = 3; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops, its memory kept
         fs::path measurementsFile() { return dataHome() / "measurements.json"; }
         std::string percent(double share) { char text[32]; std::snprintf(text, sizeof(text), "%.0f%%", share * 100); return text; }
     }
@@ -114,7 +116,7 @@ namespace oscairn
                 if(next != '#' && (next != ' ' || key.find(' ') != std::string::npos)) continue;
                 found = true;
                 const auto& x = it->second;
-                m = {std::max(m.cpu, x.cpu), std::max(m.rest, x.rest), std::max(m.voice, x.voice), std::max(m.voices, x.voices), std::max(m.memory, x.memory)};
+                m = {std::max(m.cpu, x.cpu), std::max(m.rest, x.rest), std::max(m.voice, x.voice), std::max(m.voices, x.voices), std::max(m.memory, x.memory), std::max(m.samples, x.samples)};
             }
         if(!found) return declaredCost(key, name, plugin);
         // Its CPU forgotten, or none sampled yet: the guess, with the memory as measured.
@@ -124,7 +126,7 @@ namespace oscairn
             return {name, plugin, guess.cpu, std::max(m.memory, guess.memory), m.memory > 0};
         }
         const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : m.cpu;
-        return {name, plugin, cpu, m.memory, true};
+        return {name, plugin, cpu, m.memory, true, {}, m.samples >= enoughSamples};
     }
 
     // Memory: the larger of the measurement and the declaration (RFC 0025: never the plugin's word
@@ -135,6 +137,8 @@ namespace oscairn
     {
         const auto& host = graph.host(node);
         auto c = costOf(pluginKey(graph, node), name, host.descriptor().id, limit);
+        // A shared instance's measurement is the instance's, all its parts': counted once, on its lead context.
+        if(const auto* context = dynamic_cast<const SoundContext*>(&host); context && !context->leads()) c.cpu = 0;
         const auto declared = declaredBy(host);
         std::optional<oscairn_effect_resources_t> resources;
         if(!declared) try { resources = host.effectResources(); } catch(const std::exception&) {}
@@ -180,7 +184,9 @@ namespace oscairn
             const auto bytes = state_files::read(measurementsFile(), 4 * 1024 * 1024);
             const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(bytes.data(), bytes.size()), &std::free};
             const auto* version = detail::member(doc.get(), "version");
-            if(!version || version->type != json_type_number || std::strtod(static_cast<const json_number_s*>(version->payload)->number, nullptr) != measurementsVersion) return;
+            const double read = version && version->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(version->payload)->number, nullptr) : 0;
+            if(read != measurementsVersion && read != 2) return;
+            const bool memoryOnly = read == 2; // version 2's CPU figures were overstated: measured again; its memory stands
             const auto* plugins = detail::member(doc.get(), "plugins");
             if(!plugins || plugins->type != json_type_object) return;
             for(auto* e = static_cast<const json_object_s*>(plugins->payload)->start; e; e = e->next)
@@ -189,13 +195,13 @@ namespace oscairn
                     const auto* v = detail::member(e->value, key);
                     return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : 0.0;
                 };
-                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory");
+                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples");
                 if(!std::isfinite(memory) || memory < 0 || memory > double(1ull << 40)) continue;
                 // An impossible cost (a share above the audio time itself, negative, not a number) is
                 // dropped and measured again; the memory stands.
-                const bool possible = std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
+                const bool possible = !memoryOnly && std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
-                measured_[std::string(e->name->string, e->name->string_size)] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory)} : Measurement{0, 0, 0, 0, uint64_t(memory)};
+                measured_[std::string(e->name->string, e->name->string_size)] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e6))} : Measurement{0, 0, 0, 0, uint64_t(memory), 0};
             }
         }
         catch(const std::exception&) {} // none yet, or unreadable: measured afresh
@@ -208,7 +214,7 @@ namespace oscairn
         bool first = true;
         for(const auto& [key, m] : measured_)
         {
-            char numbers[160]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory));
+            char numbers[200]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples);
             text += std::string(first ? "" : ",") + detail::quote(key) + ":" + numbers; first = false;
         }
         text += "}}\n";
@@ -446,7 +452,7 @@ namespace oscairn
     void Session::forgetMeasurements()
     {
         loadMeasurements();
-        for(auto& [key, m] : measured_) m = {0, 0, 0, 0, m.memory};
+        for(auto& [key, m] : measured_) m = {0, 0, 0, 0, m.memory, 0};
         learning_.clear();
         for(const auto& [node, name] : nodes_) graph_.seedNoteCost(node, 0, 0);
         measurementsChanged_ = true;
@@ -496,6 +502,8 @@ namespace oscairn
                     if(!s.quiet) return;
                     if(!L.restN && m.rest > 0) L.restN = seedSamples;
                     m.rest += (share - m.rest) * weight(L.restN);
+                    m.samples = std::min<uint32_t>(m.samples + 1, 1'000'000);
+                    return;
                 }
                 else if(s.voices != UINT32_MAX)
                 {
@@ -504,6 +512,8 @@ namespace oscairn
                     m.voice += (std::max(0.0, share - (L.restN >= enoughSamples ? m.rest : 0.0)) / s.voices - m.voice) * weight(L.voiceN);
                     m.voices = std::max(m.voices, s.voices);
                 }
+                else return;
+                m.samples = std::min<uint32_t>(m.samples + 1, 1'000'000);
             };
             const Learning::Pending now{st.lastMicroseconds, voices, blocks, L.quiet >= quietBlocks};
             if(auto* timing = host.workerTiming())
@@ -545,17 +555,44 @@ namespace oscairn
         if(measurementsChanged_ && std::chrono::steady_clock::now() - measurementsSaved_ > std::chrono::seconds(30)) saveMeasurements();
     }
 
+    // RFC 0025, per core: plugins in workers render in parallel on the audio cores (all but one: the
+    // system's and the display's), each part's chain one plugin after another within a block. So a
+    // Performance fits when its total fits the budget's share of every audio core, and its costliest
+    // chain the budget's share of one block. Figures from too few blocks that would refuse it let it
+    // open, said (uncertain).
     Control::Estimate Session::estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing) const
     {
         Estimate e;
         e.plugins = plugins; e.budget = budget_;
-        for(const auto& c : plugins) { e.cpu += c.cpu; e.memory += c.memory; }
+        e.cores = std::max(1u, worker::usableCores() - 1);
+        std::map<std::string, double> chains;
+        for(const auto& c : plugins)
+        {
+            e.cpu += c.cpu; e.memory += c.memory;
+            e.longest = std::max(e.longest, c.part.empty() ? c.cpu : chains[c.part] += c.cpu);
+        }
         if(budget_.cpu <= 0) return e;
         double cpu = e.cpu; uint64_t memory = e.memory;
         for(const auto& c : playing) { cpu += c.cpu; memory += c.memory; }
         const auto ceiling = e.budget.memory = memoryCeiling();
         const auto recording = recorder_.committedBytes(); // beside it, as committed
-        e.fits = e.cpu <= budget_.cpu && (!ceiling || e.memory + recording <= ceiling);
+        const bool memoryFits = !ceiling || e.memory + recording <= ceiling;
+        const bool cpuFits = e.cpu <= budget_.cpu * e.cores && e.longest <= budget_.cpu;
+        // Figures from few blocks were seen three to five times too high on the FANTOM-07 (RFC 0045): one that
+        // refuses the Performance only as long as it is not taken at a quarter lets it open, said.
+        if(!cpuFits && std::any_of(plugins.begin(), plugins.end(), [](const Cost& c) { return c.measured && !c.certain; }))
+        {
+            double total = 0, longest = 0; std::map<std::string, double> quartered;
+            for(const auto& c : plugins)
+            {
+                const double x = c.measured && !c.certain ? c.cpu / 4 : c.cpu;
+                total += x; longest = std::max(longest, c.part.empty() ? x : quartered[c.part] += x);
+            }
+            e.uncertain = memoryFits && total <= budget_.cpu * e.cores && longest <= budget_.cpu;
+        }
+        e.fits = memoryFits && (cpuFits || e.uncertain);
+        // shortcut: a change is seamless only while both Performances' totals fit one block's budget, as before the
+        // per-core model; hold them against budget x cores once a device has measured changes ringing out on several cores.
         e.seamless = e.fits && cpu <= budget_.cpu && (!ceiling || memory + recording <= ceiling);
         std::sort(e.plugins.begin(), e.plugins.end(), [](const Cost& a, const Cost& b) { return a.cpu > b.cpu; });
         return e;
@@ -563,7 +600,8 @@ namespace oscairn
 
     std::string Session::tooMuch(const Estimate& e) const
     {
-        std::string why = "needs " + percent(e.cpu) + " of the audio time where this device allows " + percent(budget_.cpu);
+        std::string why = e.longest > budget_.cpu ? "needs " + percent(e.longest) + " of the audio time where this device allows " + percent(budget_.cpu) + " in one block, for its costliest part, one plugin after another"
+                                                  : "needs " + percent(e.cpu) + " of the audio time where this device allows " + percent(budget_.cpu) + " on each of " + std::to_string(e.cores) + " cores";
         const auto ceiling = memoryCeiling();
         if(ceiling && e.memory > ceiling)
         {
@@ -601,7 +639,11 @@ namespace oscairn
         if(budget_.cpu > 0) loadMeasurements();
         // What plays now: this Performance's plugins, and any still ringing out from the last.
         std::vector<Cost> open, ringing;
-        for(const auto& [node, name] : nodes_) open.push_back(nodeCost(graph_, node, name, noteLimit(node)));
+        for(const auto& [node, name] : nodes_)
+        {
+            open.push_back(nodeCost(graph_, node, name, noteLimit(node)));
+            for(const auto& p : parts_) if(nodesOf(p).count(node)) { open.back().part = "part " + std::to_string(p.id); break; }
+        }
         for(const auto node : leaving_) if(graph_.contains(node)) ringing.push_back(nodeCost(graph_, node));
         // The open one fits on its own; what rings out from the last only makes it not seamless,
         // so adding a plugin right after a change is not refused for a tail.
@@ -616,13 +658,16 @@ namespace oscairn
         auto text = [](const json_value_s* v) { return v && v->type == json_type_string ? std::string(static_cast<const json_string_s*>(v->payload)->string, static_cast<const json_string_s*>(v->payload)->string_size) : std::string(); };
         // Each node's part's note limit, by its key: in the part's chain or a split's lanes.
         std::map<std::string, uint32_t> limits;
+        std::map<std::string, std::string> partOf; // a node's part, by its key, for the chains
+        size_t partIndex = 0;
         if(const auto* parts = detail::member(doc.get(), "parts"); parts && parts->type == json_type_array)
             for(auto* p = static_cast<const json_array_s*>(parts->payload)->start; p; p = p->next)
             {
                 const auto* limit = detail::member(detail::member(p->value, "input"), "maxNotes");
                 const uint32_t n = limit && limit->type == json_type_number ? uint32_t(std::strtoul(static_cast<const json_number_s*>(limit->payload)->number, nullptr, 10)) : 0;
+                const auto part = text(detail::member(p->value, "name")) + "#" + std::to_string(partIndex++);
                 auto chain = [&](const json_value_s* c) {
-                    if(c && c->type == json_type_array) for(auto* k = static_cast<const json_array_s*>(c->payload)->start; k; k = k->next) limits[text(k->value)] = n;
+                    if(c && c->type == json_type_array) for(auto* k = static_cast<const json_array_s*>(c->payload)->start; k; k = k->next) { limits[text(k->value)] = n; partOf[text(k->value)] = part; }
                 };
                 chain(detail::member(p->value, "chain"));
                 if(const auto* splits = detail::member(p->value, "splits"); splits && splits->type == json_type_array)
@@ -637,6 +682,9 @@ namespace oscairn
             const auto id = text(detail::member(plugin, "id")), key = text(detail::member(e->value, "key"));
             const auto digest = buildDigest(text(detail::member(plugin, "pathHint"))); // the build it will load, where it is here
             coming.push_back(costOf(id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest), text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0));
+            if(partOf.count(key)) coming.back().part = partOf.at(key);
+            // A node sharing another's instance (its engine another node's key): the instance is counted once, on that node.
+            if(const auto engine = text(detail::member(e->value, "engine")); !engine.empty() && engine != key) coming.back().cpu = 0;
         }
         return estimateOf(coming, playing);
     }

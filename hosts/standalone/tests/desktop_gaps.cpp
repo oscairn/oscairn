@@ -547,7 +547,7 @@ int main(int argc, char** argv)
                 // Its ID, version and build digest (Session::pluginKey): the graph over the socket does not carry the version.
                 std::string key;
                 for(const auto& p : plugins) if(p.name == "Basic Synth") key = "org.oscairn.basic-synth@0.1.0 " + bundleDigest(p.path);
-                data.getChildFile("measurements.json").replaceWithText("{\"version\":2,\"plugins\":{\"" + key + "\":{\"cpu\":0.01,\"rest\":0.01,\"voice\":0,\"voices\":0,\"memory\":" + std::to_string(100 * MiB) + "}}}");
+                data.getChildFile("measurements.json").replaceWithText("{\"version\":3,\"plugins\":{\"" + key + "\":{\"cpu\":0.01,\"rest\":0.01,\"voice\":0,\"voices\":0,\"memory\":" + std::to_string(100 * MiB) + "}}}");
                 engine.edit([](Control& c) { c.setBudget({.9, 0, 3072 * MiB, 256 * MiB, 0, 64 * MiB}); });
                 check(engine.launchApp({"oscairn.library", 120ull << 20}).admitted, "the Library fits");
                 std::string path;

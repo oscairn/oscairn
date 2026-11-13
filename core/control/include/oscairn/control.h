@@ -254,8 +254,14 @@ namespace oscairn
         // budget; seamless: within it together with what plays now, so a change to it rings out.
         // For the open one, what plays now is the last Performance still ringing out: it never
         // makes the open one not fit, so adding a plugin right after a change is not refused.
-        struct Cost { std::string name, plugin; double cpu = 0; uint64_t memory = 0; bool measured = false; };
-        struct Estimate { double cpu = 0; uint64_t memory = 0; std::vector<Cost> plugins; Budget budget; bool fits = true, seamless = true; };
+        // part: the part whose chain it renders in (its nodes render one after another in a block); empty, a chain
+        // of its own. certain: measured from enough blocks, or not measured at all (its default or declared estimate).
+        struct Cost { std::string name, plugin; double cpu = 0; uint64_t memory = 0; bool measured = false; std::string part; bool certain = true; };
+        // RFC 0025, per core: cpu is the total, which must fit budget.cpu on each of `cores` cores (the audio
+        // cores, plugins in workers rendering in parallel), and longest the costliest chain, which must fit
+        // budget.cpu of one block. uncertain: it would not fit, but by figures from too few blocks, and would with
+        // those at a quarter; it is let open, said in the notices.
+        struct Estimate { double cpu = 0; uint64_t memory = 0; std::vector<Cost> plugins; Budget budget; bool fits = true, seamless = true; double longest = 0; uint32_t cores = 1; bool uncertain = false; };
         virtual Estimate estimate(const std::string& directory = {}) = 0;
         // Forgets every plugin's measured CPU (not its memory): each counts at its declared or default
         // estimate, marked unmeasured, until it plays again. For estimates a stall or a burst spoiled.

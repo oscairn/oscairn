@@ -411,7 +411,7 @@ namespace oscairn
         // cpu: the busiest sustained load, falling; rest: with no note sounding or held; voice: added
         // per sounding note; voices: the most notes seen sounding at once. All shares of a block's
         // time, from blocks that ran undisturbed (budget.cpp, measure).
-        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; };
+        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; }; // samples: accepted, at rest and voiced
         Budget budget_;
         std::map<std::string, Measurement> measured_;          // by plugin ID, version and build digest, and what it declared (pluginKey)
         bool measurementsLoaded_ = false, measurementsChanged_ = false;

@@ -66,6 +66,7 @@ namespace oscairn
 
         const std::shared_ptr<Engine>& engine() const noexcept { return engine_; }
         uint16_t channel() const noexcept { return channel_; }
+        bool leads() const noexcept { return lead(); } // the context with the lowest channel: the instance's figures are its
         uint32_t bus() const noexcept { return bus_; } // the output port's index on the instance
         // The sound its channel selects, as the instance last said (each service()); any thread.
         uint32_t sound() const noexcept { return sound_.load(std::memory_order_relaxed); }

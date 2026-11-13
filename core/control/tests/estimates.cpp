@@ -152,7 +152,7 @@ int main(int argc, char** argv)
         check(restBefore > 0 && std::abs(restAfter - restBefore) < std::max(2e-5, .05 * restBefore), "notes held do not change the rest: " + std::to_string(restBefore) + " then " + std::to_string(restAfter));
         check(figure(held, "voices") == 4 && figure(held, "voice") > .015 && figure(held, "voice") < .04, "they give the cost per voice (60 us of 2667 us), for the voices seen");
     }
-    check(read(held / "measurements.json").find("\"version\":2") != std::string::npos, "the file is versioned");
+    check(read(held / "measurements.json").find("\"version\":3") != std::string::npos, "the file is versioned");
     const auto key = keyOf(held);
 
     // Files that are not trusted: the old estimator's (no version), impossible figures (a plugin at
@@ -170,18 +170,18 @@ int main(int argc, char** argv)
     const auto entry = [&](const std::string& body) { return "\"" + key + "\":{" + body + "}"; };
     const auto old = estimateWith("old", "{\"plugins\":{" + entry("\"cpu\":2.11518,\"rest\":2.11518,\"voice\":0,\"voices\":2,\"memory\":68947968") + "}}");
     check(!old.measured && std::abs(old.cpu - .02) < 1e-9, "a file of the old estimator is discarded: " + std::to_string(old.cpu));
-    const auto impossible = estimateWith("impossible", "{\"version\":2,\"plugins\":{" + entry("\"cpu\":2.11518,\"rest\":2.11518,\"voice\":0,\"voices\":2,\"memory\":68947968") + "}}");
+    const auto impossible = estimateWith("impossible", "{\"version\":3,\"plugins\":{" + entry("\"cpu\":2.11518,\"rest\":2.11518,\"voice\":0,\"voices\":2,\"memory\":68947968") + "}}");
     check(std::abs(impossible.cpu - .02) < 1e-9 && impossible.memory >= 68947968, "a rest above the audio time is dropped, its memory kept: " + std::to_string(impossible.cpu));
-    const auto negative = estimateWith("negative", "{\"version\":2,\"plugins\":{" + entry("\"cpu\":0.1,\"rest\":-0.1,\"voice\":0,\"voices\":0,\"memory\":1000") + "}}");
+    const auto negative = estimateWith("negative", "{\"version\":3,\"plugins\":{" + entry("\"cpu\":0.1,\"rest\":-0.1,\"voice\":0,\"voices\":0,\"memory\":1000,\"samples\":1000") + "}}");
     check(std::abs(negative.cpu - .02) < 1e-9, "a negative one is dropped: " + std::to_string(negative.cpu));
-    const auto sound = estimateWith("sound", "{\"version\":2,\"plugins\":{" + entry("\"cpu\":0.3,\"rest\":0.05,\"voice\":0.01,\"voices\":3,\"memory\":1000") + "}}");
+    const auto sound = estimateWith("sound", "{\"version\":3,\"plugins\":{" + entry("\"cpu\":0.3,\"rest\":0.05,\"voice\":0.01,\"voices\":3,\"memory\":1000,\"samples\":1000") + "}}");
     check(sound.measured && std::abs(sound.cpu - .3) < 1e-9, "a possible one stands: " + std::to_string(sound.cpu));
 
     // A Performance refused for a figure that is possible but spoiled (70% where a plugin costs 1%), over
     // a 50% budget, opens once the figures are forgotten (budget.forget); one with no figures at all is allowed.
     {
         const auto home = root / "refused";
-        write(home, "{\"version\":2,\"plugins\":{" + entry("\"cpu\":0.7,\"rest\":0.7,\"voice\":0,\"voices\":0,\"memory\":1000") + "}}");
+        write(home, "{\"version\":3,\"plugins\":{" + entry("\"cpu\":0.7,\"rest\":0.7,\"voice\":0,\"voices\":0,\"memory\":1000,\"samples\":1000") + "}}");
         ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1);
         const auto saved = root / "performance";
         {

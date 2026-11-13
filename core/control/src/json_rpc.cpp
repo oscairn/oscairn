@@ -715,6 +715,7 @@ namespace oscairn
                 std::vector<std::string> plugins;
                 for(const auto& x:e.plugins)plugins.push_back("{\"name\":"+quote(x.name)+",\"plugin\":"+quote(x.plugin)+",\"cpu\":"+encode(x.cpu)+",\"memory\":"+std::to_string(x.memory)+",\"measured\":"+(x.measured?"true":"false")+'}');
                 return "{\"cpu\":"+encode(e.cpu)+",\"memory\":"+std::to_string(e.memory)+",\"fits\":"+(e.fits?"true":"false")+",\"seamless\":"+(e.seamless?"true":"false")+
+                    ",\"longest\":"+encode(e.longest)+",\"cores\":"+std::to_string(e.cores)+",\"uncertain\":"+(e.uncertain?"true":"false")+
                     ",\"budget\":{\"cpu\":"+encode(e.budget.cpu)+",\"memory\":"+std::to_string(e.budget.memory)+"},\"plugins\":"+join(plugins)+'}';
             }
             if(method=="performance.export") {

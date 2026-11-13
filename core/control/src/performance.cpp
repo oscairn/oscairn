@@ -733,8 +733,9 @@ void Session::loadPerformance(const std::string& directory) {
     audition_.reset(); // opening a Performance keeps what an audition tried; auditionStart sets its own after
     const auto root=performanceRoot(directory);
     // Over the budget it is refused, saying what does not fit (RFC 0025), keeping what is prepared.
-    bool seamless=true;uint64_t incoming=0;
+    bool seamless=true;uint64_t incoming=0;std::string uncertain;
     if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));seamless=e.seamless;incoming=e.memory;
+        if(e.uncertain)uncertain="opened though it may not fit: it "+tooMuch(e)+", by figures from too few blocks to be sure";
         if(!seamless)std::fprintf(stderr,"oscairn: opened at once: with the last Performance ringing out it would not fit\n");}
     // Prepared ahead (RFC 0021), the cue only publishes it; another one prepared is let go first.
     auto prepared=std::move(prepared_);preparedOpportunistic_=false;
@@ -742,6 +743,7 @@ void Session::loadPerformance(const std::string& directory) {
     // Read at the cue, it may take over the playing Performance's free instances where keeping them warm would not fit (RFC 0021); a cut, any of them.
     if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming);
     open(*prepared,seamless);
+    if(!uncertain.empty()){notices_.push_back(uncertain);std::fprintf(stderr,"oscairn: %s\n",uncertain.c_str());}
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
     callbackTiming_.warmUp();latenessTiming_.warmUp();
     for(const auto& [n,name]:nodes_)for(auto* w:graph_.host(n).workers())w->workerTiming()->warmUp();

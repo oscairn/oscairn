@@ -79,6 +79,42 @@ memory. The budget keeps a margin (by reliability level, RFC 0027: more on `pass
 - during a seamless change, the outgoing Performance's plugins until they ring out;
 - memory for every plugin and its samples, plus what a seamless change holds twice.
 
+### The CPU model per core
+
+Built 2026-11-13 (RFC 0045's measurements on the FANTOM-07). Before, every plugin's cost was
+summed and the sum held against the budget's share of one block, as though every plugin ran on
+one core one after another; and the estimates themselves were overstated three to five times
+(the Sampler measured 0.29 to 0.33 of a block at rest and 0.09 a voice, against about 0.11 and
+0.02 measured standalone): each sample was a single block's time bounded by the top of a power-of-two
+histogram bucket, and before the rest was known every voiced sample was charged wholly to its
+voices. Now:
+
+- **The figure** is unchanged: a block's time bounded by its worker's CPU times around it, a
+  bucket's top (2026-11-13: an exact mean of the worker's CPU per block was tried and let a stall
+  that sleeps while touching new memory move the rest, its page faults being the thread's CPU time;
+  control-estimates failed one run in two with it). Still open: the overstatement this leaves.
+- **Voices** are fitted from samples with voices sounding, less the rest once it is known; until
+  then the whole sample is the voices' (unchanged: not taking such samples left the cost per voice
+  unknown for the first seconds of playing, which other tests rely on; with the exact figure above
+  the overstatement this leaves is the rest's share, not a bucket's top).
+- **A shared instance** (sound contexts) is counted once, on its lead context, live and in a saved
+  Performance (a node whose `engine` is another node's key counts nothing).
+- **The test for "fits"** is per core. Plugins in workers render in parallel on the audio cores,
+  all but one (`usableCores() - 1`, at least one: one is left to the system and the display); a
+  part's chain renders one plugin after another within a block. A Performance fits when its total
+  is at most the budget's share of every audio core (budget × cores) and its costliest chain at
+  most the budget's share of one block. A seamless change holds both Performances' totals against
+  the same.
+- **Uncertain figures:** each figure counts its samples (`samples` in `measurements.json`, the
+  file now version 3; version 2's figures are discarded and measured again, being overstated). A
+  Performance that is refused by figures from fewer than 100 samples, and would fit with each of
+  those at a quarter (the overstatement seen on the unit), opens, with a notice saying so; adding a
+  plugin past the budget is refused all the same.
+
+Tested: control-admission (three parts at 40 % each fit on the cores where the sum refused them; a
+chain of two at 40 % is refused for its 80 %; from figures of five samples it opens with a notice);
+control-estimates updated for the file's version. Memory admission is as it was.
+
 ## Admission
 
 - **Loading a Performance or a Sound, adding a plugin, importing:** checked first. Over budget:

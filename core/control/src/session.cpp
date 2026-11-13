@@ -86,7 +86,7 @@ namespace oscairn
         if( budget_.cpu > 0 )
         {
             if( const auto after = residentBytes(); after > before ) loadedBytes_[id] = after - before;
-            if( const auto e = estimate(); !e.fits )
+            if( const auto e = estimate(); !e.fits || e.uncertain ) // uncertain figures open a Performance, never add past the budget
             {
                 const auto plugin = graph_.host(id).descriptor().name;
                 dropNode(id);
@@ -112,7 +112,7 @@ namespace oscairn
         if( room ) engine.setMemoryRoom(0);
         nodes_.emplace( id, name );
         if( budget_.cpu > 0 )
-            if( const auto e = estimate(); !e.fits )
+            if( const auto e = estimate(); !e.fits || e.uncertain ) // uncertain figures open a Performance, never add past the budget
             {
                 dropNode(id);
                 throw std::invalid_argument( "adding " + (name.empty() ? graph_.host(source).descriptor().name : name) + ": the Performance " + tooMuch(e) );

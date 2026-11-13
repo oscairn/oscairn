@@ -228,7 +228,7 @@ namespace
         {
             const int t = trace[1], b = bell[0], d = data[0];
             auto note = [t](const std::string& line) { const auto text = line + "\n"; if(::write(t, text.data(), text.size()) < 0) {} };
-            return {[note, d](const std::string&, int flags) { note((flags & O_ACCMODE) == O_RDWR ? "open read-write" : "open other"); return ::dup(d); },
+            return {[note, d](const std::string&, int flags) { note((flags & O_ACCMODE) == O_RDWR ? "seam: open read-write" : "seam: open other"); return ::dup(d); },
                     [note, b](int) { note("wait"); char c; return ::read(b, &c, 1) == 1 ? 0 : -1; }, patience};
         }
         // Forked before the test starts a thread of its own.
@@ -275,7 +275,7 @@ namespace
         check(bench.read().find("open read-write\n") != std::string::npos, "opened for reading and writing");
         // A second holder on the same socket refuses before it touches the device.
         const pid_t second = bench.start(bench.seam());
-        check(ended(second, 3000) == 1 && bench.saw("another panel holder runs") && bench.count("open ") == 1, "a second holder refuses, without opening the device:\n" + bench.read());
+        check(ended(second, 3000) == 1 && bench.saw("another panel holder runs") && bench.count("seam: open") == 1, "a second holder refuses, without opening the device:\n" + bench.read());
 
         Heard heard;
         auto sink = [&](const PanelEvent& e) { std::lock_guard g(heard.lock); heard.events.push_back(e); };
@@ -298,7 +298,7 @@ namespace
             bench.ring();
             check(heard.wait(4) && heard.at(3).value == 300, "a reader attached after the last one went hears the next message");
         }
-        check(bench.count("open ") == 1, "the device opened once in all:\n" + bench.read());
+        check(bench.count("seam: open") == 1, "the device opened once in all:\n" + bench.read());
         // SIGTERM wakes the wait (here a read the signal interrupts) and the holder lets go.
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         const auto stopping = std::chrono::steady_clock::now();
@@ -310,7 +310,7 @@ namespace
         Bench failing;
         auto broken = failing.seam();
         broken.wait = [](int) { errno = ENOTTY; return -1; };
-        check(ended(failing.start(broken), 3000) == 1 && failing.saw("waiting on") && failing.count("open ") == 1, "a failed wait ends the holder; no other way of reading:\n" + failing.read());
+        check(ended(failing.start(broken), 3000) == 1 && failing.saw("waiting on") && failing.count("seam: open") == 1, "a failed wait ends the holder; no other way of reading:\n" + failing.read());
     }
 
     // The takeover guard: while another process has the device open the holder does not open it.
@@ -326,7 +326,7 @@ namespace
         const auto holders = processesHolding(bench.device);
         check(holders.size() == 1 && holders[0] == other, "the process holding it found");
         const pid_t pid = bench.start(bench.seam(300));
-        check(ended(pid, 3000) == 1 && bench.saw("holds " + bench.device) && bench.count("open ") == 0, "the holder refuses, without opening it:\n" + bench.read());
+        check(ended(pid, 3000) == 1 && bench.saw("holds " + bench.device) && bench.count("seam: open") == 0, "the holder refuses, without opening it:\n" + bench.read());
         ::kill(other, SIGKILL); ::waitpid(other, nullptr, 0);
         ::close(ready[0]); ::close(ready[1]);
 #endif

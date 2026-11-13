@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds an Oscairn OS image with Buildroot, in a Linux container (Docker). The build
-# lives in the Docker volume "oscairn-os"; the first build takes an hour or more.
+# lives in the Docker volume "oscairn-os" (OSCAIRN_OS_VOLUME names another, to keep builds
+# apart); the first build takes an hour or more.
 #
 #   os/build.sh [defconfig] [make targets...]     default: oscairn_qemu_aarch64_defconfig
 #   os/build.sh test [--no-display]               boot the QEMU image and check Oscairn starts
@@ -16,18 +17,19 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 
 docker build -q -t oscairn-os-builder "$here/docker" > /dev/null
-docker volume create oscairn-os > /dev/null
+volume=${OSCAIRN_OS_VOLUME:-oscairn-os}
+docker volume create "$volume" > /dev/null
 mkdir -p "$repo/build-os"
 run() {
-	docker run --rm -v oscairn-os:/work -v "$repo":/src:ro -v "$repo/build-os":/out -e HOME=/tmp oscairn-os-builder \
+	docker run --rm -v "$volume":/work -v "$repo":/src:ro -v "$repo/build-os":/out -e HOME=/tmp oscairn-os-builder \
 		sh -c "chown builder: /work /out && exec runuser -u builder -- env HOME=/tmp $*"
 }
 
 if [ "${1:-}" = run ]; then
 	images=/work/output/oscairn_qemu_aarch64_defconfig/images
 	# kernel-args: what the image's profile asks of the kernel (its audio cores, RFC 0035).
-	args=$(docker run --rm -v oscairn-os:/work oscairn-os-builder cat $images/kernel-args 2>/dev/null || true)
-	docker run -d --rm --name oscairn-qemu -p 127.0.0.1:5900:5900 -v oscairn-os:/work oscairn-os-builder \
+	args=$(docker run --rm -v "$volume":/work oscairn-os-builder cat $images/kernel-args 2>/dev/null || true)
+	docker run -d --rm --name oscairn-qemu -p 127.0.0.1:5900:5900 -v "$volume":/work oscairn-os-builder \
 		qemu-system-aarch64 -M virt -cpu cortex-a76 -smp 4 -m 2048 \
 		-kernel $images/Image -append "rootwait root=/dev/vda console=ttyAMA0 $args" \
 		-drive file=$images/rootfs.ext4,if=none,format=raw,id=hd0,snapshot=on \

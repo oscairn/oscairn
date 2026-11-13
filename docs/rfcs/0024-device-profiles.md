@@ -124,6 +124,12 @@ An illustrative profile (the values are an example, not a real product's):
   a core that takes the interrupts without an external `taskset`. Linux only; other threads are
   not moved. It reaches the engine as `OSCAIRN_AUDIO_THREAD_CORES`
   ([developer guide](../developer-guide.md#environment-variables)). No built-in profile sets it.
+
+  Optional `workerAllowance` (added 2026-11-13): each plugin worker's allowance per block in
+  microseconds, how long the engine waits for a block before it is missed
+  ([RFC 0045](0045-audio-scheduling-on-small-devices.md#the-allowance-today)); omitted or 0, half
+  the block's period. For trying values on a device; it reaches the engine as
+  `OSCAIRN_WORKER_BUDGET_US`. No built-in profile sets it.
 - **`audio`:** its interface, the sample rates and the block size it runs at, headphones (a cue
   bus). Optional `device` (added 2026-11-09): the audio device the engine opens instead of the
   default, for a product whose interface is not ALSA's default or not plain stereo (the

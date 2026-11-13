@@ -12,6 +12,8 @@
                          runs). Quoted for the shell: the session evaluates it.
     OSCAIRN_AUDIO_THREAD_CORES  compute.audioThreadCores as a CPU list ("1,2,3"), the cores the
                          engine's and workers' audio threads may run on; empty: anywhere
+    OSCAIRN_WORKER_BUDGET_US  compute.workerAllowance, each plugin worker's allowance per block in
+                         microseconds; empty: derived from the block (half its period)
 
     engine-args.py PROFILE.json
 """
@@ -66,6 +68,7 @@ def settings(profile):
         "OSCAIRN_PROFILE": profile.get("id", ""),
         "OSCAIRN_ENGINE_ARGS": " ".join(shlex.quote(a) for a in engine_args(profile)),
         "OSCAIRN_AUDIO_THREAD_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("audioThreadCores", [])),
+        "OSCAIRN_WORKER_BUDGET_US": str((profile.get("compute") or {}).get("workerAllowance") or ""),
     }
 
 

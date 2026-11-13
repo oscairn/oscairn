@@ -98,6 +98,8 @@ if [ -n "$headless" ]; then
 	export OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-desktop}"
 	# The cores the audio threads may run on (the profile's compute.audioThreadCores); the app sets it itself.
 	[ -n "${OSCAIRN_AUDIO_THREAD_CORES:-}" ] && export OSCAIRN_AUDIO_THREAD_CORES
+	# Each plugin worker's allowance per block (the profile's compute.workerAllowance); the app sets it itself.
+	[ -n "${OSCAIRN_WORKER_BUDGET_US:-}" ] && export OSCAIRN_WORKER_BUDGET_US
 	eval "set -- $OSCAIRN_ENGINE_ARGS"
 	while true; do
 		rm -f /run/oscairn/engine.sock

@@ -76,6 +76,17 @@ namespace oscairn::worker
         }
     }
 
+    std::chrono::nanoseconds workerAllowance(uint32_t frames, double rate, const char* overrideMicroseconds) noexcept
+    {
+        if(overrideMicroseconds && *overrideMicroseconds)
+        {
+            char* end = nullptr; errno = 0;
+            const long long us = std::strtoll(overrideMicroseconds, &end, 10);
+            if(!*end && errno == 0 && us > 0 && us <= 60'000'000) return std::chrono::microseconds(us);
+        }
+        return std::chrono::nanoseconds(int64_t(0.5e9 * double(frames) / rate));
+    }
+
     bool makeRealtime(double periodUs, int linuxPriority) noexcept
     {
 #ifdef __APPLE__

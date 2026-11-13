@@ -973,6 +973,8 @@ namespace oscairn::standalone
                 // The cores the engine's and workers' audio threads may run on (realtime.h); one set by the session wins.
                 if( std::string cores; !profile.compute.audioThreadCores.empty() )
                     { for( auto c : profile.compute.audioThreadCores ) cores += ( cores.empty() ? "" : "," ) + std::to_string( c ); setenv( "OSCAIRN_AUDIO_THREAD_CORES", cores.c_str(), 0 ); }
+                // Each plugin worker's allowance per block (realtime.h's workerAllowance); one set by the session wins.
+                if( profile.compute.workerAllowance ) setenv( "OSCAIRN_WORKER_BUDGET_US", std::to_string( profile.compute.workerAllowance ).c_str(), 0 );
                 if( socket.isEmpty() && helper.empty() )
                     if( const auto missed = applyMemoryPolicy( -999 ); !missed.empty() && profile.reliability != "desktop" )
                         std::fprintf( stderr, "oscairn: %s\n", missed.c_str() );

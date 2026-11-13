@@ -249,7 +249,10 @@ Implemented 2026-10-30 in `WorkerHost.cpp`:
   1.33 ms of its 2.67 ms). An unanswered block is silent and counted as
   a deadline miss; while the worker is still busy with it, later blocks are silent at once
   without waiting. `OSCAIRN_WORKER_BUDGET_US` overrides the budget (the identical-render
-  tests use 50 ms because they render faster than real time on ordinary threads). Offline
+  tests use 50 ms because they render faster than real time on ordinary threads); since
+  2026-11-13 it is a supported setting, the profile's `compute.workerAllowance`, and the
+  derivation lives in `workerAllowance` (`realtime.h`), which
+  [RFC 0045](0045-audio-scheduling-on-small-devices.md) reconsiders. Offline
   rendering waits up to 10 s instead. Shares smaller than half a block for long chains are
   part of step 5's policies.
 - **Supervisor:** a thread per worker checks every 10 ms and marks the plugin failed, kills

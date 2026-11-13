@@ -149,15 +149,14 @@ namespace oscairn
             void setRate(double rate_)
             {
                 rate = rate_;
-                // Each block may take half the block's time before it is silenced; a worker that
-                // misses a quarter second of blocks in a row, or leaves one unanswered that long,
-                // has failed. Offline rendering waits instead of silencing.
+                // Each block may take the worker's allowance (realtime.h) before it is silenced; a
+                // worker that misses a quarter second of blocks in a row, or leaves one unanswered
+                // that long, has failed. Offline rendering waits instead of silencing.
                 const double period = double(frames) / rate;
                 if(mode == ProcessingMode::Offline) budget = std::chrono::seconds(10);
                 else
                 {
-                    budget = std::chrono::nanoseconds(int64_t(0.5e9 * period));
-                    if(const char* us = std::getenv("OSCAIRN_WORKER_BUDGET_US")) budget = std::chrono::microseconds(std::max(1L, std::atol(us)));
+                    budget = workerAllowance(frames, rate, std::getenv("OSCAIRN_WORKER_BUDGET_US"));
                     missLimit = std::max<uint32_t>(8, uint32_t(std::ceil(0.25 / period)));
                 }
             }

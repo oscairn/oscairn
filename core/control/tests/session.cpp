@@ -476,6 +476,16 @@ namespace
                "a CPU list as the kernel writes one" );
         check( !oscairn::worker::cpuMask( "" ) && !oscairn::worker::cpuMask( "3-1" ) && !oscairn::worker::cpuMask( "1," ) && !oscairn::worker::cpuMask( "64" ) &&
                !oscairn::worker::cpuMask( "a" ) && !oscairn::worker::cpuMask( nullptr ), "a malformed one is none" );
+
+        // A worker's allowance: half the block's period, or OSCAIRN_WORKER_BUDGET_US's whole microseconds.
+        using oscairn::worker::workerAllowance;
+        check( workerAllowance( 128, 48000, nullptr ) == std::chrono::nanoseconds( 1'333'333 ) && workerAllowance( 256, 48000, "" ) == std::chrono::nanoseconds( 2'666'666 ) &&
+               workerAllowance( 64, 44100, nullptr ) == std::chrono::nanoseconds( 725'623 ), "half the block's period" );
+        check( workerAllowance( 128, 48000, "2000" ) == std::chrono::microseconds( 2000 ) && workerAllowance( 128, 48000, "50000" ) == std::chrono::milliseconds( 50 ),
+               "an override in microseconds" );
+        check( workerAllowance( 128, 48000, "0" ) == std::chrono::nanoseconds( 1'333'333 ) && workerAllowance( 128, 48000, "-5" ) == std::chrono::nanoseconds( 1'333'333 ) &&
+               workerAllowance( 128, 48000, "1.5" ) == std::chrono::nanoseconds( 1'333'333 ) && workerAllowance( 128, 48000, "abc" ) == std::chrono::nanoseconds( 1'333'333 ) &&
+               workerAllowance( 128, 48000, "99999999999" ) == std::chrono::nanoseconds( 1'333'333 ), "a malformed or out-of-range one leaves the derived allowance" );
     }
 
     // The session's callback timing from times a host gives it (blockTimes): deterministic

@@ -27,6 +27,9 @@ assert engine.settings(fantom)["OSCAIRN_PROFILE"] == "fantom-07"
 
 placed = {**fantom, "compute": {**fantom["compute"], "audioThreadCores": [1, 2, 3]}}
 assert engine.settings(placed)["OSCAIRN_AUDIO_THREAD_CORES"] == "1,2,3", "the audio threads' cores as a CPU list"
+allowed = {**fantom, "compute": {**fantom["compute"], "workerAllowance": 2000}}
+assert engine.settings(allowed)["OSCAIRN_WORKER_BUDGET_US"] == "2000", "the workers' allowance in microseconds"
+assert engine.settings(fantom)["OSCAIRN_WORKER_BUDGET_US"] == "", "none named: derived from the block"
 
 kick = load("kick")
 assert engine.settings(kick)["OSCAIRN_AUDIO_THREAD_CORES"] == "", "none named: anywhere"

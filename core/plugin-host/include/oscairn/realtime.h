@@ -30,4 +30,11 @@ namespace oscairn::worker
     // A CPU list's CPUs as bits; 0 for an empty or malformed list or a CPU past 63.
     // shortcut: CPUs 0 to 63 only; use cpu_set_t throughout for a part with more.
     uint64_t cpuMask(const char* list) noexcept;
+    // A plugin worker's allowance (RFC 0010, RFC 0045): how long the engine waits for a block it
+    // handed a worker, counted from the hand-over, before the block is missed (silenced). Half the
+    // block's period: the graph's longest usual chain is two workers one after the other (an
+    // instrument, then its effect), and both waiting their whole allowance still fit in the block.
+    // `overrideMicroseconds` (OSCAIRN_WORKER_BUDGET_US, the profile's compute.workerAllowance), a
+    // whole number of microseconds above 0, replaces it; anything else leaves the derived one.
+    std::chrono::nanoseconds workerAllowance(uint32_t frames, double rate, const char* overrideMicroseconds) noexcept;
 }

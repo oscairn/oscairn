@@ -66,6 +66,12 @@
           },
           "maxItems": 64
         },
+        "workerAllowance": {
+          "type": "integer",
+          "description": "each plugin worker's allowance per block in microseconds: how long the engine waits for a block before it is missed; omitted or 0: half the block's period",
+          "minimum": 0,
+          "maximum": 1000000
+        },
         "memory": {
           "type": "integer",
           "minimum": 0,

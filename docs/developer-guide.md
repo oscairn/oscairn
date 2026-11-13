@@ -125,7 +125,8 @@ FANTOM-0's panel device and print its messages
 | `OSCAIRN_DATA_HOME` | The data folder: the library, `assets/`, the plugin store `Plugins/`, signing keys `Keys/`, `trust.json` and `measurements.json`. Default `~/Library/Application Support/Oscairn` on macOS, `$XDG_DATA_HOME/oscairn` or `~/.local/share/oscairn` on Linux. Point it at an empty folder to test as a fresh device |
 | `OSCAIRN_CONFIG_HOME` | The desktop's configuration folder (themes and the selected theme; see [design language](design-language.md)) |
 | `OSCAIRN_RUNTIME_DIR` | Where the desktop and its engine helper put their socket |
-| `OSCAIRN_WORKER_BUDGET_US`, `OSCAIRN_WORKER_REPLY_SECONDS` | Tests: a worker's time per block in microseconds, and how long a control call waits for a worker |
+| `OSCAIRN_WORKER_BUDGET_US` | A plugin worker's allowance: how long, in microseconds, the engine waits for a block it handed the worker before the block is missed and silenced ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#the-allowance-today)). Unset, or not a whole number above 0, half the block's period (1333 at 128 frames and 48 kHz). The app sets it from its profile's `compute.workerAllowance` unless it is set already. Tests set 50000 so that worker results do not depend on the machine's load |
+| `OSCAIRN_WORKER_REPLY_SECONDS` | Tests: how long a control call waits for a worker |
 | `OSCAIRN_REQUIRE_SOCKET_BIND` | Tests: fail, rather than skip, when local sockets cannot be bound |
 
 ## Make a first CLAP plugin

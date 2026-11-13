@@ -97,6 +97,10 @@ int main()
               Profile::parse(json).compute.audioThreadCores.empty(), "the cores audio threads may run on; none named, anywhere");
         check(refused(replaced(json, cores, cores + ", \"audioThreadCores\": [4]")) && refused(replaced(json, cores, cores + ", \"audioThreadCores\": \"1-3\"")),
               "a core past its cores, or not a list");
+        check(Profile::parse(replaced(json, cores, cores + ", \"workerAllowance\": 2000")).compute.workerAllowance == 2000 &&
+              Profile::parse(json).compute.workerAllowance == 0, "each worker's allowance in microseconds; none named, derived");
+        check(refused(replaced(json, cores, cores + ", \"workerAllowance\": -1")) && refused(replaced(json, cores, cores + ", \"workerAllowance\": 1.5")),
+              "an allowance that is not a whole number of microseconds");
         check(refused(replaced(json, "\"width\": 1024", "\"width\": 0")), "a screen with no size");
         check(refused("[1, 2]"), "not an object");
         // Control groups: a role each; rows or paging for an assign group of knobs; modes for faders only.

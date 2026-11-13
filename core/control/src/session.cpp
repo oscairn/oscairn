@@ -32,7 +32,13 @@ namespace oscairn
         baseline_ = std::make_shared<const Model>( model() );
     }
 
-    Session::~Session() { graph_.setListener( nullptr ); if( budget_.cpu > 0 ) saveMeasurements(); armPressure( false ); }
+    Session::~Session()
+    {
+        { std::lock_guard lock( releaseMutex_ ); releaseStop_ = true; }
+        releaseWake_.notify_one();
+        if( releaser_.joinable() ) releaser_.join();
+        graph_.setListener( nullptr ); if( budget_.cpu > 0 ) saveMeasurements(); armPressure( false );
+    }
 
     // RFC 0021: an instrument whose plugin plays in this Performance already, on an instance it can
     // share that has room, plays a new sound of that instance instead of loading one.
@@ -779,7 +785,7 @@ namespace oscairn
         const AudioPause::Hold hold( pause_ );
         // Loaded at the old rate and not playing: let go, loaded again when asked for.
         prepared_.reset(); preparedOpportunistic_ = false;
-        warm_.clear();
+        letGo( []( const Free& ) { return true; } );
         transport_.setSampleRate( rate );
         recorder_.setSampleRate( rate );
         sampleRate_ = rate;

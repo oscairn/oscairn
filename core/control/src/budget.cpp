@@ -283,7 +283,8 @@ namespace oscairn
         const auto room = used < budget_.device ? budget_.device - used : 0;
         // Order 2: instances kept warm (RFC 0021), least recently used first.
         const auto next = prepared_ && preparedOpportunistic_ ? preparedMemory() : 0;
-        while(!warm_.empty() && warmMemory() + next > room) warm_.erase(warm_.begin());
+        uint64_t bytes = warmMemory();
+        letGo([&](const Free& w) { if(bytes + next <= room) return false; bytes -= std::min(bytes, w.host->residentBytes()); return true; });
         if(!next || next + warmMemory() <= room) return;
         std::fprintf(stderr, "oscairn: let go of the next entry prepared to cut: its memory is needed\n");
         prepared_.reset(); preparedOpportunistic_ = false;
@@ -294,7 +295,7 @@ namespace oscairn
         if(!warm_.empty())
         {
             std::fprintf(stderr, "oscairn: memory short: let go of %zu plugin instances kept warm\n", warm_.size());
-            warm_.clear();
+            letGo([](const Free&) { return true; });
             return true;
         }
         if(!prepared_) return false;

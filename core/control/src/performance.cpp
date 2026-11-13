@@ -742,7 +742,15 @@ void Session::loadPerformance(const std::string& directory) {
     bool seamless=true;uint64_t incoming=0;std::string uncertain;
     if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));seamless=e.seamless;incoming=e.memory;
         if(e.uncertain)uncertain="opened though it may not fit: it "+tooMuch(e)+", by figures from too few blocks to be sure";
-        if(!seamless)std::fprintf(stderr,"oscairn: opened at once: with the last Performance ringing out it would not fit\n");}
+        if(!seamless)std::fprintf(stderr,"oscairn: opened at once: with the last Performance ringing out it would not fit\n");
+        // RFC 0045: room for its new instances before they load. Instances kept warm whose plugin it does not
+        // use go first, least recently used first; those it may take stay (evictOpportunistic after the change).
+        if(memoryClasses()){
+            std::set<std::string> wanted;for(const auto& c:e.plugins)wanted.insert(c.plugin);
+            const auto used=reservedMemory(false)+budget_.margin+committedMemory()+e.memory;
+            const auto room=used<budget_.device?budget_.device-used:0;
+            uint64_t bytes=warmMemory();
+            letGo([&](const Free& w){if(bytes<=room || wanted.count(w.host->descriptor().id))return false;bytes-=std::min(bytes,w.host->residentBytes());return true;});}}
     // Prepared ahead (RFC 0021), the cue only publishes it; another one prepared is let go first.
     auto prepared=std::move(prepared_);preparedOpportunistic_=false;
     if(prepared && (prepared->root!=root || prepared->stamp!=stamp(root)))prepared.reset();
@@ -754,7 +762,7 @@ void Session::loadPerformance(const std::string& directory) {
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
     callbackTiming_.warmUp();latenessTiming_.warmUp();
     for(const auto& [n,name]:nodes_)for(auto* w:graph_.host(n).workers())w->workerTiming()->warmUp();
-    if(!seamless)warm_.clear(); // it cut for want of room: none kept warm (RFC 0025)
+    if(!seamless)letGo([](const Free&){return true;}); // it cut for want of room: none kept warm (RFC 0025)
     evictOpportunistic();
     if(!keepInstances_)remember(root); // an audition is remembered only once kept
     lastOpen_=stats;lastOpen_.total=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
@@ -776,7 +784,7 @@ std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool
                 room=used<budget_.device?budget_.device-used:0;}
             size_t count=0;uint64_t bytes=0;
             for(auto& f:more){const auto b=f.host->residentBytes(); // as warmMemory counts it
-                if(count<warmLimit && b<=room-bytes){f.keep=true;++count;bytes+=b;}}}
+                if((memoryClasses() || count<warmLimit) && b<=room-bytes){f.keep=true;++count;bytes+=b;}}}
         free.insert(free.end(),more.begin(),more.end());}
     std::unique_ptr<Prepared> p;
     // Instances kept warm it gave a state to before it failed hold that state now, not the one remembered.
@@ -817,7 +825,23 @@ void Session::keepWarm(NodeId n) {
     const auto loaded=loaded_.find(n);
     if(audition_ || loaded==loaded_.end() || graph_.host(n).effectResources() || !graph_.host(n).failure().empty()){graph_.remove(n);return;}
     warm_.push_back({0,graph_.release(n),loaded->second,false,std::chrono::steady_clock::now()});
-    if(warm_.size()>warmLimit)warm_.erase(warm_.begin());
+    if(!memoryClasses() && warm_.size()>warmLimit){bool first=true;letGo([&](const Free&){return std::exchange(first,false);});}
+}
+
+void Session::letGo(const std::function<bool(const Free&)>& which) {
+    std::vector<std::shared_ptr<PluginHost>> later;
+    std::erase_if(warm_,[&](Free& w){if(!which(w))return false;if(w.host->inWorker())later.push_back(std::move(w.host));return true;});
+    if(later.empty())return;
+    {std::lock_guard lock(releaseMutex_);
+        for(auto& h:later)releasing_.push_back(std::move(h));
+        if(!releaser_.joinable())releaser_=std::thread([this]{
+            std::unique_lock lock(releaseMutex_);
+            for(;;){
+                releaseWake_.wait(lock,[&]{return releaseStop_ || !releasing_.empty();});
+                if(releasing_.empty())return; // stopping, nothing left
+                auto batch=std::move(releasing_);releasing_.clear();
+                lock.unlock();batch.clear();lock.lock();}});}
+    releaseWake_.notify_one();
 }
 
 uint64_t Session::warmMemory() const {

@@ -554,7 +554,14 @@ opportunistic data, least likely needed first:
    room, and first of all on memory pressure. A change that cuts for want of room keeps none. A
    seamless change keeps the outgoing Performance's free instances rather than taking them over
    while they fit the room this class leaves once the change has happened, the incoming
-   Performance counted at its estimate, and the 32-instance bound (RFC 0021's middle rule).
+   Performance counted at its estimate (RFC 0021's middle rule; since 2026-11-13 such a kept
+   instance is still taken over before a new one is loaded, [RFC 0045](0045-audio-scheduling-on-small-devices.md#resident-instances-the-agreed-resident-engines)).
+   With memory classes they are bounded by this room alone; the 32-instance bound applies only
+   without them. Before a Performance is read at the cue, the instances kept warm of plugins it
+   does not use go, least recently used first, until its estimate fits beside what is committed;
+   those it may take over stay until after the change. A worker let go ends on a thread of its
+   own, so the control thread does not wait for its process to exit (2026-11-13: 11 ms for one
+   fixture worker on the control thread before, 0.13 ms after, `control-performance-switch-workers`).
 3. **Setlist entries prepared beyond the next one**, furthest ahead first.
 4. **A next entry prepared only as opportunistic** (it will cut anyway).
 5. Only under pressure, when the estimates were wrong: **the committed next entry.** The Setlist
@@ -569,6 +576,7 @@ reservation before it starts the app (a proposed control API call). The engine c
 (above), frees whole opportunistic items until the room is there, and answers yes, or no with the
 reason, which the shell shows. Freeing a prepared Performance destroys its
 plugins, or stops their worker processes, on the control thread; that is not timed here.
+Instances kept warm in workers are stopped on a thread of their own (above).
 
 ### Locking
 

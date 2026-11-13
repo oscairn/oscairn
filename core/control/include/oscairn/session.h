@@ -11,6 +11,9 @@
 
 #include <array>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <memory>
 #include <atomic>
 #include <map>
@@ -752,6 +755,15 @@ namespace oscairn
         std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming = 0); // read with what it may take over; incoming: its memory estimate
         void keepWarm(NodeId node);                       // ringOut: a node rung out kept loaded, or removed
         uint64_t warmMemory() const;
+        // RFC 0045: instances kept warm let go, those `which` picks: one in a worker is destroyed on a
+        // thread of its own (its process's exit never holds the control thread); one in the engine's
+        // process here (CLAP destroys a plugin on its main thread).
+        void letGo(const std::function<bool(const Free&)>& which);
+        std::mutex releaseMutex_;
+        std::condition_variable releaseWake_;
+        std::vector<std::shared_ptr<PluginHost>> releasing_; // under releaseMutex_
+        bool releaseStop_ = false;                           // under releaseMutex_
+        std::thread releaser_;                               // started at the first instance let go
         std::map<NodeId,Loaded> loaded_;                  // Prepared::loaded of the nodes in graph_
         std::vector<Free> warm_;                          // instances kept warm, least recently used first
         // The outgoing sounds of instances taken over with sounds prepared beside (RFC 0021), discarded
@@ -762,7 +774,7 @@ namespace oscairn
         std::vector<Retiring> retiringSounds_;
         void retireSounds();
         uint64_t beside_ = 0;                             // besideSounds()
-        static constexpr size_t warmLimit = 32;
+        static constexpr size_t warmLimit = 32; // without memory classes; with them, memory bounds them (evictOpportunistic)
         bool keepInstances_ = false;                      // an audition opening a Performance: take over nothing set aside
         std::unique_ptr<Prepared> read(const std::filesystem::path& root, std::vector<Free> free = {});
         void open(Prepared& prepared, bool seamless);

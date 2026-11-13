@@ -1058,7 +1058,8 @@ preparing them beside; slice 2, preparing the next sounds in an instance still s
 needs its contract call and is not built.
 
 **Kept warm, and bounded.** An instance that has rung out is kept only when it could be taken
-over (the rule above, without the ports); at most 32, the least recently used let go first. With
+over (the rule above, without the ports); at most 32, the least recently used let go first,
+without memory classes; with them, as many as their memory room allows (RFC 0025, since 2026-11-13). With
 memory classes they are opportunistic data ([RFC 0025](0025-resource-budgets.md#the-order-of-eviction),
 order 2): let go when admission needs the room, on memory pressure before anything else, and
 counted in what the device holds. A change that opens as a cut keeps none, since it cut for want of

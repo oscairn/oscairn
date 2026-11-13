@@ -653,6 +653,21 @@ instruments in workers 522 to 665 ms all loaded, 191 to 224 ms all taken over (t
 of the first, against 63 ms of state saves); in the engine's process 26 to 33 ms and 120 to 160 ms,
 the state save of each playing instance (RFC 0021's put-back) costing more than loading it.
 
+A resident pool under a memory budget, built 2026-11-13: with memory classes the instances kept
+warm are bounded by memory (admission's room for opportunistic data), not by the count of 32,
+which remains only without them; before a Performance is read at the cue, kept instances of
+plugins it does not use go, least recently used first, until its estimate fits, and after the
+change admission's eviction takes the rest as before; a worker let go ends on a thread of its own
+(`Session::letGo`), never on the audio thread and without the control thread waiting for its
+exit. The FANTOM-07's profile names `osMemory` 250 and `performanceMemory` 300 MiB, about 380 MiB
+for plugin instances in use and kept warm ([the arithmetic](../fantom-0.md#what-oscairn-has)).
+`control-performance-switch-workers` checks: one byte short, the least recently used instance kept
+warm goes and its worker exits in the background, the instances in use stay; with no room every
+one kept warm goes and none in use. Memory comes from each worker's resident memory as the
+engine reads it (`residentBytes`); a plugin in the engine's process counts none, so is never let
+go for memory (the shortcut RFC 0021 names). Unverified on the unit: whether 250 MiB keeps the UI
+out of swap. Only where the app sets the budget: `--engine-only` runs without one.
+
 ### Migration, in stages that each leave main working
 
 1. Independent of hosts: the deadline rule, the engine's main-thread service cut, the sharing
@@ -669,7 +684,9 @@ the state save of each playing instance (RFC 0021's put-back) costing more than 
 3. Chains rendered in a host: the graph fuses a part's chain whose nodes share a host into one
    step, the host routing each node's output to the next itself (events and parameters still per
    node, meters from the host's per-node peaks).
-4. Residency across changes with background replacement (above).
+4. Residency across changes with background replacement (above). Before hosts, built 2026-11-13
+   for one process per instance: reuse before a new process, the instances kept warm bounded by
+   memory and let go in the background.
 5. A+B's polling everywhere, now safe; the host-wide voice budget fed from hosts' block times.
 
 What oscairn-worker-bench measures before and after each stage: hand-overs a block, real-time

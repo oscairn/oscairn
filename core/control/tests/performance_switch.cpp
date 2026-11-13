@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <thread>
 #if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
 #endif
@@ -232,6 +233,20 @@ namespace
         return 0;
 #endif
     }
+    // This process's child processes now: its plugin workers.
+    size_t children()
+    {
+        size_t n = 0;
+#if defined(__unix__) || defined(__APPLE__)
+        if(FILE* f = popen("ps -A -o ppid=", "r"))
+        {
+            long parent;
+            while(std::fscanf(f, "%ld", &parent) == 1) n += parent == long(getpid());
+            pclose(f);
+        }
+#endif
+        return n;
+    }
     void memory(const char* what, Session& s) { std::printf("%-52s %7.0f MiB resident, %zu instances kept warm\n", what, resident(), s.warmInstances()); }
 
     void timeOnly(Session& s, const std::vector<fs::path>& p)
@@ -398,6 +413,60 @@ int main(int argc, char** argv)
             load(t, c);
             for(int i = 0; i < int(48000 * 31 / frames) && t.leaving(); ++i) blocks(t, 1);
             check(t.warmInstances() == 32, "32 kept warm: " + std::to_string(t.warmInstances()));
+        }
+
+        // RFC 0045: with memory classes, instances kept warm are bounded by memory, not by count, and let
+        // go least recently used first, their workers ending on a thread of their own; one in use never.
+        // X's instrument is kept warm first, then C's four Samplers; G (a synth through a Delay) plays.
+        // Only workers report their memory, so only there.
+        if(!placementPolicy().worker.empty())
+        {
+            const auto x = temp.path / "evict-x", g = temp.path / "evict-g";
+            single(x, argv[4], .5); ringing(g, 0, argv[1], argv[3], .5);
+            Session t(48000, frames);
+            auto gone = [&] { for(int i = 0; i < int(48000 * 31 / frames) && t.leaving(); ++i) blocks(t, 1); };
+            load(t, x); quiet(t); load(t, c); gone(); quiet(t); load(t, g); gone();
+            check(t.warmInstances() == 5, "X's instrument and C's Samplers kept warm: " + std::to_string(t.warmInstances()));
+            auto listed = [&](bool inUse) { std::map<std::string, size_t> n; for(const auto& i : t.engineTiming(false).instances) if(i.inUse == inUse) ++n[i.plugin]; return n; };
+            const auto idle = listed(false), used = listed(true);
+            check(idle.size() == 2 && !used.empty(), "two plugins idle, G's in use");
+            std::string instrument; for(const auto& [id, n] : idle) if(n == 1) instrument = id;
+            Session::Budget b{64, 0, uint64_t(1) << 40, 0, 0, 0};
+            t.setBudget(b); blocks(t, 2);
+            const auto m = t.memoryState();
+            check(m.opportunistic > 0 && m.committed > 0, "the warm instances' memory and G's measured: " + std::to_string(m.opportunistic) + ", " + std::to_string(m.committed));
+            const auto workers = children();
+            b.device = m.committed + m.opportunistic - 1; // one byte short: the least recently used goes
+            const auto at = std::chrono::steady_clock::now();
+            t.setBudget(b);
+            const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - at).count();
+            check(t.warmInstances() == 4 && listed(false).count(instrument) == 0 && listed(true) == used, "X's instrument, the least recently used, let go; G's in use kept");
+            bool ended = false;
+            for(int i = 0; i < 50 && !ended; ++i) { ended = children() < workers; if(!ended) std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
+            check(ended, "its worker ended in the background");
+            std::printf("evicting one instance kept warm held the control thread %.2f ms\n", ms);
+            b.device = m.committed; // no room at all: every instance kept warm goes, none in use
+            t.setBudget(b);
+            check(t.warmInstances() == 0 && listed(true) == used, "no room: every instance kept warm let go, none in use");
+            t.setBudget({});
+            // Before a Performance is read, room for it: an instance kept warm that it cannot take goes
+            // first, though newer, and those it may take stay. C's Samplers kept warm, then X's instrument;
+            // C opened with room for all but the instrument takes the four Samplers and loads nothing.
+            Session u(48000, frames);
+            auto rung = [&] { for(int i = 0; i < int(48000 * 31 / frames) && u.leaving(); ++i) blocks(u, 1); };
+            load(u, c); quiet(u); load(u, x); rung(); quiet(u); load(u, g); rung();
+            check(u.warmInstances() == 5, "C's Samplers, then X's instrument, kept warm: " + std::to_string(u.warmInstances()));
+            uint64_t instrumentBytes = 0;
+            for(const auto& i : u.engineTiming(false).instances) if(!i.inUse && i.plugin == instrument) instrumentBytes = i.memory;
+            Session::Budget room{64, 0, uint64_t(1) << 40, 0, 0, 0};
+            u.setBudget(room); blocks(u, 2);
+            const auto n = u.memoryState();
+            room.device = n.committed + u.estimate(c.string()).memory + n.opportunistic - instrumentBytes;
+            u.setBudget(room);
+            check(u.warmInstances() == 5, "all kept warm while nothing is opened");
+            w = load(u, c); report("G -> C, room for C but not the instrument kept warm", w);
+            check(w.loaded == 0 && w.reused == 4 && u.warmInstances() == 0, "the instrument let go before the read, the Samplers taken over: " + std::to_string(w.loaded) + " loaded");
+            u.setBudget({});
         }
 
         // A taken-over instance plays as a fresh load of its state would: what the outgoing Performance

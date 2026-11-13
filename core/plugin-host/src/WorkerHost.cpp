@@ -18,6 +18,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <set>
 #include <mutex>
@@ -421,6 +422,12 @@ namespace oscairn
                     shm_unlink(name.c_str());
                     fcntl(shm_, F_SETFD, FD_CLOEXEC); // other plugins' workers must not inherit it
                     if(ftruncate(shm_, off_t(bytes_)) != 0) throw std::runtime_error("Cannot size worker shared memory");
+#ifdef __linux__
+                    // Its pages taken now: with /dev/shm full the plugin is refused here, not the engine
+                    // ended by SIGBUS at the first write to a page tmpfs cannot give.
+                    if(const int e = posix_fallocate(shm_, 0, off_t(bytes_)); e != 0)
+                        throw std::runtime_error(std::string("Cannot reserve worker shared memory: ") + std::strerror(e));
+#endif
                     void* memory = mmap(nullptr, bytes_, PROT_READ | PROT_WRITE, MAP_SHARED, shm_, 0);
                     if(memory == MAP_FAILED) throw std::runtime_error("Cannot map worker shared memory");
                     shared_ = new(memory) Shared();

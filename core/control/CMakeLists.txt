@@ -307,6 +307,13 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(control-library PROPERTIES TIMEOUT 30)
 endif()
 
+add_executable(oscairn-performance-switch-stress-test tests/performance_switch_stress.cpp)
+target_link_libraries(oscairn-performance-switch-stress-test PRIVATE oscairn_control)
+target_compile_options(oscairn-performance-switch-stress-test PRIVATE -Wall -Wextra)
+add_test(NAME control-performance-switch-stress COMMAND oscairn-performance-switch-stress-test
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(control-performance-switch-stress PROPERTIES TIMEOUT ${switch_timeout})
+
 add_executable(oscairn-shared-parts-test tests/shared_parts.cpp)
 target_include_directories(oscairn-shared-parts-test PRIVATE ../clap-host/tests)
 target_link_libraries(oscairn-shared-parts-test PRIVATE oscairn_control_json)
@@ -326,6 +333,7 @@ set(control_worker_tests
     "control-sound-presets|oscairn-sound-presets-test|$<TARGET_FILE:oscairn_basic_synth>"
     "control-shared-parts|oscairn-shared-parts-test|$<TARGET_FILE:oscairn_basic_synth>"
     "control-json-audio|oscairn-json-rpc-test|$<TARGET_FILE:oscairn_basic_synth>"
+    "control-performance-switch-stress|oscairn-performance-switch-stress-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:kick-clap-fixture-normal>"
     "control-performance|oscairn-performance-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:oscairn_step_sequencer>|$<TARGET_FILE:kick-clap-fixture-normal>")
 if(BUILD_TESTING) # the Legacy Sampler
     list(APPEND control_worker_tests

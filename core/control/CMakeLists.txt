@@ -57,7 +57,11 @@ endif()
 add_executable(oscairn-library-scale-test tests/library_scale.cpp)
 target_link_libraries(oscairn-library-scale-test PRIVATE oscairn_control)
 target_compile_options(oscairn-library-scale-test PRIVATE -Wall -Wextra)
-add_test(NAME control-library-scale COMMAND oscairn-library-scale-test)
+# A sanitizer slows 50,000 items past the timeout and the 50 ms check means nothing there: fewer items, no timing.
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    set(library_scale_args --sanitized)
+endif()
+add_test(NAME control-library-scale COMMAND oscairn-library-scale-test ${library_scale_args})
 set_tests_properties(control-library-scale PROPERTIES TIMEOUT 300)
 
 add_executable(oscairn-signing-test tests/signing.cpp)

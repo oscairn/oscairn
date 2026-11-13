@@ -3,6 +3,7 @@
 // RFC 0023 step 5's gate: 50,000 items indexed in place. A rescan with nothing changed reads no
 // file (every file is made unreadable first, and all stay listed); a search answers within 50 ms;
 // an index damaged or out of date is rebuilt from the files, not trusted. Prints what it measured.
+// With --sanitized (a sanitizer slows it several times over) it lists 5,000 items and checks no time.
 #include "oscairn/session.h"
 #include "oscairn/package.h"
 #include "oscairn/plugin_host.h"
@@ -54,9 +55,10 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
-    constexpr size_t folders = 500, perFolder = 100, total = folders * perFolder;
+    const bool sanitized = argc > 1 && std::string(argv[1]) == "--sanitized";
+    const size_t folders = sanitized ? 50 : 500, perFolder = 100, total = folders * perFolder;
     try
     {
         state_files::TemporaryDirectory temp;
@@ -92,8 +94,8 @@ int main()
             const double all = best(5, [&] { tracks(s); });
             const double text = best(5, [&] { tracks(s, "track 4242"); });
             const double none = best(5, [&] { tracks(s, "no such thing"); });
-            check(tracks(s, "track 4242").total == 1 + 10, "a search finds what it should"); // 4242 and 42420..42429
-            check(std::max({all, text, none}) < 50, "a search answers within 50 ms");
+            check(tracks(s, "track 4242").total == (total > 42429 ? 1 + 10 : 1), "a search finds what it should"); // 4242 and 42420..42429
+            check(sanitized || std::max({all, text, none}) < 50, "a search answers within 50 ms");
             std::printf("measured: %zu items: first scan %.0f ms; rescan, nothing changed %.0f ms; query, all %.1f ms, text %.1f ms, no match %.1f ms\n", total, first, rescan, all, text, none);
             std::printf("measured: resident memory %.1f MiB before the library, %.1f MiB after the first scan (+%.1f), peak %.1f MiB\n", mib(before), mib(scanned), mib(scanned) - mib(before), mib(peak()));
             std::error_code e;

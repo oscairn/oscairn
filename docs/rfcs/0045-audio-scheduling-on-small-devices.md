@@ -397,27 +397,54 @@ the jitter of its hand-over, and a block not taken left the worker busy for the 
 so one long block cost two. Before the rule the engine waited up to the allowance and a period
 (4 ms), which let it through but could stall the callback.
 
-Built (2026-11-13): the block in flight is taken at the callback's start when it is done, and the
-callback's own block is handed at once (the usual case: the hand-over stays early). When it is not
-done, the callback's block is kept (inputs, events and transport copied), and the graph collects
-the block in flight after every other worker of its wave (`PluginHost::oneBlockLate`), waiting for
-it to the callback's deadline, never past it and with no spin, then hands the kept block. Every
-block thus has from its hand-over to the next callback's deadline: at least a period, up to a
-period and the deadline (4.9 ms at 128 frames). A block that misses even that is faded; the block
-kept behind it is handed as soon as the worker is free and heard in that callback, when what the
-worker's blocks usually take (an average of an eighth each) fits before its deadline; otherwise
-that block's sound is given up too, its events going with the callback's own block, handed at once
-so the part is in step again rather than missing every block after. One long block costs one
-block while it ends before the next callback; a block longer than two periods keeps the worker
-through the next hand-over and costs two.
+First fix (5a6a3fd6, 2026-11-13), withdrawn the same day: when the block in flight was not done at
+the callback's start, the graph waited for it after its wave's other workers, to the callback's
+deadline, then handed the kept block. On the unit (bundle 90c5d6b5, ST Final) it failed with six
+delayed workers and with one alone (Analog, 1.24 ms a block): callback p50 in the 2 to 4 ms bucket
+and max 9.8 ms against a 2,667 us period, the engine's thread at 83 % of a core, and the ordinary
+workers after the Analog part (its delay, the reverb, an EQ) silenced by the thousand with
+0.2 ms blocks; the owner heard the arpeggio stuck on one note and the pads in the right channel
+only. Waiting for a delayed block holds its wave, so the plugins after it are handed their blocks
+late and miss; why the callback itself ran past its deadline on the unit was not reproduced:
+`extra-block-paced` (below) shows no callback past the period with one or six delayed workers on
+macOS, and no more than without the mode in the container limited to four CPUs. Nor were the stuck arpeggio and the right-channel
+pads, which the Sampler parts also showed while they were not delayed; bundle 90c5d6b5 also
+carries the instance reuse and memory-class commits of the same day, and the same bundle without
+`OSCAIRN_WORKER_EXTRA_BLOCK` would tell the two apart (not run).
 
-Tests: control-worker-deadline, paced in real time with the callback's deadline set, the extra
-block for the fixture: a 2.4 ms block every period loses none of 2,000 and no callback runs past
-the period; 5.5 ms blocks lose nearly every block (a "too slow" restart's first blocks are silent
-without counting) and no callback waits past its deadline (on macOS 2.28 ms at most; the bound has
-2.5 ms of slack for the container's late timers, which ran 1.3 ms past); among 1 ms blocks one of
-4 ms loses none, one of 5 ms one, one of 5.5 ms two (exactly so on macOS; at most so in the
-container, whose late timers can give a block more time). Not measured on the unit.
+Built instead (2026-11-13): **the wait for a delayed block ends where the plugins after it need
+their time.** As in the first fix, the block in flight is taken at the callback's start when it is
+done and the callback's own block handed at once; otherwise the callback's block is kept (inputs,
+events and transport copied) and the graph waits for the block in flight after every other worker
+of its wave (`PluginHost::oneBlockLate`), but only to the callback's deadline less what the waves
+after its wave took in the last block (the costliest step of each, as step 6 computes it, now
+computed whenever a deadline is set), then hands the kept block. A delayed part playing straight to
+the mix still waits to the deadline; the Analog part's delay, reverb and EQ keep the time they
+took. A block that misses is faded, and the kept block behind it is handed as soon as the worker is
+free and heard in that callback when what the worker's blocks usually take (an average of an
+eighth each) fits before the deadline, else given up with its events carried to the callback's own
+block, handed at once so the part is in step again. Without a device the block is waited for, as
+one past its allowance always was. A variant that never waited (the block taken only if done when
+its wave is taken) was tried and left: in the container a 2.4 ms block every period then lost
+1,333 of 2,000.
+
+Tests: control-worker-deadline as for the first fix (2.4 ms blocks lose none of 2,000; 5.5 ms
+blocks nearly all, the longest callback 2.28 ms on macOS; among 1 ms blocks one of 4 ms costs
+none, 5 ms one, 5.5 ms two on macOS). `extra-block-paced` (new): a graph of ST Final's shape (a
+note effect into an instrument into an insert, five more instruments, a bus; nine workers;
+instruments 1.2 ms a block, the rest 0.1 ms), paced with the deadline set, with none, one and six
+instruments delayed and one 4.9 ms block, the best of three runs each. On macOS: no callback past
+the period in any case; the engine's thread at 10.7 % without the mode, 7.6 % with one delayed,
+3.8 % with six; ordinary blocks missed 2,281 without (the shape is near the deadline on this
+machine), 1,075 with one delayed, 0 with six; no delayed block lost but two around the 4.9 ms
+one; left and right equal in every block. In the container (16 CPUs): callbacks past the period 5
+without, 8 with one delayed, 6 with six (noise of that size); ordinary missed 1,938, 1,772 and 80.
+On four of its CPUs: callbacks past the period 7, 3 and 0; ordinary missed 2,158, 3,187 and 433, no
+delayed block lost. So one heavy delayed worker on four cores can still cost the ordinary workers
+(its block running into the next callback takes a CPU the next callback's workers want); with
+several delayed the ordinary workers fare better than without the mode. Not measured on the unit,
+where neither the callback past its deadline nor the stuck arpeggio and right-channel pads were
+explained.
 
 ### The sharing bias, a stopgap (2026-11-13)
 

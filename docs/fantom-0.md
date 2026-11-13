@@ -1371,8 +1371,9 @@ on the display; `--engine-only` the engine alone.
    `OSCAIRN_WORKER_SPIN_US=0 ./oscairn-fantom-start` turns it off for comparing.
 
    No wait on a worker goes past the audio callback's deadline (its start plus the period less
-   15 %); with the extra block a worker's block is waited for, after the callback's other workers,
-   until the deadline of the callback after the one that handed it, so it has at least a period.
+   15 %); with the extra block a worker's block is taken at the next callback's start when it is
+   done, else waited for after its wave's other workers, only to the deadline less what the plugins
+   after it took in the last block.
    `OSCAIRN_WORKER_DEADLINE=1 ./oscairn-fantom-start` makes each worker wait to its wave's deadline
    instead of its allowance
    ([RFC 0045 step 6](rfcs/0045-audio-scheduling-on-small-devices.md#the-allowance-from-the-deadline-step-6-status)),

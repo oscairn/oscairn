@@ -1506,7 +1506,8 @@ namespace oscairn
         worker::workerDeadline=callbackEnds;
         const bool deadlines=callbackEnds.time_since_epoch().count() && deadlines_;
         worker::workerDeadlineOnly=deadlines;
-        if(float later=0;deadlines)
+        // The reserves also bound the wait for a block a call late (RFC 0045's extra block), always.
+        if(float later=0;callbackEnds.time_since_epoch().count())
             for(size_t w=plan->waves.size();w-->0;)
             {
                 plan->after[w]=later;
@@ -1540,13 +1541,17 @@ namespace oscairn
             for(uint32_t k=0;k<locals;++k){const float c=plan->steps[plan->local[k]].cost;total+=c;largest=std::max(largest,c);}
             if(total-largest>=helpers_->worth())helpers_->run(locals,&Job::render,&job);
             else for(uint32_t k=0;k<locals;++k)Job::render(&job,k);
-            // RFC 0045: plugins a block late last, so waiting for their blocks in flight overlaps the wave's others.
+            // RFC 0045: plugins a block late last, so waiting for their blocks in flight overlaps the wave's others, and
+            // only to the callback's deadline less what the waves after this one took in the last block: the plugins
+            // after them keep their time.
             for(const bool late:{false,true})for(uint32_t i=first;i<end;++i)if(auto& step=plan->steps[i];step.started && step.host->oneBlockLate()==late)
             {
+                if(late && callbackEnds.time_since_epoch().count())worker::workerDeadline=callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave]));
                 step.processed=step.host->finishProcess();
                 // A block given up on took the time it was allowed, not what the worker needs: the last kept.
                 if(step.processed)step.cost=std::chrono::duration<float,std::micro>(std::chrono::steady_clock::now()-step.handed).count();
             }
+            if(callbackEnds.time_since_epoch().count())worker::workerDeadline=deadlines?callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave])):callbackEnds;
             for(uint32_t i=first;i<end;++i)finish(plan->steps[i]);
             first=end;++wave;
         }

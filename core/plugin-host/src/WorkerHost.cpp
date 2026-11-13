@@ -1262,14 +1262,15 @@ namespace oscairn
 
             // RFC 0045's extra block: each call plays the block handed a call earlier, so the node sounds exactly one
             // block late. The block in flight is taken at the call's start when it is done, and the call's own block
-            // handed at once; otherwise the call's block is kept (staged) and finishDelayed, which the graph calls
-            // after the wave's other workers, waits for the one in flight to the callback's deadline (never past it;
-            // its allowance and a period without one), then hands the kept block. Every block thus has from its
-            // hand-over to the next callback's deadline, at least a period. A block that misses even that is faded,
-            // and the block kept behind it goes to the worker as soon as the worker is free, heard in that call: one
-            // long block costs one block. Only while the worker is still busy a call later is that kept block lost
-            // too, its events going with the next one. Its outputs, events, voice report and reset come with the
-            // block played. Audio thread.
+            // handed at once; otherwise the call's block is kept (staged), and finishDelayed, which the graph calls
+            // after the wave's other workers, waits for the one in flight to the deadline the graph sets for it (the
+            // callback's, less what the waves after this one took in the last block, so the plugins after it keep
+            // their time), then hands the kept block. A block that misses even that is faded; the block kept behind
+            // it goes to the worker as soon as the worker is free and is heard in that call when what the worker's
+            // blocks usually take fits before the deadline, else its sound is given up too, its events going with the
+            // call's own block, handed at once so the part is in step again. Without a device it is waited for, as a
+            // block past the allowance always was. Its outputs, events, voice report and reset come with the block
+            // played. Audio thread.
             bool extraBlock() const noexcept { return extra_; }
             static bool listed(const char* list, const std::string& id)
             {
@@ -1334,8 +1335,7 @@ namespace oscairn
                     {
                         // Free again: the block kept behind a missed one goes now and is heard in this call, when what a
                         // block usually takes fits before the deadline.
-                        const auto deadline = workerDeadline;
-                        if(!deadline.time_since_epoch().count() || std::chrono::steady_clock::now() + std::chrono::nanoseconds(runNs_) < deadline)
+                        if(!workerDeadline.time_since_epoch().count() || std::chrono::steady_clock::now() + std::chrono::nanoseconds(runNs_) < workerDeadline)
                         {
                             handStaged();
                             if(previous_ == Previous::started) { stage(inputs, ni, frames, events, count, transport, offset); deferred_ = true; return; }
@@ -1382,6 +1382,7 @@ namespace oscairn
                 {
                     busy_.store(true);
                     kept_ = true;
+                    // Waited for to the deadline the graph gives it: the callback's less what the plugins after it took.
                     playedOk_ = finish(false); // its sound, or (missed) the fade
                     playedKept_ = kept_; played_ = startedOutputs_; playedFrames_ = startedFrames_;
                     if(shared_->done.load(std::memory_order_acquire) == sequence_) handStaged();

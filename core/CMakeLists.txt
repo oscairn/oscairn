@@ -391,6 +391,12 @@ target_link_libraries(oscairn-worker-extra-block-test PRIVATE oscairn_engine)
 add_test(NAME worker-extra-block COMMAND oscairn-worker-extra-block-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(worker-extra-block PROPERTIES TIMEOUT 60)
+# RFC 0045's extra block in real time, in a graph of ST Final's shape: callbacks within the period, ordinary workers untouched, stereo intact, notes a block late.
+add_executable(oscairn-extra-block-paced-test engine/tests/extra_block_paced.cpp)
+target_link_libraries(oscairn-extra-block-paced-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-extra-block-paced-test oscairn-plugin-worker)
+add_test(NAME extra-block-paced COMMAND oscairn-extra-block-paced-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_transpose> ${worker_timing})
+set_tests_properties(extra-block-paced PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 # RFC 0045's miss policy: a long block in a worker costs a faded dropout of that part, never its notes.
 add_executable(oscairn-stalling-worker plugin-host/src/worker_main.cpp plugin-host/src/Worker.cpp engine/tests/stalling_worker.cpp)
 target_compile_definitions(oscairn-stalling-worker PRIVATE OSCAIRN_STALLING_WORKER)

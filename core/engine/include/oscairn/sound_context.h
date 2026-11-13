@@ -133,6 +133,7 @@ namespace oscairn
         bool later_ = false; // selected only by select()
         std::set<uint32_t> mine_; // soundContexts()
         std::atomic<uint32_t> sound_{0};
+        std::chrono::steady_clock::time_point serviced_{}; // the last service (workerServiceInterval)
         void showValues(uint32_t sound); // the sound's own values, where the plugin gives them
         std::vector<kick::clap::Port> port_, none_;
         std::map<clap_id, double> values_;

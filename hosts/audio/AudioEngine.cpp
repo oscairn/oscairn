@@ -250,6 +250,10 @@ namespace oscairn::host
         const auto shipped = here.getSiblingFile( "Resources" ).getChildFile( "Preinstalled" );
         session_->preinstall( ( shipped.isDirectory() ? shipped : here.getChildFile( "Preinstalled" ) ).getFullPathName().toStdString() );
         service();
+        // On a device (an instrument's reliability level), each worker is serviced at most every 20 ms of these
+        // 5 ms ticks: each is a request and an answer, and with ten workers they were most of a tick (RFC 0045).
+        if(const char* level=std::getenv("OSCAIRN_RELIABILITY");level && (std::string(level)=="instrument" || std::string(level)=="pass-through"))
+            oscairn::setWorkerServiceInterval(std::chrono::milliseconds(20));
         startTimer( 5 ); // control ticks are independent of the panel's repaint rate
     }
 

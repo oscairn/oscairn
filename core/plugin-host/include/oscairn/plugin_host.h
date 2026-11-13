@@ -3,6 +3,7 @@
 #include <kick_clap/Host.h>
 #include "oscairn/timing.h"
 #include <array>
+#include <chrono>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -190,6 +191,13 @@ namespace oscairn
     // before applyMemoryPolicy. OSCAIRN_THP=keep leaves the process as it is. A failure is said once on
     // stderr, as `who`.
     void disableTransparentHugePages(const char* who);
+    // RFC 0045: the least time between two services of one plugin in a worker (each a request to its
+    // process and an answer, waking its control thread): a node's service() inside it returns at once.
+    // 0, the default, services at every call. A device's engine sets 20 ms (AudioEngine); the
+    // engine's main thread otherwise asks every worker 200 times a second. OSCAIRN_WORKER_SERVICE_MS, a
+    // whole number of milliseconds, replaces what is set. Main thread.
+    void setWorkerServiceInterval(std::chrono::milliseconds) noexcept;
+    std::chrono::milliseconds workerServiceInterval() noexcept;
     // RFC 0045, Linux only, false elsewhere: while the engine's audio device runs, a PM QoS request
     // for no CPU wake-up latency: `device` held open with a 32-bit 0 written, so idle cores stay out
     // of deep idle states (the FANTOM-07's cpu-sleep lists a 1.5 ms exit) and a thread woken for a

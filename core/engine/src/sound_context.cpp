@@ -85,6 +85,13 @@ namespace oscairn
 
     void SoundContext::service()
     {
+        // As often as a worker is serviced (workerServiceInterval): each call below asks the instance's worker.
+        if(const auto interval = workerServiceInterval(); interval.count())
+        {
+            const auto now = std::chrono::steady_clock::now();
+            if(now - serviced_ < interval) return;
+            serviced_ = now;
+        }
         engine_->host->service();
         if(later_) return; // its channel selects another node's sound, or a retired one, until select()
         // Never throws, as the host's service(): a worker that failed is the supervisor's to restart,

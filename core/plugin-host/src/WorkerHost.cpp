@@ -545,6 +545,12 @@ namespace oscairn
             // handle, and throwing would stop the graph servicing its other nodes.
             void service() override
             {
+                if(const auto interval = workerServiceInterval(); interval.count())
+                {
+                    const auto now = std::chrono::steady_clock::now();
+                    if(now - serviced_ < interval) return;
+                    serviced_ = now;
+                }
                 Reader r;
                 try { r = request(Op::Service); } catch(const std::exception&) { return; }
                 pending_.clear(); next_ = 0;
@@ -1428,6 +1434,7 @@ namespace oscairn
             std::array<std::atomic<uint64_t>, maxIds> idTable_{};
             std::atomic<uint32_t> idCount_{0}, idVersion_{0};
             size_t next_ = 0;
+            std::chrono::steady_clock::time_point serviced_{}; // main thread: the last service asked of the worker (workerServiceInterval)
         };
 
         // RFC 0025: when every node's plugin declares its memory (oscairn.memory), the worker's limit
@@ -1600,6 +1607,14 @@ namespace oscairn
             restarted.fetch_add(1, std::memory_order_relaxed);
             failed.store(false);
         }
+    }
+
+    namespace { std::atomic<int64_t> serviceInterval{0}; }
+    void setWorkerServiceInterval(std::chrono::milliseconds interval) noexcept { serviceInterval.store(interval.count(), std::memory_order_relaxed); }
+    std::chrono::milliseconds workerServiceInterval() noexcept
+    {
+        static const long long fixed = [] { const char* v = std::getenv("OSCAIRN_WORKER_SERVICE_MS"); char* end = nullptr; const long long n = v && *v ? std::strtoll(v, &end, 10) : -1; return v && *v && !*end && n >= 0 && n <= 1000 ? n : -1; }();
+        return std::chrono::milliseconds(fixed >= 0 ? fixed : serviceInterval.load(std::memory_order_relaxed));
     }
 
     std::shared_ptr<PluginHost> loadPluginInWorker(const std::string& program, const std::string& path, const std::string& id,

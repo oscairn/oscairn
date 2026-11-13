@@ -2116,6 +2116,21 @@ int main(int argc, char** argv)
                         // One fader moving redraws its fader, not the view (it redrew about half the screen a frame).
                         check(!frames.empty() && share / double(frames.size()) < .1, where + ": a fader moving redraws under a tenth of the screen a frame on average");
                     }
+                    // The transport running (the Groovebox playing): Stop shows in the top bar, as large
+                    // as any touch target, inside the screen and over nothing, and stops it.
+                    standalone::setOffscreen(panel); panel.setVisible(true); // shown, as --snapshot shows it: the top bar polls
+                    engine.setPlaying(true);
+                    check(wait([&] { return engine.status().playing; }), where + ": the transport plays");
+                    auto& stop = frame.bar().stopButton();
+                    wait([&] { return stop.isVisible(); });
+                    show(frame, "play-playing");
+                    const auto stopArea = panel.getLocalArea(&stop, stop.getLocalBounds().toFloat());
+                    check(stop.isVisible() && std::min(stopArea.getWidth(), stopArea.getHeight()) >= minimum - .5f,
+                          where + ": a touch-size Stop shows while the transport plays: " + stopArea.toString().toStdString());
+                    stop.triggerClick();
+                    check(wait([&] { return !engine.status().playing; }), where + ": and Stop stops it");
+                    check(wait([&] { return !stop.isVisible(); }), where + ": and goes when it has");
+                    panel.setVisible(false); panel.getProperties().remove("oscairnOffscreen");
                     app.edit(true);
                     show(frame, "parts");
                     // A part's page, taller than a short screen: it scrolls.
@@ -2134,6 +2149,24 @@ int main(int argc, char** argv)
                         std::replace(name.begin(), name.end(), ' ', '-');
                         show(frame, name);
                     }
+                    panel.overlay(nullptr);
+                }
+                {
+                    standalone::SequencerPane groovebox(engine, true);
+                    standalone::AppFrame frame(engine, "Groovebox", groovebox, shell);
+                    standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(groovebox, 2);
+                    // Its step view is still the sequencer screen drawn for 1,024 x 600, whose controls
+                    // are not all touch-size yet: Play and Stop are checked, not the whole view.
+                    panel.overlay(&frame); frame.resized(); settle();
+                    if(snap) save(panel, size + "-groovebox");
+                    std::vector<juce::Rectangle<float>> transport;
+                    for(auto* c : groovebox.getChildren())
+                        if(auto* b = dynamic_cast<juce::TextButton*>(c); b && b->isVisible() && (b->getButtonText() == "Play" || b->getButtonText() == "Stop"))
+                            transport.push_back(panel.getLocalArea(b, b->getLocalBounds().toFloat()));
+                    check(transport.size() == 2 && std::all_of(transport.begin(), transport.end(), [&](const auto& r) {
+                              return std::min(r.getWidth(), r.getHeight()) >= minimum - .5f && panel.getLocalBounds().toFloat().contains(r); }) &&
+                          !transport[0].intersects(transport[1]),
+                          where + ": the Groovebox has Play and Stop on the screen, touch-size");
                     panel.overlay(nullptr);
                 }
                 {

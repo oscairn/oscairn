@@ -31,6 +31,7 @@ namespace oscairn::standalone
         explicit SequencerPane(Engine& engine, bool transport = true); // transport: Play, Stop and clock on screen
         void refresh();
         juce::Button& clockOut() { return clockOut_; }
+        void paint(juce::Graphics& g) override { g.fillAll(ink(Ink::Background)); } // opaque: over a panel's own screen
         void resized() override;
     private:
         void timerCallback() override { refresh(); }

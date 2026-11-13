@@ -16,7 +16,10 @@ Checked when built and tested; the sections below say how.
       Home and every app on a panel: Home, Back and the running apps unless the layout binds a
       button to `home` or `back`, where the musician is, the open Performance and its scene (a
       tap: Save, Save As New), Record and Capture beside the tempo ([RFC 0020](0020-recording.md#step-4-status)),
-      the tempo and the engine's load, and All notes off (held half a
+      Stop while the transport plays (2026-11-13: in any app, so a Groovebox started from
+      anywhere can be stopped from where the musician is; the Groovebox on a panel whose layout
+      has no Play and Stop buttons shows its own, and a device's PLAY and STOP buttons start and
+      stop it through the engine), the tempo and the engine's load, and All notes off (held half a
       second; `notes.panic`) unless a button is bound to `panic` or a button of the device or a
       connected controller plays Panic ([RFC 0011](0011-performance-ui-and-editors.md#physical-controls),
       `panicOnHardware`). Apps on a panel keep running
@@ -137,7 +140,8 @@ From left to right:
    settings as a sheet: output level, audio device and rate, MIDI, tempo and clock, theme,
    brightness, stage lock and **All notes off**.
 6. **All notes off,** as an icon, where the panel has no button for it. Held half a second, so
-   a brush does not cut a chord.
+   a brush does not cut a chord. Before it, **Stop** while the transport plays, in every app:
+   what plays can always be stopped from the screen in front.
 
 What does not fit (a narrow screen, a long title) gives way in this order: the trail shortens
 to the screen's name, the app's extra actions move into its menu, status marks collapse into

@@ -593,10 +593,11 @@ namespace oscairn::standalone
         void openGroovebox()
         {
             if( !admitted( "Groovebox", [this] { openGroovebox(); } ) ) return;
-            if( panel() ) // a panel has Play and Stop
+            if( panel() ) // Play and Stop on the screen, unless the layout has buttons for them (a device's own come through its engine)
             {
                 if( bringForward( "Groovebox" ) ) return;
-                auto pane = std::make_unique<SequencerPane>( engine_, false ); auto& app = *pane; openOnScreen( "Groovebox", "layout-grid", app, std::move( pane ) ); return;
+                const bool buttons = layoutBinds( "play-stop" ) || ( layoutBinds( "play" ) && layoutBinds( "stop" ) );
+                auto pane = std::make_unique<SequencerPane>( engine_, !buttons ); auto& app = *pane; openOnScreen( "Groovebox", "layout-grid", app, std::move( pane ) ); return;
             }
             showGroovebox();
         }

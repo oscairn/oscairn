@@ -9,8 +9,9 @@ namespace oscairn::standalone
 {
     /// The top bar (RFC 0030), one in every app: Home, Back and the running apps where the
     /// product has no buttons for them, where the musician is, the open Performance and its
-    /// scene (a tap: Save), the app's own actions and its menu, the tempo and the engine's load,
-    /// and All notes off (held half a second, so a brush does not cut a chord).
+    /// scene (a tap: Save), the app's own actions and its menu, Stop while the transport plays
+    /// (in any app: what plays can always be stopped), the tempo and the engine's load, and All
+    /// notes off (held half a second, so a brush does not cut a chord).
     class TopBar : public juce::Component, private juce::Timer
     {
     public:
@@ -27,6 +28,7 @@ namespace oscairn::standalone
         TopBar(Engine& engine, const juce::String& where, Shell shell);
         void setActions(std::vector<Action> actions); // the first main one in the accent; past three, in ⋮
         const juce::String& context() const { return context_; }
+        juce::Button& stopButton() { return stop_; }
         void showMark() { mark_ = true; resized(); } // Oscairn's mark before where: Home's header
 
         void paint(juce::Graphics&) override;
@@ -58,6 +60,7 @@ namespace oscairn::standalone
         IconButton home_{IconButton::Glyph::Home, "Home"}, back_{IconButton::Glyph::Back, "Back"}, apps_{IconButton::Glyph::Apps, "Running apps"},
                    more_{IconButton::Glyph::More, "More"};
         HoldButton notesOff_{IconButton::Glyph::Panic, "All notes off"};
+        juce::TextButton stop_{"Stop"};
         std::unique_ptr<RecordButtons> record_;
         std::vector<Action> actions_;
         juce::OwnedArray<juce::TextButton> buttons_;

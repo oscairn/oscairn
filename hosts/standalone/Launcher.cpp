@@ -30,6 +30,9 @@ namespace oscairn::standalone
         notesOff_.getProperties().set("danger", true);
         notesOff_.onHeld = shell_.notesOff;
         addChildComponent(notesOff_);
+        stop_.setTooltip("Stop the transport: the Groovebox and anything else following it");
+        stop_.onClick = [this] { engine_.setPlaying(false); };
+        addChildComponent(stop_);
         if(shell_.record) { record_ = std::make_unique<RecordButtons>(engine_); addAndMakeVisible(*record_); }
         timerCallback();
         startTimerHz(4);
@@ -64,6 +67,7 @@ namespace oscairn::standalone
         load_ = status.load >= .9 ? ink(Ink::Danger) : status.load >= .75 ? meterYellow : ink(Ink::Muted);
         // A hardware button playing Panic (the device's or a controller's profile, or the Performance) replaces it (RFC 0030).
         notesOff_.setVisible(shell_.notesOff != nullptr && !panicOnHardware(engine_.controlGroups(), engine_.assignments()));
+        stop_.setVisible(status.playing);
         resized();
         repaint();
     }
@@ -76,6 +80,7 @@ namespace oscairn::standalone
         for(auto* b : {&home_, &back_, &apps_}) if(b->isVisible()) { b->setBounds(r.removeFromLeft(side).withY(top).withHeight(side)); r.removeFromLeft(2); }
         markArea_ = mark_ ? r.removeFromLeft(side).withY(top).withHeight(side) : juce::Rectangle<int>();
         if(notesOff_.isVisible()) { notesOff_.setBounds(r.removeFromRight(side).withY(top).withHeight(side)); r.removeFromRight(6); }
+        if(stop_.isVisible()) { const int w = juce::GlyphArrangement::getStringWidthInt(juce::FontOptions(textSize(TextRole::Button, mode())), "Stop") + (touch ? 36 : 28); stop_.setBounds(r.removeFromRight(std::max(w, side)).withY(top).withHeight(side)); r.removeFromRight(6); }
         // The status, at the right, as wide as it needs.
         const juce::Font small{juce::FontOptions(textSize(TextRole::Small, mode()))};
         statusArea_ = r.removeFromRight(juce::GlyphArrangement::getStringWidthInt(small, status_) + 16);

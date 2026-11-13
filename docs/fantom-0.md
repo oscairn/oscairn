@@ -1,10 +1,10 @@
 # Running Oscairn on a Roland FANTOM-0
 
-Oscairn has never run on a FANTOM-06, -07 or -08. A FANTOM-07 is now here, running Roland's
-stock Linux with root login over SSH; Oscairn has not been tried on it yet. This page says what
-is known about the hardware, what Oscairn has for it, what of that is estimated, how to run
-Oscairn beside Roland's system in a chroot, and how to check the panel map, as of November 12,
-2026.
+A FANTOM-07 is here, running Roland's stock Linux with root login over SSH, and Oscairn first
+ran on it on November 12, 2026 ([The first run on the unit](#the-first-run-on-the-unit)). This
+page says what is known about the hardware, what Oscairn has for it, what of that is estimated,
+how to run Oscairn beside Roland's system in a chroot, and how to check the panel map, as of
+November 12, 2026.
 The repository holds Oscairn's own code and data only: no Roland files, binaries or firmware,
 and nothing that changes Roland's firmware or update packages.
 
@@ -217,7 +217,9 @@ The i.MX has two USB 2.0 controllers (ChipIdea):
   ([The lever, wheels, pedals, sliders, knobs and pads](#the-lever-wheels-pedals-sliders-knobs-and-pads)).
   The bus also takes a burst at start-up: 3,277 interrupts in the first two minutes after boot.
 - **GPIO keys** (`gpio-keys`, `/dev/input/event1`): WRITE on GPIO5_11 (key code 157), MENU on
-  GPIO5_12 (139) and TEMPO on GPIO5_13 (152). Roland's app and Weston both read it.
+  GPIO5_12 (139) and TEMPO on GPIO5_13 (152). Roland's app and Weston both read it. Pressed on
+  the unit, they sent nothing on the panel bus: this device is the only place they come from.
+  Oscairn's engine reads it too ([WRITE, MENU and TEMPO](#write-menu-and-tempo)).
 - **Other input devices:** `event0` and `event2` are the SoC's and the PMIC's power keys;
   `event3` the touch screen.
 - **Lights:** one GPIO LED, `status` (GPIO3_16), on. The panel's lamps are not Linux LEDs.
@@ -322,6 +324,18 @@ played into `hw:1,0` while a program kept reading `/dev/ttyGS0`.
   owner touched decoded to the map's names. One slider chattered by one step at rest: 8,519
   messages from `fader:4` in 3.5 minutes. The 16 pads came as switches 88 to 103 and the four
   pedal-jack sense switches as 35 to 38, as Roland's tables number them; both are in the map now.
+- **A tour of the panel** (later that evening, through `oscairn-panel-dump` attached to the panel
+  holder beside the engine, about 1,600 bus interrupts in three minutes): CUTOFF and RESONANCE
+  (analog 0 and 1) run from 0 to 1023, like the lever and the wheels; sliders and knobs from 0
+  to 127, as before. SAMPLING, PAD MODE, CLIP BOARD, BANK and HOLD, top to bottom, sent switches
+  23, 22, 21, 20 and 19: SAMPLING is 23 and PAD MODE 22, the other way round from the map until
+  then. The pads, pressed from the bottom left, left to right and row by row upward, sent 101,
+  103, 102, 100, then 98, 97, 96, 99, then 92, 94, 95, 93, then 91, 88, 89, 90: Roland's pad 1
+  (by its tables, and as its panel is taken to be printed: the owner has not yet checked the
+  printed labels) is the top left. S1 and S2 are switches 86 and 87. **WRITE, MENU and TEMPO sent
+  nothing on the panel bus**: they are gpio-keys only ([Panel, buttons and lights](#panel-buttons-and-lights)).
+  E1 to E6 were turned and not pushed, so their push switches (40, 41, 48, 49, 56 and 57) are still
+  unseen; the pedal jacks (HOLD as analog 2, CTRL1 and CTRL2 as 3 and 4) were not tried.
 - **The audio link runs without Roland's app.** `aplay -D hw:1,0` played a 6-channel, S32_LE,
   48 kHz file to its end, and the link's DMA interrupts kept their rate throughout: the BMCs
   clock the link by themselves.
@@ -604,7 +618,8 @@ What stops when Roland's app is stopped, from what it was seen to do:
   Each group's `sensing` says what was seen on a unit (the ranges, the pads on the panel bus).
   `controls` stays estimated: MASTER VOLUME is taken never to reach the i.MX (Roland's tables give
   it no panel number), so its `volume` function has nothing to drive it, and the pedal jacks and
-  CUTOFF and RESONANCE are not yet seen.
+  E1 to E6 pushed are not yet seen. `inputKeys` names WRITE, MENU and TEMPO on `gpio-keys`
+  ([WRITE, MENU and TEMPO](#write-menu-and-tempo)).
 - **The audio device** (the profile's `audio.device`, [RFC 0024](rfcs/0024-device-profiles.md#what-a-profile-holds)):
   `{ "name": "hw:1,0", "channels": 6, "rate": 48000, "outputs": { "main": [0, 1] } }`, what
   played on the unit: the engine opens `hw:1,0` with six channels, as Roland's app does, at
@@ -624,8 +639,24 @@ What stops when Roland's app is stopped, from what it was seen to do:
   scale of 1.55, and `kick-screen` is laid out at the screen's own 826 × 465 design units and
   fills it, with no bars. A touch target is 68 pixels, 6.5 mm, as on the KICK. `desktop-gaps`
   renders Home, Play, the Parts views, an editor, the Library, the Catalog and Settings at
-  1280 × 720 and checks every control fits, is that large and overlaps none. Untried on the
-  instrument.
+  1280 × 720 and checks every control fits, is that large and overlaps none. On the instrument
+  (November 12): the app, started from the chroot with `DISPLAY=:0` (Xwayland's abstract socket
+  is reachable from the chroot), drew, played its groovebox through the outputs, and took touch;
+  the owner heard glitches while it was drawing, and about 310 MB of memory remained available
+  with the app, the engine and three workers running.
+- **One window on the screen.** Under Roland's Weston 6.0.1 with Xwayland, the first run showed
+  the window offset with a border at the top and left and its right and bottom edges off the
+  screen: Weston's window manager put it in a frame with a 32-pixel shadow margin. The Plugins
+  button and the Catalog also came up as windows of their own, with a close button too small to
+  tap. With the FANTOM-07's profile the app now asks for full screen in the standard way
+  (`_NET_WM_STATE_FULLSCREEN` before it is mapped, no decorations, at 0, 0 at the screen's size),
+  and everything else opens inside that window
+  ([RFC 0019](rfcs/0019-adaptive-ui.md#one-window-on-a-devices-screen)). The plugin browser and
+  the Library's pick open under the top bar, dialogs and alerts open inside the window with
+  44-unit (6.5 mm) controls, and Settings and the Setlist are child windows of the app's own.
+  Checked under Weston 13 with Xwayland in the CI image (full screen at 1280 x 720, Settings a
+  child at 0, 74); untried on the unit. File choosers still open a window of their own and are
+  not for use on the instrument.
 - **A panel holder and reader**, built only with `OSCAIRN_ROLAND_FANTOM0` (below). Their code,
   the key reader's, `oscairn-panel-dump`, the panel map and the start and stop scripts are in
   [devices/roland-fantom0/](../devices/roland-fantom0/); the profile stays with the other built-in
@@ -652,7 +683,7 @@ bootloader or device tree, unpacked in a directory on the unit (for example
 `/home/root/oscairn`) and entered with `chroot`. It holds glibc, libstdc++, ALSA's library,
 BusyBox, the X server the image's session uses, and Oscairn: `oscairn-engine`, the app
 (`Oscairn`), the CLAP plugins in `/usr/lib/clap`, `oscairn-panel-holder`, `oscairn-panel-dump`
-and the panel map in `/usr/share/oscairn/panels`, with the `fantom-07` profile built in; and, in
+and the panel map in `/usr/share/oscairn/panels`, `oscairn-engine-timing` and `cyclictest`, with the `fantom-07` profile built in; and, in
 its top folder beside `start-chroot.sh`, `oscairn-fantom-start` and `oscairn-fantom-stop`
 ([Starting Oscairn on the unit](#starting-oscairn-on-the-unit)).
 
@@ -703,11 +734,11 @@ a FIFO (before the panel holder; it now reads from a holder only). That shows th
 run on the unit yet. Idle there with `--audio null`, the engine held 125 MiB resident (its
 memory locked, at the profile's `instrument` reliability) and its three plugin workers 52 MiB
 together. On 4.19 the engine can have no memory pressure trigger (PSI is Linux 4.20 and later):
-by its code it then logs that it has none and goes on without. Showing the app on the FANTOM's
-screen is not solved. Weston and Xwayland keep running when Roland's app stops, so the likeliest
-way is for the app to be one more X11 client on `:0`, as Roland's is: the bundle's own `/tmp`
-hides Xwayland's socket file, but Xwayland also listens on the abstract socket of the same
-name, which a chroot does not hide (untried).
+by its code it then logs that it has none and goes on without. The app shows on the FANTOM's
+screen as one more X11 client on `:0`, as Roland's is: Weston and Xwayland keep running when
+Roland's app stops, and though the bundle's own `/tmp` hides Xwayland's socket file, Xwayland
+also listens on the abstract socket of the same name, which a chroot does not hide (seen on the
+unit on November 12: [The screen](#what-oscairn-has)).
 
 ## Starting Oscairn on the unit
 
@@ -732,7 +763,9 @@ its `/tmp`, which `stop-chroot.sh` unmounts):
 6. It starts the engine through `oscairn-engine-run` with the profile's options from
    `etc/default/oscairn-engine` (written from the profile when the bundle is built: `hw:1,0`,
    six channels, 48 kHz, main on 0 and 1, 128 frames, the keys on `/dev/ttyGS0`, the panel and
-   its map), its output in `var/oscairn/log/oscairn-engine.log`.
+   its map, the profile's id for its control groups, WRITE, MENU and TEMPO on `gpio-keys`), its
+   output in `var/oscairn/log/oscairn-engine.log`. It clears `var/oscairn/run/stopped` first
+   (below).
 7. It waits for the engine's control socket and asks it for `session.status`
    (`oscairn-control-request`), all within 20 seconds, and prints the answer, or the end of the
    engine's log and an error.
@@ -743,8 +776,9 @@ notes stuck on. The few seconds the script takes were harmless. Roland's engine 
 told Local Switch off by the engine as it opens the keys' link (the profile's
 `keyboard.localOff`), after Roland's app has stopped; the script has marked places for what is
 not done yet: the app on the
-display (Xwayland's `:0` from the chroot, untried) and USB MIDI (`modprobe snd-usb-audio`,
-outside the chroot). `--dry-run` checks what it can without
+display (Xwayland's `:0` from the chroot, which worked when started by hand on November 12) and
+USB MIDI (`modprobe snd-usb-audio`, outside the chroot; that night the kernel loaded it by
+itself when a keyboard was plugged in). `--dry-run` checks what it can without
 changing anything (another start, Roland's app, who holds the panel) and prints the rest.
 `--cold` is for a boot on which Roland's app never ran ([Starting at power-on](#starting-at-power-on-not-done)):
 nothing to stop, Roland's app running is a failure, and the panel is taken at once. It has a
@@ -754,7 +788,9 @@ needed none, and the word did not revive a panel that had gone silent; whether a
 Roland's app never woke waits for it is not known, and is to be tried on the unit before the
 step is enabled.
 
-`oscairn-fantom-stop` stops the engine, puts the governors back, and unmounts the chroot. It
+`oscairn-fantom-stop` stops the engine, puts the governors back, and unmounts the chroot. Before
+stopping the engine it leaves `var/oscairn/run/stopped`, which says the stop was on purpose, for
+`oscairn-fantom-boot` ([Starting at power-on](#starting-at-power-on-not-done)). It
 does not turn Local Switch back on: a power cycle does. It
 leaves the panel holder running, so the panel goes on reporting; `--panel` stops the holder too,
 after which the panel stays silent until the next power-on. While the holder runs the bundle's
@@ -793,6 +829,30 @@ to take that last line's place, after everything before it has run:
 3. **The fallback:** if that fails, the engine not answering `session.status` within 20 seconds
    among the failures, it runs `oscairn-fantom-stop --panel` and starts Roland's app, logging
    why. It never starts Roland's app while a process still holds `/dev/i2c-slave-2`.
+4. **It stays while Oscairn runs.** `go.sh` is the main process of `weston-term.service`
+   (`ExecStart=/home/root/go.sh`, `After=weston.service`). If the boot script returned, `go.sh`
+   would end, and systemd, with a unit's default settings (`KillMode=control-group`), would stop
+   the unit and kill everything left in its control group: the panel holder and the engine,
+   which `setsid` takes out of the session but not out of the control group. The panel would
+   then stay silent until the next power-on. So it waits in the foreground, looking each second
+   for the engine (by its process name). If the engine ends and `var/oscairn/run/stopped` is not
+   there, the engine is taken to have failed: the fallback, as in 3. If it is there,
+   `oscairn-fantom-stop` was run by hand: Roland's app is not started, and it goes on waiting
+   while the panel holder runs (an engine started again by hand with `oscairn-fantom-start`
+   clears the file and is watched the same way). Once neither runs (`oscairn-fantom-stop
+   --panel`), it returns: nothing is left for systemd to stop. A loop in the unit's own process
+   was chosen over `systemd-run --scope`, which would move Oscairn into a scope of its own but
+   needs systemd's bus and more of systemd than `go.sh` uses; the loop needs nothing.
+
+The unit's real settings were not read: before changing `go.sh`, read them with
+
+```sh
+systemctl show weston-term -p Type -p KillMode -p RemainAfterExit
+```
+
+`Type=simple` (or none, which is simple), `KillMode=control-group` and `RemainAfterExit=no` are
+the defaults the paragraph above assumes; `KillMode=process` or `none` would leave Oscairn
+running when `go.sh` ends, which the loop does not mind either way.
 
 The fallback is best effort: started again after it had run earlier in the same boot, Roland's
 app showed "program version error", and whether it starts cleanly after Oscairn has used the
@@ -809,7 +869,11 @@ XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 /home/root/osca
 
 (the bundle's folder as unpacked). To undo it, put the line back; Roland's update procedure also
 reinstalls `go.sh`. `./oscairn-fantom-boot --dry-run` reads MENU (mounting the chroot to run
-`oscairn-key-held`) and the one-shot file, and prints what it would do.
+`oscairn-key-held`) and the one-shot file, and prints what it would do. `--supervise` is step 4
+alone, for an Oscairn already running. `devices-fantom-start` checks each path off the unit,
+dry, the waiting on a stand-in `/proc`: staying while the engine runs, the fallback when it ends
+unasked, waiting on the holder after a stop on purpose, and returning once the holder is gone.
+None of it has run under systemd.
 
 ## The panel reader
 
@@ -833,7 +897,13 @@ left unheld ([With Roland's app stopped](#with-rolands-app-stopped)).
   that is not Roland's driver) ends the holder; there is no other way of reading it.
 - **Readers** attach to `@oscairn-panel` (abstract sockets are not hidden by the chroot). A reader
   attaching raises SIGIO, which ends the wait so the holder takes it in at once; failing that,
-  the next message does. A reader that falls behind loses messages; one that goes is dropped.
+  the next message does. A reader going raises SIGIO too (each reader's socket is set to signal
+  on its hang-up), and the holder drops it then and logs `a reader detached`; one that goes
+  just before a wait begins is dropped at the next message, when sending to it fails, and costs
+  nothing meanwhile. After any wake the holder reads every message queued, so a wake for a
+  reader loses none of the device's. A reader that falls behind loses messages.
+  `oscairn-panel-dump` is one reader: its first connection, which checks that a holder runs, is
+  the one it reads from (on November 12 it showed as two, a check and then a reader).
 - **Stopping:** SIGTERM or SIGINT, handled with every signal unblocked, end the wait (it returns
   0) and the holder closes the device and ends. A signal that comes just before the wait begins
   is only seen at the next message; SIGKILL is as clean for the driver.
@@ -841,8 +911,13 @@ left unheld ([With Roland's app stopped](#with-rolands-app-stopped)).
 Tested off the unit, through a seam that stands in for the driver (`control-panel-reader`): the
 wait and the reads until nothing is left, the second holder refusing, the guard refusing while
 another process has the file open (on Linux), SIGTERM ending a waiting holder within half a
-second, a reader attaching after another went while the device stays open, and the dump attached
-to a holder. Not yet run on the unit.
+second, a reader attaching after another went while the device stays open, a reader that goes
+dropped at once with no message from the device, and the dump attached to a holder as one
+reader. On the unit (November 12) it held the device from two seconds after Roland's app
+stopped and passed the panel on to the engine and the dump; the prompt detaching is not yet run
+there. The second `oscairn-engine` process seen that night was the panel reader's forked helper
+of the time, a copy-on-write copy of the engine; the holder replaced that reader, and the second
+process is gone with it.
 
 ### The reader
 
@@ -875,6 +950,23 @@ also takes on its own command line, to try another map); a map named without a p
 `share/oscairn/panels/` beside the installed program. The engine reads the panel from the holder
 whatever `--panel-device` names; `oscairn-engine-run` warns when it is given a panel and no
 holder runs. A build without `OSCAIRN_ROLAND_FANTOM0` (macOS, the desktop) leaves the reader out and says so when a profile has a panel.
+
+**What a control plays comes from the device's control groups** (the profile's `controls`, RFC
+0024's default targets: sliders on part levels, knobs on the banks, ZONE INT/EXT on part mutes).
+The app sends them to its engine (`controllers.set`). Without the app nothing did, so on November
+12 the engine started by `oscairn-fantom-start` alone read slider 1 (`fader:1`, 0 to 127) and
+played nothing: no group named `fader:1`, so the control resolved to no target at all, and the
+pickup and the dead band never came into it. The engine now takes the groups from the profile
+itself, `--device-profile fantom-07` (built in under its id), which `engine-args.py` adds to
+the engine's options for a profile with a panel, until an app sends its own. The engine's
+start-up Performance has two parts, Synth (the Basic Synth into the Delay, which the keys play)
+and Groovebox (the step sequencer, playing the same synth); slider 1 is the Synth part's
+level. A slider picks up:
+the Synth part starts at full level, so slider 1 does nothing until it has been brought up to
+the top, and then follows. `engine-panel-startup` checks it: the engine on the null device,
+slider 1's messages decoded through the shipped map by a reader on a pipe, nothing played
+without the profile, the Synth part's level following with it. No default Performance needs
+opening for this. Not yet run on the unit.
 
 ### The map
 
@@ -914,13 +1006,16 @@ on: Roland's test tool names every number (its `STEP01` to `STEP16` are the tone
 buttons, `C1` to `C6` the FUNCTION knobs E1 to E6 and their pushes, `VAL` the VALUE dial,
 `VOLUME1` to `VOLUME8` the control knobs, `SELECT` and `CHAIN` SCENE SELECT and SCENE CHAIN,
 `ZONE1` to `ZONE8` the ZONE INT/EXT buttons); matching those names to the panel's legends is
-Oscairn's reading, and what the owner touched agreed. The scale, as seen on the unit: sliders
-and control knobs have `max` 127 each; the lever and the wheels run to 1023, the layout's
-`analogMax`, which CUTOFF, RESONANCE and the pedal jacks keep until they are seen (Roland's pedal
-adjustment checks a reading against 500 to 1024). `analogDeadband` is 1: one slider chattered by
-one step at rest. The pads are `pad:1` to `pad:16`, Roland's switches 88 to 103 in the order pad
-2, 3, 4, 1, 5, 8, 6, 7, 11, 10, 9, 12, 16, 13, 15, 14 (taken to be numbered from the bottom left,
-as the pad map is; to check). The CTRL jacks' plug sensing is switches 35 and 36 (CTRL1 and
+Oscairn's reading, and what the owner touched agreed, but for SAMPLING and PAD MODE, whose
+numbers were the other way round until the tour of November 12 (SAMPLING 23, PAD MODE 22). The
+scale, each seen on the unit and given in each entry: sliders and control knobs have `max` 127;
+the lever, the wheels, CUTOFF and RESONANCE `max` 1023. The pedal jacks, not yet seen, keep the
+layout's `analogMax` of 1023 (Roland's pedal adjustment checks a reading against 500 to 1024).
+`analogDeadband` is 1: one slider chattered by one step at rest. The pads are `pad:1` to
+`pad:16` of the Performance's pad map, which counts from the bottom left (as on the KICK): pad 1
+is the bottom left, switch 101, and pad 16 the top right, switch 90, as the owner's presses
+showed. Roland numbers them the other way up, its pad 1 the top left (switch 91), as its panel
+is taken to be printed; the printed labels are not yet checked. The CTRL jacks' plug sensing is switches 35 and 36 (CTRL1 and
 CTRL2, Roland's "sense") and 37 and 38 (their ring contacts), as fixed controls nothing plays
 (`ctrl1Sense`, `ctrl2Sense`, `ctrl1Ring`, `ctrl2Ring`); Roland's app passes a CTRL jack's position
 on only while its sense switch is on.
@@ -931,21 +1026,43 @@ Not in the map, with Roland's numbers for them:
   The controller layer's footswitch takes a switch; nothing turns the position into one yet.
 - **MASTER VOLUME:** Roland's tables have no number for it. It never reaches the i.MX as a panel
   message (inferred: it acts on the BMC side or in the analog path).
-- **WRITE, MENU and TEMPO:** numbers 104 to 106 in Roland's tables and in the map, but the panel
-  bus never carries them: they are GPIO keys, and Roland's programs make the messages
-  themselves from `/dev/input/event1`.
+- **WRITE, MENU and TEMPO:** numbers 104 to 106 in Roland's tables, but the panel bus never
+  carries them (pressed on the unit, they sent nothing there): they are GPIO keys, and Roland's
+  programs make the messages themselves from `/dev/input/event1`. The engine reads them there
+  ([WRITE, MENU and TEMPO](#write-menu-and-tempo)).
 - Switches 39, 51, 63, 81, 84 and 85 are unused; Roland's app drops them.
+
+### WRITE, MENU and TEMPO
+
+`oscairn::host::InputKeys` ([devices/roland-fantom0/src/InputKeys.h](../devices/roland-fantom0/src/InputKeys.h)),
+built only with `OSCAIRN_ROLAND_FANTOM0` and only on Linux, reads them from `gpio-keys` on a
+thread of its own, polling with a 100 ms timeout: it finds the input device by its name among
+`/dev/input/event*` (the number may change), opens it read-only and never grabs it, so Weston
+(and Roland's app, when it runs) go on getting every event. Each press and release of a key the
+profile names is played as the panel's switches are, by its fixed function (`write`, `menu`,
+`tempo`), through the same controller layer; a key's autorepeat and every other key are passed
+over. A device that cannot be found is said once and looked for again each second, and so is
+one that fails. The profile's `inputKeys` says which:
+
+```json
+"inputKeys": { "protocol": "linux-input", "name": "gpio-keys", "keys": { "write": 157, "menu": 139, "tempo": 152 } }
+```
+
+The app passes it to the engine it starts, and `engine-args.py` to the headless one
+(`--input-keys gpio-keys --input-key-map 139=menu,152=tempo,157=write`). Like the other fixed
+controls, they play nothing yet ([What it does not do yet](#what-it-does-not-do-yet)). Tested
+on `struct input_event` records through a pipe (`devices-input-keys`, Linux; the unit's kernel
+has no uinput); not yet run on the unit. MENU held at power-on is still read on its own, by
+`oscairn-key-held`, before the engine starts ([Starting at power-on](#starting-at-power-on-not-done)).
 
 ### What it does not do yet
 
 - **The HOLD jack:** on the panel bus, decoded and shown by the dump, played by nothing
   ([The map](#the-map)).
 - **Lamps:** none is set; they go over `/dev/ttyGS0` ([Lamps](#lamps)), which Oscairn only reads.
-- **WRITE, MENU and TEMPO:** GPIO keys on `/dev/input/event1`, not panel messages; nothing reads
-  them yet.
-- **Fixed controls** (the VALUE dial, cursor, ENTER, EXIT, transport, MENU and the rest) decode
-  and show in the dump, but the engine has nothing to give them to: the controller layer plays
-  assignable controls only.
+- **Fixed controls** (the VALUE dial, cursor, ENTER, EXIT, transport and the rest) decode and show
+  in the dump, and WRITE, MENU and TEMPO reach the engine from `gpio-keys`, but the engine has
+  nothing to give them to: the controller layer plays assignable controls only.
 - **The lever and pedals with nothing assigned:** a MIDI controller's wheel then reaches the
   parts as its own MIDI message; a panel message has none, so `wheel:1` and `wheel:2` play only
   what a Performance or Sound assigns them.
@@ -1048,71 +1165,155 @@ and ID seen, how often, and its lowest and highest value. Then:
    Give an encoder that turns the wrong way a negative `step`.
 3. **What is not in the map** should show with `-`: a pedal in HOLD as analog 2. Each pad
    should name its `pad:N` and a plug going into CTRL1 `ctrl1Sense`. WRITE, MENU and TEMPO
-   should show nothing at all.
-4. **Check:** run the app with `--panel-map` pointing at the map (or a corrected copy) and move
-   the sliders: the part levels follow.
+   show nothing at all (seen on November 12).
+4. **Check:** with the engine running (`oscairn-fantom-start`), hold a key and move slider 1 to
+   the top, then down: the Synth part's level follows from the top on (it picks up there). With
+   the app, run it with `--panel-map` pointing at the map (or a corrected copy).
 
 Send back the dump's tables, and a corrected map if anything differed.
 
+## The first run on the unit
+
+November 12, 2026, late evening, with a bundle built from the commit that added
+`oscairn-fantom-boot`. One BMC ran a modified diagnostic build of its CORE1 firmware from the
+owner's research (mostly stock), so these measurements are not on pure stock firmware.
+
+- **`./oscairn-fantom-start` worked the first time,** run soon after power-on with Roland's app
+  running: Roland's app stopped, the panel holder held `/dev/i2c-slave-2` two seconds later, the
+  governors went to `performance`, and the engine opened `hw:1,0` (6 channels, 48 kHz, 128
+  frames), logged `Local Switch off sent` and `attached to the panel holder`, and answered
+  `session.status`. The keys arrived on `FANTOM keys` as one note each (their kind-6 frames),
+  Roland's own engine stayed silent, there was no underrun, and the load was about 0.3.
+- **The panel reported:** about 1,600 bus interrupts while sliders and knobs moved, and
+  `oscairn-panel-dump`, attached to the holder beside the engine, decoded a three-minute tour of
+  the panel ([With Roland's app stopped](#with-rolands-app-stopped)). Slider 1 moved the whole way
+  and played nothing ([The reader](#the-reader) says why and what changed).
+- **Interrupts:** every interrupt on the system lands on core 0.
+- **Real-time priorities are granted:** the engine's audio thread at `SCHED_FIFO` 80, its helpers
+  and the workers' audio threads at 70.
+- **The CPU's 1.5 ms idle state,** disabled, made no difference.
+- **A voice ramp on the built-in synth,** at full speed and 128 frames, held notes against the
+  block's budget, with no underrun:
+
+  | Notes | Load |
+  |---|---|
+  | 8 | 0.28 |
+  | 16 | 0.35 |
+  | 32 | 0.53 |
+  | 64 | 0.81 |
+
+  The notes were sent at a very low velocity and the owner could not hear them, so that they
+  sounded rests on the synth's block time, which rose from 0.45 to 1.8 ms.
+- **`OSCAIRN_AUDIO_THREAD_CORES`** (the audio threads kept off core 0) made no difference the
+  hand tests that night could show; it stays off ([Next session](#next-session)).
+- **A USB MIDI keyboard on USB MEMORY** worked through raw MIDI: the kernel loaded
+  `snd-usb-audio` by itself, the engine opened three inputs, and notes were heard. With that hub
+  connected, one of the link's MIDI-input addresses sent frames the key reader logged as unknown:
+  `04 a1 60 00 f0 f7 ...` (a short frame of kind 2 from 0xA1) and a 32-byte long frame from 0xA1.
+  They are recorded as seen; what they are is not known.
+- **The app on the screen:** [The screen](#what-oscairn-has).
+
+## Next session
+
+From the bundle's folder, as root, soon after power-on with Roland's app running. The timing
+tools are in the bundle: `oscairn-engine-timing` (installed with the engine) and `cyclictest`
+(`BR2_PACKAGE_RT_TESTS`), both run inside the chroot.
+
+1. **The kernel alone,** with Roland's app stopped and no engine: start Oscairn once (it stops
+   Roland's app and takes the panel), stop the engine, keeping the holder, and measure each core:
+
+   ```sh
+   ./oscairn-fantom-start
+   ./oscairn-fantom-stop
+   ./start-chroot.sh cyclictest -m -q -p 80 -i 1000 -t 1 -a 0 -D 60
+   ./start-chroot.sh cyclictest -m -q -p 80 -i 1000 -t 1 -a 1 -D 60
+   ```
+
+2. **The engine alone,** at rest for a minute, then a minute holding a chord on the keys:
+
+   ```sh
+   ./oscairn-fantom-start
+   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ```
+
+3. **The engine with its audio threads off core 0,** the same two minutes:
+
+   ```sh
+   ./oscairn-fantom-stop
+   OSCAIRN_AUDIO_THREAD_CORES=1-3 ./oscairn-fantom-start
+   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ```
+
+   The start script hands the variable to the engine (it also takes it from
+   `etc/default/oscairn-engine`, where `engine-args.py` writes the profile's
+   `compute.audioThreadCores`, empty for the FANTOM-07). The profile does not set it until a
+   difference is measured: to keep it, add `"audioThreadCores": [1, 2, 3]` to the profile's
+   `compute` (or set `OSCAIRN_AUDIO_THREAD_CORES='1-3'` in `etc/default/oscairn-engine`).
+
+4. **With the app drawing,** in the same engine (or after step 2's start, without the variable),
+   the app connected to it on the screen, and the screen touched and scrolled while it measures:
+
+   ```sh
+   ./start-chroot.sh env DISPLAY=:0 /usr/bin/Oscairn --plugins /usr/lib/clap --profile fantom-07 --connect /run/oscairn/engine.sock &
+   ./start-chroot.sh oscairn-engine-timing /run/oscairn/engine.sock --seconds 60
+   ```
+
+   The command is not yet tried as written (on November 12 the app was started from the chroot
+   with `DISPLAY=:0`).
+
+5. **The panel and the slider:** hold a key and move slider 1 to the top, then down: the Synth
+   part's level follows from the top on. The engine's log should say `control groups from the
+   profile fantom-07`. Press WRITE, MENU and TEMPO: nothing is played by them yet, and nothing
+   about them should be logged. Run `oscairn-panel-dump` beside the engine and stop it: the holder's log
+   (`var/oscairn/log/oscairn-panel-holder.log`) should show one reader attaching and, as it
+   stops, `a reader detached` at once, not at the next message. Push E1 to E6 in the dump: each
+   should name `pushE1` to `pushE6`. Read the pads' printed labels.
+6. **Before changing `go.sh`:** `systemctl show weston-term -p Type -p KillMode -p RemainAfterExit`
+   ([Starting at power-on](#starting-at-power-on-not-done)).
+
+Send back each command's output and the three logs in `var/oscairn/log`.
+
 ## What needs the owner at the instrument
 
-Each of these needs someone at the panel, Roland's app stopped, or both; first what tonight's
-work left open, then older checks still to do.
+Each of these needs someone at the panel, Roland's app stopped, or both. Run on November 12, and
+done: Oscairn's start ([The first run on the unit](#the-first-run-on-the-unit)), Local Switch
+off from the engine, the app on the display, and a USB MIDI keyboard.
 
-1. **Run it:** `./oscairn-fantom-start --dry-run`, then `./oscairn-fantom-start`, from the
-   bundle's folder, soon after power-on with Roland's app running. Expected: Roland's app stops,
-   the holder log says `holding /dev/i2c-slave-2`, the engine log ends with its audio device
-   opened, and the panel's controls move the parts (sliders the part levels). Then
-   `./oscairn-fantom-stop`, `./oscairn-fantom-start` again: the panel must still play, since
-   the holder never let go. Check `dmesg` for `i2c_slave_coms: Can not open`, `Rx fifo over flow`
-   and `Unable to handle kernel NULL pointer`, and send back the three logs in
-   `var/oscairn/log`.
-2. **The start word on a cold start.** Whether the panel reports to a holder after a power-on
+1. **The start word on a cold start.** Whether the panel reports to a holder after a power-on
    in which Roland's app never ran, so never sent its start words (kind 0 to 0x75 on the message
    link). Trying it needs Roland's app kept from starting (for example `go.sh` changed for one
    boot); if the panel stays silent, the start words are what wakes it, which would need a
-   write. Tonight's takeovers all followed Roland's app.
-3. **The buttons not yet pressed:** each should show in the dump. WRITE, MENU and TEMPO were
-   seen on November 12 as `gpio-keys` on `/dev/input/event1` (codes 157, 139 and 152, a press 1
-   and a release 0, with Roland's app stopped); Oscairn reads MENU only, at power-on
-   ([Starting at power-on](#starting-at-power-on-not-done)).
-4. **Levels and outputs:** which channel pair feeds which jack (MAIN OUT is not measured; SUB
+   write. All the takeovers so far followed Roland's app.
+2. **The buttons not yet pressed:** E1 to E6 pushed, and the pedal jacks; each should show in
+   the dump.
+3. **Levels and outputs:** which channel pair feeds which jack (MAIN OUT is not measured; SUB
    OUT gets none by default), and the pairs' levels against each other, at low volume, one pair
    at a time (`--audio-outputs 0,1`, then `2,3`, then `4,5`); and whether `--device-channels 16`
    plays as 6 does.
-5. **Local Switch from the engine:** after a power cycle (Local Switch is on again then),
-   `oscairn-fantom-start`; the engine log should say `Local Switch off sent`, and playing should
-   sound Oscairn only, with no zone's MIDI word on the link.
-6. **The display:** with Weston running and Roland's app stopped, start the app in the bundle
-   with `DISPLAY=:0` and see whether it reaches Xwayland.
 
 Older, still open:
 
-7. **DIN MIDI.** Send notes into MIDI IN from another instrument while watching
+4. **DIN MIDI.** Send notes into MIDI IN from another instrument while watching
    `cat /proc/tty/driver/IMX-uart` (each UART's `rx:` count) and the `serial` lines. Expected:
    no UART count moves (DIN MIDI is the BMC side's) and the `usb` line's rate rises (the BMC
    tells Roland's app of them). A UART count that moves refutes the first; a `usb` line that
    stays at rest refutes the second.
-8. **USB COMPUTER.** Plug a computer into USB COMPUTER, watch `dmesg -w` and the `32e50000`
+5. **USB COMPUTER.** Plug a computer into USB COMPUTER, watch `dmesg -w` and the `32e50000`
    and `32e40000` lines on the unit, and list USB devices on the computer. Whatever the computer
    enumerates (its vendor, product and interfaces) is the BMC's if the unit's Linux saw nothing.
-9. **Oscairn's key reader.** The format is confirmed (November 12, with Roland's app stopped:
-   [With Roland's app stopped](#with-rolands-app-stopped)); what is left is Oscairn reading it,
-   which `oscairn-fantom-start` does (`--keyboard-device /dev/ttyGS0`). Expected: no line saying
-   the device cannot be made raw; a key played after the first second plays the startup Synth
-   part, softly and loudly as played, under Roland's own tone. Keys held while the engine starts
-   must not sound at once (the reader drops what was queued, and logs how many). Lines saying
-   `unknown frame:` are frames not seen in the capture: send them back. Then send notes into
-   MIDI IN from another instrument: whichever `FANTOM MIDI 0x..` input plays names the DIN
-   socket's address.
-10. **Capture:** the link runs without Roland's app (November 12: playback ran to the end,
+6. **DIN MIDI into Oscairn.** The key reader plays the keys (November 12); send notes into
+   MIDI IN from another instrument while the engine runs: whichever `FANTOM MIDI 0x..` input
+   plays names the DIN socket's address.
+7. **Capture:** the link runs without Roland's app (November 12: playback ran to the end,
     [With Roland's app stopped](#with-rolands-app-stopped)); what comes back is not checked.
     `arecord -D hw:1,0 -c 6 -f S32_LE -r 48000 -d 2 /tmp/link.wav`, and look at the file for
     which of the six channels carry signal while someone plays a key, and with a source on
     MIC/LINE IN. Roland's app samples from its first two inputs, taken to be slots 0 and 1, so sound
     there fits; sound on another pair only says which pair that is; silence everywhere says
     only that the BMC feeds its sampling bus when told to. Remove the file afterward.
-11. **A lamp** (the one step that sends the BMC side anything; skip it if in doubt). With
+8. **A lamp** (the one step that sends the BMC side anything; skip it if in doubt). With
     Roland's app stopped:
 
     ```sh
@@ -1122,19 +1323,11 @@ Older, still open:
     is one frame as Roland's programs build it: a panel word to address 0x75 setting lamp 52
     (ENTER) to mode 1, level 127. ENTER lighting confirms the lamps' path and word; nothing
     happening leaves both open (the mode or level may be wrong, or the BMC may want more first).
-12. **The touch screen's range:** `evtest /dev/input/event3` prints each axis's minimum and
+9. **The touch screen's range:** `evtest /dev/input/event3` prints each axis's minimum and
     maximum before the first event (Ctrl-C after it); touch the four corners to see which way the
     axes run on the landscape screen. Neither the unit nor the bundle has `evtest`: bring a
     static aarch64 build.
-13. **A USB MIDI keyboard on USB MEMORY:** plug it in, `modprobe snd-usb-audio` (on the unit,
-    outside the chroot: the module is Roland's), and check `cat /proc/asound/cards` and
-    `amidi -l`. A raw MIDI device there confirms the kernel side. Then start the engine in the
-    chroot on a real audio device (`--audio null` opens no MIDI device). It should log
-    `no ALSA sequencer; MIDI inputs are read as ALSA raw MIDI` (after ALSA's own line that
-    `/dev/snd/seq` failed to open) and `1 MIDI inputs open (ALSA raw MIDI)` (one per input port
-    the keyboard has), and `session.status` should list the keyboard in `midiInputs` by the
-    name `amidi -l` gives its port. Play it; then pull it out and plug it back in while the engine runs: within a second
-    or two the log says `0 MIDI inputs open (ALSA raw MIDI)`, then `1` again, and it plays again.
+
 ## Building it into an image
 
 `-DOSCAIRN_ROLAND_FANTOM0=ON` links the readers from `devices/roland-fantom0/` into the engine

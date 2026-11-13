@@ -664,8 +664,14 @@ What changes for the plugin:
 
 - **Its main thread is the worker's.** Calls arrive over a socket; audio and events through
   shared memory.
-- **Time limit:** in real time, a block may take half the block's time, counted from when the
-  engine hands it over; a later one is silenced. Plugins that do not feed each other render at
+- **Time limit:** in real time, a block may take half the block's time (the worker's allowance,
+  `OSCAIRN_WORKER_BUDGET_US` or a profile's `compute.workerAllowance` to try others), counted
+  from when the engine hands it over; a later one is silenced, and `session.status` counts it as
+  a silent block apart from one played late. A plugin listed in the experimental
+  `OSCAIRN_WORKER_EXTRA_BLOCK` gets a period more for each block and is heard one block late:
+  it sees the same blocks, events and transport, so a plugin that follows the transport (an
+  arpeggiator, a sequencer) sounds a block behind the others
+  ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#one-block-late-for-one-part)). Plugins that do not feed each other render at
   the same time, each in its worker ([RFC 0034](rfcs/0034-parallel-graph-rendering.md)); effect
   contexts of one instance never do. Missing a quarter second of blocks in a row (at least 8), or leaving one
   unanswered for 250 ms, is a failure. Offline rendering waits instead.

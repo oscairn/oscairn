@@ -381,6 +381,12 @@ set_tests_properties(voice-extension-hostile PROPERTIES TIMEOUT 60 ENVIRONMENT "
 if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize" OR DEFINED ENV{CI})
     set(worker_timing --no-timing)
 endif()
+# RFC 0045's extra block: a listed plugin one block late, sample for sample, others on time.
+add_executable(oscairn-worker-extra-block-test engine/tests/worker_extra_block.cpp)
+target_link_libraries(oscairn-worker-extra-block-test PRIVATE oscairn_engine)
+add_test(NAME worker-extra-block COMMAND oscairn-worker-extra-block-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:oscairn_basic_synth>)
+set_tests_properties(worker-extra-block PROPERTIES TIMEOUT 60)
 add_executable(oscairn-worker-failures-test engine/tests/worker_failures.cpp)
 target_link_libraries(oscairn-worker-failures-test PRIVATE oscairn_engine)
 add_test(NAME worker-failures COMMAND oscairn-worker-failures-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>

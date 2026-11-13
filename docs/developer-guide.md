@@ -126,6 +126,7 @@ FANTOM-0's panel device and print its messages
 | `OSCAIRN_CONFIG_HOME` | The desktop's configuration folder (themes and the selected theme; see [design language](design-language.md)) |
 | `OSCAIRN_RUNTIME_DIR` | Where the desktop and its engine helper put their socket |
 | `OSCAIRN_WORKER_BUDGET_US` | A plugin worker's allowance: how long, in microseconds, the engine waits for a block it handed the worker before the block is missed and silenced ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#the-allowance-today)). Unset, or not a whole number above 0, half the block's period (1333 at 128 frames and 48 kHz). The app sets it from its profile's `compute.workerAllowance` unless it is set already. Tests set 50000 so that worker results do not depend on the machine's load |
+| `OSCAIRN_WORKER_EXTRA_BLOCK` | Experimental, off by default: plugin IDs, comma-separated (`org.oscairn.analog,org.oscairn.sampler`). Each instance of a listed plugin in a worker, in real time, renders each block while the engine plays the one before: it is heard exactly one block late, and has its allowance plus a block's period for each block ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#one-block-late-for-one-part)). Read as each instance loads, fixed for its life; nothing switches it automatically |
 | `OSCAIRN_WORKER_REPLY_SECONDS` | Tests: how long a control call waits for a worker |
 | `OSCAIRN_REQUIRE_SOCKET_BIND` | Tests: fail, rather than skip, when local sockets cannot be bound |
 

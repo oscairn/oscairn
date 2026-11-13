@@ -27,6 +27,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <string_view>
 #include <unordered_map>
 #ifdef __APPLE__
 #include <libproc.h>
@@ -406,6 +407,15 @@ namespace oscairn
                     output_.resize(maxOutputEvents);
                     pending_.reserve(4096);
                     fadeFrames_ = faded_ = uint32_t(process_->rate * .01);
+                    // RFC 0045's extra block, experimental: listed plugins in real time render each block while the
+                    // engine plays their last, two buffers of the worker's block so a block that is not started
+                    // never overwrites the one being played. Fixed for the node's life.
+                    if(process_->mode == ProcessingMode::Realtime && listed(std::getenv("OSCAIRN_WORKER_EXTRA_BLOCK"), descriptor_.id))
+                    {
+                        extra_ = true;
+                        held_.assign(size_t(2) * outChannels_ * frames, 0.f);
+                        for(uint32_t c = 0; c < 2 * outChannels_; ++c) heldPointers_.push_back(held_.data() + size_t(c) * frames);
+                    }
                     // The sounds present from the start keep their IDs.
                     if(contexts_) for(const auto& c : contexts()) remember(c, c.id);
                     publishIds();
@@ -866,10 +876,11 @@ namespace oscairn
             {
                 if(!frames || frames > capacity_) return false;
                 outputCount_ = 0; sysexOutput_->used = 0; reset_ = false;
+                if(extraBlock()) { startDelayed(inputs, ni, outputs, no, frames, events, count, transport, 0); return true; }
                 started_ = start(inputs, ni, outputs, no, frames, events, count, transport, 0);
                 return true;
             }
-            bool finishProcess() noexcept override { return started_ && finish(); }
+            bool finishProcess() noexcept override { return extraBlock() ? finishDelayed() : started_ && finish(); }
 
         private:
             struct Prepared
@@ -961,6 +972,7 @@ namespace oscairn
                        const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport, uint32_t offset) noexcept
             {
                 if(!frames) return true;
+                if(extraBlock()) { startDelayed(inputs, ni, outputs, no, frames, events, count, transport, offset); return finishDelayed(); }
                 return start(inputs, ni, outputs, no, frames, events, count, transport, offset) && finish();
             }
             // block's halves: start hands the block to the worker (false: silenced, nothing started);
@@ -1015,8 +1027,9 @@ namespace oscairn
                     if(outputs) for(uint32_t c = 0; c < no; ++c) if(outputs[c]) std::fill_n(outputs[c], frames, 0.f);
                     return false;
                 };
-                // The budget counts from the request, however long the caller did other work since.
-                const auto budget = process_->budget;
+                // The budget counts from the request, however long the caller did other work since; with the
+                // extra block, from the request a block earlier, so a period more.
+                const auto budget = extraBlock() ? process_->budget + std::chrono::nanoseconds(int64_t(1e9 * process_->frames / process_->rate)) : process_->budget;
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
                 const auto checked = std::chrono::steady_clock::now();
                 const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (checked - sent));
@@ -1066,6 +1079,58 @@ namespace oscairn
                 }
                 reset_ = reset_ || s.reset != 0;
                 return s.ok;
+            }
+
+            // RFC 0045's extra block: each call hands the worker this block and plays the one handed in the
+            // last call, so the node sounds exactly one block late and the worker has a period more for
+            // each block. The engine waits for the last block here, at the start, for what is left of its
+            // allowance. Its outputs, events, voice report and reset come with it. Audio thread.
+            bool extraBlock() const noexcept { return extra_; }
+            static bool listed(const char* list, const std::string& id)
+            {
+                for(std::string_view rest = list ? list : ""; !rest.empty();)
+                {
+                    const auto comma = rest.find(',');
+                    if(rest.substr(0, comma) == id) return true;
+                    rest = comma == rest.npos ? std::string_view() : rest.substr(comma + 1);
+                }
+                return false;
+            }
+            void startDelayed(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
+                              const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport, uint32_t offset) noexcept
+            {
+                float* const* last = heldPointers_.data() + (handed_ ? 0 : outChannels_); // the buffer the last block went to
+                float* const* next = heldPointers_.data() + (handed_ ? outChannels_ : 0);
+                playedFrames_ = startedFrames_;
+                if(previous_ == Previous::started)
+                {
+                    // Not from a worker that failed or restarted since: its shared block is not the one handed.
+                    busy_.store(true);
+                    if(process_->failed.load() || process_->generation.load() != generation_) { busy_.store(false); playedOk_ = false; for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(last[c], playedFrames_, 0.f); }
+                    else playedOk_ = finish();
+                }
+                else playedOk_ = previous_ == Previous::none; // a first block is silent; one not started was silenced
+                played_ = last;
+                // shortcut: a block longer than the worker's is silenced here; a realtime block never is, only an offline one (not delayed).
+                const bool fits = frames <= process_->frames;
+                const auto channels = std::min(no, outChannels_);
+                previous_ = fits && start(inputs, ni, next, channels, frames, events, count, transport, offset) ? Previous::started : Previous::notStarted;
+                if(!fits) for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(next[c], process_->frames, 0.f);
+                if(previous_ == Previous::notStarted) startedFrames_ = std::min(frames, process_->frames);
+                handed_ = !handed_;
+                playOutputs_ = outputs; playChannels_ = no; playFrames_ = frames;
+            }
+            bool finishDelayed() noexcept
+            {
+                for(uint32_t c = 0; c < playChannels_; ++c)
+                {
+                    if(!playOutputs_ || !playOutputs_[c]) continue;
+                    // shortcut: a block of another length than the last plays what the last had, then silence; a device's blocks keep one length.
+                    const auto n = c < outChannels_ ? std::min(playedFrames_, playFrames_) : 0;
+                    if(n) std::copy_n(played_[c], n, playOutputs_[c]);
+                    std::fill(playOutputs_[c] + n, playOutputs_[c] + playFrames_, 0.f);
+                }
+                return playedOk_;
             }
 
             // The waiting limits into the block, each context under the worker's ID for it; false
@@ -1161,6 +1226,14 @@ namespace oscairn
             // The block start handed over, for finish.
             float* const* startedOutputs_ = nullptr; uint32_t startedChannels_ = 0, startedFrames_ = 0, startedOffset_ = 0; bool started_ = false;
             std::chrono::steady_clock::time_point sent_{};
+            // The extra block (RFC 0045): two buffers of the worker's block, the one the last block went to
+            // and the one this block goes to; what became of the last block, and what this call plays.
+            bool extra_ = false;
+            std::vector<float> held_; std::vector<float*> heldPointers_;
+            enum class Previous { none, started, notStarted } previous_ = Previous::none;
+            bool handed_ = false, playedOk_ = true;
+            float* const* played_ = nullptr; uint32_t playedFrames_ = 0;
+            float* const* playOutputs_ = nullptr; uint32_t playChannels_ = 0, playFrames_ = 0;
             BlockTiming roundTrips_;
             std::array<kick::clap::Event, maxEvents> chunk_{};
             std::vector<kick::clap::Event> output_, pending_;

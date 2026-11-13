@@ -24,13 +24,15 @@ publisher trust and review. Those two stay open until Jacob confirms the proposa
 Revised 2026-11-11 from the owner's request of that day:
 [finding missing plugins](#finding-missing-plugins) in the repositories a device knows, a
 repository named per plugin in archives, Performances and Sounds, and what the index must carry
-for it. Proposed, not built; its [open questions](#open-questions-on-finding-missing-plugins)
-are the owner's.
+for it. Proposed, not built; the owner answered three of its
+[open questions](#open-questions-on-finding-missing-plugins) on 2026-11-12
+([decided](#decided-by-the-owner-2026-11-12-on-finding-missing-plugins)), and the rest are his.
 
 Revised 2026-11-12 from the owner's decision of that day: releases stored in pieces is the plan,
 and beside the pieces the repository publishes a
 [ready-made archive per platform](#ready-made-archives-per-platform) of each version, for a
-person to install by hand. Planned, not built; its open questions are the owner's.
+person to install by hand. Planned, not built; the owner answered its five open questions
+the same day ([decided](#decided-by-the-owner-2026-11-12-on-the-archives)).
 
 ## Progress
 
@@ -102,7 +104,10 @@ Checked when built and tested; the sections below say how.
       `revoked.json` a device could not read, or one revoking the repository's own root or index
       key, naming each entry's problem (`package-repository-revocations`). Not yet: the takedown policy, the
       official list in system images, revoked builds in what is installed, remembering revoked
-      index keys; the official list applying to another repository is not tested)
+      index keys; the official list applying to another repository is not tested. Decided, not
+      built (owner, 2026-11-12): an archive installed from a file checked against the last list
+      seen from each repository on, and a revoked build refused only on its own platform
+      ([file installs](#decided-by-the-owner-2026-11-12-on-the-archives)))
 - [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters
       (built 2026-11-07 on the desktop, [interim](#in-the-library) until the Catalog app:
       Install… with Catalog and File; the Catalog listing the enabled repositories' packages of
@@ -140,8 +145,10 @@ Checked when built and tested; the sections below say how.
 - [ ] 11. `packages.lookup`, and what is missing in installs, prepares, the library and stand-ins
 - [ ] 12. Offering the install: the Library, the Parts view, a hinted repository, the Setlist
 - [ ] 13. Newer versions whose publisher says they open the saved state (`opensStateFrom`,
-      [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim), if the
-      owner accepts it)
+      [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)); decided
+      2026-11-12 that a newer version is offered only with the claim, never by guessing
+      ([decided](#decided-by-the-owner-2026-11-12-on-finding-missing-plugins); the claim itself is
+      RFC 0043's)
 - [ ] 14. [Preinstalled packages](#preinstalled-packages): a release ships a repository snapshot
       and the engine installs from it at its first start
       (built 2026-11-11: the snapshot in `Contents/Resources/Preinstalled` (macOS) or
@@ -277,7 +284,8 @@ pieces to get one.
 
 A package can name a **blob base** of its own: an HTTPS address the publisher hosts, where its
 large files are. Their hashes are in the signed manifest, so they need no trust in that host.
-This keeps a 20 GB piano off the project's bandwidth.
+This keeps a 20 GB piano off the project's bandwidth. Such a package has no
+[ready-made archive](#ready-made-archives-per-platform) (decided 2026-11-12).
 
 ### Ready-made archives per platform
 
@@ -299,82 +307,103 @@ together, and there is no interim format with one archive per platform in the re
   platform's plugin builds each with its signatures, and `Licenses/`. No other platform's builds.
   It is a normal `.olib` ([format](../library-archive.md)): any Oscairn installs it by the
   existing archive path, from the file browser or read in place from a USB drive
-  ([installing one](../library-archive.md#installing-one)), with the same signature, trust and
-  license checks as any archive.
+  ([installing one](../library-archive.md#installing-one)), with the same signature, trust,
+  license and revocation checks as any archive.
 - **A package with no plugin builds** (an asset library, a library of Sounds or Performances) has
   one archive, named without a platform: it is the whole release.
 - **Identity and signatures.** A package's identity is its manifest's hash, and each build carries
   its own signatures, which are over the build's digest and do not depend on the archive. But
   `library.json` lists every platform's builds with their paths, and `library.sig` signs those
   exact bytes, and the reader today refuses an archive whose manifest lists a build that is not
-  there ([reading one](../library-archive.md#reading-one)). So **an archive holding one platform's
-  builds cannot keep the same manifest and still be read as the format stands**: that is an open
-  question below, with its options. Who signs, either way: only the publisher. The publisher's key
-  never leaves the publisher's machine ([publishing](#the-command)) and the repository's job holds
-  the index key, so the job does not sign an export, and the index key and root key sign nothing
-  they do not today: the root signs `repository.json` and nothing else names an export.
+  there ([reading one](../library-archive.md#reading-one)). So an archive holding one platform's
+  builds cannot be read as the format stands. **Decided by the owner 2026-11-12:** every
+  platform's export carries the same manifest and the same `library.sig`, and the reader is changed
+  to accept it ([the rule](#decided-by-the-owner-2026-11-12-on-the-archives), question 1). Nothing
+  new is signed: the publisher's key never leaves the publisher's machine
+  ([publishing](#the-command)) and the repository's job holds the index key, so the job signs no
+  export, and the index key and root key sign nothing they do not today: the root signs
+  `repository.json` and nothing else names an export.
 - **Naming.** `<package ID>-<version>-<platform>.olib`, such as
   `com.example.organ-2.1.0-macos-arm64.olib`, and `<package ID>-<version>.olib` for a package with
   no builds. The platform is one of the format's five. Every part is already plain
   (letters, digits, `.`, `-`, `_`), so the name needs no escaping.
-- **Address.** One stable pattern from the same three parts, served from the same static hosting
-  as the blobs: `<export base>/<package ID>/<version>/<file name>`. A link in a release note is
-  built from the ID, version and platform with no lookup, and does not hold a hash. **The exact
-  URL, the export base and how it maps onto GitHub Releases (whose assets are flat under a tag)
-  are to be fixed when this is built:** [hosting](#hosting-and-cost) does not settle them.
-- **Outside the index.** An export is not listed there. Its address follows from the package ID,
-  the version and a platform the index's `platforms` already lists, so the Catalog can show
-  "download for another device" with no new field; and a file no device needs for an install is
-  not a promise the signed index should make, one more hash to keep right in an index meant to
-  stay small ([size](#size)). The index's `platforms` sizes are what a device downloads, not the
-  export's, so the Catalog shows an export's size only as about the common size plus the
-  platform's.
+- **Address.** Decided by the owner 2026-11-12: the project puts a name it controls in front of the
+  exports from the start, so that links in release notes survive a move of the hosting
+  ([question 2](#decided-by-the-owner-2026-11-12-on-the-archives)). An export is served under
+  `packages.oscairn.org`, at one stable pattern from the same three parts,
+  `<export base>/<package ID>/<version>/<file name>`, where the export base is a path on that host,
+  and that address redirects to wherever the file is stored. A link in a release note is built from
+  the ID, version and platform with no lookup, and does not hold a hash. **The exact URL, the
+  export base, how the redirect is made, and how it maps onto GitHub Releases (whose assets are
+  flat under a tag) are to be fixed when this is built.** The redirect is not settled: GitHub
+  Pages alone is not known to send HTTP redirects, so it probably needs a rule in front of it, of
+  the kind [hosting](#hosting-and-cost) already allows for a CDN. Under the project's own name
+  either way.
+- **Outside the index,** but for one flag. An export is not listed there, and has no hash there:
+  its address follows from the package ID, the version and a platform the index's `platforms`
+  already lists, so the Catalog can show "download for another device" with no field per export;
+  and a file no device needs for an install is not a promise the signed index should make, one
+  more hash to keep right in an index meant to stay small ([size](#size)). The one exception is a
+  version that has **no** export (a large package, [below](#decided-by-the-owner-2026-11-12-on-the-archives)),
+  which the index says in a field, provisionally **`noExport`**, written on the version only when
+  it has none, so the Catalog does not offer a link that is not there. The format is fixed when
+  this is built. The index's `platforms` sizes are what a device downloads, not the export's, so
+  the Catalog shows an export's size only as about the common size plus the platform's.
 - **Yanked and withdrawn.** A yanked version's exports stay, as a lock may still name it and the
   person chose it: yanking is advice ([versions](#versions-and-yanking)). A withdrawn version's
   exports are removed in the publish that adds the withdrawal to the revocation list, and so is
   the export of a revoked key's package. Copies already downloaded stay, as installed packages
-  do; installing one is checked as any archive is ([the revocation list](#the-revocation-list)).
+  do; installing one is checked as any archive is, against the last revocation lists the device has
+  seen, with no network needed ([file installs](#decided-by-the-owner-2026-11-12-on-the-archives),
+  [the revocation list](#the-revocation-list)).
 - **A revoked build inside an export.** Builds are revoked by SHA-256 and a device checks each by
   its hash when it installs, from a repository or from an archive; an export adds no way round it.
-  An export holding a revoked build is removed.
+  Decided by the owner 2026-11-12: a revoked build affects only its own platform. That platform's
+  export is removed, and a device on that platform refuses the build; the other platforms keep the
+  version and their exports, though the manifest they carry lists the revoked build too (question
+  4, [below](#decided-by-the-owner-2026-11-12-on-the-archives)).
 - **Sizes.** An export copies bytes the pieces already hold: the shared part once per platform,
   plus that platform's builds. A package for four platforms holds its shared part five times: once
   as pieces and once in each export. That is the trade for a file a person can download and
-  install with no Oscairn fetching it; it costs storage, not a device's downloads. Question 3
-  limits the worst case.
+  install with no Oscairn fetching it; it costs storage, not a device's downloads. The rule for
+  large packages (question 3, [below](#decided-by-the-owner-2026-11-12-on-the-archives)) limits
+  the worst case.
 
-**Open questions** (the owner's):
+#### Decided by the owner 2026-11-12 on the archives
 
-1. **The manifest of a one-platform archive.** (a) *The same manifest.* The reader learns that a
-   listed build for another platform may be absent, a change to
-   [the archive format](../library-archive.md#reading-one) (today it refuses a missing build).
-   The identity, `library.sig` and the Catalog's same-build check stay as they are, and nothing
-   needs signing; a half-present build or a wrong digest is still refused, and the rule for which
-   absences are allowed is fixed when the reader changes. (b) *A manifest per platform,* with only
-   that platform's builds, each signed by the publisher: no reader change, but each export has its
-   own identity, which breaks "one version, one manifest hash" or makes a lock made from an export
-   name an identity the index does not list, and the publisher's own tool must sign and submit
-   every export, since the repository's job cannot. (Oscairn's own plugin packages are signed in
-   the submissions repository's import workflow, which holds the official publisher's key in a
-   protected environment, so for those the signing could happen there; other publishers sign on
-   their own machines.) This RFC leans to (a); nothing is decided.
-2. **The address after the move to object storage.** A release-asset address changes with the
-   blob base, which would break links in release notes. Either the project puts a name it
-   controls in front of the exports from the start (a CDN rule is not server-side code), or the
-   links change once and the notes are corrected.
-3. **Large packages.** A GitHub release file must be under 2 GiB, and the index builder refuses
-   an archive over 1,900 MiB ([hosting](#github-first)); a package with a blob base of its own is
-   kept off the project's bandwidth. Proposed: no export when it would be over that size or the
-   package has a blob base, so the person uses the Catalog. Then the Catalog cannot know from the
-   index that an export is missing, and either a missing link is acceptable or the index gets a
-   flag.
-4. **A revoked build among several platforms.** The manifest lists every platform's builds, so a
-   revoked Linux build is listed in the Mac export's manifest too. Does it withdraw the whole
-   version, taking every export, or only the platform whose build it is?
-5. **Revocation on a file install.** This RFC says a withdrawn version, a revoked key and a
-   revoked build are refused when installed from a repository; it does not say whether an
-   archive installed from a file (every export is one) is checked against the official
-   repository's kept list of keys and builds, beyond the trust store's own revoked keys.
+The five questions this section ended with, answered. **Planned, not built.**
+
+1. **The manifest of a one-platform archive: one manifest for all platforms.** Every export of a
+   version carries the same `library.json` and `library.sig`, listing every platform's builds. The
+   archive reader accepts an archive in which builds for **other** platforms are absent; a build
+   for the device's own platform must be present and must match its digest; and a build that is
+   present must still match, so a half-present build or a wrong digest is refused as now. The
+   identity (`library.sig`, the manifest's hash) and locks are unchanged, and nothing new is
+   signed: no per-platform manifest, and so no export of its own identity. The same allowance
+   holds for any file the manifest's `files` lists that belongs to an absent build. **This changes
+   [`docs/library-archive.md`'s reading rules](../library-archive.md#reading-one), which today
+   refuse an archive missing a listed build; that file is to be changed when this is built, and is
+   not changed now.** A package with no builds is unaffected.
+2. **The address: a name the project controls, from the start.** Exports are served under
+   `packages.oscairn.org`, at a pattern built from the package ID, version and file name, and
+   that address redirects to wherever the file is stored, so that links in release notes survive
+   a move of the hosting ([address](#ready-made-archives-per-platform)). The exact path is
+   to be fixed when it is built.
+3. **Large packages: no export.** A package over the size limit (the index builder's 1,900 MiB,
+   [hosting](#github-first)) or with a blob base of its own has no ready-made archive: the person
+   uses the Catalog. The index carries a flag on the version so the Catalog does not offer a link
+   that is not there; provisionally `noExport`, written only when the version has no export, and
+   its format fixed when this is built.
+4. **A revoked build for one platform affects only that platform.** Its export is removed, and
+   devices on that platform refuse the build. Other platforms keep the version and their exports;
+   a device does not refuse a version because the manifest lists a revoked build for a platform it
+   is not on. Withdrawing the whole version stays the separate action it already is
+   ([withdrawn is not yanked](#the-revocation-list)).
+5. **File installs are checked against revocation.** An archive installed from a file (every
+   export is one) is checked against the last revocation list the device has seen from each
+   repository it has on: revoked keys, withdrawn versions and revoked builds, with no network
+   needed at install time. A repository the device has never read has no list to check against.
+   [The revocation list](#the-revocation-list) says the same.
 
 ### Several repositories
 
@@ -514,6 +543,10 @@ are in `details/`, fetched when a package's page opens.
 - **`estimates`:** memory and CPU per device profile where measured (RFC 0025 step 5), from
   the publisher or the repository's checks. They decide "fits this device" before anything is
   downloaded; admission still measures on the device.
+- **`noExport`** (provisional name, not built): present on a version that has no
+  [ready-made archive](#ready-made-archives-per-platform), a large package or one with a blob
+  base of its own, so the Catalog offers no download link for it; absent otherwise. The format is
+  fixed when it is built.
 - **`license`:** an SPDX expression, or `LicenseRef-` and the package's own license file for
   anything else.
 - **`publisher.key`:** the publisher's key fingerprint. The manifest must be signed by it.
@@ -794,8 +827,9 @@ plugin and app code needs System.
 - **Device to device:** one paired instrument can serve another its cached blobs the same way.
 - **By hand:** a person can download a version's ready-made
   [archive for the device's platform](#ready-made-archives-per-platform) in a browser and carry it
-  there. It installs by the archive path, with the same checks, and needs no repository on the
-  drive.
+  there. It installs by the archive path, with the same checks, revocation included (against the
+  lists the device last saw, [file installs](#decided-by-the-owner-2026-11-12-on-the-archives)), and
+  needs no repository on the drive. A large package has none: it comes by the Catalog.
 
 ## Preinstalled packages
 
@@ -1003,8 +1037,9 @@ Each version in the index gains `plugins`, written from its manifest's `plugins`
   letter case is refused, as the plugin store's folders for the two would be one on a
   case-insensitive file system (as for libraries, [installing one](../library-archive.md#installing-one)).
   A plugin ID new to a package is already a human review ([proposal](#proposal)).
-- Proposed with it, for [newer versions](#versions): each plugin's `opensStateFrom`, from the
-  manifest, and `checked` when the repository's state check ran, when the owner accepts them
+- Proposed with it, for [newer versions](#versions), which are offered only with it (decided by
+  the owner 2026-11-12): each plugin's `opensStateFrom`, from the manifest, and `checked` when the
+  repository's state check ran. The fields themselves are RFC 0043's to accept
   ([RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#where-it-lives-and-how-it-is-signed)).
   Not `soundChanges`, which the device reads from the installed manifest.
 
@@ -1053,7 +1088,9 @@ The **wanted plugin** is its format, ID and version and this device's platform, 
 document's [hint](#the-repository-hint) if it has one, and the lock's digest for this platform if
 it has one.
 
-1. **The repositories that are on,** each from the index it read last, with no network. Today
+1. **All the repositories that are on,** not only the one a hint names (decided by the owner
+   2026-11-12; a build found outside the hint's repository is accepted only by the rule
+   [below](#the-same-build-and-the-same-publisher)), each from the index it read last, with no network. Today
    every listing reads the root first (`repository::open`), so a lookup from the kept index alone
    is new. A kept index was checked against a signed root when kept; the answer says which serial
    it read, as an instrument may have no clock to date it.
@@ -1068,9 +1105,11 @@ plugin is in a version when that version's `plugins` lists it.
 **Several repositories with it:** each is a candidate, named with its repository and publisher.
 They are listed in this order: the hint's repository; the repository this plugin's other
 installed versions came from (`packages.installed`), as updates and repair come from there; then
-the official, the device's and the user's, in `packages.repositories`' order. When the candidates'
-publisher keys differ, none is chosen for the user: each is shown with its publisher and key
-fingerprint and the user picks one.
+the official, the device's and the user's, in `packages.repositories`' order. A candidate from a
+repository other than the hint's is offered as the missing plugin only if it satisfies the rule
+for the same build or the same publisher ([below](#the-same-build-and-the-same-publisher)); one
+that does not is not offered, and is not chosen between by the user either. Candidates that do are
+listed in the order above.
 
 **Dependencies:** a plugin package's asset libraries, as the index names them
 (`requires.packages`), come from the same repository; `packages.install` does that today
@@ -1082,9 +1121,12 @@ index and says which are installed already.
 **The exact version first.** As the index gives it:
 
 - Published, not yanked, with a build for this platform: offered.
-- **Yanked:** offered with the publisher's reason and a second question. A lock still fetches a
-  yanked version ([versions and yanking](#versions-and-yanking)), but a document, which anyone
-  can write, should not choose one silently.
+- **Yanked:** offered (decided by the owner 2026-11-12), with a confirmation that says the
+  publisher marked the version as not recommended, and the publisher's reason. A lock naming a
+  yanked version stays satisfiable: it still fetches it ([versions and
+  yanking](#versions-and-yanking)). The confirmation is there because a document, which anyone can
+  write, should not choose a version its publisher advises against silently. It is not a
+  withdrawal, which is the repository's and never offered.
 - **Revoked** (the version, its build or its publisher's key,
   [takedown and revocation](#takedown-and-revocation)): never offered. Revocation lists are
   applied since 2026-11-11 ([the revocation list](#the-revocation-list)).
@@ -1096,8 +1138,52 @@ index and says which are installed already.
 **The same build.** When the document's lock names this platform's digest for the plugin, the
 install compares it with the build in the package's manifest, read before anything is installed
 (the whole archive today, the manifest blob once releases are stored in pieces). Another digest
-installs only after a question: the version is the same, but not the build the document was saved
-with. A document with no lock entry for this platform (one a converter wrote) skips this.
+installs only after a question, from the hint's repository: the version is the same, but not the
+build the document was saved with (from any other repository it is offered only by the rule
+[below](#the-same-build-and-the-same-publisher)). A document with no lock entry for this platform
+(one a converter wrote) skips this.
+
+#### The same build and the same publisher
+
+Decided by the owner 2026-11-12, as his condition on looking in every repository that is on
+("just make sure the signature matches"), and refined the same day. A build found in a repository
+other than the hint's (with no hint, in any) is accepted as the missing plugin by one of two
+routes, in terms the documents already use:
+
+1. **The digest matches the lock entry: accepted.** The lock entry for this plugin and this
+   platform (`{format, id, version, platform, sha256}`,
+   [Performance format](../performance-format.md)) names the build's digest, the SHA-256 of a file
+   or, for a bundle, of each file's path and SHA-256 in path order. When the candidate's manifest
+   lists the same digest as the build's `sha256` ([library archive](../library-archive.md)), it is
+   byte for byte the same build, whoever serves it, and no comparison of publisher keys is needed.
+   The digest is compared on the manifest, read before anything is installed. The build's
+   signature must still verify, and whether its key is trusted is decided as for any install
+   ([trust](#trust)).
+2. **No digest to compare, or a different build: accepted only if signed by the same publisher
+   key as the build the Performance was saved with.** That covers a lock with no entry for this
+   platform (one a converter wrote), a build with another digest, and a newer version (a newer
+   version always has another digest, so it is judged here, and offered only with the publisher's
+   claim as well, [below](#versions)). The build's signature, over `oscairn-build-1\0` and the
+   plugin's format, ID, version, the platform and the digest
+   ([RFC 0006](0006-packages-and-portability.md#signatures)), must verify, and its key must be one
+   that signed the build the Performance was saved with, as the lock records it (below).
+
+A candidate that meets neither is not offered as the missing plugin, and `acceptOtherBuild`
+([control API](#control-api-additions)) does not apply to it: the question about another build
+below is only for the hint's repository.
+
+**The lock records the signer (decided by the owner 2026-11-12; planned, not built).** To make the
+second route possible, a lock entry records the key of the publisher who signed the build, from
+now on: provisionally a `signers` list beside `sha256`, each a whole public key in lowercase hex
+as the archive's build signatures give it, written when the Performance is saved with the
+signatures of the build that loaded, and kept for other platforms and stand-ins as `sha256` is. A
+match is any of them. **This is a change to `docs/performance-format.md`'s `lock` entry, to be
+made when this is built, and that file is not changed now;** the Sound's lock is the same
+([format](../performance-format.md)). Formats may break freely before the first public release, so
+there is no migration: **a lock written before the field exists has no key**, and for it only a
+digest match, or an installed copy's recorded signer (`packages.installed` records the signers of
+the archive it came from), can satisfy the rule; with neither, a build with another digest or no
+digest to compare is not accepted.
 
 **Newer versions.** What the formats and plugins promise today about a newer version restoring
 an older version's state:
@@ -1131,10 +1217,14 @@ before downloading; the device trusts the claim only from the installed archive.
 installs side by side with any other (RFC 0006), and the part moves to it only by RFC 0043's
 explicit **Use 0.4.6** (`parts.useVersion`), which opens the part with it and marks it edited: the
 saved document is unchanged until the user saves, and saving over a locked library item makes a
-new one ([control protocol](../control-protocol.md)). Without the claim, the offer names the
-newer version and says it does not say it opens this state; the Catalog still installs it, and RFC
-0043 still lets the user move one item to it after a warning. Whether to add the field at all is
-the owner's ([open questions](#open-questions-on-finding-missing-plugins)).
+new one ([control protocol](../control-protocol.md)). **Decided by the owner 2026-11-12: a newer
+version is offered only when it declares that it opens the older one's state** (`opensStateFrom`),
+never by guessing. Without the claim nothing is offered: the stand-in's line may say that a newer
+version is published and does not say it opens this state, with no button; the Catalog still
+installs it, and RFC 0043 still lets the user move one item to it after a warning. A newer
+version has another digest, so it is judged by the publisher-key route of [the same
+build](#the-same-build-and-the-same-publisher), as well as by the claim.
+The claim's own questions (what it promises, whether CI must check it) are RFC 0043's.
 
 ### The repository hint
 
@@ -1173,7 +1263,10 @@ engine yet. On a device:
   ([in the Library](#in-the-library)).
 - **The same plugin from another publisher:** when this plugin's format and ID are installed here
   from a publisher, or published by a publisher this device trusts for plugins in a repository it
-  knows, and a candidate's publisher is another, the offer says so and chooses nothing.
+  knows, and a candidate's publisher is another, it is not offered as the missing plugin
+  ([the same publisher](#the-same-build-and-the-same-publisher), decided 2026-11-12) unless its
+  digest is the one the lock names; the line says that another publisher's plugin with this ID is in that repository, with no button, and the
+  Catalog lists it as the different package it is.
 
 ### At each trigger
 
@@ -1226,10 +1319,11 @@ kept."):
 | What the lookup found | The rest of the line |
 | --- | --- |
 | The exact version | It's in Oscairn Packages. **Install** |
-| The exact version, yanked | It's in Oscairn Packages, but its publisher withdrew it: "reason". **Install anyway** |
+| The exact version, yanked | It's in Oscairn Packages, but its publisher marked it as not recommended: "reason". **Install anyway** (asks to confirm) |
 | Another build of the version (found when installing) | This is version 1.2.0, but not the build the Performance was saved with. It may sound different. **Install** · **Cancel** |
 | Only a newer version that restores its state (step 13) | Version 2.1.0 is published and says it opens sounds saved with 1.2.0. **Install and use 2.1.0** |
-| Only a newer version, no such claim | Version 2.1.0 is published, but it doesn't say it can open sounds saved with 1.2.0. |
+| Only a newer version, no such claim | Version 2.1.0 is published, but it doesn't say it can open sounds saved with 1.2.0. (No button.) |
+| Another publisher's plugin with this ID, or another build, that the rule does not accept | Another publisher's Example Organ is in packages.example.com; it isn't the build or from the publisher this was saved with, so it isn't offered. |
 | No build here | It's published, but not for linux-arm64. |
 | A newer system needed | It needs a system update: Oscairn 1.4 or later. |
 | Revoked | It was revoked: "reason". |
@@ -1295,7 +1389,9 @@ path.
 - **`packages.install`** installs a candidate as now (`source` its repository's address, `id` its
   package, `version`). New: optional `locked`, each `{format,id,version,sha256}`; a build whose
   digest is not the locked one refuses the install, listing each, unless `acceptOtherBuild` is
-  true. New refusal `playing`: at `instrument` and above while the transport runs.
+  true, which counts only for a build from the hint's repository: from any other, the refusal
+  stands unless the publisher-key route accepts it ([the same
+  build](#the-same-build-and-the-same-publisher)). New refusal `playing`: at `instrument` and above while the transport runs.
 - **`packages.addRepository`** unchanged; the hint's flow calls it after the user's yes.
 - **`session.status`'s `failures`:** a stand-in's entry gains `plugin` (`{format,id,version}`)
   and `repository` (the document's hint for it, or `null`).
@@ -1321,9 +1417,9 @@ with `system` looks it up and shows the line [above](#at-each-trigger). A client
 | Threat | What stops it | What remains |
 | --- | --- | --- |
 | A hostile archive or Performance names a hostile repository | Nothing is fetched from it until the user asks; it is added only after a confirmation by fingerprint that names it by its signed root, not the document; adding trusts it for its listing only; its plugins still need the publisher question, and are to run in workers at `instrument` and above (RFC 0027, not built) | A user who adds the repository and then trusts its publisher installs what it lists, as with **Install anyway** on a file today. Revocation (step 4) is the backstop |
-| A typosquatted plugin ID | Matching is exact, never by name or similar ID; one publisher per plugin ID in a repository; an ID differing only in case refused; an ID new to a package reviewed by a person ([proposal](#proposal)); a candidate from a publisher other than the one this device already uses for that ID is shown as such, with no default | A repository the user added can list any ID; only the user's trust in its key protects |
+| A typosquatted plugin ID | Matching is exact, never by name or similar ID; one publisher per plugin ID in a repository; an ID differing only in case refused; an ID new to a package reviewed by a person ([proposal](#proposal)); a candidate from a publisher other than the one this device already uses for that ID is not offered as the missing plugin unless the digest the lock names matches (decided 2026-11-12, [the same build or publisher](#the-same-build-and-the-same-publisher)) | A repository the user added can list any ID; only the user's trust in its key protects |
 | A homograph address (`pаckages.oscairn.org` with a Cyrillic `а`) or `https://packages.oscairn.org@evil.example` | The format allows only lowercase ASCII letters, digits, `.` and `-` in the host, so a lookalike must be written as `xn--…`, and no user info; the key, not the address, is the repository | A plain lookalike in ASCII (`packages-oscairn.org`); the fingerprint and the signed name are shown |
-| A downgrade: a document naming an old version | Revoked versions are never offered; a yanked one asks again, showing why it was withdrawn; versions install side by side, so no other document's version changes; a lower root serial is refused, as now | An old version, neither yanked nor revoked, with a flaw found later: the publisher must yank or revoke it |
+| A downgrade: a document naming an old version | Revoked versions are never offered; a yanked one asks again, saying its publisher marked it as not recommended, and why; versions install side by side, so no other document's version changes; a lower root serial is refused, as now | An old version, neither yanked nor revoked, with a flaw found later: the publisher must yank or revoke it |
 | A hint whose key does not match | A known address with another key: the hint is not used and the known key is kept; a hinted root whose key is not the hint's: refused, nothing kept | None found |
 | A repository that claims another's ID | Kept serials and indexes keyed by root key and ID (built 2026-11-11, `control-repository`) | None found |
 | Another trusted repository's root served at a known repository's address | Each known address is read only with the root key recorded for it; another key is refused naming both, nothing kept (built 2026-11-11, `control-repository`; the app's snapshot only with a shipped key, `control-preinstall`) | A folder or an address not added yet takes any key trusted for repositories, as nothing is recorded for it |
@@ -1348,24 +1444,36 @@ In the [build order](#build-order-and-gates) as steps 9 to 13:
 | 12. The offers | The library's window, the Parts view's line and **Reload the Performance**, **Look there** and adding, the Setlist's line and **Check**, `oscairn.install.plugins` | `desktop-gaps`: each kind of row in the library's window; **Not now** installs and adds nothing; **Install selected** installs the package and its asset library; **Look there** then **Add and install** after the fingerprint; a mismatched hint added by nothing; the stand-in's line and Reload; the Setlist's entry line and **Check** |
 | 13. Newer versions | `opensStateFrom` in the index and the lookup's candidates; **Install and use** with RFC 0043's **Use 0.4.6** (the claim itself, its checks and the move are RFC 0043's steps 1, 3 and 5) | A 2.0 claiming 1.0 is offered for a 1.0 document and its part moves only on the click; a 2.0 claiming 1.0 from another publisher key is offered as without a claim; the saved document is unchanged until saved |
 
+### Decided by the owner 2026-11-12 on finding missing plugins
+
+Three of the seven questions this section ended with, and an eighth added the same day, answered. **Planned, not built.**
+
+1. **Newer versions: only with the publisher's claim.** A newer version is offered only when the
+   newer version declares that it opens the older one's state, RFC 0043's `opensStateFrom`
+   ([the publisher's claim](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)),
+   from the same publisher key as the saved version, never by guessing. Without it nothing is
+   offered from this flow ([newer versions](#versions)). The claim's own questions are
+   [RFC 0043's](0043-moving-sounds-to-newer-plugin-versions.md#decisions-for-the-owner).
+2. **Which repositories: every one that is on,** not only the one a hint names, with the owner's
+   condition, in his words "just make sure the signature matches". A build found in another
+   repository is accepted as the missing plugin if its digest matches the lock entry (the same
+   build, whoever serves it); with no digest to compare, or a different build, only if it is signed
+   by the same publisher key as the build the Performance was saved with
+   ([the rule](#the-same-build-and-the-same-publisher)). This reads RFC 0031's rule against
+   [looking in other repositories](#ruled-out) as about an installed package's updates and repair,
+   which still come only from its repository.
+3. **Yanked exact versions: offered,** with a confirmation that says the publisher marked the
+   version as not recommended. A lock naming a yanked version stays satisfiable
+   ([versions](#versions)).
+4. **The lock records the signer's key** beside each entry (provisionally `signers`), so the
+   publisher-key route can be checked from the document; planned, not built, a change to
+   `docs/performance-format.md` made when it is built. A lock written before it has no key
+   ([the rule](#the-same-build-and-the-same-publisher)). This was open question 8.
+
 ### Open questions on finding missing plugins
 
-For the owner:
+Still the owner's (numbers as before; 8 is answered, above):
 
-1. **Newer versions:** add the publisher's signed claim, renamed `opensStateFrom` with
-   `soundChanges`, as [RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)
-   defines it, and offer **Install and use** from this flow only with it, from the same publisher
-   key as the saved version? Or never offer a newer version from this flow, leaving the Catalog and
-   RFC 0043's moves? Recommended: the first. The claim's own questions (what it promises, whether CI
-   must check it, moves without it) are RFC 0043's
-   [decisions](0043-moving-sounds-to-newer-plugin-versions.md#decisions-for-the-owner) 1, 3 and 7.
-2. **Every repository that is on, or only some?** With no hint, this design looks in every
-   repository that is on. RFC 0031 [rules out](#ruled-out) "looking in other repositories for a
-   missing package of the same name"; this design reads that as about an installed package's
-   updates and repair, which still come only from its repository, and looks up a plugin with no
-   install here by its exact identity everywhere, naming each candidate's repository and
-   publisher. Accept that reading, or limit it to the official and the device's repositories?
-3. **Yanked exact versions:** offered with a second question (this design), or not offered?
 4. **`packages.lookup`'s permission:** `system` with the rest of `packages.*` (this design), or
    `library`, as it only reads?
 5. **Hints in Performances and Sounds** as well as archives (this design): they survive copies
@@ -1457,8 +1565,13 @@ address or a mirror, checks its size and hash against the root, then reads it.
 | Installed when a lock or `version` names it | Yes, so a Performance keeps working | No, never |
 | Installed already | Shown as yanked | Reported with the repository and reason; kept, never removed or disabled, offered to remove or replace |
 
-A revoked key withdraws every version of every package its key signed; a revoked build withdraws
-every archive holding it.
+A revoked key withdraws every version of every package its key signed. A revoked build is
+refused as built: an archive holding it is refused, the archive being one blob today. Decided by
+the owner 2026-11-12, for when releases are stored in pieces and exported per platform: a revoked
+build affects only its own platform, whose export is removed and whose devices refuse the build;
+other platforms keep the version and their exports, and withdrawing the whole version stays the
+separate action in the `versions` list ([archives](#decided-by-the-owner-2026-11-12-on-the-archives),
+question 4).
 
 **Whose list applies where.** A repository's list applies to its own packages: its versions, the
 publisher keys it lists, the builds in them. The official repository's `keys` and `builds` apply
@@ -1466,7 +1579,9 @@ to every repository's packages too, as the project's way to stop a key or a buil
 `versions` apply to its own, since a package ID and version name a release only within one
 repository. No other repository's list reaches beyond its own packages: otherwise a repository the
 user added could withdraw the official one's packages, or any publisher's everywhere. The trust
-store's own revoked keys (`trust.json`) apply as before, to everything.
+store's own revoked keys (`trust.json`) apply as before, to everything. An archive installed from
+a file belongs to no repository and is checked against each list of the repositories on (below,
+decided 2026-11-12).
 
 **On a device.**
 
@@ -1479,11 +1594,22 @@ store's own revoked keys (`trust.json`) apply as before, to everything.
   root alone. The official
   repository's kept list is what other repositories' installs check; a device that has never read
   the official repository has none to apply.
+- **A file install** (decided by the owner 2026-11-12, not built): an archive installed from a
+  file is checked against the last list kept for each repository the device has on: its signers'
+  keys against `keys`, its package ID and version against `versions`, its builds' digests against
+  `builds` (for the device's own platform, once builds for other platforms may be absent). It
+  needs no network: the kept lists are read, never fetched, at install time, as a repository's
+  own are. A repository the device has never read has no list, so it checks nothing. The file
+  belongs to no repository, so here each list applies to it as far as it names it; this is wider
+  than "whose list applies where" above, which keeps a repository's list to its own packages, and
+  is the owner's choice for files only, since the user turned those repositories on. It is checked
+  as an archive from a repository is, and refused the same way ("refused: <id> <version> was
+  withdrawn by <repository>: <reason>").
 - **Listing:** each version says `withdrawn` (`{repository, reason, date}`, the repository by this
   device's name for it), or `null`. The Catalog never offers it, nor picks it as the newest or an
   update, and says "Cannot be installed here: withdrawn by <repository>: <reason>".
-- **Installing:** a withdrawn version is refused even when named, a revoked key's packages and an
-  archive holding a revoked build too: "refused: <id> <version> was withdrawn by <repository>:
+- **Installing from a repository:** a withdrawn version is refused even when named, a revoked
+  key's packages and an archive holding a revoked build too (an archive from a file: see above): "refused: <id> <version> was withdrawn by <repository>:
   <reason>". The newest version and asset libraries skip withdrawn ones.
 - **Installed already:** `packages.installed` gives each package `withdrawn` by the lists last read
   of the repository it came from and the official one: its version, or a key that signed its
@@ -1503,7 +1629,9 @@ and a root naming none each refusing the repository, keeping nothing. `desktop-g
 Catalog's offer and wording. Not tested: the official list applying to another repository (its key
 cannot sign a test repository).
 
-Not built: the takedown policy; the official list in system images; a revoked build stopping to
+Not built: the takedown policy; checking an archive installed from a file against the kept lists
+(decided 2026-11-12, above); a revoked build refused only on its own platform (the same); the
+official list in system images; a revoked build stopping to
 load, which the revision above drops; remembering an index key a list revoked, so that a stolen index key
 signing a later root with a list that leaves itself out is still refused (today the serial alone
 protects a device that saw the revocation only until the thief publishes a higher serial).
@@ -1658,7 +1786,9 @@ $0.015 per GB-month, and $4.50 and $0.36 per million Class A and Class B operati
 copy and one field: copy every blob to `blobs/<ab>/<sha256>` under the new domain, set
 `blobBase` in `repository-config.json`, and merge. The next signed root names the new base.
 Devices change nothing, because every file is checked by its hash. The root and index may stay
-on Pages or move too.
+on Pages or move too. Links to [ready-made archives](#ready-made-archives-per-platform) change
+nothing either: they are under `packages.oscairn.org` and redirect to wherever the file is, so the
+redirect changes, not the link (decided 2026-11-12).
 
 ### What costs what
 
@@ -1797,7 +1927,32 @@ per platform."
 - **A ready-made `.olib` per platform** of each version, a derived export for downloading by hand,
   replaces the whole archive in the Git tree ([the section](#ready-made-archives-per-platform)).
   Both are built together; there is no interim archive per platform in the record. Planned, not
-  built; its open questions are the owner's.
+  built.
+- **The five open questions on the archives, answered** (decided by the owner 2026-11-12, in the
+  section's [decisions](#decided-by-the-owner-2026-11-12-on-the-archives)):
+  1. *The manifest:* one manifest for all platforms; the reader accepts an archive without other
+     platforms' builds, requires the device's own build and that every present build match its
+     digest; identity, `library.sig` and locks unchanged, nothing new signed. A change to
+     `docs/library-archive.md`'s reading rules, made when this is built.
+  2. *The address:* under `packages.oscairn.org`, from the start, redirecting to the file.
+  3. *Large packages:* no archive over the size limit or with a blob base of its own, and a flag
+     in the index (`noExport`, provisional) so the Catalog offers no link that isn't there.
+  4. *A revoked build:* affects only its platform; the version stays for the others.
+  5. *File installs:* checked against the last revocation list seen from each repository on, with
+     no network.
+- **The open questions on finding missing plugins, answered** (decided 2026-11-12,
+  [here](#decided-by-the-owner-2026-11-12-on-finding-missing-plugins)):
+  1. *Newer versions:* offered only when the newer version declares `opensStateFrom`
+     ([RFC 0043](0043-moving-sounds-to-newer-plugin-versions.md#the-publishers-claim)), never by
+     guessing.
+  2. *Where to look:* every repository that is on, not only the hint's; a build from another is
+     accepted when its digest matches the lock entry, and otherwise (no digest to compare, or a
+     different build) only if signed by the same publisher key as the saved build
+     ([the rule](#the-same-build-and-the-same-publisher)).
+  3. *The lock records the signer's key* beside each entry from now on (provisionally `signers`);
+     a lock written before has none. A change to `docs/performance-format.md`, made when built.
+  4. *Yanked versions:* offered, with a confirmation that the publisher marked the version as not
+     recommended; a lock naming a yanked version stays satisfiable.
 
 ## Open questions
 
@@ -1817,9 +1972,10 @@ per platform."
 - **Changing a published version,** even by its publisher.
 - **Updates that move a Performance's lock,** or that install while playing.
 - **Install scripts:** packages are files; nothing runs on install (RFC 0006).
-- **Looking in other repositories for a missing package of the same name.** (Proposed
-  2026-11-11, for the owner: this stays true of an installed package's updates and repair, while
-  a plugin with no install here is looked up by its exact identity in every repository that is
-  on; [open question 2](#open-questions-on-finding-missing-plugins).)
+- **Looking in other repositories for a missing package of the same name.** (Decided by the owner
+  2026-11-12: this stays true of an installed package's updates and repair, while a plugin with
+  no install here is looked up by its exact identity in every repository that is on, and a build
+  from a repository other than the hint's is accepted only if it verifies as the same build and
+  publisher; [question 2](#decided-by-the-owner-2026-11-12-on-finding-missing-plugins).)
 - **The repository's signature standing in for the publisher's:** they say different things.
 - **Telemetry** from devices to the repository.

@@ -62,8 +62,24 @@ namespace oscairn
         }
         PanelMap::Field field(const json_value_s* v, const std::string& what)
         {
-            fields(v, {"bytes", "bits", "shift", "mask", "signed"}, what);
+            fields(v, {"bytes", "bits", "shift", "mask", "signed", "parts"}, what);
             PanelMap::Field f;
+            if(const auto* parts = member(v, "parts"))
+            {
+                require(!member(v, "bytes") && !member(v, "bits") && !member(v, "shift") && !member(v, "mask"), what + " has parts, or bytes with bits, shift and mask");
+                each(parts, what + ".parts", 4, [&](const json_value_s* p) {
+                    fields(p, {"byte", "shift", "bits"}, what + "'s part");
+                    PanelMap::Part part;
+                    part.byte = uint8_t(whole(member(p, "byte"), what + "'s part's byte", 0, 3));
+                    if(const auto* s = member(p, "shift")) part.shift = uint8_t(whole(s, what + "'s part's shift", 0, 7));
+                    part.bits = uint8_t(whole(member(p, "bits"), what + "'s part's bits", 1, 8));
+                    require(part.shift + part.bits <= 8, what + "'s part ends within its byte");
+                    f.parts.push_back(part);
+                });
+                require(!f.parts.empty(), what + " has at least one part");
+                if(const auto* s = member(v, "signed")) { require(s->type == json_type_true || s->type == json_type_false, what + ".signed must be true or false"); f.sign = s->type == json_type_true; }
+                return f;
+            }
             each(member(v, "bytes"), what + ".bytes", 4, [&](const json_value_s* b) { f.bytes.push_back(uint8_t(whole(b, what + ".bytes", 0, 3))); });
             require(!f.bytes.empty(), what + " names at least one byte");
             if(const auto* b = member(v, "bits")) f.bits = uint32_t(whole(b, what + ".bits", 1, 8));
@@ -91,6 +107,12 @@ namespace oscairn
     int64_t PanelMap::Field::read(const std::array<uint8_t, 4>& m) const
     {
         uint64_t v = 0;
+        if(!parts.empty())
+        {
+            uint32_t width = 0;
+            for(const auto& p : parts) { v = (v << p.bits) | ((m[p.byte] >> p.shift) & ((1u << p.bits) - 1)); width += p.bits; }
+            return sign && ((v >> (width - 1)) & 1) ? int64_t(v) - (int64_t(1) << width) : int64_t(v);
+        }
         for(const auto b : bytes) v = (v << bits) | (m[b] & ((1u << bits) - 1));
         v = (v >> shift) & mask;
         if(sign && mask != 0xFFFFFFFF && (v & ((uint64_t(mask) + 1) >> 1))) return int64_t(v) - int64_t(uint64_t(mask) + 1);
@@ -117,9 +139,10 @@ namespace oscairn
                 require(p.estimated.back() == "layout" || p.estimated.back() == "controls", "estimated names layout or controls");
             });
         const auto* layout = member(root, "layout");
-        fields(layout, {"kind", "kinds", "id", "value", "delta", "analogMax", "encoderStep"}, "layout");
+        fields(layout, {"kind", "kinds", "id", "analogId", "value", "delta", "analogMax", "encoderStep"}, "layout");
         p.kind = field(member(layout, "kind"), "layout.kind");
         p.id = field(member(layout, "id"), "layout.id");
+        if(const auto* a = member(layout, "analogId")) p.analogId = field(a, "layout.analogId");
         p.value = field(member(layout, "value"), "layout.value");
         p.delta = field(member(layout, "delta"), "layout.delta");
         const auto* kinds = member(layout, "kinds");
@@ -159,7 +182,8 @@ namespace oscairn
         const auto k = map.kind.read(message);
         for(size_t i = 0; i < map.kinds.size(); ++i) if(map.kinds[i] == k) e.kind = Kind(i + 1);
         if(e.kind == Kind::Unknown) return e;
-        e.id = uint32_t(map.id.read(message));
+        const bool own = e.kind == Kind::Analog && !(map.analogId.bytes.empty() && map.analogId.parts.empty());
+        e.id = uint32_t((own ? map.analogId : map.id).read(message));
         e.value = e.kind == Kind::Encoder ? map.delta.read(message) : map.value.read(message);
         const auto entry = e.kind == Kind::SwitchOff ? Kind::SwitchOn : e.kind; // one entry for a switch's two kinds
         const auto c = std::find_if(map.controls.begin(), map.controls.end(), [&](const PanelMap::Control& c) { return c.kind == entry && c.id == e.id; });

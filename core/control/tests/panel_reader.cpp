@@ -2,7 +2,8 @@
 //
 // A non-MIDI device panel (panel_reader.h): 4-byte messages through a pipe, framed on bit 7 of
 // the first byte after garbage, a cut-short message and a read split in two; each kind decoded
-// through the map's layout, an unknown ID reported with its bytes, and a new map taking effect;
+// through the map's layout (fields of whole bytes, or of parts of them), an unknown ID reported
+// with its bytes, and a new map taking effect;
 // then the controls they name played in a Session as a MIDI controller's are (controller_input.h),
 // heard at the next block; and oscairn-panel-dump reading a pty. Also: the FANTOM-07's
 // provisional map parses, and a broken map is refused.
@@ -78,6 +79,22 @@ namespace
         check(refused(R"({"format": "oscairn.panel-map", "version": 2})"), "another version");
         auto bytes = mapJson(controls); bytes.replace(bytes.find("\"bytes\": [0]"), 12, "\"bytes\": [4]");
         check(refused(bytes), "a byte past the message");
+        auto parts = mapJson(controls); parts.replace(parts.find("\"bytes\": [1], \"mask\": 127"), 26, "\"parts\": [{\"byte\": 1, \"shift\": 2, \"bits\": 7}]");
+        check(refused(parts), "a part past its byte's end");
+        parts = mapJson(controls); parts.replace(parts.find("\"bytes\": [1]"), 12, "\"bytes\": [1], \"parts\": [{\"byte\": 1, \"bits\": 7}]");
+        check(refused(parts), "a field with bytes and parts");
+        // Fields from parts of bytes: byte 2 holds an ID's top bits (three, or an analog one's two)
+        // and, above them, the value's top five or the step's top four.
+        const auto split = PanelMap::parse(R"({"format": "oscairn.panel-map", "version": 1, "protocol": "roland-i2c-slave",
+            "layout": {"kind": {"bytes": [0], "mask": 31}, "kinds": {"encoder": 3, "analog": 4, "switchOn": 2, "switchOff": 1},
+                       "id": {"parts": [{"byte": 2, "bits": 3}, {"byte": 1, "bits": 7}]}, "analogId": {"parts": [{"byte": 2, "bits": 2}, {"byte": 1, "bits": 7}]},
+                       "value": {"parts": [{"byte": 2, "shift": 2, "bits": 5}, {"byte": 3, "bits": 7}]},
+                       "delta": {"parts": [{"byte": 2, "shift": 3, "bits": 4}, {"byte": 3, "bits": 4}], "signed": true}},
+            "controls": [{"kind": "analog", "id": 300, "control": "fader:1"}, {"kind": "encoder", "id": 900, "control": "knob:1"}]})");
+        auto e = decode(split, {0x84, 300 & 0x7F, uint8_t((1000 >> 7) << 2 | 300 >> 7), 1000 & 0x7F});
+        check(e.kind == PanelMap::Kind::Analog && e.id == 300 && e.value == 1000 && e.control == "fader:1", "an analog ID of its own, beside the value's bits: id " + std::to_string(e.id));
+        e = decode(split, {0x83, 900 & 0x7F, uint8_t(0xF << 3 | 900 >> 7), 0xD}); // -3 is 0xFD
+        check(e.kind == PanelMap::Kind::Encoder && e.id == 900 && e.value == -3 && e.control == "knob:1", "a signed step from two parts: " + std::to_string(e.value));
     }
 
     void framing()

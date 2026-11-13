@@ -27,12 +27,21 @@ namespace oscairn
     {
         // A number from a message: `bytes` (indices 0 to 3) joined, most significant first, `bits`
         // of each (from the low end); then shifted right by `shift`, masked, and read as two's
-        // complement in the mask's width when `sign`.
-        struct Field { std::vector<uint8_t> bytes; uint32_t bits = 8, shift = 0, mask = 0xFFFFFFFF; bool sign = false; int64_t read(const std::array<uint8_t, 4>&) const; };
+        // complement in the mask's width when `sign`. Or, for a number whose bits are not the low
+        // bits of each byte, `parts` joined most significant first: `bits` of a byte from bit
+        // `shift` up, two's complement in their total width when `sign`.
+        struct Part { uint8_t byte = 0, shift = 0, bits = 8; };
+        struct Field
+        {
+            std::vector<uint8_t> bytes; uint32_t bits = 8, shift = 0, mask = 0xFFFFFFFF; bool sign = false;
+            std::vector<Part> parts;
+            int64_t read(const std::array<uint8_t, 4>&) const;
+        };
         // The message kinds the panel sends (Roland's names: PMDWEncoder, PMDWADChange,
         // PMDWSwitchOn, PMDWSwitchOff).
         enum class Kind { Unknown, Encoder, Analog, SwitchOn, SwitchOff };
         Field kind, id, value, delta;
+        Field analogId; // an analog message's ID where it is not `id` (the FANTOM-0's is narrower); unset: `id`
         std::array<int64_t, 4> kinds{0, 1, 2, 3}; // the kind field's value for encoder, analog, switchOn and switchOff
         int64_t analogMax = 1023;                  // an analog control's top value, unless its entry says
         double encoderStep = 1.0 / 127;            // the change for one encoder step, 0 to 1 across a target's range

@@ -371,7 +371,10 @@ also takes on its own command line, to try another map); a map named without a p
 [hosts/standalone/panels/fantom-07.json](../hosts/standalone/panels/fantom-07.json)
 ([schema](panel-map.schema.json)). `layout` says where each number sits: a field is a list of
 `bytes` (0 to 3) joined most significant first, the low `bits` of each, then `shift`, `mask` and
-`signed`; `kinds` gives the kind field's value for each of the four kinds. `controls` lists each
+`signed`; or, where a number's bits are not the low bits of each byte, a list of `parts`, each
+`bits` bits of a `byte` from bit `shift` up, joined most significant first. `analogId` is an
+analog message's ID where it is not where `id` is. `kinds` gives the kind field's value for each
+of the four kinds. `controls` lists each
 control's `kind` (`encoder`, `analog`, or `switch` for both switch kinds), `id` and `control`:
 an identity above, or a fixed control's function from the profile (`enter`, `play`). An analog
 value is divided by `max` (or the layout's `analogMax`) for 0 to 1; an encoder's delta is

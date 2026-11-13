@@ -53,3 +53,4 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0042](0042-sliders-and-drawbars.md) | Sliders that follow a part, and organ drawbars | proposed |
 | [0043](0043-moving-sounds-to-newer-plugin-versions.md) | Moving sounds to newer plugin versions, and removing unused ones | proposed |
 | [0044](0044-panel-sections.md) | Panel sections: dedicated piano, organ and synth controls over flexible parts | proposed |
+| [0045](0045-audio-scheduling-on-small-devices.md) | Audio scheduling and placement on small devices | proposed; steps 1–3 built (measurement and an opt-in experiment) |

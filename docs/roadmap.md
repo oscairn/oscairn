@@ -325,6 +325,16 @@ Decided 2026-11-08, from what the milestone test found:
      - [x] waves, with plugins in workers in parallel
      - [x] audio helpers for plugins in the engine's process
      - [ ] measured on the target
+   - [ ] audio scheduling and placement on small devices
+     ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#progress), proposed 2026-11-13):
+     a missed worker block that no longer ends the part's notes, an allowance from the block's
+     deadline, the display off the audio cores, one block of latency for a heavy part only, and
+     share by default, split under load
+     - [x] the worker allowance a named, supported setting (`compute.workerAllowance`)
+     - [x] blocks past the allowance counted apart: played late and silenced
+     - [x] the extra block, experimental and opt-in per plugin (`OSCAIRN_WORKER_EXTRA_BLOCK`)
+     - [ ] the miss policy, the deadline allowance, core placement, automatic latency, splitting
+       under load, readiness and the timing report
 4. **Sequencers** ([the comparison](sequencer-evaluation.md) of the KICK firmware's sequencer
    with chillbeast's work, zynseq and hosted plugins)
    - [x] the evaluation, recommending the KICK model and workflow with sample-accurate

@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,12 +23,15 @@ struct AudioConfiguration
     std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, DeviceReaders.h); empty: none
     std::string keyboardDevice; // non-MIDI keys the engine reads (a profile's keyboard, DeviceReaders.h); empty: none
     bool keyboardLocalOff=false; // --keyboard-local off: the keyboard's own sound engine told Local Switch off when it is opened (a profile's keyboard.localOff)
+    // --input-keys NAME --input-key-map CODE=FUNCTION,...: keys of the Linux input device of that name the engine reads,
+    // each code played by its function (a profile's inputKeys, DeviceReaders.h); empty: none
+    std::string inputKeys; std::map<uint16_t,std::string> inputKeyMap;
     std::string profile; // --device-profile: the device profile (built-in id or file) whose control groups the engine plays its panel by until an app sends its own (RFC 0024); empty: none
     std::vector<std::string> controllers; // controller profile files (RFC 0024), each by its full path, beside the built-in ones
     bool nullDevice=false; // --audio null: the null device (NullDevice.h), writing nowhere, with no MIDI device opened; for tests, never a fallback
     static bool isOption(std::string_view name)
     {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames" ||
-            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--keyboard-device" || name=="--keyboard-local" || name=="--device-profile" || name=="--controller" || name=="--audio";}
+            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--keyboard-device" || name=="--keyboard-local" || name=="--input-keys" || name=="--input-key-map" || name=="--device-profile" || name=="--controller" || name=="--audio";}
     void setOption(std::string_view name,const std::string& value)
     {
         if(value.empty() || value.find('\0')!=std::string::npos)throw std::invalid_argument("Empty or invalid audio option");
@@ -39,6 +43,8 @@ struct AudioConfiguration
         else if(name=="--panel-map")panelMap=value;
         else if(name=="--keyboard-device")keyboardDevice=value;
         else if(name=="--keyboard-local"){if(value!="off")throw std::invalid_argument("--keyboard-local takes off");keyboardLocalOff=true;}
+        else if(name=="--input-keys")inputKeys=value;
+        else if(name=="--input-key-map")inputKeyMap=parseKeyMap(value);
         else if(name=="--device-profile")profile=value;
         else if(name=="--controller")controllers.push_back(std::filesystem::absolute(value).string()); // as many as wanted
         else if(name=="--buffer-frames")bufferFrames=number(value,16,8192,"--buffer-frames is 16 to 8192");
@@ -59,6 +65,7 @@ struct AudioConfiguration
         if(inputDevice.find('\0')!=std::string::npos || outputDevice.find('\0')!=std::string::npos)throw std::invalid_argument("Invalid audio device name");
         if(panelDevice.empty()!=panelMap.empty())throw std::invalid_argument("--panel-device and --panel-map come together");
         if(keyboardLocalOff && keyboardDevice.empty())throw std::invalid_argument("--keyboard-local needs --keyboard-device");
+        if(inputKeys.empty()!=inputKeyMap.empty())throw std::invalid_argument("--input-keys and --input-key-map come together");
         for(const auto* list:{&inputs,&outputs})
             for(auto c:*list)if(deviceChannels && c>=deviceChannels)throw std::invalid_argument("A mapped channel is beyond --device-channels");
     }
@@ -78,6 +85,7 @@ struct AudioConfiguration
         if(!panelDevice.empty()){args.push_back("--panel-device");args.push_back(panelDevice);args.push_back("--panel-map");args.push_back(panelMap);}
         if(!keyboardDevice.empty()){args.push_back("--keyboard-device");args.push_back(keyboardDevice);}
         if(keyboardLocalOff){args.push_back("--keyboard-local");args.push_back("off");}
+        if(!inputKeys.empty()){std::string map;for(const auto& [code,function]:inputKeyMap)map+=(map.empty()?"":",")+std::to_string(code)+"="+function;args.push_back("--input-keys");args.push_back(inputKeys);args.push_back("--input-key-map");args.push_back(map);}
         if(!profile.empty()){args.push_back("--device-profile");args.push_back(profile);}
         for(const auto& c:controllers){args.push_back("--controller");args.push_back(c);}
         return args;
@@ -103,6 +111,20 @@ struct AudioConfiguration
             text.remove_prefix(comma+1);
         }
         throw std::invalid_argument("Empty or incomplete audio channel list (use none to disable inputs)");
+    }
+    // "157=write,139=menu": key codes (0 to 767, KEY_MAX) and the function each plays, each code once.
+    static std::map<uint16_t,std::string> parseKeyMap(std::string_view text)
+    {
+        std::map<uint16_t,std::string> result;
+        while(true)
+        {
+            const auto comma=text.find(',');const auto item=text.substr(0,comma);const auto equals=item.find('=');
+            if(equals==std::string_view::npos || equals+1==item.size())throw std::invalid_argument("--input-key-map is CODE=FUNCTION,...");
+            const auto code=uint16_t(number(item.substr(0,equals),0,767,"an input key's code is 0 to 767"));
+            if(!result.emplace(code,std::string(item.substr(equals+1))).second)throw std::invalid_argument("an input key's code is given twice");
+            if(comma==std::string_view::npos)return result;
+            text.remove_prefix(comma+1);
+        }
     }
 };
 }

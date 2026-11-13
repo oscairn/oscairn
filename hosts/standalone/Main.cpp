@@ -931,6 +931,19 @@ namespace oscairn::standalone
                     std::fprintf(stderr,"oscairn: %s's keys are not read: this build has no reader for them (OSCAIRN_ROLAND_FANTOM0)\n",profile.name.c_str());
 #endif
                 }
+                // Its input device's keys that are not on the panel (WRITE, MENU and TEMPO): read by a new engine.
+                if(!args.contains("--connect") && !profile.inputKeys.name.empty())
+                {
+#if OSCAIRN_ROLAND_FANTOM0 && defined(__linux__)
+                    if(!args.contains("--input-keys"))
+                    {
+                        audio.inputKeys=profile.inputKeys.name;
+                        for(const auto& [function,code]:profile.inputKeys.keys)audio.inputKeyMap[uint16_t(code)]=function;
+                    }
+#else
+                    std::fprintf(stderr,"oscairn: %s's input keys are not read: this build has no reader for them (OSCAIRN_ROLAND_FANTOM0, Linux)\n",profile.name.c_str());
+#endif
+                }
                 audio.validate();
                 const auto socket = argument(args, "--connect");
                 if(audioOptions && args.contains("--connect"))

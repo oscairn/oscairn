@@ -1,5 +1,5 @@
 # The Roland FANTOM-06, -07 and -08 (docs/fantom-0.md): its panel holder and reader
-# (panel_reader.h), its message link's reader (BmcLink.h), the tool that maps the panel and the
+# (panel_reader.h), its message link's reader (BmcLink.h), its gpio keys' reader (InputKeys.h), the tool that maps the panel and the
 # panel map. Built here for their tests; the engine links the readers (through hosts/audio's
 # DeviceReaders.h), and the image installs the holder, the tool and the map, only with
 # OSCAIRN_ROLAND_FANTOM0, so a product without this panel has none of it.
@@ -46,6 +46,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(oscairn-control-request ${PROJECT_SOURCE_DIR}/os/scripts/control-request.c)
     add_test(NAME devices-fantom-start COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/fantom_start.sh ${CMAKE_CURRENT_SOURCE_DIR}/bundle)
     set_tests_properties(devices-fantom-start PROPERTIES TIMEOUT 30)
+    # WRITE, MENU and TEMPO (gpio-keys, evdev): input_event records through a pipe.
+    add_executable(oscairn-input-keys-test tests/input_keys_test.cpp src/InputKeys.cpp)
+    target_include_directories(oscairn-input-keys-test PRIVATE src)
+    target_link_libraries(oscairn-input-keys-test PRIVATE oscairn_control Threads::Threads)
+    target_compile_options(oscairn-input-keys-test PRIVATE -Wall -Wextra)
+    add_test(NAME devices-input-keys COMMAND oscairn-input-keys-test)
+    set_tests_properties(devices-input-keys PROPERTIES TIMEOUT 30)
 endif()
 
 if(OSCAIRN_ROLAND_FANTOM0)
@@ -54,6 +61,9 @@ if(OSCAIRN_ROLAND_FANTOM0)
     target_include_directories(oscairn_roland_fantom0 PRIVATE src ${PROJECT_SOURCE_DIR}/hosts/audio)
     target_link_libraries(oscairn_roland_fantom0 PUBLIC oscairn_panel Threads::Threads)
     target_compile_options(oscairn_roland_fantom0 PRIVATE -Wall -Wextra)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_sources(oscairn_roland_fantom0 PRIVATE src/InputKeys.cpp)
+    endif()
     install(TARGETS oscairn-panel-dump oscairn-panel-holder RUNTIME DESTINATION bin)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         install(TARGETS oscairn-key-held oscairn-control-request RUNTIME DESTINATION bin)

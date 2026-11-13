@@ -64,6 +64,13 @@ int main()
         check(refused(replaced(fantomJson, "\"/dev/ttyGS0\"", "\"ttyGS0\"")), "a keyboard device outside /dev");
         check(refused(replaced(fantomJson, "\"device\": \"/dev/ttyGS0\"", "\"device\": \"/dev/ttyGS0\", \"map\": \"x\"")), "a keyboard takes no map");
         check(refused(replaced(fantomJson, "\"localOff\": true", "\"localOff\": 1")), "localOff is true or false");
+        using Key = std::pair<std::string, int>;
+        check(fantom.inputKeys.protocol == "linux-input" && fantom.inputKeys.name == "gpio-keys" && kick.inputKeys.name.empty() &&
+              fantom.inputKeys.keys == std::vector<Key>{{"write", 157}, {"menu", 139}, {"tempo", 152}}, "the FANTOM-07's WRITE, MENU and TEMPO: gpio-keys 157, 139 and 152");
+        check(refused(replaced(fantomJson, "\"linux-input\"", "\"linux-hid\"")), "input keys of a protocol with no reader");
+        check(refused(replaced(fantomJson, "\"tempo\": 152", "\"tempo\": 139")), "two input keys on one code");
+        check(refused(replaced(fantomJson, "\"tempo\": 152", "\"tempo\": 768")), "an input key past KEY_MAX");
+        check(refused(replaced(fantomJson, "\"keys\": { \"write\": 157, \"menu\": 139, \"tempo\": 152 }", "\"keys\": {}")), "input keys with no key");
         // Density (RFC 0019): the FANTOM-07's 5.5" screen is dense enough to scale its UI so a
         // touch target stays 6.5 mm across; the KICK's 7" and the MODX M's are not.
         check(std::abs(fantom.screen()->density() - 10.49) < .01 && std::abs(fantom.screen()->scale() - 1.55f) < .01f && kick.screen()->scale() == 1.f &&
@@ -308,6 +315,16 @@ int main()
             Profile::parse(fantomJson).configureAudio(fantom);
             check(fantom.arguments() == std::vector<std::string>{"--output-device", "hw:1,0", "--audio-outputs", "0,1", "--device-channels", "6", "--sample-rate", "48000"},
                   "the FANTOM-07's device, channels, rate and main outputs reach the engine");
+            // Its input keys as the engine takes them, in code order, and refused when malformed.
+            oscairn::host::AudioConfiguration keys;
+            keys.setOption("--input-keys", "gpio-keys"); keys.setOption("--input-key-map", "157=write,139=menu,152=tempo");
+            check(keys.arguments() == std::vector<std::string>{"--input-keys", "gpio-keys", "--input-key-map", "139=menu,152=tempo,157=write"} && keys.inputKeyMap.at(139) == "menu",
+                  "input keys and their map reach the engine");
+            auto badKeys = [](const std::string& map) { try { oscairn::host::AudioConfiguration c; c.setOption("--input-key-map", map); } catch(const std::invalid_argument&) { return true; } return false; };
+            check(badKeys("139") && badKeys("139=") && badKeys("768=x") && badKeys("139=a,139=b") && badKeys("139=a,"), "a malformed key map is refused");
+            oscairn::host::AudioConfiguration half; half.setOption("--input-keys", "gpio-keys");
+            bool alone = false; try { half.validate(); } catch(const std::invalid_argument&) { alone = true; }
+            check(alone, "--input-keys without its map is refused");
             oscairn::host::AudioConfiguration none;
             Profile::parse(kickJson).configureAudio(none);
             check(none.arguments().empty(), "a profile without a device leaves the engine's audio as it was");

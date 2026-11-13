@@ -103,13 +103,13 @@ namespace oscairn::standalone
         juce::var value;
         require(juce::JSON::parse(juce::String::fromUTF8(json.data(), int(json.size())), value).wasOk(), "not valid JSON");
         const auto& root = object(value, "a profile");
-        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "keyboard", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated"}, "the profile");
+        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated"}, "the profile");
         require(text(root, "format") == "oscairn.profile", "format must be oscairn.profile");
         require(root.getProperty("version").isInt() && int(root.getProperty("version")) == 2, "version must be 2");
         Profile p;
         // A controller's profile (it names ports) holds its controls and ports only.
         if(const auto m = root.getProperty("midi"); m.getDynamicObject() && m.getDynamicObject()->hasProperty("ports"))
-            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "keyboard", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard"})
+            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "keyboard", "inputKeys", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard"})
                 require(!root.hasProperty(key), std::string("a controller's profile has no ") + key);
         const bool controller = root.getProperty("midi").getDynamicObject() && root.getProperty("midi").getDynamicObject()->hasProperty("ports");
         p.id = text(root, "id"); p.name = text(root, "name");
@@ -345,6 +345,22 @@ namespace oscairn::standalone
             p.keyboard = {text(o, "protocol"), text(o, "device"), flag(o, "localOff")};
             require(p.keyboard.protocol == "roland-bmc-stock", "a keyboard's protocol is roland-bmc-stock");
             require(p.keyboard.device.starts_with("/dev/"), "a keyboard's device is in /dev");
+        }
+        if(const auto v = root.getProperty("inputKeys"); !v.isVoid())
+        {
+            const auto& o = object(v, "inputKeys"); fields(o, {"protocol", "name", "keys"}, "inputKeys");
+            p.inputKeys.protocol = text(o, "protocol"); p.inputKeys.name = text(o, "name");
+            require(p.inputKeys.protocol == "linux-input", "inputKeys' protocol is linux-input");
+            require(!p.inputKeys.name.empty(), "inputKeys names its input device");
+            const auto& keys = object(o.getProperty("keys"), "inputKeys' keys");
+            std::set<int> codes;
+            for(const auto& k : keys.getProperties())
+            {
+                require(k.value.isInt() && int(k.value) >= 0 && int(k.value) <= 767 && !k.name.toString().containsAnyOf("=,"), "an input key is a function and its code, 0 to 767");
+                require(codes.insert(int(k.value)).second, "two input keys share a code");
+                p.inputKeys.keys.push_back({k.name.toString().toStdString(), int(k.value)});
+            }
+            require(!p.inputKeys.keys.empty() && p.inputKeys.keys.size() <= 64, "inputKeys has 1 to 64 keys");
         }
         if(!controller)
         {

@@ -95,6 +95,11 @@ namespace oscairn::standalone
         // with OSCAIRN_ROLAND_FANTOM0), and the character device. Empty: none. localOff: the
         // engine turns the instrument's own sound engine's Local Switch off when it starts reading.
         struct Keyboard { std::string protocol, device; bool localOff = false; } keyboard;
+        // Keys of a Linux input device that are not on the panel, read by the engine
+        // (devices/roland-fantom0's InputKeys.h, built with OSCAIRN_ROLAND_FANTOM0): the protocol
+        // (linux-input: evdev, read-only), the device's name (EVIOCGNAME, as "gpio-keys") and each
+        // key's code by the fixed function it plays. Empty: none.
+        struct InputKeys { std::string protocol, name; std::vector<std::pair<std::string, int>> keys; } inputKeys;
         // RFC 0004: its accelerators and device clocks (CPU-only: none).
         hardware::Capabilities hardware;
         struct Network { bool ethernet = false, wifi = false; } network;

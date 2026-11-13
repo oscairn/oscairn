@@ -83,6 +83,7 @@ namespace oscairn::host
 
         std::unique_ptr<Session> session_;
         std::unique_ptr<DeviceReader> panel_; // the profile's panel, on its own thread, into the session's controls
+        std::unique_ptr<DeviceReader> inputKeys_; // the profile's inputKeys, likewise
         std::unique_ptr<DeviceReader> keyboard_; // the profile's keys, on their own thread, as MIDI inputs
         std::mutex padLock_;
         std::vector<std::pair<uint32_t, bool>> pads_; // from the panel's thread, for the control thread (Session::pad is its alone)

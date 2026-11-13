@@ -734,6 +734,38 @@
       ],
       "additionalProperties": false
     },
+    "inputKeys": {
+      "type": "object",
+      "description": "Keys of a Linux input device that are not on the panel, read by the engine read-only (never grabbed): its protocol (linux-input: evdev, an image built with OSCAIRN_ROLAND_FANTOM0), the device's name as the kernel gives it (EVIOCGNAME) and each key's code by the fixed function it plays, as the panel's switches play theirs. On the FANTOM-0: WRITE, MENU and TEMPO on gpio-keys",
+      "properties": {
+        "protocol": {
+          "enum": [
+            "linux-input"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "keys": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 767
+          }
+        }
+      },
+      "required": [
+        "protocol",
+        "name",
+        "keys"
+      ],
+      "additionalProperties": false
+    },
     "hardware": {
       "type": "object",
       "description": "RFC 0004: the device's accelerators and device clocks, as what each actually offers (operations, firmware, banks, capacity), not a chip label. Absent: CPU-only. Each accelerator's service is compiled into an image only when its profile declares it (os/scripts/check-image-profile.py)",
@@ -1168,6 +1200,11 @@
             {
               "required": [
                 "keyboard"
+              ]
+            },
+            {
+              "required": [
+                "inputKeys"
               ]
             },
             {

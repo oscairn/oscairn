@@ -203,6 +203,14 @@ namespace oscairn::host
             } );
             if( !panel_ ) throw std::runtime_error( "this build reads no panel (OSCAIRN_ROLAND_FANTOM0 is off)" );
         }
+        // Keys of an input device that are not on the panel, played as its switches are.
+        if( !config.inputKeys.empty() )
+        {
+            inputKeys_ = openInputKeys( config.inputKeys, config.inputKeyMap, [this]( const std::string& control, const ControlInput& input ) {
+                session_->controllerControl( control, input );
+            } );
+            if( !inputKeys_ ) throw std::runtime_error( "this build reads no input keys (OSCAIRN_ROLAND_FANTOM0 on Linux)" );
+        }
         // Like the panel, read with --audio null too: a device named on purpose, not one found.
         if( !config.keyboardDevice.empty() )
         {
@@ -249,6 +257,7 @@ namespace oscairn::host
     {
         stopTimer();
         panel_.reset(); // its thread plays the session's controls
+        inputKeys_.reset(); // so does this one's
         keyboard_.reset();
         session_->setControllerWake( {} );
         session_->setAudioHost( {}, {} );

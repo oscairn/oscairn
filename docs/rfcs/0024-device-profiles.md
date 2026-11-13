@@ -190,6 +190,13 @@ An illustrative profile (the values are an example, not a real product's):
   2026-11-12, default false) has the engine tell the instrument's own sound engine Local Switch
   off when it opens the device, so it does not sound the keys under Oscairn: the one thing the
   reader writes. A controller's profile has none.
+- **`inputKeys`** (optional, added 2026-11-12): keys of a Linux input device that are not on the
+  panel, `{protocol, name, keys}`: the reader (`linux-input`, evdev, read-only and never grabbed,
+  compiled into an image only with `OSCAIRN_ROLAND_FANTOM0`), the device's name as the kernel
+  gives it (`gpio-keys`), and each key's code by the fixed function it plays (`"menu": 139`). The
+  engine plays them as the panel's switches, by function. On the FANTOM-0 they are WRITE, MENU and
+  TEMPO, which the panel bus does not carry ([running on a FANTOM-0](../fantom-0.md)). A
+  controller's profile has none.
 - **`reliability`:** its level (RFC 0027): `desktop`, `instrument` or `pass-through`.
 - **`apps`:** the apps installed with it (RFC 0022), by app ID; the user can add others. The
   built-in ones are `oscairn.performance`, `oscairn.library`, `oscairn.setlist`,

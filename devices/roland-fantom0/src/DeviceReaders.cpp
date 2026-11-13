@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // The FANTOM-0's panel and keys for the engine (hosts/audio's DeviceReaders.h): the panel reader
-// (panel_reader.h), attached to the panel holder, and the message link's reader (BmcLink.h).
+// (panel_reader.h), attached to the panel holder, the message link's reader (BmcLink.h), and
+// the keys of an input device that are not on the panel (InputKeys.h).
 #include "DeviceReaders.h"
 #include "BmcLink.h"
+#ifdef __linux__
+#include "InputKeys.h"
+#endif
 #include "oscairn/panel_reader.h"
 
 #include <cstdio>
@@ -60,5 +64,16 @@ namespace oscairn::host
     std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play, bool localOff )
     {
         return std::make_unique<Held<BmcLinkReader>>( device, std::move( play ), BmcLinkReader::standardError, std::chrono::milliseconds( 500 ), localOff );
+    }
+
+    std::unique_ptr<DeviceReader> openInputKeys( const std::string& name, const std::map<uint16_t, std::string>& keys, PlayControl play )
+    {
+#ifdef __linux__
+        std::fprintf( stderr, "oscairn: input keys: %zu keys of %s\n", keys.size(), name.c_str() );
+        return std::make_unique<Held<InputKeys>>( name, keys, std::move( play ) );
+#else
+        (void)name; (void)keys; (void)play;
+        return nullptr; // evdev is Linux's
+#endif
     }
 }

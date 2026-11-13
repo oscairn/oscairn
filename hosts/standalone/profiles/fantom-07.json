@@ -21,7 +21,7 @@
     { "kind": "knobs", "count": 1, "role": "fixed", "functions": ["volume"], "sensing": "MASTER VOLUME; Roland's tables give it no panel number, so it is taken not to reach the i.MX" },
     { "kind": "buttons", "count": 8, "role": "assign", "sensing": "ZONE INT/EXT 1 to 8: whether each zone sounds" },
     { "kind": "pads", "count": 16, "role": "notes", "sensing": "4 x 4 pads: switches on the panel bus, no velocity, each pad's place seen on a unit; played through the pad map, pad 1 at the bottom left" },
-    { "kind": "buttons", "count": 32, "role": "fixed", "sensing": "the zone and common sections' buttons, and E1 to E6 pushed (not yet seen); WRITE, MENU and TEMPO are gpio-keys on /dev/input/event1, not on the panel bus", "functions": [
+    { "kind": "buttons", "count": 32, "role": "fixed", "sensing": "the zone and common sections' buttons, and E1 to E6 pushed (not yet seen); WRITE, MENU and TEMPO are gpio-keys on /dev/input/event1 (inputKeys), not on the panel bus", "functions": [
       "zone9to16", "zoneSelect", "panLevel", "ctrl", "assign", "split", "chordMemory", "arpeggio", "transpose", "octaveDown", "octaveUp",
       "write", "masterFx", "motionalPad", "dawCtrl", "menu", "tempo", "dec", "inc", "cursorUp", "cursorDown", "cursorLeft", "cursorRight", "shift", "exit", "enter",
       "pushE1", "pushE2", "pushE3", "pushE4", "pushE5", "pushE6" ] },
@@ -40,6 +40,7 @@
   "midi": { "din": 1, "usbDevice": true, "usbHost": true },
   "panel": { "protocol": "roland-i2c-slave", "device": "/dev/i2c-slave-2", "map": "fantom-07.json" },
   "keyboard": { "protocol": "roland-bmc-stock", "device": "/dev/ttyGS0", "localOff": true },
+  "inputKeys": { "protocol": "linux-input", "name": "gpio-keys", "keys": { "write": 157, "menu": 139, "tempo": 152 } },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
   "onScreenKeyboard": false,

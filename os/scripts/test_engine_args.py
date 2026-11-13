@@ -19,6 +19,7 @@ assert engine.engine_args(fantom) == [
     "--buffer-frames", "128",
     "--output-device", "hw:1,0", "--audio-outputs", "0,1", "--device-channels", "6", "--sample-rate", "48000",
     "--panel-device", "/dev/i2c-slave-2", "--panel-map", "/usr/share/oscairn/panels/fantom-07.json", "--device-profile", "fantom-07",
+    "--input-keys", "gpio-keys", "--input-key-map", "139=menu,152=tempo,157=write",
     "--keyboard-device", "/dev/ttyGS0", "--keyboard-local", "off"], engine.engine_args(fantom)
 assert engine.settings(fantom)["OSCAIRN_HEADLESS"] == "0"
 assert engine.settings(fantom)["OSCAIRN_RELIABILITY"] == "instrument"

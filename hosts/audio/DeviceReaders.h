@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,4 +38,10 @@ namespace oscairn::host
     /// device is first opened.
     using PlayMidi = std::function<void( size_t input, const uint8_t* bytes, size_t size )>;
     std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play, bool localOff );
+
+    /// Keys of the Linux input device named `name` (a profile's `inputKeys`: on the FANTOM-0,
+    /// gpio-keys' WRITE, MENU and TEMPO), read-only, each code in `keys` played by its function
+    /// name as a switch (1 pressed, 0 released) on the reader's thread, as the panel's switches
+    /// are. nullptr: this build reads none.
+    std::unique_ptr<DeviceReader> openInputKeys( const std::string& name, const std::map<uint16_t, std::string>& keys, PlayControl play );
 }

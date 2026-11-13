@@ -1350,7 +1350,7 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   control thread; asking about it once it has unpacked moves it into place.
 - `packages.installed` (`{}`) returns `{packages}`: the packages installed on this device
   ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#several-repositories)), each
-  `{id,version,kind,repository,sha256,signers,otherBuild,withdrawn}`: `kind` is `plugin`, `asset` or
+  `{id,version,kind,repository,sha256,signers,otherBuild,withdrawn,dependency}`: `kind` is `plugin`, `asset` or
   `library` (installed as a locked library), and `repository` the address of the repository it
   came from, empty for one installed from a file. `sha256` is the SHA-256 of the archive it was
   installed from, as the repository's index lists it (or the file's), so a client can tell the
@@ -1362,7 +1362,9 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   or `{repository,reason,date}` when the revocation list last read from the repository it came
   from withdraws its version or revokes a key in `signers`, or the official repository's revokes
   such a key: a client tells the user ("<name> <version> was withdrawn by <repository>: <reason>")
-  and offers to remove or replace it. Nothing removes or disables it. Each install records its package in `packages.json` in the data folder: from a
+  and offers to remove or replace it. Nothing removes or disables it. `dependency` is true for an
+  asset library installed only because a package needed it, not by hand ([RFC
+  0009](rfcs/0009-sound-assets-and-dependencies.md)). Each install records its package in `packages.json` in the data folder: from a
   repository, or by `library.install` a plugin or asset package or one installed as a library (a
   copy into the user's own storage installs no package). Removing what it installed
   (`plugins.remove`, `assets.uninstall`, `assets.collect`, `library.uninstall`) removes the

@@ -623,7 +623,7 @@ namespace oscairn
     namespace { Control::Withdrawal withdrawal(V x){V w=detail::member(x,"withdrawn");return w && w->type==json_type_object?Control::Withdrawal{string(field(w,"repository")),string(field(w,"reason")),string(field(w,"date"))}:Control::Withdrawal{};} }
     std::vector<Control::InstalledPackage> RemoteControl::installedPackages() {
         auto d=impl_->call("packages.installed","{}");std::vector<InstalledPackage> out;
-        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild")),withdrawal(x)});
+        for(auto x:array(field(field(d.get(),"result"),"packages")))out.push_back({string(field(x,"id")),string(field(x,"version")),string(field(x,"kind")),string(field(x,"repository")),string(field(x,"sha256")),strings(field(x,"signers")),boolean(field(x,"otherBuild")),withdrawal(x),boolean(field(x,"dependency"))});
         return out;
     }
     Control::Preinstall RemoteControl::preinstalled() {

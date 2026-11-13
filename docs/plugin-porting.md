@@ -753,6 +753,10 @@ What changes for the plugin:
   on that platform: a device that has not measured your plugin itself counts it at this,
   not at the default of 2% of the audio time and 32 MiB, when it checks what fits. Installing
   a Performance or Sound that will not fit says so, and the library marks it.
+  Samples or patches your plugin reads ship as an asset package (`oscairn-sign asset-package`),
+  named by your plugin package with `--asset-dependency <library-id> <least-version>`: the
+  Catalog lists it under Content, and one installed only because your package needed it says
+  Installed with your package's name.
   To publish to Oscairn's package repository, sign the archive too and follow
   [Publishing a package](developer-guide.md#publishing-a-package).
 - **Installing code:** a device installs a build signed by a key its trust store trusts for

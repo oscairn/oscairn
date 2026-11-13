@@ -19,8 +19,9 @@ namespace oscairn::standalone
             return "no version it can install";
         }
         // The tabs, in the order a Catalog opened on an empty one looks for one with something to show.
-        const std::vector<std::pair<std::string, juce::String>> tabs{{"performance", "Performances"}, {"sound", "Sounds"}, {"plugin", "Plugins"}};
-        juce::String noun(const std::string& kind) { return kind == "performance" ? "Performance" : kind == "sound" ? "Sound" : "plugin"; }
+        const std::vector<std::pair<std::string, juce::String>> tabs{{"performance", "Performances"}, {"sound", "Sounds"}, {"plugin", "Plugins"}, {"asset", "Content"}};
+        juce::String noun(const std::string& kind) { return kind == "performance" ? "Performance" : kind == "sound" ? "Sound" : kind == "plugin" ? "plugin" : "content"; }
+        juce::String withWhat(const Offer& o) { return "with " + (o.with.empty() ? juce::String("a package that needs it") : text(o.with)); }
     }
 
     juce::String withdrawnSaying(const Offer& o)
@@ -61,6 +62,13 @@ namespace oscairn::standalone
                 {
                     const auto& r = at->second;
                     o.installed = r.version; o.record = r;
+                    // Installed only because a package needed it: the installed one whose listed versions name it.
+                    if(r.dependency)
+                        for(const auto& [s, l] : listings)
+                            for(const auto& q : l.packages)
+                                if(o.with.empty() && installed.count(q.id))
+                                    for(const auto& v : q.versions)
+                                        if(std::any_of(v.dependencies.begin(), v.dependencies.end(), [&](const auto& d) { return d.first == p.id; })) { o.with = q.name.empty() ? q.id : q.name; break; }
                     o.update = pick && !r.version.empty() && repository::older(r.version, pick->version);
                     // "Installed" only as this repository builds it (decided 2026-11-11).
                     for(const auto& v : p.versions)
@@ -98,7 +106,7 @@ namespace oscairn::standalone
         return o.update ? "Update to " + text(o.version.version) + separator + about
              : o.builtIn ? "Built in" + separator + about
              : o.otherBuild ? "Installed (a different build)" + separator + about
-             : o.installed ? "Installed" + separator + about
+             : o.installed ? (o.record.dependency ? "Installed " + withWhat(o) : juce::String("Installed")) + separator + about
              : o.installable ? about
                              : "Cannot be installed here: " + whyNot(o.version);
     }
@@ -159,17 +167,19 @@ namespace oscairn::standalone
         : engine_(engine), kind_(kind), installed_(std::move(installed)), scanner_(std::move(scanner))
     {
         setTitle("Catalog");
-        for(auto* b : {&performances, &sounds, &plugins}) { b->setClickingTogglesState(true); b->setRadioGroupId(1); }
+        for(auto* b : {&performances, &sounds, &plugins, &content}) { b->setClickingTogglesState(true); b->setRadioGroupId(1); }
         performances.onClick = [this] { showKind("performance"); };
         sounds.onClick = [this] { showKind("sound"); };
         plugins.onClick = [this] { showKind("plugin"); };
+        content.onClick = [this] { showKind("asset"); };
+        content.setTooltip("Content: asset libraries, such as samples, cartridges and patches, that instruments read");
         search.setJustification(juce::Justification::centredLeft); search.setIndents(10, 0);
         search.setTextToShowWhenEmpty("Search by name, tag or publisher", ink(Ink::Muted));
         search.onTextChange = [this] { filter(); };
         backButton.onClick = [this] { back(); };
         install.onClick = [this] { if(opened_ && opened_->offered() && onInstall) onInstall(*opened_); };
         list.setOutlineThickness(0);
-        for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &search, &list, &close}) addAndMakeVisible(c);
+        for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &content, &search, &list, &close}) addAndMakeVisible(c);
         addChildComponent(backButton); addChildComponent(install);
         showKind(kind);
         setSize(820, 560);
@@ -181,6 +191,7 @@ namespace oscairn::standalone
         performances.setToggleState(kind == "performance", juce::dontSendNotification);
         sounds.setToggleState(kind == "sound", juce::dontSendNotification);
         plugins.setToggleState(kind == "plugin", juce::dontSendNotification);
+        content.setToggleState(kind == "asset", juce::dontSendNotification);
         filter();
     }
 
@@ -298,7 +309,7 @@ namespace oscairn::standalone
         install.setButtonText(o.update ? "Update to " + text(o.version.version) : o.otherBuild ? juce::String("Install the repository's build") : juce::String("Install"));
         install.setEnabled(o.installable);
         install.setTooltip(o.installable ? juce::String() : whyNot(o.version));
-        for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &search, &list}) c->setVisible(false);
+        for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &content, &search, &list}) c->setVisible(false);
         backButton.setVisible(true); install.setVisible(!o.installed || o.update || o.otherBuild); // installed and current: nothing to install
         resized(); repaint();
     }
@@ -306,7 +317,7 @@ namespace oscairn::standalone
     void Catalog::back()
     {
         opened_.reset();
-        for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &search, &list}) c->setVisible(true);
+        for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &content, &search, &list}) c->setVisible(true);
         backButton.setVisible(false); install.setVisible(false);
         resized(); repaint();
     }
@@ -329,7 +340,8 @@ namespace oscairn::standalone
         if(o.installed)
             out.insert(out.begin() + 2, {"Installed", o.installed->empty() ? juce::String("Its version not known")
                                                       : text(*o.installed) + (o.builtIn ? ", built in: it comes with the app"
-                                                                              : o.otherBuild ? ", a different build: it does not match this repository's" : "")});
+                                                                              : o.otherBuild ? ", a different build: it does not match this repository's"
+                                                                              : o.record.dependency ? ", installed " + withWhat(o) : "")});
         if(!o.installable) out.push_back({"On this device", whyNot(v)});
         // Said, and what the user can do about it; never removed or disabled for them.
         if(const auto said = withdrawnSaying(o); said.isNotEmpty())
@@ -370,6 +382,7 @@ namespace oscairn::standalone
         }
         else
         {
+            content.setBounds(bar.removeFromRight(touch ? 110 : 80)); bar.removeFromRight(gap / 2);
             plugins.setBounds(bar.removeFromRight(touch ? 110 : 80)); bar.removeFromRight(gap / 2);
             sounds.setBounds(bar.removeFromRight(touch ? 110 : 80)); bar.removeFromRight(gap / 2);
             performances.setBounds(bar.removeFromRight(touch ? 150 : 120)); bar.removeFromRight(gap);

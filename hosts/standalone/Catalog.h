@@ -28,7 +28,8 @@ namespace oscairn::standalone
         bool otherBuild = false;              // installed at `version`, but not this repository's build
         bool builtIn = false;                 // not installed, but its plugins come with the app, `installed` their version
         Control::InstalledPackage record;     // what is installed, as packages.installed says
-        bool holds(const std::string& kind) const; // "performance", "sound" or "plugin"
+        std::string with;                     // an asset library installed only as a dependency: the installed package listed as needing it, by name
+        bool holds(const std::string& kind) const; // "performance", "sound", "plugin" or "asset"
         bool offered() const { return installable && (!installed || update || otherBuild); } // Install, Update, or the repository's build
     };
     /// The offers of these listings, each once per repository (`installed`: the newest version
@@ -36,11 +37,12 @@ namespace oscairn::standalone
     /// with the app (`bundled`: their versions, by plugin ID) is built in, at the oldest of their
     /// versions: shown as Built in, or offered as Update to a newer version the repository has,
     /// which installs beside the app's (RFC 0031: plugins install side by side; nothing moves on
-    /// its own).
+    /// its own). An asset library installed only as a dependency names the installed package
+    /// whose listed versions need it (`with`).
     std::vector<Offer> offers(const std::vector<std::pair<std::string, Control::PackageJob>>& listings, const std::map<std::string, Control::InstalledPackage>& installed,
                               const std::map<std::string, std::string>& bundled = {});
-    /// A row's second line: its state (Update to, Built in, Installed, Installed (a different
-    /// build), or why it cannot be installed here, a withdrawn version included), then its publisher
+    /// A row's second line: its state (Update to, Built in, Installed, Installed with <the package
+    /// needing it>, Installed (a different build), or why it cannot be installed here, a withdrawn version included), then its publisher
     /// and summary; for what is installed and withdrawn since (packages.installed's withdrawn), who
     /// withdrew it and why, and Update to when there is a newer version.
     juce::String describe(const Offer& offer);
@@ -62,8 +64,8 @@ namespace oscairn::standalone
     CodeQuestion codeQuestion(const Control::PackageJob& refused, const std::string& publisher, const std::string& publisherKey);
 
     /// The Catalog (RFC 0031), an interim view in the Library until the Catalog app
-    /// (oscairn.catalog) exists: the enabled repositories' packages holding Performances, Sounds
-    /// or plugins (each read as packages.list reads it: the root, and the index
+    /// (oscairn.catalog) exists: the enabled repositories' packages holding Performances, Sounds,
+    /// plugins or content (asset libraries: samples, cartridges, patches; each read as packages.list reads it: the root, and the index
     /// kept from last time while it is unchanged), searched by
     /// name, summary, tag or publisher. What is installed says so, with its version, or offers
     /// Update to a newer one this device can install; one whose plugins come with the app says
@@ -95,7 +97,7 @@ namespace oscairn::standalone
         juce::String emptySaying() const;
         std::function<void(const Offer&)> onInstall;
         juce::TextEditor search;
-        juce::TextButton performances{"Performances"}, sounds{"Sounds"}, plugins{"Plugins"}, close{"Close"}, backButton{"Back"}, install{"Install"};
+        juce::TextButton performances{"Performances"}, sounds{"Sounds"}, plugins{"Plugins"}, content{"Content"}, close{"Close"}, backButton{"Back"}, install{"Install"};
         juce::ListBox list{"Catalog", this};
         std::vector<std::pair<juce::String, juce::String>> facts() const; // the opened package's details, each named
         void paint(juce::Graphics&) override;

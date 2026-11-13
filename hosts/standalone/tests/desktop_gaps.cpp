@@ -849,6 +849,35 @@ int main(int argc, char** argv)
                 check(standalone::describe(stays) == "Withdrawn by Oscairn: a test withdrawal  " + juce::String::fromUTF8("·") + "  Update to 0.4.8" &&
                           standalone::withdrawnSaying(stays) == "org.oscairn.fm 0.4.7 was withdrawn by Oscairn: a test withdrawal" && stays.offered(),
                       "an installed version withdrawn since says so, by whom and why, offering the update: " + standalone::describe(stays).toStdString());
+                // Content (asset libraries, RFC 0009): no plugin, Performance or Sound, on a tab of
+                // its own, in every state a package has; one installed only because a package
+                // needed it names that package.
+                Control::RepositoryPackage carts; carts.id = "org.oscairn.fm-cartridges"; carts.name = "FM Cartridges"; carts.publisher = "Oscairn";
+                carts.versions.push_back({"1.0.0", "stable", "", "", std::string(64, 'a'), 0, 0, {{"oscairn.asset", 1}}, {}});
+                carts.versions.push_back({"1.1.0", "stable", "", "", std::string(64, 'c'), 0, 0, {{"oscairn.asset", 1}}, {}});
+                auto fmPackage = package("org.oscairn.fm", "0.4.8"); fmPackage.name = "Oscairn FM"; fmPackage.versions[0].dependencies = {{carts.id, "1.0.0"}};
+                Control::PackageJob withContent; withContent.name = "Oscairn"; withContent.packages = {fmPackage, carts};
+                Control::InstalledPackage fmRecord; fmRecord.id = "org.oscairn.fm"; fmRecord.version = "0.4.8"; fmRecord.kind = "plugin";
+                auto asset = [&](const std::string& version, char sha, bool dependency, bool fmToo, Control::Withdrawal withdrawn = {}) {
+                    Control::InstalledPackage r; r.id = carts.id; r.version = version; r.kind = "asset"; r.sha256 = std::string(64, sha); r.dependency = dependency; r.withdrawn = withdrawn;
+                    std::map<std::string, Control::InstalledPackage> installed{{r.id, r}};
+                    if(fmToo) installed[fmRecord.id] = fmRecord;
+                    return offer(standalone::offers({{"https://packages.oscairn.org", withContent}}, installed, bundled), carts.id);
+                };
+                const auto dot = juce::String::fromUTF8("  ·  ");
+                const auto fresh = offer(standalone::offers({{"https://packages.oscairn.org", withContent}}, {}, bundled), carts.id);
+                check(fresh.holds("asset") && !fresh.holds("plugin") && !fresh.holds("performance") && !fresh.holds("sound") && fresh.offered() && standalone::describe(fresh) == "Oscairn",
+                      "an asset library is content, offered to install: " + standalone::describe(fresh).toStdString());
+                check(standalone::describe(asset("1.1.0", 'c', false, false)) == "Installed" + dot + "Oscairn", "installed: " + standalone::describe(asset("1.1.0", 'c', false, false)).toStdString());
+                check(standalone::describe(asset("1.0.0", 'a', false, false)) == "Update to 1.1.0" + dot + "Oscairn", "an update: " + standalone::describe(asset("1.0.0", 'a', false, false)).toStdString());
+                check(standalone::describe(asset("1.1.0", 'e', false, false)) == "Installed (a different build)" + dot + "Oscairn",
+                      "a different build: " + standalone::describe(asset("1.1.0", 'e', false, false)).toStdString());
+                const auto pulled = asset("1.0.0", 'a', false, false, {"Oscairn", "a test withdrawal", "2026-11-12"});
+                check(standalone::describe(pulled) == "Withdrawn by Oscairn: a test withdrawal" + dot + "Update to 1.1.0", "withdrawn: " + standalone::describe(pulled).toStdString());
+                check(standalone::describe(asset("1.1.0", 'c', true, true)) == "Installed with Oscairn FM" + dot + "Oscairn",
+                      "installed only as a dependency, it names the package needing it: " + standalone::describe(asset("1.1.0", 'c', true, true)).toStdString());
+                check(standalone::describe(asset("1.1.0", 'c', true, false)) == "Installed with a package that needs it" + dot + "Oscairn",
+                      "the package needing it not listed: " + standalone::describe(asset("1.1.0", 'c', true, false)).toStdString());
             }
             // Install... (RFC 0031): exactly the Catalog and a File. The Catalog lists the enabled
             // repositories' packages of a kind, grayed with the reason where this device cannot
@@ -925,7 +954,7 @@ int main(int argc, char** argv)
                 if(auto* catalog = pane.catalog())
                 {
                     catalog->sounds.triggerClick(); settle();
-                    check(catalog->shown().empty() && catalog->emptySaying() == "No Sound packages in the repositories you have on. Look under Performances or Plugins.",
+                    check(catalog->shown().empty() && catalog->emptySaying() == "No Sound packages in the repositories you have on. Look under Performances, Plugins or Content.",
                           "an empty tab says what it is, pointing to the tabs that have something: " + catalog->emptySaying().toStdString());
                     over(*catalog, "catalog-empty-tab");
                     catalog->search.setText("tonewheel organ", true); settle();
@@ -1123,6 +1152,27 @@ int main(int argc, char** argv)
                 check(catalog && wait([&] { return !catalog->reading(); }) && synthRow() >= 0 && !catalog->shown()[size_t(synthRow())].otherBuild &&
                           !catalog->shown()[size_t(synthRow())].offered(),
                       "then it is Installed, with nothing to install");
+                if(catalog) closeCatalog();
+                // Content: the repository's asset library on a tab of its own, installed from there,
+                // then Installed.
+                pane.showCatalog("asset");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && catalog->content.getToggleState() && catalog->shown().size() == 1 &&
+                          catalog->shown()[0].package.id == "org.kick.test.samples" && catalog->shown()[0].offered(),
+                      "under Content, the asset library, offered: " + std::to_string(catalog ? catalog->shown().size() : 0));
+                if(catalog && catalog->shown().size() == 1)
+                {
+                    standalone::setDesktopMode(*catalog, 1); catalog->setSize(820, 560); settle();
+                    snapshot(*catalog, "catalog-content");
+                    catalog->open(0);
+                    catalog->install.triggerClick();
+                    check(wait([&] { return pane.message().startsWith("Installing"); }) && wait([&] { return pane.message().contains("installed."); }), "it installs: " + pane.message().toStdString());
+                }
+                pane.showCatalog("asset");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && catalog->shown().size() == 1 && !catalog->shown()[0].offered() && !catalog->shown()[0].record.dependency &&
+                          standalone::describe(catalog->shown()[0]).startsWith("Installed  "),
+                      "then it is Installed, installed by hand: " + (catalog && !catalog->shown().empty() ? standalone::describe(catalog->shown()[0]).toStdString() : std::string()));
                 if(catalog) closeCatalog();
                 // Every tab empty: no repository on, or none read (the official one's web here a
                 // stand-in that finds nothing). Each says so, and where repositories are managed.

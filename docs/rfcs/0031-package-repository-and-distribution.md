@@ -680,11 +680,19 @@ page from the Catalog app's action (below). Opening a repository by its address 
 on Install…; it belongs with the repositories in Settings.
 
 **Interim, until the Catalog app exists (built 2026-11-07):** the Catalog is a view in the
-desktop Library, labeled Catalog. Opened on a tab with nothing to show (the empty Library's
+desktop Library, labeled Catalog. Its tabs are Performances, Sounds, Plugins and **Content**: the
+asset libraries ([RFC 0009](0009-sound-assets-and-dependencies.md)) that hold no item or plugin
+(an instrument's samples, cartridges or patches), each version's `oscairn.asset` type in the
+index (decided 2026-11-12). They are packages of their own, installed, updated, withdrawn and
+removed on their own, so they get rows of their own rather than a line under the plugin package
+that needs them; the Catalog app's browse by type keeps them (sample libraries). One installed
+only because a package needed it (`packages.installed`'s `dependency`) says **Installed with**
+the installed package whose listed versions need it ("Installed with Oscairn FM"). Opened on a
+tab with nothing to show (the empty Library's
 **Browse the Catalog** on Sounds, say, when no repository on has a Sound package), it moves to the
 first tab that has something, the others a click away (decided 2026-11-12). A tab with nothing
 says so and where to look ("No Sound packages in the repositories you have on. Look under
-Performances or Plugins."); with no repository on, or none read, it says that, and that
+Performances, Plugins or Content."); with no repository on, or none read, it says that, and that
 repositories are turned on and added on the Settings app's Package repositories page. Its rows
 name each package, its version, publisher and summary; what this device cannot install is grayed
 with the reason. What is installed says

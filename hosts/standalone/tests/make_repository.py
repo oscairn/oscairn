@@ -5,8 +5,8 @@ usage: make_repository.py OUT OSCAIRN-SIGN FIXTURE.clap BUILD-INDEX.py PERFORMAN
 
 Makes throwaway root, index and publisher keys in OUT, and with the package repository
 template's index builder a repository in OUT/site holding: a plugin package with a build for
-this platform, one whose only build is for another platform, and the exported Performance given,
-renamed into the publisher's namespace and signed by it. OUT/keys.json gives the root and
+this platform, one whose only build is for another platform, the exported Performance given,
+renamed into the publisher's namespace and signed by it, and an asset library. OUT/keys.json gives the root and
 publisher public keys.
 """
 import hashlib
@@ -78,6 +78,14 @@ with zipfile.ZipFile(performance) as source, zipfile.ZipFile(olib, 'w', zipfile.
         target.writestr(entry, json.dumps(manifest).encode() if entry.filename == 'library.json' else source.read(entry))
 run(tool, 'archive', out / 'publisher.key', olib)
 record('org.kick.test.set', '1.0.0', olib, [], 'A Performance to try', ['set'])
+# An asset library (RFC 0009): files an instrument reads, no plugin, Performance or Sound.
+samples = out / 'samples'
+samples.mkdir(exist_ok=True)
+(samples / 'tone.txt').write_text('a test asset\n')
+folder = repo / 'packages' / 'org.kick.test.samples'
+folder.mkdir(parents=True)
+run(tool, 'asset-package', '--key', out / 'publisher.key', '--license', 'MIT', folder / '1.0.0.olib', 'org.kick.test.samples', '1.0.0', 'Test Samples', samples)
+record('org.kick.test.samples', '1.0.0', folder / '1.0.0.olib', [], 'Samples to try', ['samples'])
 
 (out / 'index-key.pub').write_text(keys['index'] + '\n')
 run(tool, 'file', out / 'root.key', out / 'index-key.pub', out / 'index-key.sig')

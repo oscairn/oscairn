@@ -167,8 +167,9 @@ other repositories in its profile; hiding the official one is possible but disco
 stays one switch away, and leaves the official publisher's key out of the trust store too. The engine lists and installs from it
 through the control API (`packages.list`, `packages.install`; see the
 [control protocol](docs/control-protocol.md)). In the desktop app, the Library's **Install…**
-offers the **Catalog**, the packages of the repositories turned on that are not installed, each
-with its details and Install, and a **File**. A plugin from a publisher you have not trusted asks
+offers the **Catalog**, the packages of the repositories turned on by tab (Performances, Sounds,
+Plugins, and Content: the asset libraries an instrument reads, such as FM's cartridges), each
+with its details and Install, or Installed with its version, and a **File**. A plugin from a publisher you have not trusted asks
 first: signed by the key the repository lists as the publisher's, whether to trust that publisher
 (by name and fingerprint); else whether to install it anyway. **Settings** lists the repositories, each
 by its name, address and root key fingerprint, with a switch; the official one can be turned off

@@ -948,7 +948,7 @@ namespace oscairn
                 try{for(const auto& x:c.installedPackages()){
                     std::vector<std::string> signers;for(const auto& k:x.signers)signers.push_back(quote(k));
                     out.push_back("{\"id\":"+quote(x.id)+",\"version\":"+quote(x.version)+",\"kind\":"+quote(x.kind)+",\"repository\":"+quote(x.repository)+
-                                  ",\"sha256\":"+quote(x.sha256)+",\"signers\":"+join(signers)+",\"otherBuild\":"+(x.otherBuild?"true":"false")+",\"withdrawn\":"+withdrawn(x.withdrawn)+'}');
+                                  ",\"sha256\":"+quote(x.sha256)+",\"signers\":"+join(signers)+",\"otherBuild\":"+(x.otherBuild?"true":"false")+",\"withdrawn\":"+withdrawn(x.withdrawn)+",\"dependency\":"+(x.dependency?"true":"false")+'}');
                 }}
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return "{\"packages\":"+join(out)+'}';

@@ -407,8 +407,9 @@ namespace oscairn
         // not that archive's; sha256 and signers are then empty. withdrawn: the revocation list of the
         // repository it came from, or the official one's, withdraws this version or revokes a key that
         // signed it, as each was last read (empty reason when not): said, never acted on, so the user
-        // can remove or replace it; nothing removes or disables it.
-        struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; Withdrawal withdrawn; };
+        // can remove or replace it; nothing removes or disables it. dependency: an asset library
+        // installed only because a package needed it (RFC 0009), not by hand.
+        struct InstalledPackage { std::string id, version, kind, repository, sha256; std::vector<std::string> signers; bool otherBuild = false; Withdrawal withdrawn; bool dependency = false; };
         virtual std::vector<InstalledPackage> installedPackages() = 0;
         // The packages that come with this release (RFC 0031): the app ships a snapshot of a
         // repository (its signed root and index, and the archives of the packages it preinstalls),

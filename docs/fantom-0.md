@@ -311,9 +311,18 @@ the bundle, and a tmpfs of its own on its `/run` and `/tmp`, then runs the comma
 without one) in the bundle with an environment of its own. Running it again keeps the mounts
 already there. `stop-chroot.sh` unmounts them, once nothing in the bundle runs. Nothing outside
 the bundle's directory changes but those mounts. Programs in the bundle use Roland's devices
-directly: stop Roland's app before anything opens `hw:1,0` or the panel. Start the engine by
-its full path, `/usr/bin/oscairn-engine`: by its bare name it does not find its plugin worker
-beside it, and runs plugins in the engine.
+directly: stop Roland's app before anything opens `hw:1,0` or the panel. Start the engine with:
+
+```sh
+./start-chroot.sh oscairn-engine-run --audio null --buffer-frames 128
+```
+
+`oscairn-engine-run` makes `/run/oscairn` private (mode 700), as the engine requires of the
+folder holding its control socket, raises the locked-memory limit with `ulimit -l unlimited`
+(the default of 16 MiB leaves memory unlocked), and runs `/usr/bin/oscairn-engine` by its full
+path: by its bare name it does not find its plugin worker beside it. It passes
+`--plugins /usr/lib/clap` itself, sets `OSCAIRN_RELIABILITY=instrument` unless the environment
+has it, and hands its own arguments on to the engine, audio options among them.
 
 Checked in Docker on a Mac (an ARM64 container, so on a far newer kernel than 4.19): the bundle
 unpacks, `start-chroot.sh` enters it, the engine starts with `--audio null` and answers

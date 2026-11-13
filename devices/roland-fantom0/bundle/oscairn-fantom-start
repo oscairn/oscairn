@@ -165,13 +165,14 @@ done
 # environment's OSCAIRN_AUDIO_THREAD_CORES ("1-3"), else the file's (the profile's
 # compute.audioThreadCores); none, anywhere. OSCAIRN_WORKER_BUDGET_US and
 # OSCAIRN_WORKER_EXTRA_BLOCK (RFC 0045), OSCAIRN_THP (keep: transparent huge pages left on, for
-# measuring) and OSCAIRN_CPU_LATENCY (keep: no CPU wake-up latency request, for measuring) are
-# handed over the same way, and so is every OSCAIRN_SAMPLER_*, OSCAIRN_ANALOG_*, OSCAIRN_FM_*,
+# measuring), OSCAIRN_CPU_LATENCY (keep: no CPU wake-up latency request, for measuring) and
+# OSCAIRN_WORKER_SPIN_US (the profile's compute.workerSpin; 0: none) are handed over the same way,
+# and so is every OSCAIRN_SAMPLER_*, OSCAIRN_ANALOG_*, OSCAIRN_FM_*,
 # OSCAIRN_ARPEGGIATOR_* and OSCAIRN_EFFECTS_* (the first-party plugins' device settings, which
 # they read when an instance is created): refused, with a failure, when a value holds anything
 # but letters, digits and . , : / = @ % + _ - (no quoting is attempted). start-chroot.sh passes
 # no environment on, so they are handed over here.
-cores=${OSCAIRN_AUDIO_THREAD_CORES:-} budget=${OSCAIRN_WORKER_BUDGET_US:-} extra=${OSCAIRN_WORKER_EXTRA_BLOCK:-} thp=${OSCAIRN_THP:-} latency=${OSCAIRN_CPU_LATENCY:-}
+cores=${OSCAIRN_AUDIO_THREAD_CORES:-} budget=${OSCAIRN_WORKER_BUDGET_US:-} extra=${OSCAIRN_WORKER_EXTRA_BLOCK:-} thp=${OSCAIRN_THP:-} latency=${OSCAIRN_CPU_LATENCY:-} spin=${OSCAIRN_WORKER_SPIN_US:-}
 # The plugin settings: the caller's, taken before the file is sourced (it would overwrite an
 # exported one), then the file's, the first of a name winning (a shortcut: a value holding a
 # newline is not handled).
@@ -186,8 +187,8 @@ if [ -n "$merged" ]; then
 	plug="$(printf '%s\n' "$merged" | tr '\n' ' ')" # unquoted below: no spaces in a value
 fi
 cores=${cores:-${OSCAIRN_AUDIO_THREAD_CORES:-}}
-budget=${budget:-${OSCAIRN_WORKER_BUDGET_US:-}} extra=${extra:-${OSCAIRN_WORKER_EXTRA_BLOCK:-}} thp=${thp:-${OSCAIRN_THP:-}} latency=${latency:-${OSCAIRN_CPU_LATENCY:-}}
-tuning="${budget:+OSCAIRN_WORKER_BUDGET_US=$budget }${extra:+OSCAIRN_WORKER_EXTRA_BLOCK=$extra }${thp:+OSCAIRN_THP=$thp }${latency:+OSCAIRN_CPU_LATENCY=$latency }" # unquoted below: no spaces in a value
+budget=${budget:-${OSCAIRN_WORKER_BUDGET_US:-}} extra=${extra:-${OSCAIRN_WORKER_EXTRA_BLOCK:-}} thp=${thp:-${OSCAIRN_THP:-}} latency=${latency:-${OSCAIRN_CPU_LATENCY:-}} spin=${spin:-${OSCAIRN_WORKER_SPIN_US:-}}
+tuning="${budget:+OSCAIRN_WORKER_BUDGET_US=$budget }${extra:+OSCAIRN_WORKER_EXTRA_BLOCK=$extra }${thp:+OSCAIRN_THP=$thp }${latency:+OSCAIRN_CPU_LATENCY=$latency }${spin:+OSCAIRN_WORKER_SPIN_US=$spin }" # unquoted below: no spaces in a value
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
 rm -f "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
 # The app, on a profile with a screen (OSCAIRN_HEADLESS=0): Weston and Xwayland keep running

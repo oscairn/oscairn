@@ -14,6 +14,8 @@
                          engine's and workers' audio threads may run on; empty: anywhere
     OSCAIRN_WORKER_BUDGET_US  compute.workerAllowance, each plugin worker's allowance per block in
                          microseconds; empty: derived from the block (half its period)
+    OSCAIRN_WORKER_SPIN_US  compute.workerSpin, how long an audio thread waiting on a worker spins
+                         before it sleeps, in microseconds; empty: none
 
     engine-args.py PROFILE.json
 """
@@ -69,6 +71,7 @@ def settings(profile):
         "OSCAIRN_ENGINE_ARGS": " ".join(shlex.quote(a) for a in engine_args(profile)),
         "OSCAIRN_AUDIO_THREAD_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("audioThreadCores", [])),
         "OSCAIRN_WORKER_BUDGET_US": str((profile.get("compute") or {}).get("workerAllowance") or ""),
+        "OSCAIRN_WORKER_SPIN_US": str((profile.get("compute") or {}).get("workerSpin") or ""),
     }
 
 

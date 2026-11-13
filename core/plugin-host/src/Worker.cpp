@@ -96,6 +96,23 @@ namespace oscairn::worker
         return std::chrono::nanoseconds(int64_t(0.5e9 * double(frames) / rate));
     }
 
+    std::chrono::nanoseconds spinWindow(const char* microseconds, std::chrono::nanoseconds allowance, uint32_t threads, uint32_t cores) noexcept
+    {
+        if(!microseconds || !*microseconds || threads > cores) return {};
+        char* end = nullptr; errno = 0;
+        const long long us = std::strtoll(microseconds, &end, 10);
+        if(*end || errno || us <= 0 || us > 1'000'000) return {};
+        return std::min<std::chrono::nanoseconds>(std::chrono::microseconds(us), allowance / 2);
+    }
+
+    uint32_t usableCores() noexcept
+    {
+#ifdef __linux__
+        if(cpu_set_t set; sched_getaffinity(0, sizeof(set), &set) == 0) return std::max(1, CPU_COUNT(&set));
+#endif
+        return std::max(1u, std::thread::hardware_concurrency());
+    }
+
     bool makeRealtime(double periodUs, int linuxPriority) noexcept
     {
 #ifdef __APPLE__
@@ -313,8 +330,19 @@ namespace oscairn::worker
             uint64_t reported = host.parameterReports();
             makeRealtime(1e6 * blockFrames / s.sampleRate); // the block period, not the larger shared buffer
             uint32_t seen = s.done.load(std::memory_order_acquire); // a request may already be waiting
+            std::chrono::steady_clock::time_point lastWoke{};
+            uint32_t spin = 0; // the last request's spinNs
             for(;;)
             {
+                // RFC 0045's spin: asleep until shortly before the next block is due (a period after the last
+                // came), then polling until it comes or as long again after; only while blocks keep coming.
+                if(spin && lastWoke.time_since_epoch().count())
+                {
+                    const auto due = lastWoke + std::chrono::nanoseconds(int64_t(1e9 * s.frames / s.sampleRate));
+                    if(const auto early = due - std::chrono::nanoseconds(spin) - std::chrono::steady_clock::now(); early > std::chrono::nanoseconds::zero())
+                        waitWhileEqual(s.request, seen, early);
+                    for(const auto until = due + std::chrono::nanoseconds(spin); s.request.load(std::memory_order_acquire) == seen && std::chrono::steady_clock::now() < until;) relax();
+                }
                 waitWhileEqual(s.request, seen, std::chrono::seconds(1));
                 if(s.stop.load(std::memory_order_acquire)) return;
                 const auto next = s.request.load(std::memory_order_acquire);
@@ -322,6 +350,7 @@ namespace oscairn::worker
                 seen = next;
                 const auto woke = std::chrono::steady_clock::now();
                 const auto cpuAtWake = threadCpuNanoseconds();
+                lastWoke = woke; spin = std::min<uint32_t>(s.spinNs, 2'000'000);
                 if(s.panic.exchange(0, std::memory_order_acq_rel)) host.panic();
                 // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
                 if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));

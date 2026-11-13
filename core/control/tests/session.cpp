@@ -487,6 +487,18 @@ namespace
                workerAllowance( 128, 48000, "1.5" ) == std::chrono::nanoseconds( 1'333'333 ) && workerAllowance( 128, 48000, "abc" ) == std::chrono::nanoseconds( 1'333'333 ) &&
                workerAllowance( 128, 48000, "99999999999" ) == std::chrono::nanoseconds( 1'333'333 ), "a malformed or out-of-range one leaves the derived allowance" );
 
+        // RFC 0045's spin window: OSCAIRN_WORKER_SPIN_US, held to half the allowance; none for more audio threads than cores.
+        using oscairn::worker::spinWindow;
+        const auto allowed = std::chrono::nanoseconds( 1'333'333 );
+        check( spinWindow( "200", allowed ) == std::chrono::microseconds( 200 ) && spinWindow( "5000", allowed ) == allowed / 2 &&
+               spinWindow( "200", allowed, 3, 4 ) == std::chrono::microseconds( 200 ) && spinWindow( "200", allowed, 4, 4 ) == std::chrono::microseconds( 200 ),
+               "a spin window, within half the allowance, while the threads have a core each" );
+        check( spinWindow( "200", allowed, 5, 4 ) == std::chrono::nanoseconds::zero() && spinWindow( nullptr, allowed ) == std::chrono::nanoseconds::zero() &&
+               spinWindow( "", allowed ) == std::chrono::nanoseconds::zero() && spinWindow( "0", allowed ) == std::chrono::nanoseconds::zero() &&
+               spinWindow( "-3", allowed ) == std::chrono::nanoseconds::zero() && spinWindow( "1.5", allowed ) == std::chrono::nanoseconds::zero(),
+               "none past the cores, unset, or malformed" );
+        check( oscairn::worker::usableCores() >= 1, "at least one core" );
+
         // A block's outcome from the times the engine saw: done when it came for it is on time, however
         // long since; found done within the allowance on time, past it late (played); never found, silent.
         using oscairn::worker::blockOutcome; using oscairn::worker::BlockOutcome; using std::chrono::microseconds;

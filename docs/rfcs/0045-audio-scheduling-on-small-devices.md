@@ -348,6 +348,41 @@ blocks at rest. Tested: control-session holds and lets go of a stand-in file, wr
 keeps one request across a device restart, asks for nothing under `keep`, and goes on when the
 node is absent; devices-fantom-start hands the variable on.
 
+### Spinning before sleeping
+
+How a block crosses to a worker and back (`WorkerHost::start` and `finish`, `Worker.cpp`'s
+`audio`): the engine writes the block into shared memory, stores the request's sequence number
+and wakes the worker's futex; the worker's audio thread, asleep on that futex, runs, renders and
+stores `done`, then wakes the engine's futex; the engine, if the result was not there when it
+came for it, sleeps on `done` until it is or the allowance runs out. Before 2026-11-13 neither side
+spun: every block cost the worker one wake-up and, when the engine had to wait, the engine
+another. The graph's own helpers (RFC 0034) already spin 4096 polls before sleeping.
+
+Built (2026-11-13), behind `compute.workerSpin` / `OSCAIRN_WORKER_SPIN_US` (microseconds; off
+by default, 200 on the FANTOM-07):
+
+- **The engine** polls `done` for up to the spin window before it sleeps, within the allowance
+  (`WorkerHost::finish`). One thread, the engine's, which has nothing else to do then: a worker
+  done within the window costs the engine no wake-up. Real time only.
+- **A worker** sleeps until the window before its next block is due (a period after the last one
+  came, read from the block it rendered), then polls `request` until the block comes or as long
+  again after, then sleeps as before. It spins only around a block the engine is about to hand
+  over, never between blocks that stopped coming (power: spinning ends with the audio). The engine
+  allows it, per block, only while every worker's audio thread and the engine's have a core each
+  (`spinWindow`, against `usableCores`): a worker at FIFO 70 spinning on a core keeps any other
+  thread of its priority off that core, so with more workers than cores it would delay the very
+  blocks it waits for. ST Final's nine workers on four cores therefore never spin; Rd 73 Chill's
+  two do.
+- The window is held to half the allowance.
+
+Measured in the Linux container (the Docker VM on four CPUs, real-time priority allowed, no
+high-resolution timers): no conclusion. The host machine's load was 58 to 86 (other builds) while
+it ran, and the spread between runs of one setting was wider than any difference between settings
+(`oscairn-worker-bench`; [the A/B plan](#the-device-ab-plan)). Expected on the unit, not measured:
+with the wake-up latency request held, the engine's spin removes its own wake-up after a worker
+finishes (a few tens of microseconds on the A53 per worker waited for); the workers' spin removes
+the worker's wake-up (`wake` p50 near 0) for Performances of up to three workers.
+
 ### Step 4 status
 
 Built 2026-11-13, the owner's first decision. What a missed block does now:

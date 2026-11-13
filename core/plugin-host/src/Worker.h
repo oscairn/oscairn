@@ -34,6 +34,9 @@ namespace oscairn::worker
         // 0); ringOut: this block's caller asked for them.
         uint32_t ringOutChannels = 0, ringOut = 0;
         uint32_t reset = 0; // the worker's: the plugin was reset in the last block (wasReset); nonzero is true
+        // The engine's, with each request (RFC 0045): how long, in nanoseconds, the worker's audio thread may spin
+        // around the next block's expected hand-over instead of sleeping until it; 0: sleep (spinWindow, realtime.h).
+        uint32_t spinNs = 0;
         double sampleRate = 48000;
         clap_event_transport_t transport{};
         // oscairn.voice-budget (RFC 0018). The engine's: when setLimits, the limits the plugin takes

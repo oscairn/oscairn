@@ -30,6 +30,8 @@ assert engine.settings(placed)["OSCAIRN_AUDIO_THREAD_CORES"] == "1,2,3", "the au
 allowed = {**fantom, "compute": {**fantom["compute"], "workerAllowance": 2000}}
 assert engine.settings(allowed)["OSCAIRN_WORKER_BUDGET_US"] == "2000", "the workers' allowance in microseconds"
 assert engine.settings(fantom)["OSCAIRN_WORKER_BUDGET_US"] == "", "none named: derived from the block"
+assert engine.settings(fantom)["OSCAIRN_WORKER_SPIN_US"] == "200", "the FANTOM-07's spin before sleeping on a worker"
+assert engine.settings(load("kick"))["OSCAIRN_WORKER_SPIN_US"] == "", "none named: none"
 
 kick = load("kick")
 assert engine.settings(kick)["OSCAIRN_AUDIO_THREAD_CORES"] == "", "none named: anywhere"

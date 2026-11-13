@@ -81,6 +81,9 @@ add_executable(oscairn-worker-timing-test tests/worker_timing.cpp)
 target_link_libraries(oscairn-worker-timing-test PRIVATE oscairn_control_json oscairn_control)
 add_test(NAME control-worker-timing COMMAND oscairn-worker-timing-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-worker-timing PROPERTIES TIMEOUT 60)
+# The same with RFC 0045's spin: the engine spins for each result, the lone workers for their next blocks.
+add_test(NAME control-worker-timing-spin COMMAND oscairn-worker-timing-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)
+set_tests_properties(control-worker-timing-spin PROPERTIES TIMEOUT 60 ENVIRONMENT OSCAIRN_WORKER_SPIN_US=300)
 # A Performance of ST Final's shape in workers, timed (RFC 0045): a short run here; longer by hand to compare settings.
 add_executable(oscairn-worker-bench tests/worker_bench.cpp)
 target_link_libraries(oscairn-worker-bench PRIVATE oscairn_control)

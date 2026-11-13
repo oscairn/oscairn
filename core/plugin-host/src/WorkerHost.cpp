@@ -109,6 +109,13 @@ namespace oscairn
             std::atomic<uint32_t> block{0}, lastBlock{0};
             int64_t allowanceOverrideNs = 0;
             std::chrono::nanoseconds budget() const noexcept { return std::chrono::nanoseconds(budgetNs.load(std::memory_order_relaxed)); }
+            // RFC 0045's spin (spinWindow): OSCAIRN_WORKER_SPIN_US as read with the rate, and the window it gives
+            // the engine's wait for a block; real time only. Every worker's audio thread counts toward whether
+            // workers may spin too (audioThreads, against the cores).
+            std::string spinUs;
+            std::atomic<int64_t> spinNs{0};
+            static inline std::atomic<uint32_t> audioThreads{0};
+            static uint32_t cores() noexcept { static const uint32_t n = usableCores(); return n; }
             long replySeconds = 30; // how long a control request may take (a big preset load)
             std::atomic<uint32_t> missLimit{UINT32_MAX}; // the supervisor reads it too
             const uint64_t policyLimit; // the placement policy's, in bytes; 0: none
@@ -160,6 +167,7 @@ namespace oscairn
                 // worker that misses a quarter second of blocks in a row, or leaves one unanswered
                 // that long, has failed. Offline rendering waits instead of silencing.
                 allowanceOverrideNs = workerAllowance(0, rate, std::getenv("OSCAIRN_WORKER_BUDGET_US")).count(); // 0 frames: only a valid override is not 0
+                spinUs = std::getenv("OSCAIRN_WORKER_SPIN_US") ? std::getenv("OSCAIRN_WORKER_SPIN_US") : "";
                 retime(block.load() ? block.load() : frames);
             }
             // The budget and the miss limit for blocks of n frames.
@@ -168,6 +176,7 @@ namespace oscairn
                 block = n;
                 if(mode == ProcessingMode::Offline) { budgetNs = std::chrono::nanoseconds(std::chrono::seconds(10)).count(); return; }
                 budgetNs = allowanceOverrideNs ? allowanceOverrideNs : workerAllowance(n, rate, nullptr).count();
+                spinNs = spinWindow(spinUs.c_str(), budget()).count();
                 missLimit = std::max<uint32_t>(8, uint32_t(std::ceil(0.25 / (double(n) / rate))));
             }
             // The audio thread, with each block's length: one that comes twice in a row is the running length (the odd
@@ -440,10 +449,12 @@ namespace oscairn
                 catch(...) { release(); throw; }
                 std::lock_guard lock(process_->nodesMutex);
                 process_->nodes.push_back(this);
+                Process::audioThreads.fetch_add(1, std::memory_order_relaxed);
             }
 
             ~WorkerHost() override
             {
+                Process::audioThreads.fetch_sub(1, std::memory_order_relaxed);
                 {
                     std::lock_guard control(process_->control);
                     { std::lock_guard lock(process_->nodesMutex); std::erase(process_->nodes, this); }
@@ -1078,6 +1089,8 @@ namespace oscairn
                 if(s.setLimits) limitsWaiting_ = false;
                 s.ringOut = s.ringOutChannels && no >= outChannels_;
                 if(transport) s.transport = *transport;
+                // The worker spins for the next block only while every worker's audio thread and this one have a core each.
+                s.spinNs = process_->mode == ProcessingMode::Realtime && Process::audioThreads.load(std::memory_order_relaxed) + 1 <= Process::cores() ? uint32_t(process_->spinNs.load(std::memory_order_relaxed)) : 0;
                 sent_ = std::chrono::steady_clock::now();
                 requestedAt_.store(sent_.time_since_epoch().count(), std::memory_order_release);
                 requested_.store(++sequence_, std::memory_order_release);
@@ -1102,9 +1115,14 @@ namespace oscairn
                 const auto budget = extraBlock() ? process_->budget() + std::chrono::nanoseconds(int64_t(1e9 * process_->block.load(std::memory_order_relaxed) / process_->rate)) : process_->budget();
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
                 const auto checked = std::chrono::steady_clock::now();
-                const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (checked - sent));
+                // RFC 0045's spin: polled for up to the spin window (within the allowance) before sleeping.
+                bool spun = false;
+                if(!ready && process_->mode == ProcessingMode::Realtime)
+                    for(const auto until = checked + std::min(std::chrono::nanoseconds(process_->spinNs.load(std::memory_order_relaxed)), std::chrono::nanoseconds(budget) - (checked - sent));
+                        !(spun = s.done.load(std::memory_order_acquire) == sequence_) && std::chrono::steady_clock::now() < until;) relax();
+                const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (std::chrono::steady_clock::now() - sent));
                 // The round trip as this thread sees it: done when first found done, or given up.
-                const bool done = ready || (waitWhileEqual(s.done, sequence_ - 1, left) && s.done.load(std::memory_order_acquire) == sequence_);
+                const bool done = ready || spun || (waitWhileEqual(s.done, sequence_ - 1, left) && s.done.load(std::memory_order_acquire) == sequence_);
                 // Late by the clock counts toward "too slow" even when the wait itself woke late; a
                 // block done before the caller came for it was not late.
                 const auto seen = ready ? checked : std::chrono::steady_clock::now();

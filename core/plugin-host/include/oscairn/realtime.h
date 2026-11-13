@@ -37,6 +37,23 @@ namespace oscairn::worker
     // `overrideMicroseconds` (OSCAIRN_WORKER_BUDGET_US, the profile's compute.workerAllowance), a
     // whole number of microseconds above 0, replaces it; anything else leaves the derived one.
     std::chrono::nanoseconds workerAllowance(uint32_t frames, double rate, const char* overrideMicroseconds) noexcept;
+    // RFC 0045's bounded spin: a waiting audio thread polls a word for up to this long before it
+    // sleeps, so a block done (or handed over) within it costs no wake-up. OSCAIRN_WORKER_SPIN_US (the
+    // profile's compute.workerSpin), whole microseconds above 0, held to half the allowance; anything
+    // else, or a worker's spin with more audio threads than cores to give them (`threads` > `cores`,
+    // as a spinning thread keeps its core from another of its priority), none.
+    std::chrono::nanoseconds spinWindow(const char* microseconds, std::chrono::nanoseconds allowance, uint32_t threads = 1, uint32_t cores = 1) noexcept;
+    // The CPUs this process may run on (its affinity on Linux), at least 1.
+    uint32_t usableCores() noexcept;
+    // A spinning thread's pause between polls.
+    inline void relax() noexcept
+    {
+#if defined(__aarch64__)
+        __asm__ __volatile__("yield");
+#elif defined(__x86_64__) || defined(__i386__)
+        __builtin_ia32_pause();
+#endif
+    }
     // What became of a block the engine handed a worker, once it came for it: on time (done when it
     // came, or found done within the allowance); late, found done but past the allowance, its sound
     // played all the same (the engine's own thread woke late); or silent, not done within the

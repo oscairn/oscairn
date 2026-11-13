@@ -10,26 +10,38 @@ and nothing that changes Roland's firmware or update packages.
 ## What is known
 
 From the owner's notes on the hardware (Roland's GPL release of the kernel, U-Boot and device
-tree, and Roland's test tool), and Roland's published specifications and owner's manual:
+tree, and Roland's test tool), Roland's published specifications and owner's manual, and, on
+November 12, 2026, a read-only survey of a running FANTOM-07 over SSH with Roland's app left
+undisturbed and nobody at the panel: `/proc`, `/sys`, the live device tree, the kernel's own
+configuration (`/proc/config.gz`), the boot log, the start-up scripts and the app's open
+files, threads and memory maps. What that survey showed is in
+[What the unit shows](#what-the-unit-shows) below; what it could not settle is in
+[What needs the owner at the instrument](#what-needs-the-owner-at-the-instrument).
 
-- **SoC:** NXP i.MX8M Mini, four Cortex-A53 cores: the KICK's SoC. The notes said 2 GB of RAM;
-  the unit's Linux reports 952 MB (`free -m`), with 255 MB of swap. The FANTOM-06, -07
-  and -08 share one main board and firmware; the -07 has 76 keys, velocity only, no aftertouch,
-  and weighs 7.0 kg.
-- **Screen:** 5.5", 1280 × 720, MIPI-DSI, with touch (a Goodix GT1151). The panel is portrait,
-  turned to landscape.
-- **Audio:** the i.MX's SAI1 runs a TDM link of 16 slots of 32 bits at 48 kHz to Roland's two
-  BMC chips, which are the bit clock and frame master. ALSA calls it `hw:1,0`; Roland's app
-  opens 6 channels, S32_LE. **Which slots carry which outputs is unknown**, and so is whether
-  audio played into `hw:1,0` reaches MAIN OUT without Roland's app setting the BMCs up first:
-  that is the deciding test on a unit.
-- **Panel:** Roland's GPL driver `i2c-slave-rx` makes the i.MX an I2C slave at 0x08 on I2C3 and
-  gives `/dev/i2c-slave-2`. Messages are 4 bytes, with **bit 7 set on the first byte**. Roland's
-  test tool names four kinds: `PMDWEncoder`, `PMDWADChange`, `PMDWSwitchOn` and `PMDWSwitchOff`
-  (encoders, analog controls, switches pressed and released). **Where the kind, the ID, the
-  value and the step sit in the bytes is unknown.**
-- **Keys:** a separate keyboard CPU scans them. **Where they reach the i.MX is unknown**: they may
-  come through the BMC rather than the panel.
+- **SoC:** NXP i.MX8M Mini, four Cortex-A53 cores at 1.2 to 1.8 GHz: the KICK's SoC. The notes
+  said 2 GB of RAM; the kernel sees **992 MiB** (1,015,808 KiB at boot, 320 MiB of it a
+  CMA pool the GPU and display draw from), and `free -m` reports 952 MB, with a 256 MB swap
+  file. The FANTOM-06, -07 and -08 share one main board and firmware; the -07 has 76 keys,
+  velocity only, no aftertouch, and weighs 7.0 kg.
+- **Screen:** 5.5", MIPI-DSI, a 720 × 1280 portrait panel (`tianma,tm055jvzg18` in the device
+  tree, 68 × 121 mm) that Weston turns 90° to 1280 × 720. The touch controller is a Goodix
+  (the device tree says GT1151; the chip reports ID 1158) at 0x14 on I2C2.
+- **Audio:** the i.MX's SAI1 runs a TDM link of 16 slots of 32 bits at 48 kHz, left-justified,
+  to Roland's BMC chips, which are the bit clock and frame master: the i.MX makes no audio
+  clock of its own (SAI1's master clock is off). ALSA calls it `hw:1,0`; Roland's app opens 6
+  channels each way, S32_LE. **Which slots carry what is unknown**, and so is whether audio
+  played into `hw:1,0` reaches MAIN OUT without Roland's app setting the BMCs up first: that is
+  the deciding test on a unit.
+- **Panel:** Roland's driver (`i2c-slave-coms`, built into the kernel) makes the i.MX an I2C
+  slave at 0x08 on I2C3 and gives `/dev/i2c-slave-2`. Messages are 4 bytes, with **bit 7 set on
+  the first byte**. Roland's test tool names four kinds: `PMDWEncoder`, `PMDWADChange`,
+  `PMDWSwitchOn` and `PMDWSwitchOff` (encoders, analog controls, switches pressed and released),
+  and analog sources `HOLD`, `WHEEL1`, `WHEEL2`, `BENDER` and `SLIDER1` to `SLIDER8`. **Where the
+  kind, the ID, the value and the step sit in the bytes is unknown.** Three buttons are not on
+  the panel bus at all: WRITE, MENU and TEMPO are GPIO keys (below).
+- **Keys:** a separate keyboard CPU scans them. **Where they reach the i.MX is unknown**, but
+  the survey narrows it: nothing on the i.MX reads a UART, the panel bus was quiet, and the one
+  busy link to the BMCs is a USB serial line (below); the keys most likely reach the BMC first.
 - **Panel controls** (Roland's spec sheet and owner's manual, "Panel Descriptions"): the pitch
   bend/modulation lever, WHEEL1 and WHEEL2, S1 and S2; control knobs 1 to 8 and sliders 1 to 8
   with the PAN/LEVEL, CTRL and ASSIGN buttons choosing what they play; MASTER VOLUME; the
@@ -42,6 +54,175 @@ tree, and Roland's test tool), and Roland's published specifications and owner's
   SAMPLING, PAD MODE, CLIP BOARD, BANK and HOLD; 16 pads; HOLD, CTRL1 and CTRL2 pedal jacks; MIDI
   IN and OUT; USB COMPUTER, USB MEMORY and an external USB device port. Roland's spec counts
   **eight** control knobs and **eight** sliders on the FANTOM-0 (not four).
+
+## What the unit shows
+
+Read on the running unit, November 12, 2026, with Roland's app running and the panel
+untouched. The raw outputs stay off the repository. "Inferred" marks a conclusion drawn from
+what was read rather than read itself.
+
+### How it starts
+
+systemd starts `weston.service` (Weston 6.0.1, DRM backend, the G2D renderer, `--xwayland`),
+then `weston-term.service`, which runs `/home/root/go.sh` as root. `go.sh`:
+
+1. turns swap on (`/swapfile`);
+2. reads GPIO 138 (GPIO5_10) once: high starts Roland's factory test tool (`qctest`) in an
+   `xterm` instead of the app;
+3. stops `systemd-timesyncd` and sets the clock from a saved date (the unit's clock starts at
+   January 1, 2022);
+4. writes one register through `/unit_tests/memtool`: `0x30360034`, which by the i.MX8M Mini's
+   reference manual is the video PLL's spread-spectrum control (inferred: it is for the display,
+   not audio; the audio link takes its clocks from the BMCs);
+5. loads `libcomposite`, `g_serial` and `tickgen`;
+6. runs `/home/root/mi078` with `DISPLAY=:0`, `WAYLAND_DISPLAY=wayland-0` and
+   `XDG_RUNTIME_DIR=/run/user/0`.
+
+`weston-term.service` has no `Restart=`, so `systemctl stop weston-term` stops Roland's app and
+it stays stopped until `systemctl start weston-term` or a reboot. `g_serial` and `tickgen` stay
+loaded after it stops. Nothing in `go.sh` sets up the audio link, the panel bus or the BMCs:
+whatever the BMCs need from the i.MX, Roland's app sends it itself, over the USB serial line.
+
+### Roland's app
+
+`mi078`, a 61 MB JUCE program, runs as root with 35 threads. What it holds open:
+
+| Device | What it is | How |
+|---|---|---|
+| `/dev/ttyGS0` (twice) | the USB serial gadget: the BMC control line | read and write |
+| `/dev/i2c-slave-2` | the panel | read and write; one thread blocks in the driver's ioctl |
+| `/dev/input/event1` | `gpio-keys`: WRITE, MENU, TEMPO | read only |
+| `/dev/snd/pcmC1D0p`, `pcmC1D0c` | `hw:1,0`, playback and capture | memory-mapped |
+| `/dev/snd/timer` (three) | ALSA timers | |
+| `/proc/tickgen` | Roland's `tickgen` module | memory-mapped |
+| `/dev/mem` | one page at `0x30210000`: GPIO2's registers | memory-mapped |
+
+It is an X11 client of Xwayland (`libX11`, MIT-SHM): it holds no GPU or DRM device, so it draws
+in software and Weston composites it. It sets the backlight through
+`/sys/class/backlight/backlight/brightness`. It imports ALSA's sequencer functions (JUCE's MIDI),
+which find no sequencer on this kernel.
+
+Its real-time threads, all `SCHED_RR` but two, by priority: two unnamed at `SCHED_FIFO` 49 and
+48 (one of them polls, inferred the USB serial line); "Tick Gen Task", "Cyclic
+Thread" and three "JUCE ALSA" threads at 45; "Play Task", "RhyPtn Task", eight
+"SmplPlayerTask" and one "SmplTask" at 40; a "SmplTask", "UserSmplTask" and "JUCE Timer" at 35;
+"Kbd Task" and a "SmplTask" at 30; "Thread Sw Ad" and "JUCE OSC server" at 25; "Prm Task" at
+20; "Seq Task" at 15. None is pinned to a core. RT throttling is the kernel default (950 ms of
+every second). At the time of the survey most of the app was in swap (11 MB resident, 104 MB
+swapped), with 100 KB locked.
+
+### Audio
+
+- **Two ALSA cards.** Card 0, `imx-audio-micfil`: the i.MX's PDM microphone interface, capture
+  only, unused (closed, and no interrupt since boot); inferred, a leftover of NXP's evaluation
+  board's device tree, as are its HDMI bridge and Wi-Fi entries. Card 1, `nocodec`: SAI1 through `simple-audio-card` with a dummy
+  codec (`codec_bmc`), playback and capture on `hw:1,0`.
+- **The link** (device tree `sound-bmc`): `left_j`, `dai-tdm-slot-num` 16,
+  `dai-tdm-slot-width` 32, bit clock and frame master the codec side (the BMCs), RX synchronous
+  to TX. SAI1's `fsl,dataline` enables eight data lines each way, but its pin group muxes only
+  four pads, inferred bit clock, frame sync and one data line each way. Its root clock is off
+  (`clk_summary`): the i.MX is a clock slave.
+- **What Roland's app opens**, from `/proc/asound/card1/pcm0*/sub0/`:
+
+  | | Playback | Capture |
+  |---|---|---|
+  | Access, format | MMAP_INTERLEAVED, S32_LE | MMAP_INTERLEAVED, S32_LE |
+  | Channels, rate | 6, 48000 | 6, 48000 |
+  | Period, buffer | 300, 1800 frames | 1200, 2400 frames |
+  | `avail_min`, `start_threshold` | 300, 1 | 1200, 1 |
+  | `stop_threshold` | the boundary (never stops) | the boundary |
+  | `silence_size` | the boundary | 0 |
+
+  Both run from boot without a stop; the DMA interrupt rate (200 a second) matches those
+  periods. The application pointer of both stays at 0: the app never commits frames the
+  ordinary way. Inferred: it writes and reads the memory-mapped ring directly at the hardware
+  pointer, ALSA zeroing what has played. The stream's owner is a "SmplTask" thread, and the app
+  holds its sample files open, so inferred: what the i.MX sends is **sample playback** (pads,
+  the sampler) for the BMCs to mix, and what it receives is audio to **sample**; the synth
+  voices and the main mix are the BMCs'. Nothing shows which of the six slots is which.
+- **Slots:** NXP's SAI driver enables the first *n* slots for *n* channels, so Roland's six are
+  inferred to be slots 0 to 5. Roland's `thru.sh` opens all 16 both ways
+  (`arecord -D hw:1,0 -c 16 -f S32_LE --rate=48000 | aplay -D hw:1,0`), so 16 channels are
+  accepted.
+- **Mixer controls:** card 1 has only the SAI's timestamp and bit-counter controls; card 0 the
+  micfil's gains and voice-detector settings. No volume or routing control exists on the i.MX
+  side.
+
+### USB
+
+The i.MX has two USB 2.0 controllers (ChipIdea):
+
+- **USB1 (`32e40000`), host:** EHCI, VBUS switched by GPIO1_12, bus 1. Roland's test tool
+  drives this controller's port test mode as "USB-HOST (SOM)", beside a separate
+  "USB-HOST (BMC)": this is **USB MEMORY**. The owner's USB Ethernet adapter was on it during
+  the survey, and nothing else.
+- **USB2 (`32e50000`), device only:** `g_serial`, one CDC ACM port, `/dev/ttyGS0`. It was
+  configured by a host at high speed the moment `go.sh` loaded `g_serial` (the boot log's next
+  line), and carries a steady 58 interrupts a second: inferred it is wired inside the
+  instrument to a BMC, the host, and is the BMC control line, not the USB COMPUTER port.
+- **USB COMPUTER and EXT DEVICE** are therefore not on the i.MX (inferred): the test tool's
+  "USB-HOST (BMC)" and "BMC1 USB", Roland's update reading EXT DEVICE from the BMC side, and
+  the owner's notes that custom BMC code answered over USB MIDI to a computer all put them on
+  the BMCs. USB MIDI and audio to a computer are the BMC's, not Linux's.
+- **Gadget functions in this kernel:** configfs is mounted at `/sys/kernel/config` with no
+  gadget defined; MIDI (`f_midi`), UAC1, UAC2, HID, ACM, ECM, NCM, RNDIS, mass storage and
+  FunctionFS are built in, and `g_audio` is a module. They only matter on a port a computer
+  can reach, and the i.MX's device port is (inferred) taken by the BMC.
+
+### MIDI
+
+- **DIN MIDI IN and OUT are not Linux's** (inferred, strongly): the four i.MX UARTs are UART1
+  and UART3 (with RTS/CTS), UART2 (the console, `ttymxc1`, 115,200) and UART4; no process holds
+  UART1, 3 or 4, and none has sent or received a byte since boot. Roland's test tool's MIDI
+  loopback test opens a raw MIDI device `hw:2,0,0`, a card that does not exist in normal use.
+- **ALSA:** raw MIDI is built in (`CONFIG_SND_RAWMIDI=y`); the **sequencer is not**
+  (`# CONFIG_SND_SEQUENCER is not set`, hence no `/dev/snd/seq`), nor `snd-aloop`, nor
+  `snd-dummy`. `snd-usb-audio` and `snd-usbmidi-lib` are on the unit as modules, not loaded.
+  So a USB MIDI keyboard on USB MEMORY would appear, after `modprobe snd-usb-audio`, as a raw
+  MIDI device (`/dev/snd/midiC2D0`), **and Oscairn would not see it**: its MIDI input is JUCE's,
+  which on Linux reads only the ALSA sequencer. Playing a USB MIDI keyboard needs Oscairn to
+  read raw MIDI, or a kernel with the sequencer.
+
+### Panel, buttons and lights
+
+- **`/dev/i2c-slave-2`:** character major 235 (`I2cSlaveDev2`), class `i2c-slave-dev2`; the
+  device-tree node `i2c@30a40000/i2c_rx@08`, compatible `slave-rxtx`, on I2C3 at 100 kHz; the
+  kernel device `2-1008` (address 0x08 with the slave flag). Roland's app opens it read and
+  write, so the i.MX may answer the panel too (inferred: lamp states). I2C3 had raised 142
+  interrupts since boot with nobody touching the panel.
+- **GPIO keys** (`gpio-keys`, `/dev/input/event1`): WRITE on GPIO5_11 (key code 157), MENU on
+  GPIO5_12 (139) and TEMPO on GPIO5_13 (152). Roland's app and Weston both read it.
+- **Other input devices:** `event0` and `event2` are the SoC's and the PMIC's power keys;
+  `event3` the touch screen.
+- **Lights:** one GPIO LED, `status` (GPIO3_16), on. The panel's lamps are not Linux LEDs.
+  The backlight is `pwm-backlight` on PWM3 (1 kHz), brightness 0 to 255, at 255.
+- **No ADC** (no IIO device), no other PWM, and no exported GPIO. GPIO5_10 picks the factory
+  test at boot. Roland's app maps GPIO2's registers; what it drives there is unknown (GPIO2_6
+  is held high by the kernel, unlabeled).
+- **The wheels, lever, sliders and pedals** are panel-bus analog sources by the test tool's
+  names (above). Roland's app reaches none of them another way.
+
+### Display and touch
+
+- **DRM:** `imx-drm`, LCDIF to the Samsung MIPI-DSI bridge, connector `DSI-1`, one mode
+  720 × 1280 at 60 Hz (76 MHz). `/dev/fb0` is DRM's emulated frame buffer, 720 × 1280, 32-bit.
+  Weston owns `/dev/dri/card0` and composites with the Vivante GPU (`galcore` 6.4.0, `libGAL`,
+  G2D).
+- **Weston's configuration** (`/etc/xdg/weston/weston.ini`): output `DSI-1`, `mode=720x1280@60`,
+  `transform=90`, idle timeout off, no panel, a black background; touch calibration on. Xwayland
+  serves `:0`, on `/tmp/.X11-unix/X0` and also on the abstract socket of that name.
+- **Touch:** the Goodix driver (module `goodix`), `/dev/input/event3`, multitouch (slots,
+  tracking IDs, position, touch and width major). Its coordinate range is not readable without
+  opening the device.
+- **Backlight:** `/sys/class/backlight/backlight`, which Roland's app writes.
+
+### Kernel
+
+Linux 4.19.35, `CONFIG_PREEMPT` (not PREEMPT_RT), 250 Hz, high-resolution timers; cgroups v1
+with cpusets, memory, cpu and hugetlb controllers mounted (no RT group scheduling, no CFS
+bandwidth); CPU isolation available but no `isolcpus` on the command line; huge pages (2 MiB,
+none reserved; transparent ones on `madvise`); **no PSI** (4.19 predates it); **no uinput**;
+no hidraw. `cpufreq` governor `ondemand`. Modules can be loaded (177 on the unit).
 
 ## What Oscairn has
 
@@ -66,8 +247,10 @@ tree, and Roland's test tool), and Roland's published specifications and owner's
   `{ "name": "hw:1,0", "channels": 16, "rate": 48000, "outputs": { "main": [0, 1] } }`. The
   engine opens `hw:1,0` with all 16 slots at 48 kHz (refusing to start at another rate), plays
   main left and right on slots 0 and 1 and keeps the other 14 silent. JUCE, which opens it, takes
-  S32_LE when the device offers no float format. **Slots 0 and 1 are a guess**, and so are 16
-  channels where Roland's app opens 6 (if `hw:1,0` refuses 16, try `"channels": 6`); no inputs and
+  S32_LE when the device offers no float format. **Slots 0 and 1 are a guess**. Sixteen channels
+  where Roland's app opens 6 are accepted (Roland's `thru.sh` opens 16), but whether the BMCs
+  listen beyond the six slots Roland's app fills is unknown (if nothing sounds, try
+  `"channels": 6`); no inputs and
   no SUB OUT are mapped until their slots are known. To find MAIN OUT on a unit, copy the profile, change `main`
   (for example to `[2, 3]`), start the app with `--profile` and the copy's path (the built-in
   one is compiled in), and listen at a low level; or run `oscairn-engine` with
@@ -92,8 +275,8 @@ tree, and Roland's test tool), and Roland's published specifications and owner's
 What the unit's stock system is, read on it: Linux 4.19.35 (`PREEMPT`, aarch64), an NXP Yocto
 userland (warrior) with glibc 2.29, too old for Oscairn's programs; the root filesystem on eMMC,
 writable, with 25 GB free; ALSA card 1, `hw:1,0`, for SAI1; `/dev/i2c-slave-2`, `/dev/fb0`,
-`/dev/dri/card0`, and the touch screen among `/dev/input/event*`. Roland's app (`mi078`) runs;
-no X server or Weston does.
+`/dev/dri/card0`, and the touch screen as `/dev/input/event3`. Roland's app (`mi078`) runs as an
+X11 client of Xwayland under Weston ([How it starts](#how-it-starts)).
 
 So Oscairn brings its own userland and leaves Roland's kernel, boot chain and root filesystem as
 they are: no flashing and no boot change. The bundle is a root filesystem tree, with no kernel,
@@ -140,7 +323,10 @@ run on the unit yet. Idle there with `--audio null`, the engine held 125 MiB res
 memory locked, at the profile's `instrument` reliability) and its three plugin workers 52 MiB
 together. On 4.19 the engine can have no memory pressure trigger (PSI is Linux 4.20 and later):
 by its code it then logs that it has none and goes on without. Showing the app on the FANTOM's
-screen is not solved.
+screen is not solved. Weston and Xwayland keep running when Roland's app stops, so the likeliest
+way is for the app to be one more X11 client on `:0`, as Roland's is: the bundle's own `/tmp`
+hides Xwayland's socket file, but Xwayland also listens on the abstract socket of the same
+name, which a chroot does not hide (untried).
 
 ## The panel reader
 
@@ -188,7 +374,10 @@ guessed ID.
 
 ### What it does not do yet
 
-- **Keys and pads:** not read; where they arrive is unknown.
+- **Keys and pads:** not read; where they arrive is unknown (most likely the BMC control line,
+  [Panel, buttons and lights](#panel-buttons-and-lights)).
+- **WRITE, MENU and TEMPO:** GPIO keys on `/dev/input/event1`, not panel messages; nothing reads
+  them yet.
 - **Fixed controls** (the VALUE dial, cursor, ENTER, EXIT, transport, MENU and the rest) decode
   and show in the dump, but the engine has nothing to give them to: the controller layer plays
   assignable controls only.
@@ -198,8 +387,8 @@ guessed ID.
 
 ## Mapping the panel on a unit
 
-On the FANTOM, with Oscairn's engine not reading the panel (Roland's app stopped too, so only
-one program reads the device):
+On the FANTOM, with Oscairn's engine not reading the panel (Roland's app stopped too, with
+`systemctl stop weston-term`, so only one program reads the device):
 
 ```sh
 oscairn-panel-dump /dev/i2c-slave-2 /usr/share/oscairn/panels/fantom-07.json
@@ -223,6 +412,58 @@ and ID seen, how often, and its lowest and highest value. Then:
 
 Send back the filled map and the dump's tables, and remove `"controls"` from `estimated`
 (`"layout"` too once it is confirmed).
+
+## What needs the owner at the instrument
+
+Each of these needs someone at the panel, Roland's app stopped, or both; in this order, cheapest
+first. The first four leave Roland's app running and only read `/proc`: run each watch over SSH
+while someone at the instrument does the one thing named, and compare the counts before and
+after.
+
+```sh
+watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /proc/interrupts'
+```
+
+1. **Where the keys enter.** Play a run of notes, then hold a chord, while watching. The panel
+   bus is the `30a40000.i2c` line; the BMC control line `32e50000.usb` (58 a second at rest).
+   If notes raise neither rate, the BMC plays them without a message to the i.MX per note. Then
+   do the same with
+   the pads, the lever, WHEEL1 and WHEEL2, a slider, and a pedal on HOLD and on CTRL1.
+2. **The GPIO keys.** Press WRITE, MENU and TEMPO: each should count on its own line (`Write`,
+   `Menu`, `Tempo`). Any other button that counts there is a GPIO key too.
+3. **DIN MIDI.** Send notes into MIDI IN from another instrument while watching
+   `cat /proc/tty/driver/IMX-uart` (each UART's `rx:` count) and the `serial` lines. If no count
+   moves, DIN MIDI is the BMC's, as inferred.
+4. **USB COMPUTER.** Plug a computer into USB COMPUTER, watch `dmesg -w` and the `32e50000`
+   and `32e40000` lines on the unit, and list USB devices on the computer. Whatever the computer
+   enumerates (its vendor, product and interfaces) is the BMC's if the unit's Linux saw nothing.
+5. **Stop Roland's app** (the rest needs it stopped): `systemctl stop weston-term`, then check
+   that `/proc/asound/card1/pcm0p/sub0/status` and `pcm0c/sub0/status` say `closed` and that
+   no process holds `/dev/i2c-slave-2` (`ls -l /proc/*/fd 2>/dev/null | grep i2c-slave`).
+   `systemctl start weston-term` (or a reboot) brings it back.
+6. **The panel's layout and IDs:** [Mapping the panel on a unit](#mapping-the-panel-on-a-unit),
+   with `oscairn-panel-dump` in the bundle.
+7. **Whether the link still runs:** `arecord -D hw:1,0 -c 16 -f S32_LE -r 48000 -d 2
+   /tmp/link.wav`. It finishing in two seconds means the BMCs still drive the bit clock without
+   Roland's app; hanging until killed, or an input/output error, means they stopped it. Look at
+   the file for which of the 16 slots carry signal while someone plays a key (the BMCs' audio
+   to the i.MX, which Roland samples). Remove the file afterward.
+8. **The deciding audio test,** at low volume, headphones first: play into `hw:1,0` one pair of
+   slots at a time, `oscairn-engine --output-device hw:1,0 --device-channels 16
+   --sample-rate 48000 --audio-outputs 0,1`, then `2,3` and so on to `14,15`, and note which
+   pair reaches MAIN OUT, SUB OUT or the headphones, if any. If none does, repeat with
+   `--device-channels 6` and the pairs 0 to 5, then with Roland's app started and stopped once
+   more (in case its BMC set-up outlives it). If nothing ever sounds, the BMCs mix what the i.MX
+   sends only when Roland's app tells them to, over `/dev/ttyGS0`.
+9. **The touch screen's range:** `evtest /dev/input/event3` prints each axis's minimum and
+   maximum before the first event (Ctrl-C after it); touch the four corners to see which way the
+   axes run on the landscape screen. Neither the unit nor the bundle has `evtest`: bring a
+   static aarch64 build.
+10. **A USB MIDI keyboard on USB MEMORY:** plug it in, `modprobe snd-usb-audio`, and check
+    `cat /proc/asound/cards` and `amidi -l` (on the unit). A raw MIDI device there confirms the
+    kernel side; Oscairn will not see it until it reads raw MIDI (above).
+11. **The display from the chroot:** with Weston running and Roland's app stopped, start the app
+    in the bundle with `DISPLAY=:0` and see whether it reaches Xwayland.
 
 ## Building it into an image
 

@@ -50,6 +50,21 @@ namespace oscairn::host
         return size;
     }
 
+    /// The note in a key's own frame: kind 6 from the keyboard (0x02), a panel word of 0x88 (on) or
+    /// 0x87 (off), the note, 0, the velocity (a release velocity on an off). One comes for every key
+    /// event, whatever Roland's zones and Local Switch are; the frame carries no channel, so the note
+    /// is on channel 1. Its size, 3; 0 for any other frame.
+    inline size_t bmcKey( const BmcFrame& f, uint8_t out[3] )
+    {
+        if( f.isLong || f.kind() != 6 || f.from() != 0x02 || f.length != 4 ) return 0;
+        const uint8_t* w = f.raw.data() + 4;
+        if( ( w[0] != 0x88 && w[0] != 0x87 ) || w[1] > 0x7F || w[3] > 0x7F ) return 0;
+        out[0] = w[0] == 0x88 ? 0x90 : 0x80;
+        out[1] = w[1];
+        out[2] = w[3];
+        return 3;
+    }
+
     /// The link's byte stream cut into frames. It has no delimiter and no checksum, so a reader that
     /// starts mid-stream (or loses its place) finds it again: it takes a position as a frame's start
     /// only where a frame it knows begins (a MIDI word, kind 3, whose code index agrees with its
@@ -173,7 +188,8 @@ namespace oscairn::host
     std::string bmcInputName( size_t input ); // "FANTOM keys", "FANTOM MIDI 0x81", ...
 
     /// Reads the link on a thread of its own and hands each MIDI message to `message` there, by
-    /// input (an index into bmcSources). It never writes to the device: it opens it read-only, and
+    /// input (an index into bmcSources): the keys from their own frames (bmcKey), the other sources
+    /// from their MIDI words (bmcMidi). It never writes to the device: it opens it read-only, and
     /// before reading makes it raw with echo and flow control off, checked by reading the settings
     /// back; where they do not hold it does not read. It polls with a timeout (so stopping waits at
     /// most that), and reads without pause while open: the sound chips queue what is not read, and
@@ -185,8 +201,9 @@ namespace oscairn::host
     /// (counted, logged once). Notes it passed on and has not seen end are ended (note off, and
     /// sustain off) when the device fails or ends, so none is left held across a reopen.
     ///
-    /// Frames the link is known to carry are passed over quietly: the keys' second form (kind 6 from
-    /// 0x02: the same note and velocity) and the sound engine's status (kind 9 from 0xE1, long).
+    /// Frames the link is known to carry are passed over quietly: MIDI words from the keyboard (0x02:
+    /// the notes Roland's engine plays for them, one per active zone, none with Local Switch off)
+    /// and the sound engine's status (kind 9 from 0xE1, long).
     /// Anything else is counted and logged with its header bytes, at most ten a second.
     class BmcLinkReader
     {

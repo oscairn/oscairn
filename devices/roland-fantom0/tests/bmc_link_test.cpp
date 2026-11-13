@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // The FANTOM-0's message link (BmcLink.h) without the instrument: frames built here, never bytes
-// from a unit. The parser: notes on and off from MIDI words, long frames skipped, a stream split
-// across reads, a start at every byte of a stream and after garbage finding its place, and a long
-// frame of an absurd length losing it. Then the reader on a pty in place of /dev/ttyGS0: raw with
-// echo off once open, nothing sent back, the keys' second form ignored, what comes in its first
-// moments dropped, a held note ended when the device ends, and no spinning while it is gone.
+// from a unit. The parser: the keys' notes on and off from their own frames, MIDI from the other
+// sources from MIDI words, long frames skipped, a stream split across reads, a start at every byte
+// of a stream and after garbage finding its place, with Local Switch on (each key also as one MIDI
+// word per zone) and off (the keys' own frames and the status frames only), and a long frame of an
+// absurd length losing it. Then the reader on a pty in place of /dev/ttyGS0: raw with echo off
+// once open, nothing sent back, the zones' MIDI words ignored, a key with Local Switch off read,
+// what comes in its first moments dropped, a held note ended when the device ends, and no spinning
+// while it is gone.
 //
 // With OSCAIRN_BMC_CAPTURE naming a capture of a unit's link (kept off the repository), it also
 // parses that from every byte offset of its first 2 KiB and prints the counts.
@@ -39,15 +42,21 @@ namespace
         std::copy( payload.begin(), payload.end(), f.begin() + 4 );
         return f;
     }
-    // A key as the keyboard sends it: a MIDI word to Linux, then the same as a panel word.
-    Bytes key( bool on, uint8_t note, uint8_t velocity, uint8_t from = 0x02 )
+    // A key as the keyboard sends it: with Local Switch on, the note Roland's engine plays for it
+    // in each of `zones` zones (a MIDI word each, on the zone's channel), then the key's own frame;
+    // with it off (zones 0), the key's own frame alone.
+    Bytes key( bool on, uint8_t note, uint8_t velocity, int zones = 3 )
     {
-        auto f = shortFrame( 3, from, 0x61, { uint8_t( on ? 0x29 : 0x28 ), uint8_t( on ? 0x91 : 0x81 ), note, velocity } );
-        f[8] = note; // a stale byte past the count, as a unit leaves there
-        if( from != 0x02 ) return f;
-        const auto second = shortFrame( 6, 0x02, 0x60, { uint8_t( on ? 0x88 : 0x87 ), note, 0, velocity } );
-        f.insert( f.end(), second.begin(), second.end() );
-        return f;
+        Bytes all;
+        for( int z = 0; z < zones; ++z )
+        {
+            auto f = shortFrame( 3, 0x02, 0x61, { uint8_t( on ? 0x29 : 0x28 ), uint8_t( ( on ? 0x90 : 0x80 ) | z ), note, velocity } );
+            f[8] = note; // a stale byte past the count, as a unit leaves there
+            all.insert( all.end(), f.begin(), f.end() );
+        }
+        const auto own = shortFrame( 6, 0x02, 0x60, { uint8_t( on ? 0x88 : 0x87 ), note, 0, velocity } );
+        all.insert( all.end(), own.begin(), own.end() );
+        return all;
     }
     Bytes longFrame( uint32_t length, uint8_t fill = 0 )
     {
@@ -58,7 +67,8 @@ namespace
     }
     Bytes join( std::initializer_list<Bytes> parts ) { Bytes all; for( const auto& p : parts ) all.insert( all.end(), p.begin(), p.end() ); return all; }
 
-    // The MIDI messages a parser finds in `stream`, fed `chunk` bytes at a time.
+    // The MIDI messages a parser finds in `stream`, fed `chunk` bytes at a time, as the reader takes
+    // them: the keys from their own frames, other sources from MIDI words.
     Messages midi( const Bytes& stream, size_t chunk = 4096, BmcLinkParser* keep = nullptr )
     {
         BmcLinkParser local;
@@ -67,23 +77,18 @@ namespace
         for( size_t at = 0; at < stream.size(); at += chunk )
             parser.feed( stream.data() + at, std::min( chunk, stream.size() - at ), [&]( const BmcFrame& f ) {
                 uint8_t m[3];
-                if( const auto n = bmcMidi( f, m ) ) out.emplace_back( m, m + n );
+                if( const auto n = f.from() == 0x02 ? bmcKey( f, m ) : bmcMidi( f, m ) ) out.emplace_back( m, m + n );
             } );
         return out;
     }
     bool endsWith( const Messages& all, const Messages& tail ) { return tail.size() <= all.size() && std::equal( tail.begin(), tail.end(), all.end() - tail.size() ); }
 
-    void parser()
+    // Starting at every byte of `stream`: whatever is found is the stream's own tail, never a place
+    // lost; the most messages missed from a start inside the first frame.
+    bool everyStart( const Bytes& stream, const Messages& played, size_t& worst )
     {
-        const Messages played{ { 0x91, 60, 100 }, { 0x81, 60, 40 }, { 0x91, 64, 1 }, { 0x81, 64, 127 } };
-        const auto stream = join( { key( true, 60, 100 ), longFrame( 112 ), key( false, 60, 40 ), longFrame( 3000, 0x80 ), key( true, 64, 1 ), longFrame( 0 ), key( false, 64, 127 ) } );
-        BmcLinkParser p;
-        check( midi( stream, 4096, &p ) == played, "notes on and off, with release velocity, from MIDI words; long frames skipped" );
-        check( p.stats().frames == 11 && p.stats().skipped == 0 && p.stats().lost == 0, "every frame counted, nothing skipped from the start" );
-        check( midi( stream, 1 ) == played && midi( stream, 5 ) == played && midi( stream, 13 ) == played, "frames split across reads join up" );
-
-        // A start at every byte of the stream: whatever is found is the stream's own tail, and the place is found within a frame or two.
-        bool tails = true; size_t worst = 0;
+        bool tails = true;
+        worst = 0;
         for( size_t start = 0; start < stream.size(); ++start )
         {
             BmcLinkParser q;
@@ -91,8 +96,26 @@ namespace
             tails = tails && endsWith( played, found ) && q.stats().lost == 0;
             if( start < 12 ) worst = std::max( worst, played.size() - found.size() );
         }
-        check( tails, "started at any byte, only the stream's own messages come out" );
-        check( worst <= 1, "started inside the first frame, only that key is lost" );
+        return tails;
+    }
+
+    void parser()
+    {
+        const Messages played{ { 0x90, 60, 100 }, { 0x80, 60, 40 }, { 0x90, 64, 1 }, { 0x80, 64, 127 } };
+        const auto stream = join( { key( true, 60, 100 ), longFrame( 112 ), key( false, 60, 40 ), longFrame( 3000, 0x80 ), key( true, 64, 1 ), longFrame( 0 ), key( false, 64, 127 ) } );
+        BmcLinkParser p;
+        check( midi( stream, 4096, &p ) == played, "Local Switch on: one note per key, with release velocity, from its own frame; the zones' words and long frames passed over" );
+        check( p.stats().frames == 19 && p.stats().skipped == 0 && p.stats().lost == 0, "every frame counted, nothing skipped from the start" );
+        check( midi( stream, 1 ) == played && midi( stream, 5 ) == played && midi( stream, 13 ) == played, "frames split across reads join up" );
+        size_t worst = 0;
+        check( everyStart( stream, played, worst ), "started at any byte, only the stream's own messages come out" );
+        check( worst <= 1, "started inside the first frame, at most that key is lost" );
+
+        // Local Switch off: no MIDI word at all, only the keys' own frames and the status frames.
+        const auto quiet = join( { longFrame( 112 ), key( true, 60, 100, 0 ), longFrame( 112 ), key( false, 60, 40, 0 ), longFrame( 112 ), key( true, 64, 1, 0 ), key( false, 64, 127, 0 ), longFrame( 112 ) } );
+        BmcLinkParser o;
+        check( midi( quiet, 4096, &o ) == played && o.stats().skipped == 0 && o.stats().lost == 0, "Local Switch off: the same notes" );
+        check( everyStart( quiet, played, worst ) && worst <= 1, "and started at any byte, the place found on the keys' and status frames alone" );
 
         Bytes garbage{ 0x06, 0x02, 0x61, 0x00, 0x29, 0x91 }; // a frame's start, cut off
         for( int i = 0; i < 300; ++i ) garbage.push_back( uint8_t( i * 37 + 11 ) );
@@ -104,7 +127,7 @@ namespace
         Bytes absurd = longFrame( 0 );
         absurd[12] = absurd[13] = absurd[14] = absurd[15] = 0xFF;
         BmcLinkParser a;
-        check( midi( join( { key( true, 60, 100 ), absurd, key( false, 60, 40 ), key( true, 64, 1 ) } ), 4096, &a ) == Messages{ { 0x91, 60, 100 }, { 0x81, 60, 40 }, { 0x91, 64, 1 } },
+        check( midi( join( { key( true, 60, 100 ), absurd, key( false, 60, 40 ), key( true, 64, 1 ) } ), 4096, &a ) == Messages{ { 0x90, 60, 100 }, { 0x80, 60, 40 }, { 0x90, 64, 1 } },
                "an absurd length is not followed" );
         check( a.stats().lost == 1, "it loses the place once" );
 
@@ -117,9 +140,13 @@ namespace
         f.raw[4] = 0x0E; f.raw[5] = 0xE0; check( bmcMidi( f, m ) == 3, "a pitch bend" );
         f.raw[4] = 0x09; f.raw[5] = 0xB0; check( bmcMidi( f, m ) == 0, "a code index that disagrees with the status is not MIDI" );
         f.raw[0] = 6 << 1; f.raw[4] = 0x0B; check( bmcMidi( f, m ) == 0, "a panel word is not MIDI" );
+        f.raw[1] = 0x02; f.raw[4] = 0x88; f.raw[5] = 70; f.raw[6] = 0; f.raw[7] = 33;
+        check( bmcKey( f, m ) == 3 && m[0] == 0x90 && m[1] == 70 && m[2] == 33, "a key's own frame: note on, channel 1" );
+        f.raw[4] = 0x87; check( bmcKey( f, m ) == 3 && m[0] == 0x80 && m[2] == 33, "and off, with its release velocity" );
+        f.raw[1] = 0x75; check( bmcKey( f, m ) == 0, "a panel word from elsewhere is no key" );
     }
 
-    // Every frame in a unit's capture: MIDI words from the keys, and the place, from offset `start`.
+    // Every frame in a unit's capture: the keys from their own frames, and the place, from offset `start`.
     void capture( const char* path )
     {
         std::ifstream file( path, std::ios::binary );
@@ -130,25 +157,25 @@ namespace
             keys = 0;
             p.feed( all.data() + start, all.size() - start, [&]( const BmcFrame& f ) {
                 uint8_t m[3];
-                if( const auto n = bmcMidi( f, m ) ) { out.emplace_back( m, m + n ); keys += f.from() == 0x02; }
+                if( const auto n = bmcKey( f, m ) ) { out.emplace_back( m, m + n ); ++keys; }
             } );
             return out;
         };
         BmcLinkParser first;
         size_t keys = 0;
         const auto played = run( 0, first, keys );
-        std::printf( "capture: %zu bytes, %llu frames, %zu MIDI words from 0x02, %zu MIDI messages, %llu bytes skipped, %llu places lost\n", all.size(),
-                     (unsigned long long)first.stats().frames, keys, played.size(), (unsigned long long)first.stats().skipped, (unsigned long long)first.stats().lost );
-        check( keys == 122 && first.stats().skipped == 0 && first.stats().lost == 0, "the capture: 122 key messages, nothing skipped, the place never lost" );
-        // Where each MIDI word's frame starts, walking the headers from offset 0 (where the place is known).
+        std::printf( "capture: %zu bytes, %llu frames, %zu notes from the keys' own frames, %llu bytes skipped, %llu places lost\n", all.size(),
+                     (unsigned long long)first.stats().frames, keys, (unsigned long long)first.stats().skipped, (unsigned long long)first.stats().lost );
+        check( keys == 122 && first.stats().skipped == 0 && first.stats().lost == 0, "the capture: 122 notes from the keys, nothing skipped, the place never lost" );
+        // Where each key's own frame starts, walking the headers from offset 0 (where the place is known).
         std::vector<size_t> at;
         for( size_t i = 0; i + 12 <= all.size(); )
         {
             if( all[i] & 1 ) { i += 16 + ( size_t( all[i + 12] ) | size_t( all[i + 13] ) << 8 | size_t( all[i + 14] ) << 16 | size_t( all[i + 15] ) << 24 ); continue; }
-            if( all[i] == 3 << 1 && all[i + 11] == 4 ) at.push_back( i );
+            if( all[i] == 6 << 1 && all[i + 1] == 0x02 && all[i + 11] == 4 && ( all[i + 4] == 0x88 || all[i + 4] == 0x87 ) ) at.push_back( i );
             i += 12;
         }
-        check( at.size() == played.size(), "the walk finds every MIDI word" );
+        check( at.size() == played.size(), "the walk finds every key's frame" );
         bool exact = true; uint64_t lost = 0, skipped = 0;
         for( size_t start = 1; start < std::min<size_t>( 2048, all.size() ); ++start )
         {
@@ -160,7 +187,7 @@ namespace
             lost += p.stats().lost;
             skipped = std::max<uint64_t>( skipped, p.stats().skipped );
         }
-        std::printf( "capture from offsets 1 to 2047: the most bytes skipped %llu, places lost %llu, every MIDI word whose frame starts at or after the offset found and nothing else: %s\n",
+        std::printf( "capture from offsets 1 to 2047: the most bytes skipped %llu, places lost %llu, every key whose frame starts at or after the offset found and nothing else: %s\n",
                      (unsigned long long)skipped, (unsigned long long)lost, exact ? "yes" : "no" );
         check( exact && lost == 0, "the capture from any of its first 2 KiB of offsets gives exactly its own messages from there" );
     }
@@ -186,11 +213,14 @@ namespace
             check( wait( [&] { return reader.stats().stale == 1; } ) && heard.empty(), "a key in its first moments is dropped" );
             std::this_thread::sleep_for( 400ms );
             put( join( { longFrame( 112 ), key( true, 60, 100 ), longFrame( 112 ), key( false, 60, 40 ), key( true, 62, 70 ), shortFrame( 3, 0x81, 0x61, { 0x0B, 0xB1, 64, 127 } ) } ) );
-            check( wait( [&] { return heard.size() == 4; } ), "then each key is one message, its second form ignored" );
+            check( wait( [&] { return heard.size() == 4; } ), "then each key is one message, the zones' words ignored" );
+            put( join( { key( true, 65, 80, 0 ), key( false, 65, 30, 0 ) } ) ); // Local Switch off
+            check( wait( [&] { return heard.size() == 6; } ), "a key with Local Switch off is read too" );
             {
                 std::lock_guard l( lock );
-                check( heard == Messages{ { 0x91, 60, 100 }, { 0x81, 60, 40 }, { 0x91, 62, 70 }, { 0xB1, 64, 127 } } && inputs == std::vector<size_t>{ 0, 0, 0, 1 },
-                       "the keys as FANTOM keys, MIDI from 0x81 as its own input" );
+                check( heard == Messages{ { 0x90, 60, 100 }, { 0x80, 60, 40 }, { 0x90, 62, 70 }, { 0xB1, 64, 127 }, { 0x90, 65, 80 }, { 0x80, 65, 30 } } &&
+                           inputs == std::vector<size_t>{ 0, 0, 0, 1, 0, 0 },
+                       "the keys as FANTOM keys on channel 1, MIDI from 0x81 as its own input" );
                 check( std::any_of( logged.begin(), logged.end(), []( const std::string& s ) { return s.find( "dropped 1 MIDI messages" ) != std::string::npos; } ), "the drop is logged" );
             }
             put( shortFrame( 5, 0x02, 0x60, { 1, 2 } ) );
@@ -200,10 +230,10 @@ namespace
             check( bmcInputName( 0 ) == "FANTOM keys" && bmcInputName( 1 ) == "FANTOM MIDI 0x81", "the inputs' names" );
 
             ::close( master ); // the device ends
-            check( wait( [&] { return heard.size() == 6; } ), "a device that ends ends the notes held" );
+            check( wait( [&] { return heard.size() == 8; } ), "a device that ends ends the notes held" );
             {
                 std::lock_guard l( lock );
-                check( heard.size() == 6 && heard[4] == Bytes{ 0x81, 62, 0 } && heard[5] == Bytes{ 0xB1, 64, 0 }, "note off for the held key, sustain off for the held pedal" );
+                check( heard.size() == 8 && heard[6] == Bytes{ 0x80, 62, 0 } && heard[7] == Bytes{ 0xB1, 64, 0 }, "note off for the held key, sustain off for the held pedal" );
             }
             const auto cpu = double( std::clock() ) / CLOCKS_PER_SEC;
             std::this_thread::sleep_for( 1500ms );

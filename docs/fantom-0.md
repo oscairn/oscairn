@@ -269,6 +269,14 @@ played into `hw:1,0` while a program kept reading `/dev/ttyGS0`.
   off, then the note, 0 and the velocity). In that capture the two always agree, and the panel
   word's third byte is always 0: it adds no resolution. The MIDI word's frame has a stale byte
   past its count (the note again).
+- **The MIDI words are Roland's zones' notes, the panel word is the key** (a trace later that
+  evening, Roland's app running, while the owner switched Local Switch off and on). With Local
+  Switch on, each key event came as three kind-3 MIDI words from 0x02 to 0x61, status 0x90, 0x91
+  and 0x92 for the same note and velocity, one per active zone on its channel (the earlier
+  capture had one, 0x91, because one zone was active then), and then the one kind-6 frame
+  `0c 02 60 00 | 88 nn 00 vv ...` (0x87 for off). With Local Switch off, only the kind-6 frame
+  came. So the kind-6 frame is the key itself, one per key event whatever the zones and Local
+  Switch are, and the MIDI words echo what Roland's engine plays.
 - **The sound engine reports regardless:** long frames of kind 9 from 0xE1 to 0x60, sub-type 9,
   112 bytes each, about ten a second, at rest too. Their contents were not read.
 - **What is not read waits.** With a program reading the link, Roland's engine went on playing
@@ -386,6 +394,10 @@ files stay off the repository.
   places on the Linux side the keyboard's messages are addressed to. 0x81, 0x91 and 0xA1 are
   three MIDI outputs the app picks between by number, and it treats 0x81, 0xA1, 0xB2, 0xC8 and
   0xD8 as MIDI inputs; which is the DIN socket and which a USB port was not determined.
+- **Local Switch** (traced November 12, 2026, as Roland's app turned it off and on in its menu,
+  with the stock BMC firmware): system parameter 0xCF, sent to address 0xEF as
+  `0e 00 ef 01 | 00 00 00 cf vv 00 00 | 05` (vv 0 off, 1 on), each followed by the companion
+  frame `10 00 ef 00 | 01 00 00 00 0c 0c ff | 07`.
 - **Whether anything must be sent regularly** to keep the BMC side talking was not
   determined; the 58 interrupts a second the survey saw at rest are unexplained.
 
@@ -397,7 +409,9 @@ files stay off the repository.
   control changes 64 (hold) and 120 (all sounds off) from the same address are taken the same
   way. The app's "Kbd Task" thread is what takes them. A second form, a panel word of kind 8
   (on) or 7 (off) from 0x02 with a 7-bit note and a 10-bit value, is recognized only by the
-  app's debugging; the unit sends it with every key, with the same velocity.
+  app's debugging; the unit sends it with every key, with the same velocity, and it is the one
+  that comes whatever Roland's zones and Local Switch are
+  ([With Roland's app stopped](#with-rolands-app-stopped)).
 - **The test tool gets them too** (the test tool): its keyboard test shows each key's note
   and velocity from note-on and note-off messages, with Roland's app not running. That they
   come over the same link is inferred: its only other MIDI code, for an ALSA raw MIDI device,
@@ -906,20 +920,24 @@ open it reads without pause, whatever the engine is doing and whether or not the
 ignored, since what it does not read waits and Roland's engine then holds its notes. If the
 device fails or ends it is opened again a second later.
 
-- **Frames:** each key's MIDI word (kind 3) is one note, on or off with its velocity, the
-  release velocity included. The panel word sent with it (kind 6 from 0x02) is the same key
-  again and is passed over, and so are the sound engine's status frames (kind 9 from 0xE1).
-  Kind-3 MIDI words from 0x81, 0xA1, 0xB2, 0xC8 and 0xD8, the addresses Roland's app takes MIDI
-  from its MIDI ports on, are read the same way: notes, controllers, pitch bend, pressure and
+- **Frames:** each key's own frame (kind 6 from 0x02: 0x88 on or 0x87 off, the note, 0, the
+  velocity) is one note, on or off with its velocity, the release velocity included. It comes
+  once per key event whatever Roland's zones and Local Switch are. The MIDI words from 0x02 are
+  Roland's zones' notes for the key (one per active zone, none with Local Switch off) and are
+  passed over, so are the sound engine's status frames (kind 9 from 0xE1). Before November 12's
+  trace the reader took the keys from those MIDI words, which gave a note per active zone for
+  each key and none with Local Switch off. Kind-3 MIDI words from 0x81, 0xA1, 0xB2, 0xC8 and
+  0xD8, the addresses Roland's app takes MIDI from its MIDI ports on, are read as MIDI: notes, controllers, pitch bend, pressure and
   program changes. Anything else is counted and logged with its header bytes, at most ten a
   second.
 - **Inputs:** the keys are a MIDI input named `FANTOM keys`, and each of the five addresses one
   named by its address (`FANTOM MIDI 0x81`) until it is known which port is which. They are
   listed in `session.status` and `controllers.inputs` after the devices' inputs, whether or not
   anything has arrived, each with a source number kept while the engine runs, and play like any
-  other input: parts' device rules, zones, controller profiles, ignoring and learn. The channel
-  is the word's own: the keys play on channel 2 (status 0x91), and a part takes them as it takes
-  any input's channels.
+  other input: parts' device rules, zones, controller profiles, ignoring and learn. A key's own
+  frame carries no channel, so the keys play on channel 1, the channel a keyboard sends on by
+  default; a part takes them as it takes any input's channels. The other inputs' channels are
+  their words' own.
 - **Finding its place:** the link has no delimiter or checksum. The reader takes a position as a
   frame's start only where a frame it knows begins (a MIDI word whose code index agrees with its
   status, a panel word, a status frame no longer than 4 KiB) and the next frame's header after
@@ -927,7 +945,11 @@ device fails or ends it is opened again a second later.
   than seven payload bytes, a long frame over 1 MiB) has it search again from the next byte.
   Started at each of the first 2,048 byte offsets of the owner's capture (and, once, at every
   offset), it found every key event whose frame starts after the offset and nothing else, never
-  skipping more than 127 bytes.
+  skipping more than 127 bytes; read from the keys' own frames, that capture gives its 122 note
+  events. With Local Switch off no MIDI word flows at all: the keys' own frames and the status
+  frames are enough to find the place, on a stream of that shape built in the test and on a
+  capture of the unit with Local Switch off (300 key frames in 18 seconds, all found from each
+  of the first 2,048 offsets; the capture stays off the repository).
 - **What was queued:** for the first half second after each open, and until a read leaves
   nothing waiting, MIDI words are dropped (counted and logged once), so stale notes do not all
   sound at once. When the device fails or ends, each note it passed on and has not seen end

@@ -126,8 +126,9 @@ namespace oscairn::host
         uint8_t midi[3];
         size_t size = 0;
         const auto source = std::find( bmcSources.begin(), bmcSources.end(), f.from() );
-        if( f.isLong ? f.kind() == 9 && f.from() == 0xE1 : f.kind() == 6 && f.from() == 0x02 ) return; // the sound engine's status; the keys' second form
-        if( source != bmcSources.end() && ( size = bmcMidi( f, midi ) ) > 0 )
+        if( f.isLong && f.kind() == 9 && f.from() == 0xE1 ) return; // the sound engine's status
+        if( !f.isLong && f.kind() == 3 && f.from() == 0x02 ) return; // Roland's zones' notes for a key, not the key
+        if( ( size = bmcKey( f, midi ) ) > 0 || ( source != bmcSources.end() && f.from() != 0x02 && ( size = bmcMidi( f, midi ) ) > 0 ) )
         {
             if( settling_ ) { ++stale_; ++staleSinceOpen_; return; }
             deliver( size_t( source - bmcSources.begin() ), midi, size );

@@ -5,16 +5,19 @@
 // the control thread opens, prepares and refuses Performances in quick succession, so one change
 // comes while the last still rings out or is being prepared. Among them: two sharing a Basic Synth
 // (native sound contexts), Delays and plain CLAP instruments, one of many instruments the budget
-// refuses, cuts ("opened at once") and a budget changed between switches.
+// refuses, cuts ("opened at once") and a budget changed between switches. With plugins in workers,
+// a thread of its own also kills a worker now and then, so failures and restarts race the loads.
 //   oscairn-performance-switch-stress-test SYNTH.clap DELAY.clap INSTRUMENT.clap
 // OSCAIRN_STRESS=N switches N times as often.
 #include "oscairn/session.h"
 #include "oscairn/midi_input.h"
+#include "oscairn/plugin_host.h"
 #include "../../plugin-host/src/StateFiles.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <csignal>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +25,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace oscairn;
 namespace fs = std::filesystem;
@@ -72,6 +78,39 @@ int main(int argc, char** argv)
         const auto heavy = temp.path / "heavy"; save(heavy, 3, 12, argv[1], argv[2], argv[3]);
         performances.push_back(heavy);
 
+#ifndef _WIN32
+        // A Performance whose workers were given up (on the unit: failed as too slow, again and
+        // again): the next one opens on instances of its own, not into the failed shared engines and
+        // effect engines, which refused every later Performance using those plugins ("cannot restore
+        // ... not restarted").
+        if(!placementPolicy().worker.empty())
+        {
+            Session g(48000, frames);
+            g.loadPerformance(performances[0].string());
+            std::string why;
+            for(int kill = 0; kill < 8 && why.find("not restarted") == std::string::npos; ++kill)
+            {
+                if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+                {
+                    char line[32];
+                    while(std::fgets(line, sizeof line, list)) ::kill(std::atoi(line), SIGKILL);
+                    pclose(list);
+                }
+                for(int i = 0; i < 300 && why.find("not restarted") == std::string::npos; ++i)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    const auto f = g.sessionStatus().failures;
+                    why = f.empty() ? "" : f[0].reason;
+                    if(i > 20 && why.empty()) break;
+                }
+            }
+            check(why.find("not restarted") != std::string::npos, "the first Performance's workers given up: " + why);
+            std::string refused;
+            try { g.loadPerformance(performances[1].string()); } catch(const std::exception& e) { refused = e.what(); }
+            check(refused.empty(), "the next Performance opens past its failed instances: " + refused);
+        }
+#endif
+
         Session s(48000, frames);
         std::atomic<bool> stop{false};
         std::atomic<uint64_t> rendered{0};
@@ -99,6 +138,26 @@ int main(int argc, char** argv)
             }
         });
 
+        // Workers failing under the loads, as a worker too slow on the unit is failed and restarted.
+        std::atomic<int> killed{0};
+        std::thread killer([&] {
+#ifndef _WIN32
+            if(placementPolicy().worker.empty()) return;
+            std::mt19937 rng(13);
+            while(!stop)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50 + rng() % 400));
+                std::vector<int> pids;
+                if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+                {
+                    char line[32];
+                    while(std::fgets(line, sizeof line, list)) pids.push_back(std::atoi(line));
+                    pclose(list);
+                }
+                if(!pids.empty() && ::kill(pids[rng() % pids.size()], SIGKILL) == 0) ++killed;
+            }
+#endif
+        });
         const char* stress = std::getenv("OSCAIRN_STRESS");
         const int switches = 60 * std::max(1, stress ? std::atoi(stress) : 1);
         std::mt19937 rng(11);
@@ -121,7 +180,7 @@ int main(int argc, char** argv)
                 s.loadPerformance(to.string());
                 ++opened;
             }
-            catch(const std::exception&) { ++refused; }
+            catch(const std::exception& e) { ++refused; if(std::getenv("OSCAIRN_STRESS_VERBOSE")) std::fprintf(stderr, "refused: %s\n", e.what()); }
             if(rng() % 4 == 0) { s.note(true, int(rng() % 128), .9); }
             serve(int(rng() % 40)); // the next change often comes while this one still rings out
         }
@@ -129,10 +188,11 @@ int main(int argc, char** argv)
         serve(200);
         stop = true;
         audio.join();
+        killer.join();
         render(s, 4);
         check(opened > switches / 4, "most changes opened: " + std::to_string(opened) + " of " + std::to_string(switches));
         check(rendered > 0, "the audio thread rendered");
-        std::printf("%d switches: %d opened (%d prepared ahead), %d refused, %llu blocks\n", switches, opened, prepared, refused, (unsigned long long)rendered.load());
+        std::printf("%d switches: %d opened (%d prepared ahead), %d refused, %llu blocks, %d workers killed\n", switches, opened, prepared, refused, (unsigned long long)rendered.load(), killed.load());
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(failures) return 1;

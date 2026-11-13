@@ -904,7 +904,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     std::map<std::string,uint32_t> group;for(auto node:nodes)++group[text(field(node,"engine"))];
     std::map<NodeId,uint32_t> claimed; // contexts taken per playing engine
     auto playing=[&](const std::string& id,const std::string& path,const std::string& version,uint32_t count)->std::optional<NodeId>{
-        for(const auto& [n,name]:nodes_){const auto& h=graph_.host(n);const auto& p=h.descriptor();if(p.id!=id || p.path!=path || p.version!=version)continue;
+        for(const auto& [n,name]:nodes_){const auto& h=graph_.host(n);const auto& p=h.descriptor();if(p.id!=id || p.path!=path || p.version!=version || !h.failure().empty())continue;
             const auto r=h.effectResources();auto& taken=claimed[graph_.effectSource(n)];
             if(r && r->capacity>=r->prepared+taken+count){taken+=count;return n;}}
         return std::nullopt;};
@@ -932,7 +932,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     auto take=[&](V plugin,const std::string& key)->std::optional<size_t>{
         if(free.empty())return std::nullopt;
         const auto w=want(plugin);if(!w)return std::nullopt;
-        auto fits=[&](size_t i){return free[i].host && same(*w,*free[i].host,free[i].loaded);};
+        auto fits=[&](size_t i){return free[i].host && free[i].host->failure().empty() && same(*w,*free[i].host,free[i].loaded);}; // one kept warm may have failed since
         // One that holds this node's state already first (switching back), then kept warm, least recently
         // used first, then a playing one only where keeping it warm would not fit (the middle rule).
         for(size_t i=0;i<free.size();++i)if(free[i].loaded.source==source(key) && fits(i))return i;
@@ -983,7 +983,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         std::vector<std::shared_ptr<SoundContext::Engine>> out;if(keepInstances_)return out;
         std::optional<Want> w;
         for(const auto& [n,name]:nodes_)if(const auto* c=dynamic_cast<const SoundContext*>(&graph_.host(n))){
-            const auto& e=c->engine();if(std::find(out.begin(),out.end(),e)!=out.end())continue;
+            const auto& e=c->engine();if(std::find(out.begin(),out.end(),e)!=out.end() || !e->host->failure().empty())continue; // a failed worker's engine takes nothing
             if(!w && !(w=want(plugin)))return out;
             if(same(*w,*e->host,Loaded{e->build,{}}))out.push_back(e);}
         return out;};

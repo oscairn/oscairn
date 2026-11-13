@@ -1,3 +1,3 @@
 # Arguments for the Oscairn app, as /usr/libexec/oscairn-session starts it. Nothing starts it
 # at boot in the bundle: it runs only when started through start-chroot.sh.
-OSCAIRN_ARGS="--profile fantom-07 --play"
+OSCAIRN_ARGS="--profile fantom-07"

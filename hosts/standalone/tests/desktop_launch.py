@@ -13,6 +13,9 @@ opens no MIDI port either (its controllers' Mackie and feedback ports): its log 
 quits; one left behind (the app crashed or timed out, which leaves it running by design) is
 stopped here, by the PID in its lease, only when that process is this run's.
 
+Nothing plays at start unasked: each run, and one with the FANTOM bundle's own arguments (its
+/etc/default/oscairn), must say the transport is stopped.
+
 --snapshot renders off screen: on macOS, the window server's list of on-screen windows is read
 throughout each run, and must never hold one of the app's (no splash, no window)."""
 import ctypes
@@ -185,12 +188,19 @@ def main():
     fantom = os.path.join(out, 'fantom-07.json')
     with open(fantom, 'w') as f:
         json.dump(profile, f)
+    # The FANTOM bundle's own arguments (its /etc/default/oscairn), with that profile: nothing plays
+    # at start unless asked.
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'os', 'buildroot', 'board', 'fantom-bundle',
+                           'overlay', 'etc', 'default', 'oscairn')) as f:
+        bundle = re.search(r'^OSCAIRN_ARGS="([^"]*)"', f.read(), re.M).group(1).split()
+    bundle = [fantom if a == 'fantom-07' else a for a in bundle]
     runs = [('home', ['--size', '900x600'], 1, desktop),
             ('library', ['--app', 'library', '--size', '900x600'], 2, desktop),
             ('kick', ['--profile', 'kick', '--size', '1024x600'], 1, device),
             ('fantom', ['--profile', fantom, '--size', '1280x720'], 1, device),
             ('fantom-library', ['--profile', fantom, '--app', 'library', '--size', '1280x720'], 1, device),
-            ('fantom-plugins', ['--profile', fantom, '--app', 'plugins', '--size', '1280x720'], 1, device)]
+            ('fantom-plugins', ['--profile', fantom, '--app', 'plugins', '--size', '1280x720'], 1, device),
+            ('fantom-bundle', bundle + ['--size', '1280x720'], 1, device)]
     for name, extra, windows, main_window in runs:
         folder = tempfile.mkdtemp(prefix=name + '-', dir=out)
         os.makedirs(os.path.join(folder, 'data'))
@@ -237,6 +247,7 @@ def main():
                 f'{name}: the app opened a MIDI port of its own\n{run.stderr}'
             said = f'oscairn: top-level windows: {windows}; the main one {main_window}'
             assert said in run.stderr, f'{name}: the app did not say "{said}"\n{run.stderr}'
+            assert 'oscairn: the transport stopped' in run.stderr, f'{name}: the transport plays at start, unasked\n{run.stderr}'
             png = os.path.join(folder, name + '.png')
             assert os.path.isfile(png) and os.path.getsize(png) > 0, f'{name}: no PNG written\n{run.stderr}'
             width, height, colors = png_pixels(png)

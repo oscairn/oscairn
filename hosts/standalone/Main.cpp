@@ -1193,6 +1193,7 @@ namespace oscairn::standalone
             // What the window system would have been asked for (none was: off screen), for desktop-launch.
             std::fprintf( stderr, "oscairn: top-level windows: %d; the main one %s\n", juce::TopLevelWindow::getNumTopLevelWindows(),
                           fillsScreen( *window_ ) && !window_->isUsingNativeTitleBar() && window_->getTitleBarHeight() == 0 && window_->getBorderThickness().isEmpty() ? "full screen, undecorated" : "a desktop window" );
+            std::fprintf( stderr, "oscairn: the transport %s\n", engine_->status().playing ? "playing" : "stopped" );
             file.deleteFile();
             juce::FileOutputStream out( file );
             if( !out.openedOk() || !juce::PNGImageFormat().writeImageToStream( image, out ) )

@@ -659,6 +659,28 @@ namespace oscairn::standalone
         if(!controlReady()) return "The engine is busy; try again in a moment.";
         try{out=control_->setlist(id);return {};}catch(const std::exception& e){return e.what();}
     }
+    std::vector<Control::LibraryType> Engine::libraryTypes() const
+    {
+        if(!connected() || !controlReady()) return {};
+        try{return control_->libraryTypes();}catch(const std::exception& e){std::fprintf(stderr,"oscairn: item types: %s\n",e.what());return {};}
+    }
+    std::vector<std::string> Engine::libraryFolders() const
+    {
+        if(!connected() || !controlReady()) return {};
+        try{return control_->libraryFolders();}catch(const std::exception& e){std::fprintf(stderr,"oscairn: library folders: %s\n",e.what());return {};}
+    }
+    std::string Engine::addLibraryFolder(const std::string& folder)
+    {
+        if(!connected()) return "The engine is not running.";
+        if(!controlReady()) return "The engine is busy; try again in a moment.";
+        try{control_->addLibraryFolder(folder);return {};}catch(const std::exception& e){return e.what();}
+    }
+    std::string Engine::removeLibraryFolder(const std::string& folder)
+    {
+        if(!connected()) return "The engine is not running.";
+        if(!controlReady()) return "The engine is busy; try again in a moment.";
+        try{control_->removeLibraryFolder(folder);return {};}catch(const std::exception& e){return e.what();}
+    }
     std::string Engine::saveSetlist(const Control::Setlist& setlist, std::string& id)
     {
         if(!connected()) return "The engine is not running.";

@@ -24,11 +24,15 @@ namespace oscairn
         std::string identity; // "id", "content", "payload" or "path"
         struct Field { std::string id, name; bool facet = false; };
         std::vector<Field> fields;
+        // The package that declares it (step 3), under whose ID its ID is; empty for Oscairn's own.
+        std::string owner = {};
         // What library items, archive manifests and actions (oscairn.pick.<kind>) call it: its ID,
         // without "oscairn." for Oscairn's own ("performance").
         std::string kind() const;
         // An item kept as a folder holding a document with an info block, which the library indexes.
         bool indexed() const { return storage == "managed" && !document.empty(); }
+        // Files in the user's own folders, indexed where they are and never moved or changed.
+        bool inPlace() const { return storage == "in-place"; }
     };
 
     // A type's manifest, checked (RFC 0023's rules); throws std::invalid_argument on a bad one.
@@ -40,4 +44,10 @@ namespace oscairn
     std::optional<ItemType> itemType(std::string_view idOrKind);
     // Adds a type; refuses (std::invalid_argument) one whose ID, kind or folder another type has.
     void addItemType(const ItemType& type);
+    // Forgets a type a package declared; Oscairn's own stay.
+    void removeItemType(std::string_view id);
+    // A package's type (step 3): its manifest as an archive carries it, under Types/<owner>/,
+    // checked, its ID under the owner's (a package declares only IDs under its own name), and its
+    // folder not one of Oscairn's own types'. Throws std::invalid_argument.
+    ItemType readDeclaredType(std::string_view manifest, const std::string& owner);
 }

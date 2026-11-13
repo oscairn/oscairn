@@ -14,6 +14,7 @@ A library, an exported Performance, Sound or setlist, or a plugin package is one
 | `Assets/<first 16 hex digits of the SHA-256>/<file>` | Each sample the items' plugins use, once; in an [asset package](#asset-packages), `Assets/<path>`, the library's files at their paths |
 | `Plugins/<format>/<id>@<version>/<platform>/<bundle>` | Each plugin build the items use ([RFC 0006](rfcs/0006-packages-and-portability.md)), a file or a bundle folder as installed; characters other than letters, digits, `.`, `-`, `@` and `_` in the ID and version are `_` |
 | `Licenses/<file>` | Its license texts and notices ([license and source](#license-and-source)) |
+| `Types/<package ID>/<file>.json` | A library's: each [item type](rfcs/0023-item-types.md#the-manifest) it declares, its ID under that package ID, or the type of an exported item a package declared; installed with it ([RFC 0023](rfcs/0023-item-types.md) step 3) |
 
 The manifest:
 
@@ -423,6 +424,10 @@ nothing behind:
   lists that is not there (but under an absent build, below), and a plugin build whose digest is
   not its own;
 - a signature that does not verify, at any level, or a malformed one;
+- an item type under `Types/` that is not `Types/<package ID>/<file>.json` (at most 64 KiB), whose
+  manifest does not read, whose ID is not under that package ID, that takes the folder or ID of
+  Oscairn's own types or of another package's type on the device, or that two manifests declare;
+  and one in a plugin or asset package;
 - a setlist that does not read as its [format](setlist-format.md) says, or one of whose slots names a
   Performance the archive does not list as an item of kind `performance` (a placeholder, with no
   ID, names none).

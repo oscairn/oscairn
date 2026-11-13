@@ -811,13 +811,14 @@ namespace oscairn::standalone
         if(item.kind == "performance" || item.kind == "sound") menu.addItem(9, auditioning_.id == item.id ? "Stop audition" : "Audition");
         menu.addItem(4, item.favorite ? "Remove from favorites" : "Add to favorites");
         menu.addSeparator();
-        menu.addItem(5, "Edit name, description and tags...", own);
+        const bool writable = own && !item.readOnly; // RFC 0023 step 3: its type's package gone, or indexed in place
+        menu.addItem(5, "Edit name, description and tags...", writable);
         addColors(colors, item.color, 100, "None");
-        menu.addSubMenu("Color", colors, own);
-        menu.addItem(6, own ? "Duplicate" : "Copy into my own, to edit");
-        menu.addItem(8, "Export...");
+        menu.addSubMenu("Color", colors, writable);
+        menu.addItem(6, own ? "Duplicate" : "Copy into my own, to edit", !item.readOnly);
+        menu.addItem(8, "Export...", !item.inPlace);
         menu.addSeparator();
-        menu.addItem(7, "Delete...");
+        menu.addItem(7, "Delete...", !item.inPlace);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(list_.getComponentForRowNumber(row)), [safe = juce::Component::SafePointer<LibraryPane>(this), item](int chosen) {
             if(!safe || chosen <= 0) return;
             // The item's row now: the list may have been refreshed, and reordered, while the menu was open.
@@ -985,6 +986,13 @@ namespace oscairn::standalone
         const auto hiddenTags = result_.hiddenTags;
         for(size_t i = 0; i < hiddenTags.size(); ++i) hidden.addItem(1000 + int(i), text(hiddenTags[i]));
         menu.addItem(1, "Export library...");
+        // Folders indexed in place (RFC 0023 step 3): each listed, to take out, and another to add.
+        const auto folders = engine_.libraryFolders();
+        juce::PopupMenu folderMenu;
+        for(size_t i = 0; i < folders.size(); ++i) folderMenu.addItem(3000 + int(i), "Stop indexing " + text(folders[i]));
+        folderMenu.addSeparator();
+        folderMenu.addItem(2999, "Index a folder in place...");
+        menu.addSubMenu("Folders indexed in place", folderMenu);
         menu.addSubMenu("Show a hidden tag", hidden, !hiddenTags.empty());
         // Plugins installed with archives (RFC 0006): what uses each, another platform's build, removal.
         auto plugins = engine_.installedPlugins();
@@ -1022,9 +1030,27 @@ namespace oscairn::standalone
         if(!installed.empty()) menu.addSeparator();
         for(size_t i = 0; i < installed.size(); ++i)
             menu.addItem(int(i) + 2, "Uninstall " + text(installed[i].name) + " (" + juce::String(int(installed[i].items)) + (installed[i].items == 1 ? " item)" : " items)"));
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraries_), [safe = juce::Component::SafePointer<LibraryPane>(this), installed, hiddenTags, plugins](int chosen) {
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraries_), [safe = juce::Component::SafePointer<LibraryPane>(this), installed, hiddenTags, plugins, folders](int chosen) {
             if(!safe || chosen <= 0) return;
             if(chosen == 1) { safe->exportLibrary(); return; }
+            if(chosen == 2999)
+            {
+                safe->chooser_ = std::make_unique<juce::FileChooser>("Index a folder in place", juce::File::getSpecialLocation(juce::File::userMusicDirectory));
+                safe->chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [safe](const juce::FileChooser& fc) {
+                    if(!safe || fc.getResult() == juce::File()) return;
+                    const auto error = safe->engine_.addLibraryFolder(fc.getResult().getFullPathName().toStdString());
+                    safe->refresh();
+                    safe->tell(error.empty() ? fc.getResult().getFileName() + " is indexed in place." : text(error));
+                });
+                return;
+            }
+            if(chosen >= 3000 && chosen < 3000 + int(folders.size()))
+            {
+                const auto error = safe->engine_.removeLibraryFolder(folders[size_t(chosen - 3000)]);
+                safe->refresh();
+                if(!error.empty()) safe->tell(text(error));
+                return;
+            }
             if(chosen >= 100000)
             {
                 const auto& plugin = plugins[size_t((chosen - 100000) / 2)];

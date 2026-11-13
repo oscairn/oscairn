@@ -146,4 +146,22 @@ namespace oscairn
             if(t.id == type.id || t.kind() == type.kind() || lower(t.folder) == lower(type.folder)) bad("another type has its ID or folder: " + t.id);
         types().push_back(type);
     }
+
+    void removeItemType(std::string_view id)
+    {
+        std::lock_guard lock(typesMutex);
+        std::erase_if(types(), [&](const ItemType& t) { return t.id == id && !t.owner.empty(); });
+    }
+
+    ItemType readDeclaredType(std::string_view manifest, const std::string& owner)
+    {
+        auto t = readItemType(manifest);
+        if(owner.empty() || !t.id.starts_with(owner + ".")) bad(t.id + " is not under its package's ID, " + owner);
+        auto lower = [](std::string s) { for(auto& c : s) c = char(std::tolower(static_cast<unsigned char>(c))); return s; };
+        std::lock_guard lock(typesMutex);
+        for(const auto& b : types())
+            if(b.owner.empty() && (lower(b.folder) == lower(t.folder) || b.id == t.id)) bad(t.id + " takes the folder or ID of Oscairn's own " + b.id);
+        t.owner = owner;
+        return t;
+    }
 }

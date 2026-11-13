@@ -473,6 +473,13 @@ int main(int argc, char** argv)
                 library.showKind("setlist");
                 check(wait([&] { return library.items().size() == 1 && library.items()[0].name == "Friday"; }), "the Library lists it under Setlists");
                 library.showKind("performance");
+                // Item types and folders indexed in place, through the engine (RFC 0023 step 3).
+                const auto types = engine.libraryTypes();
+                check(std::any_of(types.begin(), types.end(), [](const auto& t) { return t.id == "oscairn.setlist" && t.kind == "setlist" && t.owner.empty() && !t.readOnly; }), "the engine lists its item types");
+                const auto indexed = data.getChildFile("Indexed");
+                indexed.createDirectory();
+                check(engine.addLibraryFolder(indexed.getFullPathName().toStdString()).empty() && engine.libraryFolders().size() == 1, "a folder indexed in place, through the engine");
+                check(engine.removeLibraryFolder(engine.libraryFolders().front()).empty() && engine.libraryFolders().empty(), "and taken out");
                 // Played in order: each opens its Performance, here while a refresh is running, as
                 // the engine starts one every half second, and another waits its turn.
                 engine.soundAction({}); engine.soundAction({});

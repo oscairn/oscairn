@@ -201,6 +201,12 @@ namespace oscairn::standalone
         // its ID into id (a new one's, or a locked library's saved as the user's own); the error, or empty.
         std::string setlist(const std::string& id, Control::Setlist& out) const;
         std::string saveSetlist(const Control::Setlist& setlist, std::string& id);
+        // The item types the engine knows (RFC 0023), those packages declared too; none while it is busy or gone.
+        std::vector<Control::LibraryType> libraryTypes() const;
+        // Folders indexed in place (RFC 0023 step 3): the list (none while busy), and adding or removing one (the error, or empty).
+        std::vector<std::string> libraryFolders() const;
+        std::string addLibraryFolder(const std::string& folder);
+        std::string removeLibraryFolder(const std::string& folder);
         std::string uninstallLibrary(const std::string& id);
         // The plugin store (RFC 0006): what is installed and what uses it (nothing while the
         // engine is busy), and removing a plugin's builds (the error, or empty). Another

@@ -166,6 +166,14 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         rpc('setlists.get', {'id': performance['id']}, expect_error=True)
         rpc('library.delete', {'id': friday})
         assert rpc('library.query', {'type': 'oscairn.setlist'})['total'] == 0
+        # Item types (RFC 0023), and a folder indexed in place.
+        assert {'id': 'oscairn.setlist', 'kind': 'setlist', 'name': 'Setlist', 'plural': 'Setlists', 'storage': 'managed', 'owner': '', 'readOnly': False} in rpc('library.types')['types']
+        (home / 'Indexed').mkdir()
+        rpc('library.addFolder', {'folder': str(home / 'Indexed')})
+        assert rpc('library.folders')['folders'] == [str((home / 'Indexed').resolve())]
+        rpc('library.removeFolder', {'folder': rpc('library.folders')['folders'][0]})
+        assert rpc('library.folders')['folders'] == []
+        rpc('library.addFolder', {'folder': str(home / 'Nothing')}, expect_error=True)
         added = rpc('parts.fromSound', {'id': sound['id']})['part']
         loaded = rpc('parts.loadSound', {'part': part, 'id': sound['id']})
         assert loaded == {'accepted': True, 'flagged': ['the wire from the input to synth was removed', 'the wire from synth to the output was removed']}, loaded

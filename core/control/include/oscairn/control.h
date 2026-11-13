@@ -292,7 +292,10 @@ namespace oscairn
         // library: the installed library it is in (its ID), locked; empty for the user's own.
         // unfit: with a budget set, why it does not fit this device, from its plugins' estimates
         // (RFC 0025: measured here, else their packages'); empty when it fits or is not known.
-        struct LibraryItem { std::string id, kind = "performance", name, description, path; std::vector<std::string> tags; bool favorite = false; uint32_t recent = 0; std::string color, revision, hash, library; Origin origin; std::string unfit = {}; };
+        // readOnly (RFC 0023 step 3): of a type whose package is not installed here, or indexed in
+        // place; inPlace: a file in a folder the user chose, listed where it is, never changed.
+        struct LibraryItem { std::string id, kind = "performance", name, description, path; std::vector<std::string> tags; bool favorite = false; uint32_t recent = 0; std::string color, revision, hash, library; Origin origin; std::string unfit = {};
+                             bool readOnly = false, inPlace = false; };
         // kind: one item type's kind ("performance", "sound"...); empty for every type. types: item
         // types by ID or kind (RFC 0023), any of them; empty for every type. source: "mine" for the
         // user's own items, an installed library's ID for its items, empty for all. id: that item
@@ -312,6 +315,16 @@ namespace oscairn
         // ignored); a locked library's items refuse. Copy: a new item of the user's own with the
         // same contents and a new ID ("<name> copy" for one of theirs); returns its ID.
         virtual void libraryEdit(const std::string& id, const PerformanceInfo& info) = 0;
+        // The item types this device knows (RFC 0023): Oscairn's own and those packages declared
+        // (owner: that package's ID; readOnly: it is not installed here, so its items are listed
+        // read-only until removed). storage: "managed", "content" or "in-place".
+        struct LibraryType { std::string id, kind, name, plural, storage, owner; bool readOnly = false; };
+        virtual std::vector<LibraryType> libraryTypes() = 0;
+        // Folders indexed in place (RFC 0023 step 3), the user's choice: their files of the
+        // in-place types are listed where they are, by name and path, and never moved or changed.
+        virtual std::vector<std::string> libraryFolders() = 0;
+        virtual void addLibraryFolder(const std::string& folder) = 0;
+        virtual void removeLibraryFolder(const std::string& folder) = 0;
         // Setlists (docs/setlist-format.md), a type of library item (RFC 0023): named pages, each
         // an ordered list of slots. A slot is empty, a Performance by its library ID with the name
         // it had when last seen, or a placeholder (no ID, a name only); color: "#rrggbb" or empty

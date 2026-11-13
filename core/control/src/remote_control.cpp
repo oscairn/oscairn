@@ -570,7 +570,8 @@ namespace oscairn
     Control::LibraryResult RemoteControl::libraryQuery(const LibraryQuery& q) {
         auto d=impl_->call("library.query","{\"text\":"+quote(q.text)+",\"tags\":"+quoted(q.tags)+",\"favorites\":"+(q.favorites?"true":"false")+",\"recent\":"+(q.recent?"true":"false")+",\"limit\":"+std::to_string(q.limit)+(q.kind.empty()?std::string():",\"kind\":"+quote(q.kind))+(q.source.empty()?std::string():",\"source\":"+quote(q.source))+(q.id.empty()?std::string():",\"id\":"+quote(q.id))+(q.types.empty()?std::string():",\"type\":"+quoted(q.types))+'}');
         auto r=field(d.get(),"result");LibraryResult result;
-        for(auto i:array(field(r,"items")))result.items.push_back({string(field(i,"id")),string(field(i,"kind")),string(field(i,"name")),string(field(i,"description")),string(field(i,"path")),strings(field(i,"tags")),boolean(field(i,"favorite")),static_cast<uint32_t>(integer(field(i,"recent"))),string(field(i,"color")),string(field(i,"revision")),string(field(i,"hash")),string(field(i,"library")),{},detail::member(i,"unfit")?string(detail::member(i,"unfit")):std::string()});
+        for(auto i:array(field(r,"items")))result.items.push_back({string(field(i,"id")),string(field(i,"kind")),string(field(i,"name")),string(field(i,"description")),string(field(i,"path")),strings(field(i,"tags")),boolean(field(i,"favorite")),static_cast<uint32_t>(integer(field(i,"recent"))),string(field(i,"color")),string(field(i,"revision")),string(field(i,"hash")),string(field(i,"library")),{},detail::member(i,"unfit")?string(detail::member(i,"unfit")):std::string(),
+                                         detail::member(i,"readOnly") && boolean(detail::member(i,"readOnly")),detail::member(i,"inPlace") && boolean(detail::member(i,"inPlace"))});
         for(auto t:array(field(r,"tags")))result.tags.emplace_back(string(field(t,"tag")),static_cast<uint32_t>(integer(field(t,"count"))));
         for(auto t:array(field(r,"tagColors")))result.tagColors.emplace_back(string(field(t,"tag")),string(field(t,"color")));
         result.hiddenTags=strings(field(r,"hiddenTags"));
@@ -706,6 +707,15 @@ namespace oscairn
         auto d=impl_->call("setlists.save","{\"setlist\":"+setlistJson(setlist)+'}',30000);
         return string(field(field(d.get(),"result"),"id"));
     }
+    std::vector<Control::LibraryType> RemoteControl::libraryTypes() {
+        auto d=impl_->call("library.types","{}");std::vector<LibraryType> out;
+        for(auto t:array(field(field(d.get(),"result"),"types")))
+            out.push_back({string(field(t,"id")),string(field(t,"kind")),string(field(t,"name")),string(field(t,"plural")),string(field(t,"storage")),string(field(t,"owner")),boolean(field(t,"readOnly"))});
+        return out;
+    }
+    std::vector<std::string> RemoteControl::libraryFolders() { auto d=impl_->call("library.folders","{}");return strings(field(field(d.get(),"result"),"folders")); }
+    void RemoteControl::addLibraryFolder(const std::string& folder) { impl_->call("library.addFolder","{\"folder\":"+quote(folder)+'}',120000); }
+    void RemoteControl::removeLibraryFolder(const std::string& folder) { impl_->call("library.removeFolder","{\"folder\":"+quote(folder)+'}',120000); }
     std::vector<Control::SigningKey> RemoteControl::signingKeys() {
         auto d=impl_->call("keys.list","{}");std::vector<SigningKey> out;
         for(auto k:array(field(field(d.get(),"result"),"keys")))out.push_back({string(field(k,"name")),string(field(k,"id")),string(field(k,"key"))});

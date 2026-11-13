@@ -30,6 +30,8 @@ namespace oscairn
         using V = const json_value_s*;
         using Doc = std::unique_ptr<json_value_s, decltype(&std::free)>;
         constexpr size_t maxFile = 4 * 1024 * 1024, maxTags = 32, maxTag = 64, maxRecent = 50;
+        // shortcut: at most this many entries walked in the folders indexed in place at each rescan; the database index (step 5) scans incrementally.
+        constexpr size_t maxInPlace = 100000;
 
         std::string slurp(const fs::path& file, size_t limit = maxFile)
         {
@@ -227,6 +229,16 @@ namespace oscairn
             if(folder && !unread && written < dayAgo) fs::remove_all(entry.path(), error);
         }
         readUser();
+        // The item types packages installed here (RFC 0023 step 3), Types/<package ID>/<type ID>.json.
+        for(const auto& owner : fs::directory_iterator(home / "Types", error))
+            for(const auto& file : fs::directory_iterator(owner.path(), error))
+                try
+                {
+                    if(file.path().extension() != ".json" || file.path().filename().string().starts_with(".")) continue;
+                    const auto type = readDeclaredType(slurp(file.path(), 64 * 1024), owner.path().filename().string());
+                    if(!itemType(type.id)) addItemType(type);
+                }
+                catch(const std::exception& e) { std::fprintf(stderr, "oscairn: the item type %s is not known: %s\n", file.path().c_str(), e.what()); }
         // The Setlist app's own files from before setlists were library items (version 1), each
         // made a library setlist once, the file removed (docs/setlist-format.md).
         std::vector<fs::path> old;
@@ -241,7 +253,7 @@ namespace oscairn
                 fs::remove(file);
             }
             catch(const std::exception& e) { std::fprintf(stderr, "oscairn: the setlist %s was not converted: %s\n", file.c_str(), e.what()); }
-        rescan();
+        rescan(); forgetOrphans();
     }
 
     uint32_t Library::rescan()
@@ -318,6 +330,45 @@ namespace oscairn
                          ",\"id\":" + detail::quote(item.id) + ",\"name\":" + detail::quote(item.name) + ",\"description\":" + detail::quote(item.description) + ",\"tags\":" + list(item.tags) + ",\"color\":" + detail::quote(item.color) + ",\"revision\":" + detail::quote(item.revision) + ",\"hash\":" + detail::quote(item.hash) +
                          ",\"library\":" + detail::quote(item.library) + ",\"originLibrary\":" + detail::quote(item.origin.library) + ",\"originItem\":" + detail::quote(item.origin.item) + ",\"originHash\":" + detail::quote(item.origin.hash) + '}';
             }
+        // RFC 0023 step 3: a type whose package is not installed here is known for the items it
+        // has, listed read-only.
+        const auto all = itemTypes();
+        auto orphan = [&](const ItemType& t) { return !t.owner.empty() && std::none_of(installed_.begin(), installed_.end(), [&](const auto& l) { return l.id == t.owner; }); };
+        for(auto& item : items_)
+            if(const auto t = std::find_if(all.begin(), all.end(), [&](const ItemType& x) { return x.kind() == item.kind; }); t != all.end() && orphan(*t)) item.readOnly = true;
+        // Items in place: files of the in-place types in the folders the user chose, by name and
+        // identity, never moved or changed. Until extractors (step 4), a payload identity is the path.
+        size_t seen = 0;
+        for(const auto& type : all)
+        {
+            if(!type.inPlace()) continue;
+            for(const auto& root : folders_)
+            {
+                std::error_code walk;
+                for(auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, walk); !walk && it != fs::recursive_directory_iterator(); it.increment(walk))
+                {
+                    if(++seen > maxInPlace) break;
+                    const auto name = it->path().filename().string();
+                    if(name.starts_with(".")) { if(it->is_directory(walk)) it.disable_recursion_pending(); continue; }
+                    if(it->is_symlink(walk) || !it->is_regular_file(walk)) continue;
+                    if(std::find(type.extensions.begin(), type.extensions.end(), lower(it->path().extension().string())) == type.extensions.end()) continue;
+                    const auto path = it->path().string();
+                    const auto modified = stamp(it->path());
+                    Control::LibraryItem item;
+                    if(const auto c = cached.find(path); c != cached.end() && c->second.first == modified && c->second.second.kind == type.kind()) item = c->second.second;
+                    else
+                    {
+                        item.kind = type.kind(); item.name = it->path().stem().string(); item.path = path;
+                        try { item.id = type.identity == "content" ? assets::sha256File(it->path()) : assets::sha256(path); } catch(const std::exception&) { continue; }
+                    }
+                    item.inPlace = item.readOnly = true;
+                    if(std::any_of(items_.begin(), items_.end(), [&](const auto& i) { return i.id == item.id; })) continue; // the same file in two folders chosen
+                    items_.push_back(item);
+                    index += std::string(index.empty() ? "" : ",") + "{\"path\":" + detail::quote(item.path) + ",\"kind\":" + detail::quote(item.kind) + ",\"modified\":" + detail::quote(std::to_string(modified)) +
+                             ",\"id\":" + detail::quote(item.id) + ",\"name\":" + detail::quote(item.name) + ",\"description\":\"\",\"tags\":[],\"color\":\"\",\"revision\":\"\",\"hash\":\"\",\"library\":\"\",\"originLibrary\":\"\",\"originItem\":\"\",\"originHash\":\"\"}";
+                }
+            }
+        }
         try { writeAtomically(cache_ / "index.json", "{\"items\":[" + index + "]}\n"); } catch(const std::exception&) {} // a cache: reading works without it
         // Favorites and recents of items that went stay in the user file, for when they return.
         return uint32_t(items_.size());
@@ -429,8 +480,10 @@ namespace oscairn
                     const std::string tag(e->name->string, e->name->string_size), color = str(e->value);
                     if(validColor(color) && !color.empty()) tagColors_[tag] = color;
                 }
+            folders_.clear();
+            if(V folders = detail::member(doc.get(), "folders")) folders_ = strings(folders); // absent in files written before step 3
         }
-        catch(const std::exception&) { favorites_.clear(); recent_.clear(); hiddenTags_.clear(); tagColors_.clear(); } // none yet
+        catch(const std::exception&) { favorites_.clear(); recent_.clear(); hiddenTags_.clear(); tagColors_.clear(); folders_.clear(); } // none yet
     }
 
     void Library::writeUser() const
@@ -438,6 +491,45 @@ namespace oscairn
         std::string colors;
         for(const auto& [tag, color] : tagColors_) colors += std::string(colors.empty() ? "" : ",") + detail::quote(tag) + ":" + detail::quote(color);
         writeAtomically(cache_ / "user.json", "{\"favorites\":" + list(favorites_) + ",\"recent\":" + list(recent_) + ",\"hiddenTags\":" + list(hiddenTags_) +
-                                              ",\"tagColors\":{" + colors + "}}\n");
+                                              ",\"tagColors\":{" + colors + "},\"folders\":" + list(folders_) + "}\n");
+    }
+
+    void Library::installType(const ItemType& type, const std::string& manifest)
+    {
+        writeAtomically(home_ / "Types" / type.owner / (type.id + ".json"), manifest);
+        removeItemType(type.id); // a new version of it from the same package
+        addItemType(type);
+    }
+
+    void Library::forgetOrphans()
+    {
+        // Not at every rescan: an install rescans after placing its types and before its items.
+        for(const auto& t : itemTypes())
+            if(!t.owner.empty() && std::none_of(installed_.begin(), installed_.end(), [&](const auto& l) { return l.id == t.owner; }) &&
+               std::none_of(items_.begin(), items_.end(), [&](const auto& i) { return i.kind == t.kind(); }))
+            {
+                std::error_code ignored;
+                fs::remove(home_ / "Types" / t.owner / (t.id + ".json"), ignored);
+                fs::remove(home_ / "Types" / t.owner, ignored); // when empty
+                removeItemType(t.id);
+            }
+    }
+
+    void Library::addFolder(const std::string& folder)
+    {
+        std::error_code error;
+        const auto path = fs::canonical(folder, error);
+        if(error || !fs::is_directory(path, error)) throw std::invalid_argument("not a folder: " + folder);
+        if(std::find(folders_.begin(), folders_.end(), path.string()) != folders_.end()) return;
+        folders_.push_back(path.string());
+        writeUser();
+        rescan();
+    }
+
+    void Library::removeFolder(const std::string& folder)
+    {
+        if(!std::erase(folders_, folder)) throw std::invalid_argument("not a folder the library indexes: " + folder);
+        writeUser();
+        rescan();
     }
 }

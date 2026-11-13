@@ -28,7 +28,7 @@ namespace oscairn
         // The top-level folders: each item type's (RFC 0023: Performances/, Sounds/, Assets/...), Plugins/ and Licenses/.
         std::set<std::string> tops()
         {
-            std::set<std::string> out{"Plugins", "Licenses"};
+            std::set<std::string> out{"Plugins", "Licenses", "Types"};
             for(const auto& t : itemTypes()) out.insert(t.folder);
             return out;
         }
@@ -217,7 +217,19 @@ namespace oscairn
         if(fs::exists(archive)) throw std::runtime_error(archive.string() + " already exists");
         // Every file, and its SHA-256 for the manifest; hidden files are not packed.
         std::vector<fs::path> files;
-        for(const auto& top : tops())
+        // The folders of the types it declares too (RFC 0023 step 3), which this device may not know yet.
+        auto folders = tops();
+        std::error_code error;
+        for(const auto& owner : fs::directory_iterator(root / "Types", error))
+            for(const auto& f : fs::directory_iterator(owner.path(), error))
+                try
+                {
+                    std::ifstream in(f.path(), std::ios::binary);
+                    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                    folders.insert(readItemType(text).folder);
+                }
+                catch(const std::exception&) {} // packed as it is; a reader refuses it
+        for(const auto& top : folders)
             if(fs::is_directory(root / top))
                 for(const auto& e : fs::recursive_directory_iterator(root / top))
                 {
@@ -322,8 +334,32 @@ namespace oscairn
                 else if(!mz_zip_reader_extract_to_mem(&z.zip, e.index, bytes.data(), bytes.size(), 0)) bad("cannot read " + e.name);
                 return bytes;
             };
+            // Item types the archive declares (RFC 0023 step 3), each Types/<package ID>/<file>.json,
+            // its ID under that package's: known for this read, and installed with it.
+            std::vector<ItemType> declared;
+            auto lower = [](std::string s) { for(auto& c : s) c = char(std::tolower(static_cast<unsigned char>(c))); return s; };
+            for(const auto& e : entries)
+            {
+                if(e.directory || e.name.rfind("Types/", 0) != 0) continue;
+                const auto owner = e.name.substr(6, e.name.find('/', 6) == std::string::npos ? std::string::npos : e.name.find('/', 6) - 6);
+                if(!safe(e.name) || std::count(e.name.begin(), e.name.end(), '/') != 2 || !plainId(owner) || e.name.size() < 5 || e.name.compare(e.name.size() - 5, 5, ".json") != 0 || e.size > 64 * 1024)
+                    bad("an item type that is not Types/<package ID>/<file>.json: " + e.name);
+                ItemType t;
+                try { t = readDeclaredType(small(e), owner); } catch(const std::invalid_argument& x) { bad(x.what()); }
+                if(std::any_of(declared.begin(), declared.end(), [&](const ItemType& d) { return d.id == t.id || lower(d.folder) == lower(t.folder); })) bad("two item types with one ID or folder: " + t.id);
+                // The first package to declare a type keeps it (RFC 0023's trust rules).
+                for(const auto& known : itemTypes())
+                    if((known.id == t.id && known.owner != owner) || (known.id != t.id && lower(known.folder) == lower(t.folder)))
+                        bad("the item type " + t.id + " is another package's here, or takes another type's folder (" + known.id + ")");
+                declared.push_back(t);
+            }
+            auto typeOf = [&](const std::string& kind) -> std::optional<ItemType> {
+                for(const auto& t : declared) if(t.kind() == kind) return t;
+                return itemType(kind);
+            };
             std::set<std::string> names;
-            const auto folders = tops();
+            auto folders = tops();
+            for(const auto& t : declared) folders.insert(t.folder);
             uint64_t total = 0, nameBytes = 0, largest = 0;
             std::string manifest, archiveSignature;
             for(const auto& e : entries)
@@ -383,8 +419,10 @@ namespace oscairn
             }
             p.id = text(detail::member(d, "id")); p.name = text(detail::member(d, "name")); p.kind = text(detail::member(d, "kind"));
             // An exported item's kind is its type's (RFC 0023).
-            const auto exported = itemType(p.kind);
+            const auto exported = typeOf(p.kind);
             if(!plainId(p.id) || (p.kind != "library" && p.kind != "plugin" && p.kind != "asset" && !(exported && exported->kind() == p.kind && exported->indexed()))) bad("its ID or kind is wrong");
+            if(!declared.empty() && (p.kind == "plugin" || p.kind == "asset")) bad("a plugin or asset package declares no item types");
+            p.types = declared;
             const V items = detail::member(d, "items");
             if(!items || items->type != json_type_array) bad("it lists no items");
             std::set<std::string> ids;
@@ -392,7 +430,7 @@ namespace oscairn
             {
                 Package::Item item{text(detail::member(e->value, "kind")), text(detail::member(e->value, "id")), text(detail::member(e->value, "name")), text(detail::member(e->value, "path"))};
                 // Each in its type's folder, as the library keeps it (RFC 0023).
-                const auto type = itemType(item.kind);
+                const auto type = typeOf(item.kind);
                 if(!type || type->kind() != item.kind || !type->indexed() || !plainId(item.id) || !ids.insert(item.id).second) bad("an item's kind or ID is wrong");
                 if(!safe(item.path) || item.path.substr(0, item.path.find('/')) != type->folder || item.path.find('/', item.path.find('/') + 1) != std::string::npos ||
                    !names.count(item.path + "/" + type->document))
@@ -555,7 +593,7 @@ namespace oscairn
                 {
                     if(item.signatures.empty()) continue;
                     std::string hash;
-                    try { hash = contentHash(into / item.path / itemType(item.kind)->document); } catch(const std::runtime_error&) { bad("a signed item without its info: " + item.path); }
+                    try { hash = contentHash(into / item.path / typeOf(item.kind)->document); } catch(const std::runtime_error&) { bad("a signed item without its info: " + item.path); }
                     for(const auto& s : item.signatures) if(!signing::verify(s, signing::itemMessage(hash))) bad("an item's signature does not verify: " + item.path);
                 }
                 // A setlist's slots name Performances the archive holds; a placeholder names none (docs/setlist-format.md).

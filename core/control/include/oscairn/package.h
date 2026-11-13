@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
+#include "oscairn/item_types.h"
 #include "oscairn/signing.h"
 #include <filesystem>
 #include <map>
@@ -36,6 +37,9 @@ namespace oscairn
         std::string kind = "library";
         std::vector<Item> items;
         std::vector<Plugin> plugins;
+        // The item types it declares (RFC 0023 step 3), read from Types/<package ID>/<file>.json,
+        // each owned by the package ID in its path; filled by readPackage.
+        std::vector<ItemType> types = {};
         // Its license (an SPDX expression) and where its source is: an https:// URL and the exact
         // commit or tag. A plugin package needs a license, and one under the GPL, LGPL or AGPL
         // needs the source and its license texts and notices under Licenses/ (their §6).

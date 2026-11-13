@@ -37,6 +37,11 @@ target_compile_options(oscairn-setlists-test PRIVATE -Wall -Wextra)
 add_test(NAME control-setlists COMMAND oscairn-setlists-test $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(control-setlists PROPERTIES TIMEOUT 60)
 
+add_executable(oscairn-installed-types-test tests/installed_types.cpp)
+target_link_libraries(oscairn-installed-types-test PRIVATE oscairn_control)
+target_compile_options(oscairn-installed-types-test PRIVATE -Wall -Wextra)
+add_test(NAME control-installed-types COMMAND oscairn-installed-types-test)
+
 add_executable(oscairn-signing-test tests/signing.cpp)
 target_link_libraries(oscairn-signing-test PRIVATE oscairn_control)
 add_test(NAME control-signing COMMAND oscairn-signing-test)

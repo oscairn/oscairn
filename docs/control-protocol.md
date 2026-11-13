@@ -1289,6 +1289,16 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   already installed (kept). A plugin package installs every build of each of its plugins, takes
   no `items` and adds none (`added` is 0), whatever `asLibrary` says.
 - `library.libraries` (`{}`) returns `{libraries}`, each `{id,name,items}`.
+- `library.types` (`{}`) returns `{types}`, each item type the device knows
+  ([RFC 0023](rfcs/0023-item-types.md)): `{id,kind,name,plural,storage,owner,readOnly}`, `owner`
+  the package that declared it (empty for Oscairn's own) and `readOnly` true while that package is
+  not installed here as a library. A library archive's `Types/` brings its types
+  ([format](library-archive.md)); `library.query` items of such a type carry `readOnly: true` then.
+- `library.folders` (`{}`) returns `{folders}`: the folders indexed in place, the user's choice.
+  `library.addFolder` and `library.removeFolder` take `{folder}` and return `{"accepted":true}`;
+  adding one that is not a folder is invalid (`-32602`). Their files of the item types stored in
+  place are listed by `library.query` with `inPlace` and `readOnly` true, and are never moved,
+  removed or exported; an app may name only a folder inside the library.
 - `plugins.list` (`{}`) returns `{plugins}`: the plugin store ([RFC 0006](rfcs/0006-packages-and-portability.md)),
   each `{format,id,version,name,platforms,bytes,usedBy,open,license}`: the platforms it has builds for,
   their size on disk, the names of the library items that use it, whether the open

@@ -67,6 +67,10 @@ namespace oscairn
         std::vector<std::string> exportLibrary(const std::string& file, const std::string& name, const std::vector<std::string>& setlists, const ExportSigning& sign = {}) override;
         Setlist setlist(const std::string& id) override;
         std::string saveSetlist(const Setlist& setlist) override;
+        std::vector<LibraryType> libraryTypes() override;
+        std::vector<std::string> libraryFolders() override;
+        void addLibraryFolder(const std::string& folder) override;
+        void removeLibraryFolder(const std::string& folder) override;
         std::vector<SigningKey> signingKeys() override;
         SigningKey makeSigningKey(const std::string& name) override;
         void loadPerformance(const std::string& directory) override;

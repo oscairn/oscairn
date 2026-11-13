@@ -409,7 +409,13 @@ std::vector<std::string> Session::exportLibraryItem(const std::string& id,const 
 // library goes as a placeholder, said in notes (docs/setlist-format.md).
 void Session::stageItem(const LibraryItem& item,const fs::path& stage,Package& package,std::vector<PartSource>& from,std::vector<std::string>& notes) {
     if(std::any_of(package.items.begin(),package.items.end(),[&](const auto& i){return i.id==item.id;}))return;
+    if(item.inPlace)bad("an item indexed in place is a file of your own, not packed: "+item.name);
     const auto type=typeOf(item.kind);
+    // A package's type goes with its items, so the destination knows them (RFC 0023 step 3).
+    if(!type.owner.empty() && !fs::exists(stage/"Types"/type.owner/(type.id+".json"))){
+        fs::create_directories(stage/"Types"/type.owner);
+        fs::copy_file(dataHome()/"Types"/type.owner/(type.id+".json"),stage/"Types"/type.owner/(type.id+".json"));
+    }
     const auto name=fs::path(item.path).filename();
     auto folder=fs::path(type.folder)/name;
     for(int n=2;fs::exists(stage/folder);++n)folder=fs::path(type.folder)/(name.stem().string()+" "+std::to_string(n)+name.extension().string()); // a user's item and a library's of one name
@@ -455,7 +461,7 @@ std::vector<std::string> Session::exportLibrary(const std::string& file,const st
         std::vector<PartSource> from;
         // The user's own items of every type but setlists, then the setlists chosen, with what they name.
         const auto items=l.items();
-        for(const auto& item:items)if(item.library.empty() && item.kind!="setlist")stageItem(item,stage,package,from,staged);
+        for(const auto& item:items)if(item.library.empty() && !item.inPlace && item.kind!="setlist")stageItem(item,stage,package,from,staged);
         for(const auto& s:setlists)if(const auto* item=l.find(s)){const auto copy=*item;stageItem(copy,stage,package,from,staged);}
         return from;
     },false,sign);
@@ -2066,7 +2072,12 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         // folder: never two libraries in one, which rescan would list as neither.
         if(asLibrary){std::error_code e;for(const auto& entry:fs::directory_iterator(l.libraries(),e))
             if(entry.path().filename()!=p.id && fs::equivalent(entry.path(),l.libraries()/p.id,e))bad("another library is installed in that folder: "+entry.path().filename().string());}
-        auto manifest=[&](const Package::Item& i){return into/i.path/documentOf(i.kind);};
+        // The types it declares (RFC 0023 step 3) are known while its items are checked, and kept
+        // only once it installs: a check, a refusal or a failure forgets them again.
+        struct Declared{std::vector<std::string> ids;bool keep=false;~Declared(){if(!keep)for(const auto& id:ids)removeItemType(id);}} declared;
+        for(const auto& t:p.types)if(!itemType(t.id)){addItemType(t);declared.ids.push_back(t.id);}
+        auto typeFor=[&](const std::string& kind){for(const auto& t:p.types)if(t.kind()==kind)return t;return typeOf(kind);};
+        auto manifest=[&](const Package::Item& i){return into/i.path/typeFor(i.kind).document;};
         // A setlist chosen brings the Performances its slots name (readPackage: all in the archive).
         for(size_t n=0;n<items.size();++n)if(items[n].kind=="setlist"){
             const auto bytes=state_files::read(manifest(items[n]),1024*1024);
@@ -2075,7 +2086,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                     if(const auto at=std::find_if(p.items.begin(),p.items.end(),[&](const auto& i){return i.id==id;});at!=p.items.end())items.push_back(*at);
         }
         // Each item is what it says it is.
-        for(const auto& i:items){const auto info=readInfo(manifest(i),formatOf(i.kind));if(info.id!=i.id)bad("the item "+i.name+" is not the one its archive lists");}
+        for(const auto& i:items){const auto info=readInfo(manifest(i),typeFor(i.kind).format);if(info.id!=i.id)bad("the item "+i.name+" is not the one its archive lists");}
         // The plugins they use, and who signed each build that would go into the store (RFC 0006),
         // before anything is installed: code unsigned or by an unknown key only when the user said
         // yes, a revoked key's never. Apps join this when archives carry them (RFC 0022 step 2).
@@ -2112,6 +2123,15 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         if(!unknown.empty() && !acceptUnsignedCode)
             throw CodeRefused("it runs code from an unknown source: "+unknown+"; install it accepting unsigned code to go ahead",out.code); // said to the user as it is: no "Performance: "
         if(checkOnly)return out; // `into` stays for the install
+        // The item types it declares (RFC 0023 step 3), before its items, which may be of them.
+        for(const auto& type:p.types){
+            std::error_code e;
+            for(const auto& f:fs::directory_iterator(into/"Types"/type.owner,e)){
+                const auto bytes=state_files::read(f.path(),64*1024);const std::string text(bytes.begin(),bytes.end());
+                if(readDeclaredType(text,type.owner).id==type.id){l.installType(type,text);break;}
+            }
+        }
+        declared.keep=true;
         // The samples they use, into the user's samples by their hash, so they stay when a library goes.
         for(const auto& i:items)for(const auto& ref:assetsOf(manifest(i))){
             const auto folder=into/"Assets"/ref.sha256.substr(0,16);
@@ -2271,6 +2291,7 @@ std::vector<std::string> Session::assetLibraryUsers(const std::string& id) {
     std::vector<std::string> out;
     auto& l=library();l.rescan();
     for(const auto& item:l.items()){
+        if(item.inPlace)continue; // a file of the user's, not a document naming samples
         std::vector<assets::Ref> refs;
         try{refs=assetsOf(fs::path(item.path)/documentOf(item.kind));}
         catch(const std::exception&){out.push_back((item.name.empty()?"Untitled":item.name)+" (unreadable, so it may use it)");continue;} // unknown use is not proven unused
@@ -2407,7 +2428,7 @@ void Session::uninstallLibrary(const std::string& id) {
     const auto all=l.installed();
     if(std::none_of(all.begin(),all.end(),[&](const auto& x){return x.id==id;}))bad("no such library installed");
     fs::remove_all(l.libraries()/id); // readPackage: the ID is a plain name
-    l.rescan();
+    l.rescan();l.forgetOrphans();
     forgetRemoved();
 }
 
@@ -2485,8 +2506,9 @@ void Session::deleteLibraryItem(const std::string& id) {
     auto& l=library();
     const auto* item=l.find(id);
     if(!item)bad("no such library item");
+    if(item->inPlace)bad("an item indexed in place is a file of your own: the library never removes it; take its folder out of the library instead");
     fs::remove_all(item->path);
-    l.rescan();
+    l.rescan();l.forgetOrphans();
 }
 
 void Session::libraryEdit(const std::string& id,const PerformanceInfo& edit) {
@@ -2494,6 +2516,7 @@ void Session::libraryEdit(const std::string& id,const PerformanceInfo& edit) {
     const auto* item=l.find(id);
     if(!item)bad("no such library item");
     if(!item->library.empty())bad("a locked library's items cannot be edited; copy it into your own first");
+    if(item->readOnly)bad("it is read-only: the package of its type is not installed, or it is indexed in place");
     const auto doc=fs::path(item->path)/documentOf(item->kind);
     auto info=readInfo(doc,formatOf(item->kind));
     checkInfo(edit);
@@ -2509,6 +2532,7 @@ std::string Session::libraryCopy(const std::string& id) {
     const auto* item=l.find(id);
     if(!item)bad("no such library item");
     const auto from=*item;
+    if(from.readOnly)bad("it is read-only: the package of its type is not installed, or it is indexed in place");
     const bool locked=!from.library.empty();
     const auto name=locked?from.name:(from.name.empty()?"Untitled":from.name)+" copy";
     const auto to=l.newFolder(name,from.kind);
@@ -2555,6 +2579,18 @@ std::string Session::saveSetlist(const Setlist& given) {
     l.rescan();
     return s.info.id;
 }
+std::vector<Control::LibraryType> Session::libraryTypes() {
+    const auto installed=library().installed();
+    std::vector<LibraryType> out;
+    for(const auto& t:itemTypes())
+        out.push_back({t.id,t.kind(),t.name,t.plural,t.storage,t.owner,!t.owner.empty() && std::none_of(installed.begin(),installed.end(),[&](const auto& l){return l.id==t.owner;})});
+    return out;
+}
+
+std::vector<std::string> Session::libraryFolders() { return library().folders(); }
+void Session::addLibraryFolder(const std::string& folder) { library().addFolder(folder); }
+void Session::removeLibraryFolder(const std::string& folder) { library().removeFolder(folder); }
+
 void Session::loadPerformanceFromLibrary(const std::string& id) {
     auto& l=library();
     const auto* item=l.find(id);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include "oscairn/control.h"
+#include "oscairn/item_types.h"
 #include <filesystem>
 #include <map>
 #include <string>
@@ -35,6 +36,18 @@ namespace oscairn
         // A folder for a new item of a type the library indexes (its kind or ID, RFC 0023) named
         // `name`, its name made safe and unique.
         std::filesystem::path newFolder(const std::string& name, const std::string& kind) const;
+        // A type a package declares (RFC 0023 step 3), kept as Types/<package ID>/<type ID>.json in
+        // the data folder and known from now on. Its items are read-only while that package is not
+        // installed here as a library; with none left, the type is forgotten at a rescan.
+        void installType(const ItemType& type, const std::string& manifest);
+        // Forgets each type whose package is not installed and that has no items left: at the
+        // start, and after an item is deleted or a library uninstalled.
+        void forgetOrphans();
+        // Folders indexed in place (step 3), the user's choice, kept in the user file: each one's
+        // files of the in-place types are listed where they are, never moved or changed.
+        const std::vector<std::string>& folders() const { return folders_; }
+        void addFolder(const std::string& folder); // throws std::invalid_argument for one that is not a folder
+        void removeFolder(const std::string& folder);
 
     private:
         void readUser();
@@ -42,7 +55,7 @@ namespace oscairn
         std::filesystem::path home_, libraries_, cache_;
         std::vector<Control::InstalledLibrary> installed_;
         std::vector<Control::LibraryItem> items_;
-        std::vector<std::string> favorites_, recent_, hiddenTags_;
+        std::vector<std::string> favorites_, recent_, hiddenTags_, folders_;
         std::map<std::string, std::string> tagColors_;
     };
 

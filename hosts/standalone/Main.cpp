@@ -171,8 +171,12 @@ namespace oscairn::standalone
             // every type it indexes (RFC 0023: oscairn.pick.<kind>); Play hears the setlist's
             // entry playing. Apps that are processes (the Setlist) offer theirs from their
             // manifests, found in Apps/ beside this program.
-            for(const auto& type:itemTypes())if(type.indexed())
-                actions_.offer("oscairn.pick."+type.kind(),"Library",[this,kind=type.kind()](const std::string&,Actions::Answer answer){showPicker(std::move(answer),kind);});
+            // The engine's types, those packages installed there too (step 3), as it knows them at the start; Oscairn's own when it does not answer.
+            std::vector<std::string> kinds;
+            for(const auto& type:engine_.libraryTypes())if(type.storage=="managed" || type.storage=="in-place")kinds.push_back(type.kind);
+            if(kinds.empty())for(const auto& type:itemTypes())if(type.indexed())kinds.push_back(type.kind());
+            for(const auto& kind:kinds)
+                actions_.offer("oscairn.pick."+kind,"Library",[this,kind](const std::string&,Actions::Answer answer){showPicker(std::move(answer),kind);});
             actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
             const auto binary=executableFile().getParentDirectory();
             // Apps run as processes only against an engine on a socket (not --in-process).

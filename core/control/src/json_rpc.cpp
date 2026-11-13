@@ -538,7 +538,7 @@ namespace oscairn
                 {"wires.connect",Edit},{"wires.disconnect",Edit},{"wires.enable",Edit},{"wires.mix",Edit},{"wires.zones",Edit},
                 {"scenes.add",Edit},{"scenes.store",Edit},{"scenes.remove",Edit},{"scenes.name",Edit},{"scenes.scope",Edit},{"scenes.transition",Edit},{"scenes.untouched",Edit},
                 {"controls.add",Edit},{"controls.remove",Edit},{"controls.name",Edit},{"controls.targets",Edit},{"controls.source",Edit},
-                {"library.query",Library},{"library.favorite",Library},{"library.tag",Library},{"library.edit",Library},{"library.copy",Library},{"library.export",Library},{"library.exportLibrary",Library},{"setlists.get",Library},{"setlists.save",Library},
+                {"library.query",Library},{"library.favorite",Library},{"library.tag",Library},{"library.edit",Library},{"library.copy",Library},{"library.export",Library},{"library.exportLibrary",Library},{"setlists.get",Library},{"library.types",Library},{"library.folders",Library},{"library.addFolder",Library},{"library.removeFolder",Library},{"setlists.save",Library},
                 {"library.rescan",Library},{"library.contents",Library},{"library.install",Library},{"library.libraries",Library},{"library.uninstall",Library},
                 {"library.delete",Library},{"library.save",Library},{"library.load",Library},
                 {"performance.save",Library},{"performance.load",Library},{"performance.prepare",Library},{"performance.export",Library},{"performance.info",Library},
@@ -580,7 +580,7 @@ namespace oscairn
                         refuse(topic->first,topic->second);
             static const std::map<std::string_view,std::string_view> paths{
                 {"performance.save","directory"},{"performance.load","directory"},{"performance.prepare","directory"},{"budget.estimate","directory"},
-                {"performance.contents","directory"},{"performance.import","directory"},{"performance.export","file"},{"library.export","file"},{"library.exportLibrary","file"},
+                {"performance.contents","directory"},{"performance.import","directory"},{"performance.export","file"},{"library.export","file"},{"library.exportLibrary","file"},{"library.addFolder","folder"},
                 {"library.contents","file"},{"library.install","file"},{"plugins.addBuild","path"},{"assets.register","folder"},{"assets.import","file"},
                 {"state.save","directory"},{"sounds.prepare","state"},{"graph.add","path"},{"graph.replace","path"},
                 {"packages.list","source"},{"packages.install","source"},{"packages.addRepository","address"}};
@@ -601,7 +601,7 @@ namespace oscairn
             if( method == "session.hello" )
             {
                 fields(p, {});
-                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
+                return R"({"protocolVersion":1,"server":"oscairn","capabilities":["performance.save","performance.load","performance.prepare","performance.reopen","performance.export","budget.set","budget.estimate","performance.info","performance.setInfo","library.query","library.favorite","library.tag","library.edit","library.copy","library.export","library.exportLibrary","setlists.get","setlists.save","library.types","library.folders","library.addFolder","library.removeFolder","audition.start","audition.stop","audition.get","record.start","record.stop","record.get","record.takes","library.rescan","library.contents","library.install","library.libraries","library.uninstall","library.delete","library.save","library.load","parts.saveSound","parts.loadSound","parts.fromSound","performance.contents","performance.import","state.info","state.save","window.info","window.show","presets.list","properties.list","properties.get","properties.set","properties.request","sounds.get","sounds.prepare","sounds.select","sounds.discard","sounds.presets","assets.register","assets.import","assets.libraries","assets.uninstall","assets.collect","session.status","engine.attach","engine.release","engine.timing","params.list","params.get","params.set","params.text","params.gesture","graph.audio-routing","graph.get","graph.add","effects.create","effects.resources","instruments.share","graph.remove","graph.replace","graph.connect","graph.disconnect","graph.map","graph.unmap","graph.commit","parts.add","parts.remove","parts.insert","parts.removeNode","parts.move","parts.addSplit","parts.removeSplit","parts.addLane","parts.removeLane","parts.lane","parts.input","parts.output","parts.send","parts.level","parts.name","parts.solo","parts.pan","master.set","graph.role","parts.meters","wires.meters","edit.undo","edit.redo","edit.history","wires.connect","wires.disconnect","wires.enable","graph.enable","wires.mix","wires.zones","scenes.add","scenes.store","scenes.select","scenes.remove","scenes.name","scenes.scope","scenes.transition","scenes.untouched","controls.add","controls.remove","controls.name","controls.targets","controls.source","controls.set","subscribe","unsubscribe","transport.get","transport.set","notes.send","notes.panic","midi.ignore","controllers.set","controllers.view","controllers.get","controllers.inputs","controllers.choose","controllers.ignore","pads.get","pads.set","pads.play","pads.pressure","assignments.get","assignments.set","parts.midiOut","trust.list","trust.set","trust.remove","packages.list","packages.install","packages.job","packages.installed","packages.preinstalled","packages.repositories","packages.addRepository","packages.removeRepository","packages.enableRepository","packages.setDeviceRepositories","keys.list","keys.make","record.retro","record.delete","record.rename","record.play","harmony.get","harmony.set","hardware.capabilities","audio.devices","audio.set"],"limits":{"messageBytes":65536,"depth":32,"batch":64,"parameterChanges":128}})";
             }
             if( method == "engine.attach" || method == "engine.release" )
             {
@@ -834,6 +834,26 @@ namespace oscairn
                 catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 return "{\"exported\":true,\"notes\":"+join(notes)+'}';
             }
+            // Item types (RFC 0023), and the folders indexed in place (step 3).
+            if(method=="library.types") {
+                fields(p,{});std::vector<std::string> out;
+                for(const auto& t:c.libraryTypes())
+                    out.push_back("{\"id\":"+quote(t.id)+",\"kind\":"+quote(t.kind)+",\"name\":"+quote(t.name)+",\"plural\":"+quote(t.plural)+",\"storage\":"+quote(t.storage)+
+                                  ",\"owner\":"+quote(t.owner)+",\"readOnly\":"+(t.readOnly?"true":"false")+'}');
+                return "{\"types\":"+join(out)+'}';
+            }
+            if(method=="library.folders") {
+                fields(p,{});std::vector<std::string> out;
+                for(const auto& f:c.libraryFolders())out.push_back(quote(f));
+                return "{\"folders\":"+join(out)+'}';
+            }
+            if(method=="library.addFolder" || method=="library.removeFolder") {
+                fields(p,{"folder"});const auto folder=std::string(string(member(p,"folder")));
+                try{if(method=="library.addFolder")c.addLibraryFolder(folder);else c.removeLibraryFolder(folder);}
+                catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                catch(const std::exception& e){throw Failure{-32005,e.what()};}
+                return R"({"accepted":true})";
+            }
             // Setlists (docs/setlist-format.md): the document itself, as the library keeps it.
             if(method=="setlists.get") {
                 fields(p,{"id"});
@@ -886,7 +906,7 @@ namespace oscairn
                 std::vector<std::string> items,counts;
                 for(const auto& i:r.items){std::vector<std::string> t;for(const auto& x:i.tags)t.push_back(quote(x));
                     const auto type=itemType(i.kind);
-                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"type\":"+quote(type?type->id:i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+'}');}
+                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"type\":"+quote(type?type->id:i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+(i.readOnly?",\"readOnly\":true":"")+(i.inPlace?",\"inPlace\":true":"")+'}');}
                 for(const auto& [tag,n]:r.tags)counts.push_back("{\"tag\":"+quote(tag)+",\"count\":"+std::to_string(n)+'}');
                 std::vector<std::string> colors,hidden;
                 for(const auto& [tag,color]:r.tagColors)colors.push_back("{\"tag\":"+quote(tag)+",\"color\":"+quote(color)+'}');

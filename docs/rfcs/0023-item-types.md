@@ -12,7 +12,7 @@ Checked when built and tested; the sections below say how.
 
 - [x] 1. Built-in types: today's Performances, Sounds and samples described as types, with no change in behavior
 - [x] 2. Queries and requests by type: `library.query` by `type`, `oscairn.pick.<type>` actions, archives by type
-- [ ] 3. Installed types: declared by packages, for documents with an info block and for folders indexed in place
+- [x] 3. Installed types: declared by packages, for documents with an info block and for folders indexed in place
 - [ ] 4. Extractors: sandboxed metadata readers for files with no info block (audio, plugin presets)
 - [ ] 5. A database index, for libraries of tens of thousands of items
 - [ ] 6. The DJ types: tracks, crates and track analysis
@@ -43,6 +43,23 @@ Where this RFC left a choice, the smaller reading was taken:
   until installed types (step 3) give the type a place to be kept. The gate's pick is the
   desktop Library's; the core test (`control-item-types`) shows the library indexing, querying,
   exporting and installing a type added in the test, and the Library's code asks for any type by kind.
+- **Step 3.** A library archive declares a type as `Types/<package ID>/<file>.json`, the
+  type's ID under that package ID; plugin and asset packages declare none. An archive whose type
+  takes another type's folder, or an ID another package's type has, is refused when read, so the
+  first package keeps it. Installing keeps the manifest as `Types/<package ID>/<type ID>.json` in
+  the data folder, read at each start. A type's **owner** is that package ID: while no library of
+  that ID is installed here, its items are listed read-only (not edited or copied; deleted, yes),
+  and once none is left the type is forgotten, at the start and after a delete or an uninstall
+  (not at every rescan, which an install makes between placing its types and its items). An
+  export of an item of a package's type carries the type the same way, so the destination knows
+  it, read-only until the package is installed there. **In place:** a type stored `in-place` is
+  recognized by its `extensions` in the folders the user chose (`library.addFolder`, kept in the
+  user file, listed and removed in the Library's Libraries menu); its files are listed by name,
+  their identity the path's SHA-256 (or the file's, for `content`; a `payload` identity is the
+  path's until extractors, step 4), read-only, never moved, removed or packed. The walk is bounded
+  (100,000 entries a rescan) until the database index (step 5). The Library offers a pick for each
+  type the engine knows when the app starts; it has no tab of its own for a package's type, which
+  apps reach by picks and `library.query`. Not built: a plugin package declaring types.
 - **Setlists** are the first type built on these steps (decided 2026-11-13): `oscairn.setlist`,
   managed, in `Setlists/<name>.osetlist/setlist.json` ([format](../setlist-format.md)). How an item
   refers to another (the open question) is answered for this one type only: a setlist's slots name

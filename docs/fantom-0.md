@@ -179,9 +179,13 @@ The i.MX has two USB 2.0 controllers (ChipIdea):
   (`# CONFIG_SND_SEQUENCER is not set`, hence no `/dev/snd/seq`), nor `snd-aloop`, nor
   `snd-dummy`. `snd-usb-audio` and `snd-usbmidi-lib` are on the unit as modules, not loaded.
   So a USB MIDI keyboard on USB MEMORY would appear, after `modprobe snd-usb-audio`, as a raw
-  MIDI device (`/dev/snd/midiC2D0`), **and Oscairn would not see it**: its MIDI input is JUCE's,
-  which on Linux reads only the ALSA sequencer. Playing a USB MIDI keyboard needs Oscairn to
-  read raw MIDI, or a kernel with the sequencer.
+  MIDI device (`/dev/snd/midiC2D0`). JUCE's MIDI input reads only the ALSA sequencer, so where
+  the sequencer does not open the engine reads raw MIDI itself (`hosts/audio/RawMidi.h`),
+  decided once at startup: every input subdevice of every card, named as the sequencer would
+  name its port (a USB keyboard's "SMK-37 MIDI 1"), so the same controller choices apply as on
+  a desktop. It lists the cards again once a second for a keyboard plugged in or pulled out.
+  None of this has run on the unit or on any real ALSA card yet: only its reader, on pipes and
+  a pty in a container.
 
 ### Panel, buttons and lights
 
@@ -468,9 +472,15 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
    maximum before the first event (Ctrl-C after it); touch the four corners to see which way the
    axes run on the landscape screen. Neither the unit nor the bundle has `evtest`: bring a
    static aarch64 build.
-10. **A USB MIDI keyboard on USB MEMORY:** plug it in, `modprobe snd-usb-audio`, and check
-    `cat /proc/asound/cards` and `amidi -l` (on the unit). A raw MIDI device there confirms the
-    kernel side; Oscairn will not see it until it reads raw MIDI (above).
+10. **A USB MIDI keyboard on USB MEMORY:** plug it in, `modprobe snd-usb-audio` (on the unit,
+    outside the chroot: the module is Roland's), and check `cat /proc/asound/cards` and
+    `amidi -l`. A raw MIDI device there confirms the kernel side. Then start the engine in the
+    chroot on a real audio device (`--audio null` opens no MIDI device). It should log
+    `no ALSA sequencer; MIDI inputs are read as ALSA raw MIDI` (after ALSA's own line that
+    `/dev/snd/seq` failed to open) and `1 MIDI inputs open (ALSA raw MIDI)` (one per input port
+    the keyboard has), and `session.status` should list the keyboard in `midiInputs` by the
+    name `amidi -l` gives its port. Play it; then pull it out and plug it back in while the engine runs: within a second
+    or two the log says `0 MIDI inputs open (ALSA raw MIDI)`, then `1` again, and it plays again.
 11. **The display from the chroot:** with Weston running and Roland's app stopped, start the app
     in the bundle with `DISPLAY=:0` and see whether it reaches Xwayland.
 

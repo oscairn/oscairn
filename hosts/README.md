@@ -5,6 +5,8 @@ Programs built on the core: a file renderer, a live audio/MIDI engine and a desk
 - `render/`: `oscairn-render`, the headless file renderer used in CI.
 - `audio/`: shared JUCE 9 audio/MIDI adapter. It opens the default audio output and all
   MIDI inputs, converts arrival timestamps, and services the JUCE-free core `Session`.
+  On Linux without the ALSA sequencer it reads ALSA raw MIDI devices itself (`RawMidi.h`,
+  parsed by `MidiStream.h`) into the same path.
   The startup Performance has two parts: Synth (the keys play the Basic Synth into the
   Delay) and Groovebox (the step sequencer, also playing that synth). Its nodes are named
   `sequencer`, `synth` and `delay`, which the Groovebox and the panel layouts bind to.

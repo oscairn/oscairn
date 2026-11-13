@@ -31,6 +31,16 @@ target_compile_options(oscairn_audio_host PRIVATE -Wall -Wextra)
 # that fetch from repositories say NEEDS_CURL, and JUCE builds the rest without it.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(oscairn_audio_host PRIVATE juce::pkgconfig_JUCE_CURL_LINUX_DEPS)
+    # ALSA raw MIDI input, where the kernel has no sequencer for JUCE's MIDI input (RawMidi.h).
+    find_package(ALSA REQUIRED)
+    target_sources(oscairn_audio_host PRIVATE RawMidi_linux.cpp)
+    target_link_libraries(oscairn_audio_host PRIVATE ALSA::ALSA)
+    # Its reader on pipes, with no sound card: reading, a device ending, devices coming and going.
+    add_executable(oscairn-raw-midi-test raw_midi_test.cpp RawMidi_linux.cpp)
+    target_link_libraries(oscairn-raw-midi-test PRIVATE ALSA::ALSA)
+    target_compile_options(oscairn-raw-midi-test PRIVATE -Wall -Wextra)
+    add_test(NAME engine-raw-midi COMMAND oscairn-raw-midi-test)
+    set_tests_properties(engine-raw-midi PROPERTIES TIMEOUT 30)
 endif()
 
 # A control session on stdin and stdout that fetches from the web as the engine does, for

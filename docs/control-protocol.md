@@ -346,7 +346,12 @@ report the compiled per-channel routes.
   part whose rules match no input is silent. Each MIDI input has a `source` number (1–63;
   0 is built in), a `name`, a `kind` (`builtIn`, `port`, `usb` or `network`) and its
   `port` number. The desktop app reports every input as `usb`; ports and network
-  sessions need the device's own input table.
+  sessions need the device's own input table. On Linux an input's name is its ALSA
+  sequencer port's; on a kernel without the sequencer the engine reads ALSA raw MIDI
+  devices instead and names each input subdevice as the sequencer would name its port, so
+  a name, and every choice kept by name, is the same either way. An input keeps its
+  `source` while the engine runs, by the sequencer's `client-port` address or the raw
+  device's `hw:CARD,DEVICE,SUBDEVICE`.
 - **MIDI out** ([RFC 0012](rfcs/0012-sync-external-midi-and-multi-device.md#step-1-status)):
   a part's `midiOut` sends its MIDI to hardware outputs as well as to its instruments. Its
   `devices` are rules as above, matched against `session.status`'s `midiOutputs` (numbered

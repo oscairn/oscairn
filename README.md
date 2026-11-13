@@ -118,7 +118,8 @@ ninja -C build-app oscairn_standalone
 open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Oscairn.app
 ```
 
-It plays through the default audio output, and any connected MIDI device plays it. With no
+It plays through the default audio output, and any connected MIDI device plays it (on Linux
+through the ALSA sequencer, or, on a kernel without one, ALSA raw MIDI). With no
 MIDI device, **View → On-screen Keyboard** (or the link Play shows) opens a keyboard in a
 window of its own: click its keys, or type A W S E D F T G Y H U J K O L P on the computer's
 keyboard while it has focus (Z and X change octave). Each MIDI input has one too, which plays as

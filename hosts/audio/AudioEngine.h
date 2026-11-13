@@ -5,6 +5,9 @@
 #include "ChannelMap.h"
 #include "ControllerPorts.h"
 #include "MidiBlock.h"
+#ifdef __linux__
+#include "RawMidi.h"
+#endif
 #if OSCAIRN_PANEL_ROLAND
 #include "oscairn/panel_reader.h"
 #endif
@@ -54,11 +57,17 @@ namespace oscairn::host
         void audioDeviceAboutToStart( juce::AudioIODevice* ) override;
         void audioDeviceStopped() override { started_=false; }
         // MIDI input threads
-        void handleIncomingMidiMessage( juce::MidiInput*, const juce::MidiMessage& ) override;
+        void handleIncomingMidiMessage( juce::MidiInput* input, const juce::MidiMessage& message ) override { incoming( message, input, -1 ); }
+        // A message from a JUCE input, or from raw input `raw` (an index into midiSources_).
+        void incoming( const juce::MidiMessage& message, const juce::MidiInput* input, int raw );
 
-        uint8_t push( const juce::MidiMessage& message, const juce::MidiInput* input ); // the input's source number
+        uint8_t push( const juce::MidiMessage& message, const juce::MidiInput* input, int raw ); // the input's source number
+        uint8_t sourceNumber( const juce::String& identifier, const std::vector<uint8_t>& taken ); // maxSources for none
         void handleAsyncUpdate() override { session_->serviceControllers(); if( serviced_ ) serviced_(); } // a control moved: its model, at once
         void openMidiInputs();
+#ifdef __linux__
+        void openRawMidiInputs();
+#endif
         void openMidiOutputs();
         void queueMidiOut( uint32_t offset, double seconds ) noexcept; // audio thread: the session's MIDI out, for the sender
         void timerCallback() override { service(); }
@@ -133,7 +142,14 @@ namespace oscairn::host
         // number while the app runs, so selectors resolved before it was unplugged still match.
         std::vector<std::unique_ptr<juce::MidiInput>> midiInputs_;
         std::vector<uint8_t>                          midiSources_;
+        std::vector<std::string>                      midiNames_; // the inputs' names, in midiSources_' order
         std::map<juce::String, uint8_t>               sourceOf_; // by device identifier
+#ifdef __linux__
+        // No ALSA sequencer (a FANTOM-0's kernel): the inputs are raw MIDI devices instead of JUCE's,
+        // decided once at startup, read by one reader in midiSources_' order.
+        bool                                          rawMidi_ = false;
+        std::unique_ptr<RawMidiReader>                rawInputs_;
+#endif
         juce::MidiDeviceListConnection                midiDevicesChanged_;
 
         // MIDI outputs (RFC 0012), each numbered by device like the inputs, apart from them. The

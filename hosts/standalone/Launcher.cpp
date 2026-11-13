@@ -163,8 +163,8 @@ namespace oscairn::standalone
     }
     void EngineRecovery::resized()
     {
-        const int side = desktopMode(*this) == 2 ? 40 : 28;
-        restart_.setBounds(getLocalBounds().removeFromRight(170).reduced(8, std::max(0, (getHeight() - side) / 2)));
+        const int side = dense(*this) ? getHeight() : desktopMode(*this) == 2 ? 40 : 28; // dense: the strip is one touch target tall
+        restart_.setBounds(getLocalBounds().removeFromRight(170).reduced(dense(*this) ? denseGap : 8, std::max(0, (getHeight() - side) / 2)));
     }
     void EngineRecovery::paint(juce::Graphics& g)
     {
@@ -173,7 +173,7 @@ namespace oscairn::standalone
         const int mode = std::max(1, desktopMode(*this));
         g.setColour(ink(Ink::Danger).contrasting());
         drawInked(g, notice_, getLocalBounds().reduced(12, 0).withRight(restart_.isVisible() ? restart_.getX() - 8 : getRight() - 8),
-                 juce::Font(juce::FontOptions(textSize(TextRole::Small, mode))), juce::Justification::centredLeft);
+                 juce::Font(juce::FontOptions(textSize(dense(*this) ? TextRole::Body : TextRole::Small, mode))), juce::Justification::centredLeft);
     }
 
     Launcher::Launcher(Engine& engine, std::vector<App> apps, TopBar::Shell shell) : engine_(engine), apps_(std::move(apps)), states_(apps_.size()), recovery_(engine), bar_(engine, "Home", [&] {
@@ -203,7 +203,7 @@ namespace oscairn::standalone
     void Launcher::resized()
     {
         bar_.setBounds(getLocalBounds().removeFromTop(TopBar::heightFor(*this)));
-        recovery_.setBounds(getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)).removeFromTop(36).reduced(8, 2));
+        recovery_.setBounds(dense(*this) ? getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)).removeFromTop(44).reduced(denseGap, 0) : getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)).removeFromTop(36).reduced(8, 2));
         // Tiles in as many columns as fit at about 240 pixels, all of one size; on a device's
         // screen at about 200, shorter, with the least space between (RFC 0019).
         const bool touch = mode() == 2 || desktopMode(*this) == 0, tight = dense(*this);

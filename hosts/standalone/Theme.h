@@ -81,6 +81,12 @@ void setOffscreen(juce::Component& window);
 // a title bar `touch` tall with only its close button. launchDialog: LaunchOptions::launchAsync so.
 void setDeviceScreen(juce::Component* window,int touch=44);
 juce::Component* deviceScreen();
+// The device's window draws `pixelsPerUnit` physical pixels to a design unit (Profile::Screen::scale),
+// whatever the display's own scale is (X11 JUCE: the panel's dpi / 96, rounded; `platformScale`
+// 0: read from the display): JUCE multiplies the two, and a window's units are what a menu, an
+// alert or the keyboard in it is drawn in while the Panel's board is scaled to them, so only when
+// the window's units are the design's do they all come out as the same touch target.
+void setDeviceScale(float pixelsPerUnit,double platformScale=0);
 void keepInScreen(juce::Component& dialog);
 juce::DialogWindow* launchDialog(juce::DialogWindow::LaunchOptions& options);
 float textSize(TextRole, int mode);              // in pixels, with the theme's font scale
@@ -119,6 +125,13 @@ public:
     juce::AlertWindow* createAlertWindow(const juce::String&,const juce::String&,const juce::String&,const juce::String&,const juce::String&,juce::MessageBoxIconType,int,juce::Component*) override;
     int getAlertWindowButtonHeight() override;
     juce::Component* getParentComponentForMenuOptions(const juce::PopupMenu::Options&) override;
+    // Dense there too (RFC 0019): a menu's item one touch target tall and its text the list rows', an alert's text the same.
+    juce::Font getPopupMenuFont() override;
+    void getIdealPopupMenuItemSize(const juce::String&,bool,int,int&,int&) override;
+    void getIdealPopupMenuSectionHeaderSizeWithOptions(const juce::String&,int,int&,int&,const juce::PopupMenu::Options&) override;
+    juce::Font getAlertWindowTitleFont() override;
+    juce::Font getAlertWindowMessageFont() override;
+    juce::Font getAlertWindowFont() override;
 private:
     struct Loaded { ThemeData data; juce::Typeface::Ptr regular,bold; std::shared_ptr<juce::Drawable> splash; };
     Loaded load(const juce::File& folder) const;

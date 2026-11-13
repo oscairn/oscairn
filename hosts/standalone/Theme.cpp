@@ -306,6 +306,15 @@ void setOffscreen(juce::Component& window){window.getProperties().set("oscairnOf
 namespace{juce::Component::SafePointer<juce::Component> screenWindow;int touchSize=44;}
 void setDeviceScreen(juce::Component* window,int touch){screenWindow=window;touchSize=touch;}
 juce::Component* deviceScreen(){return screenWindow.getComponent();}
+void setDeviceScale(float pixelsPerUnit,double platformScale) {
+    auto& desktop=juce::Desktop::getInstance();
+    if(platformScale<=0){
+        const auto* display=desktop.getDisplays().getPrimaryDisplay(); // its scale is the global factor times the display's own
+        platformScale=display?display->scale/desktop.getGlobalScaleFactor():1.0;
+    }
+    const float global=float(pixelsPerUnit/juce::jmax(0.1,platformScale));
+    if(std::abs(global-desktop.getGlobalScaleFactor())>1e-4f)desktop.setGlobalScaleFactor(global);
+}
 void keepInScreen(juce::Component& dialog) {
     auto* screen=deviceScreen();
     if(!screen || &dialog==screen || dialog.getParentComponent()==screen)return;
@@ -315,6 +324,7 @@ void keepInScreen(juce::Component& dialog) {
     }
     setDesktopMode(dialog,2);
     screen->addChildComponent(dialog); // off the desktop: no window of its own
+    if(dynamic_cast<juce::AlertWindow*>(&dialog))dialog.sendLookAndFeelChange(); // an alert sizes itself by its parent: laid out again for this screen, not the desktop's
     dialog.setBounds(screen->getLocalBounds().withSizeKeepingCentre(std::min(dialog.getWidth(),screen->getWidth()),std::min(dialog.getHeight(),screen->getHeight())));
 }
 juce::DialogWindow* launchDialog(juce::DialogWindow::LaunchOptions& options) {
@@ -328,6 +338,21 @@ juce::AlertWindow* Theme::createAlertWindow(const juce::String& title,const juce
     return alert;
 }
 int Theme::getAlertWindowButtonHeight(){return deviceScreen()?touchSize:LookAndFeel_V4::getAlertWindowButtonHeight();}
+juce::Font Theme::getPopupMenuFont(){return deviceScreen()?juce::Font(juce::FontOptions(textSize(TextRole::Body,2))):LookAndFeel_V4::getPopupMenuFont();}
+void Theme::getIdealPopupMenuItemSize(const juce::String& text,bool separator,int standard,int& width,int& height) {
+    if(!deviceScreen()){LookAndFeel_V4::getIdealPopupMenuItemSize(text,separator,standard,width,height);return;}
+    // One touch target tall; the width the text, the tick's room and a margin each side.
+    width=separator?50:juce::GlyphArrangement::getStringWidthInt(getPopupMenuFont(),text)+touchSize+2*denseMargin;
+    height=separator?denseGap:touchSize;
+}
+void Theme::getIdealPopupMenuSectionHeaderSizeWithOptions(const juce::String& text,int standard,int& width,int& height,const juce::PopupMenu::Options& options) {
+    if(!deviceScreen()){LookAndFeel_V4::getIdealPopupMenuSectionHeaderSizeWithOptions(text,standard,width,height,options);return;}
+    getIdealPopupMenuItemSize(text,false,standard,width,height);
+    height=int(getPopupMenuFont().getHeight()*1.3f)+2*denseGap; // a label, not a target
+}
+juce::Font Theme::getAlertWindowTitleFont(){return deviceScreen()?juce::Font(juce::FontOptions(textSize(TextRole::Body,2),juce::Font::bold)):LookAndFeel_V4::getAlertWindowTitleFont();}
+juce::Font Theme::getAlertWindowMessageFont(){return deviceScreen()?juce::Font(juce::FontOptions(textSize(TextRole::Body,2))):LookAndFeel_V4::getAlertWindowMessageFont();}
+juce::Font Theme::getAlertWindowFont(){return deviceScreen()?juce::Font(juce::FontOptions(textSize(TextRole::Small,2))):LookAndFeel_V4::getAlertWindowFont();}
 juce::Component* Theme::getParentComponentForMenuOptions(const juce::PopupMenu::Options& options) {
     auto* parent=LookAndFeel_V4::getParentComponentForMenuOptions(options);
     return parent?parent:deviceScreen();

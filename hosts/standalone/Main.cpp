@@ -140,8 +140,8 @@ namespace oscairn::standalone
             {
                 setTitleBarHeight( 0 );
                 // A dense screen scales everything, dialogs and menus too, so a touch target keeps
-                // its physical size (RFC 0019).
-                juce::Desktop::getInstance().setGlobalScaleFactor( profile_.screen()->scale() );
+                // its physical size, on whatever display (RFC 0019).
+                setDeviceScale( profile_.screen()->scale() );
                 // Nothing else opens as a window of its own: dialogs, alerts and menus open inside this one.
                 setDeviceScreen( this, Profile::Screen::touchTarget );
                 setDense( *this ); // and dense by design: touch-size controls, the least space between them

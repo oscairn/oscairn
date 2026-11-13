@@ -36,8 +36,8 @@ int main(int argc, char** argv)
     const int touch = standalone::Profile::Screen::touchTarget;
     const int designWidth = juce::roundToInt(s->width / s->scale()), designHeight = juce::roundToInt(s->height / s->scale());
 
-    // As Main.cpp makes the device's window.
-    juce::Desktop::getInstance().setGlobalScaleFactor(s->scale());
+    // As Main.cpp makes the device's window (there, the display's own scale is read; here it is PLATFORM).
+    standalone::setDeviceScale(s->scale(), PLATFORM);
     const double pixelsPerUnit = juce::Desktop::getInstance().getGlobalScaleFactor() * PLATFORM; // one unit of the window, in physical pixels
     juce::DocumentWindow screen("screen", standalone::ink(standalone::Ink::Background), 0);
     screen.setUsingNativeTitleBar(false); screen.setTitleBarHeight(0);
@@ -152,6 +152,10 @@ int main(int argc, char** argv)
             alert->exitModalState(0);
         }
     }
+    // Main.cpp's call, reading the display's own scale: the display then draws the profile's scale, as it is (here, whatever this one is).
+    standalone::setDeviceScale(s->scale());
+    if(const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        check(std::abs(display->scale - s->scale()) < 0.01, "on this display (scale " + std::to_string(display->scale / juce::Desktop::getInstance().getGlobalScaleFactor()) + " of its own) the device's scale is drawn: " + std::to_string(display->scale));
     standalone::setDeviceScreen(nullptr);
     juce::Desktop::getInstance().setGlobalScaleFactor(1.0f);
     return failures == 0 ? 0 : 1;

@@ -635,7 +635,7 @@ namespace oscairn::standalone
 
     void Panel::resized()
     {
-        recovery_.setBounds(getLocalBounds().removeFromTop(44).reduced(4));
+        recovery_.setBounds(dense(*this) ? getLocalBounds().removeFromTop(44).reduced(denseGap, 0) : getLocalBounds().removeFromTop(44).reduced(4)); // dense: a touch target tall, Restart in it
         // Scale the board to fit the tighter dimension. A stretching layout is laid out at its
         // design size and takes the space left in the other, which may be less than the layout's
         // own size: its elements move and stretch by their anchors. Otherwise the board is centred.

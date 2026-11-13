@@ -22,11 +22,12 @@ struct AudioConfiguration
     std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, DeviceReaders.h); empty: none
     std::string keyboardDevice; // non-MIDI keys the engine reads (a profile's keyboard, DeviceReaders.h); empty: none
     bool keyboardLocalOff=false; // --keyboard-local off: the keyboard's own sound engine told Local Switch off when it is opened (a profile's keyboard.localOff)
+    std::string profile; // --device-profile: the device profile (built-in id or file) whose control groups the engine plays its panel by until an app sends its own (RFC 0024); empty: none
     std::vector<std::string> controllers; // controller profile files (RFC 0024), each by its full path, beside the built-in ones
     bool nullDevice=false; // --audio null: the null device (NullDevice.h), writing nowhere, with no MIDI device opened; for tests, never a fallback
     static bool isOption(std::string_view name)
     {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames" ||
-            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--keyboard-device" || name=="--keyboard-local" || name=="--controller" || name=="--audio";}
+            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--keyboard-device" || name=="--keyboard-local" || name=="--device-profile" || name=="--controller" || name=="--audio";}
     void setOption(std::string_view name,const std::string& value)
     {
         if(value.empty() || value.find('\0')!=std::string::npos)throw std::invalid_argument("Empty or invalid audio option");
@@ -38,6 +39,7 @@ struct AudioConfiguration
         else if(name=="--panel-map")panelMap=value;
         else if(name=="--keyboard-device")keyboardDevice=value;
         else if(name=="--keyboard-local"){if(value!="off")throw std::invalid_argument("--keyboard-local takes off");keyboardLocalOff=true;}
+        else if(name=="--device-profile")profile=value;
         else if(name=="--controller")controllers.push_back(std::filesystem::absolute(value).string()); // as many as wanted
         else if(name=="--buffer-frames")bufferFrames=number(value,16,8192,"--buffer-frames is 16 to 8192");
         else if(name=="--device-channels")deviceChannels=number(value,1,256,"--device-channels is 1 to 256");
@@ -76,6 +78,7 @@ struct AudioConfiguration
         if(!panelDevice.empty()){args.push_back("--panel-device");args.push_back(panelDevice);args.push_back("--panel-map");args.push_back(panelMap);}
         if(!keyboardDevice.empty()){args.push_back("--keyboard-device");args.push_back(keyboardDevice);}
         if(keyboardLocalOff){args.push_back("--keyboard-local");args.push_back("off");}
+        if(!profile.empty()){args.push_back("--device-profile");args.push_back(profile);}
         for(const auto& c:controllers){args.push_back("--controller");args.push_back(c);}
         return args;
     }

@@ -6,7 +6,9 @@
     OSCAIRN_RELIABILITY  the profile's reliability level, which the engine reads (RFC 0025)
     OSCAIRN_ENGINE_ARGS  oscairn-engine's audio options, as the app passes them to the engine it
                          starts: the block, the audio device and its channel map (audio.device),
-                         the panel and the keyboard. Quoted for the shell: the session evaluates it.
+                         the panel and the keyboard; with a panel, the profile's
+                         id, whose control groups the panel plays by (the app sends them when it
+                         runs). Quoted for the shell: the session evaluates it.
     OSCAIRN_AUDIO_THREAD_CORES  compute.audioThreadCores as a CPU list ("1,2,3"), the cores the
                          engine's and workers' audio threads may run on; empty: anywhere
 
@@ -41,6 +43,9 @@ def engine_args(profile, panels="/usr/share/oscairn/panels"):
     if panel:
         path = panel["map"] if panel["map"].startswith("/") else f"{panels}/{panel['map']}"
         args += ["--panel-device", panel["device"], "--panel-map", path]
+        # The panel's controls play by the device's control groups, which the app sends; without
+        # it the engine takes them from the profile, built in under its id.
+        args += ["--device-profile", profile["id"]]
     keyboard = profile.get("keyboard")
     if keyboard:
         args += ["--keyboard-device", keyboard["device"]]

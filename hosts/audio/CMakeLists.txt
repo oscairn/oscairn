@@ -79,6 +79,18 @@ add_test(NAME engine-audio-devices COMMAND oscairn_audio_devices_test $<TARGET_F
 add_test(NAME engine-audio-devices-worker COMMAND oscairn_audio_devices_test $<TARGET_FILE_DIR:oscairn_step_sequencer> $<TARGET_FILE:oscairn-plugin-worker>)
 set_tests_properties(engine-audio-devices engine-audio-devices-worker PROPERTIES TIMEOUT 60)
 
+# A device panel's slider in the engine without the app (the FANTOM-07's map, read from a pipe):
+# the null device, so no audio or MIDI device is opened.
+if(TARGET oscairn_panel)
+    juce_add_console_app(oscairn_panel_startup_test PRODUCT_NAME "oscairn-panel-startup-test")
+    target_sources(oscairn_panel_startup_test PRIVATE panel_startup_test.cpp)
+    target_compile_definitions(oscairn_panel_startup_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(oscairn_panel_startup_test PRIVATE oscairn_audio_host oscairn_panel oscairn_control_json juce::juce_recommended_config_flags)
+    add_dependencies(oscairn_panel_startup_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn-plugin-worker)
+    add_test(NAME engine-panel-startup COMMAND oscairn_panel_startup_test $<TARGET_FILE_DIR:oscairn_step_sequencer> ${PROJECT_SOURCE_DIR}/devices/roland-fantom0/panels/fantom-07.json)
+    set_tests_properties(engine-panel-startup PROPERTIES TIMEOUT 60)
+endif()
+
 # External controllers kept by the engine (RFC 0024), on input names alone: no MIDI device is opened.
 juce_add_console_app(oscairn_controller_ports_test PRODUCT_NAME "oscairn-controller-ports-test")
 target_sources(oscairn_controller_ports_test PRIVATE controller_ports_test.cpp)

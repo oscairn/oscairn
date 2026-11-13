@@ -2,6 +2,7 @@
 #include "AudioEngine.h"
 #include "NullDevice.h"
 #include "WebTransport.h"
+#include "../standalone/Profile.h"
 
 #include "oscairn/midi_input.h"
 #include "oscairn/realtime.h"
@@ -183,6 +184,14 @@ namespace oscairn::host
 
         // RFC 0011's instant controls: a control's move that waits for the control thread wakes it.
         session_->setControllerWake( [this] { triggerAsyncUpdate(); } );
+        // The device's own control groups, which give its panel's controls their default targets
+        // (RFC 0024: sliders on part levels): without the app nothing else sends them, and a
+        // control no group names plays nothing. An app that attaches sends its own in their place.
+        if( !config.profile.empty() )
+        {
+            session_->setControllers( standalone::controlGroups( standalone::readProfile( config.profile ) ), {} );
+            std::fprintf( stderr, "oscairn: control groups from the profile %s, until an app sends its own\n", config.profile.c_str() );
+        }
         if( !config.panelDevice.empty() )
         {
             // A device panel's own controls, played as a controller's are, by their identities.

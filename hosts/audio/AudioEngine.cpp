@@ -197,6 +197,19 @@ namespace oscairn::host
             throw std::runtime_error( "this build reads no panel (OSCAIRN_PANEL_ROLAND is off)" );
 #endif
         }
+        // Like the panel, read with --audio null too: a device named on purpose, not one found.
+        if( !config.keyboardDevice.empty() )
+        {
+#if OSCAIRN_PANEL_ROLAND
+            for( size_t i = 0; i < bmcSources.size(); ++i )
+            {
+                keyboardNames_.push_back( bmcInputName( i ) );
+                keyboardSources_.push_back( sourceNumber( "bmc:" + juce::String::toHexString( bmcSources[i] ), keyboardSources_ ) );
+            }
+#else
+            throw std::runtime_error( "this build reads no keyboard (OSCAIRN_PANEL_ROLAND is off)" );
+#endif
+        }
 #ifdef __linux__
         // Decided once: a kernel either has the sequencer or not. Where it has, its ports are the
         // raw devices', so never both.
@@ -204,6 +217,12 @@ namespace oscairn::host
         if( rawMidi_ ) std::fprintf( stderr, "oscairn: no ALSA sequencer; MIDI inputs are read as ALSA raw MIDI\n" );
 #endif
         openMidiInputs();
+#if OSCAIRN_PANEL_ROLAND
+        if( !config.keyboardDevice.empty() )
+            keyboard_ = std::make_unique<BmcLinkReader>( config.keyboardDevice, [this]( size_t input, const uint8_t* bytes, size_t size ) {
+                incoming( juce::MidiMessage( bytes, int( size ) ), nullptr, -1, keyboardSources_[input] );
+            } );
+#endif
         openMidiOutputs();
         sender_.startThread();
         midiDevicesChanged_ = juce::MidiDeviceListConnection::make( [this] { midiDevicesDirty_ = true; } );
@@ -229,6 +248,7 @@ namespace oscairn::host
         stopTimer();
 #if OSCAIRN_PANEL_ROLAND
         panel_.reset(); // its thread plays the session's controls
+        keyboard_.reset();
 #endif
         session_->setControllerWake( {} );
         session_->setAudioHost( {}, {} );
@@ -472,7 +492,8 @@ namespace oscairn::host
         while( source < maxSources && used.count( source ) ) ++source;
         if( source == maxSources )
             for( auto it = sourceOf_.begin(); it != sourceOf_.end(); ++it )
-                if( std::none_of( taken.begin(), taken.end(), [&]( uint8_t s ) { return s == it->second; } ) )
+                if( std::none_of( taken.begin(), taken.end(), [&]( uint8_t s ) { return s == it->second; } ) &&
+                    std::find( keyboardSources_.begin(), keyboardSources_.end(), it->second ) == keyboardSources_.end() ) // the keyboard's are always open
                     { source = it->second; sourceOf_.erase( it ); break; }
         if( source == maxSources ) return source; // 63 inputs open at once
         sourceOf_.emplace( identifier, source );
@@ -511,6 +532,7 @@ namespace oscairn::host
             std::lock_guard lock( pushLock_ );
             midiInputs_ = std::move( inputs );
             midiSources_ = std::move( sources );
+            midiSources_.insert( midiSources_.end(), keyboardSources_.begin(), keyboardSources_.end() );
         }
         std::vector<std::string> names;
         for( auto& input : midiInputs_ )
@@ -518,6 +540,7 @@ namespace oscairn::host
             input->start();
             names.push_back( input->getName().toStdString() );
         }
+        names.insert( names.end(), keyboardNames_.begin(), keyboardNames_.end() );
         std::fprintf( stderr, "oscairn: %zu MIDI inputs open\n", midiInputs_.size() );
         midiNames_ = names;
         controllers_->setInputs( std::move( names ) );
@@ -548,7 +571,9 @@ namespace oscairn::host
         {
             std::lock_guard lock( pushLock_ );
             midiSources_ = std::move( sources );
+            midiSources_.insert( midiSources_.end(), keyboardSources_.begin(), keyboardSources_.end() );
         }
+        names.insert( names.end(), keyboardNames_.begin(), keyboardNames_.end() );
         const auto count = opened.size();
         rawInputs_ = std::make_unique<RawMidiReader>( std::move( opened ),
             [this]( size_t input, const uint8_t* bytes, size_t size ) { incoming( juce::MidiMessage( bytes, int( size ) ), nullptr, int( input ) ); },
@@ -560,26 +585,26 @@ namespace oscairn::host
     }
 #endif
 
-    void AudioEngine::incoming( const juce::MidiMessage& message, const juce::MidiInput* input, int raw )
+    void AudioEngine::incoming( const juce::MidiMessage& message, const juce::MidiInput* input, int raw, uint8_t known )
     {
         kick::clap::Event converted; // channel messages pass if the block will take them (midiToClap)
         if( oscairn::midiToClap( message.getRawData(), (size_t)message.getRawDataSize(), 0, converted ) || message.isMidiClock() || message.isMidiStart() || message.isMidiContinue() || message.isMidiStop()
             || message.isSongPositionPointer() )
         {
-            const auto source = push( message, input, raw );
+            const auto source = push( message, input, raw, known );
             // A controller's control (RFC 0011's instant controls), mapped here on the MIDI thread.
             if( message.isController() || message.isNoteOnOrOff() || message.isPitchWheel() || message.isChannelPressure() )
                 session_->controllerMidi( source, message.getRawData(), (size_t)message.getRawDataSize() );
         }
     }
 
-    uint8_t AudioEngine::push( const juce::MidiMessage& message, const juce::MidiInput* input, int raw )
+    uint8_t AudioEngine::push( const juce::MidiMessage& message, const juce::MidiInput* input, int raw, uint8_t known )
     {
         Incoming in{};
         const auto size = std::min( message.getRawDataSize(), 3 );
         std::copy_n( message.getRawData(), size, in.bytes );
         in.size = (uint8_t)size;
-        in.source = untaggedSource;
+        in.source = known;
         in.seconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
 
         std::lock_guard lock( pushLock_ );

@@ -18,7 +18,8 @@ fantom = load("fantom-07")
 assert engine.engine_args(fantom) == [
     "--buffer-frames", "128",
     "--output-device", "hw:1,0", "--audio-outputs", "0,1", "--device-channels", "16", "--sample-rate", "48000",
-    "--panel-device", "/dev/i2c-slave-2", "--panel-map", "/usr/share/oscairn/panels/fantom-07.json"], engine.engine_args(fantom)
+    "--panel-device", "/dev/i2c-slave-2", "--panel-map", "/usr/share/oscairn/panels/fantom-07.json",
+    "--keyboard-device", "/dev/ttyGS0"], engine.engine_args(fantom)
 assert engine.settings(fantom)["OSCAIRN_HEADLESS"] == "0"
 assert engine.settings(fantom)["OSCAIRN_RELIABILITY"] == "instrument"
 

@@ -699,6 +699,27 @@
       ],
       "additionalProperties": false
     },
+    "keyboard": {
+      "type": "object",
+      "description": "Keys that are not MIDI, read by the engine: its protocol, which names the firmware on the other side (roland-bmc-stock: the FANTOM-0's link to its sound chips as Roland's stock BMC firmware speaks it, an image built with OSCAIRN_PANEL_ROLAND; other firmware would be another value), and its character device",
+      "properties": {
+        "protocol": {
+          "enum": [
+            "roland-bmc-stock"
+          ]
+        },
+        "device": {
+          "type": "string",
+          "pattern": "^/dev/",
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "protocol",
+        "device"
+      ],
+      "additionalProperties": false
+    },
     "hardware": {
       "type": "object",
       "description": "RFC 0004: the device's accelerators and device clocks, as what each actually offers (operations, firmware, banks, capacity), not a chip label. Absent: CPU-only. Each accelerator's service is compiled into an image only when its profile declares it (os/scripts/check-image-profile.py)",
@@ -1128,6 +1149,11 @@
             {
               "required": [
                 "panel"
+              ]
+            },
+            {
+              "required": [
+                "keyboard"
               ]
             },
             {

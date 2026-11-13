@@ -87,6 +87,8 @@ with tempfile.TemporaryDirectory(prefix="oscairn-image-") as temporary:
     # Declared but missing.
     fails("a FANTOM panel without the reader", profile={**pedal, "panel": {"protocol": "roland-i2c-slave"}},
           needle="BR2_PACKAGE_OSCAIRN_PANEL_ROLAND is not set")
+    fails("FANTOM keys without the reader", profile={**pedal, "keyboard": {"protocol": "roland-bmc-stock", "device": "/dev/ttyGS0"}},
+          needle="BR2_PACKAGE_OSCAIRN_PANEL_ROLAND is not set")
     fails("a screen without the app", profile={**pedal, "screens": [{"width": 800, "height": 480, "surface": "panel", "layout": "x"}]},
           kernel_extra={"CONFIG_DRM": "y", "CONFIG_DRM_FBDEV_EMULATION": "y", "CONFIG_FB_DEVICE": "y"}, needle="BR2_PACKAGE_OSCAIRN_STANDALONE is not set")
     fails("a touch screen without touch input", profile={**pedal, "screens": [{"width": 800, "height": 480, "touch": True, "surface": "panel", "layout": "x"}]},

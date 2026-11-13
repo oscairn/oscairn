@@ -351,7 +351,10 @@ report the compiled per-channel routes.
   devices instead and names each input subdevice as the sequencer would name its port, so
   a name, and every choice kept by name, is the same either way. An input keeps its
   `source` while the engine runs, by the sequencer's `client-port` address or the raw
-  device's `hw:CARD,DEVICE,SUBDEVICE`.
+  device's `hw:CARD,DEVICE,SUBDEVICE`. A device profile's `keyboard` (the FANTOM-0's keys,
+  [RFC 0024](rfcs/0024-device-profiles.md#what-a-profile-holds)) adds inputs of its own after
+  the devices': `FANTOM keys`, and `FANTOM MIDI 0x81`, `0xA1`, `0xB2`, `0xC8` and `0xD8` for MIDI
+  from the instrument's MIDI ports over the same link, listed whether or not anything arrives.
 - **MIDI out** ([RFC 0012](rfcs/0012-sync-external-midi-and-multi-device.md#step-1-status)):
   a part's `midiOut` sends its MIDI to hardware outputs as well as to its instruments. Its
   `devices` are rules as above, matched against `session.status`'s `midiOutputs` (numbered

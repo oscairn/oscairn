@@ -6,7 +6,7 @@
     OSCAIRN_RELIABILITY  the profile's reliability level, which the engine reads (RFC 0025)
     OSCAIRN_ENGINE_ARGS  oscairn-engine's audio options, as the app passes them to the engine it
                          starts: the block, the audio device and its channel map (audio.device),
-                         and the panel. Quoted for the shell: the session evaluates it.
+                         the panel and the keyboard. Quoted for the shell: the session evaluates it.
 
     engine-args.py PROFILE.json
 """
@@ -39,6 +39,9 @@ def engine_args(profile, panels="/usr/share/oscairn/panels"):
     if panel:
         path = panel["map"] if panel["map"].startswith("/") else f"{panels}/{panel['map']}"
         args += ["--panel-device", panel["device"], "--panel-map", path]
+    keyboard = profile.get("keyboard")
+    if keyboard:
+        args += ["--keyboard-device", keyboard["device"]]
     return args
 
 

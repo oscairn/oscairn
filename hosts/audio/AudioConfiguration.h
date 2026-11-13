@@ -20,11 +20,12 @@ struct AudioConfiguration
     // whether mapped or not (a TDM link opens all its slots), and the rate it must run at. 0: as today.
     uint32_t deviceChannels=0,sampleRate=0;
     std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, panel_reader.h); empty: none
+    std::string keyboardDevice; // non-MIDI keys the engine reads (a profile's keyboard, BmcLink.h); empty: none
     std::vector<std::string> controllers; // controller profile files (RFC 0024), each by its full path, beside the built-in ones
     bool nullDevice=false; // --audio null: the null device (NullDevice.h), writing nowhere, with no MIDI device opened; for tests, never a fallback
     static bool isOption(std::string_view name)
     {return name=="--audio-inputs" || name=="--audio-outputs" || name=="--input-device" || name=="--output-device" || name=="--buffer-frames" ||
-            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--controller" || name=="--audio";}
+            name=="--device-channels" || name=="--sample-rate" || name=="--panel-device" || name=="--panel-map" || name=="--keyboard-device" || name=="--controller" || name=="--audio";}
     void setOption(std::string_view name,const std::string& value)
     {
         if(value.empty() || value.find('\0')!=std::string::npos)throw std::invalid_argument("Empty or invalid audio option");
@@ -34,6 +35,7 @@ struct AudioConfiguration
         else if(name=="--output-device")outputDevice=value;
         else if(name=="--panel-device")panelDevice=value;
         else if(name=="--panel-map")panelMap=value;
+        else if(name=="--keyboard-device")keyboardDevice=value;
         else if(name=="--controller")controllers.push_back(std::filesystem::absolute(value).string()); // as many as wanted
         else if(name=="--buffer-frames")bufferFrames=number(value,16,8192,"--buffer-frames is 16 to 8192");
         else if(name=="--device-channels")deviceChannels=number(value,1,256,"--device-channels is 1 to 256");
@@ -69,6 +71,7 @@ struct AudioConfiguration
         if(deviceChannels){args.push_back("--device-channels");args.push_back(std::to_string(deviceChannels));}
         if(sampleRate){args.push_back("--sample-rate");args.push_back(std::to_string(sampleRate));}
         if(!panelDevice.empty()){args.push_back("--panel-device");args.push_back(panelDevice);args.push_back("--panel-map");args.push_back(panelMap);}
+        if(!keyboardDevice.empty()){args.push_back("--keyboard-device");args.push_back(keyboardDevice);}
         for(const auto& c:controllers){args.push_back("--controller");args.push_back(c);}
         return args;
     }

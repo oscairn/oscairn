@@ -52,7 +52,8 @@ none of it settles is in
 - **Keys:** a separate keyboard CPU scans them. Seen on the unit with Roland's app stopped and
   nothing sent to the BMC side: key events arrive on the USB serial line `/dev/ttyGS0`, as MIDI
   note messages with velocity, to whatever program reads it
-  ([With Roland's app stopped](#with-rolands-app-stopped)).
+  ([With Roland's app stopped](#with-rolands-app-stopped)). Oscairn reads them
+  ([The key reader](#the-key-reader)).
 - **Panel controls** (Roland's spec sheet and owner's manual, "Panel Descriptions"): the pitch
   bend/modulation lever, WHEEL1 and WHEEL2, S1 and S2; control knobs 1 to 8 and sliders 1 to 8
   with the PAN/LEVEL, CTRL and ASSIGN buttons choosing what they play; MASTER VOLUME; the
@@ -522,6 +523,7 @@ What stops when Roland's app is stopped, from what it was seen to do:
   1280 × 720 and checks every control fits, is that large and overlaps none. Untried on the
   instrument.
 - **A panel reader** in the engine, built only with `OSCAIRN_PANEL_ROLAND` (below).
+- **A key reader** in the engine, built with it ([The key reader](#the-key-reader)).
 - **A chroot bundle** (below): Oscairn with a userland of its own, to run on Roland's kernel
   and beside Roland's root filesystem without changing either. There is no image of Oscairn's
   own for the FANTOM: the i.MX8M Mini EVK image (`oscairn_imx8mm_evk_defconfig`,
@@ -680,11 +682,9 @@ Not in the map, with Roland's numbers for them:
 
 ### What it does not do yet
 
-- **Keys:** not read. They arrive on `/dev/ttyGS0` as MIDI words in Roland's frames
-  ([Keys](#keys)); nothing in Oscairn reads that link yet.
 - **Pads and the HOLD jack:** on the panel bus, decoded and shown by the dump, played by
   nothing ([The map](#the-map)).
-- **Lamps:** none is set; they go over `/dev/ttyGS0` too ([Lamps](#lamps)).
+- **Lamps:** none is set; they go over `/dev/ttyGS0` ([Lamps](#lamps)), which Oscairn only reads.
 - **WRITE, MENU and TEMPO:** GPIO keys on `/dev/input/event1`, not panel messages; nothing reads
   them yet.
 - **Fixed controls** (the VALUE dial, cursor, ENTER, EXIT, transport, MENU and the rest) decode
@@ -693,6 +693,60 @@ Not in the map, with Roland's numbers for them:
 - **The lever and pedals with nothing assigned:** a MIDI controller's wheel then reaches the
   parts as its own MIDI message; a panel message has none, so `wheel:1` and `wheel:2` play only
   what a Performance or Sound assigns them.
+
+## The key reader
+
+`oscairn::host::BmcLinkReader` ([hosts/audio/BmcLink.h](../hosts/audio/BmcLink.h)), built only
+with `OSCAIRN_PANEL_ROLAND`, reads `/dev/ttyGS0` on a thread of its own, polling with a 100 ms
+timeout. **It never writes to the device:** it opens it read-only and, before reading, makes it
+raw with echo and flow control off, and reads the settings back; where they do not hold it does
+not read (with echo on, the tty layer would send each byte received back to the BMC side). Once
+open it reads without pause, whatever the engine is doing and whether or not the input is
+ignored, since what it does not read waits and Roland's engine then holds its notes. If the
+device fails or ends it is opened again a second later.
+
+- **Frames:** each key's MIDI word (kind 3) is one note, on or off with its velocity, the
+  release velocity included. The panel word sent with it (kind 6 from 0x02) is the same key
+  again and is passed over, and so are the sound engine's status frames (kind 9 from 0xE1).
+  Kind-3 MIDI words from 0x81, 0xA1, 0xB2, 0xC8 and 0xD8, the addresses Roland's app takes MIDI
+  from its MIDI ports on, are read the same way: notes, controllers, pitch bend, pressure and
+  program changes. Anything else is counted and logged with its header bytes, at most ten a
+  second.
+- **Inputs:** the keys are a MIDI input named `FANTOM keys`, and each of the five addresses one
+  named by its address (`FANTOM MIDI 0x81`) until it is known which port is which. They are
+  listed in `session.status` and `controllers.inputs` after the devices' inputs, whether or not
+  anything has arrived, each with a source number kept while the engine runs, and play like any
+  other input: parts' device rules, zones, controller profiles, ignoring and learn. The channel
+  is the word's own: the keys play on channel 2 (status 0x91), and a part takes them as it takes
+  any input's channels.
+- **Finding its place:** the link has no delimiter or checksum. The reader takes a position as a
+  frame's start only where a frame it knows begins (a MIDI word whose code index agrees with its
+  status, a panel word, a status frame no longer than 4 KiB) and the next frame's header after
+  it is plausible too; then it follows the headers, and a header that is not (a kind of 0, more
+  than seven payload bytes, a long frame over 1 MiB) has it search again from the next byte.
+  Started at each of the first 2,048 byte offsets of the owner's capture (and, once, at every
+  offset), it found every key event whose frame starts after the offset and nothing else, never
+  skipping more than 127 bytes.
+- **What was queued:** for the first half second after each open, and until a read leaves
+  nothing waiting, MIDI words are dropped (counted and logged once), so stale notes do not all
+  sound at once. When the device fails or ends, each note it passed on and has not seen end
+  gets a note off, and a held sustain pedal a release, so nothing is left held across a reopen.
+
+The profile's `keyboard` says which reader and which device:
+
+```json
+"keyboard": { "protocol": "roland-bmc-stock", "device": "/dev/ttyGS0" }
+```
+
+The protocol names the firmware on the other side: `roland-bmc-stock` is the link as Roland's
+stock BMC firmware speaks it, so other firmware on the BMCs would be another value (and the
+panel's `roland-i2c-slave` names what Roland's stock panel firmware sends). The app passes the
+device to the engine it starts (`--keyboard-device`, which the app also takes on its own command
+line). As with the panel, the engine reads it with `--audio null` too: it is a device named on
+purpose, not one found by listing. A build without `OSCAIRN_PANEL_ROLAND` leaves the reader out
+and says so when a profile has a keyboard. Tested on frames built in the test and on a pty in
+place of the device (`engine-bmc-link`), and its parser on the owner's capture; it has not run on
+the unit.
 
 ## Checking the panel map on a unit
 
@@ -775,9 +829,16 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
    ([With Roland's app stopped](#with-rolands-app-stopped)), so the dump's log will say the
    device ended and is being opened again. The reader has to read the device as Roland does, and
    the panel may need the host's start words first, before the map can be checked.
-7. **Key messages on the link:** seen on November 12 with Roland's app stopped
-   ([With Roland's app stopped](#with-rolands-app-stopped)): the keys arrive with nothing sent
-   first, in the format Roland's programs show. What is left is for Oscairn to read them.
+7. **Oscairn's key reader.** The format is confirmed (November 12, with Roland's app stopped:
+   [With Roland's app stopped](#with-rolands-app-stopped)); what is left is Oscairn reading it.
+   With nothing else reading `/dev/ttyGS0`, start the engine in the bundle with
+   `--keyboard-device /dev/ttyGS0` (the app passes it from the profile). Expected: no line saying
+   the device cannot be made raw; `session.status` lists `FANTOM keys` in `midiInputs`; a key
+   played after the first second plays the startup Synth part, softly and loudly as played,
+   under Roland's own tone. Keys held while the engine starts must not sound at once (the reader
+   drops what was queued, and logs how many). Lines saying `unknown frame:` are frames not seen
+   in the capture: send them back. Then send notes into MIDI IN from another instrument:
+   whichever `FANTOM MIDI 0x..` input plays names the DIN socket's address.
 8. **Whether the link still runs:** `arecord -D hw:1,0 -c 16 -f S32_LE -r 48000 -d 2
    /tmp/link.wav`. Expected: it finishes in two seconds, the BMCs driving the clocks without
    Roland's app. Hanging until killed, or an input/output error, refutes that: they stopped

@@ -103,13 +103,13 @@ namespace oscairn::standalone
         juce::var value;
         require(juce::JSON::parse(juce::String::fromUTF8(json.data(), int(json.size())), value).wasOk(), "not valid JSON");
         const auto& root = object(value, "a profile");
-        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated"}, "the profile");
+        fields(root, {"format", "version", "id", "name", "platform", "compute", "audio", "controls", "screens", "midi", "cv", "network", "power", "panel", "keyboard", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard", "estimated"}, "the profile");
         require(text(root, "format") == "oscairn.profile", "format must be oscairn.profile");
         require(root.getProperty("version").isInt() && int(root.getProperty("version")) == 2, "version must be 2");
         Profile p;
         // A controller's profile (it names ports) holds its controls and ports only.
         if(const auto m = root.getProperty("midi"); m.getDynamicObject() && m.getDynamicObject()->hasProperty("ports"))
-            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard"})
+            for(const auto* key : {"platform", "compute", "audio", "screens", "cv", "network", "power", "panel", "keyboard", "hardware", "reliability", "apps", "alwaysAvailable", "repositories", "onScreenKeyboard"})
                 require(!root.hasProperty(key), std::string("a controller's profile has no ") + key);
         const bool controller = root.getProperty("midi").getDynamicObject() && root.getProperty("midi").getDynamicObject()->hasProperty("ports");
         p.id = text(root, "id"); p.name = text(root, "name");
@@ -337,6 +337,13 @@ namespace oscairn::standalone
             require(p.panel.protocol == "roland-i2c-slave", "a panel's protocol is roland-i2c-slave");
             require(p.panel.device.starts_with("/dev/"), "a panel's device is in /dev");
             require(!p.panel.map.empty(), "a panel names its message map");
+        }
+        if(const auto v = root.getProperty("keyboard"); !v.isVoid())
+        {
+            const auto& o = object(v, "keyboard"); fields(o, {"protocol", "device"}, "keyboard");
+            p.keyboard = {text(o, "protocol"), text(o, "device")};
+            require(p.keyboard.protocol == "roland-bmc-stock", "a keyboard's protocol is roland-bmc-stock");
+            require(p.keyboard.device.starts_with("/dev/"), "a keyboard's device is in /dev");
         }
         if(!controller)
         {

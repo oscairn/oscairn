@@ -882,6 +882,15 @@ namespace oscairn::standalone
                     std::fprintf(stderr,"oscairn: %s's panel is not read: this build has no reader for it (OSCAIRN_PANEL_ROLAND)\n",profile.name.c_str());
 #endif
                 }
+                // Its keys, when they are not MIDI: read by a new engine.
+                if(!args.contains("--connect") && !profile.keyboard.device.empty())
+                {
+#if OSCAIRN_PANEL_ROLAND
+                    if(!args.contains("--keyboard-device"))audio.keyboardDevice=profile.keyboard.device;
+#else
+                    std::fprintf(stderr,"oscairn: %s's keys are not read: this build has no reader for them (OSCAIRN_PANEL_ROLAND)\n",profile.name.c_str());
+#endif
+                }
                 audio.validate();
                 const auto socket = argument(args, "--connect");
                 if(audioOptions && args.contains("--connect"))

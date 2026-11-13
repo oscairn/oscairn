@@ -419,7 +419,8 @@ buffer (48 kHz unless `--sample-rate` says; the buffer as `--buffer-frames` or t
 and the sound goes nowhere, so meters, the transport, workers and deadlines run as on a device. It
 opens no MIDI input or output either, nor does the desktop app's own process (its controllers'
 Mackie Control and feedback ports; its log says `0 MIDI ports open in the app`): a test sends its
-notes with `notes.send`. A
+notes with `notes.send`. A profile's panel and keyboard (`--panel-device`, `--keyboard-device`)
+are still read: they are devices named on purpose, not found by listing. A
 profile's device becomes the null device with that device's channels. The user's saved choice
 (`audio.json`) is neither read nor written, `audio.devices` says `null` (its `source` and the
 device's name) with the device `fixed`, and `audio.set` refuses another device. It is only ever

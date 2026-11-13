@@ -171,6 +171,16 @@ An illustrative profile (the values are an example, not a real product's):
   into a control by the identities below ([panel map schema](../panel-map.schema.json),
   [running on a FANTOM-0](../fantom-0.md)). The engine plays those controls as a controller's.
   A controller's profile has none.
+- **`keyboard`** (optional, added 2026-11-12): keys that are not MIDI, `{protocol, device}`: the
+  reader (`roland-bmc-stock`, compiled into an image only with `OSCAIRN_PANEL_ROLAND`) and its
+  character device. The protocol names the firmware on the other side of the device, not only the
+  wire: `roland-bmc-stock` is the FANTOM-0's link to its sound chips (the BMCs) as Roland's stock
+  BMC firmware speaks it, so other firmware on those chips would be another value. The panel's
+  `roland-i2c-slave` likewise names what Roland's stock panel firmware sends. The engine lists the
+  keys as a MIDI input named `FANTOM keys`, and MIDI arriving over the same link from the
+  instrument's MIDI ports as one input per sender (`FANTOM MIDI 0x81`), so they play like any
+  other input ([running on a FANTOM-0](../fantom-0.md#the-key-reader)). A controller's profile has
+  none.
 - **`reliability`:** its level (RFC 0027): `desktop`, `instrument` or `pass-through`.
 - **`apps`:** the apps installed with it (RFC 0022), by app ID; the user can add others. The
   built-in ones are `oscairn.performance`, `oscairn.library`, `oscairn.setlist`,

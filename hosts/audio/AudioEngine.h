@@ -9,6 +9,7 @@
 #include "RawMidi.h"
 #endif
 #if OSCAIRN_PANEL_ROLAND
+#include "BmcLink.h"
 #include "oscairn/panel_reader.h"
 #endif
 
@@ -58,10 +59,10 @@ namespace oscairn::host
         void audioDeviceStopped() override { started_=false; }
         // MIDI input threads
         void handleIncomingMidiMessage( juce::MidiInput* input, const juce::MidiMessage& message ) override { incoming( message, input, -1 ); }
-        // A message from a JUCE input, or from raw input `raw` (an index into midiSources_).
-        void incoming( const juce::MidiMessage& message, const juce::MidiInput* input, int raw );
+        // A message from a JUCE input, from raw input `raw` (an index into midiSources_), or from the input numbered `source`.
+        void incoming( const juce::MidiMessage& message, const juce::MidiInput* input, int raw, uint8_t source = untaggedSource );
 
-        uint8_t push( const juce::MidiMessage& message, const juce::MidiInput* input, int raw ); // the input's source number
+        uint8_t push( const juce::MidiMessage& message, const juce::MidiInput* input, int raw, uint8_t source ); // the input's source number
         uint8_t sourceNumber( const juce::String& identifier, const std::vector<uint8_t>& taken ); // maxSources for none
         void handleAsyncUpdate() override { session_->serviceControllers(); if( serviced_ ) serviced_(); } // a control moved: its model, at once
         void openMidiInputs();
@@ -85,7 +86,11 @@ namespace oscairn::host
         std::unique_ptr<Session> session_;
 #if OSCAIRN_PANEL_ROLAND
         std::unique_ptr<PanelReader> panel_; // the profile's panel, on its own thread, into the session's controls
+        std::unique_ptr<BmcLinkReader> keyboard_; // the profile's keys, on their own thread, as MIDI inputs
 #endif
+        // The keyboard's inputs (bmcSources' order), listed after the devices' and numbered once.
+        std::vector<uint8_t> keyboardSources_;
+        std::vector<std::string> keyboardNames_;
         std::function<void()> serviced_;
         ChannelMap channelMap_;
         // External controllers (RFC 0024): their profiles and the musician's choices, and the

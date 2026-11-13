@@ -37,6 +37,7 @@
   "screens": [ { "width": 1280, "height": 720, "touch": true, "diagonal": 140, "surface": "panel", "layout": "kick-screen" } ],
   "midi": { "din": 1, "usbDevice": true, "usbHost": true },
   "panel": { "protocol": "roland-i2c-slave", "device": "/dev/i2c-slave-2", "map": "fantom-07.json" },
+  "keyboard": { "protocol": "roland-bmc-stock", "device": "/dev/ttyGS0" },
   "reliability": "instrument",
   "apps": ["oscairn.performance", "oscairn.groovebox", "oscairn.library", "oscairn.setlist", "oscairn.settings"],
   "onScreenKeyboard": false,

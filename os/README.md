@@ -192,7 +192,7 @@ build, so a mismatch fails the build. For each feature, from the profile:
 | Battery | `power.battery` | `CONFIG_POWER_SUPPLY` | any `CONFIG_BATTERY_*` or `CONFIG_CHARGER_*` |
 | USB device | `midi.usbDevice` | `BR2_PACKAGE_OSCAIRN_USB_GADGET`; the gadget with configfs MIDI and UAC2 | that option; `CONFIG_USB_GADGET` |
 | USB host | `midi.usbHost` | `CONFIG_USB`, USB audio and MIDI | `CONFIG_USB` |
-| Roland panel | `panel.protocol` `roland-i2c-slave` (the FANTOM-07) | `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND` (CMake's `OSCAIRN_PANEL_ROLAND`) | that option; `oscairn-panel-dump`, `/usr/share/oscairn/panels` |
+| Roland panel and keys | `panel.protocol` `roland-i2c-slave` or `keyboard.protocol` `roland-bmc-stock` (the FANTOM-07) | `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND` (CMake's `OSCAIRN_PANEL_ROLAND`) | that option; `oscairn-panel-dump`, `/usr/share/oscairn/panels` |
 | Camera | `camera` (none yet) | `CONFIG_MEDIA_SUPPORT` | the media subsystem, libcamera, libv4l |
 
 At build time it reads Buildroot's `.config`, the kernel's resolved `.config` and the target

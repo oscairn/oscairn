@@ -11,6 +11,20 @@ target_link_libraries(oscairn_engine_host PRIVATE oscairn_audio_host oscairn_hos
 add_dependencies(oscairn_engine_host oscairn_step_sequencer oscairn_basic_synth oscairn_delay oscairn-plugin-worker)
 install(TARGETS oscairn_engine_host RUNTIME DESTINATION bin)
 
+# The engine's audio timing over an interval, from its socket (tools/engine-timing): plain C++, no
+# JUCE, installed with the engine.
+add_executable(oscairn-engine-timing ${PROJECT_SOURCE_DIR}/tools/engine-timing/engine_timing.cpp)
+target_include_directories(oscairn-engine-timing PRIVATE ${PROJECT_SOURCE_DIR}/core/plugin-host/include ${PROJECT_SOURCE_DIR}/core/control/src)
+target_include_directories(oscairn-engine-timing SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/core/control/third_party)
+target_compile_options(oscairn-engine-timing PRIVATE -Wall -Wextra)
+install(TARGETS oscairn-engine-timing RUNTIME DESTINATION bin)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME engine-timing COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/engine_timing.py"
+        $<TARGET_FILE:oscairn_engine_host> $<TARGET_FILE:oscairn-engine-timing>)
+    set_tests_properties(engine-timing PROPERTIES TIMEOUT 90)
+endif()
+
 # The control socket served as the engine serves it, without an audio device.
 juce_add_console_app(oscairn_engine_pump_test PRODUCT_NAME "Oscairn Engine Pump Test")
 target_sources(oscairn_engine_pump_test PRIVATE tests/pump.cpp)

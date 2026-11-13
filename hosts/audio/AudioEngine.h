@@ -8,7 +8,7 @@
 #ifdef __linux__
 #include "RawMidi.h"
 #endif
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
 #include "BmcLink.h"
 #include "oscairn/panel_reader.h"
 #endif
@@ -84,7 +84,7 @@ namespace oscairn::host
         static constexpr uint32_t maxFrames  = 512;
 
         std::unique_ptr<Session> session_;
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
         std::unique_ptr<PanelReader> panel_; // the profile's panel, on its own thread, into the session's controls
         std::unique_ptr<BmcLinkReader> keyboard_; // the profile's keys, on their own thread, as MIDI inputs
 #endif

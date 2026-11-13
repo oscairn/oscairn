@@ -535,7 +535,7 @@ What stops when Roland's app is stopped, from what it was seen to do:
   renders Home, Play, the Parts views, an editor, the Library, the Catalog and Settings at
   1280 × 720 and checks every control fits, is that large and overlaps none. Untried on the
   instrument.
-- **A panel reader** in the engine, built only with `OSCAIRN_PANEL_ROLAND` (below).
+- **A panel reader** in the engine, built only with `OSCAIRN_ROLAND_FANTOM0` (below).
 - **A key reader** in the engine, built with it ([The key reader](#the-key-reader)).
 - **A chroot bundle** (below): Oscairn with a userland of its own, to run on Roland's kernel
   and beside Roland's root filesystem without changing either. There is no image of Oscairn's
@@ -566,7 +566,7 @@ os/fantom-bundle.sh       # build-os/oscairn-fantom-bundle.tar.gz
 ```
 
 It builds `oscairn_fantom_bundle_defconfig`: the EVK image's userland for the Cortex-A53
-(ARMv8.0), with `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND`, and the toolchain's kernel headers from
+(ARMv8.0), with `BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0`, and the toolchain's kernel headers from
 Linux 4.19.35, the unit's kernel, since glibc refuses to start on a kernel older than its
 headers ("FATAL: kernel too old"). `readelf -n` on the bundle's `libc.so.6` shows the oldest
 kernel it accepts (`OS: Linux, ABI: 4.19.0`).
@@ -632,7 +632,7 @@ The profile's `panel` says which reader, which device and which map:
 
 The app passes them to the engine it starts (`--panel-device`, `--panel-map`, which the app
 also takes on its own command line, to try another map); a map named without a path is found in
-`share/oscairn/panels/` beside the installed program. A build without `OSCAIRN_PANEL_ROLAND`
+`share/oscairn/panels/` beside the installed program. A build without `OSCAIRN_ROLAND_FANTOM0`
 (macOS, the desktop) leaves the reader out and says so when a profile has a panel.
 
 ### The map
@@ -710,7 +710,7 @@ Not in the map, with Roland's numbers for them:
 ## The key reader
 
 `oscairn::host::BmcLinkReader` ([hosts/audio/BmcLink.h](../hosts/audio/BmcLink.h)), built only
-with `OSCAIRN_PANEL_ROLAND`, reads `/dev/ttyGS0` on a thread of its own, polling with a 100 ms
+with `OSCAIRN_ROLAND_FANTOM0`, reads `/dev/ttyGS0` on a thread of its own, polling with a 100 ms
 timeout. **It never writes to the device:** it opens it read-only and, before reading, makes it
 raw with echo and flow control off, and reads the settings back; where they do not hold it does
 not read (with echo on, the tty layer would send each byte received back to the BMC side). Once
@@ -756,7 +756,7 @@ stock BMC firmware speaks it, so other firmware on the BMCs would be another val
 panel's `roland-i2c-slave` names what Roland's stock panel firmware sends). The app passes the
 device to the engine it starts (`--keyboard-device`, which the app also takes on its own command
 line). As with the panel, the engine reads it with `--audio null` too: it is a device named on
-purpose, not one found by listing. A build without `OSCAIRN_PANEL_ROLAND` leaves the reader out
+purpose, not one found by listing. A build without `OSCAIRN_ROLAND_FANTOM0` leaves the reader out
 and says so when a profile has a keyboard. Tested on frames built in the test and on a pty in
 place of the device (`engine-bmc-link`), and its parser on the owner's capture; it has not run on
 the unit.
@@ -893,6 +893,6 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
 
 ## Building it into an image
 
-`-DOSCAIRN_PANEL_ROLAND=ON` links the reader into the engine (and the app's panel handling) and
+`-DOSCAIRN_ROLAND_FANTOM0=ON` links the reader into the engine (and the app's panel handling) and
 installs `oscairn-panel-dump` and the map in `share/oscairn/panels/`. Buildroot passes it
-when a defconfig sets `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND`, as the chroot bundle's does.
+when a defconfig sets `BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0`, as the chroot bundle's does.

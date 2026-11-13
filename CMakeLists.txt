@@ -29,7 +29,7 @@ option(OSCAIRN_LV2 "Enable LV2 hosting (requires Lilv and LV2 development packag
 # Optional hardware is compiled out of products without it: on for an image whose profile has a
 # panel of protocol roland-i2c-slave (the FANTOM-0), which the engine then reads; the reader is
 # built for its test either way, but linked into nothing else.
-option(OSCAIRN_PANEL_ROLAND "Read a Roland FANTOM-0 panel's I2C messages in the engine (Linux)" OFF)
+option(OSCAIRN_ROLAND_FANTOM0 "Read a Roland FANTOM-0's panel and keys in the engine: the FANTOM-06, -07 and -08 (Linux)" OFF)
 set(OSCAIRN_LV2_EXAMPLE_DIR "" CACHE PATH "Optional upstream LV2 example bundles for integration tests")
 set(OSCAIRN_LV2_SOURCE_DIR "" CACHE PATH "Optional LV2 source checkout for unmodified eg-sampler Worker tests")
 

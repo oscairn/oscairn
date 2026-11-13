@@ -617,7 +617,7 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
 - [ ] A Roland FANTOM-07 as a test keyboard (the KICK's SoC, Roland's BMC chips as its audio
   interface over a TDM link, a panel on I2C): an image for its board, audio through `hw:1,0`,
   its keys, and its panel mapped from captures. What exists: a profile (`--profile fantom-07`,
-  estimates) and a panel reader built with `OSCAIRN_PANEL_ROLAND`, whose map has the layout and
+  estimates) and a panel reader built with `OSCAIRN_ROLAND_FANTOM0`, whose map has the layout and
   control IDs read from Roland's own programs, to confirm on the unit with `oscairn-panel-dump`;
   a key reader that plays its keys, seen on the unit to arrive on `/dev/ttyGS0`, as a MIDI input
   (not yet run on the unit); and a bundle to run Oscairn in a chroot on the

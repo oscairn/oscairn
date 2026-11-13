@@ -175,7 +175,7 @@ target_compile_options(oscairn-midi-stream-test PRIVATE -Wall -Wextra)
 add_test(NAME engine-midi-stream COMMAND oscairn-midi-stream-test)
 
 # The FANTOM-0's message link (BmcLink.h): its frame parser and its reader on a pty, plain POSIX,
-# tested everywhere; the engine links the reader only with OSCAIRN_PANEL_ROLAND.
+# tested everywhere; the engine links the reader only with OSCAIRN_ROLAND_FANTOM0.
 if(UNIX)
     find_package(Threads REQUIRED)
     add_executable(oscairn-bmc-link-test ../hosts/audio/bmc_link_test.cpp ../hosts/audio/BmcLink.cpp)

@@ -873,22 +873,22 @@ namespace oscairn::standalone
                 // installed program (share/oscairn/panels) unless the profile gives a path.
                 if(!args.contains("--connect") && !profile.panel.device.empty())
                 {
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
                     const auto exe=juce::File::getSpecialLocation(juce::File::currentExecutableFile);
                     if(!args.contains("--panel-device"))audio.panelDevice=profile.panel.device;
                     if(!args.contains("--panel-map"))audio.panelMap=juce::File::isAbsolutePath(profile.panel.map)?profile.panel.map
                         :exe.getParentDirectory().getSiblingFile("share/oscairn/panels").getChildFile(profile.panel.map).getFullPathName().toStdString();
 #else
-                    std::fprintf(stderr,"oscairn: %s's panel is not read: this build has no reader for it (OSCAIRN_PANEL_ROLAND)\n",profile.name.c_str());
+                    std::fprintf(stderr,"oscairn: %s's panel is not read: this build has no reader for it (OSCAIRN_ROLAND_FANTOM0)\n",profile.name.c_str());
 #endif
                 }
                 // Its keys, when they are not MIDI: read by a new engine.
                 if(!args.contains("--connect") && !profile.keyboard.device.empty())
                 {
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
                     if(!args.contains("--keyboard-device"))audio.keyboardDevice=profile.keyboard.device;
 #else
-                    std::fprintf(stderr,"oscairn: %s's keys are not read: this build has no reader for them (OSCAIRN_PANEL_ROLAND)\n",profile.name.c_str());
+                    std::fprintf(stderr,"oscairn: %s's keys are not read: this build has no reader for them (OSCAIRN_ROLAND_FANTOM0)\n",profile.name.c_str());
 #endif
                 }
                 audio.validate();

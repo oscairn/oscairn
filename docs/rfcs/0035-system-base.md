@@ -642,9 +642,10 @@ The `oscairn` package was audited for hardware-specific code compiled into every
 (2026-11-08). None was found to put behind an option:
 
 - **The app** (screens) and **the LV2 host** are options already (`BR2_PACKAGE_OSCAIRN_STANDALONE`;
-  `BR2_PACKAGE_OSCAIRN_LV2`, off on every product, and not hardware). The FANTOM-0 panel reader,
-  added since, is too: `OSCAIRN_PANEL_ROLAND`, set by `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND` and
-  checked against the profile's `panel.protocol`.
+  `BR2_PACKAGE_OSCAIRN_LV2`, off on every product, and not hardware). The FANTOM-0 panel and key
+  readers, added since, are too: `OSCAIRN_ROLAND_FANTOM0` (the FANTOM-06, -07 and -08 share one
+  main board and panel), set by `BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0` and checked against the
+  profile's `panel.protocol` and `keyboard.protocol`.
 - **Bluetooth, Wi-Fi, touch, a battery, a camera and the USB gadget** have no Oscairn code yet.
   The app's touch input mode (`--input-mode touch`) only sizes the UI for fingers; it has no
   code for touch hardware, which X and JUCE handle.

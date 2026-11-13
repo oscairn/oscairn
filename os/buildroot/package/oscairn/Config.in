@@ -54,13 +54,15 @@ config BR2_PACKAGE_OSCAIRN_STANDALONE
 comment "the desktop app needs X.org and a glibc toolchain"
 	depends on !BR2_PACKAGE_XORG7 || !BR2_TOOLCHAIN_USES_GLIBC
 
-config BR2_PACKAGE_OSCAIRN_PANEL_ROLAND
-	bool "Roland FANTOM-0 panel (I2C)"
+config BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0
+	bool "Roland FANTOM-0 panel and keys"
 	help
-	  Builds the engine's reader for a Roland FANTOM-0 panel's
-	  I2C messages (OSCAIRN_PANEL_ROLAND), with oscairn-panel-dump
-	  and the panel maps, for a product whose profile has
-	  panel.protocol "roland-i2c-slave".
+	  Builds the engine's readers for a Roland FANTOM-0's panel
+	  (its I2C messages) and keys (its link to the sound chips),
+	  shared by the FANTOM-06, -07 and -08 (OSCAIRN_ROLAND_FANTOM0),
+	  with oscairn-panel-dump and the panel maps, for a product
+	  whose profile has panel.protocol "roland-i2c-slave" or
+	  keyboard.protocol "roland-bmc-stock".
 
 config BR2_PACKAGE_OSCAIRN_USB_GADGET
 	bool "USB device mode (MIDI and audio to a computer)"

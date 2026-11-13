@@ -674,7 +674,7 @@
     },
     "panel": {
       "type": "object",
-      "description": "A panel that does not speak MIDI, read by the engine: its protocol (roland-i2c-slave: an image built with OSCAIRN_PANEL_ROLAND), its character device and its message map (docs/panel-map.schema.json; a file in share/oscairn/panels, or a path)",
+      "description": "A panel that does not speak MIDI, read by the engine: its protocol (roland-i2c-slave: an image built with OSCAIRN_ROLAND_FANTOM0), its character device and its message map (docs/panel-map.schema.json; a file in share/oscairn/panels, or a path)",
       "properties": {
         "protocol": {
           "enum": [
@@ -701,7 +701,7 @@
     },
     "keyboard": {
       "type": "object",
-      "description": "Keys that are not MIDI, read by the engine: its protocol, which names the firmware on the other side (roland-bmc-stock: the FANTOM-0's link to its sound chips as Roland's stock BMC firmware speaks it, an image built with OSCAIRN_PANEL_ROLAND; other firmware would be another value), and its character device",
+      "description": "Keys that are not MIDI, read by the engine: its protocol, which names the firmware on the other side (roland-bmc-stock: the FANTOM-0's link to its sound chips as Roland's stock BMC firmware speaks it, an image built with OSCAIRN_ROLAND_FANTOM0; other firmware would be another value), and its character device",
       "properties": {
         "protocol": {
           "enum": [

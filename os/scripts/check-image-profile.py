@@ -80,7 +80,7 @@ FEATURES = [
             kernel_on=["CONFIG_USB", "CONFIG_SND_USB_AUDIO"], kernel_off=["CONFIG_USB"]),
     Feature("roland-panel", lambda p: (p.get("panel") or {}).get("protocol") == "roland-i2c-slave"
             or (p.get("keyboard") or {}).get("protocol") == "roland-bmc-stock",
-            options=["BR2_PACKAGE_OSCAIRN_PANEL_ROLAND"],
+            options=["BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0"],
             files=["usr/bin/oscairn-panel-dump", "usr/share/oscairn/panels"]),
     Feature("camera", lambda p: bool(p.get("camera")),
             kernel_on=["CONFIG_MEDIA_SUPPORT"], kernel_off=["CONFIG_MEDIA_SUPPORT"],

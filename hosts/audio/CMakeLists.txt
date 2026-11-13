@@ -61,8 +61,8 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 # A FANTOM-0 panel and keys read in the engine (panel_reader.h, BmcLink.h), for images whose profile has them.
-if(OSCAIRN_PANEL_ROLAND)
-    target_compile_definitions(oscairn_audio_host PUBLIC OSCAIRN_PANEL_ROLAND=1)
+if(OSCAIRN_ROLAND_FANTOM0)
+    target_compile_definitions(oscairn_audio_host PUBLIC OSCAIRN_ROLAND_FANTOM0=1)
     target_sources(oscairn_audio_host PRIVATE BmcLink.cpp)
     target_link_libraries(oscairn_audio_host PUBLIC oscairn_panel)
 endif()

@@ -185,7 +185,7 @@ namespace oscairn::host
         session_->setControllerWake( [this] { triggerAsyncUpdate(); } );
         if( !config.panelDevice.empty() )
         {
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
             // A device panel's own controls, played as a controller's are, by their identities.
             std::ifstream file( config.panelMap, std::ios::binary );
             if( !file ) throw std::runtime_error( "cannot read the panel map " + config.panelMap );
@@ -194,20 +194,20 @@ namespace oscairn::host
                 if( !e.control.empty() ) session_->controllerControl( e.control, e.input );
             } );
 #else
-            throw std::runtime_error( "this build reads no panel (OSCAIRN_PANEL_ROLAND is off)" );
+            throw std::runtime_error( "this build reads no panel (OSCAIRN_ROLAND_FANTOM0 is off)" );
 #endif
         }
         // Like the panel, read with --audio null too: a device named on purpose, not one found.
         if( !config.keyboardDevice.empty() )
         {
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
             for( size_t i = 0; i < bmcSources.size(); ++i )
             {
                 keyboardNames_.push_back( bmcInputName( i ) );
                 keyboardSources_.push_back( sourceNumber( "bmc:" + juce::String::toHexString( bmcSources[i] ), keyboardSources_ ) );
             }
 #else
-            throw std::runtime_error( "this build reads no keyboard (OSCAIRN_PANEL_ROLAND is off)" );
+            throw std::runtime_error( "this build reads no keyboard (OSCAIRN_ROLAND_FANTOM0 is off)" );
 #endif
         }
 #ifdef __linux__
@@ -217,7 +217,7 @@ namespace oscairn::host
         if( rawMidi_ ) std::fprintf( stderr, "oscairn: no ALSA sequencer; MIDI inputs are read as ALSA raw MIDI\n" );
 #endif
         openMidiInputs();
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
         if( !config.keyboardDevice.empty() )
             keyboard_ = std::make_unique<BmcLinkReader>( config.keyboardDevice, [this]( size_t input, const uint8_t* bytes, size_t size ) {
                 incoming( juce::MidiMessage( bytes, int( size ) ), nullptr, -1, keyboardSources_[input] );
@@ -246,7 +246,7 @@ namespace oscairn::host
     AudioEngine::~AudioEngine()
     {
         stopTimer();
-#if OSCAIRN_PANEL_ROLAND
+#if OSCAIRN_ROLAND_FANTOM0
         panel_.reset(); // its thread plays the session's controls
         keyboard_.reset();
 #endif

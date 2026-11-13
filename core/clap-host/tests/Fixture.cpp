@@ -214,6 +214,9 @@ struct Plugin {
             if (stall.spin) { const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(stall.us); while (std::chrono::steady_clock::now() < until) {} }
             else std::this_thread::sleep_for(std::chrono::microseconds(stall.us));
         }
+        // KICK_FIXTURE_WORK_US=MICROSECONDS: every process call computes that long, a plugin's steady work (worker-bench).
+        static const long work = [] { const char* v = std::getenv("KICK_FIXTURE_WORK_US"); return v ? std::atol(v) : 0L; }();
+        if (work > 0) { const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(work); while (std::chrono::steady_clock::now() < until) {} }
         if (blockProcess.exchange(false)) { enteredProcess=true; while (!releaseProcess.load()) std::this_thread::yield(); }
         if (!s.active || !s.processing || !b->frames_count || b->frames_count > s.maxFrames) ++threadErrors;
         if (s.kind == 4) return CLAP_PROCESS_ERROR;

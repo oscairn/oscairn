@@ -229,7 +229,7 @@ no hidraw. `cpufreq` governor `ondemand`. Modules can be loaded (177 on the unit
 - **A device profile**, `--profile fantom-07`
   ([hosts/standalone/profiles/fantom-07.json](../hosts/standalone/profiles/fantom-07.json),
   [RFC 0024](rfcs/0024-device-profiles.md)). It declares the i.MX8M Mini (four cores, one for
-  audio, 2048 MiB), a 1280 × 720 touch screen, 48 kHz at 128-frame blocks, instrument
+  audio, 992 MiB, what the kernel sees), a 1280 × 720 touch screen, 48 kHz at 128-frame blocks, instrument
   reliability, the Performance, Groovebox, Library and Setlist apps, and its panel (below).
   **Estimated** (`estimated`): `audio` (two inputs for MIC/LINE, four outputs for MAIN and SUB
   OUT, headphones, and the audio device below, whose slots are a guess), `controls` (Roland's counts, but whether each reaches the i.MX,

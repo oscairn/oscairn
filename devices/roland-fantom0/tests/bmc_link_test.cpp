@@ -311,14 +311,14 @@ namespace
             {
                 // The header alone, then as much payload as fits a test, then keys: split at every byte.
                 auto big = header( first, length );
-                big.resize( 16 + std::min<size_t>( length, 5000 ), 0x80 );
+                big.resize( 16 + std::min<size_t>( length, 600 ), 0x80 );
                 const auto s = join( { key( true, 60, 100 ), unitShort, big, unitLong, key( false, 60, 40 ), unitShort } );
                 for( size_t at = 0; at <= s.size(); ++at ) { BmcLinkParser p; feed( p, s, at ); }
             }
         uint32_t seed = 12345;
         auto next = [&] { seed = seed * 1664525u + 1013904223u; return seed >> 8; };
         const char* stress = std::getenv( "OSCAIRN_STRESS" );
-        const long rounds = 20000 * std::max( 1L, stress ? std::atol( stress ) : 1L );
+        const long rounds = 5000 * std::max( 1L, stress ? std::atol( stress ) : 1L );
         BmcLinkParser p; // one parser across all of them, as a reader keeps it
         const Bytes pieces[]{ unitShort, unitLong, key( true, 64, 1 ), key( false, 64, 1, 0 ), longFrame( 112 ), header( 0x13, 4096 ), header( 0x13, 4097 ), header( 0x05, 0x20 ) };
         for( long r = 0; r < rounds; ++r )

@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -30,6 +31,8 @@
 #include <poll.h>
 #include <sstream>
 #include <string>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -436,6 +439,64 @@ namespace
     }
 }
 
+namespace
+{
+    // A holder that turns every reader away (as one with eight readers does, and as the unit's older
+    // holder did once eight that had gone filled it): accepts and closes at once. The reader tries
+    // again at most once a second and says so once, not a line each time; once the holder keeps
+    // it, it says it attached and hears the panel.
+    void turnedAway()
+    {
+        const std::string path = "/tmp/oscairn-panel-away-" + std::to_string(::getpid()) + ".sock";
+        ::unlink(path.c_str());
+        sockaddr_un a{};
+        a.sun_family = AF_UNIX;
+        std::memcpy(a.sun_path, path.c_str(), path.size() + 1);
+        const int listener = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        check(::bind(listener, reinterpret_cast<const sockaddr*>(&a), sizeof a) == 0 && ::listen(listener, 8) == 0, "the stand-in holder listens");
+        std::atomic<int> accepted{0};
+        std::atomic<bool> keep{false}, done{false};
+        int kept = -1;
+        std::thread away([&] {
+            while(!done)
+            {
+                pollfd p{listener, POLLIN, 0};
+                if(::poll(&p, 1, 50) != 1) continue;
+                const int c = ::accept(listener, nullptr, nullptr);
+                if(c < 0) continue;
+                ++accepted;
+                if(!keep) { ::close(c); continue; }
+                kept = c;
+                const auto m = message(1, 3, 123);
+                check(::write(c, m.data(), m.size()) == 4, "the stand-in holder sends");
+                done = true;
+            }
+        });
+        Heard heard;
+        {
+            PanelReader reader(path, PanelMap::parse(mapJson(controls)), [&](const PanelEvent& e) { std::lock_guard g(heard.lock); heard.events.push_back(e); },
+                               [&](const std::string& line) { std::lock_guard g(heard.lock); heard.log.push_back(line); });
+            std::this_thread::sleep_for(std::chrono::milliseconds(3500));
+            {
+                std::lock_guard g(heard.lock);
+                std::string all;
+                for(const auto& l : heard.log) all += l + "\n";
+                check(accepted >= 3 && accepted <= 5, "turned away, the reader tries again once a second: " + std::to_string(accepted.load()) + " tries in 3.5 s");
+                check(heard.log.size() == 2 && heard.log[1].find("at once") != std::string::npos, "and says so once:\n" + all);
+            }
+            keep = true;
+            check(heard.wait(1) && heard.at(0).value == 123, "kept, it hears the panel");
+            std::lock_guard g(heard.lock);
+            check(heard.log.size() == 3 && heard.log[2].starts_with("attached"), "and says it attached, once");
+        }
+        done = true;
+        away.join();
+        if(kept >= 0) ::close(kept);
+        ::close(listener);
+        ::unlink(path.c_str());
+    }
+}
+
 int main(int argc, char** argv)
 {
     if(argc != 4) { std::fprintf(stderr, "usage: oscairn-panel-reader-test FIXTURE MAP PANEL_DUMP\n"); return 2; }
@@ -445,6 +506,7 @@ int main(int argc, char** argv)
     maps(argv[2]);
     framing();
     deadband();
+    turnedAway();
     session(argv[1]);
     if(failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("panel reader: ok");

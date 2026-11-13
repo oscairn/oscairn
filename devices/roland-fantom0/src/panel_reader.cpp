@@ -432,6 +432,17 @@ namespace oscairn
     void PanelReader::run()
     {
         bool reported = false; // the holder not reached, once until it is
+        // A holder that ends each connection at once (one that turns a ninth reader away; an older
+        // holder kept readers that had gone until the panel next sent): said once, then quiet until
+        // a connection holds (a second, or a message), so the log is not a line a second.
+        bool refused = false, held = false;
+        auto since = std::chrono::steady_clock::now();
+        auto holds = [&] {
+            if(held) return;
+            held = true;
+            if(refused && log_) log_("attached to the panel holder at " + path_);
+            refused = false;
+        };
         while(!stop_)
         {
             if(fd_ < 0)
@@ -443,21 +454,29 @@ namespace oscairn
                     if(!pause()) return;
                     continue;
                 }
-                if(log_) log_("attached to the panel holder at " + path_);
+                if(log_ && !refused) log_("attached to the panel holder at " + path_);
                 reported = false;
+                held = false;
+                since = std::chrono::steady_clock::now();
                 have_ = 0; // a message cut by the reattach is not joined to the next
             }
             pollfd p{fd_, POLLIN, 0};
             const int ready = ::poll(&p, 1, 100); // the timeout bounds how long stopping waits
+            if(!held && std::chrono::steady_clock::now() - since >= std::chrono::seconds(1)) holds();
             if(ready == 0 || (ready < 0 && errno == EINTR)) continue;
             uint8_t buffer[256];
             const auto n = ready > 0 ? ::read(fd_, buffer, sizeof buffer) : -1;
-            if(n > 0) { bytes(buffer, size_t(n)); continue; }
+            if(n > 0) { holds(); bytes(buffer, size_t(n)); continue; }
             if(n < 0 && (errno == EAGAIN || errno == EINTR)) continue;
             if(!owned_) return; // a descriptor given: its end is the end
             const int error = errno;
             ::close(fd_); fd_ = -1;
-            if(log_) log_("the panel holder at " + path_ + (n == 0 ? " ended" : std::string(": ") + std::strerror(error)) + "; attaching again");
+            if(held) { if(log_) log_("the panel holder at " + path_ + (n == 0 ? " ended" : std::string(": ") + std::strerror(error)) + "; attaching again"); }
+            else if(!refused)
+            {
+                refused = true;
+                if(log_) log_("the panel holder at " + path_ + " ends this reader's connection at once (it turns readers away: one with eight readers already, or an older holder keeping readers that went); trying again each second, logged once attached");
+            }
             if(!pause()) return;
         }
     }

@@ -421,7 +421,8 @@ inline uint32_t VoiceBudget::voiceLimit(const Graph::Activity& node,uint32_t voi
     const float room=(soft*limit-estimate(Kept))/each;
     // At most a quarter fewer a block: one block's estimate, a measurement held up from outside
     // in it, should not take a sound down to its loudest voices.
-    return uint32_t(std::max({1.f,std::floor(float(voices)*.75f),float(voices)+std::floor(room)}));
+    // Held below 2^16 voices: a node's estimate near 0 makes the room huge, past what uint32_t holds.
+    return uint32_t(std::min(65536.f,std::max({1.f,std::floor(float(voices)*.75f),float(voices)+std::floor(room)})));
 }
 inline void VoiceBudget::measured(float total) noexcept
 {

@@ -14,6 +14,12 @@ static void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);
 static void check(bool ok,const std::string& why){if(!ok)throw std::runtime_error(why);}
 int main(int argc,char** argv){try{
     if(argc!=4)return 2;
+    {
+        // A node whose voices cost next to nothing leaves room for billions: the limit stays a count a
+        // uint32_t holds (found by a sanitizer: the float converted out of range).
+        VoiceBudget budget;budget.limit=2000;Graph::Activity cheap;cheap.perNote=1e-7f;
+        check(budget.voiceLimit(cheap,10)==65536,"a voice limit past any count is held at 2^16");
+    }
     Graph graph(48000,512);
     const auto a=graph.add(argv[2]),b=graph.add(argv[2]),synth=graph.add(argv[1]);
     {

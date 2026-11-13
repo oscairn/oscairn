@@ -387,6 +387,24 @@ the allowance and none under step 6 with a 100 ms deadline; 100 of 100 runs in t
 container, where a busy host stalled single runs by up to 150 ms, so each bound is the best of
 three runs). Not measured on the unit.
 
+### The sharing bias, a stopgap (2026-11-13)
+
+On the unit, ST Final opened once with each of its five Sampler parts in a worker of its own and
+the next time with all five in one shared worker, whose blocks then ran 1,551 us at most against
+a 1,333 us allowance (187 late, 38 silenced in 20 s) while a third of the machine was idle. Why
+the two opens differ: `Session::read` (performance.cpp) lets a node that can share join an engine
+formed by this Performance's own nodes of the same plugin, and failing that an engine of the
+Performance playing (`playingEngines`); which engines exist, and which are free, depends on what
+was playing and what was kept warm when it opened (a first open after the engine starts, a reopen
+while ST Final plays, a change from another Performance). Sharing is the intended default (decided:
+`compute.sharing`, `memory` on 1 GB devices), but without a split under load it puts five parts'
+voices on one core against one allowance. Until plugin hosts assign chains by measured cost
+([plugin hosts](#plugin-hosts-and-resident-instances)), `OSCAIRN_SHARING=cpu` forms no shared
+engine on its own (`SoundContext::sharesOnItsOwn`, in `Session::read` and `Session::add`): each
+part's instrument gets its own instance and worker. A Performance saved with parts sharing still
+opens shared, and a Sound loaded into a part can still join a playing instance. Cost: a process
+per part (about 34 MB a Sampler worker before samples on the unit). Not a profile field yet.
+
 ### Spinning before sleeping
 
 How a block crosses to a worker and back (`WorkerHost::start` and `finish`, `Worker.cpp`'s

@@ -46,6 +46,11 @@ namespace oscairn
         /// An engine around a plain instance that can share, has not failed and plays one sound on
         /// every MIDI channel (so its node on one channel sounds as it did); else none.
         static std::shared_ptr<Engine> lead(const std::shared_ptr<PluginHost>& host);
+        /// RFC 0045's sharing bias, OSCAIRN_SHARING: "cpu" forms no shared engine on its own (each part's
+        /// instrument in an instance, and so a worker, of its own: more memory, a core's time each); anything
+        /// else, "memory" or "balanced" or unset, shares as before. A Performance saved with parts sharing
+        /// still opens shared.
+        static bool sharesOnItsOwn() noexcept;
         /// A context on `channel` and output port index `bus`, both free, selecting `sound` there, or
         /// with none keeping what the channel selects (a node that played alone, whose selection may
         /// still be queued). Its sound is put on the bus by a parameter event on its channel. With

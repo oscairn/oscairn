@@ -123,5 +123,17 @@ int main(int argc, char** argv)
         const auto json = oscairn::JsonRpc(shared).dispatch(R"({"jsonrpc":"2.0","id":1,"method":"engine.timing"})").value_or("");
         check(json.find(R"("parts":["Alpha","Beta"])") != std::string::npos, "engine.timing gives the parts: " + json.substr(0, 200));
     }
+    // RFC 0045's sharing bias: with OSCAIRN_SHARING=cpu a second Basic Synth added gets an instance, and a worker, of its own.
+    for(const char* bias : {"", "cpu"})
+    {
+        setenv("OSCAIRN_SHARING", bias, 1);
+        oscairn::Session two(rate, frames);
+        const auto a = two.addPart("A"); two.insertIntoPart(a, 0, two.add("One", argv[3])); two.commit();
+        const auto b = two.addPart("B"); two.insertIntoPart(b, 0, two.add("Two", argv[3])); two.commit();
+        for(int i = 0; i < 10; ++i) { two.service(); two.process(out, frames); }
+        const auto n = two.engineTiming(false).workers.size();
+        check(n == (*bias ? 2u : 1u), std::string("OSCAIRN_SHARING=") + bias + ": " + std::to_string(n) + " workers for two Basic Synth parts");
+    }
+    unsetenv("OSCAIRN_SHARING");
     return failures ? 1 : 0;
 }

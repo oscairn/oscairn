@@ -83,6 +83,8 @@ out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "or from the profile's file" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_SPIN_US=200 oscairn-engine-run'"
 out=$(OSCAIRN_WORKER_DEADLINE=1 "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "OSCAIRN_WORKER_DEADLINE handed to the engine, after the spin" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_SPIN_US=200 OSCAIRN_WORKER_DEADLINE=1 oscairn-engine-run'"
+out=$(OSCAIRN_SHARING=cpu "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "OSCAIRN_SHARING handed to the engine" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_SPIN_US=200 OSCAIRN_SHARING=cpu oscairn-engine-run'"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
 # The first-party plugins' device settings: OSCAIRN_SAMPLER_*, _ANALOG_*, _FM_*, _ARPEGGIATOR_*, _EFFECTS_*.

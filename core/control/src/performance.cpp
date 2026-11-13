@@ -976,7 +976,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         if(!definitions.contains(from))continue;
         for(auto p:array(field(definitions.at(from),"outputs"),Graph::maxAudioChannels))if(integer(field(p,"id"))==port && !(integer(field(p,"flags"))&CLAP_AUDIO_PORT_IS_MAIN))offMain.insert(from);}
     auto kind=[&](V plugin){return text(field(plugin,"id"))+'\n'+text(field(plugin,"version"))+'\n'+text(field(plugin,"pathHint"));};
-    auto formable=[&](V node,const std::string& key){return text(field(node,"engine"))==key && group[key]==1 && !soundOf(node) && !offMain.count(key);};
+    auto formable=[&](V node,const std::string& key){return SoundContext::sharesOnItsOwn() && text(field(node,"engine"))==key && group[key]==1 && !soundOf(node) && !offMain.count(key);};
     std::map<std::string,size_t> kinds;for(auto node:nodes)if(formable(node,text(field(node,"key"))))++kinds[kind(field(node,"plugin"))];
     // The playing Performance's engines of the plugin, build and placement a node would load; none in an audition.
     auto playingEngines=[&](V plugin){

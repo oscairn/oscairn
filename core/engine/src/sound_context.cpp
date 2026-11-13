@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 #include <iomanip>
 #include <locale>
 #include <sstream>
@@ -33,6 +35,12 @@ namespace oscairn
         const auto buses = uint32_t(std::popcount(e.buses)), channels = uint32_t(std::popcount(e.channels));
         const auto sounds = uint32_t(h.soundContexts().size()), capacity = h.soundContextCapacity();
         return std::min({ports > buses ? ports - buses : 0u, 16 - channels, capacity > sounds ? capacity - sounds : 0u});
+    }
+
+    bool SoundContext::sharesOnItsOwn() noexcept
+    {
+        const char* bias = std::getenv("OSCAIRN_SHARING");
+        return !bias || std::string(bias) != "cpu";
     }
 
     std::shared_ptr<SoundContext::Engine> SoundContext::lead(const std::shared_ptr<PluginHost>& host)

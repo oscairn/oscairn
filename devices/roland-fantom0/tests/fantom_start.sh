@@ -28,8 +28,17 @@ export OSCAIRN_PANEL_DEVICE="$bundle/panel"
 out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "a dry run with the panel free succeeds" "[ $status = 0 ]"
 check "it would start the holder on the device" "echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh /usr/bin/oscairn-panel-holder $bundle/panel'"
-check "and the engine with the profile's options" "echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh oscairn-engine-run --output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'"
+check "and the engine with the profile's options, in its own session" "echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid env oscairn-engine-run --output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'"
 check "and changes nothing" "[ ! -e '$bundle/ran' ] && [ ! -e '$bundle/var' ]"
+check "the panel there: nothing about it missing" "! echo \"\$out\" | grep -q 'is not here'"
+if [ -e /sys/devices/system/cpu/cpufreq/policy0/scaling_governor ]; then
+	check "a governor here: nothing about one missing" "! echo \"\$out\" | grep -q 'no CPU frequency governor'"
+else
+	check "no governor here: it says so" "echo \"\$out\" | grep -q 'no CPU frequency governor here: nothing to set'"
+fi
+
+out=$(OSCAIRN_PANEL_DEVICE="$bundle/no-panel" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
+check "the panel absent: it says so and goes on" "[ $status = 0 ] && echo \"\$out\" | grep -q 'the panel device $bundle/no-panel is not here: the panel will not be read' && echo \"\$out\" | grep -q 'oscairn-panel-holder $bundle/no-panel'"
 
 sh -c 'exec 3< "$1"; exec sleep 30' sh "$OSCAIRN_PANEL_DEVICE" &
 holder=$!
@@ -46,7 +55,7 @@ check "a wrong option is refused" "! '$bundle/oscairn-fantom-start' --now > /dev
 out=$("$bundle/oscairn-fantom-start" --dry-run --cold 2>&1); status=$?
 check "--cold: nothing to stop, the rest as usual" "[ $status = 0 ] && ! echo \"\$out\" | grep -q weston-term && echo \"\$out\" | grep -q 'oscairn-panel-holder'"
 
-boot() { out=$(OSCAIRN_KEY_HELD="sh -c 'exit $1'" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
+boot() { out=$(OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
 boot 0
 check "boot, MENU held: Roland's application" "[ $status = 0 ] && echo \"\$out\" | grep -q 'MENU is held' && echo \"\$out\" | grep -q 'would run: /home/root/mi078' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
 boot 2
@@ -60,7 +69,13 @@ rm -f "$bundle/var/oscairn/stock-next-boot"
 sh -c 'exec 3< "$1"; exec sleep 30' sh "$OSCAIRN_PANEL_DEVICE" &
 holder=$!
 sleep 0.3
+mkdir -p "$bundle/proc/$!/fd"
+ln -s "$OSCAIRN_PANEL_DEVICE" "$bundle/proc/$!/fd/3"
 boot 0
-check "boot never starts Roland's application while the panel is held" "[ $status = 1 ] && echo \"\$out\" | grep -q 'still holds' && ! echo \"\$out\" | grep -q 'would run: /home/root/mi078'"
+check "boot never starts Roland's application while the panel is held (from the fake proc)" "[ $status = 1 ] && echo \"\$out\" | grep -q 'still holds' && ! echo \"\$out\" | grep -q 'would run: /home/root/mi078'"
+rm -rf "$bundle/proc"
 kill $holder
+sleep 0.3
+boot 0
+check "boot, the panel free again: Roland's application, nothing still holds" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: /home/root/mi078' && ! echo \"\$out\" | grep -q 'still holds'"
 exit $fail

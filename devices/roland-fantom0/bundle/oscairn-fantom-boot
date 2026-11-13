@@ -34,6 +34,7 @@ esac
 # Stand-ins for a test, off the unit; on the unit these are left unset.
 key_held=${OSCAIRN_KEY_HELD:-'"$root/start-chroot.sh" /usr/bin/oscairn-key-held gpio-keys 139'}
 panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
+proc=${OSCAIRN_PROC:-/proc}
 state=$root/var/oscairn
 log=$state/log/oscairn-fantom.log
 [ -n "$dry" ] || mkdir -p "$state/log"
@@ -43,8 +44,8 @@ say() {
 	[ -n "$dry" ] || echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $*" >> "$log"
 }
 holding() {
-	for f in /proc/[0-9]*/fd/*; do
-		case "$(readlink "$f" 2>/dev/null)" in *"$1") p=${f#/proc/}; echo "${p%%/*}" ;; esac
+	for f in "$proc"/[0-9]*/fd/*; do
+		case "$(readlink "$f" 2>/dev/null)" in *"$1") p=${f#"$proc"/}; echo "${p%%/*}" ;; esac
 	done | sort -u
 }
 # Roland's application, as go.sh starts it; it does not return.

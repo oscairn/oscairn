@@ -107,6 +107,7 @@ say "Roland's application is not running"
 if holder_running; then
 	say "the panel holder already runs: kept"
 else
+	[ -e "$panel" ] || say "the panel device $panel is not here: the panel will not be read"
 	others=$(holding "$panel")
 	[ -z "$others" ] || fail "process $(echo $others) holds $panel; not opening it (a second open can crash the kernel)"
 	say "taking the panel: oscairn-panel-holder $panel"
@@ -151,18 +152,21 @@ for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
 	grep -q "^$g " "$saved" 2>/dev/null || echo "$g $(cat "$g")" >> "$saved"
 	echo performance > "$g" && say "$g: performance" || say "cannot set $g; continuing"
 done
+[ -e "$g" ] || say "no CPU frequency governor here: nothing to set"
 
 # 6. The engine, with the profile's options.
 [ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
 say "starting the engine: oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
 if [ -n "$dry" ]; then
-	say "would run: $root/start-chroot.sh oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
+	say "would run: $root/start-chroot.sh setsid env oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
 	exit 0
 fi
 rm -f "$root/run/oscairn/engine.sock"
 eval "set -- $OSCAIRN_ENGINE_ARGS"
-"$root/start-chroot.sh" env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" oscairn-engine-run "$@" \
+# setsid: the bundle's own, as the panel holder detaches itself with; the ssh session ending
+# then does not take the engine with it.
+"$root/start-chroot.sh" setsid env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" oscairn-engine-run "$@" \
 	>> "$state/log/oscairn-engine.log" 2>&1 &
 echo $! > "$state/run/engine.pid"
 

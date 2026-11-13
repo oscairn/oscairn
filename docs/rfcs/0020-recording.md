@@ -417,8 +417,8 @@ that much longer, and a take ends that much later. All inputs of one interface g
 offset, so their alignment with each other is exact either way.
 
 **What is missing.** The desktop adapter does not read the device's latencies today, though
-the `device_bench` tool does (`getInputLatencyInSamples` and `getOutputLatencyInSamples`,
-`core/clap-host/tools/device_bench.cpp`). Reported values are often not the real round trip,
+the KICK host's `device_bench` tool did (`getInputLatencyInSamples` and
+`getOutputLatencyInSamples`; the tool was removed as unused on 2026-11-12). Reported values are often not the real round trip,
 so step 5 adds a loopback measurement: play a click out, record it back in, and store the
 result per device and interface.
 

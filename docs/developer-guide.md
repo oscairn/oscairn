@@ -76,7 +76,7 @@ the [LV2 guide](../core/lv2-host/README.md). The default build does not require 
 
 | Names | What they cover | Built with |
 | --- | --- | --- |
-| `kick-clap-*` | The CLAP host: loading, state, sessions, the scanner, benchmarks | default |
+| `kick-clap-*` | The CLAP host: loading, state, the scanner, benchmarks | default |
 | `graph`, `graph-lifecycle`, `note-routing`, `audio-routing`, `param-target`, `sequencer-*`, `midi-*`, `transport-tempo`, `sound-contexts`, `effect-contexts`, `prepared-instances`, `choke-fade`, `wheels`, `pressure`, `sampler`, ... | The engine and the reference plugins | default |
 | `worker-host`, `worker-failures`, `worker-recovery`, `handoff-bench*` | Plugin worker processes | default (`handoff-bench` on Unix) |
 | `*-workers` | The same engine and control tests with every plugin in a worker (`OSCAIRN_PLUGIN_WORKER` set) | default |

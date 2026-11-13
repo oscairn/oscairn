@@ -2,6 +2,8 @@
 
 Oscairn's raw CLAP adapter retains the `kick::clap` namespace and `kick-clap-*` tool
 names from the KICK host imported with its history. It has no device or JUCE dependency.
+The JUCE session, touchscreen panel, player and audio-device benchmark that came with the
+KICK host were removed as unused on 2026-11-12.
 The [shared PluginHost](../plugin-host/include/oscairn/plugin_host.h) and graph build on it;
 new plugin authors should start with the [developer guide](../../docs/developer-guide.md).
 The vendored CLAP SDK revision is in `third_party/clap/upstream.json`.
@@ -18,11 +20,8 @@ build/core/clap-host/kick-clap-scan build/plugins/oscairn-basic-synth.clap
 ```
 
 The raw host can also be built with `cmake -S core/clap-host -B build-clap`.
-Its optional JUCE player/session and benchmark adapters are inherited diagnostic tools,
-not the main Oscairn desktop. Oscairn's app uses JUCE 9 via `OSCAIRN_STANDALONE=ON`;
-see [host instructions](../../hosts/README.md). The optional raw-host tools instead accept
-`KICK_CLAP_JUCE_PATH` for a local JUCE checkout, with `KICK_CLAP_BUILD_PLAYER`,
-`KICK_CLAP_BUILD_JUCE` or `KICK_CLAP_BUILD_DEVICE_BENCH` as appropriate.
+Oscairn's app uses JUCE 9 via `OSCAIRN_STANDALONE=ON`;
+see [host instructions](../../hosts/README.md).
 
 ## Processing and lifecycle
 
@@ -84,37 +83,6 @@ modified. Comparing these runs exposes state-save interruptions as well as DSP
 load. An instance count is a count of plugin instances; `--notes` requests notes
 per instance, whose actual voice allocation is controlled by the plugin.
 
-The optional JUCE build also produces `kick-clap-device-bench`. For a headless
-measurement build, enable only `KICK_CLAP_BUILD_DEVICE_BENCH`; the device tool
-links JUCE's audio-device/events modules and does not need the touchscreen panel
-or player. On Linux this supports ALSA measurement without an X11 GUI:
-
-```sh
-cmake -S core/clap-host -B /tmp/kick-device-bench \
-  -DKICK_CLAP_BUILD_DEVICE_BENCH=ON -DKICK_CLAP_JUCE_PATH=/path/to/JUCE \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/kick-device-bench --parallel
-```
-
-List and select an output device:
-
-```sh
-/tmp/kick-device-bench/kick-clap-device-bench --list-devices
-/tmp/kick-device-bench/kick-clap-device-bench --audio --driver ALSA \
-  --device 'exact name from the list' --plugin /path/to/instrument.clap \
-  --id plugin.unique.id --rate 48000 --frames 128 --instances 4 --notes 8 \
-  --seconds 60 --warmup 3 --output device.json
-```
-
-Device output is muted by default while plugins still render the full workload.
-`--audible` enables the normalized stereo mix at 0.1 gain. The requested device,
-sample rate and buffer size must be accepted; the tool does not substitute a
-format. Actual device errors, stopped callbacks and unexpected format changes
-fail the run. Device-reported input/output latency is in samples, not measured
-round-trip latency. `device.native_xruns` is a measurement-period delta, or
-`null` when the backend does not supply it. Callback deadline misses remain a
-separate metric and cannot prove that a device has no xruns.
-
 JSON reports include configuration, plugin identity/version, configured Git
 revision, build type/compiler/architecture, load time (including discovery), measured frames, mean/peak render
 load, bounded p50/p95/p99 load estimates, deadline misses, control-gate silent
@@ -123,7 +91,7 @@ and state-save cost/failures. Load ratio **1.0** consumes the entire buffer
 period. Percentile values are upper bounds in 0.01 load-ratio bins; `null` means
 the quantile reached the overflow bin (10.23 or higher). Warmup is excluded from
 timing. Exit 0 means the workload completed, not that its performance is safe.
-Core diagnostic counters are cumulative per host and also appear in the panel:
+Core diagnostic counters are cumulative per host:
 **missed** counts DSP calls exceeding their buffer period; **paused** counts
 buffers silenced while state/control work owns the processing gate.
 
@@ -137,8 +105,7 @@ hashes are reported as `null`.
 
 ```sh
 python3 core/clap-host/tools/benchmark_matrix.py \
-  --bench /tmp/kick-device-bench/kick-clap-device-bench --audio --driver ALSA \
-  --device 'exact name from the list' --plugin /path/to/instrument.clap \
+  --bench build/core/clap-host/kick-clap-bench --plugin /path/to/instrument.clap \
   --id plugin.unique.id --frames 64,128,256 --instances 1,4,8 \
   --notes 8 --seconds 60 --warmup 3 --output target-matrix.json
 ```
@@ -173,8 +140,7 @@ The raw-host CTest targets use shared-library fixtures for lifecycle/thread chec
 native/MIDI note conversion, sample offsets, ports, parameters, state, idle sleep/wake,
 concurrent rendering, overflow recovery, and plugin failures. Scanner fixtures deliberately
 crash/hang in child processes. Oscairn's separate engine tests exercise graph ownership,
-channel routing and native/pooled sound switching above the raw adapter. Inherited JUCE
-player/session tests run only when those optional adapters are enabled.
+channel routing and native/pooled sound switching above the raw adapter.
 
 Enable `-DKICK_CLAP_SANITIZE=ON` for ASan/UBSan on the core, consumers and fixture modules.
 The [CI workflow](../../.github/workflows/ci.yml) runs the Oscairn suite on Linux and

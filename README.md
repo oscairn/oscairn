@@ -280,6 +280,8 @@ What is in place:
   plugin in the same block, concurrent CLAP state saves avoid gating audio (exclusive native/LV2
   snapshots may briefly silence a node), a bad
   event no longer resets the plugin, and an instance uses 0.41 MB instead of 1.55 MB.
+  The JUCE session, touchscreen panel, player and audio-device benchmark that came with it
+  were removed as unused on 2026-11-12.
 - **Engine** (`core/engine`): the graph (plugin nodes; audio connections summed, note
   connections merged; processed in dependency order each block; edited while audio runs,
   without locks) and the transport (tempo, time signature, position; its own tempo or an

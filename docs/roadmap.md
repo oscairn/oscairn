@@ -30,7 +30,9 @@ community firmware, Carla, Sushi, Tracktion Engine, Ardour, Zrythm and others). 
 covers the core, so Oscairn has its own:
 
 - [x] a new core in C++20, with no JUCE in the core;
-- [x] CLAP hosting seeded from Randy Chabot's host in KICK PR #13, imported with its history;
+- [x] CLAP hosting seeded from Randy Chabot's host in KICK PR #13, imported with its history
+  (the JUCE session, touchscreen panel, player and audio-device benchmark that came with it
+  were removed as unused on 2026-11-12);
 - [x] AGPL-3.0-or-later, with plugin loading as the license boundary
   ([RFC 0001](rfcs/0001-license.md)).
 

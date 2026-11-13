@@ -189,6 +189,10 @@ add_executable(oscairn-estimates-test tests/estimates.cpp)
 target_link_libraries(oscairn-estimates-test PRIVATE oscairn_control_json oscairn_control)
 add_test(NAME control-estimates COMMAND oscairn-estimates-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(control-estimates PROPERTIES TIMEOUT 120)
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    target_compile_definitions(oscairn-estimates-test PRIVATE OSCAIRN_SANITIZED=1)
+    set_tests_properties(control-estimates PROPERTIES TIMEOUT 600)
+endif()
 
 # Given relative to the working folder, as a packager types it.
 add_test(NAME control-plugin-check-audio-effect COMMAND oscairn-plugin-check ./$<TARGET_FILE_NAME:oscairn_delay> org.oscairn.delay effect

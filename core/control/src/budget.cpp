@@ -457,8 +457,8 @@ namespace oscairn
     // time, in a running mean per plugin build (see the constants above), its memory every second.
     // A tick's sample is left out when the plugin did not run since the last tick, and in its first 32
     // blocks. For a plugin in a worker it is also held to the CPU time the worker's audio thread
-    // used for the blocks around it (the largest bucket of its histogram, a bucket's top at most
-    // twice the time), so a block the thread was not scheduled for (a kernel stall, whether the
+    // used for the blocks around it (a block longer than the largest bucket's top counts as a
+    // typical block of the window), so a block the thread was not scheduled for (a kernel stall, whether the
     // engine then silenced the block or not) counts for no more than the work, and one that
     // computed counts in full. Split by the notes sounding through the plugin: with none for
     // quietSeconds, at rest; with some, per voice.
@@ -515,9 +515,16 @@ namespace oscairn
                 }
                 else
                 {
-                    size_t top = counts.size();
-                    for(size_t i = 0; i < counts.size(); ++i) if(counts[i] > L.before[i]) top = i;
-                    if(L.pending && top < counts.size()) accept(L.held, top + 1 < counts.size() ? double(Histogram::upperMicroseconds(top)) : INFINITY);
+                    // The window's CPU times: the top of the largest bucket (what could explain a long block) and
+                    // of the middle one (what a block takes). A block longer than any CPU time of the window is
+                    // not explained by work, so it counts as a middle one; a noisy block elsewhere cannot lend it its time.
+                    uint64_t total = 0; size_t top = counts.size(), middle = counts.size();
+                    for(size_t i = 0; i < counts.size(); ++i) if(counts[i] > L.before[i]) { total += counts[i] - L.before[i]; top = i; }
+                    for(size_t i = 0, seen = 0; i < counts.size() && total; ++i)
+                        if(counts[i] > L.before[i] && (seen += counts[i] - L.before[i]) * 2 >= total) { middle = i; break; }
+                    auto topOf = [&](size_t i) { return i + 1 < counts.size() ? double(Histogram::upperMicroseconds(i)) : double(INFINITY); };
+                    if(L.pending && total)
+                        accept(L.held, L.held.microseconds <= topOf(top) ? L.held.microseconds : topOf(middle));
                     L.pending = clean; L.held = now;
                     L.before = L.was; L.was = counts;
                 }

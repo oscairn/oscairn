@@ -4,7 +4,7 @@
   "id": "fantom-07",
   "name": "Roland FANTOM-07",
   "platform": { "os": "linux", "cpu": "arm64", "runtime": "oscairn-buildroot-2026.08", "board": "imx8mm" },
-  "compute": { "cores": 4, "realtimeCores": 1, "memory": 992, "workerSpin": 200 },
+  "compute": { "cores": 4, "realtimeCores": 1, "memory": 992, "osMemory": 250, "performanceMemory": 300, "workerSpin": 200 },
   "audio": { "inputs": 2, "outputs": 4, "rates": [48000], "block": 128, "headphones": true,
     "device": { "name": "hw:1,0", "channels": 6, "rate": 48000, "outputs": { "main": [0, 1] } } },
   "controls": [

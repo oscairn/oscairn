@@ -601,6 +601,23 @@ What stops when Roland's app is stopped, from what it was seen to do:
   [RFC 0024](rfcs/0024-device-profiles.md)). It declares the i.MX8M Mini (four cores, one for
   audio, 992 MiB, what the kernel sees), a 1280 × 720 touch screen, 48 kHz at 128-frame blocks, instrument
   reliability, the Performance, Groovebox, Library and Setlist apps, and its panel (below).
+  Memory classes ([RFC 0025](rfcs/0025-resource-budgets.md)): `osMemory` 250 MiB and
+  `performanceMemory` 300 MiB, so plugin instances kept loaded for the next change are let go by
+  memory, not only past 32 (RFC 0045's resident instances). The arithmetic, from the unit: of the
+  992 MiB the kernel sees, `free -m` gives 952, so 40 are never ours; the engine's own resident
+  memory, about 133 MB with ST Final open, is counted nowhere else (the budget counts the app's own
+  process and each plugin instance), so it goes in `osMemory`; the remaining 77 MiB are for the
+  kernel's caches, Weston, Xwayland and the other daemons beyond the headroom the app's reservations
+  already hold (the Performance and Library apps, always available, reserve 150 and 120 MiB at
+  their placeholders while the whole app measured 38 MB). With the margin (5 %, 50 MiB) and the
+  app's own memory at start (about 40 MB), plugin instances, in use and kept warm, get about
+  380 MiB. ST Final's workers held about 347 MB (480 MB with the engine) when swap filled to 240
+  of 256 MB, so it fits with about 35 MiB to keep anything warm, and a change between it and
+  another Performance of more than about 35 MiB is a cut (both cannot ring together). The UI's
+  room is the app's reservations' headroom and those 77 MiB: estimated, not measured on the unit,
+  and only in effect when the app sets the budget (an engine started with `--engine-only` has none,
+  so it keeps instances warm by count). To check on the unit: `free -m` and swap use with ST Final
+  open and after switching to and from it, and `oscairn-engine-timing`'s instances.
   **Estimated** (`estimated`): `audio` (two inputs for MIC/LINE, four outputs for MAIN and SUB
   OUT, headphones; the audio device below is verified as far as it goes, its inputs and the
   outputs beyond main are not), `controls` (Roland's counts, but whether each reaches the i.MX,

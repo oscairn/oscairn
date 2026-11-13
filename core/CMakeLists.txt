@@ -21,7 +21,7 @@ add_executable(oscairn-plugin-worker plugin-host/src/worker_main.cpp)
 target_link_libraries(oscairn-plugin-worker PRIVATE oscairn_plugin_host)
 install(TARGETS oscairn-plugin-worker RUNTIME DESTINATION bin)
 
-add_executable(oscairn-plugin-scan plugin-host/src/scan.cpp)
+add_executable(oscairn-plugin-scan plugin-host/src/scan.cpp plugin-host/src/extract.cpp)
 target_link_libraries(oscairn-plugin-scan PRIVATE oscairn_plugin_host)
 install(TARGETS oscairn-plugin-scan RUNTIME DESTINATION bin)
 

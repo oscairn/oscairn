@@ -13,7 +13,7 @@ Checked when built and tested; the sections below say how.
 - [x] 1. Built-in types: today's Performances, Sounds and samples described as types, with no change in behavior
 - [x] 2. Queries and requests by type: `library.query` by `type`, `oscairn.pick.<type>` actions, archives by type
 - [x] 3. Installed types: declared by packages, for documents with an info block and for folders indexed in place
-- [ ] 4. Extractors: sandboxed metadata readers for files with no info block (audio, plugin presets)
+- [x] 4. Extractors: sandboxed metadata readers for files with no info block (audio, plugin presets)
 - [ ] 5. A database index, for libraries of tens of thousands of items
 - [ ] 6. The DJ types: tracks, crates and track analysis
 
@@ -60,6 +60,27 @@ Where this RFC left a choice, the smaller reading was taken:
   (100,000 entries a rescan) until the database index (step 5). The Library offers a pick for each
   type the engine knows when the app starts; it has no tab of its own for a package's type, which
   apps reach by picks and `library.query`. Not built: a plugin package declaring types.
+- **Step 4.** Extractors are Oscairn's own for now: a type names one in its manifest
+  (`"extractor": "audio"`, the only one so far, for in-place types), and one naming
+  an extractor Oscairn lacks is refused; a package brings no extractor code of its own until
+  packages carry signed code other than plugins. They run in the plugin scan helper
+  (`oscairn-plugin-scan --extract <extractor> <file>`), found as the engine finds it for preset
+  listings; with none, files are indexed by name and path. The scan's own process handling runs
+  each: a fresh process per file (recycled after every file), ended after 10 s, at 64 KiB of
+  output or at 256 MiB of memory (read every 10 ms or so; on Linux the helper also caps its
+  address space at 1 GiB), the tail of its stderr logged. One thread per library runs them, one
+  at a time, off the control and audio threads; a file is listed once its extractor has answered,
+  taken in at the next query or rescan. The answer is checked: one JSON object, its `identity` a
+  lowercase SHA-256 (required for `payload`), its `fields` only the type's, text or numbers of at
+  most 256 bytes of UTF-8 with no control characters; anything else wrong refuses all of it, and
+  the file is listed by name and path (a payload identity is then the path's). The answer is kept
+  in the index by the file's time, so a rescan with nothing changed runs no extractor, and a
+  failed file is not tried again until it changes. Field values are strings in `library.query`
+  (how fields are typed stays open), with no facet counts or filters by field yet. The audio
+  extractor reads WAV, AIFF, FLAC and MP3: `duration`, `rate` and `channels` (not for MP3),
+  `title` and `artist`; its identity is the SHA-256 of the audio alone (WAV `data`, AIFF `SSND`,
+  FLAC frames, MP3 frames between ID3v2 and ID3v1 or APEv2 tags). Not built: an extractor for
+  plugin presets, and long analysis in the background (step 6).
 - **Setlists** are the first type built on these steps (decided 2026-11-13): `oscairn.setlist`,
   managed, in `Setlists/<name>.osetlist/setlist.json` ([format](../setlist-format.md)). How an item
   refers to another (the open question) is answered for this one type only: a setlist's slots name

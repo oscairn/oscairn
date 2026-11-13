@@ -187,17 +187,13 @@ void watchParentPipe() {
 #endif
 }
 #ifndef _WIN32
-// Runs the scanner helper on one binary (flag: --worker, or --presets to index presets too) with
-// a timeout, crash isolation and the last of its stderr; its stdin is a pipe only we hold the
-// write end of, which it watches to end itself if we die, so a hung scan never outlives us.
-// False with the reason in failure, which starts "Cannot " only when the helper never started
-// (scanPluginPresets asks again after those).
-static bool runHelper(const fs::path& helper, const char* flag, const std::string& binary, uint32_t timeoutMs, const std::atomic<bool>* canceled,
-               ScanResult& result, std::string& failure) {
+IsolatedRun runIsolated(const std::vector<std::string>& args, uint32_t timeoutMs, size_t maxOutput, const std::atomic<bool>* canceled,
+                        uint64_t memoryLimit, uint64_t (*memoryOf)(long)) {
+    IsolatedRun run; run.outcome = IsolatedRun::NoPipe;
     int pipes[2], errors[2], life[2];
-    if (::pipe(pipes) != 0) { failure = "Cannot create scanner pipe"; return false; }
-    if (::pipe(errors) != 0) { ::close(pipes[0]); ::close(pipes[1]); failure = "Cannot create scanner pipe"; return false; }
-    if (::pipe(life) != 0) { ::close(pipes[0]); ::close(pipes[1]); ::close(errors[0]); ::close(errors[1]); failure = "Cannot create scanner pipe"; return false; }
+    if (::pipe(pipes) != 0) return run;
+    if (::pipe(errors) != 0) { ::close(pipes[0]); ::close(pipes[1]); return run; }
+    if (::pipe(life) != 0) { ::close(pipes[0]); ::close(pipes[1]); ::close(errors[0]); ::close(errors[1]); return run; }
     for (int fd : {pipes[0], pipes[1], errors[0], errors[1], life[0], life[1]}) ::fcntl(fd, F_SETFD, FD_CLOEXEC);
     posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, pipes[1], STDOUT_FILENO);
@@ -212,13 +208,15 @@ static bool runHelper(const fs::path& helper, const char* flag, const std::strin
     posix_spawnattr_t attributes; posix_spawnattr_init(&attributes);
     posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
     posix_spawnattr_setpgroup(&attributes, 0);
-    auto program = helper.string(); std::string mode = flag, path = binary;
-    char* arguments[]{program.data(), mode.data(), path.data(), nullptr};
+    auto copies = args;
+    std::vector<char*> arguments;
+    for (auto& a : copies) arguments.push_back(a.data());
+    arguments.push_back(nullptr);
     pid_t pid = 0;
-    const auto spawned = posix_spawn(&pid, program.c_str(), &actions, &attributes, arguments, environ);
+    const auto spawned = copies.empty() ? EINVAL : posix_spawn(&pid, copies[0].c_str(), &actions, &attributes, arguments.data(), environ);
     posix_spawnattr_destroy(&attributes); posix_spawn_file_actions_destroy(&actions);
     ::close(pipes[1]); ::close(errors[1]); ::close(life[0]);
-    if (spawned != 0) { ::close(pipes[0]); ::close(errors[0]); ::close(life[1]); failure = "Cannot launch kick-clap-scan helper"; return false; }
+    if (spawned != 0) { ::close(pipes[0]); ::close(errors[0]); ::close(life[1]); run.outcome = IsolatedRun::NoLaunch; return run; }
     ::fcntl(pipes[0], F_SETFL, ::fcntl(pipes[0], F_GETFL) | O_NONBLOCK);
     ::fcntl(errors[0], F_SETFL, ::fcntl(errors[0], F_GETFL) | O_NONBLOCK);
     std::string stderrTail; // last 2 KiB the plugin wrote to stderr, for the failure message
@@ -229,20 +227,21 @@ static bool runHelper(const fs::path& helper, const char* flag, const std::strin
             if (stderrTail.size() > 2048) stderrTail.erase(0, stderrTail.size() - 2048);
         }
     };
-    std::string wire; int status = 0; bool done = false, timedOut = false, oversized = false;
+    std::string& wire = run.output; int status = 0; bool done = false, timedOut = false, oversized = false, overMemory = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (!done) {
         char bytes[4096]; ssize_t n;
         while ((n = ::read(pipes[0], bytes, sizeof(bytes))) > 0) {
-            if (wire.size() + static_cast<size_t>(n) > maxWireBytes) { oversized = true; break; }
+            if (wire.size() + static_cast<size_t>(n) > maxOutput) { oversized = true; break; }
             wire.append(bytes, static_cast<size_t>(n));
         }
         drainErrors();
         const auto waited = ::waitpid(pid, &status, WNOHANG);
         if (waited == pid) { done = true; break; }
         if (waited < 0 && errno != EINTR) { done = true; status = -1; break; }
-        if (oversized || std::chrono::steady_clock::now() >= deadline || (canceled && canceled->load())) {
-            timedOut = !oversized;
+        overMemory = memoryLimit && memoryOf && memoryOf(long(pid)) > memoryLimit;
+        if (oversized || overMemory || std::chrono::steady_clock::now() >= deadline || (canceled && canceled->load())) {
+            timedOut = !oversized && !overMemory;
             ::kill(-pid, SIGKILL);
             while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
             done = true; break;
@@ -251,25 +250,50 @@ static bool runHelper(const fs::path& helper, const char* flag, const std::strin
     }
     char tail[4096]; ssize_t n;
     while (!oversized && (n = ::read(pipes[0], tail, sizeof(tail))) > 0) {
-        if (wire.size() + static_cast<size_t>(n) > maxWireBytes) { oversized = true; break; }
+        if (wire.size() + static_cast<size_t>(n) > maxOutput) { oversized = true; break; }
         wire.append(tail, static_cast<size_t>(n));
     }
     ::close(pipes[0]);
     drainErrors(); ::close(errors[0]); ::close(life[1]);
     while (!stderrTail.empty() && std::isspace(static_cast<unsigned char>(stderrTail.back()))) stderrTail.pop_back();
     for (auto& c : stderrTail) if (c == '\n' || c == '\r') c = ' ';
-    const auto detail = stderrTail.empty() ? std::string() : ": " + stderrTail;
-    if (timedOut) failure = (canceled && canceled->load() ? "Scan canceled" : "Plugin scan timed out") + detail;
-    else if (oversized) failure = "Plugin scanner output exceeded size limit" + detail;
-    else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) failure = "Plugin crashed or failed during scan" + detail;
-    else if (!decodeScan(wire, result)) failure = "Invalid scanner response" + detail;
-    else return true;
+    run.stderrTail = std::move(stderrTail);
+    if (timedOut) run.outcome = canceled && canceled->load() ? IsolatedRun::Canceled : IsolatedRun::TimedOut;
+    else if (oversized) run.outcome = IsolatedRun::Oversized;
+    else if (overMemory) run.outcome = IsolatedRun::OverMemory;
+    else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) run.outcome = IsolatedRun::Failed;
+    else run.outcome = IsolatedRun::Exited;
+    return run;
+}
+// Runs the scanner helper on one binary (flag: --worker, or --presets to index presets too) with
+// a timeout, crash isolation and the last of its stderr; its stdin is a pipe only we hold the
+// write end of, which it watches to end itself if we die, so a hung scan never outlives us.
+// False with the reason in failure, which starts "Cannot " only when the helper never started
+// (scanPluginPresets asks again after those).
+static bool runHelper(const fs::path& helper, const char* flag, const std::string& binary, uint32_t timeoutMs, const std::atomic<bool>* canceled,
+               ScanResult& result, std::string& failure) {
+    const auto run = runIsolated({helper.string(), flag, binary}, timeoutMs, maxWireBytes, canceled);
+    const auto detail = run.stderrTail.empty() ? std::string() : ": " + run.stderrTail;
+    switch (run.outcome) {
+    case IsolatedRun::NoPipe: failure = "Cannot create scanner pipe"; break;
+    case IsolatedRun::NoLaunch: failure = "Cannot launch kick-clap-scan helper"; break;
+    case IsolatedRun::Canceled: failure = "Scan canceled" + detail; break;
+    case IsolatedRun::TimedOut: failure = "Plugin scan timed out" + detail; break;
+    case IsolatedRun::Oversized: failure = "Plugin scanner output exceeded size limit" + detail; break;
+    case IsolatedRun::OverMemory: case IsolatedRun::Failed: failure = "Plugin crashed or failed during scan" + detail; break;
+    case IsolatedRun::Exited:
+        if (decodeScan(run.output, result)) return true;
+        failure = "Invalid scanner response" + detail; break;
+    }
     return false;
 }
 bool indexPresetsWithHelper(const fs::path& helper, const fs::path& binary, uint32_t timeoutMs, ScanResult& result, std::string& failure) {
     return runHelper(helper, "--presets", binary.string(), timeoutMs ? timeoutMs : 1, nullptr, result, failure);
 }
 #else
+IsolatedRun runIsolated(const std::vector<std::string>&, uint32_t, size_t, const std::atomic<bool>*, uint64_t, uint64_t (*)(long)) {
+    IsolatedRun run; run.outcome = IsolatedRun::NoLaunch; return run;
+}
 bool indexPresetsWithHelper(const fs::path&, const fs::path&, uint32_t, ScanResult&, std::string& failure) {
     failure = "Isolated preset indexing currently supports Linux and macOS";
     return false;

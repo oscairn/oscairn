@@ -19,6 +19,19 @@ ScanResult inspect(const std::filesystem::path& binary, bool presets = false, co
 // the reason in failure. Call it off any thread that must keep answering.
 bool indexPresetsWithHelper(const std::filesystem::path& helper, const std::filesystem::path& binary,
                            uint32_t timeoutMilliseconds, ScanResult& result, std::string& failure);
+// That isolation for any helper program (arguments[0], run with the rest): a process group of its
+// own, its stdout kept up to maxOutput bytes, the last 2 KiB of its stderr (newlines as spaces),
+// and a stdin pipe it can watch (watchParentPipe). It is killed with its group at the timeout,
+// when canceled, when its output passes maxOutput, or when memoryOf(its pid), read every 10 ms or
+// so, passes memoryLimit (0: no limit; a spike between two readings is not seen). Exited: it
+// ended with status 0. Linux and macOS (NoLaunch elsewhere). Call it off any thread that must
+// keep answering.
+struct IsolatedRun {
+    enum Outcome { Exited, Failed, TimedOut, Canceled, Oversized, OverMemory, NoPipe, NoLaunch } outcome = NoLaunch;
+    std::string output, stderrTail;
+};
+IsolatedRun runIsolated(const std::vector<std::string>& arguments, uint32_t timeoutMilliseconds, size_t maxOutput,
+                        const std::atomic<bool>* canceled = nullptr, uint64_t memoryLimit = 0, uint64_t (*memoryOf)(long pid) = nullptr);
 // Scanner-helper side of that isolation: watch the stdin pipe runHelper hands the helper and
 // exit when its launcher dies, so a hung provider never leaves the helper running on alone.
 // Call at the start of a --worker/--presets run.

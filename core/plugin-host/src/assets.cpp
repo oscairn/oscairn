@@ -155,6 +155,14 @@ namespace oscairn::assets
         if(in.bad()) fail("cannot read " + file.string());
         return s.hex();
     }
+    std::string sha256File(const fs::path& file, uint64_t offset, uint64_t length)
+    {
+        std::ifstream in(file, std::ios::binary); if(!in || !in.seekg(std::streamoff(offset))) fail("cannot read " + file.string());
+        Sha256 s; std::vector<char> buffer(1 << 20);
+        while(length && in) { in.read(buffer.data(), std::streamsize(std::min<uint64_t>(length, buffer.size()))); s.add(buffer.data(), size_t(in.gcount())); length -= uint64_t(in.gcount()); }
+        if(length) fail("cannot read " + file.string());
+        return s.hex();
+    }
 
     Store::Store(fs::path root) : root_(std::move(root)) {}
     // The default location is found on first use, so hosts without a home directory still start.

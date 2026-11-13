@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/discovery.h"
+#include "Extract.h"
 #include <iostream>
 #ifdef __linux__
 #include <sys/resource.h>
@@ -14,7 +15,9 @@
 #endif
 int main(int argc,char** argv) {
     try {
-        if(argc!=3 || (std::string(argv[1])!="--worker" && std::string(argv[1])!="--presets"))return 2;
+        // --extract <extractor> <file>: an item's metadata (RFC 0023 step 4), from an untrusted file.
+        const bool extract=argc==4 && std::string(argv[1])=="--extract";
+        if(!extract && (argc!=3 || (std::string(argv[1])!="--worker" && std::string(argv[1])!="--presets")))return 2;
         kick::clap::watchParentPipe(); // end this helper if the launcher dies while a provider hangs
 #if defined(__linux__) && !defined(OSCAIRN_SCAN_SANITIZED)
         // Third-party code runs here, as in kick-clap-scan: cap its memory so a runaway scan or
@@ -23,6 +26,7 @@ int main(int argc,char** argv) {
         const rlimit cap{1ull<<30,1ull<<30};
         if(setrlimit(RLIMIT_AS,&cap)!=0){std::cerr<<"cannot limit scanner memory\n";return 3;}
 #endif
+        if(extract){const auto out=oscairn::extract(argv[2],argv[3]);std::cout.write(out.data(),std::streamsize(out.size()));return 0;}
         const auto result=kick::clap::encodeScan(oscairn::inspectPlugin(argv[2],std::string(argv[1])=="--presets"));
         std::cout.write(result.data(),result.size());return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

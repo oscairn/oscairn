@@ -508,6 +508,7 @@ namespace oscairn
     // shortcut: each item's document is read on every query; keep the result in the library's index if libraries of thousands make it slow.
     Control::LibraryResult Session::libraryQuery(const LibraryQuery& query)
     {
+        library().collect(); // what extractors answered since (RFC 0023 step 4)
         auto result = library().query(query);
         if(budget_.cpu > 0)
             for(auto& item : result.items)

@@ -294,8 +294,9 @@ namespace oscairn
         // (RFC 0025: measured here, else their packages'); empty when it fits or is not known.
         // readOnly (RFC 0023 step 3): of a type whose package is not installed here, or indexed in
         // place; inPlace: a file in a folder the user chose, listed where it is, never changed.
+        // fields (step 4): its type's fields that its extractor read, by field ID, numbers as their text.
         struct LibraryItem { std::string id, kind = "performance", name, description, path; std::vector<std::string> tags; bool favorite = false; uint32_t recent = 0; std::string color, revision, hash, library; Origin origin; std::string unfit = {};
-                             bool readOnly = false, inPlace = false; };
+                             bool readOnly = false, inPlace = false; std::vector<std::pair<std::string, std::string>> fields = {}; };
         // kind: one item type's kind ("performance", "sound"...); empty for every type. types: item
         // types by ID or kind (RFC 0023), any of them; empty for every type. source: "mine" for the
         // user's own items, an installed library's ID for its items, empty for all. id: that item

@@ -111,6 +111,13 @@ namespace oscairn
         // A managed type's items are folders with a document holding their ID; files are recognized by extension.
         if(t.storage == "managed" && (t.document.empty() || t.identity != "id")) bad("a managed type's items are folders holding a document, identified by ID");
         if(t.storage != "managed" && !t.document.empty()) bad("only a managed type's items are folders holding a document");
+        // Step 4: one of Oscairn's extractors reads its files' fields (and a payload identity).
+        if(const V extractor = detail::member(d, "extractor"))
+        {
+            t.extractor = text(extractor, "extractor");
+            if(t.extractor != "audio") bad("its extractor is not one Oscairn has: " + t.extractor);
+            if(t.storage != "in-place") bad("only an in-place type's files are read by an extractor, so far");
+        }
         if(const V fields = detail::member(d, "fields"))
         {
             if(fields->type != json_type_array) bad("its fields are not a list");

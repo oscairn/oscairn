@@ -26,6 +26,9 @@ namespace oscairn
         std::vector<Field> fields;
         // The package that declares it (step 3), under whose ID its ID is; empty for Oscairn's own.
         std::string owner = {};
+        // Which of Oscairn's extractors (step 4) reads its files' fields and payload identity, out of
+        // process ("audio"); empty for none.
+        std::string extractor = {};
         // What library items, archive manifests and actions (oscairn.pick.<kind>) call it: its ID,
         // without "oscairn." for Oscairn's own ("performance").
         std::string kind() const;

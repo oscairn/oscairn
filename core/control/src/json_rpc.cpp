@@ -906,7 +906,9 @@ namespace oscairn
                 std::vector<std::string> items,counts;
                 for(const auto& i:r.items){std::vector<std::string> t;for(const auto& x:i.tags)t.push_back(quote(x));
                     const auto type=itemType(i.kind);
-                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"type\":"+quote(type?type->id:i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+(i.readOnly?",\"readOnly\":true":"")+(i.inPlace?",\"inPlace\":true":"")+'}');}
+                    std::string fields; // what its extractor read (RFC 0023 step 4)
+                    for(const auto& [k,v]:i.fields)fields+=std::string(fields.empty()?"":",")+quote(k)+':'+quote(v);
+                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"type\":"+quote(type?type->id:i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+(i.readOnly?",\"readOnly\":true":"")+(i.inPlace?",\"inPlace\":true":"")+(fields.empty()?std::string():",\"fields\":{"+fields+'}')+'}');}
                 for(const auto& [tag,n]:r.tags)counts.push_back("{\"tag\":"+quote(tag)+",\"count\":"+std::to_string(n)+'}');
                 std::vector<std::string> colors,hidden;
                 for(const auto& [tag,color]:r.tagColors)colors.push_back("{\"tag\":"+quote(tag)+",\"color\":"+quote(color)+'}');

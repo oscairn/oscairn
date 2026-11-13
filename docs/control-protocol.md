@@ -1298,7 +1298,11 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   `library.addFolder` and `library.removeFolder` take `{folder}` and return `{"accepted":true}`;
   adding one that is not a folder is invalid (`-32602`). Their files of the item types stored in
   place are listed by `library.query` with `inPlace` and `readOnly` true, and are never moved,
-  removed or exported; an app may name only a folder inside the library.
+  removed or exported; an app may name only a folder inside the library. A file of a type with
+  an extractor ([RFC 0023 step 4](rfcs/0023-item-types.md#indexers-and-extractors)) is read out
+  of process in the background and listed once its extractor has answered, its item's `fields`
+  then an object of the type's fields it read, each a string (`{"artist":"...","bpm":"120"}`;
+  absent when none); one whose extractor fails is listed without, by name and path.
 - `plugins.list` (`{}`) returns `{plugins}`: the plugin store ([RFC 0006](rfcs/0006-packages-and-portability.md)),
   each `{format,id,version,name,platforms,bytes,usedBy,open,license}`: the platforms it has builds for,
   their size on disk, the names of the library items that use it, whether the open

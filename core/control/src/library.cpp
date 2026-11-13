@@ -6,18 +6,28 @@
 #include "oscairn/item_types.h"
 #include "oscairn/setlist.h"
 #include "oscairn/package.h"
+#include "oscairn/plugin_host.h"
+#include <kick_clap/Discovery.h>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <chrono>
 #include <cstdlib>
+#include <deque>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <random>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <fcntl.h>
 #include <unistd.h>
@@ -69,6 +79,144 @@ namespace oscairn
         int64_t stamp(const fs::path& file) { return int64_t(fs::last_write_time(file).time_since_epoch().count()); }
         std::string randomId() { std::random_device random; constexpr char hex[] = "0123456789abcdef"; std::string id; for(int i = 0; i < 16; ++i) id += hex[random() & 15]; return id; }
         std::string lower(std::string s) { for(auto& c : s) c = char(std::tolower(static_cast<unsigned char>(c))); return s; }
+
+        // An extractor's run (RFC 0023 step 4): a fresh process per file, ended at these.
+        constexpr uint32_t extractTimeoutMs = 10000;
+        constexpr size_t maxExtracted = 64 * 1024;
+        constexpr uint64_t extractMemory = uint64_t(256) << 20;
+        using Fields = std::vector<std::pair<std::string, std::string>>;
+        struct Extracted { std::string identity; Fields fields; };
+        // What an extractor answered, checked as the untrusted text it is: one JSON object, its
+        // identity a SHA-256 in lowercase hex (required for a payload identity), its fields text or
+        // numbers of at most 256 bytes of UTF-8 with no control characters, each once. Fields its
+        // type does not declare are dropped; anything else wrong refuses the whole answer.
+        Extracted readExtracted(const std::string& out, const ItemType& type)
+        {
+            auto refuse = [](const std::string& why) { throw std::runtime_error(why); };
+            if(out.size() > maxExtracted) refuse("its answer is too large");
+            if(const auto why = detail::jsonPreflight(out, 4); !why.empty()) refuse("its answer is not JSON: " + std::string(why));
+            const auto doc = parse(out);
+            V d = doc.get();
+            if(!d || d->type != json_type_object) refuse("its answer is not a JSON object");
+            Extracted e;
+            if(V id = detail::member(d, "identity"))
+            {
+                if(id->type != json_type_string) refuse("its identity is not text");
+                e.identity = str(id);
+                if(e.identity.size() != 64 || !std::all_of(e.identity.begin(), e.identity.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })) refuse("its identity is not a SHA-256");
+            }
+            if(type.identity == "payload" && e.identity.empty()) refuse("it gave no identity");
+            if(V fields = detail::member(d, "fields"))
+            {
+                if(fields->type != json_type_object) refuse("its fields are not an object");
+                for(auto* m = static_cast<const json_object_s*>(fields->payload)->start; m; m = m->next)
+                {
+                    const std::string key(m->name->string, m->name->string_size);
+                    if(std::none_of(type.fields.begin(), type.fields.end(), [&](const auto& f) { return f.id == key; })) continue;
+                    if(std::any_of(e.fields.begin(), e.fields.end(), [&](const auto& f) { return f.first == key; })) refuse("it gave the field " + key + " twice");
+                    std::string value;
+                    if(m->value->type == json_type_string) value = str(m->value);
+                    else if(m->value->type == json_type_number) value.assign(static_cast<const json_number_s*>(m->value->payload)->number, static_cast<const json_number_s*>(m->value->payload)->number_size);
+                    else refuse("its field " + key + " is neither text nor a number");
+                    // Escapes decoded, the value is checked again: no control characters, and so the preflight checks only its UTF-8.
+                    if(value.size() > 256 || std::any_of(value.begin(), value.end(), [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; }) ||
+                       !detail::jsonPreflight(value, SIZE_MAX).empty())
+                        refuse("its field " + key + " is too long or not plain UTF-8 text");
+                    e.fields.emplace_back(key, std::move(value));
+                }
+            }
+            return e;
+        }
+        std::string fieldsJson(const Fields& fields)
+        {
+            std::string out;
+            for(const auto& [k, v] : fields) out += std::string(out.empty() ? "" : ",") + detail::quote(k) + ':' + detail::quote(v);
+            return '{' + out + '}';
+        }
+    }
+
+    // Extractors at work (RFC 0023 step 4): one thread, off the control and audio threads, runs
+    // each file's extractor in a process of its own, one at a time, and keeps what it answered
+    // for the next rescan to take. A run that fails, hangs, grows too large or answers wrongly
+    // costs that file its fields (and a payload identity: its path's stands in), nothing else.
+    struct Library::Extraction
+    {
+        struct Job { std::string path; int64_t modified; ItemType type; };
+        struct Done { int64_t modified; std::string id; Fields fields; };
+        explicit Extraction(std::string program) : helper(std::move(program)), worker([this] { run(); }) {}
+        ~Extraction()
+        {
+            { std::lock_guard lock(mutex); stop = true; } // stop also ends a run under way
+            wake.notify_all();
+            worker.join();
+        }
+        void add(Job job)
+        {
+            std::lock_guard lock(mutex);
+            if(!pending.insert(job.path).second) return;
+            jobs.push_back(std::move(job));
+            wake.notify_one();
+        }
+        // The answer for path, when there is one for this version of the file.
+        std::optional<Done> take(const std::string& path, int64_t modified)
+        {
+            std::lock_guard lock(mutex);
+            const auto it = done.find(path);
+            if(it == done.end()) return std::nullopt;
+            auto d = std::move(it->second);
+            done.erase(it);
+            if(d.modified != modified) return std::nullopt;
+            return d;
+        }
+        std::atomic<bool> fresh{false}; // answers the last rescan has not taken
+
+    private:
+        void run()
+        {
+            for(;;)
+            {
+                Job job;
+                {
+                    std::unique_lock lock(mutex);
+                    wake.wait(lock, [&] { return stop.load() || !jobs.empty(); });
+                    if(stop) return;
+                    job = std::move(jobs.front());
+                    jobs.pop_front();
+                }
+                Done d{job.modified, {}, {}};
+                const auto r = kick::clap::runIsolated({helper, "--extract", job.type.extractor, job.path}, extractTimeoutMs, maxExtracted, &stop, extractMemory, &residentBytes);
+                std::string why;
+                if(r.outcome == kick::clap::IsolatedRun::Exited)
+                    try { auto e = readExtracted(r.output, job.type); d.fields = std::move(e.fields); if(job.type.identity == "payload") d.id = e.identity; }
+                    catch(const std::exception& e) { why = e.what(); }
+                else why = r.outcome == kick::clap::IsolatedRun::TimedOut ? "it ran too long" : r.outcome == kick::clap::IsolatedRun::Oversized ? "its answer is too large"
+                         : r.outcome == kick::clap::IsolatedRun::OverMemory ? "it used too much memory" : r.outcome == kick::clap::IsolatedRun::Failed ? "it failed or crashed" : "it did not start";
+                if(stop) return;
+                if(!why.empty()) std::fprintf(stderr, "oscairn: no fields for %s: %s%s%s\n", job.path.c_str(), why.c_str(), r.stderrTail.empty() ? "" : ": ", r.stderrTail.c_str());
+                if(d.id.empty())
+                    try { d.id = job.type.identity == "content" ? assets::sha256File(job.path) : assets::sha256(job.path); }
+                    catch(const std::exception&) { d.id = assets::sha256(job.path); }
+                std::lock_guard lock(mutex);
+                pending.erase(job.path);
+                done[job.path] = std::move(d);
+                fresh = true;
+            }
+        }
+        const std::string helper; // oscairn-plugin-scan, which runs Oscairn's extractors
+        std::mutex mutex; // jobs, pending and done: this thread's and the library's
+        std::condition_variable wake;
+        std::deque<Job> jobs;
+        std::set<std::string> pending; // paths queued or under way
+        std::map<std::string, Done> done;
+        std::atomic<bool> stop{false};
+        std::thread worker; // last: started once the rest is
+    };
+
+    Library::~Library() = default;
+
+    void Library::collect()
+    {
+        if(extraction_ && extraction_->fresh.exchange(false)) rescan();
     }
 
     void writeAtomically(const std::filesystem::path& file, const std::string& text)
@@ -272,6 +420,8 @@ namespace oscairn
                     item.tags = strings(detail::member(e->value, "tags")); item.color = str(detail::member(e->value, "color")); item.revision = str(detail::member(e->value, "revision")); item.hash = str(detail::member(e->value, "hash"));
                     item.library = str(detail::member(e->value, "library"));
                     item.origin = {str(detail::member(e->value, "originLibrary")), str(detail::member(e->value, "originItem")), str(detail::member(e->value, "originHash"))};
+                    if(V fields = detail::member(e->value, "fields"); fields && fields->type == json_type_object) // an extractor's (step 4)
+                        for(auto* m = static_cast<const json_object_s*>(fields->payload)->start; m; m = m->next) item.fields.emplace_back(std::string(m->name->string, m->name->string_size), str(m->value));
                     const auto modified = std::stoll(str(detail::member(e->value, "modified")));
                     cached[item.path] = {modified, item};
                 }
@@ -337,8 +487,10 @@ namespace oscairn
         for(auto& item : items_)
             if(const auto t = std::find_if(all.begin(), all.end(), [&](const ItemType& x) { return x.kind() == item.kind; }); t != all.end() && orphan(*t)) item.readOnly = true;
         // Items in place: files of the in-place types in the folders the user chose, by name and
-        // identity, never moved or changed. Until extractors (step 4), a payload identity is the path.
+        // identity, never moved or changed. A payload identity is the extractor's (step 4); with
+        // none, or none that answers, the path's.
         size_t seen = 0;
+        const auto helper = placementPolicy().scan;
         for(const auto& type : all)
         {
             if(!type.inPlace()) continue;
@@ -356,6 +508,14 @@ namespace oscairn
                     const auto modified = stamp(it->path());
                     Control::LibraryItem item;
                     if(const auto c = cached.find(path); c != cached.end() && c->second.first == modified && c->second.second.kind == type.kind()) item = c->second.second;
+                    else if(!type.extractor.empty() && !helper.empty())
+                    {
+                        // Its extractor reads it off this thread (step 4); it is listed once that answers.
+                        if(!extraction_) extraction_ = std::make_unique<Extraction>(helper);
+                        auto done = extraction_->take(path, modified);
+                        if(!done) { extraction_->add({path, modified, type}); continue; }
+                        item.kind = type.kind(); item.name = it->path().stem().string(); item.path = path; item.id = done->id; item.fields = std::move(done->fields);
+                    }
                     else
                     {
                         item.kind = type.kind(); item.name = it->path().stem().string(); item.path = path;
@@ -365,7 +525,7 @@ namespace oscairn
                     if(std::any_of(items_.begin(), items_.end(), [&](const auto& i) { return i.id == item.id; })) continue; // the same file in two folders chosen
                     items_.push_back(item);
                     index += std::string(index.empty() ? "" : ",") + "{\"path\":" + detail::quote(item.path) + ",\"kind\":" + detail::quote(item.kind) + ",\"modified\":" + detail::quote(std::to_string(modified)) +
-                             ",\"id\":" + detail::quote(item.id) + ",\"name\":" + detail::quote(item.name) + ",\"description\":\"\",\"tags\":[],\"color\":\"\",\"revision\":\"\",\"hash\":\"\",\"library\":\"\",\"originLibrary\":\"\",\"originItem\":\"\",\"originHash\":\"\"}";
+                             ",\"id\":" + detail::quote(item.id) + ",\"name\":" + detail::quote(item.name) + ",\"description\":\"\",\"tags\":[],\"color\":\"\",\"revision\":\"\",\"hash\":\"\",\"library\":\"\",\"originLibrary\":\"\",\"originItem\":\"\",\"originHash\":\"\",\"fields\":" + fieldsJson(item.fields) + "}";
                 }
             }
         }

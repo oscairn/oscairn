@@ -4,6 +4,7 @@
 #include "oscairn/item_types.h"
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -21,12 +22,18 @@ namespace oscairn
         // dataHome: OSCAIRN_DATA_HOME's folder (empty: that, else the platform's); the library
         // folders are its types' folders (Performances/, Sounds/...), the cache and user file its library/.
         explicit Library(std::filesystem::path dataHome = {});
+        ~Library(); // stops its extractors, ending a run under way
         std::filesystem::path performances() const { return home_ / "Performances"; }
         // Installed libraries (RFC 0021): each in its own folder here, named by its ID, with its
         // manifest (library.json) and its items' folders. Their items are locked.
         const std::filesystem::path& libraries() const { return libraries_; }
         std::vector<Control::InstalledLibrary> installed() const;
         uint32_t rescan();
+        // Takes in what extractors (RFC 0023 step 4) answered since the last rescan, rescanning
+        // when there is something: in-place files of a type with an extractor are read off this
+        // thread, by the scan helper (placementPolicy().scan; with none, by name and path only),
+        // and listed once it answers.
+        void collect();
         Control::LibraryResult query(const Control::LibraryQuery&) const;
         const Control::LibraryItem* find(const std::string& id) const;
         const std::vector<Control::LibraryItem>& items() const { return items_; }
@@ -57,6 +64,8 @@ namespace oscairn
         std::vector<Control::LibraryItem> items_;
         std::vector<std::string> favorites_, recent_, hiddenTags_, folders_;
         std::map<std::string, std::string> tagColors_;
+        struct Extraction;
+        std::unique_ptr<Extraction> extraction_; // started when a file first needs its extractor
     };
 
     // The platform's folder for Oscairn's user data: OSCAIRN_DATA_HOME, else Application Support

@@ -16,6 +16,8 @@ namespace oscairn::assets
     struct Library { std::string id, name, path, fingerprint; size_t files = 0; };
 
     std::string sha256File(const std::filesystem::path& file);
+    // Of length bytes from offset; throws when the file holds fewer.
+    std::string sha256File(const std::filesystem::path& file, uint64_t offset, uint64_t length);
     std::string sha256(std::string_view bytes);
     // Dotted versions compared part by part, numbers as numbers: is a older than b?
     bool older(const std::string& a, const std::string& b);

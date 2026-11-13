@@ -500,7 +500,7 @@ namespace oscairn::standalone
                 flow = {};
                 area.removeFromTop(first ? gap : gap * 2);
                 s.bounds = area.removeFromTop(int(small) + 2);
-                if(first)
+                if(first && !dense(pane)) // a device's screen keeps them in the bar, not a line taller than this heading
                 {
                     // The two views' icons at the heading's end.
                     const int side = touch ? 44 : 24;
@@ -757,8 +757,13 @@ namespace oscairn::standalone
         }
         if(!tight) { compactButton_.setBounds(bar.removeFromRight(control * 4 / 3)); bar.removeFromRight(gap); }
         filters_.setBounds(bar.removeFromRight(filters_.preferredWidth(control))); bar.removeFromRight(gap);
+        if(tight) // the list and tag views share the bar's line: the column's heading stays a heading's height
+        {
+            if(sidebar_.views.getParentComponent() != this) addAndMakeVisible(sidebar_.views);
+            sidebar_.views.setBounds(bar.removeFromRight(sidebar_.views.preferredWidth(control)).withHeight(control)); bar.removeFromRight(gap);
+        }
         // A narrow screen gives the search a row of its own rather than a sliver (RFC 0019).
-        if(bar.getWidth() < (touch ? 240 : 200)) { area.removeFromTop(gap); search_.setBounds(area.removeFromTop(control)); }
+        if(bar.getWidth() < (tight ? 160 : touch ? 240 : 200)) { area.removeFromTop(gap); search_.setBounds(area.removeFromTop(control)); }
         else search_.setBounds(bar);
         search_.setFont(juce::FontOptions(textSize(TextRole::Body, mode())));
         updatePlaceholder();

@@ -10,6 +10,7 @@
 #include "../../TextKeyboard.h"
 #include "../../Setlist.h"
 #include "../../Engine.h"
+#include "../../Profile.h"
 #include "../../Theme.h"
 #include <cstdlib>
 #include <vector>
@@ -49,7 +50,13 @@ namespace oscairn::standalone
                     actions_.offer(action.toStdString(), "shell", [this, a = action.toStdString()](const std::string& argument, Actions::Answer answer) { engine_->appRequest({}, a, argument, std::move(answer)); });
             if(juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEXT_ENTRY", {}) == "onScreen") setTextEntryOnScreen(true); // the shell's screen has no typing keyboard
             pane_ = std::make_unique<SetlistPane>(*engine_, actions_);
-            setDesktopMode(*pane_, 1);
+            // A device's screen is dense by design (RFC 0019), in its profile's theme, as Settings is.
+            const auto named = juce::SystemStats::getEnvironmentVariable("OSCAIRN_PROFILE", {});
+            try { profile_ = loadProfile(named.toStdString()); }
+            catch(const std::exception& e) { std::fprintf(stderr, "oscairn-setlist: the profile %s: %s; this computer's instead\n", named.toRawUTF8(), e.what()); profile_ = Profile::desktop(); }
+            setDesktopMode(*pane_, profile_.screen() && profile_.screen()->touch ? 2 : 1); // until the shell says how it is shown
+            if(profile_.screen() && profile_.screen()->surface != "desktop") setDense(*pane_);
+            if(profile_.screen() && !profile_.screen()->theme.empty()) theme_->setScreenTheme(profile_.screen()->theme);
             restore();
             pane_->onCurrent = [this] { keep(); playing(); };
             playing();
@@ -140,6 +147,7 @@ namespace oscairn::standalone
             if(!id.empty() && id == pane_->setlist().info.id && state["current"].isInt()) pane_->mark(int(state["current"]));
         }
 
+        Profile profile_;
         std::unique_ptr<Theme> theme_;
         std::unique_ptr<Engine> engine_;
         Actions actions_;

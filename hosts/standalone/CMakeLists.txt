@@ -63,7 +63,7 @@ juce_add_gui_app(oscairn_setlist_app
     BUNDLE_ID org.oscairn.setlist
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
-target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp DeviceScreen.cpp TextKeyboard.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp)
+target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp DeviceScreen.cpp TextKeyboard.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
 target_compile_definitions(oscairn_setlist_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
 target_link_libraries(oscairn_setlist_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
     juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)

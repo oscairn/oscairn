@@ -30,7 +30,7 @@ namespace oscairn::standalone
         juce::Rectangle<int> cell(int n) const
         {
             const int columns = int(pane_.setlist_.columns), rows = int(pane_.setlist_.rows);
-            const int gap = pane_.mode() == 2 ? 10 : 8;
+            const int gap = dense(pane_) ? denseGap : pane_.mode() == 2 ? 10 : 8;
             const int w = (getWidth() - gap * (columns - 1)) / columns, h = (getHeight() - gap * (rows - 1)) / rows;
             return {(n % columns) * (w + gap), (n / columns) * (h + gap), w, h};
         }
@@ -513,22 +513,37 @@ namespace oscairn::standalone
     void SetlistPane::resized()
     {
         const bool touch = mode() == 2;
-        const int control = touch ? 44 : 30, gap = touch ? 10 : 8, big = touch ? 72 : 56;
-        list_.setRowHeight(touch ? 64 : 48);
-        auto area = getLocalBounds().reduced(16, 12);
+        const bool tight = dense(*this); // a device's screen (RFC 0019)
+        const int control = touch ? 44 : 30, gap = tight ? denseGap : touch ? 10 : 8, big = tight ? control : touch ? 72 : 56; // dense: Previous and Next a touch target tall, not more
+        list_.setRowHeight(tight ? (touch ? 44 : 28) : touch ? 64 : 48);
+        auto area = tight ? getLocalBounds().reduced(denseMargin) : getLocalBounds().reduced(16, 12);
         auto bar = area.removeFromTop(control);
         new_.setBounds(bar.removeFromRight(touch ? 90 : 70)); bar.removeFromRight(gap);
         export_.setBounds(bar.removeFromRight(touch ? 110 : 90)); bar.removeFromRight(gap);
-        chooser_.setBounds(bar.removeFromLeft(std::min(bar.getWidth() / 2, 280)));
-        bar.removeFromLeft(gap);
-        view_.setBounds(bar.removeFromLeft(touch ? 170 : 140));
-        bar.removeFromLeft(gap);
-        columns_.setBounds(bar.removeFromLeft(touch ? 140 : 110)); bar.removeFromLeft(gap);
-        rows_.setBounds(bar.removeFromLeft(touch ? 120 : 90));
-        area.removeFromTop(gap);
-        auto pages = area.removeFromTop(control);
-        pageButton_.setBounds(pages.removeFromRight(touch ? 110 : 90)); pages.removeFromRight(gap);
-        pages_.setBounds(pages.removeFromLeft(std::min(pages.getWidth(), 280)));
+        // A device's screen has the setlist, its page and the view on one line when they fit with a chooser worth reading.
+        const bool oneLine = tight && bar.getWidth() - (columns_.isVisible() ? 570 : 360) - gap * (columns_.isVisible() ? 5 : 3) >= 160;
+        if(oneLine)
+        {
+            rows_.setBounds(bar.removeFromRight(columns_.isVisible() ? 100 : 0)); if(columns_.isVisible()) bar.removeFromRight(gap);
+            columns_.setBounds(bar.removeFromRight(columns_.isVisible() ? 110 : 0)); if(columns_.isVisible()) bar.removeFromRight(gap);
+            view_.setBounds(bar.removeFromRight(140)); bar.removeFromRight(gap);
+            pageButton_.setBounds(bar.removeFromRight(90)); bar.removeFromRight(gap);
+            pages_.setBounds(bar.removeFromRight(130)); bar.removeFromRight(gap);
+            chooser_.setBounds(bar);
+        }
+        else
+        {
+            chooser_.setBounds(bar.removeFromLeft(std::min(bar.getWidth() / 2, 280)));
+            bar.removeFromLeft(gap);
+            view_.setBounds(bar.removeFromLeft(touch ? 170 : 140));
+            bar.removeFromLeft(gap);
+            columns_.setBounds(bar.removeFromLeft(touch ? 140 : 110)); bar.removeFromLeft(gap);
+            rows_.setBounds(bar.removeFromLeft(touch ? 120 : 90));
+            area.removeFromTop(gap);
+            auto pages = area.removeFromTop(control);
+            pageButton_.setBounds(pages.removeFromRight(touch ? 110 : 90)); pages.removeFromRight(gap);
+            pages_.setBounds(pages.removeFromLeft(std::min(pages.getWidth(), 280)));
+        }
         area.removeFromTop(gap);
         // Previous and Next across the bottom, as big as the stage needs.
         if(previous_.isVisible())

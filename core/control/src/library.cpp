@@ -3,6 +3,7 @@
 #include "sheredom/json.h"
 #include "JsonInput.h"
 #include "oscairn/assets.h"
+#include "oscairn/item_types.h"
 #include "oscairn/package.h"
 #include <algorithm>
 #include <cctype>
@@ -179,8 +180,12 @@ namespace oscairn
         const auto doc = parse(slurp(file));
         V d = doc.get();
         if(!d || str(detail::member(d, "format")) != format) throw std::runtime_error("not a " + format);
+        // The document version its type reads (RFC 0023), when it names one.
+        const auto types = itemTypes();
+        const auto type = std::find_if(types.begin(), types.end(), [&](const ItemType& t) { return t.format == format; });
+        if(type == types.end()) throw std::runtime_error("no item type reads " + format);
         const V version = detail::member(d, "version");
-        if(!version || version->type != json_type_number || std::string(static_cast<const json_number_s*>(version->payload)->number, static_cast<const json_number_s*>(version->payload)->number_size) != (format == "oscairn.performance" ? "13" : "8"))
+        if(!version || version->type != json_type_number || (type->version && std::string(static_cast<const json_number_s*>(version->payload)->number, static_cast<const json_number_s*>(version->payload)->number_size) != std::to_string(type->version)))
             throw std::runtime_error("unsupported version");
         const V info = detail::member(d, "info");
         if(!info || info->type != json_type_object) throw std::runtime_error("no info block");
@@ -200,7 +205,7 @@ namespace oscairn
     Library::Library(fs::path home)
     {
         if(home.empty()) home = dataHome();
-        performances_ = home / "Performances"; sounds_ = home / "Sounds"; libraries_ = home / "Libraries"; cache_ = home / "library";
+        home_ = home; libraries_ = home / "Libraries"; cache_ = home / "library";
         // An install's or export's unpack folder left by a crash. Only those over a day old: a
         // newer one may be another process's still at work.
         std::error_code error;
@@ -242,8 +247,12 @@ namespace oscairn
         items_.clear();
         std::string index;
         std::error_code error;
-        // The user's own folders, then each installed library's, its items locked.
-        std::vector<std::tuple<fs::path, const char*, const char*, std::string>> folders{{performances_, "performance", "performance.json", ""}, {sounds_, "sound", "sound.json", ""}};
+        // The user's own folders, then each installed library's, its items locked: one per type
+        // the library indexes (RFC 0023).
+        std::vector<ItemType> types;
+        for(const auto& t : itemTypes()) if(t.indexed()) types.push_back(t);
+        std::vector<std::tuple<fs::path, ItemType, std::string>> folders;
+        for(const auto& t : types) folders.push_back({home_ / t.folder, t, ""});
         installed_.clear();
         if(fs::is_directory(libraries_, error))
             for(const auto& entry : fs::directory_iterator(libraries_, error))
@@ -255,16 +264,15 @@ namespace oscairn
                     Control::InstalledLibrary l{str(detail::member(doc.get(), "id")), str(detail::member(doc.get(), "name")), 0};
                     if(l.id != entry.path().filename().string()) continue; // not where it was installed
                     installed_.push_back(l);
-                    folders.push_back({entry.path() / "Performances", "performance", "performance.json", l.id});
-                    folders.push_back({entry.path() / "Sounds", "sound", "sound.json", l.id});
+                    for(const auto& t : types) folders.push_back({entry.path() / t.folder, t, l.id});
                 }
                 catch(const std::exception&) {} // a damaged library: install it again
             }
-        for(const auto& [folder, kind, file, library] : folders)
+        for(const auto& [folder, type, library] : folders)
         if(fs::is_directory(folder, error))
             for(const auto& entry : fs::directory_iterator(folder, error))
             {
-                const auto manifest = entry.path() / file;
+                const auto manifest = entry.path() / type.document;
                 // Hidden folders are a save in progress or one left by a crash.
                 if(!entry.is_directory() || entry.path().filename().string().starts_with(".") || !fs::is_regular_file(manifest, error)) continue;
                 const auto path = entry.path().string();
@@ -275,8 +283,8 @@ namespace oscairn
                 {
                     try
                     {
-                        const auto info = readInfo(manifest, std::string("oscairn.") + kind);
-                        item.kind = kind; item.id = info.id; item.name = info.name; item.description = info.description; item.tags = info.tags; item.color = info.color; item.revision = info.revision; item.hash = info.hash; item.path = path;
+                        const auto info = readInfo(manifest, type.format);
+                        item.kind = type.kind(); item.id = info.id; item.name = info.name; item.description = info.description; item.tags = info.tags; item.color = info.color; item.revision = info.revision; item.hash = info.hash; item.path = path;
                         item.origin = info.origin;
                     }
                     catch(const std::exception&) { continue; } // not one the library can show; it stays on disk
@@ -371,10 +379,11 @@ namespace oscairn
         std::string safe;
         for(const char c : name) safe += (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' || c == '_') ? c : '_';
         while(!safe.empty() && safe.back() == ' ') safe.pop_back();
-        const bool sound = kind == "sound";
-        if(safe.empty()) safe = sound ? "Sound" : "Performance";
-        const auto& root = sound ? sounds_ : performances_;
-        const std::string extension = sound ? ".osound" : ".oscairn";
+        const auto type = itemType(kind);
+        if(!type || !type->indexed()) throw std::invalid_argument("no item type " + kind + " keeps folders in the library");
+        if(safe.empty()) safe = type->name;
+        const auto root = home_ / type->folder;
+        const auto& extension = type->suffix;
         auto folder = root / (safe + extension);
         // A dangling link counts as taken: an install's cleanup would remove it.
         for(int n = 2; fs::exists(fs::symlink_status(folder)); ++n) folder = root / (safe + " " + std::to_string(n) + extension);

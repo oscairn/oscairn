@@ -5,6 +5,7 @@
 #include "JsonInput.h"
 #include "CurveJson.h"
 #include "oscairn/discovery.h"
+#include "oscairn/item_types.h"
 #include "oscairn/package.h"
 #include "oscairn/unavailable_plugin.h"
 #include "oscairn/sound_context.h"
@@ -345,6 +346,10 @@ std::string nextFree(const std::string& name,const std::function<bool(const std:
     do next=base+" "+std::to_string(++n);while(taken(next));
     return next;
 }
+// An item type the library indexes (RFC 0023), by its kind; its document's name and format.
+ItemType typeOf(const std::string& kind){auto t=itemType(kind);if(!t || !t->indexed())bad("no item type "+kind+" in the library");return *t;}
+std::string documentOf(const std::string& kind){return typeOf(kind).document;}
+std::string formatOf(const std::string& kind){return typeOf(kind).format;}
 std::unique_ptr<json_value_s,decltype(&std::free)> document(const fs::path& root){const auto bytes=state_files::read(root/"performance.json",4*1024*1024);const auto error=detail::jsonPreflight({reinterpret_cast<const char*>(bytes.data()),bytes.size()},32);if(!error.empty())bad(std::string(error));auto* doc=json_parse(bytes.data(),bytes.size());if(!doc)bad("invalid JSON");return {doc,&std::free};}
 }
 
@@ -385,7 +390,7 @@ std::vector<std::string> Session::exportLibraryItem(const std::string& id,const 
     if(!found)bad("no such library item");
     const auto item=*found;
     return exportArchive(file,item.kind,[&](const fs::path& stage,Package& package){
-        const auto folder=fs::path(item.kind=="sound"?"Sounds":"Performances")/fs::path(item.path).filename();
+        const auto folder=fs::path(typeOf(item.kind).folder)/fs::path(item.path).filename();
         fs::create_directories((stage/folder).parent_path());fs::copy(item.path,stage/folder,fs::copy_options::recursive);
         package.id=item.id;package.name=item.name;
         package.items.push_back({item.kind,item.id,item.name,folder.generic_string()});
@@ -416,7 +421,7 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
     try{
         Package package;package.kind=kind;
         const auto from=write(stage,package);
-        std::vector<fs::path> manifests{stage/package.items.front().path/(kind=="sound"?"sound.json":"performance.json")};
+        std::vector<fs::path> manifests{stage/package.items.front().path/documentOf(kind)};
         std::set<std::string> sounds;
         for(const auto& f:from){
             if(f.sound.empty() || (f.modified && !editedSounds) || sounds.count(f.sound))continue;
@@ -486,7 +491,7 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
         }
         // The exporter's signatures, when chosen: each item's over its content hash, and the whole archive's.
         if(sign.items)for(auto& i:package.items)
-            i.signatures.push_back({key->publicKey,signing::sign(*key,signing::itemMessage(contentHash(stage/i.path/(i.kind=="sound"?"sound.json":"performance.json"))))});
+            i.signatures.push_back({key->publicKey,signing::sign(*key,signing::itemMessage(contentHash(stage/i.path/documentOf(i.kind))))});
         writePackage(archive,package,stage,sign.archive?&*key:nullptr);
     }catch(...){std::error_code ignored;fs::remove_all(stage,ignored);throw;}
     std::error_code ignored;fs::remove_all(stage,ignored);
@@ -2002,9 +2007,9 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         // folder: never two libraries in one, which rescan would list as neither.
         if(asLibrary){std::error_code e;for(const auto& entry:fs::directory_iterator(l.libraries(),e))
             if(entry.path().filename()!=p.id && fs::equivalent(entry.path(),l.libraries()/p.id,e))bad("another library is installed in that folder: "+entry.path().filename().string());}
-        auto manifest=[&](const Package::Item& i){return into/i.path/(i.kind=="sound"?"sound.json":"performance.json");};
+        auto manifest=[&](const Package::Item& i){return into/i.path/documentOf(i.kind);};
         // Each item is what it says it is.
-        for(const auto& i:items){const auto info=readInfo(manifest(i),"oscairn."+i.kind);if(info.id!=i.id)bad("the item "+i.name+" is not the one its archive lists");}
+        for(const auto& i:items){const auto info=readInfo(manifest(i),formatOf(i.kind));if(info.id!=i.id)bad("the item "+i.name+" is not the one its archive lists");}
         // The plugins they use, and who signed each build that would go into the store (RFC 0006),
         // before anything is installed: code unsigned or by an unknown key only when the user said
         // yes, a revoked key's never. Apps join this when archives carry them (RFC 0022 step 2).
@@ -2128,9 +2133,9 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             }catch(const std::exception&){} // none, or unreadable: nothing it listed is known, so nothing goes
             for(const auto& path:listed){
                 if(std::any_of(p.items.begin(),p.items.end(),[&](const auto& i){return i.path==path;}))continue;
-                // Only an item folder of this library's, as readPackage allowed it: Performances/<name> or Sounds/<name>.
+                // Only an item folder of this library's, as readPackage allowed it: <type folder>/<name> (RFC 0023).
                 const auto gone=root/path;const auto name=gone.filename().string();
-                if((gone.parent_path()!=root/"Performances" && gone.parent_path()!=root/"Sounds") || name.empty() || name.front()=='.' || !fs::is_directory(fs::symlink_status(gone)))continue;
+                if(const auto types=itemTypes();std::none_of(types.begin(),types.end(),[&](const ItemType& t){return t.indexed() && gone.parent_path()==root/t.folder;}) || name.empty() || name.front()=='.' || !fs::is_directory(fs::symlink_status(gone)))continue;
                 const auto old=gone.parent_path()/("."+name+".old");
                 fs::remove_all(old);fs::rename(gone,old);aside.push_back({gone,old});
             }
@@ -2146,7 +2151,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                 if(copy!=l.items().end() && copy->hash==copy->origin.hash){ids[i.id]=copy->id;++out.skipped;continue;} // still as imported
                 const auto to=l.newFolder(i.name,i.kind);
                 fs::create_directories(to.parent_path());created.push_back(to);placed.push_back(i.name);moveInto(into/i.path,to);
-                const auto doc=to/(i.kind=="sound"?"sound.json":"performance.json");
+                const auto doc=to/documentOf(i.kind);
                 if(i.kind=="performance"){
                     // Parts point at the Sounds' copies. The span comes from the needle itself: an
                     // ID with a quote escapes longer than it reads, and a fixed length breaks the JSON.
@@ -2155,7 +2160,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                     for(const auto& [from,id]:ids){const std::string needle="\"sound\":"+quote(from),with="\"sound\":"+quote(id);for(auto at=text.find(needle);at!=std::string::npos;at=text.find(needle,at+with.size()))text.replace(at,needle.size(),with);}
                     state_files::write(doc,text.data(),text.size());
                 }
-                auto info=readInfo(doc,"oscairn."+i.kind);
+                auto info=readInfo(doc,formatOf(i.kind));
                 info.id=freshId();info.parent.clear();info.revision=freshId();
                 info.hash=contentHash(doc);info.origin={p.id,i.id,info.hash};
                 writeInfo(doc,info);
@@ -2191,7 +2196,7 @@ std::vector<std::string> Session::assetLibraryUsers(const std::string& id) {
     auto& l=library();l.rescan();
     for(const auto& item:l.items()){
         std::vector<assets::Ref> refs;
-        try{refs=assetsOf(fs::path(item.path)/(item.kind=="sound"?"sound.json":"performance.json"));}
+        try{refs=assetsOf(fs::path(item.path)/documentOf(item.kind));}
         catch(const std::exception&){out.push_back((item.name.empty()?"Untitled":item.name)+" (unreadable, so it may use it)");continue;} // unknown use is not proven unused
         if(uses(refs))out.push_back(item.name.empty()?"Untitled":item.name);
     }
@@ -2335,7 +2340,7 @@ std::vector<Control::InstalledPlugin> Session::installedPlugins() {
     // the library's index when libraries reach thousands of items.
     std::vector<std::pair<std::string,std::set<std::tuple<std::string,std::string,std::string>>>> uses;
     for(const auto& item:library().items())try{
-        const auto bytes=state_files::read(fs::path(item.path)/(item.kind=="sound"?"sound.json":"performance.json"),4*1024*1024);
+        const auto bytes=state_files::read(fs::path(item.path)/documentOf(item.kind),4*1024*1024);
         const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
         if(!doc)continue;
         std::set<std::tuple<std::string,std::string,std::string>> plugins;
@@ -2413,8 +2418,8 @@ void Session::libraryEdit(const std::string& id,const PerformanceInfo& edit) {
     const auto* item=l.find(id);
     if(!item)bad("no such library item");
     if(!item->library.empty())bad("a locked library's items cannot be edited; copy it into your own first");
-    const auto doc=fs::path(item->path)/(item->kind=="sound"?"sound.json":"performance.json");
-    auto info=readInfo(doc,"oscairn."+item->kind);
+    const auto doc=fs::path(item->path)/documentOf(item->kind);
+    auto info=readInfo(doc,formatOf(item->kind));
     checkInfo(edit);
     info.name=edit.name;info.description=edit.description;info.tags=edit.tags;info.color=edit.color;
     writeInfo(doc,info);
@@ -2434,8 +2439,8 @@ std::string Session::libraryCopy(const std::string& id) {
     fs::create_directories(to.parent_path());
     fs::copy(from.path,to,fs::copy_options::recursive);
     try{
-        const auto doc=to/(from.kind=="sound"?"sound.json":"performance.json");
-        auto info=readInfo(doc,"oscairn."+from.kind);
+        const auto doc=to/documentOf(from.kind);
+        auto info=readInfo(doc,formatOf(from.kind));
         info.id=freshId();info.name=name;info.parent.clear();info.revision=freshId();
         info.hash=contentHash(doc);
         if(locked)info.origin={from.library,from.id,info.hash}; // as installing it as the user's own would

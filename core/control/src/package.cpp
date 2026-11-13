@@ -4,6 +4,7 @@
 #include "JsonInput.h"
 #include "miniz/miniz.h"
 #include "oscairn/assets.h"
+#include "oscairn/item_types.h"
 #include "oscairn/library.h"
 #include <algorithm>
 #include <cctype>
@@ -23,7 +24,13 @@ namespace oscairn
         using V = const json_value_s*;
         constexpr size_t maxEntries = 1u << 20, maxPath = 1024; // a library of thousands of items, each a few files
         constexpr uint64_t maxEntry = 2ull << 30, maxTotal = 8ull << 30, maxNameBytes = 64ull << 20;
-        const std::set<std::string> tops{"Performances", "Sounds", "Assets", "Plugins", "Licenses"};
+        // The top-level folders: each item type's (RFC 0023: Performances/, Sounds/, Assets/...), Plugins/ and Licenses/.
+        std::set<std::string> tops()
+        {
+            std::set<std::string> out{"Plugins", "Licenses"};
+            for(const auto& t : itemTypes()) out.insert(t.folder);
+            return out;
+        }
         // A license expression naming the GPL, LGPL or AGPL, any version: object code under them
         // goes with its source, or directions to it (their §6), and its notices.
         bool copyleft(const std::string& license)
@@ -209,7 +216,7 @@ namespace oscairn
         if(fs::exists(archive)) throw std::runtime_error(archive.string() + " already exists");
         // Every file, and its SHA-256 for the manifest; hidden files are not packed.
         std::vector<fs::path> files;
-        for(const auto& top : tops)
+        for(const auto& top : tops())
             if(fs::is_directory(root / top))
                 for(const auto& e : fs::recursive_directory_iterator(root / top))
                 {
@@ -315,6 +322,7 @@ namespace oscairn
                 return bytes;
             };
             std::set<std::string> names;
+            const auto folders = tops();
             uint64_t total = 0, nameBytes = 0, largest = 0;
             std::string manifest, archiveSignature;
             for(const auto& e : entries)
@@ -322,7 +330,7 @@ namespace oscairn
                 const auto& name = e.name;
                 if(!safe(name)) bad("an entry with an unsafe name: " + name);
                 const auto top = name.substr(0, name.find('/'));
-                if(name != "library.json" && name != "library.sig" && !tops.count(top)) bad("an entry outside its folders: " + name);
+                if(name != "library.json" && name != "library.sig" && !folders.count(top)) bad("an entry outside its folders: " + name);
                 if(e.link) bad("a link: " + name);
                 if((nameBytes += name.size()) > maxNameBytes) bad("its names are too long");
                 if(!names.insert(name).second) bad("an entry twice: " + name);
@@ -373,17 +381,20 @@ namespace oscairn
                 if(!signing::verify(p.signature, signing::archiveMessage(manifest))) bad("its signature does not verify");
             }
             p.id = text(detail::member(d, "id")); p.name = text(detail::member(d, "name")); p.kind = text(detail::member(d, "kind"));
-            if(!plainId(p.id) || (p.kind != "library" && p.kind != "performance" && p.kind != "sound" && p.kind != "plugin" && p.kind != "asset")) bad("its ID or kind is wrong");
+            // An exported item's kind is its type's (RFC 0023).
+            const auto exported = itemType(p.kind);
+            if(!plainId(p.id) || (p.kind != "library" && p.kind != "plugin" && p.kind != "asset" && !(exported && exported->kind() == p.kind && exported->indexed()))) bad("its ID or kind is wrong");
             const V items = detail::member(d, "items");
             if(!items || items->type != json_type_array) bad("it lists no items");
             std::set<std::string> ids;
             for(auto* e = static_cast<const json_array_s*>(items->payload)->start; e; e = e->next)
             {
                 Package::Item item{text(detail::member(e->value, "kind")), text(detail::member(e->value, "id")), text(detail::member(e->value, "name")), text(detail::member(e->value, "path"))};
-                const bool sound = item.kind == "sound";
-                if((!sound && item.kind != "performance") || !plainId(item.id) || !ids.insert(item.id).second) bad("an item's kind or ID is wrong");
-                if(!safe(item.path) || item.path.substr(0, item.path.find('/')) != (sound ? "Sounds" : "Performances") || item.path.find('/', item.path.find('/') + 1) != std::string::npos ||
-                   !names.count(item.path + (sound ? "/sound.json" : "/performance.json")))
+                // Each in its type's folder, as the library keeps it (RFC 0023).
+                const auto type = itemType(item.kind);
+                if(!type || type->kind() != item.kind || !type->indexed() || !plainId(item.id) || !ids.insert(item.id).second) bad("an item's kind or ID is wrong");
+                if(!safe(item.path) || item.path.substr(0, item.path.find('/')) != type->folder || item.path.find('/', item.path.find('/') + 1) != std::string::npos ||
+                   !names.count(item.path + "/" + type->document))
                     bad("an item is not in the archive: " + item.path);
                 item.signatures = signatures(detail::member(e->value, "signatures"));
                 p.items.push_back(std::move(item));
@@ -543,7 +554,7 @@ namespace oscairn
                 {
                     if(item.signatures.empty()) continue;
                     std::string hash;
-                    try { hash = contentHash(into / item.path / (item.kind == "sound" ? "sound.json" : "performance.json")); } catch(const std::runtime_error&) { bad("a signed item without its info: " + item.path); }
+                    try { hash = contentHash(into / item.path / itemType(item.kind)->document); } catch(const std::runtime_error&) { bad("a signed item without its info: " + item.path); }
                     for(const auto& s : item.signatures) if(!signing::verify(s, signing::itemMessage(hash))) bad("an item's signature does not verify: " + item.path);
                 }
             }

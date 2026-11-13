@@ -8,7 +8,8 @@
 
 namespace oscairn
 {
-    /// The library (RFC 0021): the Performances and Sounds in the user's library folders, found by scanning,
+    /// The library (RFC 0021): the items of every type it indexes (RFC 0023: Performances, Sounds
+    /// and the rest) in the user's library folders, found by scanning,
     /// with their info blocks (name, tags, description) read from each file. Files first: the
     /// index under library/ is a cache of what was read, kept by each file's time so a rescan
     /// reads only what changed, and deleting it loses nothing. Favorites and recently used are
@@ -17,9 +18,9 @@ namespace oscairn
     {
     public:
         // dataHome: OSCAIRN_DATA_HOME's folder (empty: that, else the platform's); the library
-        // folders are its Performances/ and Sounds/, the cache and user file its library/.
+        // folders are its types' folders (Performances/, Sounds/...), the cache and user file its library/.
         explicit Library(std::filesystem::path dataHome = {});
-        const std::filesystem::path& performances() const { return performances_; }
+        std::filesystem::path performances() const { return home_ / "Performances"; }
         // Installed libraries (RFC 0021): each in its own folder here, named by its ID, with its
         // manifest (library.json) and its items' folders. Their items are locked.
         const std::filesystem::path& libraries() const { return libraries_; }
@@ -31,13 +32,14 @@ namespace oscairn
         void setFavorite(const std::string& id, bool favorite);
         void used(const std::string& id); // most recent first; at most 50 kept
         void setTag(const std::string& tag, bool hidden, const std::string& color);
-        // A folder for a new Performance or Sound (kind) named `name`, its name made safe and unique.
+        // A folder for a new item of a type the library indexes (its kind or ID, RFC 0023) named
+        // `name`, its name made safe and unique.
         std::filesystem::path newFolder(const std::string& name, const std::string& kind) const;
 
     private:
         void readUser();
         void writeUser() const;
-        std::filesystem::path performances_, sounds_, libraries_, cache_;
+        std::filesystem::path home_, libraries_, cache_;
         std::vector<Control::InstalledLibrary> installed_;
         std::vector<Control::LibraryItem> items_;
         std::vector<std::string> favorites_, recent_, hiddenTags_;
@@ -59,7 +61,8 @@ namespace oscairn
     // what the writer uses, from the document text it is about to write without its info.
     std::string contentHash(const std::filesystem::path& file);
     std::string contentHash(std::string_view documentWithoutInfo, const std::filesystem::path& nodes);
-    // The info block of a performance.json or sound.json (format names which); throws on a bad one.
+    // The info block of an item's document (format names which, and the type reading that format
+    // the document version it takes, RFC 0023); throws on a bad one.
     Control::PerformanceInfo readInfo(const std::filesystem::path& file, const std::string& format);
     // An info block as the documents hold it.
     std::string infoJson(const Control::PerformanceInfo& info);

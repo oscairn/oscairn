@@ -10,12 +10,28 @@ Status: proposed, 2026-11-01. Builds on the library
 
 Checked when built and tested; the sections below say how.
 
-- [ ] 1. Built-in types: today's Performances, Sounds and samples described as types, with no change in behavior
+- [x] 1. Built-in types: today's Performances, Sounds and samples described as types, with no change in behavior
 - [ ] 2. Queries and requests by type: `library.query` by `type`, `oscairn.pick.<type>` actions, archives by type
 - [ ] 3. Installed types: declared by packages, for documents with an info block and for folders indexed in place
 - [ ] 4. Extractors: sandboxed metadata readers for files with no info block (audio, plugin presets)
 - [ ] 5. A database index, for libraries of tens of thousands of items
 - [ ] 6. The DJ types: tracks, crates and track analysis
+
+### Decisions made while building
+
+Where this RFC left a choice, the smaller reading was taken:
+
+- **Step 1.** Oscairn's types are manifests built into the app
+  (`core/control/src/item_types.cpp`), read by the same reader as any other type's; users do not
+  see them as files (the first open question, for now). `recognize.version` is added: the
+  document version the library reads (13 for a Performance, 8 for a Sound; absent reads any), as
+  each reader refuses a version it does not know. An item's **kind**, which library items, archive
+  manifests and actions name, is its type's ID without `oscairn.` for Oscairn's own
+  (`performance`, `sound`) and the whole ID for any other. The sample type is stored by content
+  in `Assets` (its folder in archives); the sample store itself is as it was. An archive's
+  top-level folders are its types' folders, `Plugins` and `Licenses`. A type's folder may not be
+  one Oscairn keeps in the data folder (`Plugins`, `Licenses`, `Libraries`, `AssetLibraries`,
+  `Keys`, `AppData`, `library`, `assets`), and two types never share a folder, in any letter case.
 
 ## Problem
 

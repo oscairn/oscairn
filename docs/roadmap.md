@@ -405,7 +405,7 @@ Decided 2026-11-08, from what the milestone test found:
    - [ ] **item types** ([RFC 0023](rfcs/0023-item-types.md#progress), proposed): kinds of
      item declared by manifests (managed, stored by content, or indexed in place), so the
      library, archives and pickers work for any type, and packages can add types such as a DJ
-     deck's tracks and crates
+     deck's tracks and crates. Built: step 1, Oscairn's own types as manifests
    - [x] **importing a Performance:** all of it, or at least one chosen part and scene; parts
      bring their plugins, buses, wiring and controls, scenes come under free names, in one
      step to undo ([design](rfcs/0021-sounds-performances-and-library.md#importing-a-performance))

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioEngine.h"
 #include "NullDevice.h"
+#include "PreinstalledFolder.h"
 #include "WebTransport.h"
 #include "../standalone/Profile.h"
 #include "../standalone/SessionSetup.h"
@@ -261,9 +262,7 @@ namespace oscairn::host
         devices_.addAudioCallback( this );
         // RFC 0031: the packages that come with the release, a repository snapshot in the app's
         // Resources (macOS) or beside the programs (Linux), installed once per release as jobs.
-        const auto here = juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getParentDirectory();
-        const auto shipped = here.getSiblingFile( "Resources" ).getChildFile( "Preinstalled" );
-        session_->preinstall( ( shipped.isDirectory() ? shipped : here.getChildFile( "Preinstalled" ) ).getFullPathName().toStdString() );
+        session_->preinstall( preinstalledFolder( oscairn::standalone::executableFile() ).getFullPathName().toStdString() );
         service();
         // On a device (an instrument's reliability level), each worker is serviced at most every 20 ms of these
         // 5 ms ticks: each is a request and an answer, and with ten workers they were most of a tick (RFC 0045).

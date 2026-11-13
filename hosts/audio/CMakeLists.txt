@@ -102,6 +102,12 @@ if(TARGET oscairn_panel)
     set_tests_properties(engine-panel-startup PROPERTIES TIMEOUT 60)
 endif()
 
+# Where the packages that come with a release are, on macOS's and Linux's layouts (PreinstalledFolder.h).
+juce_add_console_app(oscairn_preinstalled_folder_test PRODUCT_NAME "oscairn-preinstalled-folder-test")
+target_sources(oscairn_preinstalled_folder_test PRIVATE preinstalled_folder_test.cpp)
+target_link_libraries(oscairn_preinstalled_folder_test PRIVATE juce::juce_core juce::juce_recommended_config_flags)
+add_test(NAME engine-preinstalled-folder COMMAND oscairn_preinstalled_folder_test)
+
 # External controllers kept by the engine (RFC 0024), on input names alone: no MIDI device is opened.
 juce_add_console_app(oscairn_controller_ports_test PRODUCT_NAME "oscairn-controller-ports-test")
 target_sources(oscairn_controller_ports_test PRIVATE controller_ports_test.cpp)

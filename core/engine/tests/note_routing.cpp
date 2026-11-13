@@ -41,6 +41,33 @@ int main(int argc,char** argv){try{
         check(route.route(Event::note(true,61,1,0,0,0,-1),nextId,emit) && std::count_if(route.notes.begin(),route.notes.end(),[](const auto& n){return n.used && n.held && n.key==61;})==1,"a new note still takes a slot, held");
     }
     {
+        // A full route of held notes whose voices all ended (NOTE_END while the keys are down): a new
+        // note gives one slot up, but that key's release goes out first, or a mono synth's gliding
+        // voice sounds forever. Its later key-up sends nothing. A refused release keeps the slot.
+        auto fill=[&](NoteRoute& route,uint32_t& nextId){
+            auto emit=[](const Event&){return true;};
+            for(int i=0;i<512;++i)route.route(Event::note(true,int16_t(i%128),1,0,int16_t(i/128),0,-1),nextId,emit);
+            clap_event_note_t end{};end.header={sizeof(end),0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_END,0};end.note_id=end.port_index=end.channel=end.key=-1;
+            route.ended(Event::from(end));
+            check(route.live()==512 && std::all_of(route.notes.begin(),route.notes.end(),[](const auto& n){return n.held && n.voiceEnded;}),"512 held notes, every voice ended");
+        };
+        NoteRoute route(graph.host(synth));uint32_t nextId=1;fill(route,nextId);
+        std::vector<Event> delivered;
+        auto emit=[&](const Event& e){delivered.push_back(e);return true;};
+        check(route.route(Event::note(true,100,1,5,9,0,-1),nextId,emit),"a note into a full route of ended notes sounds");
+        check(delivered.size()==2 && delivered[0].header()->type==CLAP_EVENT_NOTE_OFF && delivered[1].header()->type==CLAP_EVENT_NOTE_ON,"one release, then the new note-on");
+        const auto freed=*reinterpret_cast<const clap_event_note_t*>(delivered[0].header());
+        check(delivered[0].header()->time==5 && freed.note_id>=1 && freed.note_id<=512,"the release is at the new note's time, with the freed note's ID");
+        check(route.live()==512,"the freed slot took the new note");
+        delivered.clear();
+        check(route.route(Event::note(false,freed.key,0,6,freed.channel,0,-1),nextId,emit) && delivered.empty(),"the freed key's later key-up sends nothing");
+        // The output refuses the release: the slot stays and, with nothing released to take, the note is refused as before.
+        NoteRoute refused(graph.host(synth));nextId=1;fill(refused,nextId);
+        size_t offers=0;auto refuse=[&](const Event& e){++offers;return e.header()->type!=CLAP_EVENT_NOTE_OFF;};
+        check(!refused.route(Event::note(true,100,1,5,9,0,-1),nextId,refuse) && offers==1,"a refused release: the note is refused, once");
+        check(refused.live()==512 && std::all_of(refused.notes.begin(),refused.notes.end(),[](const auto& n){return n.held && n.voiceEnded;}),"and every ended note keeps its slot");
+    }
+    {
         NoteRoute route(graph.host(synth));uint32_t nextId=40;
         std::array<Event,10> delivered;size_t count=0;
         auto emit=[&](const Event& e){if(count==delivered.size())return false;delivered[count++]=e;return true;};

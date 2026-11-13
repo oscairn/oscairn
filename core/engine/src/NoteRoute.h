@@ -227,9 +227,11 @@ struct NoteRoute
             auto play=[&](int8_t zone,int16_t key,double velocity) {
                 if(!makeRoom())return false;
                 if(budget)budget->admit(*this,h->time);
-                // Full: a held note whose voice already ended gives its slot up, as before NOTE_END kept it.
+                // Full: a held note whose voice already ended gives its slot up, as before NOTE_END kept it,
+                // but its key's release goes out first (a mono synth's gliding voice stops on it, whatever
+                // the pedal: the normal key-up emits it regardless too); refused, the slot stays.
                 if(std::none_of(notes.begin(),notes.end(),[](const Note& x){return !x.used;}))
-                    for(auto& slot:notes)if(slot.used && slot.voiceEnded){slot.used=false;break;}
+                    for(auto& slot:notes)if(slot.used && slot.voiceEnded){if(emit(release(slot,h->time,false)))slot.used=false;break;}
                 // Still full: the oldest released note gives its slot up. Its release went out; only
                 // its NOTE_END is missing (a plugin that sends none, or one lost), and without this
                 // every later note would be refused and the plugin panicked.

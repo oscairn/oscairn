@@ -1,0 +1,8 @@
+{
+  "repository": "https://sqlite.org/src",
+  "snapshot_source": "https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip",
+  "sha256": "77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784",
+  "sqlite3.c_sha3_256": "186a1baa476b6d546de155160ca6d30ff7b7e6ee375f0bb6445e1a3d180a7dad",
+  "license": "Public domain (https://www.sqlite.org/copyright.html)",
+  "note": "Unmodified sqlite3.c and sqlite3.h from the 3.46.1 amalgamation; sqlite3.c's SHA3-256 matches the one in https://www.sqlite.org/releaselog/3_46_1.html. Used for the library's index (RFC 0023 step 5)."
+}

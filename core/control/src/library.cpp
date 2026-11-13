@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/library.h"
 #include "sheredom/json.h"
+#include "sqlite/sqlite3.h"
 #include "JsonInput.h"
 #include "oscairn/assets.h"
 #include "oscairn/item_types.h"
@@ -19,6 +20,7 @@
 #include <cstdlib>
 #include <deque>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -29,6 +31,8 @@
 #include <stdexcept>
 #include <thread>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -40,7 +44,7 @@ namespace oscairn
         using V = const json_value_s*;
         using Doc = std::unique_ptr<json_value_s, decltype(&std::free)>;
         constexpr size_t maxFile = 4 * 1024 * 1024, maxTags = 32, maxTag = 64, maxRecent = 50;
-        // shortcut: at most this many entries walked in the folders indexed in place at each rescan; the database index (step 5) scans incrementally.
+        // shortcut: at most this many entries walked in the folders indexed in place at each rescan; watching the folders (not built) would end the walk.
         constexpr size_t maxInPlace = 100000;
 
         std::string slurp(const fs::path& file, size_t limit = maxFile)
@@ -212,6 +216,139 @@ namespace oscairn
         std::thread worker; // last: started once the rest is
     };
 
+    // The index (RFC 0023 step 5): what was read of each file, by path, with the file's time, in
+    // SQLite under library/. A cache: one that does not open, fails SQLite's check or is of
+    // another version is deleted and built again from the files; a row the library could not have
+    // written is not used, its file read again. Written in one transaction a rescan, only where
+    // something changed. Without a database (one that cannot be made), the rows live in memory.
+    struct Library::Index
+    {
+        using Rows = std::unordered_map<std::string, std::pair<int64_t, Control::LibraryItem>>;
+        std::unordered_map<std::string, int64_t> modified; // each row's file time, by path
+
+        explicit Index(fs::path f) : file(std::move(f))
+        {
+            std::error_code e;
+            fs::create_directories(file.parent_path(), e);
+            if(open()) return;
+            close();
+            for(const auto* end : {"", "-wal", "-shm", "-journal"}) fs::remove(file.string() + end, e);
+            if(!open()) { close(); std::fprintf(stderr, "oscairn: the library's index %s cannot be kept; each start reads every file\n", file.c_str()); }
+        }
+        ~Index() { commit(); close(); }
+
+        Rows load()
+        {
+            Rows rows;
+            sqlite3_stmt* select = nullptr;
+            if(!db || sqlite3_prepare_v2(db, "SELECT path,kind,modified,id,name,description,tags,color,revision,hash,origin_library,origin_item,origin_hash,fields FROM items", -1, &select, nullptr) != SQLITE_OK) return rows;
+            auto text = [&](int c) {
+                const auto* t = reinterpret_cast<const char*>(sqlite3_column_text(select, c));
+                if(!t || sqlite3_column_type(select, c) != SQLITE_TEXT) throw std::runtime_error("not text");
+                return std::string(t, size_t(sqlite3_column_bytes(select, c)));
+            };
+            while(sqlite3_step(select) == SQLITE_ROW)
+                try
+                {
+                    const auto path = text(0);
+                    if(sqlite3_column_type(select, 2) != SQLITE_INTEGER) continue;
+                    const int64_t time = sqlite3_column_int64(select, 2);
+                    modified[path] = time; // known, so a rescan removes it when its file is gone
+                    Control::LibraryItem item;
+                    item.path = path; item.kind = text(1); item.id = text(3); item.name = text(4); item.description = text(5);
+                    item.color = text(7); item.revision = text(8); item.hash = text(9); item.origin = {text(10), text(11), text(12)};
+                    const auto tags = parse(text(6)), fields = parse(text(13));
+                    item.tags = strings(tags.get());
+                    if(!fields || fields->type != json_type_object) continue;
+                    for(auto* m = static_cast<const json_object_s*>(fields->payload)->start; m; m = m->next) item.fields.emplace_back(std::string(m->name->string, m->name->string_size), str(m->value));
+                    // What the library writes, and nothing else.
+                    auto small = [](const std::string& s, size_t n) { return s.size() <= n; };
+                    if(item.id.empty() || !small(item.id, 64) || !small(item.name, 1024) || !small(item.description, 4096) || !validColor(item.color) || !itemType(item.kind) ||
+                       !small(item.revision, 128) || !small(item.hash, 128) || !small(item.origin.library, 128) || !small(item.origin.item, 128) || !small(item.origin.hash, 128) ||
+                       item.tags.size() > maxTags || std::any_of(item.tags.begin(), item.tags.end(), [](const std::string& t) { return t.empty() || t.size() > maxTag; }) ||
+                       item.fields.size() > 32 || std::any_of(item.fields.begin(), item.fields.end(), [](const auto& f) { return f.second.size() > 256; }))
+                        continue;
+                    rows.emplace(path, std::pair{time, std::move(item)});
+                }
+                catch(const std::exception&) {} // not a row the library wrote: its file is read again
+            sqlite3_finalize(select);
+            return rows;
+        }
+
+        void put(const Control::LibraryItem& item, int64_t time)
+        {
+            modified[item.path] = time;
+            if(!db) return;
+            begin();
+            const std::string values[] = {item.path, item.kind, item.id, item.name, item.description, list(item.tags), item.color, item.revision, item.hash,
+                                          item.origin.library, item.origin.item, item.origin.hash, fieldsJson(item.fields)};
+            int column = 1;
+            for(const auto& v : values)
+            {
+                if(column == 3) sqlite3_bind_int64(insert, column++, time);
+                sqlite3_bind_text(insert, column++, v.data(), int(v.size()), SQLITE_TRANSIENT);
+            }
+            sqlite3_step(insert); // a cache: a row not written is read again from its file
+            sqlite3_reset(insert);
+        }
+
+        // Forgets every row but those of paths, and writes what changed.
+        void keep(const std::unordered_set<std::string>& paths)
+        {
+            for(auto it = modified.begin(); it != modified.end();)
+            {
+                if(paths.count(it->first)) { ++it; continue; }
+                if(db)
+                {
+                    begin();
+                    sqlite3_bind_text(remove, 1, it->first.data(), int(it->first.size()), SQLITE_TRANSIENT);
+                    sqlite3_step(remove);
+                    sqlite3_reset(remove);
+                }
+                it = modified.erase(it);
+            }
+            commit();
+        }
+
+    private:
+        bool open()
+        {
+            if(sqlite3_open_v2(file.c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr) != SQLITE_OK) return false;
+            sqlite3_busy_timeout(db, 2000); // another session's library on the same data folder (tests)
+            auto single = [&](const char* sql) {
+                std::string out;
+                sqlite3_stmt* s = nullptr;
+                if(sqlite3_prepare_v2(db, sql, -1, &s, nullptr) == SQLITE_OK && sqlite3_step(s) == SQLITE_ROW && sqlite3_column_text(s, 0))
+                    out = reinterpret_cast<const char*>(sqlite3_column_text(s, 0));
+                sqlite3_finalize(s);
+                return out;
+            };
+            if(single("PRAGMA quick_check") != "ok") return false;
+            const auto version = single("PRAGMA user_version");
+            if(version == "0" && sqlite3_exec(db, "CREATE TABLE items(path TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, modified INTEGER NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,"
+                                                  " description TEXT NOT NULL, tags TEXT NOT NULL, color TEXT NOT NULL, revision TEXT NOT NULL, hash TEXT NOT NULL, origin_library TEXT NOT NULL,"
+                                                  " origin_item TEXT NOT NULL, origin_hash TEXT NOT NULL, fields TEXT NOT NULL) WITHOUT ROWID; PRAGMA user_version=1",
+                                              nullptr, nullptr, nullptr) != SQLITE_OK)
+                return false;
+            if(version != "0" && version != "1") return false;
+            sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL", nullptr, nullptr, nullptr);
+            return sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO items VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", -1, &insert, nullptr) == SQLITE_OK &&
+                   sqlite3_prepare_v2(db, "DELETE FROM items WHERE path=?1", -1, &remove, nullptr) == SQLITE_OK;
+        }
+        void close()
+        {
+            sqlite3_finalize(insert); sqlite3_finalize(remove); sqlite3_close(db);
+            insert = remove = nullptr; db = nullptr;
+        }
+        void begin() { if(!writing) writing = sqlite3_exec(db, "BEGIN", nullptr, nullptr, nullptr) == SQLITE_OK; }
+        void commit() { if(writing) sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr); writing = false; }
+        fs::path file;
+        sqlite3* db = nullptr;
+        sqlite3_stmt* insert = nullptr;
+        sqlite3_stmt* remove = nullptr;
+        bool writing = false;
+    };
+
     Library::~Library() = default;
 
     void Library::collect()
@@ -377,6 +514,7 @@ namespace oscairn
             if(folder && !unread && written < dayAgo) fs::remove_all(entry.path(), error);
         }
         readUser();
+        fs::remove(cache_ / "index.json", error); // the index before step 5's
         // The item types packages installed here (RFC 0023 step 3), Types/<package ID>/<type ID>.json.
         for(const auto& owner : fs::directory_iterator(home / "Types", error))
             for(const auto& file : fs::directory_iterator(owner.path(), error))
@@ -406,30 +544,29 @@ namespace oscairn
 
     uint32_t Library::rescan()
     {
-        // What was read before, by folder and the time its file had.
-        std::map<std::string, std::pair<int64_t, Control::LibraryItem>> cached;
-        try
-        {
-            const auto doc = parse(slurp(cache_ / "index.json", maxManifestBytes)); // one row per item, as a manifest
-            if(V items = detail::member(doc.get(), "items"); items && items->type == json_type_array)
-                for(auto* e = static_cast<const json_array_s*>(items->payload)->start; e; e = e->next)
-                {
-                    Control::LibraryItem item;
-                    item.path = str(detail::member(e->value, "path")); item.id = str(detail::member(e->value, "id")); item.kind = str(detail::member(e->value, "kind"));
-                    item.name = str(detail::member(e->value, "name")); item.description = str(detail::member(e->value, "description"));
-                    item.tags = strings(detail::member(e->value, "tags")); item.color = str(detail::member(e->value, "color")); item.revision = str(detail::member(e->value, "revision")); item.hash = str(detail::member(e->value, "hash"));
-                    item.library = str(detail::member(e->value, "library"));
-                    item.origin = {str(detail::member(e->value, "originLibrary")), str(detail::member(e->value, "originItem")), str(detail::member(e->value, "originHash"))};
-                    if(V fields = detail::member(e->value, "fields"); fields && fields->type == json_type_object) // an extractor's (step 4)
-                        for(auto* m = static_cast<const json_object_s*>(fields->payload)->start; m; m = m->next) item.fields.emplace_back(std::string(m->name->string, m->name->string_size), str(m->value));
-                    const auto modified = std::stoll(str(detail::member(e->value, "modified")));
-                    cached[item.path] = {modified, item};
-                }
-        }
-        catch(const std::exception&) { cached.clear(); } // no index, or a damaged one: read every file
+        // What was read before, by path, with the time its file had: the index's rows at the
+        // first rescan (step 5), the items listed since at the next.
+        std::unordered_map<std::string, std::pair<int64_t, Control::LibraryItem>> cached;
+        if(!index_) { index_ = std::make_unique<Index>(cache_ / "index.sqlite"); cached = index_->load(); }
+        else
+            for(auto& item : items_)
+                if(const auto m = index_->modified.find(item.path); m != index_->modified.end()) { auto path = item.path; cached.emplace(std::move(path), std::pair{m->second, std::move(item)}); }
         items_.clear();
-        std::string index;
+        std::unordered_set<std::string> ids, seen; // IDs listed, paths found
         std::error_code error;
+        // An item found: what was read before when its file has the same time, else read now and
+        // kept in the index.
+        auto found = [&](const std::string& path, int64_t modified, const std::string& kind, const std::function<std::optional<Control::LibraryItem>()>& read) -> Control::LibraryItem* {
+            seen.insert(path);
+            std::optional<Control::LibraryItem> item;
+            bool fresh = false;
+            if(const auto c = cached.find(path); c != cached.end() && c->second.first == modified && c->second.second.kind == kind) item = std::move(c->second.second);
+            else { item = read(); fresh = true; }
+            if(!item || !ids.insert(item->id).second) return nullptr; // unreadable, or a copy of one listed: the first wins
+            if(fresh) index_->put(*item, modified);
+            items_.push_back(std::move(*item));
+            return &items_.back();
+        };
         // The user's own folders, then each installed library's, its items locked: one per type
         // the library indexes (RFC 0023).
         std::vector<ItemType> types;
@@ -459,26 +596,20 @@ namespace oscairn
                 // Hidden folders are a save in progress or one left by a crash.
                 if(!entry.is_directory() || entry.path().filename().string().starts_with(".") || !fs::is_regular_file(manifest, error)) continue;
                 const auto path = entry.path().string();
-                const auto modified = stamp(manifest);
-                Control::LibraryItem item;
-                if(const auto it = cached.find(path); it != cached.end() && it->second.first == modified) item = it->second.second;
-                else
-                {
+                auto* item = found(path, stamp(manifest), type.kind(), [&]() -> std::optional<Control::LibraryItem> {
                     try
                     {
                         const auto info = readInfo(manifest, type.format);
+                        Control::LibraryItem item;
                         item.kind = type.kind(); item.id = info.id; item.name = info.name; item.description = info.description; item.tags = info.tags; item.color = info.color; item.revision = info.revision; item.hash = info.hash; item.path = path;
                         item.origin = info.origin;
+                        return item;
                     }
-                    catch(const std::exception&) { continue; } // not one the library can show; it stays on disk
-                }
-                item.library = library;
-                if(std::any_of(items_.begin(), items_.end(), [&](const auto& i) { return i.id == item.id; })) continue; // a copied folder: the first wins
-                items_.push_back(item);
+                    catch(const std::exception&) { return std::nullopt; } // not one the library can show; it stays on disk
+                });
+                if(!item) continue;
+                item->library = library;
                 for(auto& l : installed_) if(l.id == library) ++l.items;
-                index += std::string(index.empty() ? "" : ",") + "{\"path\":" + detail::quote(item.path) + ",\"kind\":" + detail::quote(item.kind) + ",\"modified\":" + detail::quote(std::to_string(modified)) +
-                         ",\"id\":" + detail::quote(item.id) + ",\"name\":" + detail::quote(item.name) + ",\"description\":" + detail::quote(item.description) + ",\"tags\":" + list(item.tags) + ",\"color\":" + detail::quote(item.color) + ",\"revision\":" + detail::quote(item.revision) + ",\"hash\":" + detail::quote(item.hash) +
-                         ",\"library\":" + detail::quote(item.library) + ",\"originLibrary\":" + detail::quote(item.origin.library) + ",\"originItem\":" + detail::quote(item.origin.item) + ",\"originHash\":" + detail::quote(item.origin.hash) + '}';
             }
         // RFC 0023 step 3: a type whose package is not installed here is known for the items it
         // has, listed read-only.
@@ -489,7 +620,7 @@ namespace oscairn
         // Items in place: files of the in-place types in the folders the user chose, by name and
         // identity, never moved or changed. A payload identity is the extractor's (step 4); with
         // none, or none that answers, the path's.
-        size_t seen = 0;
+        size_t walked = 0;
         const auto helper = placementPolicy().scan;
         for(const auto& type : all)
         {
@@ -499,37 +630,33 @@ namespace oscairn
                 std::error_code walk;
                 for(auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, walk); !walk && it != fs::recursive_directory_iterator(); it.increment(walk))
                 {
-                    if(++seen > maxInPlace) break;
+                    if(++walked > maxInPlace) break;
                     const auto name = it->path().filename().string();
                     if(name.starts_with(".")) { if(it->is_directory(walk)) it.disable_recursion_pending(); continue; }
                     if(it->is_symlink(walk) || !it->is_regular_file(walk)) continue;
                     if(std::find(type.extensions.begin(), type.extensions.end(), lower(it->path().extension().string())) == type.extensions.end()) continue;
                     const auto path = it->path().string();
                     const auto modified = stamp(it->path());
-                    Control::LibraryItem item;
-                    if(const auto c = cached.find(path); c != cached.end() && c->second.first == modified && c->second.second.kind == type.kind()) item = c->second.second;
-                    else if(!type.extractor.empty() && !helper.empty())
-                    {
-                        // Its extractor reads it off this thread (step 4); it is listed once that answers.
-                        if(!extraction_) extraction_ = std::make_unique<Extraction>(helper);
-                        auto done = extraction_->take(path, modified);
-                        if(!done) { extraction_->add({path, modified, type}); continue; }
-                        item.kind = type.kind(); item.name = it->path().stem().string(); item.path = path; item.id = done->id; item.fields = std::move(done->fields);
-                    }
-                    else
-                    {
+                    auto* item = found(path, modified, type.kind(), [&]() -> std::optional<Control::LibraryItem> {
+                        Control::LibraryItem item;
                         item.kind = type.kind(); item.name = it->path().stem().string(); item.path = path;
-                        try { item.id = type.identity == "content" ? assets::sha256File(it->path()) : assets::sha256(path); } catch(const std::exception&) { continue; }
-                    }
-                    item.inPlace = item.readOnly = true;
-                    if(std::any_of(items_.begin(), items_.end(), [&](const auto& i) { return i.id == item.id; })) continue; // the same file in two folders chosen
-                    items_.push_back(item);
-                    index += std::string(index.empty() ? "" : ",") + "{\"path\":" + detail::quote(item.path) + ",\"kind\":" + detail::quote(item.kind) + ",\"modified\":" + detail::quote(std::to_string(modified)) +
-                             ",\"id\":" + detail::quote(item.id) + ",\"name\":" + detail::quote(item.name) + ",\"description\":\"\",\"tags\":[],\"color\":\"\",\"revision\":\"\",\"hash\":\"\",\"library\":\"\",\"originLibrary\":\"\",\"originItem\":\"\",\"originHash\":\"\",\"fields\":" + fieldsJson(item.fields) + "}";
+                        if(!type.extractor.empty() && !helper.empty())
+                        {
+                            // Its extractor reads it off this thread (step 4); it is listed once that answers.
+                            if(!extraction_) extraction_ = std::make_unique<Extraction>(helper);
+                            auto done = extraction_->take(path, modified);
+                            if(!done) { extraction_->add({path, modified, type}); return std::nullopt; }
+                            item.id = done->id; item.fields = std::move(done->fields);
+                        }
+                        else try { item.id = type.identity == "content" ? assets::sha256File(it->path()) : assets::sha256(path); } catch(const std::exception&) { return std::nullopt; }
+                        return item;
+                    });
+                    if(item) item->inPlace = item->readOnly = true;
                 }
             }
         }
-        try { writeAtomically(cache_ / "index.json", "{\"items\":[" + index + "]}\n"); } catch(const std::exception&) {} // a cache: reading works without it
+        // Rows of files gone, or no longer listed, leave the index.
+        index_->keep(seen);
         // Favorites and recents of items that went stay in the user file, for when they return.
         return uint32_t(items_.size());
     }
@@ -538,40 +665,52 @@ namespace oscairn
     {
         Control::LibraryResult result;
         const auto text = lower(q.text);
-        std::vector<Control::LibraryItem> found;
         std::vector<std::string> kinds; // the types asked for, by kind (RFC 0023)
         for(const auto& t : q.types) kinds.push_back(itemType(t) ? itemType(t)->kind() : t);
-        for(auto item : items_)
+        const std::unordered_set<std::string> favorites(favorites_.begin(), favorites_.end());
+        std::unordered_map<std::string, uint32_t> recent;
+        for(size_t i = 0; i < recent_.size(); ++i) recent.emplace(recent_[i], uint32_t(i) + 1);
+        const auto source = q.source == "mine" ? std::string() : q.source;
+        // Matches by reference, with what they are sorted by; only those returned are copied (step 5).
+        struct Match { const Control::LibraryItem* item; uint32_t recent; std::string key; };
+        std::vector<Match> found;
+        std::string hay;
+        for(const auto& item : items_)
         {
-            item.favorite = std::find(favorites_.begin(), favorites_.end(), item.id) != favorites_.end();
-            const auto r = std::find(recent_.begin(), recent_.end(), item.id);
-            item.recent = r == recent_.end() ? 0 : uint32_t(r - recent_.begin()) + 1;
+            const auto r = recent.find(item.id);
+            const uint32_t rank = r == recent.end() ? 0 : r->second;
             // Every chosen tag (AND), the text in its name, tags or description, and the toggles.
             if(!std::all_of(q.tags.begin(), q.tags.end(), [&](const std::string& t) { return std::find(item.tags.begin(), item.tags.end(), t) != item.tags.end(); })) continue;
-            if(q.favorites && !item.favorite) continue;
+            if(q.favorites && !favorites.count(item.id)) continue;
             if(!q.kind.empty() && item.kind != q.kind) continue;
             if(!kinds.empty() && std::find(kinds.begin(), kinds.end(), item.kind) == kinds.end()) continue;
             if(!q.id.empty() && item.id != q.id) continue;
-            if(!q.source.empty() && item.library != (q.source == "mine" ? std::string() : q.source)) continue;
-            if(q.recent && !item.recent) continue;
+            if(!q.source.empty() && item.library != source) continue;
+            if(q.recent && !rank) continue;
             if(!text.empty())
             {
-                std::string hay = lower(item.name + ' ' + item.description);
+                hay = lower(item.name + ' ' + item.description);
                 for(const auto& t : item.tags) hay += ' ' + lower(t);
                 if(hay.find(text) == std::string::npos) continue;
             }
-            found.push_back(item);
+            found.push_back({&item, rank, {}});
         }
-        // Recent first when asked for, else by name.
-        std::sort(found.begin(), found.end(), [&](const auto& a, const auto& b) { return q.recent ? a.recent < b.recent : lower(a.name) < lower(b.name); });
         std::map<std::string, uint32_t> counts;
-        for(const auto& item : found) for(const auto& t : item.tags) if(std::find(hiddenTags_.begin(), hiddenTags_.end(), t) == hiddenTags_.end()) ++counts[t];
+        for(const auto& m : found) for(const auto& t : m.item->tags) if(std::find(hiddenTags_.begin(), hiddenTags_.end(), t) == hiddenTags_.end()) ++counts[t];
         result.tags.assign(counts.begin(), counts.end());
         result.tagColors.assign(tagColors_.begin(), tagColors_.end());
         result.hiddenTags = hiddenTags_;
         result.total = uint32_t(found.size());
-        if(found.size() > q.limit) found.resize(q.limit);
-        result.items = std::move(found);
+        // Recent first when asked for, else by name.
+        if(!q.recent) for(auto& m : found) m.key = lower(m.item->name);
+        const auto end = found.begin() + std::min<size_t>(q.limit, found.size());
+        std::partial_sort(found.begin(), end, found.end(), [&](const Match& a, const Match& b) { return q.recent ? a.recent < b.recent : a.key < b.key; });
+        for(auto m = found.begin(); m != end; ++m)
+        {
+            auto& item = result.items.emplace_back(*m->item);
+            item.favorite = favorites.count(item.id) > 0;
+            item.recent = m->recent;
+        }
         return result;
     }
 

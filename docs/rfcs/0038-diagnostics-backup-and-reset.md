@@ -267,7 +267,7 @@ One action, **Create support file**, in Settings › About (and from a crash ban
 | Samples | The sample library, by hash (RFC 0009) | Yes, by hash, once | The largest part. Samples an installed package provides can be left to it (below) |
 | Installed libraries and packages | `Libraries/<id>/`, `Plugins/`, `Apps/` | **A list by default:** ID, version, digest, source. **Whole** when asked (a complete offline backup), or for a package with no known source | RFC 0006's three states: available in this backup, downloadable, no known source; shown before writing |
 | Settings | Settings files in the data folder (and on Linux desktops the theme folder under `XDG_CONFIG_HOME`) | Yes | Profile-specific ones marked with the profile they came from |
-| Favorites, recent, hidden tags | The library cache's `user.json` | Yes | The index (`index.json`) is a cache, rebuilt; left out |
+| Favorites, recent, hidden tags | The library cache's `user.json` | Yes | The index (`index.sqlite`) is a cache, rebuilt; left out |
 | Measurements | `measurements.json` | Yes | Restored only onto the same profile: they measure this hardware (RFC 0025) |
 | App data | `AppData/<id>/` (RFC 0022) | Yes, per app, with the app's version | An app may name a cache folder that is left out; it migrates its own data on first start, as after an update |
 | Trust store | `trust.json` | The user's entries | The product's own entries come from the image (RFC 0006) and are not restored over a newer image's |

@@ -16,6 +16,8 @@ namespace oscairn
     /// index under library/ is a cache of what was read, kept by each file's time so a rescan
     /// reads only what changed, and deleting it loses nothing. Favorites and recently used are
     /// the user's own, in library/user.json, never in the items' files. Control thread.
+    /// The index is SQLite's (library/index.sqlite, RFC 0023 step 5), written only where a
+    /// rescan found a change; one damaged or of another version is built again.
     class Library
     {
     public:
@@ -64,6 +66,8 @@ namespace oscairn
         std::vector<Control::LibraryItem> items_;
         std::vector<std::string> favorites_, recent_, hiddenTags_, folders_;
         std::map<std::string, std::string> tagColors_;
+        struct Index; // RFC 0023 step 5: the SQLite cache of what was read
+        std::unique_ptr<Index> index_; // opened at the first rescan
         struct Extraction;
         std::unique_ptr<Extraction> extraction_; // started when a file first needs its extractor
     };

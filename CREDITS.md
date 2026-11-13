@@ -97,6 +97,16 @@ authoritative.
   (RFC 0021), with their [license](core/control/third_party/miniz/LICENSE) and
   [pinned provenance](core/control/third_party/miniz/upstream.json).
 
+## The library's index
+
+- **SQLite:** D. Richard Hipp and the SQLite developers ([sqlite.org](https://www.sqlite.org),
+  public domain). The unmodified 3.46.1 amalgamation's `sqlite3.c` and `sqlite3.h` are vendored
+  for the library's index (RFC 0023), with their
+  [pinned provenance](core/control/third_party/sqlite/upstream.json). Archive
+  `sqlite-amalgamation-3460100.zip` SHA-256
+  `77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784`; `sqlite3.c` SHA3-256
+  `186a1baa476b6d546de155160ca6d30ff7b7e6ee375f0bb6445e1a3d180a7dad`, as its release log gives it.
+
 ## Signatures
 
 - **Monocypher:** Loup Vaillant, Michael Savage, Fabio Scotoni and the Monocypher contributors

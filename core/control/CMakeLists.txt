@@ -1,11 +1,13 @@
-add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)
-set_source_files_properties(third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c PROPERTIES COMPILE_OPTIONS "-w") # vendored, unmodified
+add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c)
+set_source_files_properties(third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/sqlite/sqlite3.c PROPERTIES COMPILE_OPTIONS "-w") # vendored, unmodified
+# The library's index (RFC 0023 step 5): no extensions loaded, double-quoted strings refused.
+set_source_files_properties(third_party/sqlite/sqlite3.c PROPERTIES COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_DQS=0")
 target_include_directories(oscairn_control SYSTEM PRIVATE third_party)
 target_include_directories(oscairn_control PUBLIC include)
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_VERSION="${PROJECT_VERSION}") # what a package's requires.oscairn is checked against (RFC 0031)
 # The release, with its pre-release label (the top-level CMakeLists.txt): what preinstalled.json records the packages that come with it under (RFC 0031).
 target_compile_definitions(oscairn_control PRIVATE OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
-target_link_libraries(oscairn_control PUBLIC oscairn_engine)
+target_link_libraries(oscairn_control PUBLIC oscairn_engine PRIVATE $<$<PLATFORM_ID:Linux>:m>)
 target_compile_options(oscairn_control PRIVATE -Wall -Wextra)
 
 # JSON stays off the render path and out of the typed Control interface.
@@ -50,6 +52,13 @@ if(UNIX) # extractors run in a process of their own on Linux and macOS (RFC 0023
     add_test(NAME control-extractors COMMAND oscairn-extractors-test $<TARGET_FILE:oscairn-extract-fixture> $<TARGET_FILE:oscairn-plugin-scan>)
     set_tests_properties(control-extractors PROPERTIES TIMEOUT 120)
 endif()
+
+# RFC 0023 step 5's gate: 50,000 items in place.
+add_executable(oscairn-library-scale-test tests/library_scale.cpp)
+target_link_libraries(oscairn-library-scale-test PRIVATE oscairn_control)
+target_compile_options(oscairn-library-scale-test PRIVATE -Wall -Wextra)
+add_test(NAME control-library-scale COMMAND oscairn-library-scale-test)
+set_tests_properties(control-library-scale PROPERTIES TIMEOUT 300)
 
 add_executable(oscairn-signing-test tests/signing.cpp)
 target_link_libraries(oscairn-signing-test PRIVATE oscairn_control)

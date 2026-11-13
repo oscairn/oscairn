@@ -21,6 +21,7 @@
 #include "oscairn/assets.h"
 #include "oscairn/discovery.h"
 #include "miniz/miniz.h"
+#include "sqlite/sqlite3.h"
 #include "oscairn/wav_file.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include <chrono>
@@ -275,22 +276,18 @@ int main(int argc, char** argv)
             check(!fs::exists(home / ".install-1") && !fs::exists(home / ".export-1"), "an install's and an export's folder over a day old are cleared");
             check(fs::is_directory(home / ".install-2") && fs::is_directory(home / ".other-1"), "a newer one, and any other hidden folder, stay");
         }
-        // Device E: the library's index past the old 4 MiB limit is still used, as a library of
-        // thousands of items has: a name only the index holds comes back.
+        // Device E: the library's index is used, the file not read again while it is unchanged:
+        // a name only the index holds comes back (RFC 0023 step 5: SQLite).
         {
             device(temp.path / "e");
+            { Session e(48000, 64); e.savePerformanceToLibrary("Indexed"); e.libraryRescan(); }
+            sqlite3* index = nullptr;
+            const bool opened = sqlite3_open((temp.path / "e" / "library" / "index.sqlite").c_str(), &index) == SQLITE_OK &&
+                                sqlite3_exec(index, "UPDATE items SET name='From the index' WHERE name='Indexed'", nullptr, nullptr, nullptr) == SQLITE_OK;
+            check(opened && sqlite3_changes(index) == 1, "the index holds the Performance");
+            sqlite3_close(index);
             Session e(48000, 64);
-            e.savePerformanceToLibrary("Indexed");
-            e.libraryRescan();
-            const auto index = temp.path / "e" / "library" / "index.json";
-            auto text = read(index);
-            const auto at = text.find("\"name\":\"Indexed\"");
-            check(at != std::string::npos, "the index holds the Performance");
-            text.replace(at, 16, "\"name\":\"From the index\"");
-            text.insert(text.rfind('}'), std::string((4u << 20) + 1, ' '));
-            std::ofstream(index, std::ios::binary | std::ios::trunc) << text;
-            e.libraryRescan();
-            check(items(e, "performance").at(0).name == "From the index", "an index over 4 MiB is used");
+            check(items(e, "performance").at(0).name == "From the index", "the index is used");
         }
         // Device F: a plugin rebuilt in place while it plays goes with an export as rebuilt.
         {

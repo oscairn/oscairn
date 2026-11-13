@@ -14,7 +14,7 @@ Checked when built and tested; the sections below say how.
 - [x] 2. Queries and requests by type: `library.query` by `type`, `oscairn.pick.<type>` actions, archives by type
 - [x] 3. Installed types: declared by packages, for documents with an info block and for folders indexed in place
 - [x] 4. Extractors: sandboxed metadata readers for files with no info block (audio, plugin presets)
-- [ ] 5. A database index, for libraries of tens of thousands of items
+- [x] 5. A database index, for libraries of tens of thousands of items
 - [ ] 6. The DJ types: tracks, crates and track analysis
 
 ### Decisions made while building
@@ -81,6 +81,22 @@ Where this RFC left a choice, the smaller reading was taken:
   `title` and `artist`; its identity is the SHA-256 of the audio alone (WAV `data`, AIFF `SSND`,
   FLAC frames, MP3 frames between ID3v2 and ID3v1 or APEv2 tags). Not built: an extractor for
   plugin presets, and long analysis in the background (step 6).
+- **Step 5.** The index is SQLite, as this RFC says: the 3.46.1 amalgamation, vendored
+  (`core/control/third_party/sqlite`, public domain), as `library/index.sqlite` in place of
+  `index.json`: a cache, one row per item by path, with what was read and the file's time. At
+  the start it is checked (SQLite's `quick_check` and the index's own version); one that fails is
+  deleted and built again from the files, and a row holding what the library could not have
+  written (sizes, color, tags, a type it does not know) is not used, its file read again. A
+  rescan reads only the files whose time changed and writes only the rows that changed, in one
+  transaction, removing those of files gone; after the first, it starts from the items in
+  memory rather than the database. Items stay in memory and queries run there, matching by
+  reference and copying only the items returned. Not built: watching folders (a rescan still
+  walks them, reading no file that has not changed, and the walk stays bounded at 100,000
+  entries) and queries in SQL. Measured by `control-library-scale` (50,000 files in place,
+  identified by content; macOS, one run under ctest), before and after: rescan with nothing
+  changed 5.7 s and 0.28 s; a query of all 83 ms and 4.1 ms, a text search 7.6 ms and 3.0 ms;
+  the first scan 11.0 s and 6.8 s; resident memory after it +184 MiB and +104 MiB (peak 368 and
+  149 MiB); the index 20 MiB of JSON, then 30 MiB with SQLite's write-ahead log.
 - **Setlists** are the first type built on these steps (decided 2026-11-13): `oscairn.setlist`,
   managed, in `Setlists/<name>.osetlist/setlist.json` ([format](../setlist-format.md)). How an item
   refers to another (the open question) is answered for this one type only: a setlist's slots name

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -106,7 +107,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         (home / 'Performances/Broken.oscairn/performance.json').write_text('{')
         assert rpc('library.rescan') == {'items': 1}
         assert rpc('library.query', {'tags': ['dark']})['total'] == 1
-        assert json.loads((home / 'library/index.json').read_text())['items'][0]['tags'] == ['pad', 'dark']
+        with sqlite3.connect(home / 'library/index.sqlite') as index:  # RFC 0023 step 5
+            assert [json.loads(t) for (t,) in index.execute('SELECT tags FROM items')] == [['pad', 'dark']]
         rpc('library.load', {'id': pad})
         assert rpc('performance.info')['tags'] == ['pad', 'dark']
         # An item's info edited in its file (and the open Performance's, being that item); a copy of

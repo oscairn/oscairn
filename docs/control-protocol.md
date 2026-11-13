@@ -1092,7 +1092,7 @@ starts, with `state` `recording`, and again when it closes. The typed methods ar
 The library ([RFC 0021](rfcs/0021-sounds-performances-and-library.md)) is the Performances
 and Sounds in the data folder's `Performances/` and `Sounds/` (`OSCAIRN_DATA_HOME`, else
 Application Support on macOS, else `XDG_DATA_HOME/oscairn` or `~/.local/share/oscairn`). Each
-file's `info` block is the truth; `library/index.json` caches what was read, by each file's
+file's `info` block is the truth; `library/index.sqlite` (SQLite) caches what was read, by each file's
 modification time, so a rescan reads only changed files and deleting the cache loses nothing.
 Favorites and recently used (at most 50) are the user's, in `library/user.json`. Files the
 library cannot read, and hidden folders, are skipped; of two files with one ID the first found

@@ -81,6 +81,7 @@ with tempfile.TemporaryDirectory(prefix="oscairn-image-") as temporary:
 
     fails("the Roland panel option without the panel", br2={"BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0": "y"}, needle="ROLAND_FANTOM0")
     fails("the panel dump tool left behind", files=[("usr/bin/oscairn-panel-dump", b"")], needle="oscairn-panel-dump")
+    fails("the panel holder left behind", files=[("usr/bin/oscairn-panel-holder", b"")], needle="oscairn-panel-holder")
     fails("the simulated accelerator's service in a program", files=[("usr/bin/oscairn-engine", b"\x7fELF oscairn.sim/1\0")],
           needle="names oscairn.sim/")
 

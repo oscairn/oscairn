@@ -70,35 +70,47 @@ namespace oscairn
     };
     PanelEvent decode(const PanelMap&, const std::array<uint8_t, 4>& message);
 
+    // The panel's device is held by one long-lived process, oscairn-panel-holder (docs/fantom-0.md,
+    // "The panel holder"): Roland's driver registers the panel's address only while the device is
+    // open, the panel stops reporting after it has been left unheld for a while, and a second open
+    // can crash the kernel. Readers attach to the holder's socket instead of opening the device:
+    // an abstract name on Linux ("@" first), or a path (tests).
+    inline constexpr const char* panelHolderSocket = "@oscairn-panel";
+    // A stream of the holder's 4-byte messages; -1 and errno when no holder listens there.
+    int connectPanelHolder(const std::string& socket);
+    // The processes other than this one with `path` open (by /proc; none where there is no /proc).
+    std::vector<int> processesHolding(const std::string& path);
+    // How the holder opens the device and waits on it; empty: ::open and ioctl(fd, 0, 0). A test's
+    // seam: a driver's ioctl cannot be had without its kernel module.
+    struct PanelDevice
+    {
+        std::function<int(const std::string& path, int flags)> open;
+        std::function<int(int fd)> wait; // the driver's returns 0 for a message and for a signal alike
+        int patience = 2000;             // milliseconds to wait for another holder of the device to let go
+    };
+    // The holder: binds `socket` first, as its lock, and refuses (1) if another holder has it; then
+    // opens `path` once for reading and writing, only while no other process has it open, retrying
+    // a refused open (EFAULT: the last holder not gone yet) for `patience`; then, until SIGTERM or
+    // SIGINT, waits on it, reads 4 bytes at a time until a read gives less, and sends each message
+    // to every attached reader (none attached: dropped). It never writes to the device, polls it or
+    // opens it again. A reader attaching raises SIGIO, which wakes the wait to take it in (or the
+    // next message does). Returns 0 when stopped, 1 when refused or failed; logs each step.
+    int holdPanel(const std::string& path, const std::string& socket, const std::function<void(const std::string&)>& log, PanelDevice device = {});
+
     // Reads a panel on a thread of its own, so it never blocks anything else; frames its bytes into
     // messages (a byte with bit 7 set starts one; anything else before it is skipped, so it
     // resynchronizes after garbage or a lost byte), decodes each through the map and hands it to
     // `sink` on that thread, unknown ones too. Unknown messages are also logged with their bytes,
     // at most ten a second.
-    //
-    // A device by path is read as Roland's programs read /dev/i2c-slave-2 (docs/fantom-0.md, "Panel
-    // messages"): opened for reading and writing (it is never written to), `ioctl(fd, 0, 0)`, which
-    // waits for a message, then one 4-byte read, and the ioctl again. The driver's wait gives way to
-    // no signal but a fatal one, so a helper process forked for it does that loop and writes each
-    // message to a pipe this reader polls with a timeout; stopping kills it. Where the ioctl fails,
-    // or wakes 100 times running with nothing to read, that is logged once and the device is opened
-    // again read-only and polled instead, as a descriptor given always is.
     class PanelReader
     {
     public:
         using Sink = std::function<void(const PanelEvent&)>;
         using Log = std::function<void(const std::string&)>; // empty: no log
         static void standardError(const std::string& line);
-        // How a device by path is opened and waited on; empty: ::open and ioctl(fd, 0, 0). A test's
-        // seam: a driver's ioctl cannot be had without its kernel module.
-        struct Device
-        {
-            std::function<int(const std::string& path, int flags)> open;
-            std::function<int(int fd)> wait; // -1 and errno on failure
-            std::vector<int> keep;           // descriptors the helper keeps open beside its own (a test's)
-        };
-        // The device at `path`: opened again a second after it fails or ends.
-        PanelReader(std::string path, PanelMap map, Sink sink, Log log = standardError, Device device = {});
+        // The panel holder at `socket` (panelHolderSocket on the unit): attached to again a second
+        // after it cannot be reached or ends. The device itself is never opened here.
+        PanelReader(std::string socket, PanelMap map, Sink sink, Log log = standardError);
         // An open descriptor, not owned (tests: a pipe or a pty): read until it ends.
         PanelReader(int fd, PanelMap map, Sink sink, Log log = standardError);
         ~PanelReader(); // stops and joins
@@ -111,18 +123,12 @@ namespace oscairn
 
     private:
         void run();
-        [[noreturn]] void helper(int out); // the forked helper's loop, writing each message to `out`
-        bool spawn();                      // forks it; fd_ its pipe's reading end
-        bool reap();                       // it ended: why (false: it could not open the device, errno set)
         void bytes(const uint8_t* data, size_t size);
         bool pause(); // a second, or until stopped; false when stopped
 
-        std::string path_;
-        Device device_;
+        std::string path_; // the holder's socket
         int fd_ = -1;
         bool owned_ = false;
-        bool roland_ = false; // reading the device as Roland's programs do, through the helper (reader thread)
-        int helper_ = -1;     // the helper's process ID
         Sink sink_;
         Log log_;
         mutable std::mutex lock_; // the map, and the pause's wake

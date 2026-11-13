@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // The FANTOM-0's panel and keys for the engine (hosts/audio's DeviceReaders.h): the panel reader
-// (panel_reader.h) and the message link's reader (BmcLink.h).
+// (panel_reader.h), attached to the panel holder, and the message link's reader (BmcLink.h).
 #include "DeviceReaders.h"
 #include "BmcLink.h"
 #include "oscairn/panel_reader.h"
@@ -24,11 +24,15 @@ namespace oscairn::host
 
     std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play )
     {
-        // A device panel's own controls, played as a controller's are, by their identities.
+        // A device panel's own controls, played as a controller's are, by their identities. The
+        // device is the panel holder's (docs/fantom-0.md, "The panel holder"): the engine attaches
+        // to it.
         std::ifstream file( map, std::ios::binary );
         if( !file ) throw std::runtime_error( "cannot read the panel map " + map );
         std::stringstream text; text << file.rdbuf();
-        return std::make_unique<Held<PanelReader>>( device, PanelMap::parse( text.str() ), [play = std::move( play )]( const PanelEvent& e ) {
+        auto parsed = PanelMap::parse( text.str() );
+        std::fprintf( stderr, "oscairn: panel: %s through the panel holder at %s\n", device.c_str(), panelHolderSocket );
+        return std::make_unique<Held<PanelReader>>( panelHolderSocket, std::move( parsed ), [play = std::move( play )]( const PanelEvent& e ) {
             if( !e.control.empty() ) play( e.control, e.input );
         } );
     }

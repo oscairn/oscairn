@@ -1,8 +1,8 @@
-# The Roland FANTOM-06, -07 and -08 (docs/fantom-0.md): its panel reader (panel_reader.h), its
-# message link's reader (BmcLink.h), the tool that maps the panel and the panel map. Built here for
-# their tests; the engine links the readers (through hosts/audio's DeviceReaders.h), and the image
-# installs the tool and the map, only with OSCAIRN_ROLAND_FANTOM0, so a product without this panel
-# has none of it.
+# The Roland FANTOM-06, -07 and -08 (docs/fantom-0.md): its panel holder and reader
+# (panel_reader.h), its message link's reader (BmcLink.h), the tool that maps the panel and the
+# panel map. Built here for their tests; the engine links the readers (through hosts/audio's
+# DeviceReaders.h), and the image installs the holder, the tool and the map, only with
+# OSCAIRN_ROLAND_FANTOM0, so a product without this panel has none of it.
 if(NOT UNIX)
     return()
 endif()
@@ -17,6 +17,9 @@ target_compile_options(oscairn_panel PRIVATE -Wall -Wextra)
 add_executable(oscairn-panel-dump tools/panel_dump.cpp)
 target_link_libraries(oscairn-panel-dump PRIVATE oscairn_panel)
 target_compile_options(oscairn-panel-dump PRIVATE -Wall -Wextra)
+add_executable(oscairn-panel-holder tools/panel_holder.cpp)
+target_link_libraries(oscairn-panel-holder PRIVATE oscairn_panel)
+target_compile_options(oscairn-panel-holder PRIVATE -Wall -Wextra)
 add_executable(oscairn-panel-reader-test tests/panel_reader.cpp)
 target_link_libraries(oscairn-panel-reader-test PRIVATE oscairn_panel)
 target_compile_options(oscairn-panel-reader-test PRIVATE -Wall -Wextra)
@@ -38,6 +41,6 @@ if(OSCAIRN_ROLAND_FANTOM0)
     target_include_directories(oscairn_roland_fantom0 PRIVATE src ${PROJECT_SOURCE_DIR}/hosts/audio)
     target_link_libraries(oscairn_roland_fantom0 PUBLIC oscairn_panel Threads::Threads)
     target_compile_options(oscairn_roland_fantom0 PRIVATE -Wall -Wextra)
-    install(TARGETS oscairn-panel-dump RUNTIME DESTINATION bin)
+    install(TARGETS oscairn-panel-dump oscairn-panel-holder RUNTIME DESTINATION bin)
     install(FILES panels/fantom-07.json DESTINATION share/oscairn/panels)
 endif()

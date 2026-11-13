@@ -81,7 +81,7 @@ FEATURES = [
     Feature("roland-panel", lambda p: (p.get("panel") or {}).get("protocol") == "roland-i2c-slave"
             or (p.get("keyboard") or {}).get("protocol") == "roland-bmc-stock",
             options=["BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0"],
-            files=["usr/bin/oscairn-panel-dump", "usr/share/oscairn/panels"]),
+            files=["usr/bin/oscairn-panel-dump", "usr/bin/oscairn-panel-holder", "usr/share/oscairn/panels"]),
     Feature("camera", lambda p: bool(p.get("camera")),
             kernel_on=["CONFIG_MEDIA_SUPPORT"], kernel_off=["CONFIG_MEDIA_SUPPORT"],
             packages=["BR2_PACKAGE_LIBCAMERA", "BR2_PACKAGE_LIBV4L"]),

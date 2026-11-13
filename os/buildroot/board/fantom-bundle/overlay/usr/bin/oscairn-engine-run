@@ -2,7 +2,8 @@
 # Runs the Oscairn engine inside the chroot bundle with what it needs on the FANTOM
 # (docs/fantom-0.md): a private /run/oscairn for its control socket, an unlimited
 # locked-memory limit, and its full path, by which alone it finds its plugin worker.
-# Audio options come from the arguments.
+# Audio options come from the arguments. The engine reads the panel from the panel holder,
+# which oscairn-fantom-start starts first; without one it says so and keeps trying.
 #
 #   oscairn-engine-run [ARGUMENTS...]
 set -eu
@@ -11,6 +12,11 @@ chmod 700 /run/oscairn
 if ! ulimit -l unlimited; then
 	echo "oscairn-engine-run: cannot raise the locked-memory limit; continuing" >&2
 fi
+case " $* " in
+*" --panel-device "*)
+	grep -q '@oscairn-panel$' /proc/net/unix 2>/dev/null ||
+		echo "oscairn-engine-run: no panel holder runs; the panel is read once one does (oscairn-fantom-start starts it)" >&2 ;;
+esac
 [ -n "${OSCAIRN_RELIABILITY:-}" ] || OSCAIRN_RELIABILITY=instrument
 export OSCAIRN_RELIABILITY
 exec /usr/bin/oscairn-engine --socket /run/oscairn/engine.sock --plugins /usr/lib/clap "$@"

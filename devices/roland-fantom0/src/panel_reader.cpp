@@ -11,18 +11,18 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstddef>
 #include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <set>
 #include <stdexcept>
 #include <sys/ioctl.h>
-#include <sys/resource.h>
-#include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
-#ifdef __linux__
-#include <sys/prctl.h>
-#endif
 
 namespace oscairn
 {
@@ -97,6 +97,22 @@ namespace oscairn
             return f;
         }
         constexpr std::array<const char*, 4> kindNames{"encoder", "analog", "switchOn", "switchOff"};
+
+        // A socket's address: "@name" an abstract one (Linux), otherwise a path. 0 when it does not fit.
+        socklen_t address(const std::string& name, sockaddr_un& a)
+        {
+            a = {};
+            a.sun_family = AF_UNIX;
+            if(name.empty() || name.size() >= sizeof a.sun_path) { errno = ENAMETOOLONG; return 0; }
+            std::memcpy(a.sun_path, name.data(), name.size());
+            if(name[0] != '@') return sizeof a;
+            a.sun_path[0] = 0;
+            return socklen_t(offsetof(sockaddr_un, sun_path) + name.size());
+        }
+
+        volatile std::sig_atomic_t holderStop = 0;
+        void stopHolder(int) { holderStop = 1; }
+        void wakeHolder(int) {} // a reader attaching: the wait ends, and the holder takes it in
 
     }
 
@@ -208,14 +224,164 @@ namespace oscairn
         return e;
     }
 
+    int connectPanelHolder(const std::string& socket)
+    {
+        sockaddr_un a;
+        const auto size = address(socket, a);
+        if(!size) return -1;
+        const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        if(fd < 0) return -1;
+        ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+        if(::connect(fd, reinterpret_cast<const sockaddr*>(&a), size) != 0) { const int error = errno; ::close(fd); errno = error; return -1; }
+        return fd;
+    }
+
+    std::vector<int> processesHolding(const std::string& path)
+    {
+        std::vector<int> pids;
+        struct stat target{};
+        DIR* proc = ::stat(path.c_str(), &target) == 0 ? ::opendir("/proc") : nullptr;
+        if(!proc) return pids;
+        while(const auto* e = ::readdir(proc))
+        {
+            const int pid = std::atoi(e->d_name);
+            if(pid <= 0 || pid == ::getpid()) continue;
+            const std::string fds = std::string("/proc/") + e->d_name + "/fd";
+            DIR* dir = ::opendir(fds.c_str());
+            if(!dir) continue;
+            while(const auto* f = ::readdir(dir))
+            {
+                struct stat s{}; // the file the descriptor is, compared by device and inode, so a path through a chroot's /dev matches too
+                if(f->d_name[0] != '.' && ::stat((fds + "/" + f->d_name).c_str(), &s) == 0 && s.st_dev == target.st_dev && s.st_ino == target.st_ino) { pids.push_back(pid); break; }
+            }
+            ::closedir(dir);
+        }
+        ::closedir(proc);
+        return pids;
+    }
+
+    int holdPanel(const std::string& path, const std::string& socket, const std::function<void(const std::string&)>& log, PanelDevice device)
+    {
+        if(!device.open) device.open = [](const std::string& p, int flags) { return ::open(p.c_str(), flags); };
+        if(!device.wait) device.wait = [](int fd) { return ::ioctl(fd, 0, 0); };
+        auto say = [&](const std::string& line) { if(log) log(line); };
+        // A handled signal ends the driver's wait (it then returns 0): SIGTERM and SIGINT to stop,
+        // SIGIO for a reader attaching. No SA_RESTART, and every signal unblocked, so nothing
+        // inherited decides whether the wait can be woken. One thread, so the signal reaches it.
+        holderStop = 0;
+        struct sigaction on{};
+        sigemptyset(&on.sa_mask);
+        on.sa_handler = stopHolder;
+        ::sigaction(SIGTERM, &on, nullptr);
+        ::sigaction(SIGINT, &on, nullptr);
+        on.sa_handler = wakeHolder;
+        ::sigaction(SIGIO, &on, nullptr);
+        on.sa_handler = SIG_IGN;
+        ::sigaction(SIGPIPE, &on, nullptr); // a reader gone: its send fails, and it is dropped
+        sigset_t none;
+        sigemptyset(&none);
+        ::sigprocmask(SIG_SETMASK, &none, nullptr);
+
+        // The lock, before the device is touched: one holder per socket, so the device is never
+        // opened twice.
+        sockaddr_un a;
+        const auto size = address(socket, a);
+        const int listener = size ? ::socket(AF_UNIX, SOCK_STREAM, 0) : -1;
+        if(listener < 0) { say("cannot make the socket " + socket + ": " + std::strerror(errno)); return 1; }
+        ::fcntl(listener, F_SETFD, FD_CLOEXEC);
+        auto bound = [&] { return ::bind(listener, reinterpret_cast<const sockaddr*>(&a), size) == 0; };
+        bool ok = bound();
+        if(!ok && errno == EADDRINUSE && socket[0] != '@')
+        {
+            // shortcut: a path's socket left by a holder that died is taken over, and two holders starting at the same moment could both do it; paths are for tests: the unit's abstract name is freed by the kernel with its holder
+            const int other = connectPanelHolder(socket);
+            if(other >= 0) { ::close(other); errno = EADDRINUSE; }
+            else ok = ::unlink(socket.c_str()) == 0 && bound();
+        }
+        if(!ok)
+        {
+            say(errno == EADDRINUSE ? "another panel holder runs (" + socket + " is taken); not opening " + path : "cannot bind " + socket + ": " + std::strerror(errno));
+            ::close(listener);
+            return 1;
+        }
+        auto unbind = [&] { ::close(listener); if(socket[0] != '@') ::unlink(socket.c_str()); };
+
+        // Opened only while no other process has it: a second open while another holds it fails
+        // and, by Roland's driver, leaves the panel's next byte to crash the kernel.
+        int fd = -1;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(device.patience);
+        for(;;)
+        {
+            const bool late = std::chrono::steady_clock::now() >= until;
+            const auto others = processesHolding(path);
+            if(!others.empty())
+            {
+                if(late)
+                {
+                    std::string pids;
+                    for(const int pid : others) pids += (pids.empty() ? "" : ", ") + std::to_string(pid);
+                    say("process " + pids + " holds " + path + "; not opening it (a second open can crash the kernel)");
+                    unbind();
+                    return 1;
+                }
+            }
+            else
+            {
+                fd = device.open(path, O_RDWR | O_NOCTTY | O_CLOEXEC); // read and write, as Roland's programs open it; never written
+                if(fd >= 0) break;
+                if((errno != EFAULT && errno != EBUSY) || late) { say("cannot open " + path + ": " + std::strerror(errno)); unbind(); return 1; }
+            }
+            if(holderStop) { unbind(); return 0; }
+            ::usleep(50000);
+        }
+        ::listen(listener, 8);
+        ::fcntl(listener, F_SETOWN, ::getpid());
+        ::fcntl(listener, F_SETFL, O_NONBLOCK | O_ASYNC);
+        say("holding " + path + "; readers attach at " + socket);
+
+        std::vector<int> readers;
+        uint64_t dropped = 0;
+        auto attach = [&] {
+            for(int c; (c = ::accept(listener, nullptr, nullptr)) >= 0;)
+            {
+                if(readers.size() >= 8) { ::close(c); say("a ninth reader turned away"); continue; }
+                ::fcntl(c, F_SETFD, FD_CLOEXEC);
+                ::fcntl(c, F_SETFL, O_NONBLOCK);
+                readers.push_back(c);
+                say("a reader attached (" + std::to_string(readers.size()) + " now)");
+            }
+        };
+        int status = 0;
+        while(!holderStop)
+        {
+            attach();
+            if(device.wait(fd) < 0 && errno != EINTR) { say(std::string("waiting on ") + path + ": " + std::strerror(errno)); status = 1; break; }
+            if(holderStop) break;
+            attach();
+            uint8_t message[4]; // the driver copies 4 bytes whatever the count asks
+            while(::read(fd, message, sizeof message) == 4) // one message a read; 0 once none is queued
+                for(size_t i = 0; i < readers.size();)
+                {
+                    const auto n = ::send(readers[i], message, sizeof message, 0);
+                    if(n == ssize_t(sizeof message)) { ++i; continue; }
+                    if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) { if(!dropped++) say("a reader is not keeping up; its messages are dropped"); ++i; continue; }
+                    ::close(readers[i]);
+                    readers.erase(readers.begin() + ptrdiff_t(i));
+                    say("a reader detached (" + std::to_string(readers.size()) + " left)");
+                }
+        }
+        for(const int r : readers) ::close(r);
+        ::close(fd);
+        unbind();
+        say("released " + path);
+        return status;
+    }
+
     void PanelReader::standardError(const std::string& line) { std::fprintf(stderr, "oscairn: panel: %s\n", line.c_str()); }
 
-    PanelReader::PanelReader(std::string path, PanelMap map, Sink sink, Log log, Device device)
-        : path_(std::move(path)), device_(std::move(device)), owned_(true), roland_(true), sink_(std::move(sink)), log_(std::move(log)),
-          map_(std::make_shared<const PanelMap>(std::move(map)))
+    PanelReader::PanelReader(std::string socket, PanelMap map, Sink sink, Log log)
+        : path_(std::move(socket)), owned_(true), sink_(std::move(sink)), log_(std::move(log)), map_(std::make_shared<const PanelMap>(std::move(map)))
     {
-        if(!device_.open) device_.open = [](const std::string& p, int flags) { return ::open(p.c_str(), flags); };
-        if(!device_.wait) device_.wait = [](int fd) { return ::ioctl(fd, 0, 0); };
         thread_ = std::thread([this] { run(); });
     }
 
@@ -227,7 +393,6 @@ namespace oscairn
         { std::lock_guard lock(lock_); stop_ = true; }
         stopped_.notify_all();
         thread_.join();
-        if(helper_ > 0) { ::kill(helper_, SIGKILL); ::waitpid(helper_, nullptr, 0); } // a fatal signal ends the driver's wait
         if(owned_ && fd_ >= 0) ::close(fd_);
     }
 
@@ -246,120 +411,35 @@ namespace oscairn
         return !stopped_.wait_for(lock, std::chrono::seconds(1), [this] { return stop_.load(); });
     }
 
-    // The helper process, after fork: system calls only (the engine's other threads are not here).
-    // It ends with what went wrong as its exit status: an open's errno; 128 and the ioctl's errno;
-    // 254 a failed read; 255 a hundred wakes in a row with nothing to read.
-    void PanelReader::helper(int out)
-    {
-#ifdef __linux__
-        ::prctl(PR_SET_PDEATHSIG, SIGKILL); // not left waiting in the driver when the engine goes
-#endif
-        struct sigaction fallback{};
-        fallback.sa_handler = SIG_DFL;
-        ::sigaction(SIGPIPE, &fallback, nullptr); // the engine gone: the next write ends it
-        const int fd = device_.open(path_, O_RDWR | O_NOCTTY | O_CLOEXEC); // read and write, as Roland's programs open it; never written
-        if(fd < 0) ::_exit(errno & 127 ? errno & 127 : 127);
-        rlimit files{};
-        const int most = ::getrlimit(RLIMIT_NOFILE, &files) == 0 && files.rlim_cur < 65536 ? int(files.rlim_cur) : 65536;
-        for(int i = 3; i < most; ++i) // the engine's descriptors (audio devices, sockets) are not held open here
-            if(i != fd && i != out && std::find(device_.keep.begin(), device_.keep.end(), i) == device_.keep.end()) ::close(i);
-        for(int empty = 0;;)
-        {
-            if(device_.wait(fd) < 0)
-            {
-                if(errno == EINTR) continue;
-                ::_exit(128 + (errno & 63));
-            }
-            uint8_t message[4];
-            const auto n = ::read(fd, message, sizeof message); // one message after each wait; a second read gives 0
-            if(n > 0) { empty = 0; if(::write(out, message, size_t(n)) != n) ::_exit(0); continue; }
-            if(n < 0 && errno != EAGAIN && errno != EINTR) ::_exit(254);
-            if(++empty == 100) ::_exit(255);
-        }
-    }
-
-    bool PanelReader::spawn()
-    {
-        int p[2];
-        if(::pipe(p) != 0) return false;
-        ::fcntl(p[0], F_SETFD, FD_CLOEXEC);
-        ::fcntl(p[1], F_SETFD, FD_CLOEXEC);
-        const pid_t pid = ::fork();
-        if(pid == 0) { ::close(p[0]); helper(p[1]); }
-        ::close(p[1]);
-        if(pid < 0) { ::close(p[0]); return false; }
-        helper_ = pid;
-        fd_ = p[0];
-        return true;
-    }
-
-    // The helper ended (its pipe did): why, from its exit status. False when it could not open the device.
-    bool PanelReader::reap()
-    {
-        int status = 0;
-        const auto pid = helper_;
-        helper_ = -1;
-        if(::waitpid(pid, &status, 0) != pid || !WIFEXITED(status))
-        {
-            if(log_) log_("the helper reading " + path_ + " ended; starting it again");
-            return true;
-        }
-        const int code = WEXITSTATUS(status);
-        if(code >= 128)
-        {
-            if(log_) log_(code == 255 ? "ioctl 0 on " + path_ + " woke 100 times with nothing to read; reading it read-only and polling instead"
-                          : code == 254 ? path_ + ": a read failed; reading it read-only and polling instead"
-                          : "ioctl 0 on " + path_ + ": " + std::strerror(code - 128) + "; reading it read-only and polling instead");
-            roland_ = false;
-            return true;
-        }
-        errno = code;
-        return false;
-    }
-
     void PanelReader::run()
     {
-        bool reported = false; // an open failure, once until it opens
+        bool reported = false; // the holder not reached, once until it is
         while(!stop_)
         {
             if(fd_ < 0)
             {
-                if(roland_ ? !spawn() : (fd_ = device_.open(path_, O_RDONLY | O_NONBLOCK | O_CLOEXEC)) < 0)
+                if((fd_ = connectPanelHolder(path_)) < 0)
                 {
-                    if(!reported && log_) log_("cannot open " + path_ + ": " + std::strerror(errno));
+                    if(!reported && log_) log_("no panel holder at " + path_ + " (" + std::strerror(errno) + "); trying again each second");
                     reported = true;
                     if(!pause()) return;
                     continue;
                 }
-                have_ = 0; // a message cut by the reopen is not joined to the next
+                if(log_) log_("attached to the panel holder at " + path_);
+                reported = false;
+                have_ = 0; // a message cut by the reattach is not joined to the next
             }
             pollfd p{fd_, POLLIN, 0};
             const int ready = ::poll(&p, 1, 100); // the timeout bounds how long stopping waits
             if(ready == 0 || (ready < 0 && errno == EINTR)) continue;
             uint8_t buffer[256];
             const auto n = ready > 0 ? ::read(fd_, buffer, sizeof buffer) : -1;
-            if(n > 0)
-            {
-                if(reported && log_) log_("reading " + path_);
-                reported = false;
-                bytes(buffer, size_t(n));
-                continue;
-            }
+            if(n > 0) { bytes(buffer, size_t(n)); continue; }
             if(n < 0 && (errno == EAGAIN || errno == EINTR)) continue;
             if(!owned_) return; // a descriptor given: its end is the end
             const int error = errno;
             ::close(fd_); fd_ = -1;
-            if(helper_ > 0)
-            {
-                const bool roland = roland_;
-                if(!reap())
-                {
-                    if(!reported && log_) log_("cannot open " + path_ + ": " + std::strerror(errno));
-                    reported = true;
-                }
-                if(roland && !roland_) continue; // fell back: opened again at once, read-only
-            }
-            else if(log_) log_(path_ + (n == 0 ? " ended" : std::string(": ") + std::strerror(error)) + "; opening it again");
+            if(log_) log_("the panel holder at " + path_ + (n == 0 ? " ended" : std::string(": ") + std::strerror(error)) + "; attaching again");
             if(!pause()) return;
         }
     }

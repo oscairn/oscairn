@@ -5,8 +5,11 @@
 // through the map's layout (fields of whole bytes, or of parts of them), an unknown ID reported
 // with its bytes, and a new map taking effect;
 // then the controls they name played in a Session as a MIDI controller's are (controller_input.h),
-// heard at the next block; a device by path opened and waited on as Roland reads its panel, by a
-// helper process, through a seam; and oscairn-panel-dump reading a pty. Also: the FANTOM-07's map
+// heard at the next block; the panel holder,
+// through a seam: it waits, then reads until nothing is left, passes each message to the readers
+// attached, keeps the device while readers come and go, refuses to start beside another holder
+// or while another process has the device open, and ends promptly on SIGTERM; and
+// oscairn-panel-dump attached to a holder, or refusing without one. Also: the FANTOM-07's map
 // decodes messages in Roland's layout, and a broken map is refused.
 #include "oscairn/panel_reader.h"
 #include "oscairn/session.h"
@@ -22,10 +25,11 @@
 #include <fcntl.h>
 #include <fstream>
 #include <mutex>
+#include <csignal>
 #include <poll.h>
 #include <sstream>
 #include <string>
-#include <termios.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -167,59 +171,132 @@ namespace
         ::close(fds[1]); ::close(fds[0]);
     }
 
-    // A device by path, read as Roland's programs read theirs, through the seam (no driver here):
-    // the helper process opens it for reading and writing, then waits, then reads, and is killed
-    // while it waits when the reader stops. Then a wait that fails: logged once, and the device
-    // opened again read-only and polled. The seam's calls happen in the helper, so they are traced
-    // through a pipe the helper keeps.
-    void rolandWay()
+    // The panel holder, forked, on a stand-in device: a pipe of messages, and a doorbell the seam's
+    // wait reads one byte from, so each ring is one wake of the driver's ioctl. The seam's calls
+    // and the holder's log go to a trace pipe.
+    struct Bench
     {
-        int fds[2], trace[2];
-        check(::pipe(fds) == 0 && ::pipe(trace) == 0, "pipes");
-        ::fcntl(fds[0], F_SETFL, O_NONBLOCK);
-        ::fcntl(trace[0], F_SETFL, O_NONBLOCK);
-        auto call = [w = trace[1]](const char* c) { if(::write(w, c, std::strlen(c)) < 0) {} };
-        auto traced = [&] { std::string all; char b[256]; ssize_t n; while((n = ::read(trace[0], b, sizeof b)) > 0) all.append(b, size_t(n)); return all; };
-        PanelReader::Device device{
-            [&, call](const std::string&, int flags) {
-                call((flags & O_ACCMODE) == O_RDWR ? (flags & O_NONBLOCK ? "open read-write non-blocking\n" : "open read-write\n")
-                                                   : (flags & O_NONBLOCK ? "open read-only non-blocking\n" : "open read-only\n"));
-                return ::dup(fds[0]); // the reader or helper closes its own
-            },
-            [call](int fd) { call("wait\n"); pollfd p{fd, POLLIN, 0}; return ::poll(&p, 1, -1) < 0 ? -1 : 0; }, // blocks, as the driver's ioctl does
-            {trace[1]}};
+        int data[2]{-1, -1}, bell[2]{-1, -1}, trace[2]{-1, -1};
+        std::string socket = "/tmp/oscairn-panel-test-" + std::to_string(::getpid()) + ".sock";
+        std::string device;
+        std::string traced;
+        Bench()
+        {
+            check(::pipe(data) == 0 && ::pipe(bell) == 0 && ::pipe(trace) == 0, "pipes");
+            ::fcntl(data[0], F_SETFL, O_NONBLOCK); // a read with nothing queued gives up at once, as the driver's gives 0
+            ::fcntl(trace[0], F_SETFL, O_NONBLOCK);
+            char path[] = "/tmp/oscairn-panel-device-XXXXXX";
+            const int fd = ::mkstemp(path);
+            ::close(fd);
+            device = path;
+        }
+        ~Bench() { for(int fd : {data[0], data[1], bell[0], bell[1], trace[0], trace[1]}) ::close(fd); ::unlink(device.c_str()); ::unlink(socket.c_str()); }
+        PanelDevice seam(int patience = 2000)
+        {
+            const int t = trace[1], b = bell[0], d = data[0];
+            auto note = [t](const std::string& line) { const auto text = line + "\n"; if(::write(t, text.data(), text.size()) < 0) {} };
+            return {[note, d](const std::string&, int flags) { note((flags & O_ACCMODE) == O_RDWR ? "open read-write" : "open other"); return ::dup(d); },
+                    [note, b](int) { note("wait"); char c; return ::read(b, &c, 1) == 1 ? 0 : -1; }, patience};
+        }
+        // Forked before the test starts a thread of its own.
+        pid_t start(PanelDevice device)
+        {
+            const pid_t pid = ::fork();
+            if(pid == 0)
+            {
+                const int t = trace[1];
+                ::_exit(holdPanel(this->device, socket, [t](const std::string& line) { const auto text = line + "\n"; if(::write(t, text.data(), text.size()) < 0) {} }, device));
+            }
+            return pid;
+        }
+        const std::string& read()
+        {
+            char b[512]; ssize_t n;
+            while((n = ::read(trace[0], b, sizeof b)) > 0) traced.append(b, size_t(n));
+            return traced;
+        }
+        bool saw(const std::string& what, int ms = 3000)
+        {
+            for(int i = 0; i < ms / 10; ++i) { if(read().find(what) != std::string::npos) return true; std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
+            return false;
+        }
+        size_t count(const std::string& what) { size_t n = 0; for(auto at = read().find(what); at != std::string::npos; at = traced.find(what, at + 1)) ++n; return n; }
+        void ring() { check(::write(bell[1], "!", 1) == 1, "the doorbell"); }
+    };
+    int ended(pid_t pid, int ms) // its exit status, or -1 if it did not end in time
+    {
+        for(int i = 0; i < ms; ++i)
+        {
+            int status = 0;
+            if(::waitpid(pid, &status, WNOHANG) == pid) return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return -1;
+    }
+
+    void holder()
+    {
+        Bench bench;
+        const pid_t pid = bench.start(bench.seam());
+        check(bench.saw("holding " + bench.device), "the holder holds the device:\n" + bench.read());
+        check(bench.read().find("open read-write\n") != std::string::npos, "opened for reading and writing");
+        // A second holder on the same socket refuses before it touches the device.
+        const pid_t second = bench.start(bench.seam());
+        check(ended(second, 3000) == 1 && bench.saw("another panel holder runs") && bench.count("open ") == 1, "a second holder refuses, without opening the device:\n" + bench.read());
+
         Heard heard;
         auto sink = [&](const PanelEvent& e) { std::lock_guard g(heard.lock); heard.events.push_back(e); };
-        auto log = [&](const std::string& line) { std::lock_guard g(heard.lock); heard.log.push_back(line); };
-        std::chrono::steady_clock::time_point stopping;
         {
-            PanelReader reader("/dev/i2c-slave-2", PanelMap::parse(mapJson(controls)), sink, log, device);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            put(fds[1], message(1, 3, 500));
-            check(heard.wait(1), "a message read after the wait");
-            put(fds[1], message(2, 5, 0));
-            check(heard.wait(2), "and the next after the next wait");
-            check(heard.at(0).control == "fader:1" && heard.at(1).control == "button:101", "the messages decoded");
-            stopping = std::chrono::steady_clock::now();
+            PanelReader reader(bench.socket, PanelMap::parse(mapJson(controls)), sink, {});
+            std::this_thread::sleep_for(std::chrono::milliseconds(200)); // connected; the holder takes it in at the next wake
+            // Three messages queued, one wake: all three read before the next wait.
+            std::vector<uint8_t> burst;
+            for(const auto& m : {message(1, 3, 100), message(1, 3, 200), message(2, 5, 0)}) burst.insert(burst.end(), m.begin(), m.end());
+            put(bench.data[1], burst);
+            bench.ring();
+            check(heard.wait(3), "one wake: the three queued messages read and passed on");
+            check(heard.at(0).value == 100 && heard.at(1).value == 200 && heard.at(2).control == "button:101", "in order");
         }
-        check(std::chrono::steady_clock::now() - stopping < std::chrono::milliseconds(500), "stopping kills the helper waiting");
-        const auto first = traced();
-        check(first.starts_with("open read-write\nwait\nwait\n"), "opened read-write, without O_NONBLOCK, then a wait before each message:\n" + first);
+        // The engine restarting: its reader goes, a new one attaches, the device stays open.
+        {
+            PanelReader reader(bench.socket, PanelMap::parse(mapJson(controls)), sink, {});
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            put(bench.data[1], message(1, 3, 300));
+            bench.ring();
+            check(heard.wait(4) && heard.at(3).value == 300, "a reader attached after the last one went hears the next message");
+        }
+        check(bench.count("open ") == 1, "the device opened once in all:\n" + bench.read());
+        // SIGTERM wakes the wait (here a read the signal interrupts) and the holder lets go.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        const auto stopping = std::chrono::steady_clock::now();
+        ::kill(pid, SIGTERM);
+        check(ended(pid, 2000) == 0, "SIGTERM ends a waiting holder, cleanly");
+        check(std::chrono::steady_clock::now() - stopping < std::chrono::milliseconds(500) && bench.saw("released " + bench.device), "promptly, releasing the device");
 
-        heard.events.clear();
-        device.wait = [call](int) { call("wait\n"); errno = ENOTTY; return -1; };
-        {
-            PanelReader reader("/dev/i2c-slave-2", PanelMap::parse(mapJson(controls)), sink, log, device);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            put(fds[1], message(1, 3, 250));
-            check(heard.wait(1), "a message read after the fallback");
-            std::lock_guard h(heard.lock);
-            check(std::count_if(heard.log.begin(), heard.log.end(), [](const std::string& l) { return l.find("ioctl 0 on /dev/i2c-slave-2: ") != std::string::npos; }) == 1,
-                  "the failed wait logged once");
-        }
-        const auto second = traced();
-        check(second == "open read-write\nwait\nopen read-only non-blocking\n", "a failed wait: opened again read-only and polled:\n" + second);
-        for(int fd : {fds[0], fds[1], trace[0], trace[1]}) ::close(fd);
+        // A wait that fails (not Roland's driver): the holder ends, opening nothing else.
+        Bench failing;
+        auto broken = failing.seam();
+        broken.wait = [](int) { errno = ENOTTY; return -1; };
+        check(ended(failing.start(broken), 3000) == 1 && failing.saw("waiting on") && failing.count("open ") == 1, "a failed wait ends the holder; no other way of reading:\n" + failing.read());
+    }
+
+    // The takeover guard: while another process has the device open the holder does not open it.
+    // Linux: it reads /proc.
+    void guard()
+    {
+#ifdef __linux__
+        Bench bench;
+        int ready[2]; check(::pipe(ready) == 0, "a pipe");
+        const pid_t other = ::fork();
+        if(other == 0) { const int fd = ::open(bench.device.c_str(), O_RDONLY); if(::write(ready[1], "!", 1) < 0) {} ::pause(); ::_exit(fd < 0); }
+        char c; check(::read(ready[0], &c, 1) == 1, "the other process has the device open");
+        const auto holders = processesHolding(bench.device);
+        check(holders.size() == 1 && holders[0] == other, "the process holding it found");
+        const pid_t pid = bench.start(bench.seam(300));
+        check(ended(pid, 3000) == 1 && bench.saw("holds " + bench.device) && bench.count("open ") == 0, "the holder refuses, without opening it:\n" + bench.read());
+        ::kill(other, SIGKILL); ::waitpid(other, nullptr, 0);
+        ::close(ready[0]); ::close(ready[1]);
+#endif
     }
 
     // The panel's controls played in a Session the way a MIDI controller's are: two faders on the
@@ -283,40 +360,45 @@ namespace
         ::close(fds[1]); ::close(fds[0]);
     }
 
-    // oscairn-panel-dump on a pty: each message on a line, with the control or "-", then the table.
+    // oscairn-panel-dump attached to a holder: each message on a line, with the control or "-",
+    // then the table. Without a holder it refuses.
     void dump(const char* tool)
     {
-        const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
-        check(master >= 0 && ::grantpt(master) == 0 && ::unlockpt(master) == 0, "a pty");
-        const std::string path = ::ptsname(master);
-        const int slave = ::open(path.c_str(), O_RDWR | O_NOCTTY);
-        termios raw{}; ::tcgetattr(slave, &raw); ::cfmakeraw(&raw); ::tcsetattr(slave, TCSANOW, &raw); // bytes as they are
+        Bench bench;
         char mapFile[] = "/tmp/oscairn-panel-map-XXXXXX";
         const int mapFd = ::mkstemp(mapFile);
         const auto json = mapJson(controls);
         check(::write(mapFd, json.data(), json.size()) == ssize_t(json.size()), "the map written");
         ::close(mapFd);
-        put(master, std::vector<uint8_t>{0x05});
-        put(master, message(1, 3, 250)); put(master, message(2, 77, 0));
-        FILE* out = ::popen((std::string("'") + tool + "' " + path + " " + mapFile + " --seconds 1").c_str(), "r");
+        const auto command = std::string("'") + tool + "' " + mapFile + " --socket " + bench.socket + " --seconds 1 2>&1";
+        check(std::system(command.c_str()) != 0, "the dump refuses without a holder");
+        const pid_t pid = bench.start(bench.seam());
+        check(bench.saw("holding"), "a holder");
+        FILE* out = ::popen(command.c_str(), "r");
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        put(bench.data[1], message(1, 3, 250)); put(bench.data[1], message(2, 77, 0));
+        bench.ring();
         std::string text; char line[256];
         while(out && std::fgets(line, sizeof line, out)) text += line;
         check(out && ::pclose(out) == 0, "the dump ran");
         check(text.find("81 03 01 7a  analog    id 3     value 250    fader:1") != std::string::npos, "a decoded message's line:\n" + text);
         check(text.find("82 4d 00 00  switchOn  id 77    value 0      -") != std::string::npos, "an unknown one's line");
         check(text.find("analog     3      1       250     250     fader:1") != std::string::npos, "the table");
-        ::unlink(mapFile); ::close(slave); ::close(master);
+        ::kill(pid, SIGTERM);
+        check(ended(pid, 2000) == 0, "the holder stopped");
+        ::unlink(mapFile);
     }
 }
 
 int main(int argc, char** argv)
 {
     if(argc != 4) { std::fprintf(stderr, "usage: oscairn-panel-reader-test FIXTURE MAP PANEL_DUMP\n"); return 2; }
+    holder(); // forks: first, before any thread
+    guard();
+    dump(argv[3]);
     maps(argv[2]);
     framing();
-    rolandWay();
     session(argv[1]);
-    dump(argv[3]);
     if(failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("panel reader: ok");
     return 0;

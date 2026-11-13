@@ -19,7 +19,9 @@ files, threads and memory maps. What that survey showed is in
 [What the unit shows](#what-the-unit-shows) below. The same day Roland's app and factory test
 tool were read as files, without touching the unit:
 [What Roland's programs show](#what-rolands-programs-show) has what they say about the keys,
-the audio link, the panel and the link to the BMCs. What neither settles is in
+the audio link, the panel and the link to the BMCs. Later that day the owner stopped Roland's
+app and read the devices by hand: [With Roland's app stopped](#with-rolands-app-stopped). What
+none of it settles is in
 [What needs the owner at the instrument](#what-needs-the-owner-at-the-instrument).
 
 - **SoC:** NXP i.MX8M Mini, four Cortex-A53 cores at 1.2 to 1.8 GHz: the KICK's SoC. The notes
@@ -47,10 +49,10 @@ the audio link, the panel and the link to the BMCs. What neither settles is in
   from Roland's test tool and app ([The map](#the-map)); none of it has been seen on a unit
   yet. Three buttons are not on the panel bus at all: WRITE, MENU and TEMPO are GPIO keys
   (below).
-- **Keys:** a separate keyboard CPU scans them. Read from Roland's app: key events reach it
-  over the USB serial line from the BMC side, as MIDI note messages with velocity
-  ([Keys](#keys)). Whether the BMC sends them to any program that listens, or only once Roland's
-  app has spoken first, is unknown.
+- **Keys:** a separate keyboard CPU scans them. Seen on the unit with Roland's app stopped and
+  nothing sent to the BMC side: key events arrive on the USB serial line `/dev/ttyGS0`, as MIDI
+  note messages with velocity, to whatever program reads it
+  ([With Roland's app stopped](#with-rolands-app-stopped)).
 - **Panel controls** (Roland's spec sheet and owner's manual, "Panel Descriptions"): the pitch
   bend/modulation lever, WHEEL1 and WHEEL2, S1 and S2; control knobs 1 to 8 and sliders 1 to 8
   with the PAN/LEVEL, CTRL and ASSIGN buttons choosing what they play; MASTER VOLUME; the
@@ -205,6 +207,13 @@ The i.MX has two USB 2.0 controllers (ChipIdea):
   kernel device `2-1008` (address 0x08 with the slave flag). Roland's app opens it read and
   write, but neither it nor the test tool ever writes to it: the lamps go another way
   ([Lamps](#lamps)). I2C3 had raised 142 interrupts since boot with nobody touching the panel.
+- **Panel words travel the panel bus** (measured later that day, Roland's app running, one
+  slider moved for 5 seconds and left for 5, in turn): I2C3 took about 200 interrupts a second
+  while it moved and none at rest. Meanwhile the app's writes rose from about 1.6 to about
+  4 kB a second and the message link's interrupts from 63 to about 180 a second: the app
+  passing each word on to the sound engine, as its code does
+  ([The lever, wheels, pedals, sliders, knobs and pads](#the-lever-wheels-pedals-sliders-knobs-and-pads)).
+  The bus also takes a burst at start-up: 3,277 interrupts in the first two minutes after boot.
 - **GPIO keys** (`gpio-keys`, `/dev/input/event1`): WRITE on GPIO5_11 (key code 157), MENU on
   GPIO5_12 (139) and TEMPO on GPIO5_13 (152). Roland's app and Weston both read it.
 - **Other input devices:** `event0` and `event2` are the SoC's and the PMIC's power keys;
@@ -217,9 +226,9 @@ The i.MX has two USB 2.0 controllers (ChipIdea):
   GPIO2_6 is held high by the kernel (the device tree's `modem-reset`, a name left from NXP's
   board).
 - **The wheels, lever, sliders and pedals** are panel analog sources by the test tool's
-  names (above). Roland's app opens no other device for them; which of them come over I2C and
-  which, if any, from the BMC side over the message link is in
-  [The lever, wheels, pedals, sliders, knobs and pads](#the-lever-wheels-pedals-sliders-knobs-and-pads).
+  names (above). Roland's app opens no other device for them; a slider's words were measured on
+  the panel bus (above), and the rest are expected there too
+  ([The lever, wheels, pedals, sliders, knobs and pads](#the-lever-wheels-pedals-sliders-knobs-and-pads)).
 
 ### Display and touch
 
@@ -242,6 +251,42 @@ with cpusets, memory, cpu and hugetlb controllers mounted (no RT group schedulin
 bandwidth); CPU isolation available but no `isolcpus` on the command line; huge pages (2 MiB,
 none reserved; transparent ones on `madvise`); **no PSI** (4.19 predates it); **no uinput**;
 no hidraw. `cpufreq` governor `ondemand`. Modules can be loaded (177 on the unit).
+
+### With Roland's app stopped
+
+Seen on the unit on November 12, 2026, with Roland's app stopped (`systemctl stop
+weston-term`), by reading the devices by hand and sending nothing to the BMC side.
+
+- **The keys arrive on `/dev/ttyGS0` with nothing sent first.** Opened raw with echo off and
+  only read, it gives 18 seconds of playing as 26,096 bytes, every byte in a frame of the shape
+  [The message link](#the-message-link) gives. Each key event comes twice: a kind-3 frame from
+  0x02 to **0x61** (not 0x63 or 0x64, as read from the app) holding a MIDI word (first byte 0x29
+  on, 0x28 off: port 2; then 0x91 or 0x81, the note and the velocity; a note off carries a
+  release velocity), and a kind-6 frame from 0x02 to 0x60 holding a panel word (0x88 on, 0x87
+  off, then the note, 0 and the velocity). In that capture the two always agree, and the panel
+  word's third byte is always 0: it adds no resolution. The MIDI word's frame has a stale byte
+  past its count (the note again).
+- **The sound engine reports regardless:** long frames of kind 9 from 0xE1 to 0x60, sub-type 9,
+  112 bytes each, about ten a second, at rest too. Their contents were not read.
+- **What is not read waits.** With a program reading the link, Roland's engine went on playing
+  the keys; when the reading stopped the last notes stayed on, and when it started again the
+  queued frames came out in a burst (15 kB in 6 seconds). Whoever opens the link has to read it
+  without pause, and expect stale key events as it opens.
+- **Roland's engine sounds the keys by itself.** With its app stopped the BMC plays its tone from
+  the keys, so Oscairn playing from them sounds together with it. Roland's Local Switch system
+  parameter is the likely way to turn that off (read from the app, not tried); it would take a
+  write to the link, which nothing in Oscairn does.
+- **The panel is silent.** A plain read-only `read()` of `/dev/i2c-slave-2` returns 0 bytes at
+  once (end of file), and moving a slider, the lever and a button raised no interrupt on the
+  panel bus, where with Roland's app running a slider raises about 200 a second
+  ([Panel, buttons and lights](#panel-buttons-and-lights)). Inferred, not confirmed: the bus
+  receives only while a reader holds the device the way Roland's programs do
+  ([Panel messages](#panel-messages)), and perhaps only after the host's start words (the two
+  kind-0 words to 0x75 that Roland's app sends,
+  [What the app does that the hardware depends on](#what-the-app-does-that-the-hardware-depends-on)).
+- **Roland's app does not come back without a power cycle.** Started again after being stopped,
+  it showed "program version error" and did nothing, with nothing else holding the link. Treat
+  stopping it as needing a power cycle to get it back.
 
 ## What Roland's programs show
 
@@ -284,29 +329,29 @@ files stay off the repository.
 
 ### Keys
 
-- **Key events reach the Linux side** (the app): short frames of kind 3 from 0x02 to 0x63 or
-  0x64 holding a MIDI word, note on (byte 2 the note, byte 3 the velocity) or note off;
+- **Key events reach the Linux side** (the app, and seen on the unit:
+  [With Roland's app stopped](#with-rolands-app-stopped)): short frames of kind 3 from 0x02 to
+  0x63 or 0x64 (on the unit, 0x61) holding a MIDI word, note on (byte 2 the note, byte 3 the velocity) or note off;
   control changes 64 (hold) and 120 (all sounds off) from the same address are taken the same
   way. The app's "Kbd Task" thread is what takes them. A second form, a panel word of kind 8
   (on) or 7 (off) from 0x02 with a 7-bit note and a 10-bit value, is recognized only by the
-  app's debugging; whether the keyboard ever sends it is unknown.
+  app's debugging; the unit sends it with every key, with the same velocity.
 - **The test tool gets them too** (the test tool): its keyboard test shows each key's note
   and velocity from note-on and note-off messages, with Roland's app not running. That they
   come over the same link is inferred: its only other MIDI code, for an ALSA raw MIDI device,
   is never called. Before that it has sent one command to 0xE1 when it started (inferred
   from the BMC's own names: a request for its test mode) and one more at the start of the
   test (inferred: unmute).
-- **Whether the BMC plays the keys by itself is not settled.** Inferred that it does, and
-  tells the Linux side as well: the app's two key handlers keep records of the keys held
+- **The BMC plays the keys by itself, and tells the Linux side as well** (heard on the unit
+  with Roland's app stopped; before that, inferred from the app): the app's two key handlers keep records of the keys held
   (inferred: for chord memory and the arpeggio) and, as far as their direct calls go, send
   nothing back to the sound engine; notes from the MIDI inputs are handled the same way; and
-  Roland's system parameters include a Local Switch. If so, Oscairn playing from these keys
-  would sound together with Roland's engine until that is turned off or its level brought
+  Roland's system parameters include a Local Switch. So Oscairn playing from these keys
+  sounds together with Roland's engine until that is turned off or its level brought
   down.
-- **Whether the BMC waits for the Linux side to speak first is unknown.** The app, when its
-  parameter thread starts, sends 0xE1 one kind-9 frame of sub-type 3 with no payload; the test
-  tool sends its command. Nothing read shows the BMC needing either before it reports keys:
-  the BMC's side of this was not read.
+- **The BMC does not wait for the Linux side to speak first** (seen on the unit). The app, when
+  its parameter thread starts, sends 0xE1 one kind-9 frame of sub-type 3 with no payload; the
+  test tool sends its command. With Roland's app stopped and nothing sent, the keys came anyway.
 
 ### The lever, wheels, pedals, sliders, knobs and pads
 
@@ -314,8 +359,9 @@ files stay off the repository.
   and CTRL jacks, the sliders, the control knobs, CUTOFF and RESONANCE are analog controls in
   Roland's numbering; the pads are switches, with no velocity.
 - **Which of them come over I2C is settled for some only.** A panel word says in two bits of
-  its first byte whether the panel's own processor made it or a BMC did, and a BMC's would
-  come over the message link, not the I2C bus. Read from the app: the CTRL jacks and their
+  its first byte whether the panel's own processor made it or a BMC did. A slider's words were
+  measured on the panel bus ([Panel, buttons and lights](#panel-buttons-and-lights)). Read from
+  the app: the CTRL jacks and their
   plug-sense switches are handled where I2C words are, and so are the pads (the app's pad
   code uses the numbers only I2C words are renumbered to). For the lever, the wheels and the
   HOLD jack nothing read says which side sends them; inferred, the panel's, like the rest.
@@ -697,10 +743,10 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
    watching. The panel bus is the `30a40000.i2c` line; the message link `32e50000.usb` (58 a
    second at rest). Expected: notes raise the `usb` line's rate and leave the `i2c` line alone
    (keys come from the BMC side). Notes that raise the `i2c` line, or neither, refute that. Then
-   the pads, the lever, WHEEL1 and WHEEL2, a slider, and a pedal on HOLD and on CTRL1: expected,
-   each raises the `i2c` line (it is a panel word) and the `usb` line too (Roland's app passes
-   it on to the sound engine). One that raises only the `usb` line reaches Linux from the BMC
-   side instead, and is not for the panel reader.
+   the pads, the lever, WHEEL1 and WHEEL2, and a pedal on HOLD and on CTRL1: expected, each
+   raises the `i2c` line (it is a panel word) and the `usb` line too (Roland's app passes it on
+   to the sound engine), as a slider was measured to on November 12
+   ([Panel, buttons and lights](#panel-buttons-and-lights)).
 2. **The GPIO keys.** Press WRITE, MENU and TEMPO: each should count on its own line (`Write`,
    `Menu`, `Tempo`) and not on the `i2c` line. Any other button that counts there is a GPIO key
    too.
@@ -715,38 +761,23 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
 5. **Stop Roland's app** (the rest needs it stopped): `systemctl stop weston-term`, then check
    that `/proc/asound/card1/pcm0p/sub0/status` and `pcm0c/sub0/status` say `closed` and that
    no process holds `/dev/i2c-slave-2` (`ls -l /proc/*/fd 2>/dev/null | grep i2c-slave`).
-   `systemctl start weston-term` (or a reboot) brings it back. With it stopped, three things to
-   note at once:
-   - **Play a key.** Roland's tone still sounding means the BMC plays its keys without the
-     app, as inferred; silence means the app was in the path (or the BMC mutes when the app
-     goes), and Oscairn would not have Roland's engine sounding under it.
-   - **Move the lever while holding that key** (if it sounds). Expected, if the lever comes
-     over I2C as step 1 showed: the pitch no longer bends, because the app carried the lever
-     to the sound engine. A bend then refutes that the app is the only path.
+   Only a power cycle brings it back: `systemctl start weston-term` after a stop showed
+   "program version error" on the unit ([With Roland's app stopped](#with-rolands-app-stopped)).
+   Done once on November 12: the keys still sound Roland's tone with the app stopped. Still to
+   note with it stopped:
+   - **Move the lever while holding a key.** Expected, if the lever comes over I2C as step 1
+     showed: the pitch no longer bends, because the app carried the lever to the sound engine.
+     A bend then refutes that the app is the only path.
    - **Look at the lamps.** Expected: they stay as they were, and pressing buttons changes none.
 6. **The panel's layout and IDs:** [Checking the panel map on a unit](#checking-the-panel-map-on-a-unit),
-   with `oscairn-panel-dump` in the bundle. Before anything else it shows whether Oscairn's
-   way of reading the device works at all: lines appearing as controls move confirm it. No
-   lines, or its log saying the device ended and is being opened again, means the driver wants
-   to be read as Roland reads it ([Panel messages](#panel-messages)), and the reader has to
-   change before the map can be checked.
-7. **Key messages on the link.** In the bundle's shell, with Roland's app stopped:
-
-   ```sh
-   stty -F /dev/ttyGS0 raw -echo
-   timeout 15 hexdump -C /dev/ttyGS0
-   ```
-
-   and play three slow notes, soft then hard. Expected for each key down: twelve bytes, `06 02`,
-   then `63` or `64`, one more byte, then a word whose first byte ends in `9`, whose third is
-   the note and whose fourth the velocity (larger for the hard one), and `04` last; for each
-   key up the same with a first byte ending in `8` (or a `9` with velocity 0). That confirms
-   the format, and that the BMC goes on reporting keys with Roland's app gone. Other bytes
-   that come with each key: send them back, they are the format. Nothing at all, with the
-   `usb` line of step 1 also at rest while keys are played: the BMC reports keys only to a
-   program that keeps talking to it, and what Roland's app says (its writes to `/dev/ttyGS0`)
-   has to be recorded next, not guessed. This cannot tell whether a BMC that has never heard
-   from Roland's app since power-on reports keys: the app starts at every boot.
+   with `oscairn-panel-dump` in the bundle. Expected now to show nothing: on November 12 a plain
+   read of the device ended at once and the panel bus stayed quiet with Roland's app stopped
+   ([With Roland's app stopped](#with-rolands-app-stopped)), so the dump's log will say the
+   device ended and is being opened again. The reader has to read the device as Roland does, and
+   the panel may need the host's start words first, before the map can be checked.
+7. **Key messages on the link:** seen on November 12 with Roland's app stopped
+   ([With Roland's app stopped](#with-rolands-app-stopped)): the keys arrive with nothing sent
+   first, in the format Roland's programs show. What is left is for Oscairn to read them.
 8. **Whether the link still runs:** `arecord -D hw:1,0 -c 16 -f S32_LE -r 48000 -d 2
    /tmp/link.wav`. Expected: it finishes in two seconds, the BMCs driving the clocks without
    Roland's app. Hanging until killed, or an input/output error, refutes that: they stopped

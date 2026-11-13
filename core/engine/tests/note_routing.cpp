@@ -3,6 +3,7 @@
 #include "../src/NoteRoute.h"
 #include "../../../hosts/audio/MidiBlock.h"
 #include "AllocationGuard.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -22,6 +23,23 @@ int main(int argc,char** argv){try{
     }
     Graph graph(48000,512);
     const auto a=graph.add(argv[2]),b=graph.add(argv[2]),synth=graph.add(argv[1]);
+    {
+        // An instrument that never sends NOTE_END (or whose ends are lost): each released note keeps
+        // its slot. A full route gives the oldest released one up for a new note, so the slots are
+        // never exhausted by released notes and no note is refused (a refused note panics the
+        // instrument, block after block).
+        NoteRoute route(graph.host(synth));uint32_t nextId=1;
+        bool all=true;
+        auto emit=[](const Event&){return true;};
+        for(int i=0;i<3000;++i)
+        {
+            all=route.route(Event::note(true,int16_t(i%128),1,0,0,0,-1),nextId,emit) && all;
+            all=route.route(Event::note(false,int16_t(i%128),0,0,0,0,-1),nextId,emit) && all;
+        }
+        check(all,"3,000 notes played and released with no NOTE_END: none refused");
+        check(route.live()<=route.notes.size(),"the slots stay within the route");
+        check(route.route(Event::note(true,61,1,0,0,0,-1),nextId,emit) && std::count_if(route.notes.begin(),route.notes.end(),[](const auto& n){return n.used && n.held && n.key==61;})==1,"a new note still takes a slot, held");
+    }
     {
         NoteRoute route(graph.host(synth));uint32_t nextId=40;
         std::array<Event,10> delivered;size_t count=0;

@@ -230,6 +230,14 @@ struct NoteRoute
                 // Full: a held note whose voice already ended gives its slot up, as before NOTE_END kept it.
                 if(std::none_of(notes.begin(),notes.end(),[](const Note& x){return !x.used;}))
                     for(auto& slot:notes)if(slot.used && slot.voiceEnded){slot.used=false;break;}
+                // Still full: the oldest released note gives its slot up. Its release went out; only
+                // its NOTE_END is missing (a plugin that sends none, or one lost), and without this
+                // every later note would be refused and the plugin panicked.
+                if(std::none_of(notes.begin(),notes.end(),[](const Note& x){return !x.used;})) {
+                    Note* oldest=nullptr;
+                    for(auto& slot:notes)if(slot.used && !slot.held && (!oldest || slot.id<oldest->id))oldest=&slot;
+                    if(oldest){end(*oldest,h->time);oldest->used=false;}
+                }
                 for(auto& slot:notes)if(!slot.used) {
                     if(nextId>INT32_MAX)return false;
                     slot={n,static_cast<int32_t>(nextId++),true,true,midi,false,key,zone,source};slot.velocity=float(velocity);

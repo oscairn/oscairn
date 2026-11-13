@@ -668,6 +668,7 @@ namespace oscairn::host
         for(uint32_t i=0;i<required;++i)valid=valid && outputMask[static_cast<int>(i)];
         outputLatencyMs_=(device->getOutputLatencyInSamples()+device->getCurrentBufferSizeSamples())*1000.0/device->getCurrentSampleRate();
         lastCallback_=0;lateCallbacks_=0;realtime_=false;
+        oscairn::holdCpuWakeLatency(true); // while the device runs: no core sleeps deeply between blocks (RFC 0045)
         if(session_)session_->audioStarted(); // the constructor's first start: the session starts warming up when made
         // At another rate, silent until service() has the plugins activated again at it, on the control thread.
         const bool moved=std::abs(rate-sampleRate_)>=.5;

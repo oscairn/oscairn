@@ -327,6 +327,27 @@ which its workers inherit, and again from each worker's start), is built; `OSCAI
 leaves a process as it is, for measuring. Confirmation trial (transparent huge pages off
 system-wide, then this change) pending.
 
+### CPU wake-up latency
+
+Measured on the FANTOM-07 (bundle c4bc60da and before): a worker's audio thread started 330 to
+400 us after the engine handed it a block (`wake`), in every sample; cores 1 to 3 entered the
+deep idle state `cpu-sleep` (exit latency listed as 1500 us) about 40 times a second each while
+playing, core 0 never (it takes every device interrupt); cyclictest at priority 80 showed 44 us
+at most. With a 1333 us allowance, a third of it went to waking up.
+
+Built (2026-11-13): while its audio device runs, the engine holds a PM QoS request for no CPU
+wake-up latency, the standard practice of audio servers: `/dev/cpu_dma_latency` opened, a 32-bit
+0 written, the file kept open (`holdCpuWakeLatency`, `plugin_host.h`; taken in
+`audioDeviceAboutToStart`, let go in `audioDeviceStopped`). The kernel then keeps every core out
+of idle states whose exit latency is above 0, so no core sleeps deeply between blocks. Linux only;
+needs no sysfs write; a device node absent or not writable (a desktop user who is not root) is
+said once on stderr and the engine goes on. `OSCAIRN_CPU_LATENCY=keep` asks for nothing, for an
+A/B on the unit. Power: the cores stay in shallow idle only while the device runs. Expected on the
+unit (not measured): `wake` p50 from the 256-512 us bucket to under 64 us, and fewer silent
+blocks at rest. Tested: control-session holds and lets go of a stand-in file, writes the 0,
+keeps one request across a device restart, asks for nothing under `keep`, and goes on when the
+node is absent; devices-fantom-start hands the variable on.
+
 ### Step 4 status
 
 Built 2026-11-13, the owner's first decision. What a missed block does now:

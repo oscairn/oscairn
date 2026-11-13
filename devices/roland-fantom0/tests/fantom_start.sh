@@ -71,6 +71,11 @@ check "the app: the profile's file when the environment has none" "echo \"\$out\
 out=$(OSCAIRN_THP=keep "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "OSCAIRN_THP=keep handed to the engine, last" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm OSCAIRN_THP=keep oscairn-engine-run'"
 check "and not set when the environment has none" "! \"$bundle/oscairn-fantom-start\" --dry-run --engine-only 2>&1 | grep -q OSCAIRN_THP"
+out=$(OSCAIRN_THP=keep OSCAIRN_CPU_LATENCY=keep "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "OSCAIRN_CPU_LATENCY=keep handed to the engine, after OSCAIRN_THP" "echo \"\$out\" | grep -q 'OSCAIRN_THP=keep OSCAIRN_CPU_LATENCY=keep oscairn-engine-run'"
+out=$(OSCAIRN_CPU_LATENCY=keep "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "and to the app" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm OSCAIRN_CPU_LATENCY=keep sh -c'"
+check "and not set when the environment has none" "! \"$bundle/oscairn-fantom-start\" --dry-run --engine-only 2>&1 | grep -q OSCAIRN_CPU_LATENCY"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
 out=$(OSCAIRN_PANEL_DEVICE="$bundle/no-panel" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?

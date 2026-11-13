@@ -1322,6 +1322,13 @@ on the display; `--engine-only` the engine alone.
    pending). `OSCAIRN_THP=keep ./oscairn-fantom-start` hands the variable on the same way and
    leaves them as the kernel has them, for comparing.
 
+   While its audio device runs, the engine holds a request for no CPU wake-up latency
+   (`/dev/cpu_dma_latency`, [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#cpu-wake-up-latency)):
+   cores 1 to 3 otherwise enter `cpu-sleep` (listed exit latency 1500 us) about 40 times a second
+   each while playing, and a worker woken for a block started 330 to 400 us after its hand-over.
+   `OSCAIRN_CPU_LATENCY=keep ./oscairn-fantom-start` hands the variable on the same way and asks for
+   nothing, for comparing.
+
 3. **The kernel beside them,** for comparison, with nothing of Oscairn running but the holder:
 
    ```sh

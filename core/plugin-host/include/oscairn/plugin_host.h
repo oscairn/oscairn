@@ -190,6 +190,14 @@ namespace oscairn
     // before applyMemoryPolicy. OSCAIRN_THP=keep leaves the process as it is. A failure is said once on
     // stderr, as `who`.
     void disableTransparentHugePages(const char* who);
+    // RFC 0045, Linux only, false elsewhere: while the engine's audio device runs, a PM QoS request
+    // for no CPU wake-up latency: `device` held open with a 32-bit 0 written, so idle cores stay out
+    // of deep idle states (the FANTOM-07's cpu-sleep lists a 1.5 ms exit) and a thread woken for a
+    // block runs at once. hold false lets it go (closing the file ends the request). True while held.
+    // OSCAIRN_CPU_LATENCY=keep leaves the cores as the kernel has them, for comparing. A device
+    // absent or not writable is said once on stderr and the engine goes on. Any thread but the audio
+    // callback's (it opens a file).
+    bool holdCpuWakeLatency(bool hold, const char* device = "/dev/cpu_dma_latency");
     // RFC 0035, Linux only: the engine moves itself into the cgroup named by OSCAIRN_AUDIO_CGROUP
     // (the audio cores' isolated cpuset partition, made by the image's session) before it starts
     // any thread or worker, so they all run on the audio cores. Returns what could not be done,

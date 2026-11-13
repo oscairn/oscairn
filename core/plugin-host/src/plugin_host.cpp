@@ -21,6 +21,7 @@
 #include <libproc.h>
 #endif
 #ifdef __linux__
+#include <fcntl.h>
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -256,6 +257,29 @@ namespace oscairn
         if(prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0) != 0) std::fprintf(stderr, "%s: transparent huge pages not disabled (%s)\n", who, std::strerror(errno));
 #else
         (void)who;
+#endif
+    }
+
+    bool holdCpuWakeLatency(bool hold, const char* device)
+    {
+#ifdef __linux__
+        static std::mutex mutex;
+        static int fd = -1;
+        static bool said = false;
+        std::lock_guard lock(mutex);
+        if(!hold) { if(fd >= 0) { ::close(fd); fd = -1; } return false; }
+        if(fd >= 0) return true;
+        if(const char* keep = std::getenv("OSCAIRN_CPU_LATENCY"); keep && std::string(keep) == "keep") return false;
+        fd = ::open(device, O_WRONLY | O_CLOEXEC);
+        const int32_t none = 0;
+        if(fd >= 0 && ::write(fd, &none, sizeof none) == ssize_t(sizeof none)) return true;
+        const int e = errno;
+        if(fd >= 0) { ::close(fd); fd = -1; }
+        if(!said) { said = true; std::fprintf(stderr, "oscairn: no CPU wake-up latency request (%s: %s); idle cores may sleep deeply between blocks\n", device, std::strerror(e)); }
+        return false;
+#else
+        (void)hold; (void)device;
+        return false;
 #endif
     }
 

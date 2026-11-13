@@ -497,6 +497,28 @@ namespace
                "found done past the allowance (the engine's thread woke late) is late, and played" );
         check( blockOutcome( false, false, microseconds( 1333 ), allowance ) == BlockOutcome::silent && blockOutcome( false, false, microseconds( 200 ), allowance ) == BlockOutcome::silent,
                "never found done within the allowance is silent" );
+
+        // The CPU wake-up latency request (RFC 0045), on a file standing in for /dev/cpu_dma_latency.
+        {
+            const auto stand = std::filesystem::temp_directory_path() / ( "oscairn-cpu-latency-" + std::to_string( getpid() ) );
+            const auto file = stand.string();
+            auto bytes = [&] { std::ifstream in( stand, std::ios::binary ); return std::string( std::istreambuf_iterator<char>( in ), {} ); };
+            auto open = [&] { size_t n = 0; for( const auto& f : std::filesystem::directory_iterator( "/proc/self/fd" ) ) { std::error_code e; if( std::filesystem::read_symlink( f, e ) == stand ) ++n; } return n; };
+#ifdef __linux__
+            { std::ofstream( stand ) << ""; }
+            setenv( "OSCAIRN_CPU_LATENCY", "keep", 1 );
+            check( !oscairn::holdCpuWakeLatency( true, file.c_str() ) && bytes().empty(), "OSCAIRN_CPU_LATENCY=keep asks for nothing" );
+            unsetenv( "OSCAIRN_CPU_LATENCY" );
+            check( oscairn::holdCpuWakeLatency( true, file.c_str() ) && bytes() == std::string( 4, '\0' ) && open() == 1, "held: a 32-bit 0 written, the file kept open" );
+            check( oscairn::holdCpuWakeLatency( true, file.c_str() ) && bytes().size() == 4 && open() == 1, "held again (the device restarting): the same request" );
+            check( !oscairn::holdCpuWakeLatency( false, file.c_str() ) && open() == 0, "let go: closed, which ends the request" );
+            std::filesystem::remove( stand );
+            check( !oscairn::holdCpuWakeLatency( true, file.c_str() ) && open() == 0, "a device not here: nothing held, and the engine goes on" );
+#else
+            (void)bytes; (void)open;
+            check( !oscairn::holdCpuWakeLatency( true, file.c_str() ), "Linux only" );
+#endif
+        }
     }
 
     // The session's callback timing from times a host gives it (blockTimes): deterministic

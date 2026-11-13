@@ -53,7 +53,7 @@ namespace oscairn::host
         void audioDeviceIOCallbackWithContext( const float* const* inputs, int numInputs, float* const* outputs, int numOutputs,
                                                int numSamples, const juce::AudioIODeviceCallbackContext& ) override;
         void audioDeviceAboutToStart( juce::AudioIODevice* ) override;
-        void audioDeviceStopped() override { started_=false; }
+        void audioDeviceStopped() override { started_=false; oscairn::holdCpuWakeLatency(false); }
         // MIDI input threads
         void handleIncomingMidiMessage( juce::MidiInput* input, const juce::MidiMessage& message ) override { incoming( message, input, -1 ); }
         // A message from a JUCE input, from raw input `raw` (an index into midiSources_), or from the input numbered `source`.

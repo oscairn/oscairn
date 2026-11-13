@@ -148,6 +148,29 @@ void sleeping(const std::string& worker, const std::string& fixture)
     check(remote->process(nullptr, 0, out, 2, frames, &on, 1, nullptr) && !remote->asleep(), "a note wakes it");
 }
 
+// engine.timing's round trips: every block handed to the worker is timed once, the first
+// warmupBlocks as startup; a reset starts a new window at the next block.
+void roundTrips(const std::string& worker, const std::string& fixture)
+{
+    constexpr uint32_t frames = 64;
+    auto remote = oscairn::loadPluginInWorker(worker, fixture, "org.kick.test.sleep", 48000, frames, oscairn::ProcessingMode::Offline); // no budget to miss on a busy machine
+    std::vector<float> l(frames), r(frames); float* out[]{l.data(), r.data()};
+    auto* timing = remote->roundTrips();
+    check(timing != nullptr, "a plugin in a worker times its round trips");
+    if(!timing) return;
+    const auto blocks = oscairn::BlockTiming::warmupBlocks + 10;
+    for(uint32_t i = 0; i < blocks; ++i) remote->process(nullptr, 0, out, 2, frames, nullptr, 0, nullptr);
+    auto t = timing->read();
+    check(t.startup.count() == oscairn::BlockTiming::warmupBlocks && t.steady.count() == 10, "the first blocks are startup, the rest steady: " +
+          std::to_string(t.startup.count()) + ", " + std::to_string(t.steady.count()));
+    check(t.startup.maxNs > 0 && t.steady.maxNs > 0 && t.seconds > 0, "each round trip takes some time");
+    timing->reset();
+    check(timing->read().steady.count() == 0, "a reset reads empty until the next block");
+    remote->process(nullptr, 0, out, 2, frames, nullptr, 0, nullptr);
+    t = timing->read();
+    check(t.steady.count() == 1 && t.startup.count() == 0, "then holds that block alone");
+}
+
 // The stepped fixture's mode 3 hides its Toggle with an info rescan, which the plugin's host takes
 // in place; through the worker the engine's side sees the new info and a new revision.
 void rescan(const std::string& worker, const std::string& fixture)
@@ -271,7 +294,7 @@ void hostileSizes(const std::string& worker, const std::string& fixture)
 int main(int argc, char** argv)
 {
     if(argc < 4) { std::fprintf(stderr, "usage: %s WORKER PLUGIN... SIZE-HOSTILE-WORKER\n", argv[0]); return 2; }
-    try { libraryRoot(argv[1], argv[2]); renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc - 1; ++i) compare(argv[1], argv[i]); hostileSizes(argv[argc - 1], argv[2]); }
+    try { libraryRoot(argv[1], argv[2]); renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); roundTrips(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc - 1; ++i) compare(argv[1], argv[i]); hostileSizes(argv[argc - 1], argv[2]); }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     return failures ? 1 : 0;
 }

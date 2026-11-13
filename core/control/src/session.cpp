@@ -427,6 +427,23 @@ namespace oscairn
         return result;
     }
 
+    Control::Timing Session::engineTiming(bool reset)
+    {
+        Timing t{callbackTiming_.read(), latenessTiming_.read(), {}};
+        for(const auto& [node,name] : nodes_)
+            if(auto* r = graph_.host(node).roundTrips()) { t.workers.push_back({node, name, r->read()}); if(reset) r->reset(); }
+        if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); }
+        return t;
+    }
+
+    void Session::blockTimes(int64_t start, int64_t end, int64_t period) noexcept
+    {
+        callbackTiming_.record(end - start, start);
+        if(audioStarted_.load(std::memory_order_acquire)) { audioStarted_.store(false, std::memory_order_relaxed); lastStart_ = 0; }
+        if(lastStart_) latenessTiming_.record(start - (lastStart_ + period), start);
+        lastStart_ = start;
+    }
+
     void Session::replace(NodeId node,const std::string& path,const std::string& pluginId,const std::string& preset)
     {
         if(staged_)throw std::invalid_argument("Finish pending graph edits before replacing a plugin");

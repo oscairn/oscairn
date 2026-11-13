@@ -435,9 +435,102 @@ namespace
     }
 }
 
+namespace
+{
+    // engine.timing's histogram (timing.h): its buckets, percentiles, reset and startup window.
+    void histogram()
+    {
+        using oscairn::Histogram;
+        check( Histogram::bucket( -5 ) == 0 && Histogram::bucket( 15'999 ) == 0 && Histogram::bucket( 16'000 ) == 1 && Histogram::bucket( 31'999 ) == 1 &&
+               Histogram::bucket( 32'000 ) == 2 && Histogram::bucket( 2'666'667 ) == 8 && Histogram::bucket( 65'535'999 ) == 12 &&
+               Histogram::bucket( 65'536'000 ) == 13 && Histogram::bucket( int64_t( 1 ) << 40 ) == 13, "buckets by powers of two from 16 us, then overflow" );
+        check( Histogram::upperMicroseconds( 0 ) == 16 && Histogram::upperMicroseconds( 8 ) == 4096 && Histogram::upperMicroseconds( 12 ) == 65536, "bucket bounds" );
+        Histogram h;
+        check( h.percentileMicroseconds( .5 ) == 0, "an empty histogram's percentiles are 0" );
+        h.counts[1] = 98; h.counts[5] = 1; h.counts[13] = 1; h.maxNs = 100'000'000; // 98 in [16, 32) us, one in [256, 512), one at 100 ms
+        check( h.count() == 100 && h.percentileMicroseconds( .5 ) == 32 && h.percentileMicroseconds( .98 ) == 32 && h.percentileMicroseconds( .99 ) == 512 &&
+               h.percentileMicroseconds( .999 ) == 100'000 && h.percentileMicroseconds( 1 ) == 100'000, "a percentile is its bucket's upper bound; past 64 ms, the maximum" );
+        h = {}; h.counts[8] = 1; h.maxNs = 3'000'000;
+        check( h.percentileMicroseconds( .5 ) == 3000, "never more than the maximum" );
+
+        oscairn::BlockTiming t;
+        const auto n = oscairn::BlockTiming::warmupBlocks;
+        for( uint32_t i = 0; i < n; ++i ) t.record( i == 0 ? 3'000'000 : 20'000, 1'000'000'000 + int64_t( i ) * 1'000'000 ); // a one-off at the start
+        for( uint32_t i = 0; i < 100; ++i ) t.record( i == 50 ? 400'000 : 20'000, 1'000'000'000 + int64_t( n + i ) * 1'000'000 );
+        auto s = t.read();
+        check( s.startup.count() == n && s.startup.maxNs == 3'000'000 && s.startup.maxAt == 0, "the first blocks are startup, the one-off with them" );
+        check( s.steady.count() == 100 && s.steady.counts[1] == 99 && s.steady.maxNs == 400'000 && s.steady.maxAt == int64_t( n + 50 ) * 1'000'000, "the steady blocks apart, the time of their maximum from the window's start" );
+        t.reset();
+        check( t.read().steady.count() == 0 && t.read().startup.count() == 0, "a reset reads empty before the next block" );
+        t.record( 50'000, 5'000'000'000 );
+        s = t.read();
+        check( s.steady.count() == 1 && s.steady.maxNs == 50'000 && s.steady.maxAt == 0 && s.startup.count() == 0, "then a window from that block, the startup over" );
+        t.warmUp();
+        t.record( 60'000, 5'001'000'000 );
+        s = t.read();
+        check( s.startup.count() == 1 && s.steady.count() == 1 && s.seconds == .001, "a warm-up's blocks are startup again" );
+    }
+
+    // The session's callback timing from times a host gives it (blockTimes): deterministic
+    // durations and lateness, no allocation on the audio thread, the startup window after a device
+    // start and a Performance load, and the window read and reset through engineTiming.
+    void callbackTiming()
+    {
+        namespace fs = std::filesystem;
+        oscairn::Session session( rate, block );
+        const int64_t period = int64_t( 1e9 * block / rate ); // 10.67 ms
+        std::array<float, block> l{}, r{};
+        float* out[] = { l.data(), r.data() };
+        int64_t start = 7'000'000'000;
+        auto run = [&]( uint32_t blocks, int64_t duration, int64_t late ) {
+            for( uint32_t i = 0; i < blocks; ++i )
+            {
+                start += period + late;
+                forbidAllocation = true;
+                session.process( out, block );
+                session.blockTimes( start, start + duration, period );
+                forbidAllocation = false;
+            }
+        };
+        const auto n = oscairn::BlockTiming::warmupBlocks;
+        run( n, 5'000'000, 0 );
+        run( 99, 100'000, 0 );
+        run( 1, 100'000, 3'000'000 ); // one callback 3 ms late
+        auto t = session.engineTiming( true );
+        check( t.callback.startup.count() == n && t.callback.startup.maxNs == 5'000'000 && t.callback.steady.count() == 100 && t.callback.steady.counts[3] == 100,
+               "the callback's durations: the first blocks startup, the rest steady" );
+        check( t.lateness.startup.count() == n && t.lateness.startup.maxNs == 0 && t.lateness.steady.count() == 99 && t.lateness.steady.maxNs == 3'000'000 &&
+               t.lateness.steady.counts[0] == 98 && t.lateness.steady.counts[8] == 1 && t.workers.empty(), "lateness against the last start plus a period; the first block is late against none" );
+        check( session.engineTiming( false ).callback.steady.count() == 0, "a reset reads empty until the next block" );
+        run( 1, 100'000, -1'000'000 );
+        t = session.engineTiming( false );
+        check( t.callback.steady.count() == 1 && t.lateness.steady.count() == 1 && t.lateness.steady.counts[0] == 1 && t.lateness.steady.maxNs == 0, "early counts as on time" );
+        session.audioStarted();
+        start += 60'000'000'000; // the device was stopped for a minute
+        run( 1, 100'000, 0 );
+        t = session.engineTiming( true );
+        check( t.callback.startup.count() == 1 && t.lateness.steady.count() == 1 && t.lateness.startup.count() == 0, "after a device start, warming up, and late against nothing" );
+
+        const auto home = fs::temp_directory_path() / ( "oscairn-session-timing-" + std::to_string( getpid() ) );
+        fs::remove_all( home );
+        setenv( "OSCAIRN_DATA_HOME", home.c_str(), 1 );
+        run( n, 100'000, 0 );
+        session.savePerformance( ( home / "Saved" ).string() );
+        session.engineTiming( true );
+        session.loadPerformance( ( home / "Saved" ).string() );
+        run( 2, 100'000, 0 );
+        t = session.engineTiming( false );
+        check( t.callback.startup.count() == 2 && t.callback.steady.count() == 0, "a Performance load warms up again" );
+        unsetenv( "OSCAIRN_DATA_HOME" );
+        fs::remove_all( home );
+    }
+}
+
 int main( int argc, char** argv )
 {
     if( argc != 4 ) return 2;
+    histogram();
+    callbackTiming();
     contract( argv[2] );
     referenceRender( argv[1], argv[2], argv[3] );
     midiClock();

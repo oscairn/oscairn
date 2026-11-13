@@ -359,6 +359,8 @@ public:
         if(frames!=frames_)throw std::invalid_argument("A prepared instrument keeps its block size"); // its instances' buffers
         for(const auto& s:desired_.instances)if(s)s->host->reconfigure(rate,frames);rate_=rate;}
     double cpuSeconds() const override {double n=0;for(const auto& s:desired_.instances)if(s)n+=s->host->cpuSeconds();return n;}
+    // shortcut: a pool reports its first instance's round trips only; merge the instances' if pooled instruments need watching.
+    BlockTiming* roundTrips() noexcept override {return base().roundTrips();}
 };
 }
 std::shared_ptr<PluginHost> preparedInstrument(std::shared_ptr<PluginHost> h,double rate,uint32_t frames,ProcessingMode mode,Lv2BufferLimits limits) {

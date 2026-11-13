@@ -805,6 +805,7 @@ namespace oscairn
             }
             uint64_t outputEventDrops() const noexcept override { return shared_->outputDrops.load(std::memory_order_relaxed); }
             const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { count = outputCount_; return output_.data(); }
+            BlockTiming* roundTrips() noexcept override { return &roundTrips_; }
             kick::clap::Statistics statistics() const noexcept override
             {
                 kick::clap::Statistics s;
@@ -975,7 +976,7 @@ namespace oscairn
                 busy_.store(true);
                 auto& s = *shared_;
                 if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) return silence();
-                if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; } // restarted
+                if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; roundTrips_.warmUp(); } // restarted
                 // A block the worker has not finished yet: stay silent rather than queue another.
                 if(s.done.load(std::memory_order_acquire) != sequence_) { workerMisses_.fetch_add(1, std::memory_order_relaxed); return silence(); }
                 for(uint32_t c = 0; c < inChannels_; ++c)
@@ -1016,15 +1017,21 @@ namespace oscairn
                 // The budget counts from the request, however long the caller did other work since.
                 const auto budget = process_->budget;
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
-                const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (std::chrono::steady_clock::now() - sent));
+                const auto checked = std::chrono::steady_clock::now();
+                const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (checked - sent));
+                // The round trip as this thread sees it: done when first found done, or given up.
+                auto roundTrip = [&](std::chrono::steady_clock::time_point seen) { roundTrips_.record(std::chrono::nanoseconds(seen - sent).count(), std::chrono::nanoseconds(seen.time_since_epoch()).count()); };
                 if(!ready && (!waitWhileEqual(s.done, sequence_ - 1, left) || s.done.load(std::memory_order_acquire) != sequence_))
                 {
+                    roundTrip(std::chrono::steady_clock::now());
                     missed();
                     return silence();
                 }
                 // Late by the clock counts toward "too slow" even when the wait itself woke late; a
                 // block done before the caller came for it was not late.
-                if(!ready && std::chrono::steady_clock::now() - sent > budget) missed();
+                const auto seen = ready ? checked : std::chrono::steady_clock::now();
+                roundTrip(seen);
+                if(!ready && seen - sent > budget) missed();
                 else consecutiveMisses_ = 0;
                 for(uint32_t c = 0; c < no; ++c)
                 {
@@ -1153,6 +1160,7 @@ namespace oscairn
             // The block start handed over, for finish.
             float* const* startedOutputs_ = nullptr; uint32_t startedChannels_ = 0, startedFrames_ = 0, startedOffset_ = 0; bool started_ = false;
             std::chrono::steady_clock::time_point sent_{};
+            BlockTiming roundTrips_;
             std::array<kick::clap::Event, maxEvents> chunk_{};
             std::vector<kick::clap::Event> output_, pending_;
             std::unique_ptr<kick::clap::SysexPool> sysexOutput_ = std::make_unique<kick::clap::SysexPool>(); // output_'s SysEx bytes

@@ -525,6 +525,15 @@ namespace oscairn
         m.nextPrepared=boolean(field(r,"nextPrepared"));m.nextCommitted=boolean(field(r,"nextCommitted"));
         return m;
     }
+    Control::Timing RemoteControl::engineTiming(bool reset) {
+        auto d=impl_->call("engine.timing",reset?"{\"reset\":true}":"{}");auto r=field(d.get(),"result");
+        auto histogram=[](V v){Histogram h;size_t i=0;for(auto n:array(field(v,"buckets")))if(i<h.buckets)h.counts[i++]=integer(n);
+            h.maxNs=int64_t(std::llround(number(field(v,"max"))*1e3));h.maxAt=int64_t(std::llround(number(field(v,"maxAt"))*1e9));return h;};
+        auto snapshot=[&](V v){return BlockTiming::Snapshot{histogram(field(v,"steady")),histogram(field(v,"startup")),number(field(v,"seconds"))};};
+        Timing t{snapshot(field(r,"callback")),snapshot(field(r,"lateness")),{}};
+        for(auto w:array(field(r,"workers")))t.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),snapshot(field(w,"roundTrip"))});
+        return t;
+    }
     Control::Estimate RemoteControl::estimate(const std::string& directory) {
         auto d=impl_->call("budget.estimate",directory.empty()?std::string("{}"):"{\"directory\":"+quote(directory)+'}',30000);auto r=field(d.get(),"result");
         Estimate e;e.cpu=number(field(r,"cpu"));e.memory=uint64_t(integer(field(r,"memory")));e.fits=boolean(field(r,"fits"));e.seamless=boolean(field(r,"seamless"));

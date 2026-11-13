@@ -672,6 +672,9 @@ void Session::loadPerformance(const std::string& directory) {
     // Read at the cue, it may take over the playing Performance's free instances where keeping them warm would not fit (RFC 0021); a cut, any of them.
     if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming);
     open(*prepared,seamless);
+    // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
+    callbackTiming_.warmUp();latenessTiming_.warmUp();
+    for(const auto& [n,name]:nodes_)if(auto* r=graph_.host(n).roundTrips())r->warmUp();
     if(!seamless)warm_.clear(); // it cut for want of room: none kept warm (RFC 0025)
     evictOpportunistic();
     if(!keepInstances_)remember(root); // an audition is remembered only once kept

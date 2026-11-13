@@ -633,6 +633,7 @@ namespace oscairn::host
         for(uint32_t i=0;i<required;++i)valid=valid && outputMask[static_cast<int>(i)];
         outputLatencyMs_=(device->getOutputLatencyInSamples()+device->getCurrentBufferSizeSamples())*1000.0/device->getCurrentSampleRate();
         lastCallback_=0;lateCallbacks_=0;realtime_=false;
+        if(session_)session_->audioStarted(); // the constructor's first start: the session starts warming up when made
         // At another rate, silent until service() has the plugins activated again at it, on the control thread.
         const bool moved=std::abs(rate-sampleRate_)>=.5;
         pendingRate_=valid && moved?rate:0;
@@ -694,5 +695,7 @@ namespace oscairn::host
         blockSeconds_   = now;
         lastBlockStart_ = blockSample_;
         blockSample_ += numSamples;
+        // engine.timing: the block's start (the clock read above) and end, on the same clock (CLOCK_MONOTONIC on Linux, to the microsecond; mach_absolute_time on macOS).
+        session_->blockTimes(int64_t(now*1e9),int64_t(juce::Time::getMillisecondCounterHiRes()*1e6),int64_t(1e9*numSamples/sampleRate_));
     }
 }

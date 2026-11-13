@@ -251,6 +251,9 @@ namespace
             check(has(own.call("trust.list"), "needs the system permission") && has(own.call("library.query"), "items"), "its own connection has its grant");
             // The host is unaffected.
             check(has(host.call("graph.get"), "nodes") && has(host.call("trust.list"), "result") && has(host.call("debug.anything"), "Method not found"), "the host is trusted");
+            check(has(app.call("engine.timing"), "engine.timing needs the system permission"), "engine.timing is a system diagnostic");
+            check(has(host.call("engine.timing", R"({"reset":true})"), R"("warmupBlocks":512,"bucketBounds":[16,32,64,)") && has(host.call("engine.timing", R"({"reset":1})"), "-32602") &&
+                  has(host.call("engine.timing", R"({"clear":true})"), "-32602"), "the host reads and resets it; its parameter checked");
         });
         ::unsetenv("OSCAIRN_DATA_HOME");
     }
@@ -438,6 +441,12 @@ namespace
                   memory.running[0].reserve==30 && memory.alwaysAvailable.size()==1 && memory.alwaysAvailable[0].reserve==20,"the memory classes cross the socket");
             remote.appClosed("oscairn.setlist");
             check(remote.memoryState().running.empty(),"and an app closing");
+            // engine.timing: the host's callback times, as the session recorded them, cross the socket.
+            f.session.blockTimes(1'000,301'000,2'666'667);f.session.blockTimes(2'767'667,2'817'667,2'666'667);
+            const auto timing=remote.engineTiming(true);
+            check(timing.callback.startup.count()==2 && timing.callback.startup.maxNs==300'000 && timing.callback.startup.counts[5]==1 && timing.callback.seconds>0 &&
+                  timing.lateness.startup.count()==1 && timing.lateness.startup.maxNs==100'000 && timing.callback.steady.count()==0,"the callback's timing crosses the socket");
+            check(remote.engineTiming(false).callback.startup.count()==0,"and is reset");
             remote.setBudget({});
             check(remote.sessionStatus().audioDevice=="Test device" && remote.sessionStatus().midiInputs==std::vector<MidiEndpoint>{{MidiEndpoint::Kind::Port,3,"Test MIDI",2}},"host status crosses socket");
             check(remote.sessionStatus().audioInputs[0].deviceChannel==2 && !remote.sessionStatus().audioReady && !remote.sessionStatus().audioOutputs[1].available,"device mapping and unavailable channels cross socket");

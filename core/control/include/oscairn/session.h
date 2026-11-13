@@ -55,6 +55,12 @@ namespace oscairn
         Launch launchApp(const AppMemory& app, bool dropNext = false) override;
         void appClosed(const std::string& app) override;
         MemoryState memoryState() override;
+        Timing engineTiming(bool reset) override;
+        /// Audio thread, after each device callback that rendered: when it started and ended and
+        /// the device's period, in nanoseconds on one monotonic clock of the host's (engine.timing).
+        void blockTimes(int64_t start, int64_t end, int64_t period) noexcept;
+        /// The device (re)started: its next callback is late against none, and the next blocks warm up.
+        void audioStarted() noexcept { audioStarted_.store(true, std::memory_order_release); callbackTiming_.warmUp(); latenessTiming_.warmUp(); }
         Estimate estimate(const std::string& directory = {}) override;
         std::vector<std::string> exportPerformance(const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
         std::vector<std::string> exportLibraryItem(const std::string& id, const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
@@ -803,6 +809,10 @@ namespace oscairn
         std::atomic<bool> playing_{ false };
         std::atomic<double> tempo_{ 120.0 };
         std::atomic<Transport::ClockSource> clockSource_{ Transport::ClockSource::Internal };
+        // engine.timing's callback histograms (blockTimes, audio thread) and the last callback's start.
+        BlockTiming callbackTiming_, latenessTiming_;
+        int64_t lastStart_ = 0;
+        std::atomic<bool> audioStarted_{ false };
         std::atomic<bool> statusPlaying_{ false };
         std::atomic<double> statusTempo_{ 120.0 }, statusBeat_{ 0.0 };
 

@@ -222,6 +222,17 @@ namespace oscairn
             bool nextPrepared = false, nextCommitted = false;
         };
         virtual MemoryState memoryState() = 0;
+        // engine.timing: the audio path's timing since the last reset (BlockTiming, timing.h). The
+        // device callback's own duration and its lateness (its start minus the last one's plus a
+        // period; early counts as 0), as the host reports them, and each plugin in a worker's block
+        // round trips. reset: after reading, a new window starts with the next block.
+        struct Timing
+        {
+            BlockTiming::Snapshot callback, lateness;
+            struct Worker { NodeId node = 0; std::string name; BlockTiming::Snapshot roundTrip; };
+            std::vector<Worker> workers;
+        };
+        virtual Timing engineTiming(bool reset) = 0;
         // What a Performance needs: the open one (directory empty) or one in a folder, each plugin
         // at its cost measured on this device or at a default (measured false). fits: within the
         // budget; seamless: within it together with what plays now, so a change to it rings out.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <kick_clap/Host.h>
+#include "oscairn/timing.h"
 #include <array>
 #include <map>
 #include <optional>
@@ -149,6 +150,10 @@ namespace oscairn
         // Control thread: the CPU time, in seconds, a plugin in its own worker has used (its share of
         // the worker's, restarts included); 0 for a plugin in the engine's process.
         virtual double cpuSeconds() const { return 0; }
+        // A plugin in a worker: each block's round trip as the engine sees it, from handing the block
+        // over to finding it done (timing.h; the audio thread records, any thread reads). Null for a
+        // plugin in the engine's process.
+        virtual BlockTiming* roundTrips() noexcept { return nullptr; }
         // Whether the plugin runs in a worker process (RFC 0010); a free instance is taken over only
         // where the placement policy would put a fresh one (RFC 0021).
         virtual bool inWorker() const noexcept { return false; }

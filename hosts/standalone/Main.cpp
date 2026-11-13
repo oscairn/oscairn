@@ -11,7 +11,7 @@
 //
 // --profile names the device it runs on (RFC 0024): a built-in profile (qemu-aarch64, kick, ignite,
 // modx-m) or a file; without it, the computer's own. A panel profile fills the display with no
-// title bar, shows its layout and asks the audio device for its block size; --layout and the
+// title bar, full screen under any window manager; shows its layout and asks the audio device for its block size; --layout and the
 // audio options override it for a run. --play starts the sequencer at launch. --input-mode overrides the saved preference for this run. --snapshot
 // renders the window off screen (no window or splash is shown) to a PNG and quits: at the layout's design size, or as in a window of
 // --size; with --play SECONDS, the sequencer plays for that long first; with --view, the
@@ -21,6 +21,7 @@
 
 #include "Controllers.h"
 #include "DesktopShell.h"
+#include "DeviceScreen.h"
 #include "Engine.h"
 #include "Layout.h"
 #include "LibraryPane.h"
@@ -235,13 +236,15 @@ namespace oscairn::standalone
                 setResizeLimits( 1, 1, 1 << 15, 1 << 15 );
                 if( auto* c = getConstrainer() )
                     c->setFixedAspectRatio( 0.0 );
-                setBounds( juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->logicalBounds.toNearestInt() );
+                fillScreen( *this ); // full screen and undecorated, under a window manager too
                 return;
             }
             centreWithSize( juce::roundToInt( layout.width * scale ), juce::roundToInt( layout.height * scale ) );
         }
 
         void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
+        // A device's screen: no border round it to draw or drag (the window's own, with no native title bar).
+        juce::BorderSize<int> getBorderThickness() const override { return fullScreen_ ? juce::BorderSize<int>() : DocumentWindow::getBorderThickness(); }
 
         void resized() override
         {
@@ -1086,6 +1089,7 @@ namespace oscairn::standalone
             const bool panel = profile.screen() && profile.screen()->surface != "desktop";
             splash_->setBounds( panel ? display->logicalBounds.toNearestInt() : display->userBounds.toNearestInt().withSizeKeepingCentre( 420, 300 ) );
             splash_->addToDesktop( panel ? 0 : juce::ComponentPeer::windowHasDropShadow );
+            if( panel ) fillScreen( *splash_ );
             splash_->setVisible( true );
             splash_->toFront( true ); // over other apps' windows, as a starting app is
         }
@@ -1123,6 +1127,9 @@ namespace oscairn::standalone
             else
                 content->setSize( l.width, l.height ); // one design unit per pixel
             const auto image = content->createComponentSnapshot( content->getLocalBounds(), true, 1.0f );
+            // What the window system would have been asked for (none was: off screen), for desktop-launch.
+            std::fprintf( stderr, "oscairn: top-level windows: %d; the main one %s\n", juce::TopLevelWindow::getNumTopLevelWindows(),
+                          fillsScreen( *window_ ) && !window_->isUsingNativeTitleBar() && window_->getTitleBarHeight() == 0 && window_->getBorderThickness().isEmpty() ? "full screen, undecorated" : "a desktop window" );
             file.deleteFile();
             juce::FileOutputStream out( file );
             if( !out.openedOk() || !juce::PNGImageFormat().writeImageToStream( image, out ) )

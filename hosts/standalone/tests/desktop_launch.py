@@ -18,6 +18,7 @@ throughout each run, and must never hold one of the app's (no splash, no window)
 import ctypes
 import fcntl
 import glob
+import json
 import os
 import re
 import shutil
@@ -172,10 +173,24 @@ def main():
     print(said.stdout.strip())
     # A crash at launch (as with the Apps menu and the null app processes) shows here as a nonzero
     # or signal exit before a PNG is ever written.
-    runs = [('home', ['--size', '900x600']),
-            ('library', ['--app', 'library', '--size', '900x600']),
-            ('kick', ['--profile', 'kick', '--size', '1024x600'])]
-    for name, extra in runs:
+    # Each with the top-level windows it makes and how its main window would ask the window
+    # system for its place, as the app says once off screen: on the desktop the Library is a
+    # window of its own; a device's screen is one window, full screen and undecorated, which its
+    # apps open inside (RFC 0019).
+    desktop, device = 'a desktop window', 'full screen, undecorated'
+    # The FANTOM-07's profile without its audio device, whose 48 kHz the null device does not run at.
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'profiles', 'fantom-07.json')) as f:
+        profile = json.load(f)
+    del profile['audio']['device']
+    fantom = os.path.join(out, 'fantom-07.json')
+    with open(fantom, 'w') as f:
+        json.dump(profile, f)
+    runs = [('home', ['--size', '900x600'], 1, desktop),
+            ('library', ['--app', 'library', '--size', '900x600'], 2, desktop),
+            ('kick', ['--profile', 'kick', '--size', '1024x600'], 1, device),
+            ('fantom', ['--profile', fantom, '--size', '1280x720'], 1, device),
+            ('fantom-library', ['--profile', fantom, '--app', 'library', '--size', '1280x720'], 1, device)]
+    for name, extra, windows, main_window in runs:
         folder = tempfile.mkdtemp(prefix=name + '-', dir=out)
         os.makedirs(os.path.join(folder, 'data'))
         os.makedirs(os.path.join(folder, 'config'))
@@ -219,12 +234,14 @@ def main():
             assert 'oscairn: 0 MIDI ports open in the app' in run.stderr and \
                 not re.search(r'oscairn: [1-9][0-9]* MIDI ports open in the app|MIDI (input|output) "', run.stderr), \
                 f'{name}: the app opened a MIDI port of its own\n{run.stderr}'
+            said = f'oscairn: top-level windows: {windows}; the main one {main_window}'
+            assert said in run.stderr, f'{name}: the app did not say "{said}"\n{run.stderr}'
             png = os.path.join(folder, name + '.png')
             assert os.path.isfile(png) and os.path.getsize(png) > 0, f'{name}: no PNG written\n{run.stderr}'
             width, height, colors = png_pixels(png)
             assert (width, height) == wanted, f'{name}: the PNG is {width}x{height}, not {wanted[0]}x{wanted[1]}'
             assert len(colors) > 1, f'{name}: the PNG is one flat color: the window never drew\n{run.stderr}'
-            print(f'{name}: {width}x{height}, {len(colors)} colors')
+            print(f'{name}: {width}x{height}, {len(colors)} colors, {windows} top-level window(s), the main one {main_window}')
         finally:
             for pid in engines(runtime):
                 stop(pid, runtime)

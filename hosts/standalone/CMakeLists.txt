@@ -107,7 +107,7 @@ if(NOT APPLE)
     install(DIRECTORY "${oscairn_apps}/" DESTINATION share/oscairn/apps USE_SOURCE_PERMISSIONS)
 endif()
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
+target_sources(oscairn_standalone PRIVATE Main.cpp DeviceScreen.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"

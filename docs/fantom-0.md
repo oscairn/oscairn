@@ -733,8 +733,9 @@ its `/tmp`, which `stop-chroot.sh` unmounts):
    `etc/default/oscairn-engine` (written from the profile when the bundle is built: `hw:1,0`,
    six channels, 48 kHz, main on 0 and 1, 128 frames, the keys on `/dev/ttyGS0`, the panel and
    its map), its output in `var/oscairn/log/oscairn-engine.log`.
-7. It waits for the engine's control socket and prints the end of its log, or the log and an
-   error if it did not start. (The bundle has no control client to ask `session.status`.)
+7. It waits for the engine's control socket and asks it for `session.status`
+   (`oscairn-control-request`), all within 20 seconds, and prints the answer, or the end of the
+   engine's log and an error.
 
 Between Roland's app stopping and the engine opening `/dev/ttyGS0` nothing reads the keys' link,
 and Roland's sound engine queues what is not read; after a long gap on the unit it was left with
@@ -745,6 +746,13 @@ not done yet: the app on the
 display (Xwayland's `:0` from the chroot, untried) and USB MIDI (`modprobe snd-usb-audio`,
 outside the chroot). `--dry-run` checks what it can without
 changing anything (another start, Roland's app, who holds the panel) and prints the rest.
+`--cold` is for a boot on which Roland's app never ran ([Starting at power-on](#starting-at-power-on-not-done)):
+nothing to stop, Roland's app running is a failure, and the panel is taken at once. It has a
+marked, disabled place for Roland's start word: when Roland's app starts it sends the panel
+`0c 00 75 00 80 30 00 00 .. 04` (to 0x75 over the link). A takeover after Roland's app had run
+needed none, and the word did not revive a panel that had gone silent; whether a panel that
+Roland's app never woke waits for it is not known, and is to be tried on the unit before the
+step is enabled.
 
 `oscairn-fantom-stop` stops the engine, puts the governors back, and unmounts the chroot. It
 does not turn Local Switch back on: a power cycle does. It
@@ -764,16 +772,44 @@ cd /home/root/oscairn
 
 ## Starting at power-on (not done)
 
-What the owner means to do once Oscairn is stable enough: Roland's start script (`go.sh`) runs
-`oscairn-fantom-start` instead of Roland's app, and the script grows as the steps above get done
-(the display, for one). Before that step is taken it needs:
+What the owner means to do once Oscairn is stable enough: Roland's start script
+(`/home/root/go.sh`) runs Oscairn instead of Roland's app, with a way back to Roland's app at
+every power-on. Nothing is installed for it and `go.sh` is not touched; the pieces are in the
+bundle.
 
-- **A fallback to Roland's app** when Oscairn does not start. Roland's app must be started while
-  nothing has taken the panel: it cannot come back after a stop without a power cycle, so the
-  choice has to be made before Oscairn's script stops or takes anything.
-- **A way for the player to choose Roland's app at power-on**, for example a button held while
-  it starts, read from the GPIO keys (WRITE, MENU and TEMPO are on `/dev/input/event1`).
-- **Recovery:** Roland's update procedure reinstalls `go.sh`, which takes the unit back to stock.
+`go.sh` does, in order: `swapon /swapfile`; reads GPIO138 (1 starts the factory test tool
+instead of the app); stops `systemd-timesyncd` and sets the date from `/home/root/date.txt`; one
+`memtool` register write; `modprobe libcomposite`, `g_serial` and `tickgen`; `sleep 1`; then,
+with `XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0`, runs `/home/root/mi078`.
+`oscairn-fantom-boot` ([source](../devices/roland-fantom0/bundle/oscairn-fantom-boot)) is meant
+to take that last line's place, after everything before it has run:
+
+1. **Roland's app when asked for:** MENU held at power-on (read with `oscairn-key-held`, which
+   asks `gpio-keys` for key 139's state once, read-only; WRITE held at power-on is the
+   bootloader's update mode, so MENU is the choice key), or the file
+   `var/oscairn/stock-next-boot` in the bundle (removed as it is honored: one boot of Roland's
+   app), or MENU that cannot be read. It then starts Roland's app as `go.sh` does.
+2. **Otherwise Oscairn:** `oscairn-fantom-start --cold`.
+3. **The fallback:** if that fails, the engine not answering `session.status` within 20 seconds
+   among the failures, it runs `oscairn-fantom-stop --panel` and starts Roland's app, logging
+   why. It never starts Roland's app while a process still holds `/dev/i2c-slave-2`.
+
+The fallback is best effort: started again after it had run earlier in the same boot, Roland's
+app showed "program version error", and whether it starts cleanly after Oscairn has used the
+link first (Local Switch among it) is not tried. The sure way back is holding MENU at the next
+power-on. `oscairn-key-held` itself has not run on the unit (its bit lookup is tested); it
+answers 2, and so Roland's app, when it cannot read MENU.
+
+The change the owner would make by hand, when he decides to: in `/home/root/go.sh`, replace the
+last line, `/home/root/mi078` (with its environment), by
+
+```sh
+XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 /home/root/oscairn/oscairn-fantom-boot
+```
+
+(the bundle's folder as unpacked). To undo it, put the line back; Roland's update procedure also
+reinstalls `go.sh`. `./oscairn-fantom-boot --dry-run` reads MENU (mounting the chroot to run
+`oscairn-key-held`) and the one-shot file, and prints what it would do.
 
 ## The panel reader
 
@@ -1036,9 +1072,10 @@ work left open, then older checks still to do.
    link). Trying it needs Roland's app kept from starting (for example `go.sh` changed for one
    boot); if the panel stays silent, the start words are what wakes it, which would need a
    write. Tonight's takeovers all followed Roland's app.
-3. **WRITE, MENU and TEMPO** (GPIO keys on `/dev/input/event1`, read by nothing yet) and the
-   buttons not yet pressed: each should count on its own line in `/proc/interrupts` (`Write`,
-   `Menu`, `Tempo`) and the rest show in the dump.
+3. **The buttons not yet pressed:** each should show in the dump. WRITE, MENU and TEMPO were
+   seen on November 12 as `gpio-keys` on `/dev/input/event1` (codes 157, 139 and 152, a press 1
+   and a release 0, with Roland's app stopped); Oscairn reads MENU only, at power-on
+   ([Starting at power-on](#starting-at-power-on-not-done)).
 4. **Levels and outputs:** which channel pair feeds which jack (MAIN OUT is not measured; SUB
    OUT gets none by default), and the pairs' levels against each other, at low volume, one pair
    at a time (`--audio-outputs 0,1`, then `2,3`, then `4,5`); and whether `--device-channels 16`
@@ -1101,7 +1138,8 @@ Older, still open:
 ## Building it into an image
 
 `-DOSCAIRN_ROLAND_FANTOM0=ON` links the readers from `devices/roland-fantom0/` into the engine
-(and the app's panel handling) and installs `oscairn-panel-holder`, `oscairn-panel-dump` and the
-map in `share/oscairn/panels/`; Buildroot also puts `oscairn-fantom-start` and
-`oscairn-fantom-stop` in the bundle's top folder. Buildroot passes it
+(and the app's panel handling) and installs `oscairn-panel-holder`, `oscairn-panel-dump`,
+`oscairn-key-held`, `oscairn-control-request` and the map in `share/oscairn/panels/`; Buildroot
+also puts `oscairn-fantom-start`, `oscairn-fantom-stop` and `oscairn-fantom-boot` in the
+bundle's top folder. Buildroot passes it
 when a defconfig sets `BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0`, as the chroot bundle's does.

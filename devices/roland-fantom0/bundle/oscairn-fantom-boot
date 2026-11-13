@@ -1,0 +1,83 @@
+#!/bin/sh
+# What Roland's start script (/home/root/go.sh) would run in place of its application, as its
+# last line, once the owner changes it by hand (docs/fantom-0.md, "Starting at power-on").
+# Nothing calls it yet. By then go.sh has turned swap on, read the factory-test GPIO, set the date,
+# written its register and loaded libcomposite, g_serial and tickgen.
+#
+#   1. Roland's application instead, when MENU is held (gpio-keys, key 139; WRITE held at power-on
+#      is the bootloader's update mode), or the file var/oscairn/stock-next-boot exists (removed
+#      as it is honored), or MENU cannot be read.
+#   2. Otherwise oscairn-fantom-start --cold: Roland's application never ran this boot.
+#   3. If that fails (the engine not answering session.status within 20 seconds among it), what it
+#      started is stopped, the panel holder too, and Roland's application is started instead.
+#
+# The fallback is best effort: started again after it had run earlier in the same boot, Roland's
+# application showed "program version error"; whether it starts cleanly after Oscairn has used
+# the link first is not tried. It is never started while another process holds the panel's
+# device (a second open can crash the kernel). The sure way back is holding MENU at the next
+# power-on; Roland's update procedure reinstalls go.sh.
+#
+# Logged to stdout and var/oscairn/log/oscairn-fantom.log.
+#
+#   ./oscairn-fantom-boot [--dry-run]
+#
+# --dry-run reads MENU (mounting the chroot to run oscairn-key-held) and the one-shot file, and
+# prints what it would do.
+set -u
+root=$(cd "$(dirname "$0")" && pwd)
+dry=""
+case "${1:-}" in
+--dry-run) dry=1 ;;
+"") ;;
+*) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
+esac
+# Stand-ins for a test, off the unit; on the unit these are left unset.
+key_held=${OSCAIRN_KEY_HELD:-'"$root/start-chroot.sh" /usr/bin/oscairn-key-held gpio-keys 139'}
+panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
+state=$root/var/oscairn
+log=$state/log/oscairn-fantom.log
+[ -n "$dry" ] || mkdir -p "$state/log"
+
+say() {
+	echo "oscairn-fantom-boot: $*"
+	[ -n "$dry" ] || echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $*" >> "$log"
+}
+holding() {
+	for f in /proc/[0-9]*/fd/*; do
+		case "$(readlink "$f" 2>/dev/null)" in *"$1") p=${f#/proc/}; echo "${p%%/*}" ;; esac
+	done | sort -u
+}
+# Roland's application, as go.sh starts it; it does not return.
+roland() {
+	say "Roland's application: $1"
+	others=$(holding "$panel")
+	if [ -n "$others" ]; then
+		say "process $(echo $others) still holds $panel; Roland's application is not started (a second open can crash the kernel)"
+		exit 1
+	fi
+	if [ -n "$dry" ]; then say "would run: /home/root/mi078"; exit 0; fi
+	XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 exec /home/root/mi078
+}
+
+# 1. Roland's application when asked for.
+eval "$key_held"
+held=$?
+[ $held -ne 0 ] || roland "MENU is held"
+[ $held -eq 1 ] || roland "MENU cannot be read (oscairn-key-held exited $held)"
+if [ -e "$state/stock-next-boot" ]; then
+	if [ -n "$dry" ]; then say "would remove $state/stock-next-boot"; else rm -f "$state/stock-next-boot"; fi
+	roland "stock-next-boot was set"
+fi
+
+# 2. Oscairn.
+say "starting Oscairn"
+if [ -n "$dry" ]; then
+	"$root/oscairn-fantom-start" --dry-run --cold && exit 0
+	roland "oscairn-fantom-start --dry-run --cold failed"
+fi
+"$root/oscairn-fantom-start" --cold && exit 0
+
+# 3. The fallback.
+say "oscairn-fantom-start failed; stopping what it started"
+"$root/oscairn-fantom-stop" --panel
+roland "Oscairn did not start"

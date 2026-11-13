@@ -1,20 +1,22 @@
 #!/bin/sh
-# oscairn-fantom-start and -stop off the unit (Linux: they read /proc): both parse, and their
-# --dry-run, in a stand-in bundle with a temporary file as the panel's device, prints the steps
-# with the profile's engine options, and refuses while another process has the device open.
+# oscairn-fantom-start, -stop and -boot off the unit (Linux: they read /proc): all parse, and
+# their --dry-run, in a stand-in bundle with a temporary file as the panel's device, prints the
+# steps with the profile's engine options and refuses while another process has the device open;
+# boot, with stand-ins for oscairn-key-held's three answers and the one-shot file, picks Roland's
+# application or Oscairn.
 #   fantom_start.sh SCRIPTS_DIR
 set -u
 scripts=$1
 fail=0
 check() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1"; fail=1; fi; }
 
-for s in oscairn-fantom-start oscairn-fantom-stop; do
+for s in oscairn-fantom-start oscairn-fantom-stop oscairn-fantom-boot; do
 	check "$s parses" "sh -n '$scripts/$s'"
 done
 
 bundle=$(mktemp -d)
 trap 'kill $holder 2>/dev/null; rm -rf "$bundle"' EXIT
-cp "$scripts/oscairn-fantom-start" "$scripts/oscairn-fantom-stop" "$bundle/"
+cp "$scripts/oscairn-fantom-start" "$scripts/oscairn-fantom-stop" "$scripts/oscairn-fantom-boot" "$bundle/"
 printf '#!/bin/sh\necho start-chroot ran >> "$(dirname "$0")/ran"\n' > "$bundle/start-chroot.sh"
 printf '#!/bin/sh\necho stop-chroot ran >> "$(dirname "$0")/ran"\n' > "$bundle/stop-chroot.sh"
 chmod +x "$bundle"/*
@@ -41,4 +43,24 @@ out=$("$bundle/oscairn-fantom-stop" --dry-run 2>&1); status=$?
 check "the stop's dry run" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: $bundle/stop-chroot.sh' && echo \"\$out\" | grep -q 'program version error'"
 check "and changes nothing" "[ ! -e '$bundle/ran' ]"
 check "a wrong option is refused" "! '$bundle/oscairn-fantom-start' --now > /dev/null 2>&1"
+out=$("$bundle/oscairn-fantom-start" --dry-run --cold 2>&1); status=$?
+check "--cold: nothing to stop, the rest as usual" "[ $status = 0 ] && ! echo \"\$out\" | grep -q weston-term && echo \"\$out\" | grep -q 'oscairn-panel-holder'"
+
+boot() { out=$(OSCAIRN_KEY_HELD="sh -c 'exit $1'" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
+boot 0
+check "boot, MENU held: Roland's application" "[ $status = 0 ] && echo \"\$out\" | grep -q 'MENU is held' && echo \"\$out\" | grep -q 'would run: /home/root/mi078' && ! echo \"\$out\" | grep -q 'starting Oscairn'"
+boot 2
+check "boot, MENU unreadable: Roland's application" "[ $status = 0 ] && echo \"\$out\" | grep -q 'MENU cannot be read' && echo \"\$out\" | grep -q 'would run: /home/root/mi078'"
+boot 1
+check "boot, MENU up: Oscairn, cold" "[ $status = 0 ] && echo \"\$out\" | grep -q 'starting Oscairn' && echo \"\$out\" | grep -q 'oscairn-engine-run' && ! echo \"\$out\" | grep -q mi078"
+mkdir -p "$bundle/var/oscairn" && : > "$bundle/var/oscairn/stock-next-boot"
+boot 1
+check "boot, stock-next-boot: Roland's application, the file removed when it is honored" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would remove' && echo \"\$out\" | grep -q 'stock-next-boot was set' && [ -e '$bundle/var/oscairn/stock-next-boot' ]"
+rm -f "$bundle/var/oscairn/stock-next-boot"
+sh -c 'exec 3< "$1"; exec sleep 30' sh "$OSCAIRN_PANEL_DEVICE" &
+holder=$!
+sleep 0.3
+boot 0
+check "boot never starts Roland's application while the panel is held" "[ $status = 1 ] && echo \"\$out\" | grep -q 'still holds' && ! echo \"\$out\" | grep -q 'would run: /home/root/mi078'"
+kill $holder
 exit $fail

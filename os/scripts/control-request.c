@@ -2,7 +2,9 @@
  *
  * control-request SOCKET REQUEST...: sends each JSON-RPC request line to an Oscairn control socket
  * and prints each response line. boot-test.py builds it for the image and types it into the guest
- * to read session.status there; it is not part of the image. */
+ * to read session.status there; it is not part of an image, but for the FANTOM-0's bundle, whose
+ * scripts ask the engine for session.status with it (devices/roland-fantom0, as
+ * oscairn-control-request). */
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>

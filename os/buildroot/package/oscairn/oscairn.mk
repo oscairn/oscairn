@@ -30,11 +30,12 @@ endif
 
 ifeq ($(BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0),y)
 OSCAIRN_CONF_OPTS += -DOSCAIRN_ROLAND_FANTOM0=ON
-# Its start and stop scripts, run from the bundle's folder outside the chroot, beside
+# Its start, stop and boot scripts, run from the bundle's folder outside the chroot, beside
 # start-chroot.sh (devices/roland-fantom0/bundle).
 define OSCAIRN_INSTALL_FANTOM0_SCRIPTS
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-start $(TARGET_DIR)/oscairn-fantom-start
 	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-stop $(TARGET_DIR)/oscairn-fantom-stop
+	$(INSTALL) -D -m 0755 $(@D)/devices/roland-fantom0/bundle/oscairn-fantom-boot $(TARGET_DIR)/oscairn-fantom-boot
 endef
 OSCAIRN_POST_INSTALL_TARGET_HOOKS += OSCAIRN_INSTALL_FANTOM0_SCRIPTS
 else

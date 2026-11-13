@@ -35,8 +35,15 @@ target_compile_options(oscairn-bmc-link-test PRIVATE -Wall -Wextra)
 add_test(NAME engine-bmc-link COMMAND oscairn-bmc-link-test)
 set_tests_properties(engine-bmc-link PROPERTIES TIMEOUT 30)
 
-# The bundle's start and stop scripts, dry, in a stand-in bundle (they read /proc).
+# oscairn-key-held's bit lookup, everywhere; the tool itself reads Linux input devices.
+add_executable(oscairn-key-held-test tests/key_held_test.c)
+add_test(NAME devices-key-held COMMAND oscairn-key-held-test)
+# The bundle's start, stop and boot scripts, dry, in a stand-in bundle (they read /proc).
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(oscairn-key-held tools/key_held.c)
+    target_compile_options(oscairn-key-held PRIVATE -Wall -Wextra)
+    # The scripts ask the engine for session.status with it (os/scripts/control-request.c).
+    add_executable(oscairn-control-request ${PROJECT_SOURCE_DIR}/os/scripts/control-request.c)
     add_test(NAME devices-fantom-start COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/fantom_start.sh ${CMAKE_CURRENT_SOURCE_DIR}/bundle)
     set_tests_properties(devices-fantom-start PROPERTIES TIMEOUT 30)
 endif()
@@ -48,5 +55,8 @@ if(OSCAIRN_ROLAND_FANTOM0)
     target_link_libraries(oscairn_roland_fantom0 PUBLIC oscairn_panel Threads::Threads)
     target_compile_options(oscairn_roland_fantom0 PRIVATE -Wall -Wextra)
     install(TARGETS oscairn-panel-dump oscairn-panel-holder RUNTIME DESTINATION bin)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        install(TARGETS oscairn-key-held oscairn-control-request RUNTIME DESTINATION bin)
+    endif()
     install(FILES panels/fantom-07.json DESTINATION share/oscairn/panels)
 endif()

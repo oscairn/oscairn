@@ -21,7 +21,8 @@
 #      opens /dev/ttyGS0 the engine tells Roland's sound engine Local Switch off (the profile's
 #      keyboard.localOff), so it does not sound the keys under Oscairn; Roland's application has
 #      stopped by then. It stays off until a power cycle;
-#   7. reports whether the engine came up, with its log's last lines.
+#   7. reports whether the engine came up: its session.status, asked within 20 seconds of its
+#      start, or its log's last lines and a failure.
 #
 # Between Roland's application stopping and the engine opening /dev/ttyGS0 nothing reads the
 # keys' link; Roland's sound engine then queues what is not read, and after a long gap on the
@@ -30,18 +31,22 @@
 # Each step is logged here and to var/oscairn/log/oscairn-fantom.log in the bundle (the bundle's
 # var/log is a link to its /tmp, which stop-chroot.sh unmounts). oscairn-fantom-stop stops it.
 #
-#   ./oscairn-fantom-start [--dry-run]
+#   ./oscairn-fantom-start [--dry-run] [--cold]
 #
 # --dry-run checks what it can without changing anything (another start, Roland's application,
-# who holds the panel) and prints the steps it would take instead of taking them.
+# who holds the panel) and prints the steps it would take instead of taking them. --cold is for
+# a boot on which Roland's application never ran (oscairn-fantom-boot): there is nothing to stop,
+# and Roland's application running is a failure.
 set -u
 root=$(cd "$(dirname "$0")" && pwd)
-dry=""
-case "${1:-}" in
---dry-run) dry=1 ;;
-"") ;;
-*) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
-esac
+dry="" cold=""
+for a in "$@"; do
+	case "$a" in
+	--dry-run) dry=1 ;;
+	--cold) cold=1 ;;
+	*) echo "usage: $0 [--dry-run] [--cold]" >&2; exit 2 ;;
+	esac
+done
 # Stand-ins for a test, off the unit; on the unit these are left unset.
 panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
 proc=${OSCAIRN_PROC:-/proc}
@@ -80,7 +85,9 @@ say "mounting the bundle's /proc, /sys, /dev, /run and /tmp"
 run "$root/start-chroot.sh" true || fail "start-chroot.sh failed"
 
 # 3. Roland's application.
-if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston-term; then
+if [ -n "$cold" ]; then
+	[ -z "$(named mi078)" ] || fail "--cold, but Roland's application (mi078) runs"
+elif command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston-term; then
 	say "stopping Roland's application (systemctl stop weston-term)"
 	run systemctl stop weston-term || fail "systemctl stop weston-term failed"
 elif [ -n "$(named mi078)" ]; then
@@ -121,6 +128,13 @@ else
 	fi
 fi
 
+# The start word, on a boot on which Roland's application never ran: when Roland's application
+# starts it sends the panel 0c 00 75 00 80 30 00 00 .. 04 (to 0x75 over /dev/ttyGS0). A takeover
+# after Roland's application had run needed none, and the word did not revive a panel that had
+# gone silent; whether a cold panel waits for it is not known. Disabled: to be tried on the unit
+# before it is enabled.
+# [ -n "$cold" ] && send the start word here
+
 # -- Not done yet; each goes here when it is known: --------------------------------------------
 # Oscairn's app on the display: Weston and Xwayland keep running; the app as an X11 client on :0
 #   from the chroot (Xwayland's abstract socket) is untried.
@@ -152,15 +166,23 @@ eval "set -- $OSCAIRN_ENGINE_ARGS"
 	>> "$state/log/oscairn-engine.log" 2>&1 &
 echo $! > "$state/run/engine.pid"
 
-# 7. Whether it came up.
+# 7. Whether it came up: its control socket, then an answer to session.status, all within 20
+# seconds (the request is killed if it hangs).
+broke() { tail -n 20 "$state/log/oscairn-engine.log"; fail "$1 (var/oscairn/log/oscairn-engine.log)"; }
 i=0
 until [ -S "$root/run/oscairn/engine.sock" ]; do
 	i=$((i + 1))
-	if [ $i -gt 150 ] || ! kill -0 "$(cat "$state/run/engine.pid")" 2>/dev/null; then
-		tail -n 20 "$state/log/oscairn-engine.log"
-		fail "the engine did not start (var/oscairn/log/oscairn-engine.log)"
-	fi
+	[ $i -le 150 ] && kill -0 "$(cat "$state/run/engine.pid")" 2>/dev/null || broke "the engine did not start"
 	nap
 done
-tail -n 5 "$state/log/oscairn-engine.log"
+"$root/start-chroot.sh" /usr/bin/oscairn-control-request /run/oscairn/engine.sock '{"jsonrpc":"2.0","id":1,"method":"session.status"}' \
+	> "$state/run/status" 2>&1 &
+request=$!
+while kill -0 $request 2>/dev/null; do
+	i=$((i + 1))
+	[ $i -le 200 ] || { kill $request 2>/dev/null; break; }
+	nap
+done
+wait $request && grep -q '"result"' "$state/run/status" || broke "the engine does not answer session.status"
+say "session.status: $(cut -c1-400 "$state/run/status")"
 say "the engine runs (pid $(cat "$state/run/engine.pid")); its control socket is $root/run/oscairn/engine.sock"

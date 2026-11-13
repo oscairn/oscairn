@@ -164,13 +164,14 @@ done
 # 6. The app, or the engine alone, with the profile's options. The cores its audio threads keep to: this script's
 # environment's OSCAIRN_AUDIO_THREAD_CORES ("1-3"), else the file's (the profile's
 # compute.audioThreadCores); none, anywhere. OSCAIRN_WORKER_BUDGET_US and
-# OSCAIRN_WORKER_EXTRA_BLOCK (RFC 0045) are handed over the same way. start-chroot.sh passes no
+# OSCAIRN_WORKER_EXTRA_BLOCK (RFC 0045) and OSCAIRN_THP (keep: transparent huge pages left on, for
+# measuring) are handed over the same way. start-chroot.sh passes no
 # environment on, so they are handed over here.
-cores=${OSCAIRN_AUDIO_THREAD_CORES:-} budget=${OSCAIRN_WORKER_BUDGET_US:-} extra=${OSCAIRN_WORKER_EXTRA_BLOCK:-}
+cores=${OSCAIRN_AUDIO_THREAD_CORES:-} budget=${OSCAIRN_WORKER_BUDGET_US:-} extra=${OSCAIRN_WORKER_EXTRA_BLOCK:-} thp=${OSCAIRN_THP:-}
 [ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"
 cores=${cores:-${OSCAIRN_AUDIO_THREAD_CORES:-}}
-budget=${budget:-${OSCAIRN_WORKER_BUDGET_US:-}} extra=${extra:-${OSCAIRN_WORKER_EXTRA_BLOCK:-}}
-tuning="${budget:+OSCAIRN_WORKER_BUDGET_US=$budget }${extra:+OSCAIRN_WORKER_EXTRA_BLOCK=$extra }" # unquoted below: no spaces in a value
+budget=${budget:-${OSCAIRN_WORKER_BUDGET_US:-}} extra=${extra:-${OSCAIRN_WORKER_EXTRA_BLOCK:-}} thp=${thp:-${OSCAIRN_THP:-}}
+tuning="${budget:+OSCAIRN_WORKER_BUDGET_US=$budget }${extra:+OSCAIRN_WORKER_EXTRA_BLOCK=$extra }${thp:+OSCAIRN_THP=$thp }" # unquoted below: no spaces in a value
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
 rm -f "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
 # The app, on a profile with a screen (OSCAIRN_HEADLESS=0): Weston and Xwayland keep running

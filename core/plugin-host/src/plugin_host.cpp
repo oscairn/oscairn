@@ -23,9 +23,11 @@
 #ifdef __linux__
 #include <pthread.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #endif
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <stdexcept>
@@ -243,6 +245,17 @@ namespace oscairn
         uint64_t pages = 0, resident = 0;
         if(!(statm >> pages >> resident)) return 0;
         return resident * uint64_t(sysconf(_SC_PAGESIZE));
+#endif
+    }
+
+    void disableTransparentHugePages(const char* who)
+    {
+#ifdef __linux__
+        const char* keep = std::getenv("OSCAIRN_THP");
+        if(keep && std::string(keep) == "keep") return;
+        if(prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0) != 0) std::fprintf(stderr, "%s: transparent huge pages not disabled (%s)\n", who, std::strerror(errno));
+#else
+        (void)who;
 #endif
     }
 

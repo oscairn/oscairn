@@ -34,6 +34,7 @@ int main(int argc,char** argv)
     } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 2;}
     if(socket.empty()){std::cerr<<"--socket is required; its parent must be a private directory owned by this user\n";return 2;}
     std::signal(SIGINT,[](int){stopping=1;});std::signal(SIGTERM,[](int){stopping=1;});
+    oscairn::disableTransparentHugePages("oscairn-engine"); // the workers it starts inherit it
     // RFC 0035: on the audio cores before any thread or worker starts, so all of them are there.
     if(const auto missed=oscairn::applyCpuPolicy();!missed.empty())std::cerr<<"oscairn-engine: "<<missed<<'\n';
     // RFC 0025: at instrument and above, locked and last in the out-of-memory order (not -1000: it may be the leak).

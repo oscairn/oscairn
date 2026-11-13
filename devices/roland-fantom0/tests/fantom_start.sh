@@ -64,8 +64,13 @@ check "the environment's first" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_BUDGET
 printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
 out=$(OSCAIRN_WORKER_BUDGET_US=2000 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog "$bundle/oscairn-fantom-start" --dry-run 2>&1)
 check "the app: the worker budget and extra block, after the cores" "echo \"\$out\" | grep -q 'setsid env DISPLAY=:0 OSCAIRN_AUDIO_THREAD_CORES=2,3 OSCAIRN_WORKER_BUDGET_US=2000 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog sh -c'"
+out=$(OSCAIRN_THP=keep "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "OSCAIRN_THP=keep handed to the app, last" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm OSCAIRN_THP=keep sh -c'"
 out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1)
 check "the app: the profile's file when the environment has none" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_BUDGET_US=2400 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm sh -c'"
+out=$(OSCAIRN_THP=keep "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "OSCAIRN_THP=keep handed to the engine, last" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm OSCAIRN_THP=keep oscairn-engine-run'"
+check "and not set when the environment has none" "! \"$bundle/oscairn-fantom-start\" --dry-run --engine-only 2>&1 | grep -q OSCAIRN_THP"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
 out=$(OSCAIRN_PANEL_DEVICE="$bundle/no-panel" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?

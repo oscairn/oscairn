@@ -1311,6 +1311,12 @@ on the display; `--engine-only` the engine alone.
    way, for the app and for `--engine-only`: its own environment's value first, else the file's.
    For example `OSCAIRN_WORKER_BUDGET_US=2000 ./oscairn-fantom-start`.
 
+   Oscairn's engine and workers turn transparent huge pages off for themselves at their start
+   (`prctl(PR_SET_THP_DISABLE)`; khugepaged's scan, every 10.24 s, stalled a worker's audio thread
+   for 5 to 23 ms, [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md); confirmation trial
+   pending). `OSCAIRN_THP=keep ./oscairn-fantom-start` hands the variable on the same way and
+   leaves them as the kernel has them, for comparing.
+
 3. **The kernel beside them,** for comparison, with nothing of Oscairn running but the holder:
 
    ```sh

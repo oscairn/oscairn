@@ -307,6 +307,19 @@ worker, comes out one block after the same graph without it, in waves and one st
 A Performance change needs nothing more: a new instance starts with nothing to play, and one
 retiring plays its last blocks a block late like the rest (reasoned, not tested).
 
+### Transparent huge pages stall a worker's audio thread
+
+Measured on the FANTOM-07 on 2026-11-13 (Linux 4.19, memory locked, audio threads SCHED_FIFO,
+transparent huge pages on `madvise`): every 10.24 s, the grid of khugepaged's scan (`scan_sleep`
+10 s), a worker's audio thread stalls for 5 to 23 ms while not running (its CPU time is a
+fraction of the block's wall time, with one page fault per context switch). That fits
+khugepaged holding the process's mmap lock while it collapses a 2 MB range, the audio thread
+blocking in a page fault; the workers' 2 MB heap regions and 16 MB of the engine's carry the
+`hg` flag. The fix, `disableTransparentHugePages` (`prctl(PR_SET_THP_DISABLE)`, from the engine,
+which its workers inherit, and again from each worker's start), is built; `OSCAIRN_THP=keep`
+leaves a process as it is, for measuring. Confirmation trial (transparent huge pages off
+system-wide, then this change) pending.
+
 ## Core placement
 
 What the device showed: interrupts on core 0, nothing pinned, and the display's software

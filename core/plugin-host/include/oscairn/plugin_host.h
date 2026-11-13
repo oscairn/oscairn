@@ -174,6 +174,12 @@ namespace oscairn
     // the out-of-memory killer's order (oom_score_adj: the engine -999, a worker 300). Returns what
     // could not be done, empty when everything asked was done or nothing was asked.
     std::string applyMemoryPolicy(int oomScoreAdj);
+    // Linux only, a no-op elsewhere: the process (and the processes it starts) never has its memory backed
+    // by transparent huge pages, so khugepaged's collapse of a 2 MB range cannot hold the process's
+    // mmap lock while an audio thread faults (RFC 0045). Before the process allocates audio memory and
+    // before applyMemoryPolicy. OSCAIRN_THP=keep leaves the process as it is. A failure is said once on
+    // stderr, as `who`.
+    void disableTransparentHugePages(const char* who);
     // RFC 0035, Linux only: the engine moves itself into the cgroup named by OSCAIRN_AUDIO_CGROUP
     // (the audio cores' isolated cpuset partition, made by the image's session) before it starts
     // any thread or worker, so they all run on the audio cores. Returns what could not be done,

@@ -30,6 +30,7 @@ int main(int argc, char** argv)
         rlimit r{space, space}; setrlimit(RLIMIT_AS, &r);
     }
 #endif
+    oscairn::disableTransparentHugePages("oscairn-plugin-worker"); // before the memory is locked or allocated
     // RFC 0025: locked at instrument and above; a committed plugin's worker after the apps in the
     // out-of-memory order, since RFC 0010 restarts it.
     if(const auto missed = oscairn::applyMemoryPolicy(300); !missed.empty() && std::getenv("OSCAIRN_RELIABILITY"))

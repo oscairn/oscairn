@@ -13,11 +13,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <thread>
 #include <unistd.h>
 #ifdef __linux__
 #include <pthread.h>
+#include <sys/prctl.h>
 #endif
 
 using namespace oscairn;
@@ -300,6 +302,48 @@ int main(int argc, char** argv)
             pthread_attr_destroy(&defaults);
             std::printf("instrument level here: %s\n", missed.empty() ? "locked, oom_score_adj -999" : missed.c_str());
             unsetenv("OSCAIRN_RELIABILITY");
+        }
+        // RFC 0045: a worker disables transparent huge pages itself unless OSCAIRN_THP=keep. The kernel
+        // reports it as THP_enabled in /proc/PID/status from 5.0; before, this process's own flag is read.
+        // This process must not set it first: the workers would inherit it and prove nothing.
+        {
+            auto workers = [] {
+                std::set<std::string> found;
+                for(const auto& e : std::filesystem::directory_iterator("/proc"))
+                {
+                    std::ifstream cmdline(e.path().string() + "/cmdline"); std::string name; std::getline(cmdline, name, '\0');
+                    if(name.find("oscairn-plugin-worker") != std::string::npos) found.insert(e.path().string());
+                }
+                return found;
+            };
+            auto thp = [](const std::string& dir) {
+                std::ifstream in(dir + "/status"); std::string line;
+                while(std::getline(in, line)) if(line.rfind("THP_enabled:", 0) == 0) return std::atoi(line.c_str() + 12);
+                return -1;
+            };
+            auto newWorker = [&](const char* thpMode) {
+                if(thpMode) setenv("OSCAIRN_THP", thpMode, 1); else unsetenv("OSCAIRN_THP");
+                const auto before = workers();
+                auto host = loadPluginInWorker(argv[1], argv[3], "org.kick.test.memory", 48000, frames);
+                std::string dir;
+                for(const auto& w : workers()) if(!before.count(w)) dir = w;
+                const int value = dir.empty() ? -2 : thp(dir);
+                host.reset(); unsetenv("OSCAIRN_THP");
+                return value;
+            };
+            const int kept = newWorker("keep"), disabled = newWorker(nullptr);
+            check(kept != -2 && disabled != -2, "the test found its workers");
+            if(kept == -1) std::puts("this kernel has no THP_enabled line (before 5.0): worker flag not read");
+            else
+            {
+                check(kept == 1, "with OSCAIRN_THP=keep a worker keeps transparent huge pages (THP_enabled " + std::to_string(kept) + ")");
+                check(disabled == 0, "otherwise a worker disables them (THP_enabled " + std::to_string(disabled) + ")");
+            }
+            check(prctl(PR_GET_THP_DISABLE, 0, 0, 0, 0) == 0, "this process has them");
+            setenv("OSCAIRN_THP", "keep", 1); disableTransparentHugePages("test");
+            check(prctl(PR_GET_THP_DISABLE, 0, 0, 0, 0) == 0, "OSCAIRN_THP=keep leaves a process as it is");
+            unsetenv("OSCAIRN_THP"); disableTransparentHugePages("test");
+            check(prctl(PR_GET_THP_DISABLE, 0, 0, 0, 0) == 1, "disableTransparentHugePages disables them for the process");
         }
 #endif
     }

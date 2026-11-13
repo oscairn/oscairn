@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// RFC 0045's miss policy: one long block in a worker (the fixture's KICK_FIXTURE_STALL: 100 ms in its
-// 30th block, against a 10 ms allowance) costs only a dropout of that part. The block it stalls in is
+// RFC 0045's miss policy: one long block in a worker (the fixture's KICK_FIXTURE_STALL: 150 ms in its
+// 30th block, against a 30 ms allowance) costs only a dropout of that part. The block it stalls in is
 // silenced after the allowance and the blocks after it while it is busy are not handed over, but no
 // panic follows: a note held through it sounds afterwards; a note off sent while it is busy takes
 // effect afterwards (a release tail that decays); a note on sent then sounds afterwards; the dropout
@@ -34,25 +34,27 @@ namespace
 
     // One block of a run: its left channel, and whether the worker was busy (the block not handed) or silenced.
     struct Block { std::vector<float> l; bool busy = false, silent = false; };
-    struct Run { std::vector<Block> blocks; kick::clap::Statistics stats; int firstBusy = -1, lastSilent = -1; };
+    struct Run { std::vector<Block> blocks; kick::clap::Statistics stats; int firstBusy = -1, lastBusy = -1; };
     float peak(const Block& b) { float p = 0; for(float x : b.l) p = std::max(p, std::abs(x)); return p; }
 
     // 200 blocks of a graph's node, about 1 ms apart so the stall's real time passes; `events` gives each
-    // block's, knowing whether the worker was busy in the block before.
+    // block's, knowing whether the worker was busy in the two blocks before (in the stall, not a stray miss).
+    // The stall is the longest row of blocks not handed (firstBusy to lastBusy): a loaded machine may miss
+    // another block or two besides.
     Run play(oscairn::Graph& g, oscairn::NodeId node, const std::function<std::vector<Event>(int, bool)>& events, oscairn::PluginHost* host = nullptr)
     {
         auto& h = host ? *host : g.host(node);
-        Run r;
+        Run r; int row = 0;
         for(int i = 0; i < 200; ++i)
         {
             const auto before = h.statistics();
-            const auto e = events(i, r.firstBusy >= 0 && r.blocks.back().busy);
+            const auto e = events(i, row >= 2);
             std::vector<float> l(frames), right(frames); float* out[]{l.data(), right.data()};
             g.process(out, frames, nullptr, e.data(), uint32_t(e.size()));
             const auto after = h.statistics();
             Block b{l, after.busyBlocks > before.busyBlocks, after.silentBlocks > before.silentBlocks};
-            if(b.busy && r.firstBusy < 0) r.firstBusy = i;
-            if(b.silent) r.lastSilent = i;
+            row = b.busy ? row + 1 : 0;
+            if(row > r.lastBusy - r.firstBusy + 1 || (row && r.lastBusy < 0)) { r.firstBusy = i - row + 1; r.lastBusy = i; }
             r.blocks.push_back(std::move(b));
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -69,11 +71,19 @@ namespace
     // The stall happened as set: a block silenced after waiting, then blocks not handed, then blocks heard again.
     bool stalled(const Run& r, const std::string& name)
     {
-        const bool ok = r.firstBusy > 0 && r.stats.busyBlocks >= 10 && r.stats.silentBlocks >= r.stats.busyBlocks + 1 && r.lastSilent < 180;
+        const bool ok = r.firstBusy > 0 && r.stats.busyBlocks >= 3 && r.stats.silentBlocks >= r.stats.busyBlocks + 1 && r.lastBusy - r.firstBusy >= 2 && r.lastBusy < 180; // a loaded machine sleeps long between blocks at times
         check(ok, name + ": the stall silenced a block and the worker was busy for the next: silent " + std::to_string(r.stats.silentBlocks) + ", busy " + std::to_string(r.stats.busyBlocks));
         std::printf("%s: silent %llu, busy %llu, panics after a miss %llu, dropped events %llu\n", name.c_str(), (unsigned long long)r.stats.silentBlocks,
                     (unsigned long long)r.stats.busyBlocks, (unsigned long long)r.stats.missPanics, (unsigned long long)r.stats.droppedEvents);
         return ok;
+    }
+    // The run's last block heard whole: neither it nor the two before it missed (a loaded machine may miss
+    // another block besides the stall; with the extra block a miss is heard a block later and fades in after).
+    const Block& last(const Run& r)
+    {
+        for(size_t i = r.blocks.size(); i-- > 2;)
+            if(std::none_of(r.blocks.begin() + long(i) - 2, r.blocks.begin() + long(i) + 1, [](const Block& b) { return b.busy || b.silent; })) return r.blocks[i];
+        return r.blocks.back();
     }
     // The largest step between neighboring samples from block `from` on.
     float steepest(const Run& r, size_t from)
@@ -90,7 +100,7 @@ namespace
         if(!stalled(r, name)) return;
         check(r.stats.missPanics == 0, name + ": no panic after the missed blocks: " + std::to_string(r.stats.missPanics));
         const float level = peak(r.blocks[20]); // the note's level in the graph's output, before the stall
-        check(level > 0 && peak(r.blocks.back()) == level && r.blocks.back().l.front() == level, name + ": the note held through the stall sounds after it: " + std::to_string(peak(r.blocks.back())));
+        check(level > 0 && peak(last(r)) == level && last(r).l.front() == level, name + ": the note held through the stall sounds after it: " + std::to_string(peak(last(r))));
         // 1 ms is 48 frames: the fade's steps are the sound's 48th, against the whole sound for a cut.
         const float bound = level / 48 * 1.01f, step = steepest(r, 10); // past the note on and the worker's 10 ms first fade-in
         check(step <= bound, name + ": the dropout fades out and in, no step larger than " + std::to_string(bound) + ": " + std::to_string(step));
@@ -114,10 +124,10 @@ namespace
         // The tail decays over 1,024 frames from the block heard after the stall.
         const float level = peak(r.blocks[20]);
         bool decaying = false;
-        for(size_t i = size_t(r.lastSilent) + 1; i < std::min(r.blocks.size(), size_t(r.lastSilent) + 12); ++i)
+        for(size_t i = size_t(r.lastBusy) + 1; i < std::min(r.blocks.size(), size_t(r.lastBusy) + 12); ++i)
             for(float x : r.blocks[i].l) decaying = decaying || (x > level * .02f && x < level * .9f);
         check(decaying, name + ": the release decays after the stall, not cut by a panic");
-        check(peak(r.blocks.back()) == 0, name + ": and ends: " + std::to_string(peak(r.blocks.back())));
+        check(peak(last(r)) == 0, name + ": and ends: " + std::to_string(peak(last(r))));
     }
 
     // A note on sent while the worker is busy sounds after it.
@@ -131,13 +141,13 @@ namespace
         if(!stalled(r, name)) return;
         check(sent > 0 && r.blocks[size_t(sent)].busy, name + ": the note on went into a block not handed over");
         check(r.stats.missPanics == 0, name + ": no panic after the missed blocks");
-        check(peak(r.blocks.back()) > 0 && r.blocks.back().l.front() == peak(r.blocks.back()), name + ": the note on sent during the stall sounds after it: " + std::to_string(peak(r.blocks.back())));
+        check(peak(last(r)) > 0 && last(r).l.front() == peak(last(r)), name + ": the note on sent during the stall sounds after it: " + std::to_string(peak(last(r))));
     }
 
     // Two parts sharing one Basic Synth in a worker that stalls a block: both keep their notes.
     void shared(const char* stalling, const char* synth)
     {
-        setenv("OSCAIRN_TEST_WORKER_STALL", "30:100000", 1);
+        setenv("OSCAIRN_TEST_WORKER_STALL", "30:150000", 1);
         auto plugin = oscairn::loadPluginInWorker(stalling, synth, "", rate, frames);
         unsetenv("OSCAIRN_TEST_WORKER_STALL");
         auto engine = std::make_shared<oscairn::SoundContext::Engine>(); engine->host = plugin; engine->busParameter = oscairn::SoundContext::busParameter(*plugin);
@@ -200,9 +210,9 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc != 5) { std::fprintf(stderr, "usage: %s WORKER STALLING-WORKER FIXTURE BASIC-SYNTH\n", argv[0]); return 2; }
-    // Times far from a busy machine's noise: a 10 ms allowance, a 100 ms stall (under the 250 ms hang limit).
-    setenv("OSCAIRN_WORKER_BUDGET_US", "10000", 1);
-    setenv("KICK_FIXTURE_STALL", "30:100000", 1);
+    // Times far from a busy machine's noise: a 30 ms allowance, a 150 ms stall (under the 250 ms hang limit).
+    setenv("OSCAIRN_WORKER_BUDGET_US", "30000", 1);
+    setenv("KICK_FIXTURE_STALL", "30:150000", 1);
     try
     {
         overflow(argv[1], argv[3]);

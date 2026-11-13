@@ -364,7 +364,7 @@ Built 2026-11-13, the owner's first decision. What a missed block does now:
   after waiting and played late, a worker that hangs is still failed at 250 ms, and carrying events
   does not touch either count. `worker-failures` still restarts the 2 ms fixture as too slow.
 
-Tests: `worker-miss` (new): the fixture stalling 100 ms in one block against a 10 ms allowance,
+Tests: `worker-miss` (new): the fixture stalling 150 ms in one block against a 30 ms allowance,
 in a graph: a note held through it sounds afterwards at its level, with no panic (`missPanics` 0);
 the dropout's largest step between samples is the sound's 48th (a cut's is the whole sound); a
 note off sent while the worker is busy takes effect afterwards (the tail instrument's release

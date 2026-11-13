@@ -204,6 +204,20 @@ namespace
         }
         ~Served() { running = false; thread.join(); server.reset(); session.reset(); }
     };
+
+    // Set on a view with no window: every area its components' repaints invalidate, in its own
+    // pixels, which a window would redraw at its next frame. It draws nothing meanwhile.
+    struct Invalidated : juce::CachedComponentImage
+    {
+        juce::Rectangle<int> whole;
+        juce::RectangleList<int> areas;
+        explicit Invalidated(juce::Rectangle<int> w) : whole(w) {}
+        void paint(juce::Graphics&) override {}
+        bool invalidateAll() override { areas.add(whole); return false; }
+        bool invalidate(const juce::Rectangle<int>& area) override { areas.add(area.getIntersection(whole)); return false; }
+        void releaseResources() override {}
+        int64_t pixels() const { int64_t n = 0; for(const auto& r : areas) n += int64_t(r.getWidth()) * r.getHeight(); return n; }
+    };
 }
 
 int main(int argc, char** argv)
@@ -1921,6 +1935,9 @@ int main(int argc, char** argv)
                     for(const auto& p : plugins) if(p.name == "Basic Synth") standalone::insertPlugin(c, part, 0, p);
                 }
                 c.addMacro("Brightness"); c.addMacro("Swell");
+                // A device's faders, as the FANTOM-07's: fader:1 plays the first part's level.
+                ControlGroup faders; faders.role = ControlGroup::Role::Assign; faders.kind = "faders"; faders.count = 8;
+                c.setControllers({faders}, {});
             });
             check(wait([&] { return engine.graph().parts.size() == 4 && !engine.parameters(node).empty(); }) && engine.editError().empty(), "parts and the views plugin to show: " + engine.editError());
             auto settle = [] { for(int i = 0; i < 40; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); };
@@ -2015,6 +2032,90 @@ int main(int argc, char** argv)
                     standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(app, 2);
                     app.attach(frame.bar(), [] {});
                     show(frame, "play");
+                    // Its first part's fader swept on the FANTOM-07's panel, as its reader plays it
+                    // (Session::controllerControl from a thread of its own, a step every 4 ms, a
+                    // second from where it is down to nothing): how long a move takes to show on
+                    // Play's strip, how much of the screen each frame (16 ms) invalidates, and what
+                    // drawing that costs here, in software at the screen's own pixels.
+                    if(id == "fantom-07")
+                    {
+                        // Found again each time: Play rebuilds its strips when what it shows changes.
+                        juce::Slider* fader = nullptr;
+                        std::function<void(juce::Component&)> find = [&](juce::Component& c) {
+                            for(auto* child : c.getChildren())
+                            {
+                                if(auto* s = dynamic_cast<juce::Slider*>(child); s && !fader && s->getTooltip().startsWith("The part's level")) fader = s;
+                                find(*child);
+                            }
+                        };
+                        auto shown = [&] { fader = nullptr; find(frame); return fader ? fader->getValue() : -1.0; };
+                        check(shown() >= 0, where + ": Play shows a part's fader");
+                        auto* session = served.session.get();
+                        const double start = engine.graph().parts.front().level;
+                        using Clock = std::chrono::steady_clock;
+                        constexpr int steps = 250;
+                        std::vector<std::pair<double, Clock::time_point>> sent; sent.reserve(steps);
+                        std::mutex sentLock;
+                        auto* invalidated = new Invalidated(panel.getLocalBounds());
+                        // Shown as --snapshot shows a window: its views poll as on screen, and a repaint
+                        // invalidates what shows. No window is made.
+                        standalone::setOffscreen(panel); panel.setVisible(true);
+                        panel.setCachedComponentImage(invalidated); // the panel owns it now
+                        std::thread reader([&] {
+                            for(int i = 0; i <= steps; ++i)
+                            {
+                                const double v = start * (1 - double(i) / steps);
+                                { std::lock_guard l(sentLock); sent.push_back({v, Clock::now()}); }
+                                session->controllerControl("fader:1", {ControlInput::Kind::Absolute, v});
+                                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                            }
+                        });
+                        std::vector<double> latencies, frames; // ms; each frame's invalidated share of the screen
+                        juce::Rectangle<int> largest;
+                        size_t next = 0;
+                        auto frameStart = Clock::now();
+                        const auto began = frameStart;
+                        while(Clock::now() - began < std::chrono::milliseconds(1400))
+                        {
+                            juce::MessageManager::getInstance()->runDispatchLoopUntil(1);
+                            const auto now = Clock::now();
+                            const double value = shown();
+                            {
+                                // The latest move the strip shows, if new: the moves before it it skipped.
+                                std::lock_guard l(sentLock);
+                                for(size_t j = sent.size(); j-- > next;)
+                                    if(std::abs(sent[j].first - value) < 1e-6) { latencies.push_back(std::chrono::duration<double, std::milli>(now - sent[j].second).count()); next = j + 1; break; }
+                            }
+                            if(now - frameStart >= std::chrono::milliseconds(16))
+                            {
+                                frames.push_back(double(invalidated->pixels()) / (double(screen.width) * screen.height));
+                                if(invalidated->pixels() > int64_t(largest.getWidth()) * largest.getHeight()) largest = invalidated->areas.getBounds();
+                                invalidated->areas.clear(); frameStart = now;
+                            }
+                        }
+                        reader.join();
+                        panel.setCachedComponentImage(nullptr);
+                        panel.setVisible(false); panel.getProperties().remove("oscairnOffscreen");
+                        auto timeDrawing = [&](juce::Rectangle<int> area) {
+                            if(area.isEmpty()) return 0.0;
+                            const auto t = Clock::now();
+                            for(int i = 0; i < 10; ++i) panel.createComponentSnapshot(area);
+                            return std::chrono::duration<double, std::milli>(Clock::now() - t).count() / 10;
+                        };
+                        const auto changed = std::count_if(frames.begin(), frames.end(), [](double f) { return f > 0; });
+                        double share = 0, most = 0; for(const auto f : frames) { share += f; most = std::max(most, f); }
+                        double latency = 0, slowest = 0; for(const auto l : latencies) { latency += l; slowest = std::max(slowest, l); }
+                        std::printf("fader sweep at %s: %d moves, %zu shown, %.1f ms on average from the move to the strip (slowest %.1f ms); "
+                                    "%lld of %zu frames redraw, %.0f%% of the screen a frame on average (most %.0f%%); drawing the whole screen %.2f ms, the largest frame's area %.2f ms; a copy of the graph %.1f us\n",
+                                    where.c_str(), steps + 1, latencies.size(), latencies.empty() ? 0 : latency / double(latencies.size()), slowest,
+                                    (long long)changed, frames.size(), frames.empty() ? 0 : 100 * share / double(frames.size()), 100 * most,
+                                    timeDrawing(panel.getLocalBounds()), timeDrawing(largest), [&] {
+                                        const auto t = Clock::now(); for(int i = 0; i < 1000; ++i) (void)engine.graph().revision;
+                                        return std::chrono::duration<double, std::micro>(Clock::now() - t).count() / 1000; }());
+                        check(!latencies.empty() && latency / double(latencies.size()) < 50, where + ": a fader's moves show on its strip within 50 ms on average");
+                        // One fader moving redraws its fader, not the view (it redrew about half the screen a frame).
+                        check(!frames.empty() && share / double(frames.size()) < .1, where + ": a fader moving redraws under a tenth of the screen a frame on average");
+                    }
                     app.edit(true);
                     show(frame, "parts");
                     // A part's page, taller than a short screen: it scrolls.

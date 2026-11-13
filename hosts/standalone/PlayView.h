@@ -95,7 +95,7 @@ namespace oscairn::standalone
         int page_ = 0, ticks_ = 0;
         Control::LiveValues values_; // as last shown: a change shows at the next tick, a display frame
         void showValues();
-        std::string shape_;
+        std::string shape_, drawn_; // drawn_: what its own paint showed last
         juce::TextButton previous_{"Previous"}, next_{"Next"}, performanceControls_{"Performance"}, partControlsButton_, pageButton_;
         std::vector<juce::Rectangle<int>> scenes_; // eight tiles
         juce::Rectangle<int> knobRow_;

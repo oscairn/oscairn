@@ -50,6 +50,7 @@ namespace oscairn::standalone
         const ResolvedControl& slot() const { return slot_; }
         void set(const ResolvedControl& slot)
         {
+            const bool same = slot.target == slot_.target && slot.label == slot_.label && slot.bank == slot_.bank && slot.layer == slot_.layer;
             if(!(slot.target == slot_.target))
             {
                 const auto [low, high] = view_.rangeOf(slot.target);
@@ -59,8 +60,10 @@ namespace oscairn::standalone
             const bool any = slot.target.kind != Assignment::Kind::None;
             slider_.setVisible(any);
             slider_.setEnabled(slot.target.kind != Assignment::Kind::Scene && slot.target.kind != Assignment::Kind::Panic);
+            const double was = slider_.getValue();
             if(any && !slider_.isMouseButtonDown()) slider_.setValue(view_.valueOf(slot.target), juce::dontSendNotification);
-            repaint();
+            // Its text again only when it changed: a value moving repaints its tile, not the view.
+            if(!same || slider_.getValue() != was) repaint();
         }
         void paint(juce::Graphics& g) override
         {
@@ -135,16 +138,25 @@ namespace oscairn::standalone
         }
         void set(const PartRow& p)
         {
-            name_ = text(p.name);
-            detail_ = p.bus ? "Bus" + (p.chain.empty() ? juce::String() : juce::String::fromUTF8(" · ") + text(p.chain.front().name))
-                            : (p.sound.empty() ? juce::String("No instrument") : text(p.sound)) + (p.input.empty() ? juce::String() : juce::String::fromUTF8(" · ") + text(p.input));
+            const auto name = text(p.name);
+            const auto detail = p.bus ? "Bus" + (p.chain.empty() ? juce::String() : juce::String::fromUTF8(" · ") + text(p.chain.front().name))
+                                      : (p.sound.empty() ? juce::String("No instrument") : text(p.sound)) + (p.input.empty() ? juce::String() : juce::String::fromUTF8(" · ") + text(p.input));
             if(!fader_.isMouseButtonDown()) fader_.setValue(p.level, juce::dontSendNotification);
             mute_.setToggleState(p.mute, juce::dontSendNotification);
             solo_.setToggleState(p.solo, juce::dontSendNotification);
             const float alpha = p.mute || p.silenced ? .45f : 1.f;
             for(auto* c : std::initializer_list<juce::Component*>{&fader_, &mute_, &solo_}) c->setAlpha(alpha);
-            alpha_ = alpha;
+            // The fader, mute and solo repaint themselves as they change; the strip only for its own text and dimming.
+            if(name == name_ && detail == detail_ && alpha == alpha_) return;
+            name_ = name; detail_ = detail; alpha_ = alpha;
             repaint();
+        }
+        // Its meters, when they moved: that area alone.
+        void meter(const std::vector<double>& channels)
+        {
+            if(channels == shownPeaks_) return;
+            shownPeaks_ = channels;
+            repaint(meter_);
         }
         void paint(juce::Graphics& g) override
         {
@@ -156,8 +168,7 @@ namespace oscairn::standalone
             g.setColour(ink(Ink::Muted).withAlpha(alpha_)); drawInked(g, detail_, detailArea(), juce::Font(juce::FontOptions(textSize(TextRole::Small, m))));
             if(!part_) return; // the master has no meter of its own yet
             // A bar per channel of its sound, beside the fader.
-            const auto it = view_.meters_.find(part_);
-            const auto channels = it == view_.meters_.end() || it->second.empty() ? std::vector<double>{0.0} : it->second;
+            const auto channels = shownPeaks_.empty() ? std::vector<double>{0.0} : shownPeaks_;
             auto bars = meter_.toFloat();
             const float width = (bars.getWidth() - 3.f * float(channels.size() - 1)) / float(channels.size());
             for(const auto peak : channels) { drawMeter(g, bars.removeFromLeft(width), peak * alpha_, true); bars.removeFromLeft(3); }
@@ -195,6 +206,7 @@ namespace oscairn::standalone
         juce::Slider fader_;
         MarkButton mute_{"M", Ink::Danger, "Mute"}, solo_{"S", Ink::Accent, "Solo"};
         juce::Rectangle<int> meter_;
+        std::vector<double> shownPeaks_;
     };
 
     PlayView::PlayView(Engine& engine) : engine_(engine)
@@ -286,7 +298,7 @@ namespace oscairn::standalone
         {
             meters_.clear();
             for(const auto& m : engine_.meters()) meters_[m.part] = m.channels;
-            for(auto& s : strips_) s->repaint();
+            for(auto& s : strips_) if(s->part()) { const auto it = meters_.find(s->part()); s->meter(it == meters_.end() ? std::vector<double>{} : it->second); }
         }
         if(ticks_ % 12 == 0) { refresh(); return; }
         if(auto values = engine_.liveValues(); values != values_) { values_ = std::move(values); showValues(); }
@@ -337,7 +349,11 @@ namespace oscairn::standalone
         pageButton_.setButtonText(group.rows.empty() ? "Bank " + juce::String(page_ + 1) + "/" + juce::String(banks) : text(group.rows[size_t(page_)].name)); // a row by its name
         publishRow();
         showHint();
-        repaint();
+        // Its own drawing (the scenes) again only when it changed, or what it holds rebuilt: the
+        // strips and knobs repaint themselves, so a refresh does not redraw the whole screen.
+        std::string drawn = shape_ + "/" + std::to_string(graph_.scene);
+        for(const auto& scene : graph_.scenes) drawn += "," + std::to_string(scene.id) + ":" + scene.name;
+        if(drawn != drawn_) { drawn_ = std::move(drawn); repaint(); }
     }
 
     // The device's knobs bound "row:N" play the bank shown.

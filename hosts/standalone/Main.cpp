@@ -142,6 +142,7 @@ namespace oscairn::standalone
                 juce::Desktop::getInstance().setGlobalScaleFactor( profile_.screen()->scale() );
                 // Nothing else opens as a window of its own: dialogs, alerts and menus open inside this one.
                 setDeviceScreen( this, Profile::Screen::touchTarget );
+                setDense( *this ); // and dense by design: touch-size controls, the least space between them
             }
 #if JUCE_MAC
             juce::MenuBarModel::setMacMainMenu( this );
@@ -173,7 +174,7 @@ namespace oscairn::standalone
             actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
             const auto binary=executableFile().getParentDirectory();
             // Apps run as processes only against an engine on a socket (not --in-process).
-            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString(),"OSCAIRN_PROFILE="+profileArgument});
+            appProcesses_=std::make_unique<AppProcesses>(engine_,actions_,engine_.canPrepareSounds()?findApps(appsFolder()):std::vector<AppManifest>{},std::vector<std::string>{"OSCAIRN_THEMES="+binary.getChildFile("themes").getFullPathName().toStdString(),"OSCAIRN_PROFILE="+profileArgument,"OSCAIRN_SCREEN_THEME="+(profile_.screen()?profile_.screen()->theme:std::string())});
             appNotice_=std::make_unique<AppNotice>(*appProcesses_);
             menuItemsChanged(); // the Apps menu again, now that it knows the Setlist app
             Component::addChildComponent(*appNotice_);
@@ -916,6 +917,7 @@ namespace oscairn::standalone
                 }
                 // The device this runs on (RFC 0024): its block size for a new engine, unless given.
                 const auto profile=loadProfile(argument(args,"--profile").unquoted().toStdString());
+                if(profile.screen())theme_->setScreenTheme(profile.screen()->theme); // its screen's theme, unless the user chose one
                 const auto controllers=controllerProfiles(controllerFiles); // checked before anything opens
                 if(!args.contains("--connect") && !args.contains("--buffer-frames") && profile.audio.block>0)audio.bufferFrames=uint32_t(profile.audio.block);
                 // Its audio device and channel map, unless the command line chooses a device or channels.

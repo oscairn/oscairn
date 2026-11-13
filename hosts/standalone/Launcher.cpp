@@ -204,11 +204,12 @@ namespace oscairn::standalone
     {
         bar_.setBounds(getLocalBounds().removeFromTop(TopBar::heightFor(*this)));
         recovery_.setBounds(getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)).removeFromTop(36).reduced(8, 2));
-        // Tiles in as many columns as fit at about 240 pixels, all of one size.
-        const bool touch = mode() == 2 || desktopMode(*this) == 0;
-        const int gap = touch ? 14 : 12, tileHeight = touch ? 150 : 132;
-        auto area = getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)).reduced(gap * 2, gap * 2);
-        const int columns = std::clamp(area.getWidth() / 240, 1, std::max(1, int(apps_.size())));
+        // Tiles in as many columns as fit at about 240 pixels, all of one size; on a device's
+        // screen at about 200, shorter, with the least space between (RFC 0019).
+        const bool touch = mode() == 2 || desktopMode(*this) == 0, tight = dense(*this);
+        const int gap = tight ? denseGap : touch ? 14 : 12, tileHeight = tight ? 120 : touch ? 150 : 132;
+        auto area = getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)).reduced(tight ? denseMargin : gap * 2);
+        const int columns = std::clamp(area.getWidth() / (tight ? 200 : 240), 1, std::max(1, int(apps_.size())));
         const int width = (area.getWidth() - gap * (columns - 1)) / columns;
         tiles_.clear();
         for(size_t i = 0; i < apps_.size(); ++i)
@@ -228,7 +229,7 @@ namespace oscairn::standalone
         {
             const auto r = tiles_[i];
             drawSection(g, r, ink(Ink::Surface));
-            auto inside = r.reduced(16);
+            auto inside = r.reduced(dense(*this) ? 12 : 16);
             const int iconSide = 48;
             const auto well = inside.removeFromTop(iconSide).removeFromLeft(iconSide).toFloat();
             g.setColour(ink(Ink::Raised)); g.fillRoundedRectangle(well, std::min(12.f, themeData().radius + 4));

@@ -76,6 +76,8 @@ int main()
         check(std::abs(fantom.screen()->density() - 10.49) < .01 && std::abs(fantom.screen()->scale() - 1.55f) < .01f && kick.screen()->scale() == 1.f &&
               modx.screen()->scale() == 1.f && !qemu.screen()->diagonal && qemu.screen()->scale() == 1.f, "each screen's density and scale from its diagonal");
         check(refused(replaced(fantomJson, "\"diagonal\": 140", "\"diagonal\": 1.5")), "a diagonal that is not whole millimeters");
+        check(fantom.screen()->theme == "oscairn-block" && kick.screen()->theme.empty(), "the FANTOM-07's screen shows Oscairn Block until the user chooses a theme");
+        check(refused(replaced(fantomJson, "\"theme\": \"oscairn-block\"", "\"theme\": \"../block\"")), "a screen's theme is a theme's ID");
         check(kick.cpuBudget() == .75 && kick.memoryBudget() == 2048ull * 1024 * 1024 * 8 / 10, "an instrument's budget: 75% of the audio thread, 80% of its memory");
         const auto desktop = loadProfile("");
         check(desktop.id == "desktop" && desktop.compute.cores >= 1 && desktop.screen() && desktop.screen()->surface == "desktop" && desktop.screen()->layout == "desktop" &&

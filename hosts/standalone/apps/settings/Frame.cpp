@@ -5,7 +5,9 @@ namespace oscairn::standalone::settings
 {
     namespace
     {
-        constexpr int margin = 16, gap = 8;
+        // Round the frame's content and between its parts; a device's screen's least (RFC 0019).
+        int margin(const juce::Component& c) { return dense(c) ? denseMargin : 16; }
+        int gap(const juce::Component& c) { return dense(c) ? denseGap : 8; }
         int controlHeight(int mode) { return mode == 2 ? 44 : 30; }
         juce::Font font(TextRole role, int mode, bool bold = false) { return juce::Font(juce::FontOptions(textSize(role, mode), bold ? juce::Font::bold : juce::Font::plain)); }
         // An explanation wrapped to `width`, as drawn and as measured.
@@ -47,13 +49,13 @@ namespace oscairn::standalone::settings
     {
         const int m = mode();
         const int top = stacked(width) ? int(textSize(TextRole::Body, m) * 1.5f) + 4 : 0;
-        return gap + top + controlHeight(m) + explanationHeight(width) + gap;
+        return 2 * gap(*this) + top + controlHeight(m) + explanationHeight(width);
     }
 
     void Row::resized()
     {
         const int m = mode();
-        auto area = getLocalBounds().reduced(0, gap);
+        auto area = getLocalBounds().reduced(0, gap(*this));
         if(stacked(getWidth())) area.removeFromTop(int(textSize(TextRole::Body, m) * 1.5f) + 4);
         else area.removeFromLeft(labelWidth(getWidth()));
         control_.setBounds(area.removeFromTop(controlHeight(m)).withWidth(std::min(area.getWidth(), 420)));
@@ -62,7 +64,7 @@ namespace oscairn::standalone::settings
     void Row::paint(juce::Graphics& g)
     {
         const int m = mode();
-        const auto bounds = getLocalBounds().reduced(0, gap);
+        const auto bounds = getLocalBounds().reduced(0, gap(*this));
         g.setColour(ink(Ink::Text));
         const auto labelBox = stacked(getWidth()) ? bounds.withHeight(int(textSize(TextRole::Body, m) * 1.5f))
                                                   : bounds.withWidth(labelWidth(getWidth()) - 12).withHeight(controlHeight(m));
@@ -159,7 +161,8 @@ namespace oscairn::standalone::settings
     void Frame::resized()
     {
         const int m = mode();
-        list_.setRowHeight(m == 2 ? 56 : 36);
+        const int margin = settings::margin(*this), gap = settings::gap(*this);
+        list_.setRowHeight(dense(*this) ? 44 : m == 2 ? 56 : 36); // a device's screen: a row a touch target tall
         auto area = getLocalBounds().reduced(margin);
         const int heading = int(textSize(TextRole::Title, m)) + 2 * gap;
         // Wide with a mouse, the first page is chosen at once: a column with nothing beside it says nothing.
@@ -169,7 +172,7 @@ namespace oscairn::standalone::settings
         scroll_.setVisible(page_ != nullptr);
         if(sideBySide())
         {
-            list_.setBounds(area.removeFromLeft(240).withTrimmedTop(heading));
+            list_.setBounds(area.removeFromLeft(dense(*this) ? 200 : 240).withTrimmedTop(heading));
             area.removeFromLeft(2 * margin);
             title_ = area.removeFromTop(heading);
         }

@@ -65,6 +65,14 @@ void setDesktopMode(juce::Component&, int mode);
 // On screen, as isShowing() says; or in a window --snapshot renders off screen (setOffscreen), which
 // has no peer: views that poll only while shown poll there too.
 bool showing(const juce::Component&);
+// A device's screen is dense by design (RFC 0019): what a finger uses keeps the touch target's
+// size (44 units, at least 6.5 mm, Profile::Screen), and the space between and round controls
+// is the least that keeps neighbors apart: `denseGap` between them, `denseMargin` round a view's
+// content; a list's row is one touch target tall. setDense marks a view and all it holds; the
+// desktop, in Touch too, is not dense.
+inline constexpr int denseGap = 4, denseMargin = 6;
+bool dense(const juce::Component&);
+void setDense(juce::Component&);
 void setOffscreen(juce::Component& window);
 // A device's screen (RFC 0019): one window, and nothing else opens as a window of its own. The
 // window dialogs, alerts and menus open inside, with `touch` (design units) the smallest a
@@ -86,6 +94,9 @@ public:
     std::vector<std::pair<juce::String,juce::String>> installed() const;
     void apply(const juce::String& id);
     void install(const juce::File& source); // a theme folder or its theme.json
+    // The theme a device's screen shows while the user has chosen none (its profile's), before
+    // the built-in default; empty: none.
+    void setScreenTheme(const juce::String& id);
     juce::File directory() const {return root_.getChildFile("themes");}
     juce::File configuration() const {return root_;} // the per-user Oscairn configuration folder
     const juce::String& error() const {return error_;}
@@ -117,6 +128,7 @@ private:
     void reload();
     void timerCallback() override;
     juce::File root_,builtIn_,selection_;
+    juce::String screenTheme_;
     juce::Typeface::Ptr regular_,bold_;
     std::optional<juce::String> lastSelection_; // none until the first load: an empty selection is the default theme
     juce::String error_;

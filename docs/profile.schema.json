@@ -581,6 +581,11 @@
           "layout": {
             "type": "string",
             "minLength": 1
+          },
+          "theme": {
+            "description": "The theme the screen shows until the user chooses one, by its ID (RFC 0019)",
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,64}$"
           }
         },
         "required": [

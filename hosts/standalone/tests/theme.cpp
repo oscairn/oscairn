@@ -97,7 +97,11 @@ int main(int argc,char** argv){try{
     selection.replaceWithText("missing-theme");
     {Theme broken(root,builtIn);check(themeData().id=="oscairn-dark" && broken.error().isNotEmpty() && face(broken)=="Inter/Regular","missing theme falls back to the default theme with an error");}
     {const auto custom=root.getChildFile("builder");check(builtIn.copyDirectoryTo(custom) && custom.getChildFile("default").replaceWithText("oscairn-light\n"),"copy built-ins");
-        selection.deleteFile();Theme builder(root,custom);check(themeData().id=="oscairn-light","the built-in default file chooses the first theme");}
+        selection.deleteFile();Theme builder(root,custom);check(themeData().id=="oscairn-light","the built-in default file chooses the first theme");
+        // A device's screen (its profile's theme) comes before the built-in default, and the user's choice before it.
+        builder.setScreenTheme("oscairn-block");check(themeData().id=="oscairn-block","a device's screen shows its profile's theme while none is chosen");
+        builder.apply("oscairn-classic");builder.setScreenTheme("oscairn-dark");check(themeData().id=="oscairn-classic","the user's choice comes before the screen's");
+        selection.deleteFile();builder.setScreenTheme("no-such-theme");check(themeData().id=="oscairn-light","a screen's theme not installed: the built-in default");}
     {Theme emergency(root,root.getChildFile("no-built-in-themes"));
         check(themeData().id=="oscairn-dark" && face(emergency).isNotEmpty(),"without built-in themes the emergency theme uses the platform font");}
     root.deleteRecursively();

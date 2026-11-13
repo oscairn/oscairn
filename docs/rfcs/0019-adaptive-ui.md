@@ -168,13 +168,34 @@ Decided and built 2026-11-09. Panels come in many sizes: the KICK and the Ignite
 - **Touch sizes:** in Touch (every Panel), the controls a finger uses are at least 44 units
   across: parameter tiles' sliders and lists, Play's faders and mute and solo, the Parts list's
   mute and level and its scene buttons, the Part page's controls and its chain's add buttons.
+- **Dense by design** (2026-11-13, after the FANTOM-07 showed the Library, the Catalog and
+  Settings with a few huge rows): a device's screen keeps every touch target at 44 units
+  (6.5 mm; not lower, for lists too: a keyboard player's finger is no smaller there) and spends
+  nothing else. `setDense` marks the window (and the Settings app's frame when its profile's
+  screen is not a desktop); the views then use `denseGap` (4 units) between controls and
+  `denseMargin` (6) round their content, and a list's row is one touch target tall, on one line:
+  the Library and the Catalog (which fills the Library under its dialog's title bar), the
+  Settings list. Settings shows its list and the page side by side from 720 units wide, Home's
+  tiles go four across at 120 units tall, and Play's rows close up. The desktop, in Touch too,
+  keeps its spacing. On the FANTOM-07 the Library shows 7 rows where it showed 4, the Catalog 6
+  where it showed 4.
+- **The screen's theme:** a profile's screen may name a theme (`"theme": "oscairn-block"`, the
+  FANTOM-07's: square, joined sections, no space between them), shown until the user chooses
+  one, before the built-in default; the apps that are processes get it from the shell
+  (`OSCAIRN_SCREEN_THEME`).
 
 `desktop-gaps` renders every built-in device profile's screen at its size and density, and an
 800 × 600 one at 8", over the Panel of its layout: Home, Play, the Parts list, a part's page, each
 page of an editor with rich views (the views test plugin), the Library, the Catalog (sized as it
 opens over the Library, without its dialog's title bar, and with no repository read) and Settings.
 Each fills the screen, and no control falls outside what its parents show (a scrolling view's
-content aside), is under 6.5 mm across at that density, or overlaps another. The Desktop window is
+content aside), is under 6.5 mm across at that density, or overlaps another. Each screen is
+dense and in its profile's theme; on the FANTOM-07 the Library and the Catalog show at least 6
+rows, the Groovebox has Play and Stop on the screen, and with the transport playing a Stop
+shows in the top bar, touch-size, and stops it. A fader swept there as the panel's reader plays
+it (`Session::controllerControl`, a step every 4 ms) is timed to Play's strip, with what each
+frame invalidates; it shows within 50 ms on average and a frame redraws under a tenth of the
+screen. The Desktop window is
 checked the same way at 1,440 × 900 and 1,024 × 640 (and Touch at 1,024 × 640), without the
 physical minimum, since a computer's density is not known. Given a path it writes
 `SNAPSHOTS-screen-<size>-<view>.png`. Not yet: the Mixer, Routing and Controls pages on a Panel

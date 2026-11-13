@@ -477,20 +477,20 @@ namespace oscairn::standalone
 
     void PlayView::resized()
     {
-        const bool touch = mode() == 2;
-        const int gap = sectionGap(touch ? 10 : 8), pad = touch ? 14 : 12;
+        const bool touch = mode() == 2, tight = dense(*this); // tight: a device's screen (RFC 0019)
+        const int gap = sectionGap(tight ? denseGap : touch ? 10 : 8), pad = tight ? denseMargin : touch ? 14 : 12, between = tight ? denseGap : touch ? 12 : 10;
         auto area = getLocalBounds().reduced(pad);
         // The scenes, with Previous and Next at the ends when the Performance is from the setlist.
-        auto row = area.removeFromTop(touch ? 56 : 46);
+        auto row = area.removeFromTop(tight ? 44 : touch ? 56 : 46);
         if(previous_.isVisible())
         {
             previous_.setBounds(row.removeFromLeft(touch ? 120 : 100)); row.removeFromLeft(touch ? 10 : 8);
             next_.setBounds(row.removeFromRight(touch ? 120 : 100)); row.removeFromRight(touch ? 10 : 8);
         }
         scenes_.clear();
-        const int sceneGap = touch ? 8 : 6, sceneWidth = (row.getWidth() - sceneGap * (sceneTiles - 1)) / sceneTiles;
+        const int sceneGap = tight ? denseGap : touch ? 8 : 6, sceneWidth = (row.getWidth() - sceneGap * (sceneTiles - 1)) / sceneTiles;
         for(int i = 0; i < sceneTiles; ++i) scenes_.push_back(row.removeFromLeft(sceneWidth)), row.removeFromLeft(sceneGap);
-        area.removeFromTop(touch ? 12 : 10);
+        area.removeFromTop(between);
         // The knobs, and their switch and bank at the right.
         // Taller when the tiles are too narrow for text beside the dial (six screen knobs and more),
         // but at most a quarter of the view, leaving the strips room on a short screen.
@@ -510,7 +510,7 @@ namespace oscairn::standalone
         }
         const int n = std::max(1, int(knobs_.size())), w = (knobs.getWidth() - gap * (n - 1)) / n;
         for(auto& k : knobs_) { k->setBounds(knobs.removeFromLeft(w)); knobs.removeFromLeft(gap); }
-        area.removeFromTop(touch ? 12 : 10);
+        area.removeFromTop(between);
         // Learning: what to do next, over the strips.
         banner_ = {};
         if(learning_)

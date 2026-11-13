@@ -272,8 +272,9 @@ namespace oscairn::standalone
             require(v.isArray() && v.size() <= 8, "screens must be a list");
             for(const auto& e : *v.getArray())
             {
-                const auto& o = object(e, "a screen"); fields(o, {"width", "height", "touch", "diagonal", "surface", "layout"}, "a screen");
-                Screen s{count(o, "width", 16384), count(o, "height", 16384), flag(o, "touch"), text(o, "surface"), text(o, "layout"), count(o, "diagonal", 10000)};
+                const auto& o = object(e, "a screen"); fields(o, {"width", "height", "touch", "diagonal", "surface", "layout", "theme"}, "a screen");
+                Screen s{count(o, "width", 16384), count(o, "height", 16384), flag(o, "touch"), text(o, "surface"), text(o, "layout"), count(o, "diagonal", 10000), text(o, "theme", false)};
+                require(s.theme.empty() || juce::String(s.theme).containsOnly("abcdefghijklmnopqrstuvwxyz0123456789-"), "a screen's theme is a theme's ID");
                 require(s.width > 0 && s.height > 0, "a screen has a size");
                 require(surfaces.contains(juce::String(s.surface)), "surface is desktop, panel or compact");
                 p.screens.push_back(s);

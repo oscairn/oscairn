@@ -18,7 +18,8 @@
 // app's connection allowed audio.set and refused
 // graph.add; and the app started as a process of its own from its manifest. With SNAPSHOTS, the
 // app renders itself to SNAPSHOTS-settings-1400x900.png, -900x700.png, and on the KICK's
-// 1024 x 600 screen under the shell's top bar, -kick-list.png and -kick-audio.png.
+// 1024 x 600 screen under the shell's top bar, -kick-list.png, -kick-audio.png and
+// -kick-repositories.png, and the same on the FANTOM-07's 826 x 465 design units, -fantom-*.png.
 //   oscairn_desktop_settings_test PLUGIN_DIR APPS THEMES [SNAPSHOTS]
 #include "../AppProcesses.h"
 #include "../Launcher.h"
@@ -519,17 +520,21 @@ int main(int argc, char** argv)
                 auto place = std::make_unique<standalone::AppPlace>(processes, "oscairn.settings");
                 standalone::AppFrame shell(engine, "Settings", *place, {});
                 standalone::setDesktopMode(shell, 2); standalone::setDesktopMode(*place, 2);
-                shell.setSize(1024, 600);
-                wait([] { return false; }, 300);
-                const auto area = place->getBounds();
-                for(const auto& [name, page] : {std::pair<const char*, const char*>{"kick-list", nullptr}, {"kick-audio", "audio"}, {"kick-repositories", "repositories"}})
+                // And the FANTOM-07's 1280 x 720 on 5.5", 826 x 465 design units, drawn at one pixel a unit.
+                for(const auto& [device, w, h] : {std::tuple{"kick", 1024, 600}, std::tuple{"fantom-07", 826, 465}})
                 {
-                    auto image = shell.createComponentSnapshot(shell.getLocalBounds());
-                    std::vector<std::string> arguments{"--mode", "2", "--profile", "kick"};
-                    if(page) arguments.insert(arguments.end(), {"--page", page});
-                    const auto app = render(arguments, area.getWidth(), area.getHeight());
-                    { juce::Graphics g(image); g.drawImageAt(app, area.getX(), area.getY()); }
-                    write(image, name);
+                    shell.setSize(w, h);
+                    wait([] { return false; }, 300);
+                    const auto area = place->getBounds();
+                    for(const auto& [name, page] : {std::pair<const char*, const char*>{"list", nullptr}, {"audio", "audio"}, {"repositories", "repositories"}})
+                    {
+                        auto image = shell.createComponentSnapshot(shell.getLocalBounds());
+                        std::vector<std::string> arguments{"--mode", "2", "--profile", device};
+                        if(page) arguments.insert(arguments.end(), {"--page", page});
+                        const auto app = render(arguments, area.getWidth(), area.getHeight());
+                        { juce::Graphics g(image); g.drawImageAt(app, area.getX(), area.getY()); }
+                        write(image, (juce::String(device == std::string("kick") ? "kick" : "fantom") + "-" + name).toRawUTF8());
+                    }
                 }
             }
             }();

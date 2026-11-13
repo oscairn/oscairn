@@ -109,6 +109,7 @@ namespace oscairn::standalone
         void paint(juce::Graphics&) override;
         void paintOverChildren(juce::Graphics&) override; // why nothing is listed, over the list
         void resized() override;
+        void parentHierarchyChanged() override { resized(); } // sized before it is put on a device's (dense) screen
 
     private:
         int getNumRows() override { return int(shown_.size()); }

@@ -2006,6 +2006,8 @@ int main(int argc, char** argv)
                 const bool snap = saved.insert(size).second;
                 const auto where = id + " (" + size + ")";
                 standalone::Panel panel(engine, layout);
+                standalone::setDense(panel); // a device's screen, as the app marks its window
+                theme.apply(screen.theme.empty() ? "oscairn-dark" : juce::String(screen.theme)); // in its profile's theme, as a user who chose none sees it
                 panel.setDesignSize(juce::roundToInt(screen.width / scale), juce::roundToInt(screen.height / scale));
                 panel.setSize(screen.width, screen.height);
                 auto show = [&](juce::Component& view, const std::string& name, juce::Component* top = nullptr) {
@@ -2015,6 +2017,16 @@ int main(int argc, char** argv)
                           where + " " + name + " fills the screen: " + area.toString().toStdString());
                     audit(panel, top ? *top : view, minimum, where + " " + name);
                     if(snap) save(panel, size + "-" + name);
+                };
+                // The whole rows a view's list shows.
+                auto rows = [](juce::Component& view) {
+                    std::function<juce::ListBox*(juce::Component&)> list = [&](juce::Component& c) -> juce::ListBox* {
+                        if(auto* l = dynamic_cast<juce::ListBox*>(&c); l && l->isVisible()) return l;
+                        for(auto* child : c.getChildren()) if(auto* l = list(*child)) return l;
+                        return nullptr;
+                    };
+                    const auto* l = list(view);
+                    return l && l->getRowHeight() > 0 ? l->getHeight() / l->getRowHeight() : 0;
                 };
                 standalone::TopBar::Shell shell{[] {}, [] {}, [] {}, [] {}, [](bool) {}, true};
                 {
@@ -2175,15 +2187,21 @@ int main(int argc, char** argv)
                     standalone::AppFrame frame(engine, "Library", library, shell);
                     standalone::setDesktopMode(frame, 2); standalone::setDesktopMode(library, 2);
                     show(frame, "library");
+                    const int libraryRows = rows(library);
+                    std::printf("%s: the Library shows %d rows\n", where.c_str(), libraryRows);
+                    if(id == "fantom-07") check(libraryRows >= 6, where + ": the Library shows at least 6 rows: " + std::to_string(libraryRows));
                     // The Catalog over it, as LibraryPane::showCatalog sizes it on a panel (its dialog's
                     // title bar aside); not read, so no repository is asked.
                     standalone::Catalog catalog(engine, "plugin", {});
                     standalone::setDesktopMode(catalog, 2);
-                    const auto logical = frame.getLocalBounds();
-                    catalog.setSize(std::min(984, std::max(600, logical.getWidth() - 40)), std::min(560, std::max(400, logical.getHeight() - 40)));
-                    catalog.setCentrePosition(logical.getCentre());
+                    const auto logical = frame.getLocalArea(&library, library.getLocalBounds());
+                    catalog.setSize(logical.getWidth(), logical.getHeight() - 44); // a dense screen's: all of the Library under its dialog's title bar
+                    catalog.setCentrePosition(logical.getCentre().translated(0, 22));
                     frame.addAndMakeVisible(catalog);
                     show(frame, "catalog", &catalog); // a dialog of its own over the Library
+                    const int catalogRows = rows(catalog);
+                    std::printf("%s: the Catalog shows %d rows\n", where.c_str(), catalogRows);
+                    if(id == "fantom-07") check(catalogRows >= 6, where + ": the Catalog shows at least 6 rows: " + std::to_string(catalogRows));
                     frame.removeChildComponent(&catalog);
                     panel.overlay(nullptr);
                 }

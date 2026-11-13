@@ -186,6 +186,7 @@ Theme::Theme(juce::File root,juce::File builtIn) {
 #endif
     }
     root_=root;selection_=root_.getChildFile("appearance.txt");
+    screenTheme_=juce::SystemStats::getEnvironmentVariable("OSCAIRN_SCREEN_THEME",{}); // an app process on a device's screen: the shell's
     set(Loaded{});reload();juce::LookAndFeel::setDefaultLookAndFeel(this);startTimer(1000);
 }
 Theme::~Theme(){stopTimer();juce::LookAndFeel::setDefaultLookAndFeel(nullptr);}
@@ -236,6 +237,7 @@ juce::File Theme::find(const juce::String& id) const {
     return builtIn_.getChildFile(id).isDirectory()?builtIn_.getChildFile(id):directory().getChildFile(id);
 }
 juce::String Theme::defaultId() const {
+    if(validId(screenTheme_) && (builtIn_.getChildFile(screenTheme_).isDirectory() || directory().getChildFile(screenTheme_).isDirectory()))return screenTheme_;
     const auto id=builtIn_.getChildFile("default").loadFileAsString().trim();
     return validId(id) && builtIn_.getChildFile(id).isDirectory()?id:juce::String("oscairn-dark");
 }
@@ -279,6 +281,7 @@ void Theme::reload() {
     try{set(load(find(defaultId())));}catch(const std::exception&){set(Loaded{});}
 }
 void Theme::timerCallback(){reload();}
+void Theme::setScreenTheme(const juce::String& id){if(id==screenTheme_)return;screenTheme_=id;lastSelection_.reset();reload();}
 juce::Typeface::Ptr Theme::getTypefaceForFont(const juce::Font& font) {
     if(regular_ && font.getTypefaceName()==juce::Font::getDefaultSansSerifFontName())return font.isBold() && bold_?bold_:regular_;
     return LookAndFeel_V4::getTypefaceForFont(font);
@@ -294,6 +297,11 @@ bool showing(const juce::Component& c) {
     for(;at->getParentComponent();at=at->getParentComponent())if(!at->isVisible())return false;
     return at->isVisible() && at->getProperties().contains("oscairnOffscreen");
 }
+bool dense(const juce::Component& c) {
+    for(auto* at=&c;at;at=at->getParentComponent())if(at->getProperties().contains("oscairnDense"))return true;
+    return false;
+}
+void setDense(juce::Component& c){c.getProperties().set("oscairnDense",true);}
 void setOffscreen(juce::Component& window){window.getProperties().set("oscairnOffscreen",true);}
 namespace{juce::Component::SafePointer<juce::Component> screenWindow;int touchSize=44;}
 void setDeviceScreen(juce::Component* window,int touch){screenWindow=window;touchSize=touch;}

@@ -86,7 +86,7 @@ namespace oscairn::standalone::settings
 
     private:
         int mode() const { return std::max(1, desktopMode(*this)); }
-        bool sideBySide() const { return mode() == 1 && getWidth() >= 720; }
+        bool sideBySide() const { return (mode() == 1 || dense(*this)) && getWidth() >= 720; } // a device's screen: as wide, side by side too
         int getNumRows() override { return int(shown_.size()); }
         void paintListBoxItem(int row, juce::Graphics&, int width, int height, bool selected) override;
         void listBoxItemClicked(int row, const juce::MouseEvent&) override { open(shown_[size_t(row)]->id); }

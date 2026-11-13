@@ -133,8 +133,10 @@ open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Osca
 Options: `--app performance|library|setlist|groovebox|recordings|settings|plugins` (open an app,
 or the plugin browser, instead of Home), `--layout desktop|kick|kick-screen|ignite|keys49|file.json`,
 `--profile kick` (a device's screen: one window, full screen under any window manager, with
-everything else opening inside it; see [running on a KICK](docs/kick.md)), `--play` (start the
-transport at launch, so the Groovebox plays: nothing plays at start without it), and `--snapshot out.png
+everything else opening inside it, dense by design: touch-size controls with the least space
+between them, in the theme its profile names until you choose one; see [running on a
+KICK](docs/kick.md)), `--play` (start the transport at launch, so the Groovebox plays: nothing
+plays at start without it), and `--snapshot out.png
 [--size WxH] [--play SECONDS]` to render the window to a PNG and quit (off screen: no window shows,
 and the app is never the active one or in the Dock), and `--audio null` (the
 engine on a device that writes nowhere, with no MIDI device opened: for tests and scripted

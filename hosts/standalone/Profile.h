@@ -65,10 +65,11 @@ namespace oscairn::standalone
         };
         std::vector<Control> controls;
         // A screen: its size, touch, the surface drawn on it (RFC 0019) and that surface's layout;
-        // `diagonal` in millimeters, 0 when not known.
+        // `diagonal` in millimeters, 0 when not known; `theme`, the theme it shows until the user
+        // chooses one (empty: the app's default).
         struct Screen
         {
-            int width = 0, height = 0; bool touch = false; std::string surface = "desktop", layout = "desktop"; int diagonal = 0;
+            int width = 0, height = 0; bool touch = false; std::string surface = "desktop", layout = "desktop"; int diagonal = 0; std::string theme;
             // Pixels per millimeter; 0 when its size is not known.
             double density() const { return diagonal > 0 ? std::hypot(double(width), double(height)) / diagonal : 0.0; }
             // Pixels per design unit (RFC 0019): enough that a touch target (`touchTarget` units)

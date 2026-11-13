@@ -374,22 +374,26 @@ namespace oscairn::standalone
         const int m = mode();
         drawListRow(g, {0, 0, width, height}, row, juce::Colours::transparentBlack);
         if(selected) { g.setColour(ink(Ink::Accent).withAlpha(.18f)); g.fillRect(0, 0, width, height); }
-        auto area = juce::Rectangle<int>(0, 0, width, height).reduced(16, 4);
-        auto top = area.removeFromTop(area.getHeight() / 2 + 2);
+        auto area = juce::Rectangle<int>(0, 0, width, height).reduced(dense(*this) ? 12 : 16, dense(*this) ? 0 : 4);
+        // On a device's screen one line, a row a touch target tall: the name and version, then the rest.
+        const juce::Font name(juce::FontOptions(textSize(TextRole::Body, m), juce::Font::bold));
+        const auto title = text(o.package.name.empty() ? o.package.id : o.package.name) + "  " + text(o.installed ? *o.installed : o.version.version);
+        auto top = dense(*this) ? area.removeFromLeft(std::min(area.getWidth(), int(juce::GlyphArrangement::getStringWidth(name, title)) + 16)) : area.removeFromTop(area.getHeight() / 2 + 2);
         // What this device cannot install is grayed, and says why; what is installed says so, with its version.
         g.setColour(o.installable || o.installed ? ink(Ink::Text) : ink(Ink::Muted));
-        g.setFont(juce::FontOptions(textSize(TextRole::Body, m), juce::Font::bold));
-        g.drawText(text(o.package.name.empty() ? o.package.id : o.package.name) + "  " + text(o.installed ? *o.installed : o.version.version), top, juce::Justification::bottomLeft, true);
+        g.setFont(name);
+        g.drawText(title, top, dense(*this) ? juce::Justification::centredLeft : juce::Justification::bottomLeft, true);
         g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(textSize(TextRole::Small, m)));
-        g.drawText(describe(o), area, juce::Justification::topLeft, true);
+        g.drawText(describe(o), area, dense(*this) ? juce::Justification::centredLeft : juce::Justification::topLeft, true);
     }
 
     void Catalog::resized()
     {
         const bool touch = mode() == 2;
-        const int control = touch ? 44 : 30, gap = touch ? 10 : 8;
-        list.setRowHeight(touch ? 64 : 48);
-        auto area = getLocalBounds().reduced(16, 12);
+        const bool tight = dense(*this); // a device's screen (RFC 0019)
+        const int control = touch ? 44 : 30, gap = tight ? denseGap : touch ? 10 : 8;
+        list.setRowHeight(tight ? 44 : touch ? 64 : 48);
+        auto area = tight ? getLocalBounds().reduced(denseMargin) : getLocalBounds().reduced(16, 12);
         auto bar = area.removeFromTop(control);
         headingArea_ = {};
         if(opened_)

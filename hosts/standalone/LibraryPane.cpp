@@ -481,7 +481,7 @@ namespace oscairn::standalone
     {
         const int m = pane.mode();
         const bool touch = m == 2;
-        const int gap = touch ? 10 : 8, pad = gap + 2;
+        const int gap = dense(pane) ? denseGap : touch ? 10 : 8, pad = touch ? 12 : 10;
         const float body = textSize(TextRole::Body, m), small = textSize(TextRole::Small, m);
         const int row = std::max(touch ? 44 : 0, int(body) + 4 + 2 * (gap - 2)), pill = std::max(touch ? 44 : 0, int(body) + 4 + gap);
         // Measured in the theme's typeface, the one it is drawn in.
@@ -677,7 +677,8 @@ namespace oscairn::standalone
         const int m = mode();
         drawListRow(g, {0, 0, width, height}, row, colorOf(item->color));
         if(selected) { g.setColour(ink(Ink::Accent).withAlpha(.18f)); g.fillRect(0, 0, width, height); g.setColour(ink(Ink::Accent)); g.fillRect(0, 0, 3, height); }
-        auto area = juce::Rectangle<int>(0, 0, width, height).reduced(24, compact_ ? 0 : 4);
+        const bool oneLine = compact_ || dense(*this); // a device's screen: one line, a row a touch target tall
+        auto area = juce::Rectangle<int>(0, 0, width, height).reduced(dense(*this) ? 12 : 24, oneLine ? 0 : 4);
         area.removeFromRight(starArea(width, height).getWidth());
         const float body = textSize(TextRole::Body, m), small = textSize(TextRole::Small, m);
         const auto name = text(item->name.empty() ? "Untitled" : item->name);
@@ -692,7 +693,7 @@ namespace oscairn::standalone
         // On a row tinted with its color, the muted ink may not read: the text's own, a little lighter.
         const bool tinted = themeData().style.rows == ThemeStyle::Rows::Fill && !colorOf(item->color).isTransparent();
         const auto detailInk = tinted ? ink(Ink::Text).withAlpha(.78f) : ink(Ink::Muted);
-        if(compact_)
+        if(oneLine)
         {
             // One line: the name, then the rest in muted text.
             const int w = std::min(area.getWidth(), int(juce::GlyphArrangement::getStringWidth(bold, name)) + 1);
@@ -710,7 +711,7 @@ namespace oscairn::standalone
             g.setColour(detailInk); g.setFont(juce::FontOptions(small));
             g.drawText(detail, area, juce::Justification::topLeft, true);
         }
-        drawStar(g, starArea(width, height).toFloat().withSizeKeepingCentre(float(height), float(height)).reduced(float(height) * (compact_ ? .2f : .28f)), item->favorite);
+        drawStar(g, starArea(width, height).toFloat().withSizeKeepingCentre(float(height), float(height)).reduced(float(height) * (oneLine ? .2f : .28f)), item->favorite);
     }
 
     void LibraryPane::listBoxItemClicked(int row, const juce::MouseEvent& e)
@@ -742,15 +743,17 @@ namespace oscairn::standalone
     void LibraryPane::resized()
     {
         const bool touch = mode() == 2;
-        const int control = touch ? 44 : 30, gap = touch ? 10 : 8;
-        list_.setRowHeight(compact_ ? (touch ? 44 : 28) : (touch ? 64 : 48));
-        auto area = getLocalBounds().reduced(16, 12);
+        const bool tight = dense(*this); // a device's screen (RFC 0019)
+        const int control = touch ? 44 : 30, gap = tight ? denseGap : touch ? 10 : 8;
+        list_.setRowHeight(compact_ || tight ? (touch ? 44 : 28) : (touch ? 64 : 48));
+        auto area = tight ? getLocalBounds().reduced(denseMargin) : getLocalBounds().reduced(16, 12);
         auto bar = area.removeFromTop(control);
+        compactButton_.setVisible(!tight); // its rows are one line already
         if(mode_ == Mode::Play)
         {
             kind_.setBounds(bar.removeFromLeft(kind_.preferredWidth(control))); bar.removeFromLeft(gap);
         }
-        compactButton_.setBounds(bar.removeFromRight(control * 4 / 3)); bar.removeFromRight(gap);
+        if(!tight) { compactButton_.setBounds(bar.removeFromRight(control * 4 / 3)); bar.removeFromRight(gap); }
         filters_.setBounds(bar.removeFromRight(filters_.preferredWidth(control))); bar.removeFromRight(gap);
         // A narrow screen gives the search a row of its own rather than a sliver (RFC 0019).
         if(bar.getWidth() < (touch ? 240 : 200)) { area.removeFromTop(gap); search_.setBounds(area.removeFromTop(control)); }
@@ -761,7 +764,7 @@ namespace oscairn::standalone
         auto bottom = area.removeFromBottom(control);
         area.removeFromBottom(gap);
         // Sources and tags in a column on the left; narrow windows give it a third.
-        sideView_.setBounds(area.removeFromLeft(std::min(touch ? 240 : 200, area.getWidth() / 3)));
+        sideView_.setBounds(area.removeFromLeft(std::min(tight ? 180 : touch ? 240 : 200, area.getWidth() / (tight ? 4 : 3))));
         rebuildSide();
         area.removeFromLeft(gap);
         list_.setBounds(area);
@@ -1100,7 +1103,9 @@ namespace oscairn::standalone
         const auto scanner = executableFile().getSiblingFile("oscairn-plugin-scan");
         auto* content = new Catalog(engine_, kind, std::move(installed), scanner.existsAsFile() ? scanner.getFullPathName().toStdString() : std::string());
         setDesktopMode(*content, mode());
-        if(mode() == 2) content->setSize(std::min(984, std::max(600, getWidth() - 40)), std::min(560, std::max(400, getHeight() - 40)));
+        // A device's screen: all of the pane, under the dialog's title bar (a touch target tall).
+        if(dense(*this)) content->setSize(getWidth(), getHeight() - 44);
+        else if(mode() == 2) content->setSize(std::min(984, std::max(600, getWidth() - 40)), std::min(560, std::max(400, getHeight() - 40)));
         juce::DialogWindow::LaunchOptions options;
         options.dialogTitle = "Catalog";
         options.content.setOwned(content); options.componentToCentreAround = this; options.useNativeTitleBar = true; options.resizable = false;

@@ -276,7 +276,7 @@ namespace oscairn
         /// move waits for the control thread, which should then call service().
         void controllerMidi( uint8_t source, const uint8_t* bytes, size_t size ) noexcept;
         /// The same for a device panel's own control, by identity ("fader:1"), from any thread but
-        /// the audio thread (panel_reader.h); false when it played nothing.
+        /// the audio thread (a device's reader, devices/); false when it played nothing.
         bool controllerControl( const std::string& control, ControlInput input ) noexcept;
         void setControllerWake( std::function<void()> wake );
         void serviceControllers(); // the control thread, woken: the moves to the model and the parameters to their plugins, and no more of service()

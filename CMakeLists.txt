@@ -38,6 +38,7 @@ option(BUILD_TESTING "Build the tests that need the Legacy Sampler" ON)
 enable_testing()
 
 add_subdirectory(core)
+add_subdirectory(devices/roland-fantom0)
 add_subdirectory(plugins)
 add_subdirectory(hosts)
 

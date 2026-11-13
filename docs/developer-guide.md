@@ -104,7 +104,10 @@ Programs in `tools/`, and the ones built beside the tests, for plugin work:
 | `oscairn-midi-monitor` (`tools/midi-monitor`) | with `OSCAIRN_STANDALONE` or `OSCAIRN_ENGINE` | Print what a MIDI controller sends, for writing its profile |
 | `oscairn-handoff-bench` (`tools/worker-bench`) | `build-dev/core/oscairn-handoff-bench`, on Unix | Measure handing audio blocks to worker processes and back |
 
-`tools/sampler-research` holds a research script, not a build tool.
+`tools/sampler-research` holds a research script, not a build tool. A device family's own tools
+live with its code in `devices/`: `oscairn-panel-dump` (`devices/roland-fantom0/tools`, built as
+`build-dev/devices/roland-fantom0/oscairn-panel-dump` on Unix) prints a FANTOM-0's panel messages
+([running on a FANTOM-0](fantom-0.md#checking-the-panel-map-on-a-unit)).
 
 ### Environment variables
 

@@ -295,26 +295,3 @@ target_link_libraries(oscairn-recording-test PRIVATE oscairn_control_json)
 target_compile_options(oscairn-recording-test PRIVATE -Wall -Wextra)
 add_test(NAME control-recording COMMAND oscairn-recording-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-recording PROPERTIES TIMEOUT 60)
-
-# A non-MIDI device panel (panel_reader.h) and the tool that maps one (docs/fantom-0.md): built here
-# for their test; the engine links the reader, and the image installs the tool and the map, only
-# with OSCAIRN_ROLAND_FANTOM0 (the FANTOM-0 family's panel), so a product without that panel has none of it.
-if(UNIX)
-    add_library(oscairn_panel STATIC src/panel_reader.cpp)
-    target_include_directories(oscairn_panel SYSTEM PRIVATE third_party)
-    target_link_libraries(oscairn_panel PUBLIC oscairn_control)
-    target_compile_options(oscairn_panel PRIVATE -Wall -Wextra)
-    add_executable(oscairn-panel-dump ${PROJECT_SOURCE_DIR}/tools/panel-dump/panel_dump.cpp)
-    target_link_libraries(oscairn-panel-dump PRIVATE oscairn_panel)
-    target_compile_options(oscairn-panel-dump PRIVATE -Wall -Wextra)
-    add_executable(oscairn-panel-reader-test tests/panel_reader.cpp)
-    target_link_libraries(oscairn-panel-reader-test PRIVATE oscairn_panel)
-    target_compile_options(oscairn-panel-reader-test PRIVATE -Wall -Wextra)
-    add_test(NAME control-panel-reader COMMAND oscairn-panel-reader-test $<TARGET_FILE:kick-clap-fixture-normal>
-        ${PROJECT_SOURCE_DIR}/hosts/standalone/panels/fantom-07.json $<TARGET_FILE:oscairn-panel-dump>)
-    set_tests_properties(control-panel-reader PROPERTIES TIMEOUT 60)
-    if(OSCAIRN_ROLAND_FANTOM0)
-        install(TARGETS oscairn-panel-dump RUNTIME DESTINATION bin)
-        install(FILES ${PROJECT_SOURCE_DIR}/hosts/standalone/panels/fantom-07.json DESTINATION share/oscairn/panels)
-    endif()
-endif()

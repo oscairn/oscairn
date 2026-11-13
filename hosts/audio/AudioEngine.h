@@ -8,10 +8,7 @@
 #ifdef __linux__
 #include "RawMidi.h"
 #endif
-#if OSCAIRN_ROLAND_FANTOM0
-#include "BmcLink.h"
-#include "oscairn/panel_reader.h"
-#endif
+#include "DeviceReaders.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
@@ -84,11 +81,9 @@ namespace oscairn::host
         static constexpr uint32_t maxFrames  = 512;
 
         std::unique_ptr<Session> session_;
-#if OSCAIRN_ROLAND_FANTOM0
-        std::unique_ptr<PanelReader> panel_; // the profile's panel, on its own thread, into the session's controls
-        std::unique_ptr<BmcLinkReader> keyboard_; // the profile's keys, on their own thread, as MIDI inputs
-#endif
-        // The keyboard's inputs (bmcSources' order), listed after the devices' and numbered once.
+        std::unique_ptr<DeviceReader> panel_; // the profile's panel, on its own thread, into the session's controls
+        std::unique_ptr<DeviceReader> keyboard_; // the profile's keys, on their own thread, as MIDI inputs
+        // The keyboard's inputs (keyboardInputs()' order), listed after the devices' and numbered once.
         std::vector<uint8_t> keyboardSources_;
         std::vector<std::string> keyboardNames_;
         std::function<void()> serviced_;

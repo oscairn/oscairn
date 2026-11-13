@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Oscairn panel map version 1",
-  "description": "How a non-MIDI device panel's 4-byte messages decode (core/control's panel_reader.h, docs/fantom-0.md): where the kind, ID, value and encoder step sit in a message, and the control each kind and ID is. The first byte of every message has bit 7 set; the reader frames on it. Sections listed in estimated are guesses, not read off a unit.",
+  "description": "How a non-MIDI device panel's 4-byte messages decode (devices/roland-fantom0's panel_reader.h, docs/fantom-0.md): where the kind, ID, value and encoder step sit in a message, and the control each kind and ID is. The first byte of every message has bit 7 set; the reader frames on it. Sections listed in estimated are guesses, not read off a unit.",
   "type": "object",
   "properties": {
     "format": { "const": "oscairn.panel-map" },

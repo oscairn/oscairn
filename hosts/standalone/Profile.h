@@ -84,11 +84,11 @@ namespace oscairn::standalone
         struct Port { std::string name; int index = 1; std::string protocol = "midi"; bool ignore = false, display = false; };
         struct Midi { int din = 0; bool usbDevice = false, usbHost = false; std::vector<Port> ports; } midi;
         struct Cv { int inputs = 0, outputs = 0; } cv;
-        // A panel that does not speak MIDI, read by the engine (core/control's panel_reader.h): its
+        // A panel that does not speak MIDI, read by the engine (devices/roland-fantom0's panel_reader.h): its
         // protocol (roland-i2c-slave, built with OSCAIRN_ROLAND_FANTOM0), its character device and
         // its message map (a file in share/oscairn/panels, or a path). Empty: none.
         struct Panel { std::string protocol, device, map; } panel;
-        // Keys that are not MIDI, read by the engine (hosts/audio's BmcLink.h): the protocol, which
+        // Keys that are not MIDI, read by the engine (devices/roland-fantom0's BmcLink.h): the protocol, which
         // names the firmware on the other side (roland-bmc-stock: Roland's own BMC firmware, built
         // with OSCAIRN_ROLAND_FANTOM0), and the character device. Empty: none.
         struct Keyboard { std::string protocol, device; } keyboard;

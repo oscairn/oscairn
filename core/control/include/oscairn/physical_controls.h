@@ -115,7 +115,7 @@ namespace oscairn
     // of rows sending a number per row, the row (-1: none); nothing when no control sends it.
     struct MidiControl { size_t group = 0; uint32_t index = 0; int row = -1; };
     std::optional<MidiControl> midiControl(const std::vector<ControlGroup>&, const std::string& device, uint32_t port, const uint8_t* bytes, size_t size);
-    // A control's input without MIDI (a device panel's own, read by panel_reader.h): a position
+    // A control's input without MIDI (a device panel's own, read by its reader in devices/): a position
     // (Absolute, 0 to 1, picked up), a change (Relative, in the same units) or a switch (1
     // pressed, 0 released; momentary). The MIDI messages above become these too.
     struct ControlInput { enum class Kind { Absolute, Relative, Switch } kind = Kind::Absolute; double value = 0; };

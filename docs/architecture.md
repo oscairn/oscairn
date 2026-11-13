@@ -70,6 +70,12 @@ users can add their own or port a DAW.
 | 4. Engines and effects | Plugins, official and community | Synths, samplers (including slicing and pad banks), drum engines, effects |
 | 5. UI and controller services | First-party, or anything that speaks the control API | Screen UI, control-surface mapping, browsing and editing; outside the audio thread. Controller services can run without the screen UI. |
 
+Code for one device family's own hardware (a panel or keys that do not speak MIDI) lives in
+`devices/`, one folder per family, and depends on the core and the host's interfaces, never the
+other way: the engine reaches it through `hosts/audio/DeviceReaders.h`, and an image whose profile
+has no such hardware builds none of it. `devices/roland-fantom0/` is the FANTOM-0's
+([running on a FANTOM-0](fantom-0.md)).
+
 ### Two kinds of thing: plugins and the UI
 
 To avoid an app framework, there are only plugins and the UI:

@@ -50,7 +50,7 @@ namespace oscairn
         // A MIDI input thread: a message from the input numbered `source` (the session status's
         // midiInputs). Any number of threads; never called on the audio thread.
         void midi(uint8_t source, const uint8_t* bytes, size_t size) noexcept;
-        // A device panel's own control, by identity, from its reader's thread (panel_reader.h): as
+        // A device panel's own control, by identity, from its reader's thread (a device's, devices/): as
         // midi(), without MIDI. False when it played nothing.
         bool control(const std::string& control, ControlInput input) noexcept;
 

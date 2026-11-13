@@ -60,11 +60,13 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(control-preinstall-web PROPERTIES TIMEOUT 120)
 endif()
 
-# A FANTOM-0 panel and keys read in the engine (panel_reader.h, BmcLink.h), for images whose profile has them.
+# A device's own panel and keys read in the engine (DeviceReaders.h), for images whose profile has
+# them: the FANTOM-0's, from devices/roland-fantom0; otherwise none.
 if(OSCAIRN_ROLAND_FANTOM0)
     target_compile_definitions(oscairn_audio_host PUBLIC OSCAIRN_ROLAND_FANTOM0=1)
-    target_sources(oscairn_audio_host PRIVATE BmcLink.cpp)
-    target_link_libraries(oscairn_audio_host PUBLIC oscairn_panel)
+    target_link_libraries(oscairn_audio_host PUBLIC oscairn_roland_fantom0)
+else()
+    target_sources(oscairn_audio_host PRIVATE NoDeviceReaders.cpp)
 endif()
 
 # The audio device chosen through the control API, on a fake device type: nothing reaches a speaker.

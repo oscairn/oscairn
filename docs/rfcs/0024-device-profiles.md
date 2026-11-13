@@ -167,12 +167,13 @@ An illustrative profile (the values are an example, not a real product's):
 - **`power`:** battery or mains, for power management (RFC 0028).
 - **`panel`** (optional, added 2026-11-08): a panel that does not speak MIDI, `{protocol, device,
   map}`: the reader (`roland-i2c-slave`, the FANTOM-0's, compiled into an image only with
-  `OSCAIRN_ROLAND_FANTOM0`), its character device, and its message map, which turns each message
+  `OSCAIRN_ROLAND_FANTOM0` from `devices/roland-fantom0/`), its character device, and its message map, which turns each message
   into a control by the identities below ([panel map schema](../panel-map.schema.json),
   [running on a FANTOM-0](../fantom-0.md)). The engine plays those controls as a controller's.
   A controller's profile has none.
 - **`keyboard`** (optional, added 2026-11-12): keys that are not MIDI, `{protocol, device}`: the
-  reader (`roland-bmc-stock`, compiled into an image only with `OSCAIRN_ROLAND_FANTOM0`) and its
+  reader (`roland-bmc-stock`, compiled into an image only with `OSCAIRN_ROLAND_FANTOM0`, from
+  `devices/roland-fantom0/`) and its
   character device. The protocol names the firmware on the other side of the device, not only the
   wire: `roland-bmc-stock` is the FANTOM-0's link to its sound chips (the BMCs) as Roland's stock
   BMC firmware speaks it, so other firmware on those chips would be another value. The panel's

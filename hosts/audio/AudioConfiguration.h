@@ -19,8 +19,8 @@ struct AudioConfiguration
     // A profile's audio.device (RFC 0024): the device's channels, opened in each direction used
     // whether mapped or not (a TDM link opens all its slots), and the rate it must run at. 0: as today.
     uint32_t deviceChannels=0,sampleRate=0;
-    std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, panel_reader.h); empty: none
-    std::string keyboardDevice; // non-MIDI keys the engine reads (a profile's keyboard, BmcLink.h); empty: none
+    std::string panelDevice,panelMap; // a non-MIDI panel the engine reads and its message map (a profile's panel, DeviceReaders.h); empty: none
+    std::string keyboardDevice; // non-MIDI keys the engine reads (a profile's keyboard, DeviceReaders.h); empty: none
     std::vector<std::string> controllers; // controller profile files (RFC 0024), each by its full path, beside the built-in ones
     bool nullDevice=false; // --audio null: the null device (NullDevice.h), writing nowhere, with no MIDI device opened; for tests, never a fallback
     static bool isOption(std::string_view name)

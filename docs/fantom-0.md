@@ -541,7 +541,11 @@ What stops when Roland's app is stopped, from what it was seen to do:
   renders Home, Play, the Parts views, an editor, the Library, the Catalog and Settings at
   1280 × 720 and checks every control fits, is that large and overlaps none. Untried on the
   instrument.
-- **A panel reader** in the engine, built only with `OSCAIRN_ROLAND_FANTOM0` (below).
+- **A panel reader** in the engine, built only with `OSCAIRN_ROLAND_FANTOM0` (below). Its code,
+  the key reader's, `oscairn-panel-dump` and the panel map are in
+  [devices/roland-fantom0/](../devices/roland-fantom0/); the profile stays with the other built-in
+  profiles in `hosts/standalone/profiles`, and the bundle's files with the other boards' in
+  `os/buildroot/board/fantom-bundle`.
 - **A key reader** in the engine, built with it ([The key reader](#the-key-reader)).
 - **A chroot bundle** (below): Oscairn with a userland of its own, to run on Roland's kernel
   and beside Roland's root filesystem without changing either. There is no image of Oscairn's
@@ -618,7 +622,7 @@ name, which a chroot does not hide (untried).
 
 ## The panel reader
 
-`oscairn::PanelReader` ([core/control/include/oscairn/panel_reader.h](../core/control/include/oscairn/panel_reader.h))
+`oscairn::PanelReader` ([devices/roland-fantom0/include/oscairn/panel_reader.h](../devices/roland-fantom0/include/oscairn/panel_reader.h))
 polls on a thread of its own with a 100 ms timeout, so it never blocks the audio or message
 thread and stops within that. The device is read as Roland's programs read it
 ([Panel messages](#panel-messages)): opened for reading and writing (never written to), then
@@ -655,7 +659,7 @@ also takes on its own command line, to try another map); a map named without a p
 
 ### The map
 
-[hosts/standalone/panels/fantom-07.json](../hosts/standalone/panels/fantom-07.json)
+[devices/roland-fantom0/panels/fantom-07.json](../devices/roland-fantom0/panels/fantom-07.json)
 ([schema](panel-map.schema.json)). `layout` says where each number sits: a field is a list of
 `bytes` (0 to 3) joined most significant first, the low `bits` of each, then `shift`, `mask` and
 `signed`; or, where a number's bits are not the low bits of each byte, a list of `parts`, each
@@ -729,7 +733,7 @@ Not in the map, with Roland's numbers for them:
 
 ## The key reader
 
-`oscairn::host::BmcLinkReader` ([hosts/audio/BmcLink.h](../hosts/audio/BmcLink.h)), built only
+`oscairn::host::BmcLinkReader` ([devices/roland-fantom0/src/BmcLink.h](../devices/roland-fantom0/src/BmcLink.h)), built only
 with `OSCAIRN_ROLAND_FANTOM0`, reads `/dev/ttyGS0` on a thread of its own, polling with a 100 ms
 timeout. **It never writes to the device:** it opens it read-only and, before reading, makes it
 raw with echo and flow control off, and reads the settings back; where they do not hold it does
@@ -914,6 +918,6 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
 
 ## Building it into an image
 
-`-DOSCAIRN_ROLAND_FANTOM0=ON` links the reader into the engine (and the app's panel handling) and
+`-DOSCAIRN_ROLAND_FANTOM0=ON` links the readers from `devices/roland-fantom0/` into the engine (and the app's panel handling) and
 installs `oscairn-panel-dump` and the map in `share/oscairn/panels/`. Buildroot passes it
 when a defconfig sets `BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0`, as the chroot bundle's does.

@@ -185,30 +185,22 @@ namespace oscairn::host
         session_->setControllerWake( [this] { triggerAsyncUpdate(); } );
         if( !config.panelDevice.empty() )
         {
-#if OSCAIRN_ROLAND_FANTOM0
             // A device panel's own controls, played as a controller's are, by their identities.
-            std::ifstream file( config.panelMap, std::ios::binary );
-            if( !file ) throw std::runtime_error( "cannot read the panel map " + config.panelMap );
-            std::stringstream text; text << file.rdbuf();
-            panel_ = std::make_unique<PanelReader>( config.panelDevice, PanelMap::parse( text.str() ), [this]( const PanelEvent& e ) {
-                if( !e.control.empty() ) session_->controllerControl( e.control, e.input );
+            panel_ = openPanel( config.panelDevice, config.panelMap, [this]( const std::string& control, const ControlInput& input ) {
+                session_->controllerControl( control, input );
             } );
-#else
-            throw std::runtime_error( "this build reads no panel (OSCAIRN_ROLAND_FANTOM0 is off)" );
-#endif
+            if( !panel_ ) throw std::runtime_error( "this build reads no panel (OSCAIRN_ROLAND_FANTOM0 is off)" );
         }
         // Like the panel, read with --audio null too: a device named on purpose, not one found.
         if( !config.keyboardDevice.empty() )
         {
-#if OSCAIRN_ROLAND_FANTOM0
-            for( size_t i = 0; i < bmcSources.size(); ++i )
+            const auto inputs = keyboardInputs();
+            if( inputs.empty() ) throw std::runtime_error( "this build reads no keyboard (OSCAIRN_ROLAND_FANTOM0 is off)" );
+            for( const auto& input : inputs )
             {
-                keyboardNames_.push_back( bmcInputName( i ) );
-                keyboardSources_.push_back( sourceNumber( "bmc:" + juce::String::toHexString( bmcSources[i] ), keyboardSources_ ) );
+                keyboardNames_.push_back( input.name );
+                keyboardSources_.push_back( sourceNumber( input.key, keyboardSources_ ) );
             }
-#else
-            throw std::runtime_error( "this build reads no keyboard (OSCAIRN_ROLAND_FANTOM0 is off)" );
-#endif
         }
 #ifdef __linux__
         // Decided once: a kernel either has the sequencer or not. Where it has, its ports are the
@@ -217,12 +209,10 @@ namespace oscairn::host
         if( rawMidi_ ) std::fprintf( stderr, "oscairn: no ALSA sequencer; MIDI inputs are read as ALSA raw MIDI\n" );
 #endif
         openMidiInputs();
-#if OSCAIRN_ROLAND_FANTOM0
         if( !config.keyboardDevice.empty() )
-            keyboard_ = std::make_unique<BmcLinkReader>( config.keyboardDevice, [this]( size_t input, const uint8_t* bytes, size_t size ) {
+            keyboard_ = openKeyboard( config.keyboardDevice, [this]( size_t input, const uint8_t* bytes, size_t size ) {
                 incoming( juce::MidiMessage( bytes, int( size ) ), nullptr, -1, keyboardSources_[input] );
             } );
-#endif
         openMidiOutputs();
         sender_.startThread();
         midiDevicesChanged_ = juce::MidiDeviceListConnection::make( [this] { midiDevicesDirty_ = true; } );
@@ -246,10 +236,8 @@ namespace oscairn::host
     AudioEngine::~AudioEngine()
     {
         stopTimer();
-#if OSCAIRN_ROLAND_FANTOM0
         panel_.reset(); // its thread plays the session's controls
         keyboard_.reset();
-#endif
         session_->setControllerWake( {} );
         session_->setAudioHost( {}, {} );
         session_->setControllerHost( {} );

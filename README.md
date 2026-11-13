@@ -358,6 +358,7 @@ The design the code is built towards; parts of it are not built yet. In full:
 | --- | --- |
 | `core/` | Graph, transport and clock, event routing, plugin hosting, the control API and the Sounds and Performances library. A library. |
 | `hosts/` | Programs built on the core: headless (render to file, for CI), desktop, later device and plugin builds. |
+| `devices/` | Code for one device family's own hardware, outside the core: `roland-fantom0/` reads the Roland FANTOM-06, -07 and -08's panel and keys, built in only with `OSCAIRN_ROLAND_FANTOM0` ([running on a FANTOM-0](docs/fantom-0.md)). |
 | `plugins/` | First-party plugins: step sequencer, basic synth, delay, split and join, MIDI effects, the Modular wrapper; arpeggiator (not built yet). |
 | `tools/` | Developer tools: `oscairn-sign` (signing keys and plugin builds), the MIDI monitor and the worker hand-off bench ([developer guide](docs/developer-guide.md#tools)). |
 | `docs/` | [Architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and design decisions in [`rfcs/`](docs/rfcs/README.md). |

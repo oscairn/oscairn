@@ -38,6 +38,15 @@ else
 	check "no governor here: it says so" "echo \"\$out\" | grep -q 'no CPU frequency governor here: nothing to set'"
 fi
 
+out=$(OSCAIRN_AUDIO_THREAD_CORES=1-3 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the audio threads' cores from the environment, handed to the engine" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=1-3 oscairn-engine-run --output-device'"
+echo "OSCAIRN_AUDIO_THREAD_CORES='2,3'" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "or from the profile's file" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=2,3 oscairn-engine-run'"
+out=$(OSCAIRN_AUDIO_THREAD_CORES=1-3 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the environment's first" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=1-3 oscairn-engine-run'"
+echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
+
 out=$(OSCAIRN_PANEL_DEVICE="$bundle/no-panel" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "the panel absent: it says so and goes on" "[ $status = 0 ] && echo \"\$out\" | grep -q 'the panel device $bundle/no-panel is not here: the panel will not be read' && echo \"\$out\" | grep -q 'oscairn-panel-holder $bundle/no-panel'"
 

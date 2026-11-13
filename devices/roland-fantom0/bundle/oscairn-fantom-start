@@ -154,19 +154,24 @@ for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
 done
 [ -e "$g" ] || say "no CPU frequency governor here: nothing to set"
 
-# 6. The engine, with the profile's options.
+# 6. The engine, with the profile's options. The cores its audio threads keep to: this script's
+# environment's OSCAIRN_AUDIO_THREAD_CORES ("1-3"), else the file's (the profile's
+# compute.audioThreadCores); none, anywhere. start-chroot.sh passes no environment on, so it is
+# handed over here.
+cores=${OSCAIRN_AUDIO_THREAD_CORES:-}
 [ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"
+cores=${cores:-${OSCAIRN_AUDIO_THREAD_CORES:-}}
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
-say "starting the engine: oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
+say "starting the engine: oscairn-engine-run $OSCAIRN_ENGINE_ARGS${cores:+ (audio threads on cores $cores)}"
 if [ -n "$dry" ]; then
-	say "would run: $root/start-chroot.sh setsid env oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
+	say "would run: $root/start-chroot.sh setsid env ${cores:+OSCAIRN_AUDIO_THREAD_CORES=$cores }oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
 	exit 0
 fi
 rm -f "$root/run/oscairn/engine.sock" "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
 eval "set -- $OSCAIRN_ENGINE_ARGS"
 # setsid: the bundle's own, as the panel holder detaches itself with; the ssh session ending
 # then does not take the engine with it.
-"$root/start-chroot.sh" setsid env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" oscairn-engine-run "$@" \
+"$root/start-chroot.sh" setsid env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} oscairn-engine-run "$@" \
 	>> "$state/log/oscairn-engine.log" 2>&1 &
 echo $! > "$state/run/engine.pid"
 

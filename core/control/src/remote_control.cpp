@@ -536,6 +536,7 @@ namespace oscairn
             snapshot(field(w,"collect")),snapshot(field(w,"wake")),snapshot(field(w,"run")),uint64_t(integer(field(w,"busy"))),uint64_t(integer(field(w,"missPanics"))),uint64_t(integer(field(w,"minorFaults"))),uint64_t(integer(field(w,"majorFaults"))),snapshot(field(w,"cpu")),uint64_t(integer(field(w,"involuntarySwitches")))});
         return t;
     }
+    void RemoteControl::forgetMeasurements() { impl_->call("budget.forget","{}"); }
     Control::Estimate RemoteControl::estimate(const std::string& directory) {
         auto d=impl_->call("budget.estimate",directory.empty()?std::string("{}"):"{\"directory\":"+quote(directory)+'}',30000);auto r=field(d.get(),"result");
         Estimate e;e.cpu=number(field(r,"cpu"));e.memory=uint64_t(integer(field(r,"memory")));e.fits=boolean(field(r,"fits"));e.seamless=boolean(field(r,"seamless"));

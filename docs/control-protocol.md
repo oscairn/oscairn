@@ -657,7 +657,7 @@ it is refused to apps whatever they were granted.
 | `play` or `edit` | reading what plays: `transport.get`, `graph.get`, `params.list`, `params.get`, `params.text`, `pads.get`, `assignments.get`, `harmony.get`, `parts.meters`, `wires.meters`, `sounds.get`, `effects.resources`, `state.info`, `window.info`, `presets.list`, `properties.list`, `properties.get`; the `transport`, `params.changed`, `graph.changed` and `controls.changed` topics |
 | `edit` | the rest of `graph`, `parts`, `wires`, `params`, `scenes`, `controls`, `pads`, `edit`, `sounds`, `properties` and `assignments`; `master.set`, `effects.create`, `instruments.share`, `harmony.set`, `state.save`, `window.show` |
 | `library` | `library.*`, `performance.*`, `budget.estimate`, `audition.*`, `assets.*`, `record.*`; the `record` topic |
-| `system` | `packages.*`, `trust.*`, `keys.*`, `plugins.*`, `controllers.set`, `controllers.view`, `controllers.inputs`, `controllers.choose`, `controllers.ignore`, `midi.ignore`, `engine.attach`, `engine.release`, `budget.set`, `performance.reopen`, `memory.*`, `audio.set`, `engine.timing` |
+| `system` | `packages.*`, `trust.*`, `keys.*`, `plugins.*`, `controllers.set`, `controllers.view`, `controllers.inputs`, `controllers.choose`, `controllers.ignore`, `midi.ignore`, `engine.attach`, `engine.release`, `budget.set`, `budget.forget`, `performance.reopen`, `memory.*`, `audio.set`, `engine.timing` |
 | `play`, `edit` or `system` | `controllers.get` and the `controllers` topic, which `RemoteControl` subscribes to |
 
 `controls`, `midi`, `audio`, `background`, `network` and `files` are accepted in a grant and
@@ -1181,6 +1181,12 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   or adding a plugin that would take the open one over it, fails saying what does not fit; one
   that fits only alone opens as a cut, without the last ringing out. A plugin whose
   `oscairn.memory` declaration exceeds what the memory budget leaves is refused before it activates.
+  `budget.forget` (no parameters; the `system` permission) lets go of every plugin's measured CPU,
+  returning `{forgotten:true}`: each counts at its declared or default estimate until it plays
+  again (its measured memory stands, so a plugin so counted shows `measured` true when its memory is
+  known), and `measurements.json` is rewritten at once. For estimates a stall or a burst spoiled; an
+  impossible figure in the file (a share above the audio time, negative) is dropped when it is read
+  anyway, and a file written by an older estimator is discarded.
   While playing, `cpu` is also the shared voice budget's hard limit ([RFC 0018](rfcs/0018-voice-budget-and-stealing.md#step-3-status)):
   past 85% of it the least audible notes fade out to make room for new ones, and `parts.meters` counts them.
   `budget.set` also takes optional memory classes in bytes ([RFC 0025](rfcs/0025-resource-budgets.md#memory-reserved-committed-and-opportunistic)):

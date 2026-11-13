@@ -116,21 +116,40 @@ time less the reliability level's margin (desktop 90%, instrument 75%, pass-thro
 of the profile's memory. Until a budget is set nothing is measured or checked, so tests and tools
 never write the user's data folder.
 
-- **Measured:** at each service tick, every plugin's last block as a share of the block's time,
-  kept as a slowly falling high-water mark (about ten minutes' half-life) per plugin build (ID,
-  version and the digest of its files, so a rebuild without a new version is measured again), skipping its first 32 blocks; memory every second, a worker's share of its
-  process's resident memory or, in the engine's process, what the process grew by while the
-  plugin loaded. Kept in `measurements.json` in the data folder, saved every 30 seconds when
-  changed and when the session ends. One sample a tick can miss a rare spike between ticks.
-  Each sample is also split by the notes sounding through the plugin in that block (held, or
-  sustained by the pedal; the graph counts them for every plugin that takes notes): with none,
-  it updates the plugin's cost **at rest**; with some, its cost **per voice** (the time above
-  rest, divided by the notes), each a falling high-water mark too, and the most notes seen at
-  once. A plugin that takes no notes (an effect) is all at rest. A block's time is the wall
-  time of the plugin's `process` call on its audio thread (the worker's, for a plugin in one),
-  so threads a plugin starts itself (an EQ's coefficient matching) are not counted, unless they
-  slow that call; a worker's whole CPU time, every thread's, is reported in `session.status`
-  but not budgeted.
+- **Measured:** at each service tick, every plugin's last block as a share of the block's time
+  (at most 1), per plugin build (ID, version and the digest of its files, so a rebuild without a
+  new version is measured again), skipping its first 32 blocks and a tick in which it ran no block;
+  memory every second, a worker's share of its process's resident memory or, in the engine's
+  process, what the process grew by while the plugin loaded. Kept in `measurements.json` in the
+  data folder (`{"version":2,"plugins":{...}}`), saved every 30 seconds when changed and when the
+  session ends. One sample a tick can miss a rare spike between ticks. The figures are means, not
+  high-water marks, so one stall or burst cannot set them for good:
+  - A sample of a plugin in a worker is held to the CPU time the worker's audio thread used for the
+    blocks around it (the largest bucket of the per-block CPU histogram of `engine.timing`, whose top
+    is at most twice the time), so a block the thread was not scheduled for (a kernel stall: the
+    wall time of `process` includes it) counts for no more than the work, and a block that computed
+    counts in full. Wall time beyond the CPU time never counts, whether or not the engine silenced the block; a tick in which no block ran is no sample.
+  - Each sample is split by the notes sounding through the plugin in that block (held, or
+    sustained by the pedal; the graph counts them for every plugin that takes notes). A block counts
+    **at rest** only with no note sounding for half a second (a release tail is not rest); a plugin
+    that takes no notes (an effect) is all at rest. The rest is a running mean of those samples,
+    each weighing its blocks over 4000 (about 10 s at 128 frames and 48 kHz), and at least 1/n
+    while n is small. With notes sounding, a block updates the cost **per voice** the same way, the
+    time above rest divided by the notes, taking the rest off once 100 samples at rest are known (before
+    that the whole sample is the voices', an upper bound), and the most notes seen at once.
+  - `cpu`, the cost with no note limit, is the busiest sustained load: the largest of a one-second
+    mean of the samples, falling with a time constant of 60000 blocks (a few minutes at 128 frames),
+    so one bad session wears off.
+  - A figure read from the file counts as 4 samples, so what is played now outweighs it quickly. A
+    figure that is impossible (a share above 1, negative, not a number) is dropped when the file is
+    read and measured again, its memory kept; a file without `"version":2`, written by the first
+    estimator (a high-water mark of wall times, which kernel stalls of a worker's audio thread of 5 to 23 ms every 10 s and notes
+    held during the measurement spoiled on the FANTOM-07, [RFC 0045](0045-audio-scheduling-on-small-devices.md#what-the-timing-tools-must-report)),
+    is discarded whole. `budget.forget` lets go of every CPU figure at once.
+  A block's time is the wall time of the plugin's `process` call on its audio thread (the worker's,
+  for a plugin in one), held as above, so threads a plugin starts itself (an EQ's coefficient
+  matching) are not counted, unless they slow that call; a worker's whole CPU time, every thread's, is
+  reported in `session.status` but not budgeted.
 - **Estimated:** the open Performance, or one in a folder from its document's plugin identities;
   a plugin never measured here counts at 2% of the audio time and 32 MiB, marked unmeasured. A
   measured plugin in a part with a note limit (RFC 0018) counts at rest plus its cost per voice

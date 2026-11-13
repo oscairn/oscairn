@@ -62,6 +62,7 @@ namespace oscairn
         /// The device (re)started: its next callback is late against none, and the next blocks warm up.
         void audioStarted() noexcept { audioStarted_.store(true, std::memory_order_release); callbackTiming_.warmUp(); latenessTiming_.warmUp(); }
         Estimate estimate(const std::string& directory = {}) override;
+        void forgetMeasurements() override;
         std::vector<std::string> exportPerformance(const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
         std::vector<std::string> exportLibraryItem(const std::string& id, const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
         std::vector<std::string> exportLibrary(const std::string& file, const std::string& name, const std::vector<std::string>& setlists, const ExportSigning& sign = {}) override;
@@ -344,6 +345,7 @@ namespace oscairn
         bool memoryPressure();
         size_t heldRemoved() const noexcept { return graph_.heldRemoved(); } // removed plugins not freed yet
         uint64_t plansCompiled() const noexcept { return graph_.plansCompiled(); } // for tests: a fader moved live compiles none
+        void saveMeasurementsNow() { measurementsChanged_ = true; saveMeasurements(); } // for tests: measurements.json now, not within 30 seconds
         uint32_t maxFrames() const noexcept { return maxFrames_; }
 
     private:
@@ -406,14 +408,27 @@ namespace oscairn
         void meter();                            // service(): updates the meters from the graph's peaks
         // Resource budgets (budget.cpp, RFC 0025): this device's measurements of each plugin build,
         // kept in the data folder once a budget is set.
-        // cpu: the busiest block seen; rest: with no note sounding; voice: added per sounding note;
-        // voices: the most notes seen sounding at once. All shares of a block's time.
+        // cpu: the busiest sustained load, falling; rest: with no note sounding or held; voice: added
+        // per sounding note; voices: the most notes seen sounding at once. All shares of a block's
+        // time, from blocks that ran undisturbed (budget.cpp, measure).
         struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; };
         Budget budget_;
         std::map<std::string, Measurement> measured_;          // by plugin ID, version and build digest, and what it declared (pluginKey)
         bool measurementsLoaded_ = false, measurementsChanged_ = false;
         std::chrono::steady_clock::time_point measurementsSaved_{};
         uint64_t measureTicks_ = 0;
+        // What measure() keeps of each plugin between ticks, not saved. A sample waits one tick for the
+        // worker's CPU times of its blocks (recorded as the next block is handed over) before it counts.
+        struct Learning
+        {
+            struct Pending { double microseconds = 0; uint32_t voices = 0; uint64_t blocks = 0; bool quiet = false; };
+            uint64_t blocks = 0, quiet = 0; // the plugin's blocks at the last tick; blocks since a note last sounded
+            uint32_t samples = 0, restN = 0, voiceN = 0;
+            double fast = 0;
+            bool pending = false; Pending held;
+            std::array<uint64_t, Histogram::buckets> was{}, before{}; // the worker's per-block CPU time histogram at the last two ticks
+        };
+        std::map<NodeId, Learning> learning_;
         std::map<NodeId, uint64_t> loadedBytes_;               // this process's growth as an in-process plugin loaded
         std::atomic<uint32_t> blockFrames_{0};                 // the audio thread's last block
         void measure();                                        // service()

@@ -3951,6 +3951,32 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "budget.forget",
+              "description": "Lets go of every plugin's measured CPU (its memory stays): each counts at its declared or default estimate until it plays again"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "budget.estimate",
               "description": "What the open Performance, or one in a folder, needs against the budget"
             },

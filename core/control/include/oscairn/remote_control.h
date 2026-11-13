@@ -58,6 +58,7 @@ namespace oscairn
         MemoryState memoryState() override;
         Timing engineTiming(bool reset) override;
         Estimate estimate(const std::string& directory = {}) override;
+        void forgetMeasurements() override;
         std::vector<std::string> exportPerformance(const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
         void loadPerformance(const std::string& directory) override;
         bool preparePerformance(const std::string& directory) override;

@@ -184,6 +184,12 @@ add_executable(oscairn-plugin-check tests/plugin_check.cpp)
 target_link_libraries(oscairn-plugin-check PRIVATE oscairn_control)
 # A note effect is checked for the notes it sends, an audio effect for sound.
 add_test(NAME control-plugin-check-note-effect COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_transpose> org.oscairn.transpose effect)
+# RFC 0025's CPU estimates: a stall or a burst does not spoil them, and a spoiled one can be forgotten.
+add_executable(oscairn-estimates-test tests/estimates.cpp)
+target_link_libraries(oscairn-estimates-test PRIVATE oscairn_control_json oscairn_control)
+add_test(NAME control-estimates COMMAND oscairn-estimates-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(control-estimates PROPERTIES TIMEOUT 120)
+
 # Given relative to the working folder, as a packager types it.
 add_test(NAME control-plugin-check-audio-effect COMMAND oscairn-plugin-check ./$<TARGET_FILE_NAME:oscairn_delay> org.oscairn.delay effect
     WORKING_DIRECTORY $<TARGET_FILE_DIR:oscairn_delay>)

@@ -1478,9 +1478,9 @@ namespace
             std::string key;
             {
                 std::ifstream in(root / "budget-home" / "measurements.json"); const std::string text((std::istreambuf_iterator<char>(in)), {});
-                const auto at = text.find("{\"plugins\":{\"") + 13; key = text.substr(at, text.find('"', at) - at);
+                const auto at = text.find("\"plugins\":{\"") + 12; key = text.substr(at, text.find('"', at) - at);
             }
-            std::ofstream(home / "measurements.json") << "{\"plugins\":{\"" << key << "\":{\"cpu\":0.3,\"rest\":0.05,\"voice\":0.01,\"voices\":3,\"memory\":1000}}}";
+            std::ofstream(home / "measurements.json") << "{\"version\":2,\"plugins\":{\"" << key << "\":{\"cpu\":0.3,\"rest\":0.05,\"voice\":0.01,\"voices\":3,\"memory\":1000}}}";
             Session v(48000, frames);
             v.setBudget({.9, 0});
             const auto a = v.add("a", fixture, "org.kick.test.synth");
@@ -1556,7 +1556,7 @@ namespace
         ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1);
         // Two modes measured: the default (9 MiB declared) at 10 MiB, a big one (17 MiB declared) at 100.
         const auto build = "org.kick.test.memory@1 " + bundleDigest(fixture) + "#"; // measurements' key (Session::pluginKey)
-        std::ofstream(home / "measurements.json") << "{\"plugins\":{"
+        std::ofstream(home / "measurements.json") << "{\"version\":2,\"plugins\":{"
             "\"" << build << 9 * MiB << "\":{\"cpu\":0.01,\"rest\":0.01,\"voice\":0,\"voices\":0,\"memory\":" << 10 * MiB << "},"
             "\"" << build << 17 * MiB << "\":{\"cpu\":0.01,\"rest\":0.01,\"voice\":0,\"voices\":0,\"memory\":" << 100 * MiB << "}}}";
         {
@@ -1591,7 +1591,7 @@ namespace
             const auto other = root / "memory-default";
             fs::create_directories(other);
             ::setenv("OSCAIRN_DATA_HOME", other.c_str(), 1);
-            std::ofstream(other / "measurements.json") << "{\"plugins\":{\"" << build << 9 * MiB
+            std::ofstream(other / "measurements.json") << "{\"version\":2,\"plugins\":{\"" << build << 9 * MiB
                 << "\":{\"cpu\":0.01,\"rest\":0.01,\"voice\":0,\"voices\":0,\"memory\":" << 9 * MiB << "}}}";
             Session u(48000, frames);
             u.setBudget({.9, 12 * MiB});
@@ -1672,7 +1672,7 @@ namespace
         // build at its largest measurement) is estimated, not taken at the 32 MiB default.
         const uint64_t half = MiB + uint64_t(.5 * (16 * MiB)), most = MiB + uint64_t(.9 * (16 * MiB));
         const auto build = "org.kick.test.memory@1 " + bundleDigest(fixture) + "#";
-        std::ofstream(home / "measurements.json") << "{\"plugins\":{"
+        std::ofstream(home / "measurements.json") << "{\"version\":2,\"plugins\":{"
             "\"" << build << half << "\":{\"cpu\":0.001,\"rest\":0.001,\"voice\":0,\"voices\":0,\"memory\":" << half << "},"
             "\"" << build << most << "\":{\"cpu\":0.001,\"rest\":0.001,\"voice\":0,\"voices\":0,\"memory\":" << most << "}}}";
         Session s(48000, frames);

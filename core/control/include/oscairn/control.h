@@ -253,6 +253,9 @@ namespace oscairn
         struct Cost { std::string name, plugin; double cpu = 0; uint64_t memory = 0; bool measured = false; };
         struct Estimate { double cpu = 0; uint64_t memory = 0; std::vector<Cost> plugins; Budget budget; bool fits = true, seamless = true; };
         virtual Estimate estimate(const std::string& directory = {}) = 0;
+        // Forgets every plugin's measured CPU (not its memory): each counts at its declared or default
+        // estimate, marked unmeasured, until it plays again. For estimates a stall or a burst spoiled.
+        virtual void forgetMeasurements() = 0;
         // An export (RFC 0021): one archive file (package.h) holding this Performance, every sample
         // its plugins use, and the library Sound of each part still that Sound; with editedSounds,
         // also the Sound of each part edited since, as it is in the library. Refuses a file that exists.

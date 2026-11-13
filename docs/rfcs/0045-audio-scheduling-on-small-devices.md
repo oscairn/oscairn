@@ -505,6 +505,13 @@ Steps 2 and 11; built marked as such.
   Tested by `control-worker-timing`: one block stalled in the plugin, every part apart, the cpu far
   below the run for a stall that sleeps and close to it for one that spins.
 - The callback's duration and lateness, and the device's underruns, as now.
+- The same cpu histogram keeps a stall out of the admission estimates ([RFC 0025](0025-resource-budgets.md#status)):
+  a plugin's cost is a running mean of its blocks' wall time held to the CPU time its audio thread
+  used, so a block the kernel did not schedule counts for the work done and no more, and notes
+  held do not count as cost at rest. The first estimator took the largest block seen, so on the
+  FANTOM-07 the stalls and held notes of one night's test runs made Analog cost 211% of the audio
+  time at rest and refused nearly every Performance; `budget.forget` lets go of such figures.
+  Tested by `control-estimates`.
 
 ## Decisions for the owner
 

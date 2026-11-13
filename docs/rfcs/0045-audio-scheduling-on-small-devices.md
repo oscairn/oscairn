@@ -631,8 +631,8 @@ the background only when the memory budget would be exceeded.
 ### Migration, in stages that each leave main working
 
 1. Independent of hosts: the deadline rule, the engine's main-thread service cut, the sharing
-   stopgap (`OSCAIRN_SHARING=cpu`), the spin (built 2026-11-13); admission per core (RFC 0025,
-   next).
+   stopgap (`OSCAIRN_SHARING=cpu`), the spin, admission per core (RFC 0025), all built
+   2026-11-13.
 2. A worker process that holds several instances of different plugins: `Op::Init` loads the first,
    a new `Op::Load` adds another node (the node index, shared block and control protocol are per
    node already: a worker holds a root and its effect contexts today); one audio thread per

@@ -118,6 +118,10 @@ struct Statistics {
     // Cumulative per host. A missed DSP deadline is not an audio-device xrun.
     uint64_t deadlineMisses = 0, controlSilences = 0, idleBlocks = 0;
     uint64_t restarts = 0; // Oscairn plugin workers restarted after failing (RFC 0010)
+    // Oscairn plugin workers (RFC 0045): blocks past the allowance that played late, and those
+    // silenced; both are in deadlineMisses. The allowance per block, 0 for a plugin in the engine.
+    uint64_t lateBlocks = 0, silentBlocks = 0;
+    double allowanceMicroseconds = 0;
 };
 
 // oscairn.hardware (oscairn-clap/hardware.h, RFC 0004): the process's accelerators, which every

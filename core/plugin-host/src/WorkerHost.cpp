@@ -810,7 +810,9 @@ namespace oscairn
                 kick::clap::Statistics s;
                 s.blocks = shared_->blocks.load(); s.droppedEvents = shared_->droppedEvents.load() + sysexDrops_.load(std::memory_order_relaxed); s.processErrors = shared_->processErrors.load();
                 s.lastMicroseconds = shared_->lastMicroseconds.load(); s.maximumMicroseconds = shared_->maximumMicroseconds.load();
-                s.deadlineMisses = shared_->deadlineMisses.load() + workerMisses_.load(std::memory_order_relaxed);
+                s.lateBlocks = late_.load(std::memory_order_relaxed); s.silentBlocks = silent_.load(std::memory_order_relaxed);
+                s.deadlineMisses = shared_->deadlineMisses.load() + s.lateBlocks + s.silentBlocks;
+                s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process_->budget).count();
                 s.controlSilences = shared_->controlSilences.load(); s.idleBlocks = shared_->idleBlocks.load();
                 s.restarts = process_->restarted.load(std::memory_order_relaxed);
                 return s;
@@ -977,7 +979,7 @@ namespace oscairn
                 if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) return silence();
                 if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; roundTrips_.warmUp(); } // restarted
                 // A block the worker has not finished yet: stay silent rather than queue another.
-                if(s.done.load(std::memory_order_acquire) != sequence_) { workerMisses_.fetch_add(1, std::memory_order_relaxed); return silence(); }
+                if(s.done.load(std::memory_order_acquire) != sequence_) { silent_.fetch_add(1, std::memory_order_relaxed); return silence(); }
                 for(uint32_t c = 0; c < inChannels_; ++c)
                 {
                     if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, audioIn(c));
@@ -1020,18 +1022,17 @@ namespace oscairn
                 const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (checked - sent));
                 // The round trip as this thread sees it: done when first found done, or given up.
                 auto roundTrip = [&](std::chrono::steady_clock::time_point seen) { roundTrips_.record(std::chrono::nanoseconds(seen - sent).count(), std::chrono::nanoseconds(seen.time_since_epoch()).count()); };
-                if(!ready && (!waitWhileEqual(s.done, sequence_ - 1, left) || s.done.load(std::memory_order_acquire) != sequence_))
-                {
-                    roundTrip(std::chrono::steady_clock::now());
-                    missed();
-                    return silence();
-                }
+                const bool done = ready || (waitWhileEqual(s.done, sequence_ - 1, left) && s.done.load(std::memory_order_acquire) == sequence_);
                 // Late by the clock counts toward "too slow" even when the wait itself woke late; a
                 // block done before the caller came for it was not late.
                 const auto seen = ready ? checked : std::chrono::steady_clock::now();
                 roundTrip(seen);
-                if(!ready && seen - sent > budget) missed();
-                else consecutiveMisses_ = 0;
+                switch(blockOutcome(ready, done, seen - sent, budget))
+                {
+                case BlockOutcome::silent: missed(silent_); return silence();
+                case BlockOutcome::late: missed(late_); break;
+                case BlockOutcome::onTime: consecutiveMisses_ = 0; break;
+                }
                 for(uint32_t c = 0; c < no; ++c)
                 {
                     if(!outputs[c]) continue;
@@ -1104,11 +1105,11 @@ namespace oscairn
                 idVersion_.fetch_add(1, std::memory_order_release);
             }
 
-            // A block that ran out of budget. Only these count toward "too slow"; a block the
-            // worker never finishes is a hang, which the supervisor detects.
-            void missed() noexcept
+            // A block that ran out of budget, late or silent. Only these count toward "too slow"; a
+            // block the worker never finishes is a hang, which the supervisor detects.
+            void missed(std::atomic<uint64_t>& count) noexcept
             {
-                workerMisses_.fetch_add(1, std::memory_order_relaxed);
+                count.fetch_add(1, std::memory_order_relaxed);
                 if(++consecutiveMisses_ >= process_->missLimit) tooSlow_.store(true, std::memory_order_release);
             }
 
@@ -1153,7 +1154,8 @@ namespace oscairn
             std::atomic<uint32_t> requested_{0};
             std::atomic<int64_t> requestedAt_{0};
             std::atomic<bool> tooSlow_{false}, busy_{false};
-            std::atomic<uint64_t> workerMisses_{0};
+            // Blocks past the allowance: played late, or silenced (also those silenced at once while the worker was still busy).
+            std::atomic<uint64_t> late_{0}, silent_{0};
             bool reset_ = false; // audio thread: wasReset, from the worker's blocks in the last call
             uint32_t sequence_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
             // The block start handed over, for finish.

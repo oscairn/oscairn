@@ -119,14 +119,18 @@ namespace oscairn
             struct PluginFailure { NodeId node=0; std::string name, reason; bool operator==(const PluginFailure&) const = default; };
             std::vector<PluginFailure> failures;
             // Plugins in their own workers (RFC 0010): CPU time used in seconds, restarts included, memory in
-            // bytes, and the time its last block took inside the worker and the most a block has, in microseconds.
-            struct WorkerUsage { NodeId node=0; std::string name; double cpu=0; uint64_t memory=0; double block=0, blockMax=0; bool operator==(const WorkerUsage&) const = default; };
+            // bytes, and the time its last block took inside the worker and the most a block has, in microseconds;
+            // its allowance per block in microseconds, and its blocks past it played late and silenced, since it was loaded.
+            struct WorkerUsage { NodeId node=0; std::string name; double cpu=0; uint64_t memory=0; double block=0, blockMax=0, allowance=0; uint64_t late=0, silent=0; bool operator==(const WorkerUsage&) const = default; };
             std::vector<WorkerUsage> workers;
             std::vector<MidiEndpoint> midiOutputs; // its MIDI outputs, numbered from 1 apart from the inputs, for parts' MIDI out and clock
             // What the last Performance load, Sound or import passed over without failing: an optional asset missing.
             std::vector<std::string> notices;
             // The audio device's underruns and overruns since it started, as the host counts them (RFC 0035).
             uint64_t audioUnderruns = 0;
+            // Of the workers' blocks past their allowance (RFC 0045): those played late, and those
+            // silenced, the ones heard as a dropout. Both are in deadlineMisses; neither is an underrun.
+            uint64_t lateBlocks = 0, silentBlocks = 0;
             uint64_t audioDeviceList = 0; // changes when the host's audio devices come or go: audioDevices() again
             uint64_t midiPortList = 0; // changes when MIDI inputs come or go, or a port's profiles or ignoring change: midiPorts() again
             // The keys held now on each source that has any (a MIDI input's source, or 0 for the
@@ -225,11 +229,12 @@ namespace oscairn
         // engine.timing: the audio path's timing since the last reset (BlockTiming, timing.h). The
         // device callback's own duration and its lateness (its start minus the last one's plus a
         // period; early counts as 0), as the host reports them, and each plugin in a worker's block
-        // round trips. reset: after reading, a new window starts with the next block.
+        // round trips, its allowance (microseconds) and its blocks past it, played late and silenced,
+        // since the last reset. reset: after reading, a new window starts with the next block.
         struct Timing
         {
             BlockTiming::Snapshot callback, lateness;
-            struct Worker { NodeId node = 0; std::string name; BlockTiming::Snapshot roundTrip; };
+            struct Worker { NodeId node = 0; std::string name; BlockTiming::Snapshot roundTrip; double allowance = 0; uint64_t late = 0, silent = 0; };
             std::vector<Worker> workers;
         };
         virtual Timing engineTiming(bool reset) = 0;

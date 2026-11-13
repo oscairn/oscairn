@@ -486,6 +486,17 @@ namespace
         check( workerAllowance( 128, 48000, "0" ) == std::chrono::nanoseconds( 1'333'333 ) && workerAllowance( 128, 48000, "-5" ) == std::chrono::nanoseconds( 1'333'333 ) &&
                workerAllowance( 128, 48000, "1.5" ) == std::chrono::nanoseconds( 1'333'333 ) && workerAllowance( 128, 48000, "abc" ) == std::chrono::nanoseconds( 1'333'333 ) &&
                workerAllowance( 128, 48000, "99999999999" ) == std::chrono::nanoseconds( 1'333'333 ), "a malformed or out-of-range one leaves the derived allowance" );
+
+        // A block's outcome from the times the engine saw: done when it came for it is on time, however
+        // long since; found done within the allowance on time, past it late (played); never found, silent.
+        using oscairn::worker::blockOutcome; using oscairn::worker::BlockOutcome; using std::chrono::microseconds;
+        const auto allowance = microseconds( 1333 );
+        check( blockOutcome( true, true, microseconds( 5000 ), allowance ) == BlockOutcome::onTime && blockOutcome( false, true, microseconds( 1333 ), allowance ) == BlockOutcome::onTime,
+               "a block done when the engine came for it, or by the allowance, is on time" );
+        check( blockOutcome( false, true, microseconds( 1334 ), allowance ) == BlockOutcome::late && blockOutcome( false, true, microseconds( 3750 ), allowance ) == BlockOutcome::late,
+               "found done past the allowance (the engine's thread woke late) is late, and played" );
+        check( blockOutcome( false, false, microseconds( 1333 ), allowance ) == BlockOutcome::silent && blockOutcome( false, false, microseconds( 200 ), allowance ) == BlockOutcome::silent,
+               "never found done within the allowance is silent" );
     }
 
     // The session's callback timing from times a host gives it (blockTimes): deterministic

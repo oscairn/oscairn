@@ -812,6 +812,7 @@ namespace oscairn
         std::atomic<Transport::ClockSource> clockSource_{ Transport::ClockSource::Internal };
         // engine.timing's callback histograms (blockTimes, audio thread) and the last callback's start.
         BlockTiming callbackTiming_, latenessTiming_;
+        std::map<NodeId, std::pair<uint64_t, uint64_t>> timingBase_; // control thread: each worker's late and silent blocks at the last reset
         int64_t lastStart_ = 0;
         std::atomic<bool> audioStarted_{ false };
         std::atomic<bool> statusPlaying_{ false };

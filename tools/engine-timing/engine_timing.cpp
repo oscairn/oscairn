@@ -158,6 +158,10 @@ int main(int argc, char** argv)
                     seconds, number(field(field(r, "callback"), "seconds")), reset ? "" : ", since the last reset");
         std::printf("deadline misses %+.0f, audio underruns %+.0f over the interval (now %.0f and %.0f)\n",
                     after.first - before.first, after.second - before.second, after.first, after.second);
+        // Each worker's blocks past its allowance in the window: played late, or silenced (heard as a dropout).
+        for(V w : array(field(r, "workers")))
+            std::printf("%s (%d): allowance %.0f, past it %.0f played late and %.0f silenced\n", text(field(w, "name")).c_str(), int(number(field(w, "node"))),
+                        number(field(w, "allowance")), number(field(w, "late")), number(field(w, "silent")));
         std::printf("startup: the first %.0f blocks after a start (engine, device, Performance load, worker restart)\n\n", number(field(r, "warmupBlocks")));
         std::printf("%-24s %-8s %8s %7s %7s %7s %9s %8s\n", "measurement", "", "blocks", "p50", "p99", "p99.9", "max", "max at s");
         for(const auto& row : rows) { summary("steady", row.name, row.steady); if(row.startup.count()) summary("startup", "", row.startup); }

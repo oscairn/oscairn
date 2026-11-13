@@ -37,4 +37,15 @@ namespace oscairn::worker
     // `overrideMicroseconds` (OSCAIRN_WORKER_BUDGET_US, the profile's compute.workerAllowance), a
     // whole number of microseconds above 0, replaces it; anything else leaves the derived one.
     std::chrono::nanoseconds workerAllowance(uint32_t frames, double rate, const char* overrideMicroseconds) noexcept;
+    // What became of a block the engine handed a worker, once it came for it: on time (done when it
+    // came, or found done within the allowance); late, found done but past the allowance, its sound
+    // played all the same (the engine's own thread woke late); or silent, not done within the
+    // allowance and silenced. Late and silent both count toward "too slow".
+    enum class BlockOutcome { onTime, late, silent };
+    constexpr BlockOutcome blockOutcome(bool doneWhenAsked, bool doneAfterWaiting, std::chrono::nanoseconds sinceHandOver, std::chrono::nanoseconds allowance) noexcept
+    {
+        if(doneWhenAsked) return BlockOutcome::onTime;
+        if(!doneAfterWaiting) return BlockOutcome::silent;
+        return sinceHandOver > allowance ? BlockOutcome::late : BlockOutcome::onTime;
+    }
 }

@@ -90,6 +90,11 @@ namespace
         // worker), met every deadline.
         const auto misses = graph.host(a).statistics().deadlineMisses + alone.host(r).statistics().deadlineMisses;
         if(timing || !misses) check(same, name + ": the other instrument sounds exactly as when playing alone");
+        // Blocks past the allowance are told apart: played late or silenced, both among the deadline misses.
+        const auto healthy = graph.host(a).statistics(), failed = graph.host(b).statistics();
+        check(std::abs(healthy.allowanceMicroseconds - 1e6 * period / 2) < 1, name + ": a worker reports its allowance, half the block's period: " + std::to_string(healthy.allowanceMicroseconds));
+        check(healthy.lateBlocks + healthy.silentBlocks <= healthy.deadlineMisses && failed.lateBlocks + failed.silentBlocks <= failed.deadlineMisses, name + ": late and silent blocks are deadline misses");
+        if(expected && std::string(expected) == "too slow") check(failed.silentBlocks > 0, name + ": a plugin taking 2 ms of a 2.67 ms block with a 1.33 ms allowance is silenced: " + std::to_string(failed.silentBlocks));
         check(energy > 0, name + ": the other instrument made sound");
         if(expected) check(reason.find(expected) != std::string::npos && reason.find("not restarted") != std::string::npos,
                            name + ": failure reported as \"" + expected + "\" and given up, got \"" + reason + "\"");

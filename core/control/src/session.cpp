@@ -411,9 +411,11 @@ namespace oscairn
         for(const auto& [node,name] : nodes_)
         {
             const auto& host = graph_.host(node);
-            result.deadlineMisses += host.statistics().deadlineMisses;
+            const auto st = host.statistics();
+            result.deadlineMisses += st.deadlineMisses; result.lateBlocks += st.lateBlocks; result.silentBlocks += st.silentBlocks;
             if(auto why = host.failure(); !why.empty()) result.failures.push_back({node, name, std::move(why)});
-            if(const auto cpu = host.cpuSeconds(); cpu > 0) { const auto st = host.statistics(); result.workers.push_back({node, name, cpu, host.residentBytes(), st.lastMicroseconds, st.maximumMicroseconds}); }
+            if(const auto cpu = host.cpuSeconds(); cpu > 0)
+                result.workers.push_back({node, name, cpu, host.residentBytes(), st.lastMicroseconds, st.maximumMicroseconds, st.allowanceMicroseconds, st.lateBlocks, st.silentBlocks});
         }
         result.notices = notices_;
         for( size_t source = 0; source < maxSources; ++source )
@@ -431,8 +433,15 @@ namespace oscairn
     {
         Timing t{callbackTiming_.read(), latenessTiming_.read(), {}};
         for(const auto& [node,name] : nodes_)
-            if(auto* r = graph_.host(node).roundTrips()) { t.workers.push_back({node, name, r->read()}); if(reset) r->reset(); }
-        if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); }
+            if(auto* r = graph_.host(node).roundTrips())
+            {
+                // Late and silent blocks counted from the last reset (from the call, not the next block as the histograms).
+                const auto st = graph_.host(node).statistics();
+                const auto [late, silent] = timingBase_.count(node) ? timingBase_[node] : std::pair<uint64_t, uint64_t>{};
+                t.workers.push_back({node, name, r->read(), st.allowanceMicroseconds, st.lateBlocks - std::min(late, st.lateBlocks), st.silentBlocks - std::min(silent, st.silentBlocks)});
+                if(reset) { r->reset(); timingBase_[node] = {st.lateBlocks, st.silentBlocks}; }
+            }
+        if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); std::erase_if(timingBase_, [&](const auto& b) { return !nodes_.count(b.first); }); }
         return t;
     }
 

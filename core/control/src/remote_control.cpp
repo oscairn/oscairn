@@ -189,10 +189,10 @@ namespace oscairn
             status.audioInputs=channels(field(v,"audioInputs"));status.audioOutputs=channels(field(v,"audioOutputs"));
             status.audioReady=boolean(field(v,"audioReady"));
             status.graphEventDrops=integer(field(v,"graphEventDrops"));status.midiEventDrops=integer(field(v,"midiEventDrops"));
-            status.deadlineMisses=integer(field(v,"deadlineMisses"));status.audioUnderruns=integer(field(v,"audioUnderruns"));status.audioDeviceList=integer(field(v,"audioDeviceList"));status.midiPortList=integer(field(v,"midiPortList"));status.midiInputs.clear();status.midiOutputs.clear();status.failures.clear();status.workers.clear();
+            status.deadlineMisses=integer(field(v,"deadlineMisses"));status.lateBlocks=integer(field(v,"lateBlocks"));status.silentBlocks=integer(field(v,"silentBlocks"));status.audioUnderruns=integer(field(v,"audioUnderruns"));status.audioDeviceList=integer(field(v,"audioDeviceList"));status.midiPortList=integer(field(v,"midiPortList"));status.midiInputs.clear();status.midiOutputs.clear();status.failures.clear();status.workers.clear();
             for(auto f:array(field(v,"failures")))status.failures.push_back({static_cast<NodeId>(integer(field(f,"node"))),string(field(f,"name")),string(field(f,"reason"))});
             status.notices.clear();for(auto n:array(field(v,"notices")))status.notices.push_back(string(n));
-            for(auto w:array(field(v,"workers")))status.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),number(field(w,"cpu")),uint64_t(integer(field(w,"memory"))),number(field(w,"block")),number(field(w,"blockMax"))});
+            for(auto w:array(field(v,"workers")))status.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),number(field(w,"cpu")),uint64_t(integer(field(w,"memory"))),number(field(w,"block")),number(field(w,"blockMax")),number(field(w,"allowance")),uint64_t(integer(field(w,"late"))),uint64_t(integer(field(w,"silent")))});
             for(auto [list,key]:{std::pair{&status.midiInputs,"midiInputs"},{&status.midiOutputs,"midiOutputs"}})
                 for(auto e:array(field(v,key)))
                     list->push_back({MidiEndpoint::Kind(named(endpointKinds,string(field(e,"kind")))),uint8_t(integer(field(e,"source"))),string(field(e,"name")),static_cast<uint32_t>(integer(field(e,"port")))});
@@ -531,7 +531,7 @@ namespace oscairn
             h.maxNs=int64_t(std::llround(number(field(v,"max"))*1e3));h.maxAt=int64_t(std::llround(number(field(v,"maxAt"))*1e9));return h;};
         auto snapshot=[&](V v){return BlockTiming::Snapshot{histogram(field(v,"steady")),histogram(field(v,"startup")),number(field(v,"seconds"))};};
         Timing t{snapshot(field(r,"callback")),snapshot(field(r,"lateness")),{}};
-        for(auto w:array(field(r,"workers")))t.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),snapshot(field(w,"roundTrip"))});
+        for(auto w:array(field(r,"workers")))t.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),snapshot(field(w,"roundTrip")),number(field(w,"allowance")),uint64_t(integer(field(w,"late"))),uint64_t(integer(field(w,"silent")))});
         return t;
     }
     Control::Estimate RemoteControl::estimate(const std::string& directory) {

@@ -28,6 +28,29 @@ namespace oscairn::standalone
             juce::StringArray out; for(const auto& t : tags) out.add(text(t));
             return out.joinIntoString(", ");
         }
+        juce::String instrumentsAndEffects(int n) { return juce::String(n) + (n == 1 ? " instrument or effect" : " instruments and effects"); }
+    }
+
+    int installedPluginPackages(Engine& engine)
+    {
+        int n = 0;
+        engine.packages([&](Control& c) { for(const auto& p : c.installedPackages()) n += p.kind == "plugin"; });
+        return n;
+    }
+
+    juce::String libraryLine(int plugins, uint32_t performances, uint32_t sounds)
+    {
+        const auto dot = juce::String::fromUTF8(" · ");
+        return (plugins ? instrumentsAndEffects(plugins) + dot : juce::String()) + juce::String(int(performances)) + (performances == 1 ? " Performance" : " Performances") +
+               (sounds ? dot + juce::String(int(sounds)) + (sounds == 1 ? " Sound" : " Sounds") : juce::String());
+    }
+
+    // An instrument's presets are not Sounds in the library, and an empty list must not say it has none.
+    juce::String libraryEmpty(bool sound, int plugins)
+    {
+        if(sound) return plugins ? "No Sounds yet. The presets of the " + instrumentsAndEffects(plugins) + " installed are in the sound picker, not here."
+                                 : "No Sounds yet. An instrument's own presets are in the sound picker, not here.";
+        return plugins ? "No Performances yet. " + instrumentsAndEffects(plugins) + (plugins == 1 ? " is" : " are") + " installed, to start one with." : juce::String("No Performances yet.");
     }
 
     ExportChoices::ExportChoices(Engine& engine, bool performance) : engine_(engine), performance_(performance)
@@ -417,8 +440,7 @@ namespace oscairn::standalone
         if(awaiting_) { awaiting_ = false; tell(text(engine_.soundMessage())); } // what an install or export did, or why not
         if(message_.isEmpty()) status_.setText(juce::String(result_.total) + (sound ? (result_.total == 1 ? " Sound" : " Sounds") : (result_.total == 1 ? " Performance" : " Performances")), juce::dontSendNotification);
         const bool none = result_.total == 0 && query_.text.empty() && query_.tags.empty() && !query_.favorites && !query_.recent && query_.source.empty();
-        // An instrument's presets are not Sounds in the library, and an empty list must not say it has none.
-        empty.setText(sound ? "No Sounds yet. An instrument's own presets are in the sound picker, not here." : "No Performances yet.", juce::dontSendNotification);
+        if(none) empty.setText(libraryEmpty(sound, installedPluginPackages(engine_)), juce::dontSendNotification);
         empty.setVisible(none); browse.setVisible(none && mode_ == Mode::Play);
         rebuildSide();
         updateButtons();

@@ -529,8 +529,7 @@ namespace oscairn::standalone
                     Control::LibraryQuery q; q.limit = 1; q.kind = "performance";
                     const auto performances = engine_.library( q ); q.kind = "sound"; const auto sounds = engine_.library( q );
                     if( !performances || !sounds ) return juce::String();
-                    auto count = []( uint32_t n, const char* one, const char* many ) { return juce::String( int( n ) ) + " " + ( n == 1 ? one : many ); };
-                    return count( performances->total, "Performance", "Performances" ) + ", " + count( sounds->total, "Sound", "Sounds" ); },
+                    return libraryLine( installedPluginPackages( engine_ ), performances->total, sounds->total ); },
                     [this] { showLibraryApp(); } } );
             if( profile_.offers( "oscairn.setlist" ) && appProcesses_->find( "oscairn.setlist" ) )
                 apps.push_back( { "Setlist", "list-music", [] { return juce::String( "Songs in order, for the stage" ); }, [this] { showSetlist(); } } );

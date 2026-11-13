@@ -936,6 +936,17 @@ int main(int argc, char** argv)
                 };
                 // The Library's empty state: no Sounds, and nothing narrowing the list, says so in
                 // one line, with a button straight to the Catalog; a search that finds nothing does not.
+                // Home's Library tile, and the empty Library, by what is installed (a starter
+                // library of Performances counted as installed, and again when removed).
+                const auto dot = juce::String::fromUTF8(" · ");
+                check(standalone::libraryLine(0, 0, 0) == "0 Performances" && standalone::libraryLine(5, 0, 0) == "5 instruments and effects" + dot + "0 Performances" &&
+                          standalone::libraryLine(1, 12, 3) == "1 instrument or effect" + dot + "12 Performances" + dot + "3 Sounds",
+                      "the Library tile's line: " + standalone::libraryLine(5, 0, 0).toStdString());
+                check(standalone::libraryEmpty(false, 0) == "No Performances yet." &&
+                          standalone::libraryEmpty(false, 5) == "No Performances yet. 5 instruments and effects are installed, to start one with." &&
+                          standalone::libraryEmpty(true, 5) == "No Sounds yet. The presets of the 5 instruments and effects installed are in the sound picker, not here.",
+                      "the empty Library's lines: " + standalone::libraryEmpty(false, 5).toStdString());
+                check(standalone::installedPluginPackages(engine) == 0, "no plugin package installed yet");
                 pane.showKind("sound");
                 check(wait([&] { return pane.empty.isVisible(); }) && pane.items().empty() && pane.empty.getText() == "No Sounds yet. An instrument's own presets are in the sound picker, not here." && pane.browse.isVisible() &&
                           !pane.empty.getBounds().isEmpty() && pane.empty.getBottom() <= pane.browse.getY(),
@@ -1028,6 +1039,14 @@ int main(int argc, char** argv)
                       "the publisher's key trusted for plugins, by its name");
                 const auto plugins = engine.installedPlugins();
                 check(std::any_of(plugins.begin(), plugins.end(), [](const auto& p) { return p.id == "org.kick.test.synth"; }), "its plugin in the store");
+                // With a plugin package installed, the empty Library says what the user has.
+                check(standalone::installedPluginPackages(engine) == 1, "one plugin package installed: " + std::to_string(standalone::installedPluginPackages(engine)));
+                pane.showKind("sound");
+                check(wait([&] { return pane.empty.isVisible() && pane.empty.getText() == "No Sounds yet. The presets of the 1 instrument or effect installed are in the sound picker, not here."; }),
+                      "the empty Sounds name what is installed: " + pane.empty.getText().toStdString());
+                settle();
+                snapshot(pane, "library-empty-installed");
+                pane.showKind("performance");
                 // Installed, it is listed as installed with its version, and its details offer
                 // nothing to install; the Desktop's Catalog, the same.
                 auto synthRow = [&] {
@@ -1174,6 +1193,26 @@ int main(int argc, char** argv)
                           standalone::describe(catalog->shown()[0]).startsWith("Installed  "),
                       "then it is Installed, installed by hand: " + (catalog && !catalog->shown().empty() ? standalone::describe(catalog->shown()[0]).toStdString() : std::string()));
                 if(catalog) closeCatalog();
+                // A library of Performances installed (as the starter library is), then removed:
+                // counted while it is there, and the count as it was once it is gone (this run's
+                // library holds Performances already, so the empty line is checked on Sounds).
+                pane.showKind("performance");
+                settle();
+                const auto before = pane.items().size();
+                pane.showCatalog("performance");
+                catalog = pane.catalog();
+                check(catalog && wait([&] { return !catalog->reading(); }) && catalog->shown().size() == 1, "the Performance package listed");
+                if(catalog && catalog->shown().size() == 1)
+                {
+                    catalog->open(0);
+                    catalog->install.triggerClick();
+                    check(wait([&] { return pane.message().contains("installed."); }), "it installs: " + pane.message().toStdString());
+                }
+                pane.refresh();
+                check(wait([&] { return pane.items().size() == before + 1; }) && !pane.empty.isVisible(), "with a library of Performances, its Performance counted: " + std::to_string(pane.items().size()));
+                check(engine.uninstallLibrary("org.kick.test.set").empty(), "the library removed");
+                pane.refresh();
+                check(wait([&] { return pane.items().size() == before; }), "removed, the count is as it was: " + std::to_string(pane.items().size()));
                 // Every tab empty: no repository on, or none read (the official one's web here a
                 // stand-in that finds nothing). Each says so, and where repositories are managed.
                 engine.packages([&](Control& c) { c.setRepositoryEnabled(site, false); });

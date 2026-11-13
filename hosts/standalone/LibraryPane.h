@@ -42,6 +42,14 @@ namespace oscairn::standalone
     /// once it is saved or not wanted, at once when nothing is unsaved or the engine does not
     /// answer; Cancel, a failed save (said) or a canceled name stays. Returns the prompt, or null.
     juce::Component* askToSave(Engine& engine, juce::Component* over, const juce::String& what, std::function<void()> then);
+    /// The plugin packages installed (packages.installed): the instruments and effects the user
+    /// has beside those that come with the app; 0 when the engine does not answer.
+    int installedPluginPackages(Engine& engine);
+    /// Home's Library tile: "5 instruments and effects · 0 Performances", the first part only when
+    /// any are installed, then " · 3 Sounds" when there are Sounds.
+    juce::String libraryLine(int plugins, uint32_t performances, uint32_t sounds);
+    /// The Library's empty state for Performances or Sounds, saying what is installed when any is.
+    juce::String libraryEmpty(bool sound, int plugins);
     /// An archive's install choices: locked or as the user's own, and which items, all ticked,
     /// under a heading for each kind there is (Performances, then Sounds); under Plugins, each
     /// plugin build it adds to the store with who signed it; who signed the archive, and a warning

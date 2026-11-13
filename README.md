@@ -208,7 +208,10 @@ view (the whole graph, laid out by signal flow):
 
 ![Routing view](docs/images/desktop/routing.png)
 
-The **Library** app: Performances and Sounds by source and tag, with audition:
+The **Library** app: Performances and Sounds by source and tag, with audition. Its tile on Home
+counts the instrument and effect packages installed beside the Performances ("5 instruments and
+effects · 0 Performances"); an empty list says so, and what is installed, with a button to the
+Catalog:
 
 ![Library](docs/images/desktop/library.png)
 

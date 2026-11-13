@@ -31,7 +31,8 @@ result = subprocess.run([sys.executable, str(here / "check-image-profile.py"),
                         capture_output=True, text=True)
 print(result.stdout, end="")
 expect(result.returncode == 0 and "oscairn_qemu_aarch64_defconfig (qemu-aarch64)" in result.stdout
-       and "oscairn_imx8mm_evk_defconfig (imx8mm-evk)" in result.stdout,
+       and "oscairn_imx8mm_evk_defconfig (imx8mm-evk)" in result.stdout
+       and "oscairn_fantom_bundle_defconfig (fantom-07)" in result.stdout,
        "every product defconfig agrees with the profile its overlay names")
 
 # Every profile present, each feature read from it without an error.

@@ -9,6 +9,7 @@ Buildroot itself stays unmodified and easy to upgrade.
 | QEMU, generic ARM64 machine | `oscairn_qemu_aarch64_defconfig` | Builds and boots; Oscairn starts and plays |
 | The same, real-time test variant | `oscairn_qemu_aarch64_rt_defconfig` | See [real-time kernel](#real-time-kernel) |
 | NXP i.MX8M Mini EVK (`imx8mm-evk`), the KICK's SoC | `oscairn_imx8mm_evk_defconfig` | Builds; never booted (no board here). See [i.MX8M Mini EVK](#imx8m-mini-evk) |
+| Roland FANTOM-0: not an image but a root filesystem for a chroot on its stock Linux (`os/fantom-bundle.sh`) | `oscairn_fantom_bundle_defconfig` | Builds; checked in Docker, not on the unit. See [running on a FANTOM-0](../docs/fantom-0.md#running-in-a-chroot-on-rolands-linux) |
 
 QEMU has no model of the RK3588 or the KICK's i.MX8M Mini, so the QEMU image uses the
 generic `virt` machine with a Cortex-A76 CPU (code is built for the RK3588's

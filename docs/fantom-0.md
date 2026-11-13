@@ -1,17 +1,19 @@
 # Running Oscairn on a Roland FANTOM-0
 
-Oscairn has never run on a FANTOM-06, -07 or -08, and nobody has tried it on one: there is no
-unit yet. This page says what is known about the hardware, what Oscairn has for it, what of that
-is estimated, and how to map the panel once a unit is here, as of November 8, 2026. The
-repository holds Oscairn's own code and data only: no Roland files, binaries or firmware, and
-nothing that changes Roland's firmware or update packages.
+Oscairn has never run on a FANTOM-06, -07 or -08. A FANTOM-07 is now here, running Roland's
+stock Linux with root login over SSH; Oscairn has not been tried on it yet. This page says what
+is known about the hardware, what Oscairn has for it, what of that is estimated, how to run
+Oscairn beside Roland's system in a chroot, and how to map the panel, as of November 12, 2026.
+The repository holds Oscairn's own code and data only: no Roland files, binaries or firmware,
+and nothing that changes Roland's firmware or update packages.
 
 ## What is known
 
 From the owner's notes on the hardware (Roland's GPL release of the kernel, U-Boot and device
 tree, and Roland's test tool), and Roland's published specifications and owner's manual:
 
-- **SoC:** NXP i.MX8M Mini, four Cortex-A53 cores, 2 GB RAM: the KICK's SoC. The FANTOM-06, -07
+- **SoC:** NXP i.MX8M Mini, four Cortex-A53 cores: the KICK's SoC. The notes said 2 GB of RAM;
+  the unit's Linux reports 952 MB (`free -m`), with 255 MB of swap. The FANTOM-06, -07
   and -08 share one main board and firmware; the -07 has 76 keys, velocity only, no aftertouch,
   and weighs 7.0 kg.
 - **Screen:** 5.5", 1280 × 720, MIPI-DSI, with touch (a Goodix GT1151). The panel is portrait,
@@ -79,9 +81,66 @@ tree, and Roland's test tool), and Roland's published specifications and owner's
   1280 × 720 and checks every control fits, is that large and overlaps none. Untried on the
   instrument.
 - **A panel reader** in the engine, built only with `OSCAIRN_PANEL_ROLAND` (below).
-- **No image.** The i.MX8M Mini EVK image (`oscairn_imx8mm_evk_defconfig`,
+- **A chroot bundle** (below): Oscairn with a userland of its own, to run on Roland's kernel
+  and beside Roland's root filesystem without changing either. There is no image of Oscairn's
+  own for the FANTOM: the i.MX8M Mini EVK image (`oscairn_imx8mm_evk_defconfig`,
   [kick.md](kick.md)) is the nearest; the FANTOM's own device tree, display, touch, audio and
   boot path are not there.
+
+## Running in a chroot on Roland's Linux
+
+What the unit's stock system is, read on it: Linux 4.19.35 (`PREEMPT`, aarch64), an NXP Yocto
+userland (warrior) with glibc 2.29, too old for Oscairn's programs; the root filesystem on eMMC,
+writable, with 25 GB free; ALSA card 1, `hw:1,0`, for SAI1; `/dev/i2c-slave-2`, `/dev/fb0`,
+`/dev/dri/card0`, and the touch screen among `/dev/input/event*`. Roland's app (`mi078`) runs;
+no X server or Weston does.
+
+So Oscairn brings its own userland and leaves Roland's kernel, boot chain and root filesystem as
+they are: no flashing and no boot change. The bundle is a root filesystem tree, with no kernel,
+bootloader or device tree, unpacked in a directory on the unit (for example
+`/home/root/oscairn`) and entered with `chroot`. It holds glibc, libstdc++, ALSA's library,
+BusyBox, the X server the image's session uses, and Oscairn: `oscairn-engine`, the app
+(`Oscairn`), the CLAP plugins in `/usr/lib/clap`, `oscairn-panel-dump` and the panel map in
+`/usr/share/oscairn/panels`, with the `fantom-07` profile built in.
+
+Build it (Docker; the first build takes an hour or more):
+
+```sh
+os/fantom-bundle.sh       # build-os/oscairn-fantom-bundle.tar.gz
+```
+
+It builds `oscairn_fantom_bundle_defconfig`: the EVK image's userland for the Cortex-A53
+(ARMv8.0), with `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND`, and the toolchain's kernel headers from
+Linux 4.19.35, the unit's kernel, since glibc refuses to start on a kernel older than its
+headers ("FATAL: kernel too old"). `readelf -n` on the bundle's `libc.so.6` shows the oldest
+kernel it accepts (`OS: Linux, ABI: 4.19.0`).
+
+On the unit, as root, in the directory it was unpacked in:
+
+```sh
+./start-chroot.sh oscairn-engine --help
+./start-chroot.sh             # a shell in the bundle
+./stop-chroot.sh
+```
+
+`start-chroot.sh` mounts the system's `/proc`, `/sys`, `/dev`, `/dev/pts` and `/dev/shm` under
+the bundle, and a tmpfs of its own on its `/run` and `/tmp`, then runs the command (a shell
+without one) in the bundle with an environment of its own. Running it again keeps the mounts
+already there. `stop-chroot.sh` unmounts them, once nothing in the bundle runs. Nothing outside
+the bundle's directory changes but those mounts. Programs in the bundle use Roland's devices
+directly: stop Roland's app before anything opens `hw:1,0` or the panel. Start the engine by
+its full path, `/usr/bin/oscairn-engine`: by its bare name it does not find its plugin worker
+beside it, and runs plugins in the engine.
+
+Checked in Docker on a Mac (an ARM64 container, so on a far newer kernel than 4.19): the bundle
+unpacks, `start-chroot.sh` enters it, the engine starts with `--audio null` and answers
+`session.status` on its control socket, and `oscairn-panel-dump` decodes messages fed to it from
+a FIFO. That shows the userland is complete, not that it runs on the unit's kernel: nothing has
+run on the unit yet. Idle there with `--audio null`, the engine held 125 MiB resident (its
+memory locked, at the profile's `instrument` reliability) and its three plugin workers 52 MiB
+together. On 4.19 the engine can have no memory pressure trigger (PSI is Linux 4.20 and later):
+by its code it then logs that it has none and goes on without. Showing the app on the FANTOM's
+screen is not solved.
 
 ## The panel reader
 
@@ -168,6 +227,5 @@ Send back the filled map and the dump's tables, and remove `"controls"` from `es
 ## Building it into an image
 
 `-DOSCAIRN_PANEL_ROLAND=ON` links the reader into the engine (and the app's panel handling) and
-installs `oscairn-panel-dump` and the map in `share/oscairn/panels/`. No Buildroot config
-sets it yet: a FANTOM image would pass it from its defconfig through the oscairn package's
-CMake options, as its profile has the panel.
+installs `oscairn-panel-dump` and the map in `share/oscairn/panels/`. Buildroot passes it
+when a defconfig sets `BR2_PACKAGE_OSCAIRN_PANEL_ROLAND`, as the chroot bundle's does.

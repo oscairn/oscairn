@@ -365,6 +365,7 @@ public:
     double cpuSeconds() const override {double n=0;for(const auto& s:desired_.instances)if(s)n+=s->host->cpuSeconds();return n;}
     // shortcut: a pool reports its first instance's round trips only; merge the instances' if pooled instruments need watching.
     WorkerTiming* workerTiming() noexcept override {return base().workerTiming();}
+    std::vector<PluginHost*> workers() override {std::vector<PluginHost*> all;for(const auto& s:desired_.instances)if(s)for(auto* w:s->host->workers())all.push_back(w);return all;}
 };
 }
 std::shared_ptr<PluginHost> preparedInstrument(std::shared_ptr<PluginHost> h,double rate,uint32_t frames,ProcessingMode mode,Lv2BufferLimits limits) {

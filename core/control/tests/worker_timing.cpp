@@ -9,7 +9,8 @@
 // panics after a miss and the audio thread's page faults, counted from the last reset. The audio thread's
 // own CPU time per block (cpu) answers whether a long run was computing or not scheduled: far below the run
 // for a stall that sleeps, close to it for one that spins (a second worker, KICK_FIXTURE_STALL's fourth field).
-//   oscairn-worker-timing-test WORKER FIXTURE.clap
+// An instrument two parts share (sound contexts, RFC 0021) is in it too, once, naming both parts.
+//   oscairn-worker-timing-test WORKER FIXTURE.clap BASIC-SYNTH.clap
 #include <oscairn/json_rpc.h>
 #include <oscairn/session.h>
 #include <chrono>
@@ -26,7 +27,7 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc != 3) return 2;
+    if(argc != 4) return 2;
     // Times far from a busy machine's noise: a 10 ms allowance, a 100 ms stall (under the 250 ms hang
     // limit) in the plugin's 30th block, touching 4 MiB there.
     setenv("OSCAIRN_PLUGIN_WORKER", argv[1], 1);
@@ -101,6 +102,26 @@ int main(int argc, char** argv)
         std::printf("worst block: run %.0f us, cpu %.0f us at %.2f s (spinning stall)\n", h.maxNs / 1e3, h.maxCpuNs / 1e3, h.maxAt / 1e9);
         check(h.maxNs >= 50'000'000 && h.maxCpuNs >= h.maxNs / 2 && h.maxCpuNs <= h.maxNs + 1'000'000, "a stall that computes: the worst block's cpu is close to its run: run " +
               std::to_string(h.maxNs) + ", cpu " + std::to_string(h.maxCpuNs));
+    }
+    // An instrument with sound contexts, two parts sharing its instance: one worker, both parts named.
+    setenv("KICK_FIXTURE_STALL", "", 1);
+    {
+        oscairn::Session shared(rate, frames);
+        const auto lead = shared.add("Lead", argv[3]);
+        const auto alpha = shared.addPart("Alpha"); shared.insertIntoPart(alpha, 0, lead); shared.commit();
+        const auto pad = shared.shareInstrument("Pad", lead);
+        const auto beta = shared.addPart("Beta"); shared.insertIntoPart(beta, 0, pad); shared.commit();
+        for(int i = 0; i < 40; ++i) { shared.service(); shared.process(out, frames); }
+        const auto st = shared.engineTiming(false);
+        check(st.workers.size() == 1, "a shared instrument is in engine.timing once: " + std::to_string(st.workers.size()));
+        if(st.workers.size() == 1)
+        {
+            const auto& x = st.workers[0];
+            check(x.node == lead && x.parts == std::vector<std::string>{"Alpha", "Beta"}, "under its first node, naming both parts it plays for");
+            check(count(x.roundTrip) > 0 && count(x.wake) > 0 && count(x.cpu) > 0 && x.allowance > 0, "with its round trips and their parts");
+        }
+        const auto json = oscairn::JsonRpc(shared).dispatch(R"({"jsonrpc":"2.0","id":1,"method":"engine.timing"})").value_or("");
+        check(json.find(R"("parts":["Alpha","Beta"])") != std::string::npos, "engine.timing gives the parts: " + json.substr(0, 200));
     }
     return failures ? 1 : 0;
 }

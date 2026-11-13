@@ -241,6 +241,10 @@ namespace oscairn
                 NodeId node = 0; std::string name; BlockTiming::Snapshot roundTrip; double allowance = 0; uint64_t late = 0, silent = 0;
                 BlockTiming::Snapshot collect, wake, run; uint64_t busy = 0, missPanics = 0, minorFaults = 0, majorFaults = 0;
                 BlockTiming::Snapshot cpu; uint64_t involuntarySwitches = 0;
+                // Each worker once, however many nodes render through it (a shared instance's sound
+                // contexts, a node's prepared instances): node and name are the first such node's,
+                // parts every part those nodes are in.
+                std::vector<std::string> parts;
             };
             std::vector<Worker> workers;
         };

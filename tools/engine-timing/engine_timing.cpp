@@ -170,10 +170,15 @@ int main(int argc, char** argv)
         // render (each ends the part's notes); its audio thread's page faults and involuntary context switches;
         // and its worst block, run beside the CPU time of that same block (startup or steady, the longer run).
         for(V w : array(field(r, "workers")))
-            std::printf("%s (%d): allowance %.0f, past it %.0f played late and %.0f silenced (%.0f not handed: busy), %.0f panics after a miss, page faults %.0f minor %.0f major, %.0f involuntary context switches\n",
-                        text(field(w, "name")).c_str(), int(number(field(w, "node"))), number(field(w, "allowance")), number(field(w, "late")), number(field(w, "silent")),
+        {
+            // The parts a worker plays for: several where they share its instance (sound contexts).
+            std::string parts;
+            for(V p : array(field(w, "parts"))) parts += (parts.empty() ? " for " : ", ") + text(p);
+            std::printf("%s (%d)%s: allowance %.0f, past it %.0f played late and %.0f silenced (%.0f not handed: busy), %.0f panics after a miss, page faults %.0f minor %.0f major, %.0f involuntary context switches\n",
+                        text(field(w, "name")).c_str(), int(number(field(w, "node"))), parts.c_str(), number(field(w, "allowance")), number(field(w, "late")), number(field(w, "silent")),
                         number(field(w, "busy")), number(field(w, "missPanics")), number(field(w, "minorFaults")), number(field(w, "majorFaults")),
                         number(field(w, "involuntarySwitches")));
+        }
         for(V w : array(field(r, "workers")))
         {
             const auto steady = histogram(field(field(w, "run"), "steady")), startup = histogram(field(field(w, "run"), "startup"));

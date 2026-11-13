@@ -123,6 +123,7 @@ namespace oscairn
         uint64_t residentBytes() const override { return lead() ? engine_->host->residentBytes() : 0; }
         double cpuSeconds() const override { return lead() ? engine_->host->cpuSeconds() : 0; }
         bool inWorker() const noexcept override { return engine_->host->inWorker(); }
+        std::vector<PluginHost*> workers() override { return engine_->host->workers(); } // the shared instance, under every context's node
 
     private:
         bool lead() const noexcept { return !(engine_->channels & ((1u << channel_) - 1)); }

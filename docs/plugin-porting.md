@@ -874,8 +874,8 @@ writing tests:
   `oscairn-lv2-production-probe`, is built only with `-DOSCAIRN_LV2=ON`, even for CLAP plugins.
 
 Set `OSCAIRN_PLUGIN_WORKER=build/core/oscairn-plugin-worker` to run either check with the
-plugin in a worker. On a running engine, `oscairn-engine-timing` prints each plugin in a worker's
-block round trips as the engine sees them (p50 to the maximum), taken apart into the worker's
+plugin in a worker. On a running engine, `oscairn-engine-timing` prints each plugin in a worker
+(an instrument with sound contexts once, with the parts it plays for), its block round trips as the engine sees them (p50 to the maximum), taken apart into the worker's
 wake-up and its run, the CPU time its audio thread used in it and its page faults, beside the audio callback's own
 ([Tools](developer-guide.md#tools)). See
 [Test before publishing a plugin](developer-guide.md#test-before-publishing-a-plugin).

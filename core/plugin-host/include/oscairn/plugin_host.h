@@ -159,6 +159,11 @@ namespace oscairn
         // over to finding it done, and its parts (WorkerTiming, timing.h; the audio thread records,
         // any thread reads). Null for a plugin in the engine's process.
         virtual WorkerTiming* workerTiming() noexcept { return nullptr; }
+        // Control thread: every plugin in a worker this node renders through, each with its own
+        // workerTiming and statistics: itself, or the instances it plays (RFC 0021's prepared
+        // instances), or the instance it shares with other nodes (a sound context), which several
+        // nodes then name. Empty for a node wholly in the engine's process.
+        virtual std::vector<PluginHost*> workers() { return workerTiming() ? std::vector<PluginHost*>{this} : std::vector<PluginHost*>{}; }
         // Whether the plugin runs in a worker process (RFC 0010); a free instance is taken over only
         // where the placement policy would put a fresh one (RFC 0021).
         virtual bool inWorker() const noexcept { return false; }

@@ -432,19 +432,32 @@ namespace oscairn
     Control::Timing Session::engineTiming(bool reset)
     {
         Timing t{callbackTiming_.read(), latenessTiming_.read(), {}};
+        // Each worker once, under the first node rendering through it, with the parts of every node that does.
+        std::vector<std::pair<PluginHost*, std::vector<NodeId>>> workers;
         for(const auto& [node,name] : nodes_)
-            if(auto* r = graph_.host(node).workerTiming())
+            for(auto* w : graph_.host(node).workers())
             {
-                // The counts from the last reset (from the call, not the next block as the histograms).
-                const auto st = graph_.host(node).statistics();
-                const auto base = timingBase_.count(node) ? timingBase_[node] : kick::clap::Statistics{};
-                auto since = [](uint64_t now, uint64_t then) { return now - std::min(then, now); };
-                t.workers.push_back({node, name, r->roundTrip.read(), st.allowanceMicroseconds, since(st.lateBlocks, base.lateBlocks), since(st.silentBlocks, base.silentBlocks),
-                                     r->collect.read(), r->wake.read(), r->run.read(), since(st.busyBlocks, base.busyBlocks), since(st.missPanics, base.missPanics),
-                                     since(st.minorFaults, base.minorFaults), since(st.majorFaults, base.majorFaults), r->cpu.read(), since(st.involuntarySwitches, base.involuntarySwitches)});
-                if(reset) { r->reset(); timingBase_[node] = st; }
+                auto at = std::find_if(workers.begin(), workers.end(), [&](const auto& x) { return x.first == w; });
+                if(at == workers.end()) at = workers.insert(workers.end(), {w, {}});
+                at->second.push_back(node);
             }
-        if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); std::erase_if(timingBase_, [&](const auto& b) { return !nodes_.count(b.first); }); }
+        for(const auto& [host, served] : workers)
+        {
+            auto* r = host->workerTiming();
+            // The counts from the last reset (from the call, not the next block as the histograms).
+            const auto st = host->statistics();
+            const auto base = timingBase_.count(host) ? timingBase_[host] : kick::clap::Statistics{};
+            auto since = [](uint64_t now, uint64_t then) { return now - std::min(then, now); };
+            t.workers.push_back({served.front(), nodes_.at(served.front()), r->roundTrip.read(), st.allowanceMicroseconds, since(st.lateBlocks, base.lateBlocks), since(st.silentBlocks, base.silentBlocks),
+                                 r->collect.read(), r->wake.read(), r->run.read(), since(st.busyBlocks, base.busyBlocks), since(st.missPanics, base.missPanics),
+                                 since(st.minorFaults, base.minorFaults), since(st.majorFaults, base.majorFaults), r->cpu.read(), since(st.involuntarySwitches, base.involuntarySwitches), {}});
+            for(const auto& p : parts_)
+                if(const auto in = nodesOf(p); std::any_of(served.begin(), served.end(), [&](NodeId n) { return in.count(n); })) t.workers.back().parts.push_back(p.name);
+            if(reset) { r->reset(); timingBase_[host] = st; }
+        }
+        // A worker gone may leave its address to a new one: its counts go with it.
+        std::erase_if(timingBase_, [&](const auto& b) { return std::none_of(workers.begin(), workers.end(), [&](const auto& w) { return w.first == b.first; }); });
+        if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); }
         return t;
     }
 

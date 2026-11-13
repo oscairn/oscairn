@@ -744,7 +744,7 @@ void Session::loadPerformance(const std::string& directory) {
     open(*prepared,seamless);
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
     callbackTiming_.warmUp();latenessTiming_.warmUp();
-    for(const auto& [n,name]:nodes_)if(auto* r=graph_.host(n).workerTiming())r->warmUp();
+    for(const auto& [n,name]:nodes_)for(auto* w:graph_.host(n).workers())w->workerTiming()->warmUp();
     if(!seamless)warm_.clear(); // it cut for want of room: none kept warm (RFC 0025)
     evictOpportunistic();
     if(!keepInstances_)remember(root); // an audition is remembered only once kept

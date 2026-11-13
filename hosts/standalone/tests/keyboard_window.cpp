@@ -120,7 +120,9 @@ int main(int argc, char** argv)
                 board.mouseDown(down);
                 check(wait([&] { return peak(any) > 1e-3 && peak(keyLabOnly) > 1e-3; }), "a click on the KeyLab's keyboard sounds the parts the KeyLab plays");
                 check(peak(builtInOnly) < 1e-6, "and not the part only the built-in input plays");
-                check(wait([&] { return holds(3, 64); }), "the engine has the key held as the KeyLab's");
+                // Failing, say whether the window was still active and the keyboard focused: losing either lets go of the key.
+                check(wait([&] { return holds(3, 64); }), std::string("the engine has the key held as the KeyLab's (window ") + (window->getPeer() && window->getPeer()->isFocused() ? "active" : "not active") +
+                      ", keyboard " + (keyLabKeys->hasKeyboardFocus(true) ? "focused" : "not focused") + ", key " + (keyLabKeys->keys().down(64) ? "down" : "up") + ")");
                 check(keyLabKeys->keys().down(64) && keyLabKeys->keys().velocity(64) > .5f, "the key shows down, low on it loud");
                 board.mouseUp(down);
                 check(wait([&] { return !holds(3, 64); }), "let go, the KeyLab's key is up");

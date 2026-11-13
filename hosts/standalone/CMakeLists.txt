@@ -222,7 +222,11 @@ target_link_libraries(oscairn_keyboard_window_test PRIVATE oscairn_standalone_ic
 target_compile_definitions(oscairn_keyboard_window_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
 add_dependencies(oscairn_keyboard_window_test oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
 add_test(NAME keyboard-window COMMAND oscairn_keyboard_window_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes")
-set_tests_properties(keyboard-window PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}")
+# Alone: it holds a key through clicks and typing that need its window to stay the active one,
+# and a window that stops being active, or a keyboard that loses focus, lets go of its keys
+# (KeyboardWindow.cpp), as it must; another test's window coming to the front in a parallel run
+# can do that to the key the test holds.
+set_tests_properties(keyboard-window PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}" RUN_SERIAL TRUE)
 # Unsaved changes asked about before quitting and before the Library opens another, against a socket session.
 juce_add_console_app(oscairn_desktop_quit_test PRODUCT_NAME "Oscairn Desktop Quit Test")
 target_sources(oscairn_desktop_quit_test PRIVATE tests/desktop_quit.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)

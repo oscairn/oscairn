@@ -198,6 +198,44 @@ int main(int argc, char** argv)
                 settle();
                 screen.clearContentComponent();
             }
+            // On the FANTOM-07's window as the app makes it, where the display's own scale (here 3, as X11
+            // makes of the panel) is part of what a unit is drawn at: the keys, in physical pixels at 1280 x 720,
+            // are what the dense UI's touch target is, not that times the display's.
+            {
+                standalone::setDeviceScale(s->scale(), 3.0);
+                const double pixelsPerUnit = juce::Desktop::getInstance().getGlobalScaleFactor() * 3.0;
+                juce::DocumentWindow device("device", standalone::ink(standalone::Ink::Background), 0);
+                device.setUsingNativeTitleBar(false); device.setTitleBarHeight(0);
+                standalone::setDeviceScreen(&device, touch);
+                standalone::setDense(device);
+                device.setSize(juce::roundToInt(s->width / pixelsPerUnit), juce::roundToInt(s->height / pixelsPerUnit));
+                juce::TextEditor field;
+                standalone::setDesktopMode(field, 2);
+                device.addAndMakeVisible(field); field.setBounds(10, 10, 200, 30);
+                device.setVisible(true); device.toFront(true);
+                standalone::setTextEntryOnScreen(true);
+                field.grabKeyboardFocus();
+                check(wait([&] { return standalone::textKeyboard() != nullptr; }), "on the device's window, the field's focus shows the keyboard");
+                if(auto* keyboard = standalone::textKeyboard())
+                {
+                    float least = 1e9f, most = 0; int keysDrawn = 0;
+                    for(auto* c : keyboard->getChildren()) if(auto* b = dynamic_cast<juce::TextButton*>(c)) { const auto h = device.getLocalArea(b, b->getLocalBounds().toFloat()).getHeight() * float(pixelsPerUnit); least = std::min(least, h); most = std::max(most, h); ++keysDrawn; }
+                    const float target = touch * s->scale();
+                    std::fprintf(stderr, "the device's keys: %d, %.1f to %.1f px tall; a touch target is %.1f px; the keyboard is %.1f px tall of %d\n", keysDrawn, double(least), double(most), double(target),
+                                 double(device.getLocalArea(keyboard, keyboard->getLocalBounds().toFloat()).getHeight() * float(pixelsPerUnit)), s->height);
+                    check(keysDrawn > 40 && least >= target - 1.5f && most <= target * 1.6f, "its keys come out a touch target tall in pixels, not multiplied");
+                    check(device.getLocalArea(keyboard, keyboard->getLocalBounds().toFloat()).getHeight() * float(pixelsPerUnit) <= s->height * .55f, "and the keyboard takes about half the screen or less");
+                    if(const auto prefix = argc >= 4 ? juce::String(argv[3]) : juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEST_SNAPSHOTS", {}); prefix.isNotEmpty())
+                    {
+                        const juce::File out{prefix + "-device-keys-1280x720.png"}; out.deleteFile();
+                        juce::FileOutputStream stream(out);
+                        juce::PNGImageFormat().writeImageToStream(device.createComponentSnapshot(device.getLocalBounds(), true, float(pixelsPerUnit)), stream);
+                    }
+                }
+                field.giveAwayKeyboardFocus(); settle();
+                standalone::setDeviceScreen(&screen);
+                juce::Desktop::getInstance().setGlobalScaleFactor(1.0f);
+            }
             standalone::setTextEntryOnScreen(false);
             standalone::setDeviceScreen(nullptr);
             screen.clearContentComponent();

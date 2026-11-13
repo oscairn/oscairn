@@ -1571,6 +1571,40 @@ int main(int argc, char** argv)
                     check(wait([&] { for(auto* c : panel.getChildren()) if(auto* r = dynamic_cast<standalone::EngineRecovery*>(c)) strip = r; return strip && strip->isVisible(); }) && strip->notice().contains("Reconnecting"),
                           "a Panel shows the engine's notice with EngineRecovery");
                 }
+                // And on the FANTOM-07's window as the app makes it, where the display's own scale (here 3, as
+                // X11 makes of the panel) is part of what a unit is drawn at: the strip is a touch target
+                // (68 px) tall in physical pixels.
+                {
+                    const auto fantom = standalone::loadProfile("fantom-07");
+                    const auto* s = fantom.screen();
+                    standalone::setDeviceScale(s->scale(), 3.0);
+                    const double pixelsPerUnit = juce::Desktop::getInstance().getGlobalScaleFactor() * 3.0;
+                    juce::DocumentWindow device("device", standalone::ink(standalone::Ink::Background), 0);
+                    device.setUsingNativeTitleBar(false); device.setTitleBarHeight(0);
+                    standalone::setDeviceScreen(&device, standalone::Profile::Screen::touchTarget);
+                    standalone::setDense(device);
+                    device.setSize(juce::roundToInt(s->width / pixelsPerUnit), juce::roundToInt(s->height / pixelsPerUnit));
+                    auto* panel = new standalone::Panel(engine, standalone::Layout::parse(R"({"name": "Notice test", "size": [826, 465], "controls": [{"type": "screen", "rect": [0, 0, 826, 465]}]})"));
+                    panel->setDesignSize(juce::roundToInt(s->width / s->scale()), juce::roundToInt(s->height / s->scale()));
+                    device.setContentOwned(panel, false);
+                    device.setVisible(true);
+                    standalone::EngineRecovery* strip = nullptr;
+                    check(wait([&] { for(auto* c : panel->getChildren()) if(auto* r = dynamic_cast<standalone::EngineRecovery*>(c)) strip = r; return strip && strip->isVisible(); }), "the device's window shows the engine's notice");
+                    if(strip)
+                    {
+                        const auto drawn = device.getLocalArea(strip, strip->getLocalBounds().toFloat()) * float(pixelsPerUnit);
+                        check(std::abs(drawn.getHeight() - standalone::Profile::Screen::touchTarget * s->scale()) < 1.5f, "the notice's strip is a touch target tall in pixels: " + std::to_string(drawn.getHeight()) + " of " + std::to_string(standalone::Profile::Screen::touchTarget * s->scale()));
+                        const auto prefix = argc >= 5 ? juce::String(argv[4]) : juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEST_SNAPSHOTS", {});
+                        if(prefix.isNotEmpty())
+                        {
+                            const juce::File out{prefix + "-engine-stopped.png"}; out.deleteFile();
+                            juce::FileOutputStream stream(out);
+                            juce::PNGImageFormat().writeImageToStream(device.createComponentSnapshot(device.getLocalBounds(), true, float(pixelsPerUnit)), stream);
+                        }
+                    }
+                    standalone::setDeviceScreen(nullptr);
+                    juce::Desktop::getInstance().setGlobalScaleFactor(1.0f);
+                }
                 // As after a managed engine's crash: Restart is a real button, in front of the
                 // view's own controls at its place, on Home and in the Performance app.
                 standalone::DesktopShell shell(engine, argv[2], standalone::InputMode::Mouse);

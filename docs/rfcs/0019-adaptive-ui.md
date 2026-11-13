@@ -156,7 +156,7 @@ Decided and built 2026-11-09. Panels come in many sizes: the KICK and the Ignite
   per design unit, is what keeps 44 units at least 6.5 mm, and never below 1: the FANTOM-07's
   10.5 pixels per millimeter give 1.55, the KICK, Ignite, MODX M and an 8" 800 × 600 stay at 1
   (their targets are 6.6 to 8.9 mm). A screen of unknown size stays at 1. On a device, the scale
-  is JUCE's global scale, so dialogs and menus follow it too.
+  is JUCE's global scale divided by the display's own (X11 JUCE makes one of the panel's dpi / 96, rounded, and multiplies the two), so the window's units are the design's and dialogs, menus and the keyboard follow it too.
 - **Reflow, not stretch:** a screen-only layout (`kick-screen`, `modx-m-screen`) is laid out at
   the screen's size in design units, its pixels over its scale (the FANTOM-07's 1280 × 720 is
   826 × 465 units), and fills it with no bars. The views over it lay themselves out from the space

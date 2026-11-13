@@ -303,3 +303,13 @@ add_dependencies(oscairn_plugin_crash_test oscairn_basic_synth oscairn-plugin-sc
 add_test(NAME desktop-plugin-crash COMMAND oscairn_plugin_crash_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan>
     $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-process_crash>)
 set_tests_properties(desktop-pad-editor desktop-plugin-crash PROPERTIES TIMEOUT 60 ENVIRONMENT "${worker_environment}")
+# macOS: no test here shows a window on the screen of whoever runs it (tests/hidden_windows.mm,
+# loaded into each test and the apps it starts), but desktop-window-order, which is about windows
+# coming forward and runs only when asked.
+if(APPLE)
+    add_library(oscairn_hidden_windows SHARED tests/hidden_windows.mm)
+    target_link_libraries(oscairn_hidden_windows PRIVATE "-framework AppKit")
+    get_property(window_tests DIRECTORY PROPERTY TESTS)
+    list(REMOVE_ITEM window_tests desktop-window-order)
+    set_property(TEST ${window_tests} APPEND PROPERTY ENVIRONMENT "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:oscairn_hidden_windows>")
+endif()

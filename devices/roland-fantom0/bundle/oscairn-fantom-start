@@ -162,7 +162,7 @@ if [ -n "$dry" ]; then
 	say "would run: $root/start-chroot.sh setsid env oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
 	exit 0
 fi
-rm -f "$root/run/oscairn/engine.sock"
+rm -f "$root/run/oscairn/engine.sock" "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
 eval "set -- $OSCAIRN_ENGINE_ARGS"
 # setsid: the bundle's own, as the panel holder detaches itself with; the ssh session ending
 # then does not take the engine with it.

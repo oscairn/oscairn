@@ -3,7 +3,8 @@
 # their --dry-run, in a stand-in bundle with a temporary file as the panel's device, prints the
 # steps with the profile's engine options and refuses while another process has the device open;
 # boot, with stand-ins for oscairn-key-held's three answers and the one-shot file, picks Roland's
-# application or Oscairn.
+# application or Oscairn, and, on a stand-in /proc, stays while the engine runs, falls back to
+# Roland's application when it ends unasked, and after oscairn-fantom-stop waits on the holder.
 #   fantom_start.sh SCRIPTS_DIR
 set -u
 scripts=$1
@@ -15,7 +16,7 @@ for s in oscairn-fantom-start oscairn-fantom-stop oscairn-fantom-boot; do
 done
 
 bundle=$(mktemp -d)
-trap 'kill $holder 2>/dev/null; rm -rf "$bundle"' EXIT
+trap 'kill $holder ${watcher:-} 2>/dev/null; rm -rf "$bundle"' EXIT
 cp "$scripts/oscairn-fantom-start" "$scripts/oscairn-fantom-stop" "$scripts/oscairn-fantom-boot" "$bundle/"
 printf '#!/bin/sh\necho start-chroot ran >> "$(dirname "$0")/ran"\n' > "$bundle/start-chroot.sh"
 printf '#!/bin/sh\necho stop-chroot ran >> "$(dirname "$0")/ran"\n' > "$bundle/stop-chroot.sh"
@@ -78,4 +79,31 @@ kill $holder
 sleep 0.3
 boot 0
 check "boot, the panel free again: Roland's application, nothing still holds" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: /home/root/mi078' && ! echo \"\$out\" | grep -q 'still holds'"
+
+# Step 4, the boot script staying in the foreground (--supervise, dry), on a stand-in /proc.
+fake=$bundle/fakeproc
+running() { mkdir -p "$fake/$2" && echo "$1" > "$fake/$2/comm"; }
+gone() { rm -rf "$fake/$1"; }
+until_done() { i=0; while kill -0 $1 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; ! kill -0 $1 2>/dev/null; }
+supervise() { OSCAIRN_PROC=$fake OSCAIRN_BOOT_POLL=0.1 "$bundle/oscairn-fantom-boot" --dry-run --supervise > "$bundle/watch.out" 2>&1 & watcher=$!; }
+check "boot's dry run says it would stay in the foreground" "OSCAIRN_KEY_HELD=\"sh -c 'exit 1'\" OSCAIRN_PROC='$bundle/proc' '$bundle/oscairn-fantom-boot' --dry-run 2>&1 | grep -q 'would stay in the foreground while the engine runs'"
+running oscairn-engine 4242
+supervise
+sleep 0.5
+check "the engine running: boot stays" "kill -0 $watcher && grep -q 'Oscairn runs; staying in the foreground' '$bundle/watch.out'"
+gone 4242
+check "the engine ended without oscairn-fantom-stop: the fallback, then Roland's application" "until_done $watcher && grep -q 'the engine ended without oscairn-fantom-stop' '$bundle/watch.out' && grep -q 'would run: $bundle/oscairn-fantom-stop --panel' '$bundle/watch.out' && grep -q 'would run: /home/root/mi078' '$bundle/watch.out'"
+running oscairn-engine 4242
+running oscairn-panel-h 4243
+supervise
+sleep 0.3
+mkdir -p "$bundle/var/oscairn/run" && : > "$bundle/var/oscairn/run/stopped"
+gone 4242
+sleep 0.5
+check "stopped on purpose: boot stays while the holder runs, and starts nothing" "kill -0 $watcher && grep -q 'stopped on purpose (oscairn-fantom-stop); staying while the panel holder runs' '$bundle/watch.out' && ! grep -q mi078 '$bundle/watch.out'"
+gone 4243
+check "and ends once the holder has gone too" "until_done $watcher && grep -q 'nothing left to keep' '$bundle/watch.out' && ! grep -q mi078 '$bundle/watch.out'"
+rm -f "$bundle/var/oscairn/run/stopped"
+out=$("$bundle/oscairn-fantom-stop" --dry-run 2>&1)
+check "the stop marks itself on purpose (dry: says so)" "echo \"\$out\" | grep -q 'would mark the stop as on purpose' && [ ! -e '$bundle/var/oscairn/run/stopped' ]"
 exit $fail

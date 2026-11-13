@@ -7,7 +7,9 @@
 # something holds its device, and left unheld it went silent until the next power-on, so stopping
 # the holder silences the panel. Roland's application is not started again: started after a stop
 # it shows "program version error", and Local Switch, which the engine turned off, is not turned
-# back on. A power cycle returns the instrument to Roland's system, Local Switch on.
+# back on. A power cycle returns the instrument to Roland's system, Local Switch on. Started at
+# power-on, oscairn-fantom-boot stays waiting while the panel holder runs, and ends once it does
+# not (--panel).
 #
 #   ./oscairn-fantom-stop [--panel] [--dry-run]
 set -u
@@ -47,6 +49,9 @@ end() {
 }
 
 engine=$(named oscairn-engine)
+# Said before the engine ends: oscairn-fantom-boot, watching it, then knows it was on purpose and
+# does not start Roland's application. oscairn-fantom-start clears it.
+if [ -n "$dry" ]; then say "would mark the stop as on purpose ($state/run/stopped)"; else mkdir -p "$state/run" && : > "$state/run/stopped"; fi
 if [ -n "$engine" ]; then
 	say "stopping the engine (pid $(echo $engine))"
 	end 100 $engine

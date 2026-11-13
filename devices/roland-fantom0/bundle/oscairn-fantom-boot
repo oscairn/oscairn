@@ -10,6 +10,17 @@
 #   2. Otherwise oscairn-fantom-start --cold: Roland's application never ran this boot.
 #   3. If that fails (the engine not answering session.status within 20 seconds among it), what it
 #      started is stopped, the panel holder too, and Roland's application is started instead.
+#   4. Once Oscairn runs, it stays: go.sh is the main process of weston-term.service, so when this
+#      returns go.sh ends, and systemd, with a unit's default settings, stops the unit and kills
+#      what is left in its control group, the panel holder and the engine with it (setsid leaves
+#      a session, not a control group), which would silence the panel until the next power-on. So
+#      it waits, checking each second, for as long as the engine runs. If the engine ends without
+#      oscairn-fantom-stop (which leaves var/oscairn/run/stopped to say it was on purpose), it is
+#      taken to have failed: step 3's fallback. Stopped on purpose, it goes on waiting while the
+#      panel holder runs (an engine started again by hand, which clears the file, is watched the
+#      same way), and returns once neither runs: nothing is left for systemd to stop.
+#      A small loop in the unit's own process, rather than systemd-run --scope, which would need
+#      systemd's bus and more of it on the unit than go.sh relies on.
 #
 # The fallback is best effort: started again after it had run earlier in the same boot, Roland's
 # application showed "program version error"; whether it starts cleanly after Oscairn has used
@@ -19,22 +30,26 @@
 #
 # Logged to stdout and var/oscairn/log/oscairn-fantom.log.
 #
-#   ./oscairn-fantom-boot [--dry-run]
+#   ./oscairn-fantom-boot [--dry-run] [--supervise]
 #
 # --dry-run reads MENU (mounting the chroot to run oscairn-key-held) and the one-shot file, and
-# prints what it would do.
+# prints what it would do. --supervise is step 4 alone, for an Oscairn already started (and for
+# tests: with --dry-run, the fallback is printed and not taken).
 set -u
 root=$(cd "$(dirname "$0")" && pwd)
-dry=""
-case "${1:-}" in
---dry-run) dry=1 ;;
-"") ;;
-*) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
-esac
+dry="" supervise=""
+for a in "$@"; do
+	case "$a" in
+	--dry-run) dry=1 ;;
+	--supervise) supervise=1 ;;
+	*) echo "usage: $0 [--dry-run] [--supervise]" >&2; exit 2 ;;
+	esac
+done
 # Stand-ins for a test, off the unit; on the unit these are left unset.
 key_held=${OSCAIRN_KEY_HELD:-'"$root/start-chroot.sh" /usr/bin/oscairn-key-held gpio-keys 139'}
 panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
 proc=${OSCAIRN_PROC:-/proc}
+poll=${OSCAIRN_BOOT_POLL:-1}
 state=$root/var/oscairn
 log=$state/log/oscairn-fantom.log
 [ -n "$dry" ] || mkdir -p "$state/log"
@@ -43,6 +58,7 @@ say() {
 	echo "oscairn-fantom-boot: $*"
 	[ -n "$dry" ] || echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $*" >> "$log"
 }
+named() { for c in "$proc"/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = "$1" ] && { p=${c#"$proc"/}; echo "${p%%/*}"; }; done; }
 holding() {
 	for f in "$proc"/[0-9]*/fd/*; do
 		case "$(readlink "$f" 2>/dev/null)" in *"$1") p=${f#"$proc"/}; echo "${p%%/*}" ;; esac
@@ -60,6 +76,31 @@ roland() {
 	XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 exec /home/root/mi078
 }
 
+# 3. The fallback: what Oscairn started stopped, the panel holder too, then Roland's application.
+fallback() {
+	say "$1; stopping what it started"
+	if [ -n "$dry" ]; then say "would run: $root/oscairn-fantom-stop --panel"; else "$root/oscairn-fantom-stop" --panel; fi
+	roland "Oscairn did not start or did not keep running"
+}
+# 4. In the foreground for as long as Oscairn runs (above).
+watch() {
+	quiet=""
+	while :; do
+		if [ -n "$(named oscairn-engine)" ]; then
+			[ -n "$quiet" ] || say "Oscairn runs; staying in the foreground while it does"
+			quiet=1
+		elif [ -e "$state/run/stopped" ]; then
+			[ -n "$(named oscairn-panel-h)" ] || { say "stopped on purpose and the panel holder is gone: nothing left to keep"; exit 0; }
+			[ "$quiet" = held ] || say "the engine was stopped on purpose (oscairn-fantom-stop); staying while the panel holder runs"
+			quiet=held
+		else
+			fallback "the engine ended without oscairn-fantom-stop"
+		fi
+		sleep "$poll"
+	done
+}
+[ -z "$supervise" ] || watch
+
 # 1. Roland's application when asked for.
 eval "$key_held"
 held=$?
@@ -73,12 +114,9 @@ fi
 # 2. Oscairn.
 say "starting Oscairn"
 if [ -n "$dry" ]; then
-	"$root/oscairn-fantom-start" --dry-run --cold && exit 0
-	roland "oscairn-fantom-start --dry-run --cold failed"
+	"$root/oscairn-fantom-start" --dry-run --cold || roland "oscairn-fantom-start --dry-run --cold failed"
+	say "would stay in the foreground while the engine runs, and fall back to Roland's application if it ends without oscairn-fantom-stop"
+	exit 0
 fi
-"$root/oscairn-fantom-start" --cold && exit 0
-
-# 3. The fallback.
-say "oscairn-fantom-start failed; stopping what it started"
-"$root/oscairn-fantom-stop" --panel
-roland "Oscairn did not start"
+"$root/oscairn-fantom-start" --cold || fallback "oscairn-fantom-start failed"
+watch

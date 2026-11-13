@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Oscairn
+Comment=Instruments, effects and Performances for live playing
+Exec=Oscairn
+Icon=oscairn
+Categories=AudioVideo;Audio;Midi;Music;
+Terminal=false

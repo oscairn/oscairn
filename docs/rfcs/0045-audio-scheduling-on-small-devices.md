@@ -1,7 +1,8 @@
 # RFC 0045: Audio scheduling and placement on small devices
 
-Status: proposed, 2026-11-13, from the FANTOM-07 measurements of that week and the owner's
-decisions of the same day ([below](#the-owners-wishes)). Steps 1 to 3 are built (measurement
+Status: accepted 2026-11-13 but for decision 6, held ([decisions](#decisions-for-the-owner)),
+from the FANTOM-07 measurements of that week and the owner's wishes and decisions of the same
+day ([below](#the-owners-wishes)). Steps 1 to 3 are built (measurement
 and an opt-in experiment); step 4, the miss policy, is built and changes what a missed block
 does by default. Builds on plugin worker isolation
 ([RFC 0010](0010-plugin-worker-isolation.md)), parallel graph rendering
@@ -98,7 +99,10 @@ same arithmetic sat in `Process::setRate`, `core/plugin-host/src/WorkerHost.cpp`
   The allowance is half the block's period: 1,333 µs at 128 frames and 48 kHz. Offline rendering
   waits 10 s instead. The period is that of the blocks the engine runs: until a block length comes
   twice in a row the most a block can be (the engine's 512 frames), then that length (`Process::follow`);
-  so are the extra block's period and the misses in a row that end a worker.
+  so are the extra block's period and the misses in a row that end a worker. The worker's audio
+  thread still gives macOS's time-constraint policy the most a block can be as its period
+  (`makeRealtime`, set once as the thread starts); Linux takes only the priority from it, so the
+  FANTOM-07 is not affected, and nothing waits on it: left as it is.
 - **Why half.** RFC 0010 does not say; the code's reason, now written beside it, is that the
   graph's usual longest chain is two workers one after the other (an instrument, then its effect),
   and two whole allowances fit in a block. Since RFC 0034 a worker's wait counts from its own
@@ -567,40 +571,46 @@ Steps 2 and 11; built marked as such.
 
 ## Decisions for the owner
 
-Each with a recommendation.
+Each with a recommendation, and the owner's decision of 2026-11-13. The build order after step 4
+is set separately.
 
 1. **The miss policy (step 4): stop ending a part's notes on a missed block.** Recommended: yes,
-   first, before any other change; it is a behavior fix more than a policy.
+   first, before any other change; it is a behavior fix more than a policy. **Decided: yes, and
+   first** (built: [step 4 status](#step-4-status)). With it, "probably yes" to the allowance
+   following the running block length rather than the most a block can be, to go in after it
+   (built: [the allowance today](#the-allowance-today)).
 2. **"Too slow" (step 5): restart only a worker that has stopped making progress;** shed voices,
-   then use the extra block, for one that is merely slow. Recommended: yes.
+   then use the extra block, for one that is merely slow. Recommended: yes. **Decided: yes.**
 3. **The allowance from the block's deadline and the graph's waves (step 6),** behind a setting
-   until measured, then the default. Recommended: yes.
+   until measured, then the default. Recommended: yes. **Decided: yes.**
 4. **Adaptive latency: the per-instance extra block, entered and left under measured load
    (step 8),** with a profile list of plugins that start in it as the stopgap. Not switching the
    device buffer. Recommended: yes, after the device has tried step 3 on Analog and the Sampler.
+   **Decided: yes,** with the hysteresis, leaving only while the part is silent.
 5. **Part taps in a recording shifted back for a delayed part; the main mix recorded as heard.**
-   Recommended: yes.
+   Recommended: yes. **Decided: yes.**
 6. **One profile field for the audio cores:** `realtimeCores` as a list, `audioThreadCores`
    removed; the FANTOM-07's profile sets cores 1–3 and its session keeps the display stack on
    core 0. Recommended: yes, after one measurement with `audioThreadCores: [1, 2, 3]` and the
-   display drawing.
+   display drawing. **Held, not decided:** runs on the device showed no difference idle or with
+   the engine alone, but no run had the screen changing views, the load that stalled the engine
+   ([problem](#problem)); that measurement comes first.
 7. **The sharing bias names:** `compute.sharing` as `memory`, `balanced`, `cpu`, with `memory`
-   on 1 GB devices. Recommended: yes, the thresholds to be measured.
+   on 1 GB devices. Recommended: yes, the thresholds to be measured. **Decided: yes.**
 8. **`oscairn.ready` and warm-up blocks** as the start-up answer. Recommended: yes; the draft
-   header goes to the plugin SDK with a fixture before any real plugin adopts it.
+   header goes to the plugin SDK with a fixture before any real plugin adopts it. **Decided:
+   yes.**
 9. **Fair voices between shared parts (step 9a), as a correctness fix before any split:** each
    part a share of the plugin's pool even with no CPU budget, its reserve first. Recommended:
-   yes, first among the sharing work.
+   yes, first among the sharing work. **Decided: yes,** as a correctness fix.
 10. **Sample sharing between Sampler instances:** left to the Sampler's own work (a plugin
-   change), not designed here. Recommended: yes.
+   change), not designed here. Recommended: yes. **Decided: yes,** left to the Sampler.
 
 ## How each step is tested
 
-- Steps 1–3: as their status sections say (built).
-- Step 4: a graph test with a worker that misses one block chosen by the test (a fixture mode
-  that sleeps past the allowance in a block it is told to through a parameter), checking that its held notes keep sounding
-  after the miss, no panic reaches it, the events of a block not handed arrive in the next, and
-  the fade's samples; `worker-failures` still names a crash, a hang and memory.
+- Steps 1–4: as their status sections say (built). Step 4's block is chosen through the
+  environment (`KICK_FIXTURE_STALL`, or the stalling worker build for a plugin without one), not a
+  parameter; `worker-failures` still names a crash, a hang, too slow and memory.
 - Step 5: a worker that renders every block in 1.5 allowances is never restarted and has its
   voice limit lowered; one that stops is restarted after a quarter second.
 - Step 6: with an injected callback start and step costs, each worker's wait in a chain and in

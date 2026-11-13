@@ -169,6 +169,11 @@ target_link_libraries(oscairn-channel-map-test PRIVATE oscairn_engine)
 target_include_directories(oscairn-channel-map-test PRIVATE clap-host/tests)
 add_test(NAME audio-device-channel-map COMMAND oscairn-channel-map-test)
 
+# The engine's raw MIDI parser (Linux without an ALSA sequencer), plain C++, tested everywhere.
+add_executable(oscairn-midi-stream-test ../hosts/audio/midi_stream_test.cpp)
+target_compile_options(oscairn-midi-stream-test PRIVATE -Wall -Wextra)
+add_test(NAME engine-midi-stream COMMAND oscairn-midi-stream-test)
+
 add_library(oscairn-lifecycle-fixture MODULE engine/tests/lifecycle_fixture.cpp)
 target_link_libraries(oscairn-lifecycle-fixture PRIVATE oscairn_clap_headers)
 set_target_properties(oscairn-lifecycle-fixture PROPERTIES PREFIX "" SUFFIX ".clap")

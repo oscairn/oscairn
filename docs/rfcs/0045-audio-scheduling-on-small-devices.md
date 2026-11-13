@@ -96,7 +96,9 @@ same arithmetic sat in `Process::setRate`, `core/plugin-host/src/WorkerHost.cpp`
 - **The quantity.** When the engine hands a worker a block (`WorkerHost::start`) it records the
   time; when it comes for the result (`finish`) it waits at most the allowance from that hand-over.
   The allowance is half the block's period: 1,333 µs at 128 frames and 48 kHz. Offline rendering
-  waits 10 s instead.
+  waits 10 s instead. The period is that of the blocks the engine runs: until a block length comes
+  twice in a row the most a block can be (the engine's 512 frames), then that length (`Process::follow`);
+  so are the extra block's period and the misses in a row that end a worker.
 - **Why half.** RFC 0010 does not say; the code's reason, now written beside it, is that the
   graph's usual longest chain is two workers one after the other (an instrument, then its effect),
   and two whole allowances fit in a block. Since RFC 0034 a worker's wait counts from its own

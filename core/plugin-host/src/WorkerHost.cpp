@@ -102,7 +102,13 @@ namespace oscairn
             static constexpr size_t maxRestarts = 3;
             std::string program, path, id;
             double rate; uint32_t frames;
-            std::chrono::nanoseconds budget{}, hangLimit{};
+            std::chrono::nanoseconds hangLimit{};
+            // The allowance per block, and the blocks in a row that end a worker, follow the block length the engine
+            // runs (block, from follow), not the most a block can be (frames): a device's buffer is not its period.
+            std::atomic<int64_t> budgetNs{0};
+            std::atomic<uint32_t> block{0}, lastBlock{0};
+            int64_t allowanceOverrideNs = 0;
+            std::chrono::nanoseconds budget() const noexcept { return std::chrono::nanoseconds(budgetNs.load(std::memory_order_relaxed)); }
             long replySeconds = 30; // how long a control request may take (a big preset load)
             std::atomic<uint32_t> missLimit{UINT32_MAX}; // the supervisor reads it too
             const uint64_t policyLimit; // the placement policy's, in bytes; 0: none
@@ -153,13 +159,23 @@ namespace oscairn
                 // Each block may take the worker's allowance (realtime.h) before it is silenced; a
                 // worker that misses a quarter second of blocks in a row, or leaves one unanswered
                 // that long, has failed. Offline rendering waits instead of silencing.
-                const double period = double(frames) / rate;
-                if(mode == ProcessingMode::Offline) budget = std::chrono::seconds(10);
-                else
-                {
-                    budget = workerAllowance(frames, rate, std::getenv("OSCAIRN_WORKER_BUDGET_US"));
-                    missLimit = std::max<uint32_t>(8, uint32_t(std::ceil(0.25 / period)));
-                }
+                allowanceOverrideNs = workerAllowance(0, rate, std::getenv("OSCAIRN_WORKER_BUDGET_US")).count(); // 0 frames: only a valid override is not 0
+                retime(block.load() ? block.load() : frames);
+            }
+            // The budget and the miss limit for blocks of n frames.
+            void retime(uint32_t n) noexcept
+            {
+                block = n;
+                if(mode == ProcessingMode::Offline) { budgetNs = std::chrono::nanoseconds(std::chrono::seconds(10)).count(); return; }
+                budgetNs = allowanceOverrideNs ? allowanceOverrideNs : workerAllowance(n, rate, nullptr).count();
+                missLimit = std::max<uint32_t>(8, uint32_t(std::ceil(0.25 / (double(n) / rate))));
+            }
+            // The audio thread, with each block's length: one that comes twice in a row is the running length (the odd
+            // tail of a callback longer than the engine's block does not move it); none longer than `frames` counts.
+            void follow(uint32_t n) noexcept
+            {
+                n = std::min(n, frames);
+                if(n && lastBlock.exchange(n, std::memory_order_relaxed) == n && n != block.load(std::memory_order_relaxed)) retime(n);
             }
 
             ~Process()
@@ -833,7 +849,7 @@ namespace oscairn
                 s.lastMicroseconds = shared_->lastMicroseconds.load(); s.maximumMicroseconds = shared_->maximumMicroseconds.load();
                 s.lateBlocks = late_.load(std::memory_order_relaxed); s.silentBlocks = silent_.load(std::memory_order_relaxed);
                 s.deadlineMisses = shared_->deadlineMisses.load() + s.lateBlocks + s.silentBlocks;
-                s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process_->budget).count();
+                s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process_->budget()).count();
                 s.busyBlocks = busyBlocks_.load(std::memory_order_relaxed); s.missPanics = missPanics_.load(std::memory_order_relaxed);
                 s.minorFaults = shared_->minorFaults.load(std::memory_order_relaxed); s.majorFaults = shared_->majorFaults.load(std::memory_order_relaxed);
                 s.involuntarySwitches = shared_->involuntarySwitches.load(std::memory_order_relaxed);
@@ -1015,6 +1031,7 @@ namespace oscairn
                 busy_.store(true);
                 auto& s = *shared_;
                 if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; carriedBytes_->used = 0; return silence(); }
+                process_->follow(frames);
                 if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process_->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
                 // A block the worker has not finished yet: stay silent rather than queue another, its events carried
                 // to the next block handed (RFC 0045); only a release lost on the way is reset for.
@@ -1082,7 +1099,7 @@ namespace oscairn
                 };
                 // The budget counts from the request, however long the caller did other work since; with the
                 // extra block, from the request a block earlier, so a period more.
-                const auto budget = extraBlock() ? process_->budget + std::chrono::nanoseconds(int64_t(1e9 * process_->frames / process_->rate)) : process_->budget;
+                const auto budget = extraBlock() ? process_->budget() + std::chrono::nanoseconds(int64_t(1e9 * process_->block.load(std::memory_order_relaxed) / process_->rate)) : process_->budget();
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
                 const auto checked = std::chrono::steady_clock::now();
                 const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (checked - sent));

@@ -179,6 +179,28 @@ void roundTrips(const std::string& worker, const std::string& fixture)
     check(t.steady.count() == 1 && t.startup.count() == 0, "then holds that block alone");
 }
 
+// The allowance per block is half the period of the blocks the engine runs, not of the most a block can be
+// (the engine's buffers hold 512 frames; a device's period is 128): the maximum until a block length comes
+// twice in a row, then that length; an odd tail does not move it; an override (OSCAIRN_WORKER_BUDGET_US) stays.
+void allowance(const std::string& worker, const std::string& fixture)
+{
+    constexpr uint32_t maximum = 512;
+    ::unsetenv("OSCAIRN_WORKER_BUDGET_US");
+    auto remote = oscairn::loadPluginInWorker(worker, fixture, "org.kick.test.sleep", 48000, maximum, oscairn::ProcessingMode::Realtime);
+    std::vector<float> l(maximum), r(maximum); float* out[]{l.data(), r.data()};
+    auto run = [&](uint32_t frames, int blocks) { for(int i = 0; i < blocks; ++i) remote->process(nullptr, 0, out, 2, frames, nullptr, 0, nullptr); return remote->statistics().allowanceMicroseconds; };
+    check(std::abs(remote->statistics().allowanceMicroseconds - 5333.3) < 1, "before any block, half the period of the most a block can be");
+    check(std::abs(run(128, 1) - 5333.3) < 1, "one block of another length does not move it");
+    check(std::abs(run(128, 1) - 1333.3) < 1, "the length twice in a row is the running one: half its period");
+    check(std::abs(run(1, 1) - 1333.3) < 1 && std::abs(run(128, 2) - 1333.3) < 1, "a callback's odd tail does not move it");
+    check(std::abs(run(256, 2) - 2666.7) < 1, "another running length: its half period");
+    ::setenv("OSCAIRN_WORKER_BUDGET_US", "2000", 1);
+    auto fixed = oscairn::loadPluginInWorker(worker, fixture, "org.kick.test.sleep", 48000, maximum, oscairn::ProcessingMode::Realtime);
+    ::unsetenv("OSCAIRN_WORKER_BUDGET_US");
+    for(int i = 0; i < 4; ++i) fixed->process(nullptr, 0, out, 2, 128, nullptr, 0, nullptr);
+    check(std::abs(fixed->statistics().allowanceMicroseconds - 2000) < 1, "an override is the allowance whatever the block length");
+}
+
 // The stepped fixture's mode 3 hides its Toggle with an info rescan, which the plugin's host takes
 // in place; through the worker the engine's side sees the new info and a new revision.
 void rescan(const std::string& worker, const std::string& fixture)
@@ -302,7 +324,7 @@ void hostileSizes(const std::string& worker, const std::string& fixture)
 int main(int argc, char** argv)
 {
     if(argc < 4) { std::fprintf(stderr, "usage: %s WORKER PLUGIN... SIZE-HOSTILE-WORKER\n", argv[0]); return 2; }
-    try { libraryRoot(argv[1], argv[2]); renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); roundTrips(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc - 1; ++i) compare(argv[1], argv[i]); hostileSizes(argv[argc - 1], argv[2]); }
+    try { libraryRoot(argv[1], argv[2]); renderMode(argv[1], argv[2]); sleeping(argv[1], argv[2]); roundTrips(argv[1], argv[2]); allowance(argv[1], argv[2]); rescan(argv[1], argv[2]); window(argv[1], argv[2]); for(int i = 2; i < argc - 1; ++i) compare(argv[1], argv[i]); hostileSizes(argv[argc - 1], argv[2]); }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     return failures ? 1 : 0;
 }

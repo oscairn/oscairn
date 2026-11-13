@@ -2,6 +2,7 @@
   "repository": "org.oscairn.main",
   "name": "Oscairn",
   "blobBase": "https://github.com/oscairn/packages/releases/download/blobs-",
+  "exportDownload": "https://github.com/oscairn/packages/releases/download/exports-",
   "mirrors": [],
   "rootKey": "",
   "indexKey": { "key": "", "signature": "" }

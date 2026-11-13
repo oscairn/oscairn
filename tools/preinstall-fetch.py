@@ -1,23 +1,28 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Fetches the packages a release ships (RFC 0031, "Preinstalled packages") and lays them out as
 a repository snapshot: the official repository's signed root, index key and index exactly as
-published, and only the listed packages' archives as blobs. The engine installs from it on first
-run through the normal installer, which checks every signature and hash again.
+published, and as blobs only the listed packages' pieces for --platform (each one's pieces list,
+what every platform shares and that platform's builds; RFC 0031, "Pieces: the format"). The engine
+installs from it on first run through the normal installer, which checks every signature and hash
+again.
 
-usage: python3 -I tools/preinstall-fetch.py --oscairn-sign PATH --out DIR
-           [--list tools/preinstalled.txt] [--platform macos-arm64] [--licenses DIR]
+usage: python3 -I tools/preinstall-fetch.py --oscairn-sign PATH --out DIR --platform macos-arm64
+           [--list tools/preinstalled.txt] [--licenses DIR] [--repository URL --root-key HEX]
 
 Everything is checked here first, and any failure stops it with a nonzero exit: the root is the
 official root key's (the index key it signed, and the index key signed the root, both checked with
 `oscairn-sign verify-file`); the index is the one the root names by hash; each listed version is in
-the index, stable and not yanked, with a build for --platform when it brings code; each archive is
-the size and SHA-256 the index gives, its manifest the one the index names, and `oscairn-sign
-verify` passes with the archive and every build signed by the publisher key the index gives; each
-asset library a listed package needs is listed at the version a device would pick. --licenses
-writes each package's license texts, license and source there, one folder per package.
+the index, stable and not yanked, with a build for --platform when it brings code; each piece and
+pieces list is the size and SHA-256 the index's chain gives, the manifest the one the index names,
+and `oscairn-sign verify --platform` passes on the archive the pieces make for that platform, with
+the archive and every build signed by the publisher key the index gives; each asset library a
+listed package needs is listed at the version a device would pick. --licenses writes each package's
+license texts, license and source there, one folder per package. --repository and --root-key read
+another repository (a file:// address for a folder), for testing.
 """
 import argparse
 import gzip
+import tempfile
 import hashlib
 import json
 import subprocess
@@ -26,8 +31,9 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 
-REPOSITORY = 'https://packages.oscairn.org'
-ROOT_KEY = '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841'  # official in core/control/src/packages.cpp
+OFFICIAL = 'https://packages.oscairn.org'
+OFFICIAL_KEY = '6a7eceba0a34104fea44e99e8c904fc53f410b4ad7ee615bbb51bf6876630841'  # official in core/control/src/packages.cpp
+REPOSITORY, ROOT_KEY = OFFICIAL, OFFICIAL_KEY
 
 
 def fail(why):
@@ -62,9 +68,13 @@ def main():
     parser.add_argument('--oscairn-sign', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--list', type=Path, default=Path(__file__).resolve().parent / 'preinstalled.txt')
-    parser.add_argument('--platform')
+    parser.add_argument('--platform', required=True)
     parser.add_argument('--licenses', type=Path)
+    parser.add_argument('--repository', default=OFFICIAL)
+    parser.add_argument('--root-key', default=OFFICIAL_KEY)
     a = parser.parse_args()
+    global REPOSITORY, ROOT_KEY
+    REPOSITORY, ROOT_KEY = a.repository.rstrip('/'), a.root_key
     if a.out.exists():
         fail(f'{a.out} exists; give a folder that does not')
     wanted = []
@@ -140,51 +150,69 @@ def main():
         if release.get('yanked') or release.get('channel', 'stable') not in ('', 'stable'):
             fail(f'{what} is yanked or not stable')
         code = any(release.get('types', {}).get(t) for t in ('clap', 'lv2'))
-        if a.platform and code and a.platform not in release.get('platforms', {}):
+        if code and a.platform not in release.get('platforms', {}):
             fail(f'{what} has no build for {a.platform}')
         for need in release.get('requires', {}).get('packages', []):
             pick = newest(packages.get(need['id'], {'versions': []}), need['version'])
             if not pick or listed.get(need['id']) != pick['version']:
                 fail(f'{what} needs {need["id"]} {need["version"]} or later; list it at {pick["version"] if pick else "(none in the repository)"}')
 
-        # The archive: from the blob base, else the repository's own blobs/.
-        sha, size = release['archive']['sha256'], release['archive']['size']
-        path = f'blobs/{sha[:2]}/{sha}'
-        data = None
-        for url in ([root['blobBase'] + f'{sha[:2]}/{sha}'] if root.get('blobBase') else []) + [REPOSITORY + '/' + path]:
-            try:
-                data = fetch(url, size)
-                break
-            except OSError as e:
-                print(f'preinstall-fetch: {url}: {e}; trying the next place', file=sys.stderr)
-        if data is None or len(data) != size or hashlib.sha256(data).hexdigest() != sha:
-            fail(f'the archive of {what} is missing or not the one the index names')
-        blob = keep(path, data)
-        with zipfile.ZipFile(blob) as z:
-            if hashlib.sha256(z.read('library.json')).hexdigest() != release['manifest']['sha256']:
-                fail(f'the archive of {what} is not the release the index names')
-        publisher = package['publisher']['key']
-        lines = [l.split() for l in sign(a.oscairn_sign, 'verify', blob).splitlines()]
-        archive = [l for l in lines if l[0] == 'archive']
-        builds = [l for l in lines if l[0] == 'build']
-        if archive != [['archive', package_id, publisher]] or any(l[-1] != publisher for l in builds):
-            fail(f'{what} is not signed throughout by its publisher\'s key {publisher}: ' + '; '.join(' '.join(l) for l in archive + builds))
-        print(f'{what}: {size} bytes, signed by {publisher}')
+        # Its pieces: the pieces list, then what every platform shares and this platform's builds,
+        # each from the blob base, else the repository's own blobs/, by the size and SHA-256 named.
+        def blob(sha, size):
+            path = f'blobs/{sha[:2]}/{sha}'
+            data = None
+            for url in ([root['blobBase'] + f'{sha[:2]}/{sha}'] if root.get('blobBase') else []) + [REPOSITORY + '/' + path]:
+                try:
+                    data = fetch(url, size)
+                    break
+                except OSError as e:
+                    print(f'preinstall-fetch: {url}: {e}; trying the next place', file=sys.stderr)
+            if data is None or len(data) != size or hashlib.sha256(data).hexdigest() != sha:
+                fail(f'a piece of {what} is missing or not the one the index names: {path}')
+            return keep(path, data)
+        pieces_list = json.loads(blob(release['pieces']['sha256'], release['pieces']['size']).read_bytes())
+        if pieces_list.get('format') != 'oscairn.repository-pieces' or pieces_list.get('version') != 1:
+            fail(f'the pieces list of {what} is not format oscairn.repository-pieces, version 1')
+        pieces = [p for p in pieces_list['pieces'] if p.get('platform') in (None, a.platform)]
+        files = {p['sha256']: blob(p['sha256'], p['size']) for p in pieces}
+        size = sum(p['size'] for p in pieces)
+        with tempfile.TemporaryDirectory() as work:
+            # The archive these pieces make, as a ready-made archive for the platform is: what is checked.
+            archive = Path(work) / 'release.olib'
+            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as out:
+                for p in pieces:
+                    if p['type'] == 'file':
+                        out.write(files[p['sha256']], p['path'])
+                    else:
+                        with zipfile.ZipFile(files[p['sha256']]) as z:
+                            for name in z.namelist():
+                                out.writestr(name, z.read(name))
+            with zipfile.ZipFile(archive) as z:
+                if hashlib.sha256(z.read('library.json')).hexdigest() != release['manifest']['sha256']:
+                    fail(f'the pieces of {what} are not the release the index names')
+            publisher = package['publisher']['key']
+            lines = [l.split() for l in sign(a.oscairn_sign, 'verify', '--platform', a.platform, archive).splitlines()]
+            signed = [l for l in lines if l[0] == 'archive']
+            builds = [l for l in lines if l[0] == 'build']
+            if signed != [['archive', package_id, publisher]] or any(l[-1] != publisher for l in builds):
+                fail(f'{what} is not signed throughout by its publisher\'s key {publisher}: ' + '; '.join(' '.join(l) for l in signed + builds))
+            print(f'{what}: {size} bytes in {len(pieces)} pieces for {a.platform}, signed by {publisher}')
 
-        if a.licenses:
-            folder = a.licenses / package_id
-            folder.mkdir(parents=True)
-            with zipfile.ZipFile(blob) as z:
-                manifest = json.loads(z.read('library.json'))
-                for name in z.namelist():
-                    p = PurePosixPath(name)
-                    if len(p.parts) == 2 and p.parts[0] == 'Licenses' and p.parts[1] not in ('.', '..'):
-                        (folder / p.parts[1]).write_bytes(z.read(name))
-            source = manifest.get('source') or {}
-            (folder / 'PACKAGE.txt').write_text(
-                f'{package["name"]} ({package_id}) {version}, published by {package["publisher"]["name"]} at {REPOSITORY}\n'
-                f'License: {manifest.get("license") or package.get("license", "")}\n'
-                + (f'Source: {source["url"]} at {source["revision"]}\n' if source.get('url') else 'Source: not named in the package\n'))
+            if a.licenses:
+                folder = a.licenses / package_id
+                folder.mkdir(parents=True)
+                with zipfile.ZipFile(archive) as z:
+                    manifest = json.loads(z.read('library.json'))
+                    for name in z.namelist():
+                        p = PurePosixPath(name)
+                        if len(p.parts) == 2 and p.parts[0] == 'Licenses' and p.parts[1] not in ('.', '..'):
+                            (folder / p.parts[1]).write_bytes(z.read(name))
+                source = manifest.get('source') or {}
+                (folder / 'PACKAGE.txt').write_text(
+                    f'{package["name"]} ({package_id}) {version}, published by {package["publisher"]["name"]} at {REPOSITORY}\n'
+                    f'License: {manifest.get("license") or package.get("license", "")}\n'
+                    + (f'Source: {source["url"]} at {source["revision"]}\n' if source.get('url') else 'Source: not named in the package\n'))
     print(f'{len(wanted)} packages from {root["name"]} serial {root["serial"]} in {a.out}')
 
 

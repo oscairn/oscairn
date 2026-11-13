@@ -709,7 +709,9 @@ Each starts as an RFC:
   Library's Install… with Catalog and File, the Catalog an interim view of the repositories'
   packages not installed, grayed with the reason where they cannot install, with details,
   Install and trusting a publisher from the install question; the repositories in the Settings
-  app, each with a switch, Remove for the user's and Add a repository...)
+  app, each with a switch, Remove for the user's and Add a repository...; releases stored in
+  pieces, a device downloading what all platforms share and its own platform's builds only, and
+  a ready-made archive per platform of each version to download by hand)
 - [ ] **Finding missing plugins** ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#finding-missing-plugins),
   proposed 2026-11-11): a plugin a library, Performance or Sound needs and this device lacks is
   looked up by its exact format and ID in the repositories' indexes, offline from the kept ones,

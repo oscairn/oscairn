@@ -18,6 +18,7 @@ version the user has installed is kept; a copy of a repository the device ships 
 that repository; a snapshot older than the repository the device has seen is refused; a snapshot
 whose root key is not a shipped repository's is refused.
 """
+import gzip
 import hashlib
 import http.server
 import json
@@ -82,7 +83,6 @@ with tempfile.TemporaryDirectory(prefix='oscairn-preinstall-') as temporary:
         keys[name] = (key_id, public)
     repo = temp / 'submissions'
     shutil.copytree(builder.parents[1], repo)
-    blobs = {}
 
     def package(plugin_id, version, needs=None, asset_library=None):
         folder = repo / 'packages' / plugin_id
@@ -104,7 +104,6 @@ with tempfile.TemporaryDirectory(prefix='oscairn-preinstall-') as temporary:
         if needs:
             record['dependencies'] = {'assets': [{'id': needs[0], 'version': needs[1]}]}
         (folder / f'{version}.json').write_text(json.dumps(record))
-        blobs[(plugin_id, version)] = hashlib.sha256(data).hexdigest()
 
     package('org.kick.synth', '1.0.0')
     package('org.kick.synth', '2.0.0')
@@ -137,15 +136,29 @@ with tempfile.TemporaryDirectory(prefix='oscairn-preinstall-') as temporary:
     site = published('site', 5)
     later = published('later', 6)  # the same repository published again since the snapshot was taken
 
-    # The snapshot: the signed root, index key and index as published, and the archives of the
-    # synth 1.0.0, the analog synth and the asset library it needs, and the other synth, tampered.
+    # The snapshot, made by tools/preinstall-fetch.py from the published site: the signed root,
+    # index key and index as published, and the pieces (RFC 0031) of the synth 1.0.0, the analog
+    # synth and the asset library it needs, and the other synth: each one's pieces list, what every
+    # platform shares and this platform's builds. The other synth's build piece is then tampered with.
     snapshot = temp / 'Preinstalled'
-    shutil.copytree(site, snapshot, ignore=shutil.ignore_patterns('blobs'))
-    for key in (('org.kick.synth', '1.0.0'), ('org.kick.analog', '1.0.0'), ('org.kick.factory', '1.0.0'), ('org.kick.other', '1.0.0')):
-        sha = blobs[key]
-        (snapshot / 'blobs' / sha[:2]).mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(site / 'blobs' / sha[:2] / sha, snapshot / 'blobs' / sha[:2] / sha)
-    tampered = snapshot / 'blobs' / blobs[('org.kick.other', '1.0.0')][:2] / blobs[('org.kick.other', '1.0.0')]
+    (temp / 'preinstalled.txt').write_text('org.kick.synth 1.0.0\norg.kick.analog 1.0.0\norg.kick.factory 1.0.0\norg.kick.other 1.0.0\n')
+    fetched = subprocess.run([sys.executable, '-I', builder.parents[3] / 'preinstall-fetch.py', '--oscairn-sign', tool, '--out', snapshot, '--platform', here,
+                              '--list', temp / 'preinstalled.txt', '--repository', site.as_uri(), '--root-key', keys['root'][1], '--licenses', temp / 'licenses'],
+                             capture_output=True, text=True, timeout=300)
+    check(fetched.returncode == 0 and (temp / 'licenses' / 'org.kick.synth' / 'PACKAGE.txt').is_file(), 'tools/preinstall-fetch.py makes the snapshot from the pieces: ' + fetched.stderr[-2000:])
+    requests.clear()  # it tried the root's blob base first, which nothing serves here
+    root = json.loads((site / 'repository.json').read_text())
+    index = json.loads(gzip.decompress((site / root['index']['path']).read_bytes()))
+    build_pieces = {}
+    for package_id, version in (('org.kick.synth', '1.0.0'), ('org.kick.other', '1.0.0'), ('org.kick.synth', '2.0.0')):
+        v = next(v for p in index['packages'] if p['id'] == package_id for v in p['versions'] if v['version'] == version)
+        listed = v['pieces']['sha256']
+        pieces = json.loads((site / 'blobs' / listed[:2] / listed).read_bytes())['pieces']
+        build_pieces[(package_id, version)] = next(p['sha256'] for p in pieces if p.get('platform') == here)
+    check(not (snapshot / 'blobs' / build_pieces[('org.kick.synth', '2.0.0')][:2] / build_pieces[('org.kick.synth', '2.0.0')]).exists() and
+          (snapshot / 'blobs' / build_pieces[('org.kick.synth', '1.0.0')][:2] / build_pieces[('org.kick.synth', '1.0.0')]).is_file(),
+          'the snapshot holds the listed versions\' pieces and not the others\'')
+    tampered = snapshot / 'blobs' / build_pieces[('org.kick.other', '1.0.0')][:2] / build_pieces[('org.kick.other', '1.0.0')]
     data = bytearray(tampered.read_bytes())
     data[len(data) // 2] ^= 1
     tampered.write_bytes(bytes(data))

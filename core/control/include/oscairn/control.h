@@ -391,7 +391,11 @@ namespace oscairn
         // one. A withdrawn version is never installed, even when named; yanked is the publisher's
         // advice, and a version named still installs.
         struct Withdrawal { std::string repository, reason, date; };
-        struct RepositoryVersion { std::string version, channel, yanked, incompatible, sha256; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; Withdrawal withdrawn; };
+        // sha256: its manifest's, the package's identity (RFC 0031). size and installed: on this device's
+        // platform. exports: each ready-made archive (RFC 0031), its platform (empty for a package with no
+        // builds) and its address under the repository's web address; none from a folder no web address is known for.
+        struct RepositoryVersion { std::string version, channel, yanked, incompatible, sha256; uint64_t size = 0, installed = 0; std::vector<std::pair<std::string, uint64_t>> types; std::vector<std::pair<std::string, std::string>> dependencies; Withdrawal withdrawn;
+                                   std::vector<std::pair<std::string, std::string>> exports = {}; };
         struct RepositoryPackage { std::string id, name, summary, license, publisher, publisherKey; std::vector<std::string> tags; std::vector<RepositoryVersion> versions; };
         // state: "running", "done" or "failed" (error says why). rootKey: the repository's root key
         // once read. name: this device's name for the repository read (repositories(), by the

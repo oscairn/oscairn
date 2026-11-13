@@ -49,14 +49,25 @@ namespace oscairn::repository
     struct Version
     {
         std::string version, channel, yanked, needs;    // needs: requires.oscairn, the oldest Oscairn it runs on, empty for any
-        std::string manifestSha256, archiveSha256;
-        uint64_t archiveSize = 0;
+        std::string manifestSha256, piecesSha256;       // its manifest (its identity) and its pieces list, each a blob
+        uint64_t piecesSize = 0;
         bool code = false;                              // it brings plugin builds
         std::vector<std::string> platforms;             // those it has builds for
         uint64_t size = 0, installed = 0;               // on this platform: download, and installed
         std::vector<std::pair<std::string, uint64_t>> types;          // items of each type and plugins by format, as the index counts them
         std::vector<std::pair<std::string, std::string>> dependencies; // requires.packages: each package ID and the least version
+        // The platforms with a ready-made archive (RFC 0031): each in `platforms` the index's
+        // noExport leaves; one empty name for a package with no builds whose archive exists.
+        std::vector<std::string> exports;
     };
+    // A piece of a release (RFC 0031, "Pieces: the format"): a blob by its SHA-256 and size, the
+    // bytes its entries restore to, its type ("file", the entry itself; "zip", its entries at or
+    // under `path`), the archive path it restores to, and the platform of the build it holds,
+    // empty for what every platform shares.
+    struct Piece { std::string sha256, type, path, platform; uint64_t size = 0, installed = 0; };
+    // A pieces list's JSON read and checked: format oscairn.repository-pieces version 1, each piece
+    // whole, its path a safe archive path given once, its platform a known one; refused otherwise.
+    std::vector<Piece> pieces(const std::string& json);
     struct Package { std::string id, name, summary, license, publisherId, publisherName, publisherKey; std::vector<std::string> tags; std::vector<Version> versions; };
     // A repository's revocation list (RFC 0031, revocations/<sha256>.json, named in its root by its
     // hash and so signed with it): each entry with its reason and date (YYYY-MM-DD). keys: publisher

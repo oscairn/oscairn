@@ -140,6 +140,33 @@ namespace oscairn
 
     bool redistributable(const std::string& license, std::optional<bool> declared) { return declared ? *declared : !licenseRef(license); }
 
+    bool safeArchivePath(const std::string& name) { return safe(name); }
+
+    void unpackPiece(const fs::path& zip, const fs::path& into, const std::string& under, uint64_t most)
+    {
+        Zip z(true);
+        if(!mz_zip_reader_init_file(&z.zip, zip.string().c_str(), 0)) bad("a piece is not a zip: " + under);
+        const auto count = mz_zip_reader_get_num_files(&z.zip);
+        if(count > maxEntries) bad("a piece holds too many files: " + under);
+        uint64_t total = 0;
+        for(mz_uint i = 0; i < count; ++i)
+        {
+            mz_zip_archive_file_stat st;
+            if(!mz_zip_reader_file_stat(&z.zip, i, &st)) bad("an entry of a piece cannot be read: " + under);
+            if(mz_zip_reader_is_file_a_directory(&z.zip, i)) continue;
+            const std::string name = st.m_filename;
+            if(!safe(name) || (name != under && name.rfind(under + "/", 0) != 0)) bad("a piece holds an entry outside its path: " + name);
+            if(((st.m_external_attr >> 16) & S_IFMT) == S_IFLNK) bad("a link: " + name);
+            if(st.m_uncomp_size > maxEntry || (total += st.m_uncomp_size) > most) bad("a piece is larger than its list says: " + under);
+            const auto out = into / name;
+            std::error_code e;
+            if(fs::exists(out, e)) bad("an entry twice: " + name);
+            fs::create_directories(out.parent_path());
+            if(!mz_zip_reader_extract_to_file(&z.zip, i, out.string().c_str(), 0)) bad("cannot extract " + name);
+            if(fs::file_size(out) != st.m_uncomp_size) bad("an entry is not the size it says: " + name);
+        }
+    }
+
     std::string manifestJson(const Package& package)
     {
         std::string items, plugins, files;
@@ -238,8 +265,10 @@ namespace oscairn
     Package readPackage(const fs::path& archive, const fs::path& into, const std::string& device)
     {
         const bool extract = !into.empty();
-        if(extract && fs::exists(into)) throw std::runtime_error(into.string() + " already exists");
-        if(extract) fs::create_directories(into);
+        // A folder read where it is, as a release restored from its pieces is (RFC 0031): checked, nothing copied.
+        const bool inPlace = extract && archive == into;
+        if(extract && !inPlace && fs::exists(into)) throw std::runtime_error(into.string() + " already exists");
+        if(extract && !inPlace) fs::create_directories(into);
         try
         {
             // Its entries: a zip's, read in place, or an unpacked folder's (RFC 0031), whose hidden
@@ -313,8 +342,8 @@ namespace oscairn
             }
             if(manifest.empty()) bad("it has no library.json");
             // Room for what it holds and one entry more (RFC 0031), before anything is written.
-            if(extract && fs::space(into).available < total + largest) bad("there is not room for it on this device: it needs " + std::to_string((total + largest) >> 20) + " MiB");
-            if(extract)
+            if(extract && !inPlace && fs::space(into).available < total + largest) bad("there is not room for it on this device: it needs " + std::to_string((total + largest) >> 20) + " MiB");
+            if(extract && !inPlace)
                 for(const auto& e : entries)
                 {
                     const auto out = into / e.name;
@@ -500,6 +529,7 @@ namespace oscairn
                 {
                     if(!e.is_regular_file()) continue;
                     const auto name = fs::relative(e.path(), into).generic_string();
+                    if(inPlace && (name == "library.json" || name == "library.sig")) continue;
                     const auto listed = p.files.find(name);
                     if(listed == p.files.end()) bad("a file the manifest does not list: " + name);
                     if(assets::sha256File(e.path()) != listed->second) bad("a file that is not what the manifest says: " + name);

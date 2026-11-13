@@ -13,6 +13,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -22,7 +23,8 @@ namespace oscairn::repository
     {
         namespace fs = std::filesystem;
         using V = const json_value_s*;
-        constexpr uint64_t maxRoot = 1 << 20, maxSignatures = 64 << 10, maxIndexGz = 64ull << 20, maxIndex = 256ull << 20, maxBlob = 8ull << 30;
+        constexpr uint64_t maxRoot = 1 << 20, maxSignatures = 64 << 10, maxIndexGz = 64ull << 20, maxIndex = 256ull << 20, maxPieces = 64ull << 20, maxPieceCount = 1u << 20,
+                           maxPieceBytes = 8ull << 30; // an archive's limit in all (docs/library-archive.md)
         [[noreturn]] void bad(const std::string& why) { throw std::runtime_error("not a usable repository: " + why); }
         using Doc = std::unique_ptr<json_value_s, decltype(&std::free)>;
         Doc parse(const std::string& bytes, const char* what)
@@ -246,6 +248,28 @@ namespace oscairn::repository
         return out;
     }
 
+    std::vector<Piece> pieces(const std::string& json)
+    {
+        if(json.size() > maxPieces) bad("a pieces list is too large");
+        const auto doc = parse(json, "a pieces list");
+        V d = doc.get();
+        if(text(detail::member(d, "format"), "pieces: format") != "oscairn.repository-pieces" || number(detail::member(d, "version"), "pieces: version") != 1)
+            bad("a pieces list is not format oscairn.repository-pieces, version 1");
+        const V list = detail::member(d, "pieces");
+        if(!list || list->type != json_type_array) bad("a pieces list lists no pieces");
+        std::vector<Piece> out;
+        std::set<std::string> paths;
+        each(list, [&](V e) {
+            Piece p{text(detail::member(e, "sha256"), "pieces: sha256"), text(detail::member(e, "type"), "pieces: type"), text(detail::member(e, "path"), "pieces: path"),
+                    text(detail::member(e, "platform"), "pieces: platform", true), number(detail::member(e, "size"), "pieces: size"), number(detail::member(e, "installed"), "pieces: installed")};
+            if(!hex(p.sha256, 64) || (p.type != "file" && p.type != "zip") || !safeArchivePath(p.path) || (!p.platform.empty() && !knownPlatform(p.platform)) ||
+               p.size > maxPieceBytes || p.installed > maxPieceBytes || (p.type == "file" && p.size != p.installed) || !paths.insert(p.path).second || out.size() >= maxPieceCount)
+                bad("a piece is malformed, too large or listed twice: " + p.path);
+            out.push_back(std::move(p));
+        });
+        return out;
+    }
+
     bool older(const std::string& a, const std::string& b) { return assets::older(a, b); } // asset libraries' minimum versions compare the same way
 
     std::string incompatible(const Version& v, const std::string& system, const std::string& platform)
@@ -450,15 +474,25 @@ namespace oscairn::repository
                 version.yanked = text(detail::member(v, "yanked"), "yanked", true);
                 version.needs = text(detail::member(detail::member(v, "requires"), "oscairn"), "requires.oscairn", true);
                 version.manifestSha256 = text(detail::member(detail::member(v, "manifest"), "sha256"), "manifest.sha256");
-                const V archive = detail::member(v, "archive");
-                version.archiveSha256 = text(detail::member(archive, "sha256"), "archive.sha256");
-                version.archiveSize = number(detail::member(archive, "size"), "archive.size");
-                if(!hex(version.manifestSha256, 64) || !hex(version.archiveSha256, 64) || version.archiveSize > maxBlob) bad("a version's files are named wrongly: " + package.id + " " + version.version);
+                const V listed = detail::member(v, "pieces"); // a release in pieces (RFC 0031); a whole archive (`archive`, before 2026-11-12) is not read
+                version.piecesSha256 = text(detail::member(listed, "sha256"), "pieces.sha256");
+                version.piecesSize = number(detail::member(listed, "size"), "pieces.size");
+                if(!hex(version.manifestSha256, 64) || !hex(version.piecesSha256, 64) || version.piecesSize > maxPieces) bad("a version's files are named wrongly: " + package.id + " " + version.version);
                 members(detail::member(v, "types"), [&](const std::string& type, V n) { version.types.push_back({type, number(n, "types")}); if((type == "clap" || type == "lv2") && version.types.back().second) version.code = true; });
                 each(detail::member(detail::member(v, "requires"), "packages"), [&](V d) { version.dependencies.push_back({text(detail::member(d, "id"), "requires.packages.id"), text(detail::member(d, "version"), "requires.packages.version")}); });
                 auto sizes = [&](V s) { version.size += number(detail::member(s, "size"), "size"); version.installed += number(detail::member(s, "installed"), "installed"); };
                 members(detail::member(v, "platforms"), [&](const std::string& name, V s) { version.platforms.push_back(name); if(name == platform()) sizes(s); });
                 if(const V common = detail::member(v, "common")) sizes(common);
+                // noExport: absent when every ready-made archive exists, true when none does, else the platforms whose archive does not.
+                const V none = detail::member(v, "noExport");
+                if(!none || none->type == json_type_null) version.exports = version.platforms.empty() ? std::vector<std::string>{""} : version.platforms;
+                else if(none->type == json_type_array)
+                {
+                    std::vector<std::string> missing;
+                    each(none, [&](V p) { missing.push_back(text(p, "noExport")); });
+                    for(const auto& p : version.platforms) if(std::find(missing.begin(), missing.end(), p) == missing.end()) version.exports.push_back(p);
+                }
+                else if(none->type != json_type_true) bad("a version's noExport is not true or a list of platforms: " + package.id + " " + version.version);
                 package.versions.push_back(std::move(version));
             });
             index.packages.push_back(std::move(package));

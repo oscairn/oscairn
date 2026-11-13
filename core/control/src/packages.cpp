@@ -190,6 +190,73 @@ Control::Withdrawal withdrawal(const Lists& l,const std::string& id,const std::s
     return {};
 }
 std::string withdrawnSaying(const std::string& id,const std::string& version,const Control::Withdrawal& w){return id+" "+version+" was withdrawn by "+w.repository+": "+w.reason;}
+// A file removed when it goes out of scope, unless kept.
+struct Gone{fs::path p;~Gone(){std::error_code e;if(!p.empty())fs::remove(p,e);}};
+// A blob as a file, the size and SHA-256 the signed index's chain gives: read in place from a
+// folder, else fetched into the data folder, where a download cut short stays to be resumed by the
+// next install (Source::fetch); a whole one is removed with `gone` unless moved first.
+fs::path blobFile(repository::Source& from,const std::string& sha256,uint64_t size,Gone& gone,const std::string& what){
+    auto file=from.local(repository::blobPath(sha256));
+    std::error_code e;
+    if(file.empty()){file=dataHome()/(".install-"+sha256+".partial");from.fetch(sha256,size,file);gone.p=file;return file;} // fetch checked it
+    if(!fs::is_regular_file(file,e) || fs::file_size(file,e)!=size || assets::sha256File(file)!=sha256)
+        throw std::runtime_error("refused: the package file for "+what+" is missing, or not the one the index names (changed or damaged): "+repository::blobPath(sha256));
+    return file;
+}
+// A small blob whole, as above.
+std::string blobBytes(repository::Source& from,const std::string& sha256,uint64_t size,const std::string& what){
+    Gone gone;
+    std::ifstream in(blobFile(from,sha256,size,gone,what),std::ios::binary);
+    std::string bytes(size_t(size),'\0');
+    if(!in.read(bytes.data(),std::streamsize(bytes.size())) || assets::sha256(bytes)!=sha256)throw std::runtime_error("refused: the package file for "+what+" changed as it was read");
+    return bytes;
+}
+// A release restored from its pieces into `into`, a new folder in the data folder (RFC 0031,
+// "Pieces: the format" and "Streamed installs"): its pieces list; its manifest, the index's, and its
+// signature, by the publisher's key the index names, before anything large is fetched; room for
+// what it restores and its largest piece once more; then what every platform shares and this
+// device's builds, one piece at a time, a zip unpacked entry by entry with a fixed buffer, a file
+// moved into place. The tree is then read by the archive's own rules where it is. On any refusal
+// the caller removes `into`.
+Package restore(repository::Source& from,const repository::Package& package,const repository::Version& pick,const fs::path& into){
+    const auto what=package.id+" "+pick.version;
+    const auto all=repository::pieces(blobBytes(from,pick.piecesSha256,pick.piecesSize,what));
+    std::vector<const repository::Piece*> wanted;
+    const repository::Piece *manifest=nullptr,*signature=nullptr;
+    uint64_t installed=0,largest=0;
+    for(const auto& p:all){
+        if(!p.platform.empty() && p.platform!=platform())continue; // another device's build
+        if(p.path=="library.json")manifest=&p;else if(p.path=="library.sig")signature=&p;else wanted.push_back(&p);
+        installed+=p.installed;largest=std::max(largest,p.size);
+    }
+    if(!manifest || manifest->type!="file" || manifest->sha256!=pick.manifestSha256 || manifest->size>maxManifestBytes || !signature || signature->type!="file" || signature->size>4096)
+        throw std::runtime_error("refused: the pieces of "+what+" are not the release the index names");
+    fs::create_directories(into);
+    const auto manifestBytes=blobBytes(from,manifest->sha256,manifest->size,what),signatureBytes=blobBytes(from,signature->sha256,signature->size,what);
+    {
+        const std::unique_ptr<json_value_s,decltype(&std::free)> doc{detail::jsonPreflight(signatureBytes,2).empty()?json_parse(signatureBytes.data(),signatureBytes.size()):nullptr,&std::free};
+        signing::Signature s;
+        if(doc)try{s=signing::signatureFrom(doc.get());}catch(const std::exception&){}
+        if(s.key.empty() || signing::keyId(s.key)!=package.publisherKey || !signing::verify(s,signing::archiveMessage(manifestBytes)))
+            throw std::runtime_error("refused: "+what+" is not signed by its publisher's key "+package.publisherKey);
+    }
+    writeAtomically(into/"library.json",manifestBytes);writeAtomically(into/"library.sig",signatureBytes);
+    if(fs::space(into).available<installed+largest)
+        throw std::runtime_error("not a usable Oscairn archive: there is not room for it on this device: it needs "+std::to_string((installed+largest)>>20)+" MiB");
+    for(const auto* p:wanted){
+        Gone gone;
+        const auto file=blobFile(from,p->sha256,p->size,gone,what);
+        if(p->type=="zip"){unpackPiece(file,into,p->path,p->installed);continue;}
+        const auto to=into/p->path;
+        std::error_code e;
+        if(fs::exists(to,e))throw std::runtime_error("not a usable Oscairn archive: an entry twice: "+p->path);
+        fs::create_directories(to.parent_path());
+        if(!gone.p.empty()){fs::rename(file,to);gone.p.clear();continue;} // fetched and checked: moved into place
+        fs::copy_file(file,to); // from a drive: hashed as it landed here, as the drive may change underneath
+        if(assets::sha256File(to)!=p->sha256)throw std::runtime_error("refused: the package file for "+what+" changed as it was read: "+repository::blobPath(p->sha256));
+    }
+    return readPackage(into,into); // in place: every path, hash and signature, this device's builds there
+}
 }
 
 struct Session::PackageWork {
@@ -198,7 +265,7 @@ struct Session::PackageWork {
     PackageJob job;          // guarded by mutex
     bool unpacked=false;     // the thread is done and left packages, each in its folder, to move into place
     std::vector<std::pair<Package,fs::path>> packages; // the asset libraries it needs first, then the package
-    std::map<std::string,std::string> archives; // each one's archive SHA-256 as the index lists it, by package ID
+    std::map<std::string,std::string> manifests; // each one's manifest SHA-256 (its identity) as the index lists it, by package ID
     bool acceptUnsignedCode=false;
     bool replace=false;      // the user chose the repository's build over a different one installed
     std::string source;      // the repository's address, recorded with what it installs
@@ -324,10 +391,17 @@ uint64_t Session::listRepository(const std::string& source){
             if(const auto* r=knownAs(known,source,index.rootKey))out.name=r->name;
             out.repository=index.repository;out.serial=index.serial;
             const Lists lists{{index.revoked},index.rootKey==official.key?std::vector<repository::Revocations>{}:keptRevocations(official.key),out.name.empty()?addressOf(source):out.name,officialName};
+            // Ready-made archives are at the repository's web address (a folder copy's, the known repository's): exports/<id>/<version>/<file>.
+            const auto* r=knownAs(known,source,index.rootKey);
+            const auto address=web(source)?addressOf(source):r && web(r->address)?r->address:std::string();
             for(const auto& p:index.packages){
                 RepositoryPackage listed{p.id,p.name,p.summary,p.license,p.publisherName,p.publisherKey,p.tags,{}};
-                for(const auto& v:p.versions)listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.archiveSha256,v.size,v.installed,v.types,v.dependencies,
-                                                                        withdrawal(lists,p.id,v.version,{p.publisherKey})});
+                for(const auto& v:p.versions){
+                    listed.versions.push_back({v.version,v.channel,v.yanked,repository::incompatible(v,OSCAIRN_VERSION,platform()),v.manifestSha256,v.size,v.installed,v.types,v.dependencies,
+                                               withdrawal(lists,p.id,v.version,{p.publisherKey})});
+                    if(!address.empty())for(const auto& e:v.exports)
+                        listed.versions.back().exports.push_back({e,address+"/exports/"+p.id+"/"+v.version+"/"+p.id+"-"+v.version+(e.empty()?"":"-"+e)+".olib"});
+                }
                 out.packages.push_back(std::move(listed));
             }
             out.state="done";
@@ -353,7 +427,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships,known,expected,officialName=known.front().name]{
         std::string rootKey,error,chosen,repositoryId,name,claimed;uint64_t serial=0;
         std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each asset library it needs
-        std::map<std::string,std::string> archives;
+        std::map<std::string,std::string> manifests;
         try{
             auto from=sourceFor(source,&w->cancel);
             const auto index=repository::open(*from,trusted,revoked,rootKey,claimed,kept(),expected);
@@ -363,22 +437,11 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
             if(const auto* r=knownAs(known,source,index.rootKey))name=r->name;
             const auto called=name.empty()?addressOf(source):name; // never the name its root claims
             const Lists lists{{index.revoked},index.rootKey==official.key?std::vector<repository::Revocations>{}:keptRevocations(official.key),called,officialName};
-            // A release: fetched (or read in place), checked against the signed index and unpacked.
+            // A release: restored from its pieces (fetched or read in place), checked against the signed index.
             auto unpack=[&](const repository::Package& package,const repository::Version& pick){
-                // The package file: read in place from a folder, else fetched into the data folder,
-                // where a download cut short stays to be resumed; either way it must be the size and
-                // SHA-256 the signed index gives.
-                const auto blob=repository::blobPath(pick.archiveSha256);
-                auto file=from->local(blob);
-                fs::path download;
-                if(file.empty()){download=dataHome()/(".install-"+pick.archiveSha256+".partial");from->fetch(pick.archiveSha256,pick.archiveSize,download);file=download;}
-                struct Gone{fs::path p;~Gone(){std::error_code e;if(!p.empty())fs::remove(p,e);}} gone{download}; // whole: used or refused; one cut short is kept to resume
-                std::error_code e;
-                if(!fs::is_regular_file(file,e) || fs::file_size(file,e)!=pick.archiveSize || assets::sha256File(file)!=pick.archiveSha256)
-                    throw std::runtime_error("refused: the package file for "+package.id+" "+pick.version+" is missing, or not the one the index names (changed or damaged): "+blob);
                 unpacked.push_back({Package{},scratch("")});
                 auto& [got,into]=unpacked.back();
-                got=readPackage(file,into); // every hash and signature in it, and room for it
+                got=restore(*from,package,pick,into); // every hash and signature in it, and room for it
                 // It is the release the index names, from the publisher it names.
                 if(got.manifestSha256!=pick.manifestSha256 || got.id!=package.id)
                     throw std::runtime_error("refused: the package file for "+package.id+" "+pick.version+" is not the release the index names");
@@ -388,7 +451,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
                 std::vector<std::string> signers{package.publisherKey},builds;
                 for(const auto& plugin:got.plugins)for(const auto& b:plugin.builds){builds.push_back(b.sha256);for(const auto& s:b.signatures)signers.push_back(signing::keyId(s.key));}
                 if(const auto w=withdrawal(lists,package.id,pick.version,signers,builds);!w.reason.empty())throw std::runtime_error("refused: "+withdrawnSaying(package.id,pick.version,w));
-                archives[package.id]=pick.archiveSha256;
+                manifests[package.id]=pick.manifestSha256;
             };
             // The newest stable version this device can install that is neither yanked nor withdrawn, and at least `least`.
             auto newest=[&](const repository::Package& package,const std::string& least){
@@ -437,10 +500,28 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
         w->job.rootKey=rootKey;w->job.repository=repositoryId;w->job.name=name;w->job.claimedName=claimed;w->job.serial=serial;w->job.package=id;w->job.version=chosen;
         if(!error.empty()){w->job.state="failed";w->job.error=error;return;}
         std::rotate(unpacked.begin(),unpacked.begin()+1,unpacked.end()); // the libraries first, so the package finds them installed
-        w->packages=std::move(unpacked);w->archives=std::move(archives);w->unpacked=true;
+        w->packages=std::move(unpacked);w->manifests=std::move(manifests);w->unpacked=true;
     });
     packageWork_=std::move(work);
     return packageJobs_;
+}
+
+// An archive installed from a file (RFC 0031, decided 2026-11-12): checked against the list last
+// kept from each repository that is on, each as far as it names the file (wider than a repository's
+// list reaches for its own packages: the file belongs to none). Its signers' keys against `keys`,
+// its ID and version against `versions`, its builds for this device against `builds`; read, never
+// fetched. A repository never read has no list, and checks nothing.
+std::string Session::revokedFile(const Package& p){
+    std::vector<std::string> signers,builds;
+    if(!p.signature.key.empty())signers.push_back(signing::keyId(p.signature.key));
+    for(const auto& plugin:p.plugins)for(const auto& b:plugin.builds){
+        for(const auto& s:b.signatures)signers.push_back(signing::keyId(s.key));
+        if(b.platform==platform())builds.push_back(b.sha256); // a revoked build affects only its platform
+    }
+    const auto version=p.kind=="asset"?p.assetVersion:p.plugins.empty()?std::string():p.plugins.front().version;
+    for(const auto& r:repositories())if(r.enabled)
+        if(const auto w=withdrawal(Lists{keptRevocations(r.key),{},r.name,{}},p.id,version,signers,builds);!w.reason.empty())return "refused: "+withdrawnSaying(p.id,version,w);
+    return {};
 }
 
 // What is installed and withdrawn since (RFC 0031), by the lists last read: said, never acted on.
@@ -478,7 +559,7 @@ Control::PackageJob Session::packageJob(uint64_t id){
             try{
                 const bool dependency=&package!=&packages.back().first; // a library the package needs, installed first
                 const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true,false,dependency,w.replace && !dependency);
-                recordPackage(package,true,w.job.version,w.source,w.archives[package.id],installed.otherBuild); // an asset library is recorded at its own version
+                recordPackage(package,true,w.job.version,w.source,w.manifests[package.id],installed.otherBuild); // an asset library is recorded at its own version
                 done.installed.added+=installed.added;done.installed.skipped+=installed.skipped;
                 done.installed.notes.insert(done.installed.notes.end(),installed.notes.begin(),installed.notes.end());
                 done.installed.code.insert(done.installed.code.end(),installed.code.begin(),installed.code.end());

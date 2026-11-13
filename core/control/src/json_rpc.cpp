@@ -1009,8 +1009,11 @@ namespace oscairn
                         for(const auto& [type,n]:v.types)types+=(types.empty()?"":",")+quote(type)+":"+std::to_string(n);
                         std::vector<std::string> needs;
                         for(const auto& [id,least]:v.dependencies)needs.push_back("{\"id\":"+quote(id)+",\"version\":"+quote(least)+'}');
+                        std::vector<std::string> exports;
+                        for(const auto& [platform,address]:v.exports)exports.push_back("{\"platform\":"+quote(platform)+",\"address\":"+quote(address)+'}');
                         versions.push_back("{\"version\":"+quote(v.version)+",\"channel\":"+quote(v.channel)+",\"yanked\":"+quote(v.yanked)+",\"incompatible\":"+quote(v.incompatible)+",\"sha256\":"+quote(v.sha256)+
-                                           ",\"size\":"+std::to_string(v.size)+",\"installed\":"+std::to_string(v.installed)+",\"types\":{"+types+"},\"dependencies\":"+join(needs)+",\"withdrawn\":"+withdrawn(v.withdrawn)+'}');
+                                           ",\"size\":"+std::to_string(v.size)+",\"installed\":"+std::to_string(v.installed)+",\"types\":{"+types+"},\"dependencies\":"+join(needs)+",\"withdrawn\":"+withdrawn(v.withdrawn)+
+                                           ",\"exports\":"+join(exports)+'}');
                     }
                     packages.push_back("{\"id\":"+quote(x.id)+",\"name\":"+quote(x.name)+",\"summary\":"+quote(x.summary)+",\"license\":"+quote(x.license)+",\"publisher\":"+quote(x.publisher)+
                                        ",\"publisherKey\":"+quote(x.publisherKey)+",\"tags\":"+join(tags)+",\"versions\":"+join(versions)+'}');

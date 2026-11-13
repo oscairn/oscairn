@@ -17,6 +17,7 @@ only where the system trusts a test authority, which the test cannot arrange its
 OSCAIRN_TEST_CA names a folder holding that authority's ca.pem and ca.key (set up in a throwaway
 VM or container); a wrong host name is then refused too.
 """
+import gzip
 import hashlib
 import http.server
 import socket
@@ -103,18 +104,24 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         folder = repo / 'packages' / plugin_id
         folder.mkdir(parents=True, exist_ok=True)
         olib = folder / f'{version}.olib'
+        platforms = [platform] if isinstance(platform, str) else platform  # a build for each
         if asset_library:  # an asset package from that folder
             run(tool, 'asset-package', '--license', 'MIT', '--key', temp / 'publisher.key', olib, plugin_id, version, 'Test factory content', asset_library)
         else:
-            build = temp / 'builds' / plugin_id / version / platform / 'Synth.clap'
-            build.parent.mkdir(parents=True)
-            shutil.copyfile(fixture, build)
-            run(tool, 'build', temp / 'publisher.key', 'clap', plugin_id, version, platform, build)
+            builds = []
+            for each in platforms:
+                build = temp / 'builds' / plugin_id / version / each / 'Synth.clap'
+                build.parent.mkdir(parents=True)
+                shutil.copyfile(fixture, build)
+                if each != here:  # another digest than this platform's, so revoking one build is not revoking both
+                    build.write_bytes(build.read_bytes() + b'\0' * 16)
+                run(tool, 'build', temp / 'publisher.key', 'clap', plugin_id, version, each, build)
+                builds.append(f'{each}={build}')
             depends = ['--asset-dependency', *needs] if needs else []
-            run(tool, 'plugin-package', '--license', 'MIT', *depends, '--key', temp / 'publisher.key', olib, 'clap', plugin_id, version, 'Test Synth', f'{platform}={build}')
+            run(tool, 'plugin-package', '--license', 'MIT', *depends, '--key', temp / 'publisher.key', olib, 'clap', plugin_id, version, 'Test Synth', *builds)
         data = olib.read_bytes()
         record = {'format': 'oscairn.repository-release', 'version': 1, 'id': plugin_id, 'release': version, 'publisher': 'org.kick',
-                  'summary': 'A test synth', 'license': 'MIT', 'tags': ['synth'], 'platforms': [] if asset_library else [platform],
+                  'summary': 'A test synth', 'license': 'MIT', 'tags': ['synth'], 'platforms': [] if asset_library else platforms,
                   'archive': {'path': olib.name, 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}, 'yanked': None}
         if requires:
             record['requires'] = {'oscairn': requires}
@@ -135,6 +142,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
     (factory / 'patches' / 'Pad.fxp').write_bytes(b'another patch')
     package('org.kick.factory', '1.1.0', here, asset_library=factory)
     package('org.kick.analog', '1.0.0', here, needs=('org.kick.factory', '1.1.0'))
+    # A plugin package with builds for this platform and another (RFC 0031: stored in pieces, so a
+    # device fetches only its own).
+    duo = package('org.kick.duo', '1.0.0', [here, elsewhere])
     (temp / 'index-key.pub').write_text(keys['index'][1] + '\n')
     run(tool, 'file', temp / 'root.key', temp / 'index-key.pub', temp / 'index-key.sig')
     config = json.loads((repo / 'repository-config.json').read_text())
@@ -146,16 +156,46 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         'verification': 'https://kick.example/.well-known/oscairn-publisher.json'}))
 
     def site(name, serial, *extra, source=repo, index='index'):
-        """The repository as the index builder makes it, signed, with its blobs under blobs/<ab>/."""
+        """The repository as the index builder makes it, signed, with its blobs under blobs/<ab>/
+        and its ready-made archives beside it, in <name>-exports."""
         out = temp / name
         built = subprocess.run([sys.executable, '-I', builder, '--repo', source, '--oscairn-sign', tool, '--cache', temp / 'cache',
-                                '--out', out, '--serial', str(serial), *extra], capture_output=True, text=True, timeout=300)
+                                '--out', out, '--serial', str(serial), '--exports', temp / f'{name}-exports', *extra], capture_output=True, text=True, timeout=300)
         assert built.returncode == 0, built.stderr
         run(tool, 'file', temp / f'{index}.key', out / 'repository.json', out / 'repository.sig')
         for blob in (out / 'blobs.txt').read_text().split():
             (out / 'blobs' / blob[:2]).mkdir(parents=True, exist_ok=True)
             shutil.copyfile(temp / 'cache' / blob, out / 'blobs' / blob[:2] / blob)
         return out
+
+    def release(at, package_id, version):
+        """A version as a site's index gives it, and its pieces."""
+        root = json.loads((at / 'repository.json').read_text())
+        index = json.loads(gzip.decompress((at / root['index']['path']).read_bytes()))
+        v = next(v for p in index['packages'] if p['id'] == package_id for v in p['versions'] if v['version'] == version)
+        listed = v['pieces']['sha256']
+        return v, json.loads((at / 'blobs' / listed[:2] / listed).read_bytes())['pieces']
+
+    def manifest_of(olib):
+        with zipfile.ZipFile(olib) as z:
+            return hashlib.sha256(z.read('library.json')).hexdigest()
+
+    def build_piece(at, package_id, version, platform=here):
+        return next(p for p in release(at, package_id, version)[1] if p.get('platform') == platform)['sha256']
+
+    def resign(at, change):
+        """A site whose index change(index) altered, named again in its root and signed again with the index key."""
+        root = json.loads((at / 'repository.json').read_text())
+        index = json.loads(gzip.decompress((at / root['index']['path']).read_bytes()))
+        change(index)
+        data = gzip.compress(json.dumps(index).encode(), mtime=0)
+        sha = hashlib.sha256(data).hexdigest()
+        (at / 'index' / f'{sha}.json.gz').write_bytes(data)
+        root['index'] = {'path': f'index/{sha}.json.gz', 'sha256': sha, 'size': len(data)}
+        root['deltas'] = []
+        root['repository'] = index['repository']  # another ID keeps another kept index and serial
+        (at / 'repository.json').write_text(json.dumps(root))
+        run(tool, 'file', temp / 'index.key', at / 'repository.json', at / 'repository.sig')
 
     if web:
         # Over HTTP (RFC 0031 step 2), from a local server: the tree at /, a tampered mirror at
@@ -240,7 +280,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         state['site'] = site('web7', 7)
         state['bad'] = temp / 'web-bad'
         shutil.copytree(state['site'], state['bad'])
-        synth_blob = hashlib.sha256(synth.read_bytes()).hexdigest()
+        synth_blob = build_piece(state['site'], 'org.kick.test.synth', '1.0.0')  # the piece holding its build (RFC 0031), the largest
+        synth_size = (state['site'] / 'blobs' / synth_blob[:2] / synth_blob).stat().st_size
         bad_blob = state['bad'] / 'blobs' / synth_blob[:2] / synth_blob
         bad_blob.write_bytes(bad_blob.read_bytes()[:-1] + b'!')
         blob_path = f'blobs/{synth_blob[:2]}/{synth_blob}'
@@ -265,7 +306,10 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
             state['log'].clear()
             listing = job('packages.list', {'source': base})
             paths = fetched()
-            check(listing['state'] == 'done' and listing['serial'] == 7 and len(listing['packages']) == 4, 'a repository on the web lists what it offers: ' + listing['error'])
+            check(listing['state'] == 'done' and listing['serial'] == 7 and len(listing['packages']) == 5, 'a repository on the web lists what it offers: ' + listing['error'])
+            exports = {v['version']: v['exports'] for p in listing['packages'] if p['id'] == 'org.kick.duo' for v in p['versions']}
+            check(exports == {'1.0.0': [{'platform': p, 'address': f'{base}exports/org.kick.duo/1.0.0/org.kick.duo-1.0.0-{p}.olib'} for p in sorted([here, elsewhere])]},
+                  'each version lists its ready-made archives by platform, at the repository\'s address: ' + json.dumps(exports))
             # The revocation list too, since 2026-11-11: read with the root, then kept, so later refreshes with the same list do not fetch it.
             check(paths[:2] == ['/repository.json', '/repository.sig'] and len(paths) == 4 and paths[2].startswith('/revocations/') and paths[3].startswith('/index/') and paths[3].endswith('.json.gz'),
                   'the first refresh fetches the root, its revocation list and the whole index: ' + json.dumps(paths))
@@ -314,8 +358,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
             first = job('packages.install', {'source': base, 'id': 'org.kick.test.synth'})
             kept = home / f'.install-{synth_blob}.partial'
             have = kept.stat().st_size if kept.is_file() else 0
-            check(first['state'] == 'failed' and 'resumes' in first['error'] and 0 < have < synth.stat().st_size and store() == [],
-                  'a download cut short fails, keeping what it fetched: ' + first['error'])
+            check(first['state'] == 'failed' and 'resumes' in first['error'] and 0 < have < synth_size and store() == [] and leftovers() == [kept.name],
+                  'a download cut short fails, keeping what it fetched of that piece and nothing else: ' + first['error'] + ' ' + json.dumps(leftovers()))
             fetched()
             second = job('packages.install', {'source': base, 'id': 'org.kick.test.synth'})
             ranges = [r for path, r in state['log'] if path.endswith(synth_blob)]
@@ -409,7 +453,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         rpc('trust.set', {'key': keys['root'][1], 'name': 'Test repository', 'scope': ['repositories']})
         state = job('packages.list', {'source': str(good)})
         listed = {x['id']: x for x in state['packages']}
-        check(state['state'] == 'done' and state['repository'] == 'org.example.test' and state['serial'] == 7 and set(listed) == {'org.kick.test.synth', 'org.kick.other', 'org.kick.factory', 'org.kick.analog'},
+        check(state['state'] == 'done' and state['repository'] == 'org.example.test' and state['serial'] == 7 and set(listed) == {'org.kick.test.synth', 'org.kick.other', 'org.kick.factory', 'org.kick.analog', 'org.kick.duo'},
               'once trusted, it lists what it offers: ' + json.dumps(state)[:300])
         versions = {v['version']: v for v in listed['org.kick.test.synth']['versions']}
         check(versions['1.0.0']['incompatible'] == '' and versions['1.0.0']['installed'] >= fixture.stat().st_size and 'system update' in versions['2.0.0']['incompatible'],
@@ -420,6 +464,21 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(analog['types'] == {'clap': 1} and analog['dependencies'] == [{'id': 'org.kick.factory', 'version': '1.1.0'}] and
               listed['org.kick.factory']['versions'][0]['types'] == {'oscairn.asset': 1} and listed['org.kick.factory']['versions'][0]['dependencies'] == [],
               'each version lists what it holds by type and the packages it needs: ' + json.dumps(analog))
+        # Stored in pieces (RFC 0031): a version's size here is what every platform shares and this
+        # platform's builds, not another platform's; and its ready-made archives are listed only where a web address is known.
+        indexed, duo_pieces = release(good, 'org.kick.duo', '1.0.0')
+        duo_listed = listed['org.kick.duo']['versions'][0]
+        check(duo_listed['size'] == indexed['common']['size'] + indexed['platforms'][here]['size'] and
+              duo_listed['installed'] == indexed['common']['installed'] + indexed['platforms'][here]['installed'] and set(indexed['platforms']) == {here, elsewhere} and
+              duo_listed['size'] == sum(p['size'] for p in duo_pieces if p.get('platform') in (None, here)) and duo_listed['exports'] == [],
+              'the download and installed sizes are this platform\'s and the shared part\'s: ' + json.dumps(indexed))
+        check(sorted(p['path'] for p in duo_pieces if 'platform' not in p) == ['library.json', 'library.sig'] and
+              sorted(p['platform'] for p in duo_pieces if 'platform' in p) == sorted([here, elsewhere]) and all(p['type'] == 'zip' for p in duo_pieces if 'platform' in p),
+              'a release is its manifest, its signature and a piece per platform\'s build: ' + json.dumps(duo_pieces))
+        with zipfile.ZipFile(duo) as z:
+            manifest_sha = hashlib.sha256(z.read('library.json')).hexdigest()
+        check(duo_listed['sha256'] == manifest_sha == indexed['manifest']['sha256'] and 'archive' not in indexed,
+              'a version is known by its manifest\'s SHA-256, and no whole archive is named: ' + json.dumps(indexed['manifest']))
 
         # Code from a publisher not trusted for plugins needs a yes, as an archive's does.
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
@@ -452,9 +511,19 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         state = job('packages.install', {'source': str(good), 'id': 'org.example.none'})
         check(state['state'] == 'failed' and 'no package' in state['error'], 'a package it does not have: ' + state['error'])
 
+        # Only this device's pieces are read: with the other platform's build piece gone from the drive, it installs.
+        partial = temp / 'partial'
+        shutil.copytree(good, partial)
+        gone = build_piece(partial, 'org.kick.duo', '1.0.0', elsewhere)
+        (partial / 'blobs' / gone[:2] / gone).unlink()
+        state = job('packages.install', {'source': str(partial), 'id': 'org.kick.duo'})
+        check(state['state'] == 'done' and [p['platforms'] for p in store() if p['id'] == 'org.kick.duo'] == [[here]] and leftovers() == [],
+              'only what every platform shares and this platform\'s build are read: ' + state['error'])
+        rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.duo', 'version': '1.0.0'})
+
         tampered = temp / 'tampered'
         shutil.copytree(good, tampered)
-        blob = next(b for b in (tampered / 'blobs').rglob('*') if b.is_file() and b.read_bytes() == synth.read_bytes())
+        blob = tampered / 'blobs' / build_piece(good, 'org.kick.test.synth', '1.0.0')[:2] / build_piece(good, 'org.kick.test.synth', '1.0.0')
         data = bytearray(blob.read_bytes())
         data[len(data) // 2] ^= 1
         blob.write_bytes(bytes(data))
@@ -465,7 +534,31 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
               'a tampered blob is refused, leaving nothing: ' + state['error'])
         blob.unlink()
         state = job('packages.install', {'source': str(tampered), 'id': 'org.kick.test.synth'})
-        check(state['state'] == 'failed' and 'missing' in state['error'], 'a blob not on the drive is refused: ' + state['error'])
+        # As a drive pulled midway: the manifest and its signature were read and written, and its build's piece is gone.
+        check(state['state'] == 'failed' and 'missing' in state['error'] and store() == [] and leftovers() == [],
+              'a piece not on the drive, after the pieces before it were read, is refused, leaving nothing: ' + state['error'])
+
+        # Free space (RFC 0031): checked for what the pieces restore to, and the largest piece once
+        # more, after the manifest and before anything else; here a list claiming far more than any disk holds.
+        roomy = temp / 'roomy'
+        shutil.copytree(good, roomy)
+        v, listed_pieces = release(roomy, 'org.kick.test.synth', '1.0.0')
+        listed_pieces += [{'sha256': '0' * 64, 'size': 1, 'installed': 8 << 30, 'type': 'zip', 'path': f'Licenses/huge{n}'} for n in range(4096)]
+        claim = json.dumps({'format': 'oscairn.repository-pieces', 'version': 1, 'pieces': listed_pieces}).encode()
+        claim_sha = hashlib.sha256(claim).hexdigest()
+        (roomy / 'blobs' / claim_sha[:2]).mkdir(exist_ok=True)
+        (roomy / 'blobs' / claim_sha[:2] / claim_sha).write_bytes(claim)
+
+        def claims(index):
+            index['repository'] = 'org.example.roomy'  # not the kept index of the repository it copies, at the same serial
+            for p in index['packages']:
+                for x in p['versions']:
+                    if p['id'] == 'org.kick.test.synth' and x['version'] == '1.0.0':
+                        x['pieces'] = {'sha256': claim_sha, 'size': len(claim)}
+        resign(roomy, claims)
+        state = job('packages.install', {'source': str(roomy), 'id': 'org.kick.test.synth'})
+        check(state['state'] == 'failed' and 'not room for it' in state['error'] and store() == [] and leftovers() == [],
+              'an install that does not fit is refused before its pieces are fetched, leaving nothing: ' + state['error'])
 
         forged = temp / 'forged'
         shutil.copytree(good, forged)
@@ -506,11 +599,11 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
                   what + ': ' + (state['error'] or f"serial {state['serial']}, {len(state['packages'])} packages, {state['name']}") + ' ' + json.dumps(kept()))
 
         rpc('packages.addRepository', {'address': str(temp / 'impostor7'), 'key': keys['impostor'][1], 'name': 'Impostor'})
-        lists(site('impostor7', 7, source=fake, index='impostor-index'), 7, 3, 'a root claiming another repository\'s ID at its serial lists its own packages')
-        lists(good, 7, 4, 'the repository it claims to be still lists its own packages, not the impostor\'s')
-        lists(site('impostor9', 9, source=fake, index='impostor-index'), 9, 3, 'the impostor at a higher serial lists')
-        lists(good, 7, 4, 'the repository it claims to be is not refused as older')
-        check(kept().get(f"{keys['root'][1]}/org.example.test.index.json") == (7, 4) and kept().get(f"{keys['impostor'][1]}/org.example.test.index.json") == (9, 3),
+        lists(site('impostor7', 7, source=fake, index='impostor-index'), 7, 4, 'a root claiming another repository\'s ID at its serial lists its own packages')
+        lists(good, 7, 5, 'the repository it claims to be still lists its own packages, not the impostor\'s')
+        lists(site('impostor9', 9, source=fake, index='impostor-index'), 9, 4, 'the impostor at a higher serial lists')
+        lists(good, 7, 5, 'the repository it claims to be is not refused as older')
+        check(kept().get(f"{keys['root'][1]}/org.example.test.index.json") == (7, 5) and kept().get(f"{keys['impostor'][1]}/org.example.test.index.json") == (9, 4),
               'each kept index is kept by its root key: ' + json.dumps(kept()))
         state = job('packages.list', {'source': str(site('impostor8', 8, source=fake, index='impostor-index'))})
         check(state['state'] == 'failed' and 'older than one this device has seen (9)' in state['error'], 'the impostor\'s own older root is refused: ' + state['error'])
@@ -572,22 +665,40 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
               'and the unpacked one installs, read in place and left as it was')
         check(recorded() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': ''}], 'installed from a file, it is recorded with no repository: ' + json.dumps(recorded()))
 
-        # What an install came from (the owner's rule, 2026-11-11): the archive's SHA-256 as the
-        # repository lists it, and its signer. The user's own build at the same ID and version is
-        # told apart; an install from the repository keeps it unless asked to replace it.
+        # What an install came from (the owner's rule, 2026-11-11): the release's manifest SHA-256
+        # (since RFC 0031's pieces, its identity) as the repository lists it, and its signer. The
+        # user's own build at the same ID and version is told apart; an install from the repository
+        # keeps it unless asked to replace it.
         listing = {x['id']: x for x in job('packages.list', {'source': str(good)})['packages']}
         listed = {v['version']: v['sha256'] for v in listing['org.kick.test.synth']['versions']}
-        check(listed['1.0.0'] == hashlib.sha256(synth.read_bytes()).hexdigest(), 'a listing gives each version its archive SHA-256: ' + json.dumps(listed))
-        check(records()[0]['sha256'] == '' and records()[0]['signers'] == [keys['publisher'][0]] and not records()[0]['otherBuild'],
-              'from a package folder there is no archive hash, only its signer: ' + json.dumps(records()))
+        check(listed['1.0.0'] == manifest_of(synth), 'a listing gives each version its manifest\'s SHA-256: ' + json.dumps(listed))
+        check(records()[0]['sha256'] == listed['1.0.0'] and records()[0]['signers'] == [keys['publisher'][0]] and not records()[0]['otherBuild'],
+              'from a package folder of the same release, its manifest\'s hash and signer, as the repository\'s: ' + json.dumps(records()))
         stored = home / 'Plugins' / 'clap' / 'org.kick.test.synth@1.0.0' / here / 'Synth.clap'
         rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         check(state['state'] == 'done' and records() == [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'kind': 'plugin', 'repository': str(good),
                                                           'sha256': listed['1.0.0'], 'signers': [keys['publisher'][0]], 'otherBuild': False, 'withdrawn': None, 'dependency': False}],
-              'from the repository, the listed archive hash and its signer are recorded: ' + json.dumps(records()))
+              'from the repository, the listed manifest hash and its signer are recorded: ' + json.dumps(records()))
         again = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         check(again['state'] == 'done' and again['installed']['notes'] == [] and records()[0]['sha256'] == listed['1.0.0'], 'the same build again changes nothing')
+        # Its ready-made archive for this platform (RFC 0031), downloaded and installed by hand, is
+        # the repository's release; the one for another platform is refused here.
+        exported = temp / 'site-exports'
+        rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
+        installed = rpc('library.install', {'file': str(exported / f'org.kick.test.synth-1.0.0-{here}.olib')})
+        check(installed['code'][0]['status'] == 'trusted' and records()[0]['sha256'] == listed['1.0.0'] and len(store()) == 1 and leftovers() == [],
+              'a ready-made archive installs by hand and is recorded as the repository\'s release: ' + json.dumps(records()))
+        installed = rpc('library.install', {'file': str(exported / f'org.kick.duo-1.0.0-{here}.olib')})
+        error = rpc('library.install', {'file': str(exported / f'org.kick.duo-1.0.0-{elsewhere}.olib')}, expect_error=True)
+        check([p['platforms'] for p in store() if p['id'] == 'org.kick.duo'] == [[here]] and 'another device' in error['message'] and leftovers() == [],
+              'the duo\'s archive for this platform installs, and the other platform\'s is refused as made for another device: ' + error['message'])
+        rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.duo', 'version': '1.0.0'})
+        page = (good / 'exports' / 'org.kick.duo' / '1.0.0' / f'org.kick.duo-1.0.0-{here}.olib' / 'index.html').read_text()
+        check(f'url=https://github.com/oscairn/packages/releases/download/exports-org.kick.duo/org.kick.duo-1.0.0-{here}.olib' in page and
+              f'org.kick.duo org.kick.duo-1.0.0-{elsewhere}.olib' in (good / 'exports.txt').read_text().splitlines() and
+              sorted(f.name for f in exported.iterdir()) == sorted(line.split()[1] for line in (good / 'exports.txt').read_text().splitlines()),
+              'each ready-made archive has a page at its stable address sending the browser on to the file, and is listed for upload')
         # The user's own build, keeping the ID and version, signed by another key.
         own = temp / 'builds' / 'own' / 'Synth.clap'
         own.parent.mkdir(parents=True)
@@ -598,8 +709,8 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.test.synth', 'version': '1.0.0'})
         rpc('library.install', {'file': str(mine), 'acceptUnsignedCode': True})
         r = records()[0]
-        check(r['sha256'] == hashlib.sha256(mine.read_bytes()).hexdigest() != listed['1.0.0'] and r['signers'] == [keys['other'][0]] and r['repository'] == '' and stored.read_bytes() == own.read_bytes(),
-              'a build from a file is recorded by its own archive hash and signer: ' + json.dumps(r))
+        check(r['sha256'] == manifest_of(mine) != listed['1.0.0'] and r['signers'] == [keys['other'][0]] and r['repository'] == '' and stored.read_bytes() == own.read_bytes(),
+              'a build from a file is recorded by its own manifest hash and signer: ' + json.dumps(r))
         # From the repository without asking: the different build is kept and said to be another build.
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.test.synth'})
         r = records()[0]
@@ -736,10 +847,10 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         rpc('trust.set', {'key': keys['root'][1], 'name': 'Test repository', 'scope': ['repositories']})
         state = job('packages.list', {'source': str(older)})
         check(state['state'] == 'failed' and 'older than one this device has seen (7)' in state['error'], 'after the move, an older root is still refused: ' + state['error'])
-        lists(good, 7, 4, 'and the current one lists, not from the old kept index')
+        lists(good, 7, 5, 'and the current one lists, not from the old kept index')
         written = json.loads((home / 'repositories.json').read_text())
         check(written['version'] == 2 and written['seen'] == {keys['root'][1]: {'org.example.test': 7}, official_key: {'org.example.test': 7}} and
-              written['added'][0]['address'] == str(good) and kept() == {f"{keys['root'][1]}/org.example.test.index.json": (7, 4)},
+              written['added'][0]['address'] == str(good) and kept() == {f"{keys['root'][1]}/org.example.test.index.json": (7, 5)},
               'the serial is kept for each trusted root key, and the old kept index is gone: ' + json.dumps(written['seen']) + ' ' + json.dumps(kept()))
     finally:
         p.stdin.close()
@@ -831,6 +942,35 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
             check(state['state'] == 'failed' and why in state['error'], 'a revocation list that is malformed or missing refuses the repository: ' + state['error'])
         check(json.loads((home / 'repositories.json').read_text())['seen'][keys['root'][1]]['org.example.test'] == 22 and kept_list() == before,
               'and nothing of such a root is kept: ' + json.dumps(json.loads((home / 'repositories.json').read_text())['seen']))
+
+        # A revoked build affects only its own platform (decided 2026-11-12): another platform's
+        # build revoked leaves this device's install and ready-made archive, and that platform's
+        # archive is not made; this platform's revoked refuses the install here.
+        with zipfile.ZipFile(duo) as z:
+            digest = {b['platform']: b['sha256'] for b in json.loads(z.read('library.json'))['plugins'][0]['builds']}
+        build_revoked = {'reason': 'a test build revocation', 'date': '2026-11-12'}
+        out = publish('revoking24', 24, {'builds': [{'sha256': digest[elsewhere], **build_revoked}]})
+        state = job('packages.install', {'source': str(at), 'id': 'org.kick.duo'})
+        check(state['state'] == 'done' and release(out, 'org.kick.duo', '1.0.0')[0].get('noExport') == [elsewhere] and
+              (temp / 'revoking24-exports' / f'org.kick.duo-1.0.0-{here}.olib').is_file() and not (temp / 'revoking24-exports' / f'org.kick.duo-1.0.0-{elsewhere}.olib').exists(),
+              'another platform\'s build revoked: this device installs, and only that platform\'s archive is not made: ' + state['error'])
+        rpc('plugins.remove', {'format': 'clap', 'id': 'org.kick.duo', 'version': '1.0.0'})
+        out = publish('revoking25', 25, {'builds': [{'sha256': digest[here], **build_revoked}], 'versions': [{'id': 'org.kick.test.synth', 'version': '1.0.0', **withdrawal}]})
+        state = job('packages.install', {'source': str(at), 'id': 'org.kick.duo'})
+        check(state['state'] == 'failed' and 'org.kick.duo 1.0.0 was withdrawn by Test repository: a test build revocation' in state['error'] and
+              release(out, 'org.kick.duo', '1.0.0')[0].get('noExport') == [here] and release(out, 'org.kick.test.synth', '1.0.0')[0].get('noExport') is True and
+              not (temp / 'revoking25-exports' / f'org.kick.test.synth-1.0.0-{here}.olib').exists(),
+              'this platform\'s build revoked refuses it here; a withdrawn version has no ready-made archive: ' + state['error'])
+        # An archive installed from a file is checked against the lists kept from the repositories on, with no network (decided 2026-11-12).
+        error = rpc('library.install', {'file': str(temp / 'site-exports' / f'org.kick.test.synth-1.0.0-{here}.olib')}, expect_error=True)
+        refused = rpc('library.install', {'file': str(temp / 'site-exports' / f'org.kick.duo-1.0.0-{here}.olib')}, expect_error=True)
+        check('org.kick.test.synth 1.0.0 was withdrawn by Test repository: a test withdrawal' in error['message'] and
+              'org.kick.duo 1.0.0 was withdrawn by Test repository: a test build revocation' in refused['message'] and
+              not any(p['id'] == 'org.kick.duo' for p in store()) and not any(e.name.startswith('.install-') for e in home.iterdir()),
+              'a file whose version is withdrawn, or whose build for this platform is revoked, is refused, leaving nothing: ' + error['message'] + ' / ' + refused['message'])
+        rpc('packages.enableRepository', {'address': str(at), 'enabled': False})
+        installed = rpc('library.install', {'file': str(temp / 'site-exports' / f'org.kick.duo-1.0.0-{here}.olib')})
+        check(any(p['id'] == 'org.kick.duo' for p in store()), 'with that repository off, its list no longer applies to files')
     finally:
         p.stdin.close()
         p.wait(timeout=30)

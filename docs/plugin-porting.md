@@ -758,7 +758,20 @@ What changes for the plugin:
   Catalog lists it under Content, and one installed only because your package needed it says
   Installed with your package's name.
   To publish to Oscairn's package repository, sign the archive too and follow
-  [Publishing a package](developer-guide.md#publishing-a-package).
+  [Publishing a package](developer-guide.md#publishing-a-package). Submit one archive holding
+  every platform's builds, signed once; the repository stores it in pieces, so a device
+  downloads only what all platforms share and its own platform's builds
+  ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#pieces-the-format)), and makes a
+  **ready-made archive per platform** of each version from them, with your manifest and
+  signature unchanged and the other platforms' builds left out. Link to those from your release
+  notes, never to a file in the submissions repository:
+  `https://packages.oscairn.org/exports/<package ID>/<version>/<package ID>-<version>-<platform>.olib`
+  (`<package ID>-<version>.olib` for a package with no builds), which sends a browser on to the
+  file. An archive that leaves out builds its manifest lists is read only where the left-out builds
+  are for other platforms: one for the reading device's platform must be there. `oscairn-sign
+  verify` lists each left-out build as an `absent ...` line, and `--platform <platform>` requires
+  that platform's builds; `oscairn-sign archive` refuses to sign such an archive again (its manifest
+  would lose those builds), and the repository refuses it as a submission.
 - **Installing code:** a device installs a build signed by a key its trust store trusts for
   plugins without asking. A build that is unsigned or signed by an unknown key is installed
   only after the user agrees (`acceptUnsignedCode`; the desktop's Install anyway). Installing
@@ -771,7 +784,10 @@ What changes for the plugin:
   version of your package or revoke your key: that version, or everything your key signed, is
   then never offered or installed from it (from any repository when the official one revokes your
   key), and devices that have it installed keep it and tell their user who withdrew it and why
-  ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-revocation-list)). To retire a
+  ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-revocation-list)). A revoked
+  build stops only its own platform: devices on it refuse it, and that platform's ready-made
+  archive is no longer made; other platforms keep the version. An archive installed from a file
+  is checked against the lists the device last read from the repositories it has on. To retire a
   bad release yourself, yank it: a yanked version still installs where a lock names it.
 - **A plugin that is not here,** in another version, or that fails to load opens as a
   stand-in: silent, its ports and parameters as saved, its state written back unchanged, so

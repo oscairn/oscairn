@@ -88,7 +88,7 @@ void Session::advancePreinstall(){
         s.job=0;
         const auto at=std::find_if(s.packages.begin(),s.packages.end(),[](const auto& p){return p.state=="installing";});
         if(at==s.packages.end()){
-            // The listing: each package whose archive the snapshot holds, at that version.
+            // The listing: each package whose pieces the snapshot holds (its manifest's, a blob named by the version's SHA-256), at that version.
             if(job.state!="done"){s.error="the packages that come with Oscairn could not be read: "+job.error;finish();return;}
             const auto record=readRecord();
             for(const auto& p:job.packages){

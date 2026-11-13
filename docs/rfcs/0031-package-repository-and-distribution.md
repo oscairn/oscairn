@@ -31,8 +31,9 @@ for it. Proposed, not built; the owner answered three of its
 Revised 2026-11-12 from the owner's decision of that day: releases stored in pieces is the plan,
 and beside the pieces the repository publishes a
 [ready-made archive per platform](#ready-made-archives-per-platform) of each version, for a
-person to install by hand. Planned, not built; the owner answered its five open questions
-the same day ([decided](#decided-by-the-owner-2026-11-12-on-the-archives)).
+person to install by hand. The owner answered its five open questions the same day
+([decided](#decided-by-the-owner-2026-11-12-on-the-archives)). Built the same day, with
+[the pieces' format](#pieces-the-format) fixed; [Progress](#progress) step 1 says what is tested.
 
 ## Progress
 
@@ -69,14 +70,31 @@ Checked when built and tested; the sections below say how.
       ([names](#kept-state-keyed-by-the-root-key)); `control-repository`. 2026-11-11: each known
       address read only with the root key recorded for it, and the app's snapshot only with a
       shipped one's; another key refused naming both, nothing kept
-      ([signatures](#signatures-and-freshness)); `control-repository`, `control-preinstall`. Not yet: releases stored in pieces (items, samples
-      and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
-      (step 2), `.orepo` files; the free-space refusal and a drive pulled midway are not tested.
-      Planned, not built (owner, 2026-11-12): pieces, and with them a ready-made `.olib` per
-      platform of each version, assembled from the pieces at publish time for downloading by hand,
-      replacing the whole archive a person can fetch from the submissions repository's Git tree
-      today; built together, with no interim archive per platform in the record
-      ([ready-made archives](#ready-made-archives-per-platform)))
+      ([signatures](#signatures-and-freshness)); `control-repository`, `control-preinstall`. 2026-11-12: releases stored in pieces
+      ([the format](#pieces-the-format)): the index builder splits each submitted archive into
+      its manifest, signature, item folders, large samples, other shared entries and each
+      platform's builds, content-addressed and so stored once across versions; the index names
+      each version's manifest and pieces list, with sizes per platform apart from `common`, and
+      no whole archive; a device fetches the pieces list, the manifest and its signature (checked
+      by the publisher's key first), then free space, then the shared pieces and its own
+      platform's one at a time, a zip piece unpacked entry by entry from the staged piece with a
+      fixed buffer, the tree read by the archive's rules in place, a version known by its
+      manifest's hash (the Catalog's Installed); the archive reader accepts an archive leaving
+      out other platforms' builds ([decision 1](#decided-by-the-owner-2026-11-12-on-the-archives));
+      a ready-made archive per platform of each version, assembled from the pieces, checked with
+      `oscairn-sign verify --platform` and published with a page at its stable address
+      ([ready-made archives](#ready-made-archives-per-platform)); `control-repository` (two
+      platforms' sizes, only this platform's pieces read, a tampered piece, a piece missing
+      midway as a drive pulled, the free-space refusal by a pieces list claiming more than a disk
+      holds, ready-made archives installed by hand and refused for another device, revoked builds
+      and withdrawn versions), `control-repository-web` (a piece cut short and resumed, a
+      tampered mirror), `control-archives`, `control-package`, `package-repository-index` (pieces,
+      deduplication, an archive per platform), `control-preinstall`. Not yet: `oscairn repo
+      build`, `.orepo` files, choosing items (every item is fetched), samples kept by hash across
+      packages on a device (a sample piece is downloaded per package that has it), a piece kept
+      whole when an install fails after it (only a piece cut short is resumed); the free-space
+      refusal is tested by a claim, not a full disk, and a drive pulled midway by a piece missing,
+      not a drive removed)
 - [ ] 2. Fetching over HTTPS: refresh, incremental index updates, mirrors, resumable downloads
       (built 2026-11-06: fetching through the host's transport, JUCE's URL streams: the system's
       HTTPS on macOS, libcurl with Mbed TLS on Linux since RFC 0039's step 1 (2026-11-07, which
@@ -91,8 +109,10 @@ Checked when built and tested; the sections below say how.
       of repositories; any other scheme refused);
       `desktop-gaps` drives it through a stand-in transport, up to the trust prompt and a second
       read, not an install from the web.
+      2026-11-12: per-platform fetches, each piece from the mirrors, the blob base and the
+      address in turn and resumed by a range request (step 1's pieces).
       Not yet: fetching the root from a mirror when the repository's own address
-      is down, per-platform fetches (releases are still whole archives))
+      is down)
 - [ ] 3. Publishing: the `oscairn publish` command, checks, immutable versions and yanking
 - [ ] 4. Revocation lists and the takedown process
       (built 2026-11-11: the list's format specified ([the revocation list](#the-revocation-list));
@@ -102,12 +122,15 @@ Checked when built and tested; the sections below say how.
       repository; what is installed reported (`packages.installed`'s `withdrawn`, the Catalog),
       never removed; `control-repository`, `desktop-gaps`. 2026-11-12: the index builder refuses a
       `revoked.json` a device could not read, or one revoking the repository's own root or index
-      key, naming each entry's problem (`package-repository-revocations`). Not yet: the takedown policy, the
+      key, naming each entry's problem (`package-repository-revocations`). 2026-11-12 (owner's
+      decision of that day, [file installs](#decided-by-the-owner-2026-11-12-on-the-archives)):
+      an archive installed from a file checked against the last list kept from each repository
+      on, with no network; a revoked build refused only on its own platform, whose ready-made
+      archive is not made, nor a withdrawn version's or a revoked key's package's;
+      `control-repository`. Not yet: the takedown policy, the
       official list in system images, revoked builds in what is installed, remembering revoked
-      index keys; the official list applying to another repository is not tested. Decided, not
-      built (owner, 2026-11-12): an archive installed from a file checked against the last list
-      seen from each repository on, and a revoked build refused only on its own platform
-      ([file installs](#decided-by-the-owner-2026-11-12-on-the-archives)))
+      index keys; the official list applying to another repository is not tested, nor the publish
+      job removing a ready-made archive already uploaded (no test runs the workflow))
 - [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters
       (built 2026-11-07 on the desktop, [interim](#in-the-library) until the Catalog app:
       Install… with Catalog and File; the Catalog listing the enabled repositories' packages of
@@ -164,7 +187,11 @@ Checked when built and tested; the sections below say how.
       `trust.json`: all seven installed in 3 to 7 s with the built-in publisher key, no question,
       recorded from `https://packages.oscairn.org` with the index's archive hashes (so the
       Catalog says Installed), and a Performance with FM saved. The "Setting up…" line was not
-      looked at. Not yet: Linux builds of the packages and a Linux release ([known
+      looked at. 2026-11-12: the snapshot holds the listed packages' pieces for the release's
+      platform, `tools/preinstall-fetch.py --platform` checking the archive they make; the
+      engine's first-run install reads them as any repository's (`control-preinstall`, which now
+      makes its snapshot with that script from a local repository). The dmg was not rebuilt.
+      Not yet: Linux builds of the packages and a Linux release ([known
       gaps](#what-ships)); the device image; the starter library of Performances and
       [its dependencies](../library-archive.md#package-dependencies), specified, not built)
 
@@ -282,6 +309,100 @@ person with a browser, the repository also publishes a
 [ready-made archive per platform](#ready-made-archives-per-platform), so nobody has to fetch the
 pieces to get one.
 
+#### Pieces: the format
+
+Fixed when built (2026-11-12), so that a second implementer can write a repository or a device
+from this alone. The submission stays one signed archive per version holding every platform's
+builds ([submitting](#submitting-with-no-server)); the index builder splits it into pieces when it
+publishes, and nothing in a piece is signed anew.
+
+**Which entries make which piece.** Every entry of the archive goes into exactly one piece:
+
+| Piece | Type | Its `path` | `platform` |
+| --- | --- | --- | --- |
+| `library.json`, and `library.sig` when there is one | `file` | the entry | |
+| Each item folder, `Performances/<folder>` or `Sounds/<folder>` | `zip` | the folder | |
+| Each plugin build the manifest lists, its file or bundle (one piece for a bundle several plugins list) | `zip` | the build's `path` | the build's |
+| Each file under `Assets/` of 1 MiB (1,048,576 bytes) or more: a sample, kept as itself | `file` | the entry | |
+| Every other entry, by its top folder (`Assets`, `Licenses`, `Plugins`, `Performances`, `Sounds`) | `zip` | the top folder | |
+
+A `file` piece is the entry's bytes, unchanged: its SHA-256 is the one the manifest's `files`
+gives it (for `library.json`, the manifest's hash, the package's identity), so the same sample in
+two packages or two versions is one blob. A `zip` piece is a zip holding its entries under their
+paths in the archive (`Sounds/Pad/sound.json`, not `sound.json`), each stored or deflated, with no
+folders, links, encryption or data descriptors needed; the builder writes them in name order with
+the date 1980-01-01 and the same compression, so a piece whose entries did not change between two
+versions is byte for byte the same blob and is stored and downloaded once.
+
+**The pieces list.** Each version's pieces are listed in a JSON file stored as a blob like the
+pieces (`blobs/<ab>/<sha256>`), named in the index by its hash:
+
+```json
+{
+  "format": "oscairn.repository-pieces",
+  "version": 1,
+  "pieces": [
+    {"sha256": "…", "size": 18342, "installed": 18342, "type": "file", "path": "library.json"},
+    {"sha256": "…", "size": 218, "installed": 218, "type": "file", "path": "library.sig"},
+    {"sha256": "…", "size": 401220, "installed": 1030234, "type": "zip", "path": "Sounds/Pad"},
+    {"sha256": "…", "size": 9821004, "installed": 24117248, "type": "zip",
+     "path": "Plugins/clap/com.example.organ@2.1.0/linux-arm64/Organ.clap", "platform": "linux-arm64"}
+  ]
+}
+```
+
+- `sha256` and `size`: the blob's, as stored. `installed`: the bytes its entries restore to.
+- `type`: `file` or `zip`. `path`: for a `file`, the entry it restores to; for a `zip`, the folder or
+  file every entry it holds is at or under.
+- `platform`: present on a plugin build's piece only, one of the format's five platforms.
+- At most 1,048,576 pieces and 64 MiB; a path is a safe archive path (the
+  [reading rules](../library-archive.md#reading-one)) and appears once.
+
+**The index.** Each version names its manifest and its pieces list by hash and size, and gives
+sizes per platform apart from what every platform shares:
+
+```json
+"manifest": { "sha256": "…", "size": 18342 },
+"pieces": { "sha256": "…", "size": 1204 },
+"platforms": {
+  "linux-arm64": { "size": 9821004, "installed": 24117248 },
+  "macos-arm64": { "size": 11003920, "installed": 27262976 }
+},
+"common": { "size": 412881, "installed": 1048576 }
+```
+
+- `manifest`: the `library.json` piece, whose hash is the package's identity, compared with an
+  installed package's ([updates](#updates)).
+- `pieces`: the pieces list.
+- `platforms`: for each platform with builds, the sum of its builds' pieces' `size` (what a device
+  on it downloads beyond `common`) and `installed`. `common`: the same for every other piece. A
+  device on a platform fetches `common` and its own platform's, and checks free space for the sum
+  of their `installed` and the largest piece once more.
+- `noExport`: present only on a version missing some [ready-made archive](#ready-made-archives-per-platform):
+  `true` when it has none (over the size limit, a package with a blob base of its own, a withdrawn
+  version, a revoked key's package), or the list of platforms whose archive is missing (a revoked
+  build's platform). Absent, every platform in `platforms` has one, or the one archive of a package
+  with no builds exists.
+- The whole archive is no longer named: `archive` is gone from the index.
+
+**The root** signs nothing new: it names the index by hash as before, the index names each
+version's manifest and pieces list by hash, and the pieces list names every piece by hash. A
+device trusts a piece because that chain of hashes from the signed root reaches it, and the
+release because its manifest's `library.sig` verifies with the publisher key the index names.
+
+**On a device** ([streamed installs](#streamed-installs)): the pieces list, then `library.json`,
+checked against the index's `manifest`, and `library.sig`, checked against the publisher's key,
+before anything large is fetched; then free space; then each `common` piece and each of its own
+platform's pieces, one at a time. Each piece must be the size and SHA-256 the list gives. A `zip`
+piece's entries must each be a safe path at or under its `path`, not a link, not written already,
+and no more bytes in all than its `installed`; a `file` piece lands at its `path`, never over an
+entry already written. The restored tree is then read by the archive's own rules, in place
+([reading rules](../library-archive.md#reading-one)), the other platforms' builds absent: an entry
+the manifest's `files` does not list, or not the SHA-256 it gives, refuses the install, as does a
+build of this device's platform that is not whole. A repository made by the template before 2026-11-12, naming each version's whole archive
+(`archive`), is not read: formats break freely before the first public release, and its owner
+rebuilds it with the current template.
+
 A package can name a **blob base** of its own: an HTTPS address the publisher hosts, where its
 large files are. Their hashes are in the signed manifest, so they need no trust in that host.
 This keeps a 20 GB piano off the project's bandwidth. Such a package has no
@@ -293,10 +414,13 @@ Decided by the owner 2026-11-12: releases are stored in pieces, so that "a mac u
 to download the linux and accelerated binaries too", and next to the pieces the repository
 publishes a ready-made `.olib` for each platform of each version. A person downloads one in a
 browser and installs it by hand, or carries it to an offline device, with no Oscairn doing the
-fetching. Today that person downloads a version's whole archive, `packages/<id>/<version>.olib`,
-from the submissions repository's Git tree; once releases are stored in pieces that file is gone
-and these replace it. Plugin forks' release notes link to them. **Planned, not built:** both come
-together, and there is no interim format with one archive per platform in the record.
+fetching. Until then that person downloaded a version's whole archive, `packages/<id>/<version>.olib`,
+from the submissions repository's Git tree; these replace it as what a person downloads, and the
+submissions repository's README points to them. The submitted archive stays in the Git tree as
+the index builder's input, since the submission is still one whole archive
+([submitting](#submitting-with-no-server)). Plugin forks' release notes link to them. **Built
+2026-11-12,** together with the pieces, with no interim format with one archive per platform in
+the record.
 
 - **Derived, never a source.** An export is assembled from the pieces when a release is published,
   by the job that writes the index. Devices keep fetching pieces; none needs an export for a
@@ -333,22 +457,41 @@ together, and there is no interim format with one archive per platform in the re
   `packages.oscairn.org`, at one stable pattern from the same three parts,
   `<export base>/<package ID>/<version>/<file name>`, where the export base is a path on that host,
   and that address redirects to wherever the file is stored. A link in a release note is built from
-  the ID, version and platform with no lookup, and does not hold a hash. **The exact URL, the
-  export base, how the redirect is made, and how it maps onto GitHub Releases (whose assets are
-  flat under a tag) are to be fixed when this is built.** The redirect is not settled: GitHub
-  Pages alone is not known to send HTTP redirects, so it probably needs a rule in front of it, of
-  the kind [hosting](#hosting-and-cost) already allows for a CDN. Under the project's own name
-  either way.
+  the ID, version and platform with no lookup, and does not hold a hash. **Fixed when built
+  (2026-11-12):**
+  - The address is `<repository address>/exports/<package ID>/<version>/<file name>`, for the
+    official repository `https://packages.oscairn.org/exports/com.example.organ/2.1.0/com.example.organ-2.1.0-macos-arm64.olib`.
+    A device makes it from the address it reads the repository at (a folder copy of a known
+    repository uses that repository's), with no field in the index.
+  - On GitHub, the file is a release asset of the submissions repository: one release per
+    package, `exports-<package ID>`, each asset named by its file name, so it is at
+    `<exportDownload><package ID>/<file name>`, `exportDownload` in `repository-config.json`
+    being `https://github.com/oscairn/packages/releases/download/exports-`. A release holds at most
+    1000 assets, so a package has room for 200 versions of five platforms.
+  - GitHub Pages sends no HTTP redirect of its own. So the index builder writes, at the stable
+    address, a folder holding a small page (`index.html`) that sends the browser on to the file
+    with a `meta` refresh and links it. Pages answers the address without its `/` at the end with
+    a 301 to the folder (checked on `packages.oscairn.org`, 2026-11-12, for its `index` folder),
+    so the link in a release note, without the `/`, works. **The trade-off:** a browser follows it
+    and downloads the file; a program that does not read HTML (`curl -L`, `wget`) gets the page,
+    not the file, and must use the release asset's address, which the page names. A rule in front
+    of Pages (a CDN, [hosting](#moving-package-files-to-object-storage)) can later answer the same
+    address with a real redirect, and nothing that links to it changes.
+  - Publishing uploads each archive not uploaded yet, keeps one already there (derived from
+    pieces that never change), and removes from the `exports-` releases each archive no longer
+    made (a withdrawn version, a revoked key's package, a revoked build's platform).
 - **Outside the index,** but for one flag. An export is not listed there, and has no hash there:
   its address follows from the package ID, the version and a platform the index's `platforms`
   already lists, so the Catalog can show "download for another device" with no field per export;
   and a file no device needs for an install is not a promise the signed index should make, one
   more hash to keep right in an index meant to stay small ([size](#size)). The one exception is a
-  version that has **no** export (a large package, [below](#decided-by-the-owner-2026-11-12-on-the-archives)),
-  which the index says in a field, provisionally **`noExport`**, written on the version only when
-  it has none, so the Catalog does not offer a link that is not there. The format is fixed when
-  this is built. The index's `platforms` sizes are what a device downloads, not the export's, so
-  the Catalog shows an export's size only as about the common size plus the platform's.
+  version missing an export (a large package, [below](#decided-by-the-owner-2026-11-12-on-the-archives)),
+  which the index says in **`noExport`**, written on the version only then, so the Catalog does
+  not offer a link that is not there: `true` for none, or the list of platforms without one
+  ([the format](#pieces-the-format)). The index's `platforms` sizes are what a device downloads,
+  not the export's, so the Catalog shows an export's size only as about the common size plus the
+  platform's. Each export is assembled from the pieces alone and checked with `oscairn-sign verify
+  --platform` before it is published; a pull request's check makes and checks them too.
 - **Yanked and withdrawn.** A yanked version's exports stay, as a lock may still name it and the
   person chose it: yanking is advice ([versions](#versions-and-yanking)). A withdrawn version's
   exports are removed in the publish that adds the withdrawal to the revocation list, and so is
@@ -371,7 +514,9 @@ together, and there is no interim format with one archive per platform in the re
 
 #### Decided by the owner 2026-11-12 on the archives
 
-The five questions this section ended with, answered. **Planned, not built.**
+The five questions this section ended with, answered. **Built 2026-11-12,** each as said below;
+a package with a blob base of its own (question 3) cannot be submitted yet, as a release record
+has no field for one, so that case does not arise.
 
 1. **The manifest of a one-platform archive: one manifest for all platforms.** Every export of a
    version carries the same `library.json` and `library.sig`, listing every platform's builds. The
@@ -380,20 +525,19 @@ The five questions this section ended with, answered. **Planned, not built.**
    present must still match, so a half-present build or a wrong digest is refused as now. The
    identity (`library.sig`, the manifest's hash) and locks are unchanged, and nothing new is
    signed: no per-platform manifest, and so no export of its own identity. The same allowance
-   holds for any file the manifest's `files` lists that belongs to an absent build. **This changes
-   [`docs/library-archive.md`'s reading rules](../library-archive.md#reading-one), which today
-   refuse an archive missing a listed build; that file is to be changed when this is built, and is
-   not changed now.** A package with no builds is unaffected.
+   holds for any file the manifest's `files` lists that belongs to an absent build. This changed
+   [`docs/library-archive.md`'s reading rules](../library-archive.md#reading-one) (2026-11-12),
+   which until then refused an archive missing a listed build. A package with no builds is
+   unaffected.
 2. **The address: a name the project controls, from the start.** Exports are served under
    `packages.oscairn.org`, at a pattern built from the package ID, version and file name, and
    that address redirects to wherever the file is stored, so that links in release notes survive
-   a move of the hosting ([address](#ready-made-archives-per-platform)). The exact path is
-   to be fixed when it is built.
+   a move of the hosting ([address](#ready-made-archives-per-platform), where the path and the
+   redirect, a page on GitHub Pages, are fixed).
 3. **Large packages: no export.** A package over the size limit (the index builder's 1,900 MiB,
    [hosting](#github-first)) or with a blob base of its own has no ready-made archive: the person
-   uses the Catalog. The index carries a flag on the version so the Catalog does not offer a link
-   that is not there; provisionally `noExport`, written only when the version has no export, and
-   its format fixed when this is built.
+   uses the Catalog. The index carries `noExport` on the version so the Catalog does not offer a
+   link that is not there, written only when the version lacks an export.
 4. **A revoked build for one platform affects only that platform.** Its export is removed, and
    devices on that platform refuse the build. Other platforms keep the version and their exports;
    a device does not refuse a version because the manifest lists a revoked build for a platform it
@@ -487,8 +631,15 @@ Sources:
   device can install from it, but offers to remove it after; downloads Oscairn makes never land
   as a whole archive (one a person downloads by hand is theirs to put there).
 
-Today, reading an archive extracts every entry into a new folder before installing from it
-([format](../library-archive.md#reading-one)). Streaming replaces that for packages.
+Reading an archive extracts every entry into a new folder before installing from it
+([format](../library-archive.md#reading-one)), and that stays so for an `.olib` from a file. From
+a repository (built 2026-11-12, [the format](#pieces-the-format)) a piece is downloaded into the
+data folder, beside the install's folder, hashed as it arrives, and resumed by a range request when
+cut short; a `zip` piece is then unpacked from it entry by entry with miniz's fixed buffers and the
+downloaded piece removed, and a `file` piece moved into place by a rename. From a folder or drive a
+piece is read where it is. So the peak is what is installed so far plus one piece, the largest
+piece being counted in the free-space check. A piece is not decompressed while it downloads, so a
+download cut short can resume.
 
 ## The index
 
@@ -517,6 +668,7 @@ are in `details/`, fetched when a package's page opens.
         {
           "version": "2.1.0",
           "manifest": { "sha256": "…", "size": 18342 },
+          "pieces": { "sha256": "…", "size": 1204 },
           "packageSignature": true,
           "requires": { "oscairn": "1.4", "packages": [{ "id": "com.example.dsp-runtime", "version": "2" }] },
           "types": { "oscairn.sound": 64, "oscairn.performance": 12, "clap": 2 },
@@ -543,10 +695,12 @@ are in `details/`, fetched when a package's page opens.
 - **`estimates`:** memory and CPU per device profile where measured (RFC 0025 step 5), from
   the publisher or the repository's checks. They decide "fits this device" before anything is
   downloaded; admission still measures on the device.
-- **`noExport`** (provisional name, not built): present on a version that has no
-  [ready-made archive](#ready-made-archives-per-platform), a large package or one with a blob
-  base of its own, so the Catalog offers no download link for it; absent otherwise. The format is
-  fixed when it is built.
+- **`pieces`:** the version's pieces list, by hash and size ([the format](#pieces-the-format)).
+- **`noExport`:** present on a version missing a
+  [ready-made archive](#ready-made-archives-per-platform), `true` for none (a large package, one
+  with a blob base of its own, a withdrawn version, a revoked key's package) or the platforms
+  without one (a revoked build's), so the Catalog offers no download link that is not there;
+  absent otherwise.
 - **`license`:** an SPDX expression, or `LicenseRef-` and the package's own license file for
   anything else.
 - **`publisher.key`:** the publisher's key fingerprint. The manifest must be signed by it.
@@ -592,9 +746,9 @@ search:
 - **The root's fields:** `format` (`oscairn.repository`), `version` (1), `repository`, `name`,
   `serial`, `rootKey`, `indexKey` (`{key, signature}`, the root key's signature over it),
   `index` and `revocations` (each `{path, sha256, size}`), `deltas` (each `{from, path, sha256,
-  size}`), `blobBase` and `mirrors`. Until step
-  1 stores a release in pieces, each version in the index also names its whole archive
-  (`archive`, `{sha256, size}`), a blob like any other.
+  size}`), `blobBase` and `mirrors`. Until 2026-11-12 each version in the index also named its
+  whole archive (`archive`, `{sha256, size}`); since then it names its pieces
+  ([the format](#pieces-the-format)).
 - Everything else is checked by its hash in the root.
 - **Rollback:** a device refuses a root with a lower serial than one it has seen, so a mirror
   cannot hand it an older index with a version that has since been revoked.
@@ -644,7 +798,12 @@ repository of submission records:
 
 - `packages/<package>/<version>.json` holds where the signed archive is (a URL, often the
   publisher's own release page, or the archive beside it) and its hash, with the index's
-  summary, license, tags, channel and claimed platforms.
+  summary, license, tags, channel and claimed platforms. The submission stays **one signed
+  archive per version holding every platform's builds** (unchanged by pieces, 2026-11-12): the
+  publisher signs once, and the repository's job splits it into
+  [pieces](#pieces-the-format) and assembles the
+  [ready-made archives](#ready-made-archives-per-platform) from them, signing nothing. An archive
+  that leaves out builds its manifest lists is refused as a submission.
 - **A publisher's first submission** also adds `publishers/<publisher>.json`: the publisher's
   ID, name and key. A reverse-DNS publisher ID is verified by a file at
   `https://<domain>/.well-known/oscairn-publisher.json` naming the key, as Flathub verifies
@@ -655,9 +814,10 @@ repository of submission records:
   by that key or one it signed.
 - **CI** fetches the files, checks every hash against the signed manifest, runs the checks, and
   posts the results on the pull request.
-- **On merge**, CI copies the blobs into storage (unless the package uses its own blob base),
-  writes the new index and root, signs the root with the index key, and uploads. Merges are
-  serialized, so serials never collide.
+- **On merge**, CI splits each release into pieces and copies the new ones into storage (unless
+  the package uses its own blob base), assembles and uploads the ready-made archives, writes the
+  new index and root, signs the root with the index key, and uploads. Merges are serialized, so
+  serials never collide.
 - A template for the repository and its CI is kept in
   [tools/package-repository/template](../../tools/package-repository/template/README.md)
   ([hosting](#hosting-and-cost)).
@@ -848,13 +1008,16 @@ ships in the box is the one exception, and it is local. Built 2026-11-11 except 
 A **repository snapshot**, as a [USB drive](#offline-and-several-devices) carries one: the
 official repository's `repository.json`, `repository.sig`, index, revocations and deltas exactly
 as `packages.oscairn.org` published them at release time, and under `blobs/<ab>/<sha256>` only the
-archives of the packages the release preinstalls. It is the whole signed index with a subset of
-the blobs, not a signed subset: the release script does not hold the index key, and need not.
-`tools/preinstalled.txt` lists the packages and versions; `tools/preinstall-fetch.py` downloads
-them, checks the root against the official root key (the index key it signed, and the index key's
-signature over the root, with `oscairn-sign verify-file`), the index by the root's hash, each
-archive by the index's size and SHA-256, its manifest by the index's hash, and every signature in
-it with `oscairn-sign verify`, signed throughout by the publisher key the index names; that each
+pieces of the packages the release preinstalls (since 2026-11-12, [the format](#pieces-the-format)):
+each one's pieces list, what every platform shares and the release's platform's builds. It is the
+whole signed index with a subset of the blobs, not a signed subset: the release script does not
+hold the index key, and need not. `tools/preinstalled.txt` lists the packages and versions;
+`tools/preinstall-fetch.py --platform` downloads them, checks the root against the official root
+key (the index key it signed, and the index key's signature over the root, with `oscairn-sign
+verify-file`), the index by the root's hash, each pieces list and piece by the size and SHA-256
+named for it, and on the archive those pieces make for the platform its manifest by the index's
+hash and every signature with `oscairn-sign verify --platform`, signed throughout by the publisher
+key the index names; that each
 version is stable, not yanked and has a build for the platform; and that each asset library a
 listed package needs is listed at the version a device would pick. `tools/release-macos.sh` runs
 it into `Oscairn.app/Contents/Resources/Preinstalled` and fails if anything does not verify; on
@@ -885,13 +1048,13 @@ the control thread and one job at a time, so neither audio nor the UI waits:
 1. A `packages.list` job reads the snapshot folder, as any repository is read: root, index key and
    index verified against a root key trusted for `repositories`, the serial checked against the
    one this device has seen and then kept.
-2. Each package whose archive the snapshot holds is a candidate, at that version. One installed
+2. Each package whose pieces the snapshot holds (its manifest's piece) is a candidate, at that version. One installed
    already, at any version, is **kept**: the user's wins, newer or older (owner, 2026-11-11), and
    updates the normal way (a newer one is never joined by an older one beside it, as plugin versions install side
    by side). One that `preinstalled.json` lists from an earlier release and is no longer installed
    was **removed** by the user and stays removed.
-3. Each other one is a `packages.install` job from the folder at that version: the archive read in
-   place, its size and SHA-256 checked against the index, its manifest against the index, every
+3. Each other one is a `packages.install` job from the folder at that version: its pieces read in
+   place, each by the size and SHA-256 named for it, its manifest against the index, every
    signature in it, its publisher's key, and its plugin code judged against the trust store as
    always; its asset libraries come from the snapshot too. An asset library already brought by an
    earlier package counts as installed.
@@ -1566,13 +1729,12 @@ address or a mirror, checks its size and hash against the root, then reads it.
 | Installed when a lock or `version` names it | Yes, so a Performance keeps working | No, never |
 | Installed already | Shown as yanked | Reported with the repository and reason; kept, never removed or disabled, offered to remove or replace |
 
-A revoked key withdraws every version of every package its key signed. A revoked build is
-refused as built: an archive holding it is refused, the archive being one blob today. Decided by
-the owner 2026-11-12, for when releases are stored in pieces and exported per platform: a revoked
-build affects only its own platform, whose export is removed and whose devices refuse the build;
-other platforms keep the version and their exports, and withdrawing the whole version stays the
-separate action in the `versions` list ([archives](#decided-by-the-owner-2026-11-12-on-the-archives),
-question 4).
+A revoked key withdraws every version of every package its key signed. A revoked build affects
+only its own platform (decided by the owner 2026-11-12, built the same day): a device on that
+platform refuses a release holding it, from a repository or a file, and that platform's export is
+no longer made; other platforms keep the version and their exports, and withdrawing the whole
+version stays the separate action in the `versions` list
+([archives](#decided-by-the-owner-2026-11-12-on-the-archives), question 4).
 
 **Whose list applies where.** A repository's list applies to its own packages: its versions, the
 publisher keys it lists, the builds in them. The official repository's `keys` and `builds` apply
@@ -1595,7 +1757,7 @@ decided 2026-11-12).
   root alone. The official
   repository's kept list is what other repositories' installs check; a device that has never read
   the official repository has none to apply.
-- **A file install** (decided by the owner 2026-11-12, not built): an archive installed from a
+- **A file install** (decided by the owner 2026-11-12, built the same day): an archive installed from a
   file is checked against the last list kept for each repository the device has on: its signers'
   keys against `keys`, its package ID and version against `versions`, its builds' digests against
   `builds` (for the device's own platform, once builds for other platforms may be absent). It
@@ -1630,8 +1792,12 @@ and a root naming none each refusing the repository, keeping nothing. `desktop-g
 Catalog's offer and wording. Not tested: the official list applying to another repository (its key
 cannot sign a test repository).
 
-Not built: the takedown policy; checking an archive installed from a file against the kept lists
-(decided 2026-11-12, above); a revoked build refused only on its own platform (the same); the
+`control-repository` also tests (2026-11-12) another platform's revoked build leaving this
+device's install and export, this platform's refusing the install, a withdrawn version having no
+export, and files refused for a withdrawn version or this platform's revoked build until the
+repository is turned off.
+
+Not built: the takedown policy; the
 official list in system images; a revoked build stopping to
 load, which the revision above drops; remembering an index key a list revoked, so that a stolen index key
 signing a later root with a list that leaves itself out is still refused (today the serial alone
@@ -1737,6 +1903,7 @@ starts on GitHub, with no server.
 | Checks and publishing | GitHub Actions: `check.yml` on pull requests, `publish.yml` on each merge to `main` | Builds `oscairn-sign` at a pinned commit, checks, builds the index, signs the root |
 | The signed root and index | GitHub Pages | `repository.json`, `repository.sig`, `index/`, `revocations/` |
 | Package files | GitHub Releases assets: a release `blobs-<ab>` per first two hex digits, each asset named by its SHA-256 | The blob base is `https://github.com/oscairn/packages/releases/download/blobs-`, so a blob is at `blobs-<ab>/<sha256>` under it |
+| Ready-made archives | GitHub Releases assets: a release `exports-<package ID>` per package, each asset `<package ID>-<version>-<platform>.olib`; a page for each at `exports/<package ID>/<version>/<file name>/` on Pages | `exportDownload` is `https://github.com/oscairn/packages/releases/download/exports-` ([address](#ready-made-archives-per-platform)) |
 
 The template for the repository, its workflows and its index builder are in
 [tools/package-repository/template](../../tools/package-repository/template/README.md).
@@ -1864,7 +2031,8 @@ waits on them. What remains, in order:
    the items chosen, the samples it lacks and its own platform's builds, unzipping each as it
    streams, so peak storage is the installed size plus one entry from the web too. Decided
    2026-11-12: built together with it, the ready-made `.olib` per platform of each version
-   ([above](#ready-made-archives-per-platform)), with no interim archive per platform.
+   ([above](#ready-made-archives-per-platform)), with no interim archive per platform. Built
+   2026-11-12 but for choosing items and skipping samples a device has (see Progress, step 1).
 2. HTTPS on Linux devices: done by RFC 0039's step 1 (libcurl with Mbed TLS in the image,
    `JUCE_USE_CURL` on); the core's `Transport` did not change. A device whose time is unknown
    fetches nothing from the web and says to set the time first (RFC 0035, decided 2026-11-08).
@@ -1927,8 +2095,8 @@ per platform."
   coming: linux-arm64 now, later Windows, x86_64 and hardware-accelerated builds.
 - **A ready-made `.olib` per platform** of each version, a derived export for downloading by hand,
   replaces the whole archive in the Git tree ([the section](#ready-made-archives-per-platform)).
-  Both are built together; there is no interim archive per platform in the record. Planned, not
-  built.
+  Both are built together; there is no interim archive per platform in the record. Built the
+  same day.
 - **The five open questions on the archives, answered** (decided by the owner 2026-11-12, in the
   section's [decisions](#decided-by-the-owner-2026-11-12-on-the-archives)):
   1. *The manifest:* one manifest for all platforms; the reader accepts an archive without other

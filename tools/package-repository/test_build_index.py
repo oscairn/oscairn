@@ -6,7 +6,9 @@ usage: test_build_index.py <oscairn-sign>
 
 Makes throwaway keys, a signed archive with one plugin build, a publisher and a release, builds
 the index, signs and checks the root with oscairn-sign, and checks that a bad release, a changed
-release and a tampered root are each refused. Keys live only in a temporary folder.
+release and a tampered root are each refused. Each release is split into pieces, deduplicated
+across versions, and a ready-made archive per platform is assembled from them and checked
+(RFC 0031). Keys live only in a temporary folder.
 """
 import gzip
 import hashlib
@@ -100,7 +102,11 @@ def main(tool):
         (release_dir / "2.1.0.json").write_text(json.dumps(release))
 
         def build(out_dir, *extra):
-            return run(sys.executable, "-I", BUILDER, "--repo", repo, "--oscairn-sign", tool, "--cache", temp / "cache", "--out", out_dir, "--serial", "7", *extra)
+            return run(sys.executable, "-I", BUILDER, "--repo", repo, "--oscairn-sign", tool, "--cache", temp / "cache", "--out", out_dir, "--serial", "7",
+                       "--exports", Path(str(out_dir) + "-exports"), *extra)
+
+        def pieces_of(cache, version):
+            return json.loads((cache / version["pieces"]["sha256"]).read_bytes())["pieces"]
 
         # A good build.
         site = temp / "site"
@@ -123,8 +129,35 @@ def main(tool):
               "types and per-platform sizes: " + json.dumps(version["platforms"]))
         rev = (site / root["revocations"]["path"]).read_bytes()
         check(hashlib.sha256(rev).hexdigest() == root["revocations"]["sha256"] and json.loads(rev)["format"] == "oscairn.repository-revocations", "the revocation list, by hash")
-        blob = release["archive"]["sha256"]
-        check((site / "blobs.txt").read_text() == blob + "\n" and (temp / "cache" / blob).read_bytes() == data, "the archive is a blob in the cache by its hash")
+        # In pieces (RFC 0031): the manifest, its signature, the licenses and the build, each a blob
+        # by its hash, listed in the pieces list the version names; no whole archive.
+        listed = pieces_of(temp / "cache", version)
+        with zipfile.ZipFile(olib) as z:
+            signature_bytes = z.read("library.sig")
+        check([(p["type"], p["path"], p.get("platform")) for p in listed] == [("file", "library.json", None), ("file", "library.sig", None), ("zip", "Licenses", None),
+              ("zip", "Plugins/clap/com.example.organ@2.1.0/linux-arm64/Organ.clap", "linux-arm64")] and "archive" not in version,
+              "a release is its manifest, signature, licenses and build as pieces: " + json.dumps(listed))
+        check(listed[0]["sha256"] == hashlib.sha256(manifest).hexdigest() and (temp / "cache" / listed[1]["sha256"]).read_bytes() == signature_bytes and
+              all(hashlib.sha256((temp / "cache" / p["sha256"]).read_bytes()).hexdigest() == p["sha256"] and (temp / "cache" / p["sha256"]).stat().st_size == p["size"] for p in listed),
+              "each piece is in the cache by its hash and size, the manifest and signature as themselves")
+        check(sorted((site / "blobs.txt").read_text().split()) == sorted([version["pieces"]["sha256"]] + [p["sha256"] for p in listed]),
+              "every piece and the pieces list are listed for upload")
+        check(version["platforms"]["linux-arm64"]["size"] == listed[3]["size"] and version["common"] == {"size": sum(p["size"] for p in listed[:3]), "installed": sum(p["installed"] for p in listed[:3])},
+              "the sizes are the pieces', the build's apart from the shared part: " + json.dumps({k: version[k] for k in ("platforms", "common")}))
+        with zipfile.ZipFile(temp / "cache" / listed[3]["sha256"]) as z:
+            check([(i.filename, i.date_time) for i in z.infolist()] == [("Plugins/clap/com.example.organ@2.1.0/linux-arm64/Organ.clap", (1980, 1, 1, 0, 0, 0))],
+                  "a zip piece holds its entries at their archive paths, dated 1980-01-01")
+        # Its ready-made archive for linux-arm64: the archive's entries, the manifest and signature
+        # unchanged, checked by oscairn-sign; and a page at its stable address.
+        export = temp / "site-exports" / "com.example.organ-2.1.0-linux-arm64.olib"
+        with zipfile.ZipFile(olib) as z, zipfile.ZipFile(export) as e:
+            same = sorted(z.namelist()) == sorted(e.namelist()) and all(z.read(n) == e.read(n) for n in z.namelist())
+        out = run(tool, "verify", "--platform", "linux-arm64", export)
+        page = (site / "exports" / "com.example.organ" / "2.1.0" / export.name / "index.html").read_text()
+        check(same and out.returncode == 0 and f"archive com.example.organ {made['publisher'][0]}" in out.stdout and "noExport" not in version and
+              "url=https://github.com/oscairn/packages/releases/download/exports-com.example.organ/com.example.organ-2.1.0-linux-arm64.olib" in page and
+              (site / "exports.txt").read_text() == f"com.example.organ {export.name}\n",
+              "the ready-made archive holds the release's entries byte for byte and verifies, with a page at its stable address: " + out.stderr)
         check(root["indexKey"]["key"] == made["index"][1] and root["rootKey"] == made["root"][1], "the root carries the root key and the delegated index key")
         check(build(temp / "again").returncode == 0 and (temp / "again" / "repository.json").read_bytes() == (site / "repository.json").read_bytes(), "the build is reproducible")
 
@@ -289,6 +322,15 @@ def main(tool):
                 archive={"path": f"{version}.olib", "sha256": hashlib.sha256(data_).hexdigest(), "size": len(data_)})))
         out = build(temp / "needy-met")
         check(out.returncode == 0, "and the tree builds once a new enough version is here: " + out.stderr.strip())
+        if out.returncode == 0:
+            met_root = json.loads((temp / "needy-met" / "repository.json").read_text())
+            met_index = json.loads(gzip.decompress((temp / "needy-met" / met_root["index"]["path"]).read_bytes()))
+            factory = {v["version"]: v for p in met_index["packages"] if p["id"] == "com.example.factory" for v in p["versions"]}
+            shared = [{p["path"]: p["sha256"] for p in pieces_of(temp / "cache", factory[v])}["Assets"] for v in ("1.0", "1.3")]
+            listed_blobs = (temp / "needy-met" / "blobs.txt").read_text().split()
+            check(shared[0] == shared[1] and listed_blobs.count(shared[0]) == 1 and factory["1.0"]["platforms"] == {} and
+                  (temp / "needy-met-exports" / "com.example.factory-1.0.olib").is_file(),
+                  "a piece unchanged between two versions is one blob, and a package with no builds has one archive, named without a platform")
         (needy_dir / "1.0.0.json").write_text(json.dumps({k: v for k, v in needy.items() if k != "dependencies"}))
         out = build(temp / "needy-unnamed")
         check(out.returncode != 0 and "`dependencies` is not the archive's" in out.stderr, "a record not naming its archive's dependencies is refused: " + out.stderr.strip())

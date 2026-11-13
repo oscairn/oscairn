@@ -18,7 +18,6 @@ and must sound and stay finite.
 """
 import gzip
 import hashlib
-import io
 import json
 import os
 import subprocess
@@ -26,7 +25,6 @@ import sys
 import tempfile
 import time
 import urllib.request
-import zipfile
 from pathlib import Path
 
 # What the official repository publishes (github.com/oscairn/packages: repository-config.json and
@@ -128,13 +126,13 @@ with tempfile.TemporaryDirectory(prefix='oscairn-live-') as temporary:
         index = json.loads(gzip.decompress(fetch(source + '/' + root['index']['path'])))
         for library, _ in INSTRUMENTS.values():
             release = next(v for x in index['packages'] if x['id'] == library for v in x['versions'])
-            data = fetch(f"{root['blobBase']}{release['archive']['sha256'][:2]}/{release['archive']['sha256']}")
+            # Its manifest, a piece named by its hash (RFC 0031), lists each file of the library.
+            data = fetch(f"{root['blobBase']}{release['manifest']['sha256'][:2]}/{release['manifest']['sha256']}")
             folder = home / 'AssetLibraries' / library / release['version']
-            check(hashlib.sha256(data).hexdigest() == release['archive']['sha256'], f'{library} {release["version"]}: its archive fetched here again matches the index')
-            archive = zipfile.ZipFile(io.BytesIO(data))
-            want = {n[len('Assets/'):]: hashlib.sha256(archive.read(n)).hexdigest() for n in archive.namelist() if n.startswith('Assets/') and not n.endswith('/')}
+            check(hashlib.sha256(data).hexdigest() == release['manifest']['sha256'], f'{library} {release["version"]}: its manifest fetched here again matches the index')
+            want = {a['path']: a['sha256'] for a in json.loads(data)['assets']['files']}
             have = {str(f.relative_to(folder)): hashlib.sha256(f.read_bytes()).hexdigest() for f in folder.rglob('*') if f.is_file()} if folder.is_dir() else {}
-            check(want and have == want, f'{folder.relative_to(home)} holds each of its archive\'s {len(want)} files and nothing else ({len(have)} there, {sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())} bytes)')
+            check(want and have == want, f'{folder.relative_to(home)} holds each of the {len(want)} files its manifest lists and nothing else ({len(have)} there, {sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())} bytes)')
     finally:
         p.stdin.close()
         p.wait(timeout=30)

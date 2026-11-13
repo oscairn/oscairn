@@ -80,12 +80,14 @@ on each data folder ([RFC 0031](rfcs/0031-package-repository-and-distribution.md
 [`tools/preinstalled.txt`](../tools/preinstalled.txt) lists them, each a package ID and version
 at https://packages.oscairn.org; change it in a commit of its own, to the newest stable versions,
 before tagging. The release script runs [`tools/preinstall-fetch.py`](../tools/preinstall-fetch.py),
-which downloads the official repository's signed root and index and the listed archives into
-`Oscairn.app/Contents/Resources/Preinstalled` as a repository snapshot, and fails the release when
-anything does not verify: the root against the official root key, the index and each archive by
-hash, every signature in each archive by the publisher key the index names, a version yanked or
-without a `macos-arm64` build, or an asset library a listed package needs and the list lacks. It
-needs the network, and the archives are never committed. To check a list without building:
+which downloads the official repository's signed root and index and the listed packages' pieces
+for the platform ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#pieces-the-format))
+into `Oscairn.app/Contents/Resources/Preinstalled` as a repository snapshot, and fails the release
+when anything does not verify: the root against the official root key, the index and each piece
+by hash, every signature in the archive the pieces make for the platform by the publisher key
+the index names, a version yanked or without a `macos-arm64` build, or an asset library a listed
+package needs and the list lacks. It needs the network, and the pieces are never committed. To
+check a list without building:
 
 ```sh
 python3 -I tools/preinstall-fetch.py --oscairn-sign build/core/control/oscairn-sign \

@@ -1962,11 +1962,12 @@ Control::Archive Session::archiveContents(const std::string& file) {
 Control::Installed Session::installArchive(const std::string& file,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode) {
     const auto into=unpackFolder();
     const auto p=readPackage(file,into);
+    // Checked against the revocation lists last kept from the repositories that are on (RFC 0031), with no network.
+    if(const auto why=revokedFile(p);!why.empty()){std::error_code e;fs::remove_all(into,e);throw std::runtime_error(why);}
     const auto out=installUnpacked(p,into,asLibrary,chosen,acceptUnsignedCode,false);
     // From a file, no repository and no version, but a plugin package's: its first plugin's, the package's unless that plugin names its own.
-    // Its file's SHA-256, as a repository's index would list it; a package folder has none.
-    std::error_code e;
-    recordPackage(p,asLibrary,p.plugins.empty()?std::string():p.plugins.front().version,{},fs::is_regular_file(file,e)?assets::sha256File(file):std::string(),out.otherBuild);
+    // Its manifest's SHA-256, its identity, as a repository's index lists it (RFC 0031).
+    recordPackage(p,asLibrary,p.plugins.empty()?std::string():p.plugins.front().version,{},p.manifestSha256,out.otherBuild);
     return out;
 }
 

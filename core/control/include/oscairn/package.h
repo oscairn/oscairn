@@ -96,6 +96,15 @@ namespace oscairn
     // license file, which Oscairn cannot read.
     bool redistributable(const std::string& license, std::optional<bool> declared);
 
+    // A path an archive may hold: relative, plain components, none hidden, `..`, with a backslash,
+    // drive or control character, at most 1024 bytes (docs/library-archive.md's reading rules).
+    bool safeArchivePath(const std::string& name);
+    // Unpacks a zip piece of a release (RFC 0031, "Pieces: the format") into `into`, entry by entry
+    // with a fixed buffer: each a safe path at or under `under`, not a link, not written already,
+    // at most 2 GiB, at most 1,048,576 of them and `most` bytes in all, each the size it declares.
+    // Untrusted: refuses anything else, leaving what it wrote for the caller to remove.
+    void unpackPiece(const std::filesystem::path& zip, const std::filesystem::path& into, const std::string& under, uint64_t most);
+
     // The manifest, library.json, as the archive and an installed library hold it.
     std::string manifestJson(const Package& package);
 

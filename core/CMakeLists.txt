@@ -174,6 +174,17 @@ add_executable(oscairn-midi-stream-test ../hosts/audio/midi_stream_test.cpp)
 target_compile_options(oscairn-midi-stream-test PRIVATE -Wall -Wextra)
 add_test(NAME engine-midi-stream COMMAND oscairn-midi-stream-test)
 
+# The FANTOM-0's message link (BmcLink.h): its frame parser and its reader on a pty, plain POSIX,
+# tested everywhere; the engine links the reader only with OSCAIRN_PANEL_ROLAND.
+if(UNIX)
+    find_package(Threads REQUIRED)
+    add_executable(oscairn-bmc-link-test ../hosts/audio/bmc_link_test.cpp ../hosts/audio/BmcLink.cpp)
+    target_link_libraries(oscairn-bmc-link-test PRIVATE Threads::Threads)
+    target_compile_options(oscairn-bmc-link-test PRIVATE -Wall -Wextra)
+    add_test(NAME engine-bmc-link COMMAND oscairn-bmc-link-test)
+    set_tests_properties(engine-bmc-link PROPERTIES TIMEOUT 30)
+endif()
+
 add_library(oscairn-lifecycle-fixture MODULE engine/tests/lifecycle_fixture.cpp)
 target_link_libraries(oscairn-lifecycle-fixture PRIVATE oscairn_clap_headers)
 set_target_properties(oscairn-lifecycle-fixture PROPERTIES PREFIX "" SUFFIX ".clap")

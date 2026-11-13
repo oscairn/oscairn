@@ -163,11 +163,14 @@ done
 
 # 6. The app, or the engine alone, with the profile's options. The cores its audio threads keep to: this script's
 # environment's OSCAIRN_AUDIO_THREAD_CORES ("1-3"), else the file's (the profile's
-# compute.audioThreadCores); none, anywhere. start-chroot.sh passes no environment on, so it is
-# handed over here.
-cores=${OSCAIRN_AUDIO_THREAD_CORES:-}
+# compute.audioThreadCores); none, anywhere. OSCAIRN_WORKER_BUDGET_US and
+# OSCAIRN_WORKER_EXTRA_BLOCK (RFC 0045) are handed over the same way. start-chroot.sh passes no
+# environment on, so they are handed over here.
+cores=${OSCAIRN_AUDIO_THREAD_CORES:-} budget=${OSCAIRN_WORKER_BUDGET_US:-} extra=${OSCAIRN_WORKER_EXTRA_BLOCK:-}
 [ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"
 cores=${cores:-${OSCAIRN_AUDIO_THREAD_CORES:-}}
+budget=${budget:-${OSCAIRN_WORKER_BUDGET_US:-}} extra=${extra:-${OSCAIRN_WORKER_EXTRA_BLOCK:-}}
+tuning="${budget:+OSCAIRN_WORKER_BUDGET_US=$budget }${extra:+OSCAIRN_WORKER_EXTRA_BLOCK=$extra }" # unquoted below: no spaces in a value
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
 rm -f "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
 # The app, on a profile with a screen (OSCAIRN_HEADLESS=0): Weston and Xwayland keep running
@@ -178,11 +181,11 @@ if [ -z "$alone" ] && [ "${OSCAIRN_HEADLESS:-1}" = 0 ] && [ -n "${OSCAIRN_PROFIL
 	set -- /usr/bin/Oscairn --profile "$OSCAIRN_PROFILE" --plugins /usr/lib/clap
 	say "starting the app: $*${cores:+ (audio threads on cores $cores)}"
 	if [ -n "$dry" ]; then
-		say "would run: $root/start-chroot.sh setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES=$cores }sh -c 'ulimit -l unlimited; exec \"\$@\"' sh $*"
+		say "would run: $root/start-chroot.sh setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES=$cores }${tuning}sh -c 'ulimit -l unlimited; exec \"\$@\"' sh $*"
 		exit 0
 	fi
 	rm -rf "$root/tmp/oscairn-0"
-	"$root/start-chroot.sh" setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} \
+	"$root/start-chroot.sh" setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} $tuning\
 		sh -c 'ulimit -l unlimited || echo "oscairn-fantom-start: cannot raise the locked-memory limit; continuing" >&2; exec "$@"' sh "$@" \
 		>> "$state/log/oscairn-app.log" 2>&1 &
 	echo $! > "$state/run/app.pid"
@@ -208,14 +211,14 @@ if [ -z "$alone" ] && [ "${OSCAIRN_HEADLESS:-1}" = 0 ] && [ -n "${OSCAIRN_PROFIL
 fi
 say "starting the engine: oscairn-engine-run $OSCAIRN_ENGINE_ARGS${cores:+ (audio threads on cores $cores)}"
 if [ -n "$dry" ]; then
-	say "would run: $root/start-chroot.sh setsid env ${cores:+OSCAIRN_AUDIO_THREAD_CORES=$cores }oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
+	say "would run: $root/start-chroot.sh setsid env ${cores:+OSCAIRN_AUDIO_THREAD_CORES=$cores }${tuning}oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
 	exit 0
 fi
 rm -f "$root/run/oscairn/engine.sock"
 eval "set -- $OSCAIRN_ENGINE_ARGS"
 # setsid: the bundle's own, as the panel holder detaches itself with; the ssh session ending
 # then does not take the engine with it.
-"$root/start-chroot.sh" setsid env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} oscairn-engine-run "$@" \
+"$root/start-chroot.sh" setsid env OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-instrument}" ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} ${tuning}oscairn-engine-run "$@" \
 	>> "$state/log/oscairn-engine.log" 2>&1 &
 echo $! > "$state/run/engine.pid"
 

@@ -54,6 +54,18 @@ out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1)
 check "or from the profile's file" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=2,3 oscairn-engine-run'"
 out=$(OSCAIRN_AUDIO_THREAD_CORES=1-3 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
 check "the environment's first" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=1-3 oscairn-engine-run'"
+out=$(OSCAIRN_WORKER_BUDGET_US=2000 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog,org.oscairn.sampler "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the worker budget and extra block from the environment, handed to the engine" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=2,3 OSCAIRN_WORKER_BUDGET_US=2000 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog,org.oscairn.sampler oscairn-engine-run'"
+printf "OSCAIRN_WORKER_BUDGET_US='2400'\nOSCAIRN_WORKER_EXTRA_BLOCK='org.oscairn.fm'\n" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "or from the profile's file" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_BUDGET_US=2400 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm oscairn-engine-run'"
+out=$(OSCAIRN_WORKER_BUDGET_US=2000 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the environment's first" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_BUDGET_US=2000 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm oscairn-engine-run'"
+printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
+out=$(OSCAIRN_WORKER_BUDGET_US=2000 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the app: the worker budget and extra block, after the cores" "echo \"\$out\" | grep -q 'setsid env DISPLAY=:0 OSCAIRN_AUDIO_THREAD_CORES=2,3 OSCAIRN_WORKER_BUDGET_US=2000 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog sh -c'"
+out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the app: the profile's file when the environment has none" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_BUDGET_US=2400 OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.fm sh -c'"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
 out=$(OSCAIRN_PANEL_DEVICE="$bundle/no-panel" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?

@@ -1306,6 +1306,11 @@ on the display; `--engine-only` the engine alone.
    difference is measured: to keep it, add `"audioThreadCores": [1, 2, 3]` to the profile's
    `compute` (or set `OSCAIRN_AUDIO_THREAD_CORES='1-3'` in `etc/default/oscairn-engine`).
 
+   The start script hands `OSCAIRN_WORKER_BUDGET_US` and `OSCAIRN_WORKER_EXTRA_BLOCK` (plugin IDs
+   separated by commas; [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md)) on in the same
+   way, for the app and for `--engine-only`: its own environment's value first, else the file's.
+   For example `OSCAIRN_WORKER_BUDGET_US=2000 ./oscairn-fantom-start`.
+
 3. **The kernel beside them,** for comparison, with nothing of Oscairn running but the holder:
 
    ```sh

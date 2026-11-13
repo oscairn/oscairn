@@ -146,6 +146,26 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         assert rpc('library.query', {'type': 'oscairn.sound'})['items'][0]['type'] == 'oscairn.sound'
         rpc('library.query', {'type': 'org.example.none'}, expect_error=True)
         rpc('library.query', {'kind': 'oscairn.sound'}, expect_error=True)
+        # Setlists (docs/setlist-format.md): the whole document, saved and read through the library.
+        performance = rpc('library.query', {'kind': 'performance'})['items'][0]
+        setlist = {'format': 'oscairn.setlist', 'version': 2,
+                   'info': {'id': '', 'name': 'Friday', 'description': '', 'tags': ['live'], 'color': '', 'revision': '', 'parent': '', 'hash': '', 'origin': None},
+                   'display': {'mode': 'grid', 'columns': 4, 'rows': 3},
+                   'pages': [{'name': 'Set 1', 'slots': [{'id': performance['id'], 'name': performance['name'], 'color': '#e5484d', 'label': 'Opener'}, None]},
+                             {'name': 'Encore', 'slots': [{'id': '', 'name': 'Piano Ballad', 'color': '', 'label': ''}]}]}
+        friday = rpc('setlists.save', {'setlist': setlist})['id']
+        got = rpc('setlists.get', {'id': friday})['setlist']
+        assert got['info']['id'] == friday and got['info']['tags'] == ['live'] and got['pages'] == setlist['pages'] and got['display'] == setlist['display'], got
+        assert len(got['info']['revision']) == 16 and len(got['info']['hash']) == 64
+        listed = rpc('library.query', {'type': 'oscairn.setlist'})['items']
+        assert [i['id'] for i in listed] == [friday] and listed[0]['kind'] == 'setlist' and listed[0]['type'] == 'oscairn.setlist'
+        got['pages'][0]['name'] = 'First set'
+        assert rpc('setlists.save', {'setlist': got})['id'] == friday and rpc('setlists.get', {'id': friday})['setlist']['pages'][0]['name'] == 'First set'
+        got['pages'][0]['slots'][0]['color'] = 'red'
+        rpc('setlists.save', {'setlist': got}, expect_error=True)
+        rpc('setlists.get', {'id': performance['id']}, expect_error=True)
+        rpc('library.delete', {'id': friday})
+        assert rpc('library.query', {'type': 'oscairn.setlist'})['total'] == 0
         added = rpc('parts.fromSound', {'id': sound['id']})['part']
         loaded = rpc('parts.loadSound', {'part': part, 'id': sound['id']})
         assert loaded == {'accepted': True, 'flagged': ['the wire from the input to synth was removed', 'the wire from synth to the output was removed']}, loaded

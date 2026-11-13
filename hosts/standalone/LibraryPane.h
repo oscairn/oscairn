@@ -118,7 +118,7 @@ namespace oscairn::standalone
 
         void search(const juce::String& text);
         void toggleTag(const std::string& tag);
-        void showKind(const std::string& kind);     // "performance" or "sound"; tags chosen for the other kind are cleared
+        void showKind(const std::string& kind);     // "performance", "sound" or "setlist"; tags chosen for another kind are cleared
         void showSource(const std::string& source); // "mine", an installed library's ID, or empty for all
         void setCompact(bool compact);              // one line a row, to see more; kept for the next time
         bool compact() const { return compact_; }
@@ -157,6 +157,8 @@ namespace oscairn::standalone
         void editItem(int row);                              // its name, description and tags, asked for
         std::string copyItem(int row);                       // into the user's own; the copy's ID, or empty
         void exportItem(int row);                            // to an archive file, chosen and asked about
+        void exportLibrary();                                // the user's own items and the setlists chosen, to an archive file
+        std::unique_ptr<juce::Component> exportChoices_;     // the setlists offered, while asked
         // Audition (RFC 0021): the item at row tried in place, a Sound in auditionPart's; while
         // one plays, choosing another row tries that one. Stop puts back what was there; keep
         // makes it the change. Picking, canceling or closing stops it.
@@ -217,9 +219,9 @@ namespace oscairn::standalone
         bool settingUp_ = true; // the packages that come with the release may be installing (RFC 0031): asked until they are not
         juce::String message_;
         juce::TextEditor search_;
-        juce::TextButton performances_{"Performances"}, sounds_{"Sounds"};
+        juce::TextButton performances_{"Performances"}, sounds_{"Sounds"}, setlists_{"Setlists"};
         IconButton favorites_{IconButton::Glyph::Star, "Favorites"}, recent_{IconButton::Glyph::Recent, "Recent"}, compactButton_{IconButton::Glyph::Compact, "Compact"};
-        JoinedButtons kind_{{&performances_, &sounds_}, true}, filters_{{&favorites_, &recent_}, false};
+        JoinedButtons kind_{{&performances_, &sounds_, &setlists_}, true}, filters_{{&favorites_, &recent_}, false};
         Sidebar sidebar_{*this};
         juce::Viewport sideView_;
         juce::ListBox list_{"Performances", this};

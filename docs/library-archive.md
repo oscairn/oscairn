@@ -1,6 +1,6 @@
 # Library archive format, version 3
 
-A library, an exported Performance or Sound, or a plugin package is one archive file
+A library, an exported Performance, Sound or setlist, or a plugin package is one archive file
 ([RFC 0021](rfcs/0021-sounds-performances-and-library.md#libraries)): a zip holding
 
 | Entry | What it is |
@@ -9,6 +9,7 @@ A library, an exported Performance or Sound, or a plugin package is one archive 
 | `library.sig` | Optional: the whole archive's signature, `{key, signature}` over `oscairn-archive-1\0` and the manifest's exact bytes ([signatures](#signatures)) |
 | `Performances/<folder>/` | Each Performance as the library keeps it: `performance.json` ([format](performance-format.md)) and `nodes/` |
 | `Sounds/<folder>/` | Each Sound the same way, `sound.json` and `nodes/` |
+| `Setlists/<folder>/` | Each setlist, `setlist.json` ([format](setlist-format.md), [below](#setlists)) |
 | `<type folder>/<folder>/` | Each item of any other [item type](rfcs/0023-item-types.md) the reading device knows, in its type's folder, as the library keeps it |
 | `Assets/<first 16 hex digits of the SHA-256>/<file>` | Each sample the items' plugins use, once; in an [asset package](#asset-packages), `Assets/<path>`, the library's files at their paths |
 | `Plugins/<format>/<id>@<version>/<platform>/<bundle>` | Each plugin build the items use ([RFC 0006](rfcs/0006-packages-and-portability.md)), a file or a bundle folder as installed; characters other than letters, digits, `.`, `-`, `@` and `_` in the ID and version are `_` |
@@ -43,6 +44,61 @@ from the plugin store, and the store's builds for other platforms (installed fro
 added with `plugins.addBuild`). Only CLAP plugins go in: LV2 plugins are installed on each device (many need libraries
 outside their bundles), so an LV2 plugin, like one not on this device, is left out, and
 the export says which.
+
+## Setlists
+
+A setlist ([format](setlist-format.md)) goes in an archive as the library keeps it: its folder,
+named anything ending in `.osetlist`, under `Setlists/`, holding `setlist.json`, and an entry in the
+manifest's `items`:
+
+```json
+{"kind": "setlist", "id": "7d0c5e2a9b13f4c8", "name": "Friday", "path": "Setlists/Friday.osetlist", "signatures": []}
+```
+
+`id` is the one in the setlist's info block, `name` its name, `path` its folder. Every Performance a
+slot names goes in the same archive, as an item of kind `performance` whose `id` is the slot's; a
+reader refuses the archive otherwise. A slot for a Performance that cannot go in is written as a
+placeholder: `id` empty, `name` the Performance's.
+
+**A setlist exported** (`library.export`) is an archive of kind `setlist`, its ID and name the
+setlist's, holding the setlist, each Performance its slots name (once, however many slots name it),
+each of their parts' Sounds by the rule for an exported Performance, and every sample, plugin build
+and license text they all need, as above. A slot whose Performance is no longer in the library goes
+as a placeholder, and the export's notes say so. **A library exported** (`library.exportLibrary`) is
+of kind `library` and holds the user's own items of every type but setlists, and the setlists the
+exporter chose, with the Performances they name wherever those are.
+
+**Installed into the user's own storage**, each slot points at the copy of its Performance, made
+by the same install or, when one is still as imported, the copy already there. **As a library**,
+every ID is kept, so the slots need nothing. A setlist chosen alone (`items`) brings the
+Performances it names. Two items with one ID are handled as for Performances.
+
+**Written by hand**, an archive holding one setlist and the one Performance it names:
+
+```text
+library.json
+Performances/Bass Split.oscairn/performance.json   (and its nodes/, as the library keeps it)
+Setlists/Friday.osetlist/setlist.json
+```
+
+```json
+{"format": "oscairn.library", "version": 3, "id": "friday-set", "name": "Friday set", "kind": "library",
+ "license": "", "source": null,
+ "items": [
+  {"kind": "setlist", "id": "7d0c5e2a9b13f4c8", "name": "Friday", "path": "Setlists/Friday.osetlist", "signatures": []},
+  {"kind": "performance", "id": "3f9c0a1b2d4e5f60", "name": "Bass Split", "path": "Performances/Bass Split.oscairn", "signatures": []}
+ ],
+ "plugins": [], "assets": null, "dependencies": {"assets": []},
+ "files": {
+  "Performances/Bass Split.oscairn/performance.json": "<SHA-256 of the file, 64 lowercase hex digits>",
+  "Setlists/Friday.osetlist/setlist.json": "<SHA-256 of the file>"
+ }}
+```
+
+`files` lists every file in the archive but `library.json` and `library.sig`, each by its SHA-256;
+a file it does not list, or one that is not what it says, refuses the archive. Its slots may name
+only `3f9c0a1b2d4e5f60`, or be placeholders or empty. With `kind` `setlist` instead, `id` and `name`
+are the setlist's (`7d0c5e2a9b13f4c8`, `Friday`).
 
 ## Plugin packages
 
@@ -366,7 +422,10 @@ nothing behind:
 - a file whose SHA-256 is not the one `files` lists, a file `files` does not list or one it
   lists that is not there (but under an absent build, below), and a plugin build whose digest is
   not its own;
-- a signature that does not verify, at any level, or a malformed one.
+- a signature that does not verify, at any level, or a malformed one;
+- a setlist that does not read as its [format](setlist-format.md) says, or one of whose slots names a
+  Performance the archive does not list as an item of kind `performance` (a placeholder, with no
+  ID, names none).
 
 **An archive made for one device** (decided 2026-11-12,
 [RFC 0031](rfcs/0031-package-repository-and-distribution.md#ready-made-archives-per-platform)):

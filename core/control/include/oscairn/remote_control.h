@@ -96,6 +96,9 @@ namespace oscairn
         void auditionStop(bool keep = false) override;
         Audition audition() const override;
         std::vector<std::string> exportLibraryItem(const std::string& id, const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
+        std::vector<std::string> exportLibrary(const std::string& file, const std::string& name, const std::vector<std::string>& setlists, const ExportSigning& sign = {}) override;
+        Setlist setlist(const std::string& id) override;
+        std::string saveSetlist(const Setlist& setlist) override;
         std::vector<SigningKey> signingKeys() override;
         SigningKey makeSigningKey(const std::string& name) override;
         std::string libraryCopy(const std::string& id) override;

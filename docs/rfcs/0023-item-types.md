@@ -43,6 +43,11 @@ Where this RFC left a choice, the smaller reading was taken:
   until installed types (step 3) give the type a place to be kept. The gate's pick is the
   desktop Library's; the core test (`control-item-types`) shows the library indexing, querying,
   exporting and installing a type added in the test, and the Library's code asks for any type by kind.
+- **Setlists** are the first type built on these steps (decided 2026-11-13): `oscairn.setlist`,
+  managed, in `Setlists/<name>.osetlist/setlist.json` ([format](../setlist-format.md)). How an item
+  refers to another (the open question) is answered for this one type only: a setlist's slots name
+  Performances by library ID, an export carries them, and an install refuses an archive missing
+  one but for placeholders, and remaps them in a copy. A general way stays open.
 
 ## Problem
 

@@ -1502,16 +1502,16 @@ int main(int argc, char** argv)
                 engine.edit([](Control& c) { c.libraryRescan(); });
                 check(wait([&] { const auto all = engine.library({}); return all && all->total >= 1003; }), "the library read holds 1001 staged items");
                 standalone::Actions actions;
-                standalone::SetlistPane pane(engine, actions, data.getChildFile("Setlists-staged"));
-                const std::string setlistName = "Staged";
-                standalone::Setlist staged; staged.name = setlistName; staged.entries = {{lastId, "Z last", {}}, {"perf-gone", "Gone", {}}};
-                standalone::writeSetlist(data.getChildFile("Setlists-staged"), staged);
-                pane.open(standalone::setlistFile(data.getChildFile("Setlists-staged"), setlistName));
+                standalone::SetlistPane pane(engine, actions);
+                Control::Setlist staged; staged.info.name = "Staged"; staged.pages = {{"Page 1", {{lastId, "Z last", {}, {}}, {"perf-gone", "Gone", {}, {}}}}};
+                std::string stagedId;
+                check(engine.saveSetlist(staged, stagedId).empty(), "the staged setlist saved in the library");
+                pane.open(stagedId);
                 pane.go(0);
-                check(pane.current() == 0 && !pane.message().contains("no longer in the library"), "the last Performance opens: " + pane.message().toStdString());
+                check(pane.current() == 0 && !pane.message().contains("not in the library"), "the last Performance opens: " + pane.message().toStdString());
                 check(wait([&] { return !engine.soundBusy(); }), "it finished opening");
                 pane.go(1);
-                check(pane.current() == 0 && pane.message().contains("no longer in the library"), "a gone entry is still marked: " + pane.message().toStdString());
+                check(pane.current() == 0 && pane.message().contains("not in the library"), "a gone entry is still marked: " + pane.message().toStdString());
                 check(wait([&] { return !engine.soundBusy(); }), "the staged setlist is done opening");
             }
             // A reconnect to an engine still running (a timeout, another window) keeps its Capture
@@ -1541,6 +1541,10 @@ int main(int argc, char** argv)
                 // Stall the server from this thread: the engine's next periodic refresh cannot
                 // finish its handshake, and its timeout marks the engine disconnected.
                 engine.edit([](Control& c) { c.addMacro("Drop probe"); }); // an undo name to read
+                // The Setlist app reads its setlist through the engine: opened while it answers.
+                standalone::Actions actions;
+                standalone::SetlistPane pane(engine, actions);
+                check(standalone::slotsOf(pane.setlist()).size() == 2 && pane.current() == -1, "the staged setlist is open with nothing playing");
                 check(wait([&] { return !engine.meters().empty() && !engine.history().undo.empty() && engine.performanceInfo(); }), "the meters, undo names and Performance read before the drop: " + std::to_string(engine.meters().size()) + " " + engine.history().undo);
                 forcedHold = true;
                 check(wait([&] { return engine.jobRunning(); }), "the next refresh starts against the stalled server");
@@ -1550,10 +1554,6 @@ int main(int argc, char** argv)
                 check(engine.refusal() == "The engine is not running." && engine.soundMessage() == engine.refusal(), "a Save while disconnected says the engine is not running: " + engine.soundMessage());
                 check(engine.meters().empty() && engine.wireMeters().empty() && engine.history().undo.empty() && !engine.performanceInfo() && engine.takes().empty(),
                       "nothing read before the drop shows while disconnected");
-                const auto folder = data.getChildFile("Setlists-staged");
-                standalone::Actions actions;
-                standalone::SetlistPane pane(engine, actions, folder);
-                check(pane.setlist().entries.size() == 2 && pane.current() == -1, "the staged setlist is open with nothing playing");
                 pane.go(0);
                 check(pane.current() == -1 && pane.message().contains("not answering"), "a setlist entry says it did not open: " + pane.message().toStdString());
                 pane.step(1);

@@ -5,6 +5,7 @@
 #include "miniz/miniz.h"
 #include "oscairn/assets.h"
 #include "oscairn/item_types.h"
+#include "oscairn/setlist.h"
 #include "oscairn/library.h"
 #include <algorithm>
 #include <cctype>
@@ -556,6 +557,21 @@ namespace oscairn
                     std::string hash;
                     try { hash = contentHash(into / item.path / itemType(item.kind)->document); } catch(const std::runtime_error&) { bad("a signed item without its info: " + item.path); }
                     for(const auto& s : item.signatures) if(!signing::verify(s, signing::itemMessage(hash))) bad("an item's signature does not verify: " + item.path);
+                }
+                // A setlist's slots name Performances the archive holds; a placeholder names none (docs/setlist-format.md).
+                for(const auto& item : p.items)
+                {
+                    if(item.kind != "setlist") continue;
+                    const auto file = into / item.path / "setlist.json";
+                    std::error_code e;
+                    if(fs::file_size(file, e) > (1u << 20)) bad("a setlist larger than 1 MiB: " + item.path);
+                    std::ifstream in(file, std::ios::binary);
+                    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                    Control::Setlist setlist;
+                    try { setlist = readSetlist(bytes); } catch(const std::runtime_error& x) { bad("the setlist " + item.path + " cannot be read: " + x.what()); }
+                    for(const auto& id : setlistPerformances(setlist))
+                        if(std::none_of(p.items.begin(), p.items.end(), [&](const Package::Item& i) { return i.kind == "performance" && i.id == id; }))
+                            bad("the setlist " + item.name + " names a Performance the archive does not hold: " + id);
                 }
             }
             return p;

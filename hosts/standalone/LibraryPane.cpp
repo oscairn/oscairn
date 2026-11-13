@@ -290,7 +290,7 @@ namespace oscairn::standalone
     LibraryPane::LibraryPane(Engine& engine, Actions& actions, Mode mode, const std::string& kind) : engine_(engine), actions_(actions), mode_(mode)
     {
         query_.kind = kind;
-        kind_.onChoose = [this](int i) { showKind(i ? "sound" : "performance"); };
+        kind_.onChoose = [this](int i) { showKind(i == 0 ? "performance" : i == 1 ? "sound" : "setlist"); };
         part_.onClick = [this] { newPart(list_.getSelectedRow()); };
         search_.setJustification(juce::Justification::centredLeft); search_.setIndents(10, 0);
         search_.onTextChange = [this] { query_.text = search_.getText().toStdString(); refresh(); };
@@ -315,7 +315,7 @@ namespace oscairn::standalone
         options_.onClick = [this] { itemMenu(list_.getSelectedRow()); };
         options_.setTooltip("Options: everything for the selected item (edit, color, copy, delete). A right click or a long press on a row does the same");
         libraries_.onClick = [this] { librariesMenu(); };
-        libraries_.setTooltip("The installed libraries and plugins, to uninstall one, or show a hidden tag");
+        libraries_.setTooltip("The installed libraries and plugins, to uninstall one, show a hidden tag, or export your library");
         install_.onClick = [this] { installMenu(); };
         install_.setTooltip("Install from the Catalog, or from a file");
         for(auto* c : std::initializer_list<juce::Component*>{&search_, &filters_, &compactButton_, &sideView_, &list_, &options_, &audition_, &status_}) addAndMakeVisible(c);
@@ -343,9 +343,9 @@ namespace oscairn::standalone
         if(query_.kind != kind) query_.tags.clear();
         query_.kind = kind;
         const bool sound = kind == "sound";
-        performances_.setToggleState(!sound, juce::dontSendNotification); sounds_.setToggleState(sound, juce::dontSendNotification);
+        performances_.setToggleState(kind == "performance", juce::dontSendNotification); sounds_.setToggleState(sound, juce::dontSendNotification); setlists_.setToggleState(kind == "setlist", juce::dontSendNotification);
         updatePlaceholder();
-        send_.setVisible(mode_ == Mode::Play && !sound && actions_.offered(sendPerformance));
+        send_.setVisible(mode_ == Mode::Play && kind == "performance" && actions_.offered(sendPerformance));
         part_.setVisible(mode_ == Mode::Play && sound);
         updateButtons();
         refresh();
@@ -445,7 +445,7 @@ namespace oscairn::standalone
         if(awaiting_) { awaiting_ = false; tell(text(engine_.soundMessage())); } // what an install or export did, or why not
         if(message_.isEmpty()) status_.setText(juce::String(result_.total) + " " + noun(query_.kind, result_.total != 1), juce::dontSendNotification);
         const bool none = result_.total == 0 && query_.text.empty() && query_.tags.empty() && !query_.favorites && !query_.recent && query_.source.empty();
-        if(none) empty.setText(libraryEmpty(sound, installedPluginPackages(engine_)), juce::dontSendNotification);
+        if(none) empty.setText(query_.kind == "setlist" ? juce::String("No setlists yet. The Setlist app makes them.") : libraryEmpty(sound, installedPluginPackages(engine_)), juce::dontSendNotification);
         empty.setVisible(none); browse.setVisible(none && mode_ == Mode::Play);
         rebuildSide();
         updateButtons();
@@ -609,7 +609,7 @@ namespace oscairn::standalone
     void LibraryPane::startAudition(int row)
     {
         const auto* item = at(row);
-        if(!item) return;
+        if(!item || (item->kind != "sound" && item->kind != "performance")) return; // a Sound or a Performance is tried, nothing else
         // One engine job at a time: what is asked while another loads would be lost.
         if(engine_.soundBusy()) { tell("Still loading; try again in a moment."); return; }
         SoundAction start; start.kind = SoundAction::AuditionStart; start.libraryId = item->id;
@@ -807,8 +807,8 @@ namespace oscairn::standalone
             menu.addItem(1, "Open");
             if(actions_.offered(sendPerformance)) menu.addItem(2, "Add to setlist");
         }
-        else menu.addItem(3, "New part");
-        menu.addItem(9, auditioning_.id == item.id ? "Stop audition" : "Audition");
+        else if(item.kind == "sound") menu.addItem(3, "New part");
+        if(item.kind == "performance" || item.kind == "sound") menu.addItem(9, auditioning_.id == item.id ? "Stop audition" : "Audition");
         menu.addItem(4, item.favorite ? "Remove from favorites" : "Add to favorites");
         menu.addSeparator();
         menu.addItem(5, "Edit name, description and tags...", own);
@@ -911,6 +911,55 @@ namespace oscairn::standalone
             });
     }
 
+    // The library to take to another device: the user's own items, and the setlists chosen here
+    // with the Performances they name; every Sound, sample and plugin they use.
+    void LibraryPane::exportLibrary()
+    {
+        Control::LibraryQuery q; q.limit = 1000; q.types = {"oscairn.setlist"};
+        const auto found = engine_.library(q);
+        if(!found) { tell("The engine is busy; try again in a moment."); return; }
+        struct Choices : juce::Viewport
+        {
+            juce::Component list;
+            juce::OwnedArray<juce::ToggleButton> boxes;
+            std::vector<std::string> ids;
+            Choices() { setViewedComponent(&list, false); setScrollBarsShown(true, false); }
+        };
+        auto choices = std::make_unique<Choices>();
+        for(const auto& s : found->items)
+        {
+            auto* box = choices->boxes.add(new juce::ToggleButton(text(s.name.empty() ? "Untitled" : s.name)));
+            box->setBounds(0, int(choices->ids.size()) * 28, 340, 26);
+            choices->list.addAndMakeVisible(box); choices->ids.push_back(s.id);
+        }
+        choices->list.setSize(340, int(found->items.size()) * 28);
+        choices->setSize(360, std::min(280, std::max(28, int(found->items.size()) * 28)));
+        auto* w = new juce::AlertWindow("Export library", found->items.empty() ? juce::String("Your own Performances and Sounds, with every sample and plugin they use.")
+                                                                               : juce::String("Your own Performances and Sounds, and the setlists chosen here with the Performances they name:"), juce::MessageBoxIconType::NoIcon, this);
+        w->addTextEditor("name", "My library", "Name");
+        if(!found->items.empty()) w->addCustomComponent(choices.get());
+        w->addButton("Export...", 1, juce::KeyPress(juce::KeyPress::returnKey)); w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        keepInScreen(*w);
+        exportChoices_ = std::move(choices);
+        w->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<LibraryPane>(this), w](int result) {
+            if(!safe) return;
+            std::vector<std::string> chosen;
+            if(auto* c = dynamic_cast<Choices*>(safe->exportChoices_.get()))
+                for(int i = 0; i < c->boxes.size(); ++i) if(c->boxes[i]->getToggleState()) chosen.push_back(c->ids[size_t(i)]);
+            const auto name = w->getTextEditorContents("name").trim();
+            if(result != 1) return;
+            safe->chooser_ = std::make_unique<juce::FileChooser>("Export library", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile((name.isEmpty() ? juce::String("Library") : name) + ".olib"), "*.olib");
+            safe->chooser_->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                [safe, chosen, name](const juce::FileChooser& fc) {
+                    if(!safe || fc.getResult() == juce::File()) return;
+                    auto file = fc.getResult(); if(!file.hasFileExtension("olib")) file = file.withFileExtension("olib");
+                    SoundAction out; out.kind = SoundAction::ExportLibrary; out.directory = file.getFullPathName().toStdString(); out.items = chosen; out.choice.name = name.toStdString();
+                    safe->engine_.soundAction(std::move(out));
+                    safe->tell("Exporting..."); safe->stale_ = true; safe->awaiting_ = true;
+                });
+        }), true);
+    }
+
     void LibraryPane::deleteItem(int row)
     {
         const auto* found = at(row);
@@ -935,6 +984,7 @@ namespace oscairn::standalone
         juce::PopupMenu hidden;
         const auto hiddenTags = result_.hiddenTags;
         for(size_t i = 0; i < hiddenTags.size(); ++i) hidden.addItem(1000 + int(i), text(hiddenTags[i]));
+        menu.addItem(1, "Export library...");
         menu.addSubMenu("Show a hidden tag", hidden, !hiddenTags.empty());
         // Plugins installed with archives (RFC 0006): what uses each, another platform's build, removal.
         auto plugins = engine_.installedPlugins();
@@ -974,6 +1024,7 @@ namespace oscairn::standalone
             menu.addItem(int(i) + 2, "Uninstall " + text(installed[i].name) + " (" + juce::String(int(installed[i].items)) + (installed[i].items == 1 ? " item)" : " items)"));
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraries_), [safe = juce::Component::SafePointer<LibraryPane>(this), installed, hiddenTags, plugins](int chosen) {
             if(!safe || chosen <= 0) return;
+            if(chosen == 1) { safe->exportLibrary(); return; }
             if(chosen >= 100000)
             {
                 const auto& plugin = plugins[size_t((chosen - 100000) / 2)];

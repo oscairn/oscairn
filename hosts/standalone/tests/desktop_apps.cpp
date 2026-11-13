@@ -15,6 +15,7 @@
 #include "../Launcher.h"
 #include "../LibraryPane.h"
 #include "../Setlist.h"
+#include "oscairn/setlist.h"
 #include "EngineProcess.h"
 #include "oscairn/local_socket.h"
 #include "oscairn/session.h"
@@ -99,7 +100,12 @@ int main(int argc, char** argv)
             std::erase_if(apps, [](const auto& a) { return a.id != "oscairn.setlist"; }); // the Settings app beside it has a test of its own
             check(apps.size() == 1 && apps[0].id == "oscairn.setlist" && apps[0].executable.existsAsFile() && apps[0].maximum == 400 && apps[0].permissions == std::vector<std::string>{"play", "library"}, "the Setlist's manifest is found in the folder, with its build for this platform and its permissions");
             const auto setlists = data.getChildFile("Setlists");
-            auto saved = [&] { try { return standalone::readSetlist(standalone::setlistFile(setlists, "Setlist")).entries.size(); } catch(const std::exception&) { return size_t(0); } };
+            // The setlist the app saved through the library (docs/setlist-format.md).
+            auto savedSetlist = [&] {
+                for(const auto& f : setlists.findChildFiles(juce::File::findDirectories, false, "*.osetlist")) return oscairn::readSetlist(f.getChildFile("setlist.json").loadFileAsString().toStdString());
+                throw std::runtime_error("no setlist");
+            };
+            auto saved = [&] { try { return standalone::slotsOf(savedSetlist()).size(); } catch(const std::exception&) { return size_t(0); } };
             {
                 std::vector<standalone::AppProcesses::Notice> notices;
                 standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_TEST_PICK=1"});
@@ -114,8 +120,8 @@ int main(int argc, char** argv)
                 check(wait([&] { return answer != "?"; }) && answer == "Added to Setlist", "the send crossed into the app: " + answer);
                 // The app's pick, asked at its start, crosses back: the shell's Library answers.
                 check(wait([&] { return saved() == 2; }) && picks == 1, "the app's pick was answered across the boundary, and filled a slot");
-                const auto first = standalone::readSetlist(standalone::setlistFile(setlists, "Setlist"));
-                check(first.entries.size() == 2 && first.entries[0].name == "Verse Keys" && first.entries[1].name == "Bass Split", "in order: the send, then the pick");
+                const auto first = standalone::slotsOf(savedSetlist());
+                check(first.size() == 2 && first[0].name == "Verse Keys" && first[1].name == "Bass Split", "in order: the send, then the pick");
                 // Previous and Next from Play: it steps, and says what plays.
                 answer = "?";
                 actions.request(standalone::stepSetlist, "1", [&](const std::string& a) { answer = a; });

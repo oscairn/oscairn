@@ -6,6 +6,7 @@
 #include "CurveJson.h"
 #include "oscairn/discovery.h"
 #include "oscairn/item_types.h"
+#include "oscairn/setlist.h"
 #include "oscairn/package.h"
 #include "oscairn/unavailable_plugin.h"
 #include "oscairn/sound_context.h"
@@ -391,23 +392,77 @@ std::vector<std::string> Session::exportLibraryItem(const std::string& id,const 
     const auto* found=library().find(id);
     if(!found)bad("no such library item");
     const auto item=*found;
-    return exportArchive(file,item.kind,[&](const fs::path& stage,Package& package){
-        const auto folder=fs::path(typeOf(item.kind).folder)/fs::path(item.path).filename();
-        fs::create_directories((stage/folder).parent_path());fs::copy(item.path,stage/folder,fs::copy_options::recursive);
+    std::vector<std::string> staged;
+    auto notes=exportArchive(file,item.kind,[&](const fs::path& stage,Package& package){
         package.id=item.id;package.name=item.name;
-        package.items.push_back({item.kind,item.id,item.name,folder.generic_string()});
-        // A Performance's parts, as saved: where each came from.
         std::vector<PartSource> from;
-        if(item.kind=="performance"){
-            const auto bytes=state_files::read(stage/folder/"performance.json",4*1024*1024);
-            const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
-            if(!doc)bad("invalid JSON in "+item.path);
-            for(auto part:array(field(doc.get(),"parts"),1024))
-                if(const auto* f=member(part,"from");f && f->type==json_type_object)from.push_back({text(field(f,"sound")),text(field(f,"revision")),text(field(f,"name")),boolean(field(f,"modified"))});
-        }
+        stageItem(item,stage,package,from,staged);
         return from;
     },editedSounds,sign);
+    notes.insert(notes.begin(),staged.begin(),staged.end());
+    return notes;
 }
+
+// A library item into an export's stage as the library keeps it, once, in its type's folder
+// under a name no other item there has. A Performance adds where its parts came from to `from`;
+// a setlist brings each Performance its slots name, and a slot whose Performance is not in the
+// library goes as a placeholder, said in notes (docs/setlist-format.md).
+void Session::stageItem(const LibraryItem& item,const fs::path& stage,Package& package,std::vector<PartSource>& from,std::vector<std::string>& notes) {
+    if(std::any_of(package.items.begin(),package.items.end(),[&](const auto& i){return i.id==item.id;}))return;
+    const auto type=typeOf(item.kind);
+    const auto name=fs::path(item.path).filename();
+    auto folder=fs::path(type.folder)/name;
+    for(int n=2;fs::exists(stage/folder);++n)folder=fs::path(type.folder)/(name.stem().string()+" "+std::to_string(n)+name.extension().string()); // a user's item and a library's of one name
+    fs::create_directories((stage/folder).parent_path());fs::copy(item.path,stage/folder,fs::copy_options::recursive);
+    package.items.push_back({item.kind,item.id,item.name,folder.generic_string()});
+    if(item.kind=="performance"){
+        // Its parts, as saved: where each came from.
+        const auto bytes=state_files::read(stage/folder/type.document,4*1024*1024);
+        const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
+        if(!doc)bad("invalid JSON in "+item.path);
+        for(auto part:array(field(doc.get(),"parts"),1024))
+            if(const auto* f=member(part,"from");f && f->type==json_type_object)from.push_back({text(field(f,"sound")),text(field(f,"revision")),text(field(f,"name")),boolean(field(f,"modified"))});
+    }
+    if(item.kind=="setlist"){
+        const auto bytes=state_files::read(stage/folder/type.document,1024*1024);
+        auto setlist=readSetlist({reinterpret_cast<const char*>(bytes.data()),bytes.size()});
+        bool placeholders=false;
+        for(auto& page:setlist.pages)for(auto& slot:page.slots){
+            if(slot.empty || slot.id.empty())continue;
+            const auto* performance=library().find(slot.id);
+            if(performance && performance->kind=="performance"){const auto p=*performance;stageItem(p,stage,package,from,notes);continue;}
+            notes.push_back((slot.name.empty()?std::string("A Performance"):slot.name)+" in "+(item.name.empty()?std::string("the setlist"):item.name)+" is not in the library: it goes as a placeholder");
+            slot.id.clear();if(slot.name.empty())slot.name="Untitled";placeholders=true;
+        }
+        if(placeholders)writeSetlist(stage/folder,setlist);
+    }
+}
+
+std::vector<std::string> Session::exportLibrary(const std::string& file,const std::string& name,const std::vector<std::string>& setlists,const ExportSigning& sign) {
+    auto& l=library();
+    l.rescan();
+    for(const auto& id:setlists){const auto* s=l.find(id);if(!s || s->kind!="setlist")bad("no such setlist in the library: "+id);}
+    // Its ID: its name made plain (a library's folder when installed, docs/library-archive.md), so exporting it again makes the next version of it.
+    const auto title=name.empty()?fs::path(file).stem().string():name;
+    std::string id;
+    for(const char c:title)if(id.size()<64)id+=(std::isalnum(static_cast<unsigned char>(c)) || c=='.' || c=='_')?c:'-';
+    while(!id.empty() && !std::isalnum(static_cast<unsigned char>(id.front())))id.erase(id.begin());
+    while(!id.empty() && id.back()=='.')id.pop_back();
+    if(id.empty())id="library";
+    std::vector<std::string> staged;
+    auto notes=exportArchive(file,"library",[&](const fs::path& stage,Package& package){
+        package.id=id;package.name=title;
+        std::vector<PartSource> from;
+        // The user's own items of every type but setlists, then the setlists chosen, with what they name.
+        const auto items=l.items();
+        for(const auto& item:items)if(item.library.empty() && item.kind!="setlist")stageItem(item,stage,package,from,staged);
+        for(const auto& s:setlists)if(const auto* item=l.find(s)){const auto copy=*item;stageItem(copy,stage,package,from,staged);}
+        return from;
+    },false,sign);
+    notes.insert(notes.begin(),staged.begin(),staged.end());
+    return notes;
+}
+
 
 // An archive of what write puts in the stage, with the Sounds of the parts it reports (each only
 // while the part is still that Sound, that revision the library's; an edited part's when asked)
@@ -423,8 +478,10 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
     try{
         Package package;package.kind=kind;
         const auto from=write(stage,package);
-        std::vector<fs::path> manifests{stage/package.items.front().path/documentOf(kind)};
+        std::vector<fs::path> manifests;
+        for(const auto& i:package.items)manifests.push_back(stage/i.path/documentOf(i.kind));
         std::set<std::string> sounds;
+        for(const auto& i:package.items)sounds.insert(i.id); // in it already
         for(const auto& f:from){
             if(f.sound.empty() || (f.modified && !editedSounds) || sounds.count(f.sound))continue;
             const auto* item=library().find(f.sound);
@@ -2010,6 +2067,13 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         if(asLibrary){std::error_code e;for(const auto& entry:fs::directory_iterator(l.libraries(),e))
             if(entry.path().filename()!=p.id && fs::equivalent(entry.path(),l.libraries()/p.id,e))bad("another library is installed in that folder: "+entry.path().filename().string());}
         auto manifest=[&](const Package::Item& i){return into/i.path/documentOf(i.kind);};
+        // A setlist chosen brings the Performances its slots name (readPackage: all in the archive).
+        for(size_t n=0;n<items.size();++n)if(items[n].kind=="setlist"){
+            const auto bytes=state_files::read(manifest(items[n]),1024*1024);
+            for(const auto& id:setlistPerformances(readSetlist({reinterpret_cast<const char*>(bytes.data()),bytes.size()})))
+                if(std::none_of(items.begin(),items.end(),[&](const auto& i){return i.id==id;}))
+                    if(const auto at=std::find_if(p.items.begin(),p.items.end(),[&](const auto& i){return i.id==id;});at!=p.items.end())items.push_back(*at);
+        }
         // Each item is what it says it is.
         for(const auto& i:items){const auto info=readInfo(manifest(i),formatOf(i.kind));if(info.id!=i.id)bad("the item "+i.name+" is not the one its archive lists");}
         // The plugins they use, and who signed each build that would go into the store (RFC 0006),
@@ -2144,9 +2208,11 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             // Listed only once its items are all there.
             writeAtomically(root/"library.json",manifestJson(p));
         }else if(!pluginPackage){
-            // The user's own, under new IDs: Sounds first, so the Performances that came with them point at their copies.
+            // The user's own, under new IDs: Sounds first, so the Performances that came with them point at their copies,
+            // and setlists after the Performances, so their slots do.
             std::map<std::string,std::string> ids; // the archive's item ID -> the copy's
-            std::stable_sort(items.begin(),items.end(),[](const auto& a,const auto& b){return a.kind=="sound" && b.kind!="sound";});
+            const auto rank=[](const std::string& kind){return kind=="sound"?0:kind=="performance"?1:2;};
+            std::stable_sort(items.begin(),items.end(),[&](const auto& a,const auto& b){return rank(a.kind)<rank(b.kind);});
             l.rescan();
             for(const auto& i:items){
                 const auto copy=std::find_if(l.items().begin(),l.items().end(),[&](const LibraryItem& x){return x.library.empty() && x.origin.library==p.id && x.origin.item==i.id;});
@@ -2160,6 +2226,14 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                     // The search goes on after the replacement, which may hold the needle itself.
                     const auto bytes=state_files::read(doc,4*1024*1024);std::string text(bytes.begin(),bytes.end());
                     for(const auto& [from,id]:ids){const std::string needle="\"sound\":"+quote(from),with="\"sound\":"+quote(id);for(auto at=text.find(needle);at!=std::string::npos;at=text.find(needle,at+with.size()))text.replace(at,needle.size(),with);}
+                    state_files::write(doc,text.data(),text.size());
+                }
+                if(i.kind=="setlist"){
+                    // Slots point at the Performances' copies.
+                    const auto bytes=state_files::read(doc,1024*1024);
+                    auto setlist=readSetlist({reinterpret_cast<const char*>(bytes.data()),bytes.size()});
+                    for(auto& page:setlist.pages)for(auto& slot:page.slots)if(const auto copy=ids.find(slot.id);!slot.empty && copy!=ids.end())slot.id=copy->second;
+                    const auto text=setlistJson(setlist);
                     state_files::write(doc,text.data(),text.size());
                 }
                 auto info=readInfo(doc,formatOf(i.kind));
@@ -2452,6 +2526,35 @@ std::string Session::libraryCopy(const std::string& id) {
     }catch(...){std::error_code ignored;fs::remove_all(to,ignored);throw;}
 }
 
+Control::Setlist Session::setlist(const std::string& id) {
+    const auto* item=library().find(id);
+    if(!item || item->kind!="setlist")bad("no such setlist in the library");
+    const auto bytes=state_files::read(fs::path(item->path)/documentOf("setlist"),1024*1024);
+    auto s=readSetlist({reinterpret_cast<const char*>(bytes.data()),bytes.size()});
+    s.info.id=item->id; // a copied folder's first one is the one listed
+    return s;
+}
+
+std::string Session::saveSetlist(const Setlist& given) {
+    auto& l=library();
+    auto s=given;
+    checkInfo(s.info);
+    const auto* item=s.info.id.empty()?nullptr:l.find(s.info.id);
+    if(item && (item->kind!="setlist" || !item->library.empty()))item=nullptr; // a locked library's: saved as a new one of the user's own
+    fs::path folder;
+    if(item){
+        folder=item->path;
+        const auto was=readInfo(folder/documentOf("setlist"),formatOf("setlist"));
+        s.info.parent=was.revision;s.info.origin=was.origin;
+    }else{
+        s.info.id=freshId();s.info.parent.clear();s.info.origin={};
+        folder=l.newFolder(s.info.name,"setlist");
+    }
+    s.info.revision=freshId();
+    writeSetlist(folder,s);
+    l.rescan();
+    return s.info.id;
+}
 void Session::loadPerformanceFromLibrary(const std::string& id) {
     auto& l=library();
     const auto* item=l.find(id);

@@ -10,7 +10,7 @@ namespace oscairn
 {
     /// An item type (RFC 0023): what a kind of item is, read from its manifest, so the library,
     /// archives and pickers handle every type the same way instead of naming kinds. Oscairn's own
-    /// (Performance, Sound and sample) are manifests built into the app.
+    /// (Performance, Sound, setlist and sample) are manifests built into the app.
     struct ItemType
     {
         std::string id, name, plural;

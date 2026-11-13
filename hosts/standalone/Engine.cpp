@@ -379,7 +379,7 @@ namespace oscairn::standalone
         // and said: a dropped Save must not look saved.
         if(const auto why=refusal();!why.empty() && (!connected() || action.kind!=SoundAction::PrepareFromLibrary)){soundMessage_=why;if(action.done)action.done(why);return;}
         if((action.kind==SoundAction::Prepare || action.kind==SoundAction::PrepareFromLibrary || action.kind==SoundAction::Replace || action.kind==SoundAction::SavePerformance || action.kind==SoundAction::LoadPerformance || action.kind==SoundAction::SaveToLibrary || action.kind==SoundAction::LoadFromLibrary || action.kind==SoundAction::SaveSound || action.kind==SoundAction::LoadSound || action.kind==SoundAction::PartFromSound || action.kind==SoundAction::ImportPerformance ||
-            action.kind==SoundAction::ExportPerformance || action.kind==SoundAction::InstallArchive || action.kind==SoundAction::AuditionStart || action.kind==SoundAction::AuditionStop) && !canPrepareSounds())
+            action.kind==SoundAction::ExportPerformance || action.kind==SoundAction::ExportLibrary || action.kind==SoundAction::InstallArchive || action.kind==SoundAction::AuditionStart || action.kind==SoundAction::AuditionStop) && !canPrepareSounds())
         {
             soundMessage_="Preparation requires the separate engine. Relaunch without --in-process.";
             if(action.done)action.done(soundMessage_);
@@ -413,7 +413,7 @@ namespace oscairn::standalone
         // The engine refuses to write over a file: an export to one the musician chose to replace
         // goes beside it first, and replaces it only once written (finishSounds), so a failed
         // or refused export keeps the old archive.
-        if(action.kind==SoundAction::ExportPerformance && juce::File(action.directory).existsAsFile())
+        if((action.kind==SoundAction::ExportPerformance || action.kind==SoundAction::ExportLibrary) && juce::File(action.directory).existsAsFile())
         {
             const juce::File target(action.directory);
             const auto folder=target.getSiblingFile(".oscairn-export").getNonexistentSibling(false);
@@ -652,6 +652,18 @@ namespace oscairn::standalone
         if(!connected()) return "The engine is not running.";
         if(!controlReady()) return "The engine is busy; try again in a moment."; // a 30 s call would wait on the job
         try{copied=control_->libraryCopy(id);return {};}catch(const std::exception& e){return e.what();}
+    }
+    std::string Engine::setlist(const std::string& id, Control::Setlist& out) const
+    {
+        if(!connected()) return "The engine is not running.";
+        if(!controlReady()) return "The engine is busy; try again in a moment.";
+        try{out=control_->setlist(id);return {};}catch(const std::exception& e){return e.what();}
+    }
+    std::string Engine::saveSetlist(const Control::Setlist& setlist, std::string& id)
+    {
+        if(!connected()) return "The engine is not running.";
+        if(!controlReady()) return "The engine is busy; try again in a moment.";
+        try{id=control_->saveSetlist(setlist);return {};}catch(const std::exception& e){return e.what();}
     }
     std::vector<Control::InstalledPlugin> Engine::installedPlugins() const
     {

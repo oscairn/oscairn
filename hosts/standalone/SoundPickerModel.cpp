@@ -133,6 +133,7 @@ namespace oscairn::standalone
         const std::string signedNote = sign ? " Signed with " + action.signKey + "." : "";
         if(action.kind == SoundAction::ExportPerformance && !action.libraryId.empty()) return withNotes("Exported." + signedNote, control.exportLibraryItem(action.libraryId,action.directory,action.asNew,signing));
         if(action.kind == SoundAction::ExportPerformance) return withNotes("Performance exported." + signedNote, control.exportPerformance(action.directory,action.asNew,signing));
+        if(action.kind == SoundAction::ExportLibrary) return withNotes("Library exported." + signedNote, control.exportLibrary(action.directory,action.choice.name,action.items,signing));
         if(action.kind == SoundAction::InstallArchive){
             const auto r=control.installArchive(action.directory,action.asNew,action.items,action.acceptCode);
             std::string message="Installed "+std::to_string(r.added)+(r.skipped?", "+std::to_string(r.skipped)+" already here":"")+".";

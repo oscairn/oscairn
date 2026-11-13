@@ -1220,8 +1220,32 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   open one is refused.
 - `library.export` takes `{id,file}` and optional `editedSounds` and `sign`, and returns the same: a
   library item as it is saved, without opening it. A Performance comes with its parts' Sounds
-  by the same rule (from what its file records), a Sound alone; with every sample and plugin they
+  by the same rule (from what its file records), a Sound alone, a setlist with every Performance
+  its slots name and their parts' Sounds (a slot whose Performance is not in the library goes as
+  a placeholder, said in `notes`); with every sample and plugin they
 use.
+- `library.exportLibrary` takes `{file}` and optional `name`, `setlists` (setlist IDs) and `sign`,
+  and returns the same: the library as one archive of kind `library`, holding every item of the
+  user's own but setlists, and the setlists named (the caller's choice) with the Performances
+  their slots name, wherever those are; with every Sound, sample and plugin they use. Its ID is
+  `name` made plain (other characters `-`; `library` when nothing is left), so exporting it again
+  makes the next version of the same library ([format](library-archive.md#setlists)). An ID in
+  `setlists` that is not a setlist's is refused.
+
+### Setlists
+
+A setlist ([format](setlist-format.md)) is a library item of the type `oscairn.setlist`: listed by
+`library.query` (`type` `oscairn.setlist`), edited, copied, deleted, exported and installed as any
+other item. Its contents go through these methods, each the whole document:
+
+- `setlists.get` takes `{id}` and returns `{setlist}`: the document as the library keeps it.
+- `setlists.save` takes `{setlist}`, a version 2 document, and returns `{id}`. Its `info.id` names
+  the user's own setlist to save over, as its next revision (`parent` the one before); otherwise
+  (no ID, an ID no setlist of the user's has, or a locked library's) it is a new setlist with a new ID. `info`'s `name`, `description`,
+  `tags` and `color` are taken; `revision`, `parent`, `hash` and `origin` are the library's. A
+  document that breaks a rule of the format is refused (`-32602`). A request is at most 64 KiB.
+
+The typed methods are `Control::setlist`, `saveSetlist` and `exportLibrary`.
 
 ### Libraries
 

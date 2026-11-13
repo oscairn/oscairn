@@ -1,4 +1,4 @@
-add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)
+add_library(oscairn_control STATIC src/session.cpp src/performance.cpp src/parts.cpp src/pads.cpp src/physical_controls.cpp src/controller_mapping.cpp src/controller_input.cpp src/control_surface.cpp src/undo.cpp src/library.cpp src/item_types.cpp src/setlist.cpp src/package.cpp src/libraries.cpp src/repository.cpp src/packages.cpp src/preinstall.cpp src/budget.cpp src/audition.cpp src/signing.cpp src/trust.cpp third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)
 set_source_files_properties(third_party/miniz/miniz.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c PROPERTIES COMPILE_OPTIONS "-w") # vendored, unmodified
 target_include_directories(oscairn_control SYSTEM PRIVATE third_party)
 target_include_directories(oscairn_control PUBLIC include)
@@ -30,6 +30,12 @@ add_executable(oscairn-item-types-test tests/item_types.cpp)
 target_link_libraries(oscairn-item-types-test PRIVATE oscairn_control)
 target_compile_options(oscairn-item-types-test PRIVATE -Wall -Wextra)
 add_test(NAME control-item-types COMMAND oscairn-item-types-test)
+
+add_executable(oscairn-setlists-test tests/setlists.cpp)
+target_link_libraries(oscairn-setlists-test PRIVATE oscairn_control)
+target_compile_options(oscairn-setlists-test PRIVATE -Wall -Wextra)
+add_test(NAME control-setlists COMMAND oscairn-setlists-test $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(control-setlists PROPERTIES TIMEOUT 60)
 
 add_executable(oscairn-signing-test tests/signing.cpp)
 target_link_libraries(oscairn-signing-test PRIVATE oscairn_control)

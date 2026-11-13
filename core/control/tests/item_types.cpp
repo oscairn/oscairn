@@ -45,6 +45,9 @@ int main()
               "the Performance type, by ID");
         check(sound && sound->id == "oscairn.sound" && sound->folder == "Sounds" && sound->suffix == ".osound" && sound->document == "sound.json" && sound->version == 8,
               "the Sound type, by kind");
+        const auto setlist = itemType("oscairn.setlist");
+        check(setlist && setlist->kind() == "setlist" && setlist->folder == "Setlists" && setlist->suffix == ".osetlist" && setlist->document == "setlist.json" && setlist->version == 2 && setlist->indexed(),
+              "the setlist type");
         check(sample && sample->storage == "content" && sample->identity == "content" && sample->folder == "Assets" && !sample->indexed(), "the sample type, stored by content");
         check(!itemType("pattern") && !itemType("org.example.pattern"), "no other type until one is added");
 
@@ -72,7 +75,7 @@ int main()
 
         // Adding a type: never over another's ID or folder.
         addItemType(pattern);
-        check(itemType("org.example.pattern") && itemTypes().size() == 4, "a type added is known");
+        check(itemType("org.example.pattern") && itemTypes().size() == 5, "a type added is known");
         bool twice = false; try { addItemType(pattern); } catch(const std::invalid_argument&) { twice = true; }
         check(twice, "a type added twice is refused");
         auto clash = readItemType(manifest(R"("id":"org.example.pattern")", R"("id":"org.example.other")"));

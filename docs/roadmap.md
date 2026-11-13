@@ -373,6 +373,10 @@ Decided 2026-11-08, from what the milestone test found:
    - [x] RFC 0022 step 2: the Setlist as a program of its own, started from its manifest and
      supervised by the shell (restarts, the hang rule, its memory maximum, its log), its pick and
      send over the control API
+   - [x] **setlists as library items** ([format](setlist-format.md), an RFC 0023 item type):
+     named pages of slots, with empty slots, labels and placeholders; exported with their
+     Performances and everything those need, installed with the slots pointing at the copies; a
+     library export with the setlists chosen; the Setlist app's old files converted at startup
    - [x] **where a Sound came from:** each part records the Sound and revision it was loaded
      from; **Save** writes that Sound's next revision, **Save As New** makes another, the
      parts list marks a part edited since (`*`), and **Update from library** loads a newer

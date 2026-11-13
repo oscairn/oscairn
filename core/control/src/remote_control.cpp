@@ -4,6 +4,7 @@
 #include "sheredom/json.h"
 #include "JsonInput.h"
 #include "CurveJson.h"
+#include "oscairn/setlist.h"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -690,6 +691,20 @@ namespace oscairn
     std::vector<std::string> RemoteControl::exportLibraryItem(const std::string& id,const std::string& file,bool editedSounds,const ExportSigning& sign) {
         auto d=impl_->call("library.export","{\"id\":"+quote(id)+",\"file\":"+quote(file)+",\"editedSounds\":"+(editedSounds?"true":"false")+signing(sign)+'}',120000);
         return strings(field(field(d.get(),"result"),"notes"));
+    }
+    std::vector<std::string> RemoteControl::exportLibrary(const std::string& file,const std::string& name,const std::vector<std::string>& setlists,const ExportSigning& sign) {
+        auto d=impl_->call("library.exportLibrary","{\"file\":"+quote(file)+",\"name\":"+quote(name)+",\"setlists\":"+quoted(setlists)+signing(sign)+'}',120000);
+        return strings(field(field(d.get(),"result"),"notes"));
+    }
+    Control::Setlist RemoteControl::setlist(const std::string& id) {
+        auto d=impl_->call("setlists.get","{\"id\":"+quote(id)+'}',30000);
+        const std::unique_ptr<char,decltype(&std::free)> text{static_cast<char*>(json_write_minified(field(field(d.get(),"result"),"setlist"),nullptr)),&std::free};
+        if(!text)throw std::runtime_error("the engine sent no setlist");
+        return readSetlist(text.get());
+    }
+    std::string RemoteControl::saveSetlist(const Setlist& setlist) {
+        auto d=impl_->call("setlists.save","{\"setlist\":"+setlistJson(setlist)+'}',30000);
+        return string(field(field(d.get(),"result"),"id"));
     }
     std::vector<Control::SigningKey> RemoteControl::signingKeys() {
         auto d=impl_->call("keys.list","{}");std::vector<SigningKey> out;

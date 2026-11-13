@@ -2965,6 +2965,158 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "library.exportLibrary",
+              "description": "The library as one archive file (kind library): the user's own items of every type but setlists, and the setlists named with the Performances they name; every Sound, sample and plugin they use. Refuses a file that exists"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "setlists": {
+                  "type": "array",
+                  "maxItems": 1000,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "sign": {
+                  "type": "object",
+                  "description": "Signs with the signing key named: each item, the whole archive, or both",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "items": {
+                      "type": "boolean"
+                    },
+                    "archive": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "setlists.get",
+              "description": "A setlist from the library, as its document (docs/setlist-format.md)"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
+              "const": "setlists.save",
+              "description": "Saves a setlist document (docs/setlist-format.md) over the user's own setlist with its info.id, as its next revision, else as a new one; returns its ID"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "setlist": {
+                  "type": "object",
+                  "required": [
+                    "format",
+                    "version",
+                    "info",
+                    "display",
+                    "pages"
+                  ],
+                  "properties": {
+                    "format": {
+                      "const": "oscairn.setlist"
+                    },
+                    "version": {
+                      "const": 2
+                    }
+                  }
+                }
+              },
+              "required": [
+                "setlist"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "audition.start",
               "description": "The open Performance as one archive file, with its samples and the Sounds of parts still those Sounds; editedSounds adds those of edited parts. Refuses a file that exists"
             },

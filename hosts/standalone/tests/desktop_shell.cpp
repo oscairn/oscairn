@@ -15,6 +15,7 @@
 #include "../Launcher.h"
 #include "../Recording.h"
 #include "../Setlist.h"
+#include "oscairn/setlist.h"
 #include "../Panel.h"
 #include "../PlayView.h"
 #include "../ParameterGrid.h"
@@ -453,7 +454,8 @@ int main(int argc, char** argv)
 
                 // From the Setlist, Add asks for a pick, which the Library answers.
                 const auto folder = data.getChildFile("Setlists");
-                setlist = std::make_unique<standalone::SetlistPane>(engine, actions, folder);
+                setlist = std::make_unique<standalone::SetlistPane>(engine, actions);
+                auto saved = [&] { Control::Setlist s; engine.setlist(setlist->setlist().info.id, s); return s; };
                 standalone::setDesktopMode(*setlist, 1); setlist->setSize(700, 760);
                 setlist->create("Friday");
                 setlist->addFromLibrary();
@@ -461,13 +463,15 @@ int main(int argc, char** argv)
                 check(wait([&] { return picker->items().size() == 3; }), "the picker lists the library");
                 snapshot(*picker, "library-pick");
                 picker->choose(0);
-                check(setlist->setlist().entries.size() == 1 && setlist->setlist().entries[0].name == "Bass Split", "the pick filled a slot: " + setlist->message().toStdString());
+                check(standalone::slotsOf(setlist->setlist()).size() == 1 && standalone::slotsOf(setlist->setlist())[0].name == "Bass Split", "the pick filled a slot: " + setlist->message().toStdString());
                 // From the Library, Add to setlist sends to the Setlist.
                 const auto verse = std::find_if(library.items().begin(), library.items().end(), [](const auto& i) { return i.name == "Verse Keys"; }) - library.items().begin();
                 library.send(int(verse));
-                check(setlist->setlist().entries.size() == 2 && library.message() == "Added to Friday", "the send was taken: " + library.message().toStdString());
-                const auto saved = standalone::readSetlist(standalone::setlistFile(folder, "Friday"));
-                check(saved.name == "Friday" && saved.entries.size() == 2 && saved.entries[1].name == "Verse Keys", "the setlist was saved");
+                check(standalone::slotsOf(setlist->setlist()).size() == 2 && library.message() == "Added to Friday", "the send was taken: " + library.message().toStdString());
+                check(saved().info.name == "Friday" && standalone::slotsOf(saved()).size() == 2 && standalone::slotsOf(saved())[1].name == "Verse Keys", "the setlist was saved in the library");
+                library.showKind("setlist");
+                check(wait([&] { return library.items().size() == 1 && library.items()[0].name == "Friday"; }), "the Library lists it under Setlists");
+                library.showKind("performance");
                 // Played in order: each opens its Performance, here while a refresh is running, as
                 // the engine starts one every half second, and another waits its turn.
                 engine.soundAction({}); engine.soundAction({});
@@ -477,7 +481,7 @@ int main(int argc, char** argv)
                 check(wait([&] { return engine.controlReady(); }) && engine.soundMessage() == "Performance opened. Press Play or play a note.", "the next prepared: " + engine.soundMessage());
                 // Prepared, it opens as it was read then: its file renamed since, with its time kept, opens unchanged.
                 juce::File second;
-                for(const auto& item : library.items()) if(item.id == setlist->setlist().entries[1].id) second = juce::File(item.path).getChildFile("performance.json");
+                for(const auto& item : library.items()) if(item.id == standalone::slotsOf(setlist->setlist())[1].id) second = juce::File(item.path).getChildFile("performance.json");
                 const auto original = second.loadFileAsString();
                 const auto written = std::filesystem::last_write_time(second.getFullPathName().toStdString());
                 second.replaceWithText(original.replace("Verse Keys", "Changed Keys"));
@@ -501,13 +505,25 @@ int main(int argc, char** argv)
                 setlist->setDisplay({standalone::SetlistDisplay::Mode::Grid, 3, 2});
                 setlist->setSize(900, 600);
                 snapshot(*setlist, "setlist-grid");
-                const auto grid = standalone::readSetlist(standalone::setlistFile(folder, "Friday"));
-                check(grid.display.mode == standalone::SetlistDisplay::Mode::Grid && grid.display.columns == 3 && grid.display.rows == 2
-                      && grid.entries.size() == 7 && grid.entries[0].color == "#e5484d" && grid.entries[1].color.empty(), "the display and colors were saved");
+                const auto grid = saved();
+                check(grid.mode == "grid" && grid.columns == 3 && grid.rows == 2 && standalone::slotsOf(grid).size() == 7
+                      && standalone::slotsOf(grid)[0].color == "#e5484d" && standalone::slotsOf(grid)[1].color.empty(), "the display and colors were saved");
                 check(wait([&] { return !engine.soundBusy(); }), "the engine is free");
                 setlist->go(6);
                 check(setlist->current() == 6 && wait([&] { return !engine.soundBusy(); }), "the second page's first entry opened");
                 snapshot(*setlist, "setlist-grid-page-2");
+                // An empty slot keeps its place and Next passes over it, into the next named page; a label shows instead of the name.
+                setlist->addEmpty();
+                setlist->addPage("Encore");
+                setlist->add(library.items()[0].id);
+                setlist->setLabel(8, "Encore opener");
+                check(wait([&] { return !engine.soundBusy(); }), "the engine is free again");
+                setlist->step(1);
+                check(setlist->current() == 8 && setlist->page() == 1 && setlist->nameAt(8) == "Encore opener", "Next passed the empty slot, into the next page");
+                const auto pages = saved();
+                check(pages.pages.size() == 2 && pages.pages[1].name == "Encore" && pages.pages[0].slots.size() == 8 && pages.pages[0].slots[7].empty && pages.pages[1].slots[0].label == "Encore opener",
+                      "the pages, the empty slot and the label were saved");
+                snapshot(*setlist, "setlist-grid-pages");
                 setlist->setDisplay({standalone::SetlistDisplay::Mode::Scroll, 3, 2});
                 snapshot(*setlist, "setlist-scroll");
                 // Sounds: a part saved to the library, listed apart, picked into another part, added as a new part.
@@ -608,9 +624,7 @@ int main(int argc, char** argv)
                 library.showSource("");
                 wait([&] { return library.items().size() == 5; });
                 // A file that is not a setlist is refused.
-                const auto bad = folder.getChildFile("Bad.json");
-                bad.replaceWithText(R"({"format":"oscairn.setlist","version":2,"name":"x","entries":[]})");
-                bool refused = false; try { standalone::readSetlist(bad); } catch(const std::exception&) { refused = true; }
+                bool refused = false; try { oscairn::readSetlist(R"({"format":"oscairn.setlist","version":1,"name":"x","entries":[]})"); } catch(const std::exception&) { refused = true; }
                 check(refused, "a setlist of another version is refused");
             }
             // Routing with parts expanded, the preference read from the configuration folder.

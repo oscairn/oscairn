@@ -257,6 +257,10 @@ namespace oscairn
         // A library item as an archive, as it is saved: a Performance with its parts' Sounds (an
         // edited part's when editedSounds), or a Sound; every sample they use. Refuses a file that exists.
         virtual std::vector<std::string> exportLibraryItem(const std::string& id, const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) = 0;
+        // The library as an archive (kind "library"): the user's own items of every type but
+        // setlists, and the setlists chosen (IDs) with the Performances they name; every Sound,
+        // sample and plugin they use. Its ID is its name made plain. Refuses a file that exists.
+        virtual std::vector<std::string> exportLibrary(const std::string& file, const std::string& name, const std::vector<std::string>& setlists, const ExportSigning& sign = {}) = 0;
         // Signing keys (RFC 0006): private keys in the data folder, Keys/<name>.key, each readable
         // only by the user; listed by name, ID and public key, never the private key. Make: a new
         // one; a name is letters, digits, '.', '-' and '_', at most 64, not starting with '.'.
@@ -308,6 +312,18 @@ namespace oscairn
         // ignored); a locked library's items refuse. Copy: a new item of the user's own with the
         // same contents and a new ID ("<name> copy" for one of theirs); returns its ID.
         virtual void libraryEdit(const std::string& id, const PerformanceInfo& info) = 0;
+        // Setlists (docs/setlist-format.md), a type of library item (RFC 0023): named pages, each
+        // an ordered list of slots. A slot is empty, a Performance by its library ID with the name
+        // it had when last seen, or a placeholder (no ID, a name only); color: "#rrggbb" or empty
+        // for the Performance's; label: shown instead of its name when set. mode: "list",
+        // "scroll" or "grid" (columns x rows, 1 to 8 each).
+        struct SetlistSlot { std::string id, name, color, label; bool empty = false; };
+        struct SetlistPage { std::string name; std::vector<SetlistSlot> slots; };
+        struct Setlist { PerformanceInfo info; std::string mode = "list"; uint32_t columns = 4, rows = 3; std::vector<SetlistPage> pages; };
+        virtual Setlist setlist(const std::string& id) = 0;
+        // Saves over the user's own setlist with info.id, as its next revision; one with no ID, or a
+        // locked library's, is saved as a new one. Returns its ID.
+        virtual std::string saveSetlist(const Setlist& setlist) = 0;
         virtual std::string libraryCopy(const std::string& id) = 0;
         // Save: over the open library Performance (renamed when name is given), else a new one.
         // asNew: always a new one, with its own ID. Returns its ID.

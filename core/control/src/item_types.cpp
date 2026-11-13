@@ -51,6 +51,9 @@ namespace oscairn
             R"({"format":"oscairn.type","version":1,"id":"oscairn.sound","name":"Sound","plural":"Sounds",
                 "recognize":{"folder":".osound","document":"sound.json","format":"oscairn.sound","version":8},
                 "storage":"managed","folder":"Sounds","identity":"id","fields":[]})",
+            R"({"format":"oscairn.type","version":1,"id":"oscairn.setlist","name":"Setlist","plural":"Setlists",
+                "recognize":{"folder":".osetlist","document":"setlist.json","format":"oscairn.setlist","version":2},
+                "storage":"managed","folder":"Setlists","identity":"id","fields":[]})",
             R"({"format":"oscairn.type","version":1,"id":"oscairn.sample","name":"Sample","plural":"Samples",
                 "recognize":{"extensions":[]},"storage":"content","folder":"Assets","identity":"content","fields":[]})",
         };

@@ -64,6 +64,9 @@ namespace oscairn
         Estimate estimate(const std::string& directory = {}) override;
         std::vector<std::string> exportPerformance(const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
         std::vector<std::string> exportLibraryItem(const std::string& id, const std::string& file, bool editedSounds = false, const ExportSigning& sign = {}) override;
+        std::vector<std::string> exportLibrary(const std::string& file, const std::string& name, const std::vector<std::string>& setlists, const ExportSigning& sign = {}) override;
+        Setlist setlist(const std::string& id) override;
+        std::string saveSetlist(const Setlist& setlist) override;
         std::vector<SigningKey> signingKeys() override;
         SigningKey makeSigningKey(const std::string& name) override;
         void loadPerformance(const std::string& directory) override;
@@ -746,6 +749,7 @@ namespace oscairn
         std::set<NodeId> nodesOf(const Part& part) const;
         static std::vector<assets::Ref> assetsOf(const std::filesystem::path& manifest);
         std::vector<std::string> exportArchive(const std::string& file, const std::string& kind, const std::function<std::vector<PartSource>(const std::filesystem::path&, Package&)>& write, bool editedSounds, const ExportSigning& sign);
+        void stageItem(const LibraryItem& item, const std::filesystem::path& stage, Package& package, std::vector<PartSource>& from, std::vector<std::string>& notes);
         static signing::Key signingKey(const std::string& name); // Keys/<name>.key in the data folder
         Signer judge(const std::string& kind, const std::vector<signing::Signature>& signatures) const; // against the trust store
         struct CodeRefused : std::runtime_error { std::vector<Signer> code; CodeRefused(const std::string& why, std::vector<Signer> signers) : std::runtime_error(why), code(std::move(signers)) {} }; // installUnpacked's refusal, with the signers it judged

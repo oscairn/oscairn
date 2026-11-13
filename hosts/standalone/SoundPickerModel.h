@@ -25,7 +25,7 @@ namespace oscairn::standalone
     struct SoundAction
     {
         enum Kind { Refresh, Prepare, Select, Discard, BrightnessLocks, Replace, SavePerformance, LoadPerformance, SaveToLibrary, LoadFromLibrary, SaveSound, LoadSound, PartFromSound, ImportPerformance,
-                    ExportPerformance, InstallArchive, AuditionStart, AuditionStop, PrepareFromLibrary, AddPluginBuild, ReopenPerformance } kind = Refresh;
+                    ExportPerformance, InstallArchive, AuditionStart, AuditionStop, PrepareFromLibrary, AddPluginBuild, ReopenPerformance, ExportLibrary } kind = Refresh;
         NodeId node = 0;
         std::string pluginId;
         uint32_t context = 0, track = 0;
@@ -39,7 +39,7 @@ namespace oscairn::standalone
         std::vector<uint32_t> parts, scenes; // ImportPerformance from directory: by its IDs; both none for all of it
         bool asNew = false;    // SaveToLibrary, SaveSound: a new library item, not the next revision of the one it came from;
                                // ExportPerformance: with edited parts' Sounds; InstallArchive: as a locked library; AuditionStop: keep it
-        std::vector<std::string> items; // InstallArchive from directory (the archive file): these items; none for all
+        std::vector<std::string> items; // InstallArchive from directory (the archive file): these items; none for all. ExportLibrary to directory: the setlists in it (choice.name its name)
         bool acceptCode = false; // InstallArchive: the user said yes to plugin builds unsigned or by an unknown key (RFC 0006)
         std::string signKey;     // ExportPerformance: the signing key its items and the archive are signed with (RFC 0006); empty: not signed
         std::string importPath; // Prepare from this .sfz or .wav instead of choice

@@ -61,7 +61,7 @@ namespace oscairn::standalone
 #if JUCE_MAC
             else juce::Process::setDockIconVisible(false); // rendered off screen: no window, never the active app, nor in the Dock
 #endif
-            std::fprintf(stderr, "oscairn-setlist: started (pid %d) with %s\n", int(::getpid()), pane_->setlist().name.empty() ? "no setlist" : pane_->setlist().name.c_str());
+            std::fprintf(stderr, "oscairn-setlist: started (pid %d) with %s\n", int(::getpid()), pane_->setlist().info.name.empty() ? "no setlist" : pane_->setlist().info.name.c_str());
             // For tests (desktop-apps), which cannot press Add in another process: ask for a pick once started.
             if(juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEST_PICK", {}) == "1") juce::MessageManager::callAsync([this] { pane_->addFromLibrary(); });
             // For tests: leak that many MB once (the first run with this data folder), so its shell stops it and it comes back.
@@ -106,8 +106,8 @@ namespace oscairn::standalone
         }
         std::string current() const
         {
-            const auto& entries = pane_->setlist().entries;
-            return pane_->current() >= 0 && size_t(pane_->current()) < entries.size() ? entries[size_t(pane_->current())].id : std::string();
+            const auto slots = slotsOf(pane_->setlist());
+            return pane_->current() >= 0 && size_t(pane_->current()) < slots.size() ? slots[size_t(pane_->current())].id : std::string();
         }
         // The entry playing, sent to whoever takes it (Play, which then shows Previous and Next).
         void playing() { actions_.request(sendSetlistEntry, current(), [](const std::string&) {}); }
@@ -116,13 +116,13 @@ namespace oscairn::standalone
             const auto data = juce::SystemStats::getEnvironmentVariable("OSCAIRN_APP_DATA", {});
             return data.isEmpty() ? juce::File() : juce::File(data).getChildFile("state.json");
         }
-        // The setlist open and the entry playing, written when it changes.
+        // The setlist open (its library ID) and the slot playing, written when it changes.
         void keep()
         {
             const auto file = stateFile();
             if(file == juce::File()) return;
             auto* state = new juce::DynamicObject();
-            state->setProperty("setlist", juce::String::fromUTF8(pane_->setlist().name.c_str())); state->setProperty("current", pane_->current());
+            state->setProperty("setlist", juce::String::fromUTF8(pane_->setlist().info.id.c_str())); state->setProperty("current", pane_->current());
             file.getParentDirectory().createDirectory();
             juce::TemporaryFile temporary(file);
             if(!temporary.getFile().replaceWithText(juce::JSON::toString(juce::var(state))) || !temporary.overwriteTargetFileWithTemporary())
@@ -133,9 +133,9 @@ namespace oscairn::standalone
             const auto file = stateFile();
             if(file == juce::File() || !file.existsAsFile()) return;
             const auto state = juce::JSON::parse(file.loadFileAsString());
-            const auto name = state["setlist"].toString().toStdString();
-            if(const auto saved = setlistFile(setlistFolder(), name); !name.empty() && name != pane_->setlist().name && saved.existsAsFile()) pane_->open(saved);
-            if(!name.empty() && name == pane_->setlist().name && state["current"].isInt()) pane_->mark(int(state["current"]));
+            const auto id = state["setlist"].toString().toStdString();
+            if(!id.empty() && id != pane_->setlist().info.id) pane_->open(id);
+            if(!id.empty() && id == pane_->setlist().info.id && state["current"].isInt()) pane_->mark(int(state["current"]));
         }
 
         std::unique_ptr<Theme> theme_;

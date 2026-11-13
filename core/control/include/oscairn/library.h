@@ -64,6 +64,8 @@ namespace oscairn
     // The info block of an item's document (format names which, and the type reading that format
     // the document version it takes, RFC 0023); throws on a bad one.
     Control::PerformanceInfo readInfo(const std::filesystem::path& file, const std::string& format);
+    // The same from the document's text; needId false takes an empty ID (a document not saved yet).
+    Control::PerformanceInfo readInfo(std::string_view document, const std::string& format, bool needId = true);
     // An info block as the documents hold it.
     std::string infoJson(const Control::PerformanceInfo& info);
     // Replaces a document's info block with this one, keeping the rest byte for byte.

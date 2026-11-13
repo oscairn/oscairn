@@ -4,15 +4,18 @@
 #include "JsonInput.h"
 #include "oscairn/assets.h"
 #include "oscairn/item_types.h"
+#include "oscairn/setlist.h"
 #include "oscairn/package.h"
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
@@ -62,6 +65,7 @@ namespace oscairn
             return out + ']';
         }
         int64_t stamp(const fs::path& file) { return int64_t(fs::last_write_time(file).time_since_epoch().count()); }
+        std::string randomId() { std::random_device random; constexpr char hex[] = "0123456789abcdef"; std::string id; for(int i = 0; i < 16; ++i) id += hex[random() & 15]; return id; }
         std::string lower(std::string s) { for(auto& c : s) c = char(std::tolower(static_cast<unsigned char>(c))); return s; }
     }
 
@@ -175,9 +179,12 @@ namespace oscairn
         writeAtomically(file, text.substr(0, from) + infoJson(info) + text.substr(to));
     }
 
-    Control::PerformanceInfo readInfo(const fs::path& file, const std::string& format)
+    Control::PerformanceInfo readInfo(const fs::path& file, const std::string& format) { return readInfo(std::string_view(slurp(file)), format); }
+
+    Control::PerformanceInfo readInfo(std::string_view document, const std::string& format, bool needId)
     {
-        const auto doc = parse(slurp(file));
+        if(document.size() > maxFile) throw std::runtime_error("the document is too large");
+        const auto doc = parse(std::string(document));
         V d = doc.get();
         if(!d || str(detail::member(d, "format")) != format) throw std::runtime_error("not a " + format);
         // The document version its type reads (RFC 0023), when it names one.
@@ -196,7 +203,7 @@ namespace oscairn
         out.revision = str(detail::member(info, "revision")); out.parent = str(detail::member(info, "parent")); out.hash = str(detail::member(info, "hash"));
         if(const V o = detail::member(info, "origin"); !o || o->type != json_type_null)
             out.origin = {str(detail::member(o, "library")), str(detail::member(o, "item")), str(detail::member(o, "hash"))};
-        if(out.id.empty() || out.id.size() > 64 || !validColor(out.color) || out.name.size() > 256 || out.description.size() > 4096 || out.tags.size() > maxTags ||
+        if((needId && out.id.empty()) || out.id.size() > 64 || !validColor(out.color) || out.name.size() > 256 || out.description.size() > 4096 || out.tags.size() > maxTags ||
            std::any_of(out.tags.begin(), out.tags.end(), [](const std::string& t) { return t.empty() || t.size() > maxTag; }))
             throw std::runtime_error("invalid info");
         return out;
@@ -220,6 +227,20 @@ namespace oscairn
             if(folder && !unread && written < dayAgo) fs::remove_all(entry.path(), error);
         }
         readUser();
+        // The Setlist app's own files from before setlists were library items (version 1), each
+        // made a library setlist once, the file removed (docs/setlist-format.md).
+        std::vector<fs::path> old;
+        for(const auto& entry : fs::directory_iterator(home / "Setlists", error))
+            if(entry.is_regular_file() && entry.path().extension() == ".json" && !entry.path().filename().string().starts_with(".")) old.push_back(entry.path());
+        for(const auto& file : old)
+            try
+            {
+                auto s = setlistFromVersion1(slurp(file, 1024 * 1024));
+                s.info.id = randomId(); s.info.revision = randomId();
+                writeSetlist(newFolder(s.info.name, "setlist"), s);
+                fs::remove(file);
+            }
+            catch(const std::exception& e) { std::fprintf(stderr, "oscairn: the setlist %s was not converted: %s\n", file.c_str(), e.what()); }
         rescan();
     }
 

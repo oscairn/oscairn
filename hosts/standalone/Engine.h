@@ -197,6 +197,10 @@ namespace oscairn::standalone
         std::string deleteLibraryItem(const std::string& id);
         std::string editLibraryItem(const std::string& id, const Control::PerformanceInfo& info);
         std::string copyLibraryItem(const std::string& id, std::string& copied);
+        // Setlists (docs/setlist-format.md), through the library: one read into out, or one saved,
+        // its ID into id (a new one's, or a locked library's saved as the user's own); the error, or empty.
+        std::string setlist(const std::string& id, Control::Setlist& out) const;
+        std::string saveSetlist(const Control::Setlist& setlist, std::string& id);
         std::string uninstallLibrary(const std::string& id);
         // The plugin store (RFC 0006): what is installed and what uses it (nothing while the
         // engine is busy), and removing a plugin's builds (the error, or empty). Another

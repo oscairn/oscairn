@@ -21,8 +21,11 @@ namespace oscairn::host
     /// The panel at `device`, its messages decoded through the map file `map`, each control it
     /// names played by identity on the reader's thread. Throws when the map is unreadable or
     /// refused; nullptr: this build reads no panel.
+    /// A pad pressed or released (an index into the Performance's pad map, from 0) goes to `pad`
+    /// on the same thread.
     using PlayControl = std::function<void( const std::string& control, const ControlInput& )>;
-    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play );
+    using PlayPad = std::function<void( uint32_t pad, bool on )>;
+    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play, PlayPad pad );
 
     /// The keyboard's MIDI inputs, in order: each one's name and the key its source number is kept
     /// by. Empty: this build reads no keyboard.

@@ -5,7 +5,7 @@
 
 namespace oscairn::host
 {
-    std::unique_ptr<DeviceReader> openPanel( const std::string&, const std::string&, PlayControl ) { return nullptr; }
+    std::unique_ptr<DeviceReader> openPanel( const std::string&, const std::string&, PlayControl, PlayPad ) { return nullptr; }
     std::vector<KeyboardInput> keyboardInputs() { return {}; }
     std::unique_ptr<DeviceReader> openKeyboard( const std::string&, PlayMidi ) { return nullptr; }
 }

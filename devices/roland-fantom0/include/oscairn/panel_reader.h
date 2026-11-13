@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace oscairn
@@ -45,6 +46,7 @@ namespace oscairn
         std::array<int64_t, 4> kinds{0, 1, 2, 3}; // the kind field's value for encoder, analog, switchOn and switchOff
         int64_t analogMax = 1023;                  // an analog control's top value, unless its entry says
         double encoderStep = 1.0 / 127;            // the change for one encoder step, 0 to 1 across a target's range
+        int64_t analogDeadband = 0;                // steps: an analog control turning back by this much or less is chatter (PanelEvent)
         // A control: its message kind (encoder, analog, or switch for both switch kinds), ID and
         // identity; `max` and `step` override the layout's.
         struct Control { Kind kind = Kind::Unknown; uint32_t id = 0; std::string control; int64_t max = 0; double step = 0; };
@@ -67,6 +69,11 @@ namespace oscairn
         int64_t value = 0; // the value field, or for an encoder the delta field
         std::string control;
         ControlInput input;
+        // An analog control's value that only chatters (set by PanelReader, with the map's
+        // analogDeadband): the same value again, or a turn back by the dead band or less, short of
+        // either end. A move on in the same direction is never chatter, so a slow move arrives step
+        // by step and the ends are always reached. The engine plays no chatter; the dump shows it.
+        bool chatter = false;
     };
     PanelEvent decode(const PanelMap&, const std::array<uint8_t, 4>& message);
 
@@ -139,6 +146,8 @@ namespace oscairn
         // The reader thread's own.
         std::array<uint8_t, 4> frame_{};
         size_t have_ = 0;
+        struct Analog { int64_t value = -1; int direction = 0; }; // the last value passed on, and which way it moved
+        std::unordered_map<uint32_t, Analog> analog_;
         int64_t window_ = 0; uint32_t logged_ = 0; uint64_t hidden_ = 0; // the log's rate limit, per second
         std::thread thread_; // last: started once the rest is ready
     };

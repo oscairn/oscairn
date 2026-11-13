@@ -188,6 +188,9 @@ namespace oscairn::host
             // A device panel's own controls, played as a controller's are, by their identities.
             panel_ = openPanel( config.panelDevice, config.panelMap, [this]( const std::string& control, const ControlInput& input ) {
                 session_->controllerControl( control, input );
+            }, [this]( uint32_t pad, bool on ) {
+                { std::lock_guard lock( padLock_ ); pads_.emplace_back( pad, on ); }
+                triggerAsyncUpdate();
             } );
             if( !panel_ ) throw std::runtime_error( "this build reads no panel (OSCAIRN_ROLAND_FANTOM0 is off)" );
         }
@@ -368,6 +371,15 @@ namespace oscairn::host
         try { writeChoice( choice ); }
         catch( const std::exception& e ) { notice_ = std::string( "the choice is not saved: " ) + e.what(); }
         return listDevices();
+    }
+
+    void AudioEngine::playPads()
+    {
+        std::vector<std::pair<uint32_t, bool>> pads;
+        { std::lock_guard lock( padLock_ ); pads.swap( pads_ ); }
+        // A pad has no velocity on this panel: full, unless the pad's assignment sets one.
+        for( const auto& [pad, on] : pads )
+            if( pad < PadMap::pads ) session_->pad( pad, on, 1.0 );
     }
 
     void AudioEngine::service()

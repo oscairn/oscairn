@@ -5,12 +5,13 @@
 // through the map's layout (fields of whole bytes, or of parts of them), an unknown ID reported
 // with its bytes, and a new map taking effect;
 // then the controls they name played in a Session as a MIDI controller's are (controller_input.h),
-// heard at the next block; the panel holder,
+// heard at the next block; an analog control's chatter marked by the dead band; the panel holder,
 // through a seam: it waits, then reads until nothing is left, passes each message to the readers
 // attached, keeps the device while readers come and go, refuses to start beside another holder
 // or while another process has the device open, and ends promptly on SIGTERM; and
 // oscairn-panel-dump attached to a holder, or refusing without one. Also: the FANTOM-07's map
-// decodes messages in Roland's layout, and a broken map is refused.
+// decodes messages in Roland's layout, with each control's scale, its pads and its jacks' sensing,
+// and a broken map is refused.
 #include "oscairn/panel_reader.h"
 #include "oscairn/session.h"
 
@@ -78,7 +79,7 @@ namespace
     {
         std::ifstream in(shipped); std::stringstream text; text << in.rdbuf();
         const auto fantom = PanelMap::parse(text.str());
-        check(fantom.controls.size() == 112 && fantom.estimated.empty(), "the FANTOM-07's map parses, every entry with its id");
+        check(fantom.controls.size() == 132 && fantom.estimated.empty() && fantom.analogDeadband == 1, "the FANTOM-07's map parses, every entry with its id");
         // Roland's layout (docs/fantom-0.md). Slider 1 (analog 9) at 1000: byte 2 holds the ID's top
         // two bits and, from bit 2, the value's top five, which must not read as ID bits.
         auto f = decode(fantom, {0x84, 9, uint8_t((1000 >> 7) << 2), uint8_t(1000 & 0x7F)});
@@ -89,6 +90,15 @@ namespace
         // ENTER (switch 62) pressed and released; bits 5 and 6 of byte 0 say who sent it, not the kind.
         f = decode(fantom, {0xA2, 62, 0, 0});
         check(f.kind == PanelMap::Kind::SwitchOn && f.control == "enter" && decode(fantom, {0x81, 62, 0, 0}).kind == PanelMap::Kind::SwitchOff, "the FANTOM's ENTER, on and off");
+        // Each control's scale, as seen on a unit: sliders and knobs 0 to 127, the lever and wheels 0 to 1023.
+        auto analog = [&](uint32_t id, int value) { return decode(fantom, {0x84, uint8_t(id & 0x7F), uint8_t((value >> 7) << 2 | id >> 7), uint8_t(value & 0x7F)}); };
+        check(analog(16, 127).control == "fader:8" && near(analog(16, 127).input.value, 1) && near(analog(17, 64).input.value, 64 / 127.) && analog(17, 64).control == "knob:1",
+              "slider 8 (analog 16) and knob 1 on 0 to 127");
+        check(near(analog(7, 1023).input.value, 1) && near(analog(5, 512).input.value, 512 / 1023.) && analog(5, 512).control == "wheel:3", "the lever and WHEEL1 on 0 to 1023");
+        // The pads, in Roland's order of switches 88 to 103, and the CTRL jacks' plug sensing.
+        check(decode(fantom, {0x82, 91, 0, 0}).control == "pad:1" && decode(fantom, {0x82, 88, 0, 0}).control == "pad:2" && decode(fantom, {0x81, 103, 0, 0}).control == "pad:14" &&
+              decode(fantom, {0x81, 103, 0, 0}).input.value == 0, "pads 1, 2 and 14 from switches 91, 88 and 103");
+        check(decode(fantom, {0x82, 35, 0, 0}).control == "ctrl1Sense" && decode(fantom, {0x82, 38, 0, 0}).control == "ctrl2Ring", "the CTRL jacks' sensing, fixed");
         auto refused = [](const std::string& json) { try { PanelMap::parse(json); } catch(const std::invalid_argument&) { return true; } return false; };
         check(!refused(mapJson(controls)), "the test's map parses");
         check(refused(mapJson(controls + R"(, {"kind": "analog", "id": 3, "control": "fader:9"})")), "two analog controls on one id");
@@ -167,6 +177,29 @@ namespace
             check(heard.wait(49), "the burst heard");
             std::lock_guard g(heard.lock);
             check(heard.log.size() <= 2 + 10 + 10, "the log is rate-limited: " + std::to_string(heard.log.size()));
+        }
+        ::close(fds[1]); ::close(fds[0]);
+    }
+
+    // The dead band: a fader (0 to 1000) with analogDeadband 1. Turning back a step, or the same
+    // value again, is chatter; a slow move on is not; the ends always play.
+    void deadband()
+    {
+        int fds[2]; check(::pipe(fds) == 0, "a pipe");
+        auto json = mapJson(controls);
+        json.replace(json.find("\"encoderStep\": 0.01"), 19, "\"encoderStep\": 0.01, \"analogDeadband\": 1");
+        Heard heard;
+        const std::vector<int> values{500, 501, 500, 502, 503, 502, 503, 501, 1, 0, 0, 1, 999, 1000};
+        const std::vector<bool> chatter{false, true, true, false, false, true, true, false, false, false, true, true, false, false};
+        {
+            PanelReader reader(fds[0], PanelMap::parse(json), [&](const PanelEvent& e) { std::lock_guard g(heard.lock); heard.events.push_back(e); }, {});
+            for(const int v : values) put(fds[1], message(1, 3, v));
+            check(heard.wait(values.size()), "every value heard");
+            std::string got;
+            for(size_t i = 0; i < values.size(); ++i) got += heard.at(i).chatter ? "c" : "-";
+            std::string want;
+            for(const bool c : chatter) want += c ? "c" : "-";
+            check(got == want, "chatter marked " + want + ": " + got);
         }
         ::close(fds[1]); ::close(fds[0]);
     }
@@ -398,6 +431,7 @@ int main(int argc, char** argv)
     dump(argv[3]);
     maps(argv[2]);
     framing();
+    deadband();
     session(argv[1]);
     if(failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("panel reader: ok");

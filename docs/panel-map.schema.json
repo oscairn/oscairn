@@ -29,7 +29,8 @@
         "value": { "$ref": "#/$defs/Field", "description": "An analog control's position, 0 to its max" },
         "delta": { "$ref": "#/$defs/Field", "description": "An encoder's steps, usually signed" },
         "analogMax": { "type": "integer", "minimum": 1, "maximum": 4294967295, "description": "An analog control's top value, unless its entry says; default 1023" },
-        "encoderStep": { "type": "number", "minimum": 0.000001, "maximum": 1, "description": "The change one encoder step makes, 0 to 1 across a target's range; default 1/127" }
+        "encoderStep": { "type": "number", "minimum": 0.000001, "maximum": 1, "description": "The change one encoder step makes, 0 to 1 across a target's range; default 1/127" },
+        "analogDeadband": { "type": "integer", "minimum": 0, "maximum": 4095, "description": "Steps: an analog control's same value again, or a turn back by this many or fewer short of either end, is chatter, which the engine does not play; a move on in one direction always plays; default 0, none" }
       },
       "required": ["kind", "kinds", "id", "value", "delta"],
       "additionalProperties": false
@@ -39,7 +40,7 @@
       "maxItems": 1024,
       "items": {
         "type": "object",
-        "description": "A control: its message kind and ID, and its identity (knob:N, fader:N, wheel:N, screen:N, button:N as overrides name them, RFC 0024) or a fixed control's profile function. Without an id it is not mapped yet and is skipped. No two entries of one kind share an id",
+        "description": "A control: its message kind and ID, and its identity (knob:N, fader:N, wheel:N, screen:N, button:N as overrides name them, RFC 0024), a pad of the Performance's pad map (pad:N, from 1) or a fixed control's profile function. Without an id it is not mapped yet and is skipped. No two entries of one kind share an id",
         "properties": {
           "kind": { "enum": ["encoder", "analog", "switch"], "description": "switch: both switch kinds, on and off" },
           "id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },

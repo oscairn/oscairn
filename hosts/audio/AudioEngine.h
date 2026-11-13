@@ -61,7 +61,8 @@ namespace oscairn::host
 
         uint8_t push( const juce::MidiMessage& message, const juce::MidiInput* input, int raw, uint8_t source ); // the input's source number
         uint8_t sourceNumber( const juce::String& identifier, const std::vector<uint8_t>& taken ); // maxSources for none
-        void handleAsyncUpdate() override { session_->serviceControllers(); if( serviced_ ) serviced_(); } // a control moved: its model, at once
+        void handleAsyncUpdate() override { playPads(); session_->serviceControllers(); if( serviced_ ) serviced_(); } // a control moved: its model, at once
+        void playPads(); // the panel's pads pressed and released since, in order
         void openMidiInputs();
 #ifdef __linux__
         void openRawMidiInputs();
@@ -83,6 +84,8 @@ namespace oscairn::host
         std::unique_ptr<Session> session_;
         std::unique_ptr<DeviceReader> panel_; // the profile's panel, on its own thread, into the session's controls
         std::unique_ptr<DeviceReader> keyboard_; // the profile's keys, on their own thread, as MIDI inputs
+        std::mutex padLock_;
+        std::vector<std::pair<uint32_t, bool>> pads_; // from the panel's thread, for the control thread (Session::pad is its alone)
         // The keyboard's inputs (keyboardInputs()' order), listed after the devices' and numbered once.
         std::vector<uint8_t> keyboardSources_;
         std::vector<std::string> keyboardNames_;

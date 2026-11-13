@@ -163,7 +163,7 @@ namespace oscairn
                 require(p.estimated.back() == "layout" || p.estimated.back() == "controls", "estimated names layout or controls");
             });
         const auto* layout = member(root, "layout");
-        fields(layout, {"kind", "kinds", "id", "analogId", "value", "delta", "analogMax", "encoderStep"}, "layout");
+        fields(layout, {"kind", "kinds", "id", "analogId", "value", "delta", "analogMax", "encoderStep", "analogDeadband"}, "layout");
         p.kind = field(member(layout, "kind"), "layout.kind");
         p.id = field(member(layout, "id"), "layout.id");
         if(const auto* a = member(layout, "analogId")) p.analogId = field(a, "layout.analogId");
@@ -179,6 +179,7 @@ namespace oscairn
         }
         if(const auto* m = member(layout, "analogMax")) p.analogMax = whole(m, "layout.analogMax", 1, 4294967295.0);
         if(const auto* s = member(layout, "encoderStep")) p.encoderStep = number(s, "layout.encoderStep", 1e-6, 1);
+        if(const auto* d = member(layout, "analogDeadband")) p.analogDeadband = whole(d, "layout.analogDeadband", 0, 4095);
         std::set<std::pair<int, uint32_t>> seen;
         each(member(root, "controls"), "controls", 1024, [&](const json_value_s* v) {
             fields(v, {"kind", "id", "control", "max", "step"}, "a control");
@@ -457,7 +458,16 @@ namespace oscairn
             if(have_ < frame_.size()) continue;
             have_ = 0;
             ++messages_;
-            const auto e = decode(*map, frame_);
+            auto e = decode(*map, frame_);
+            if(e.kind == PanelMap::Kind::Analog && !e.control.empty() && map->analogDeadband > 0)
+            {
+                auto& last = analog_[e.id];
+                const auto d = e.value - last.value;
+                const bool end = e.input.value <= 0 || e.input.value >= 1; // the ends are always reached
+                const bool back = last.direction == 0 || (d > 0) != (last.direction > 0);
+                e.chatter = last.value >= 0 && (d == 0 || (!end && back && std::abs(d) <= map->analogDeadband));
+                if(!e.chatter) { if(last.value >= 0) last.direction = d > 0 ? 1 : -1; last.value = e.value; }
+            }
             if(e.control.empty())
             {
                 ++unknown_;

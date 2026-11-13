@@ -7,6 +7,7 @@
 #include "oscairn/panel_reader.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -22,18 +23,25 @@ namespace oscairn::host
         };
     }
 
-    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play )
+    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play, PlayPad pad )
     {
-        // A device panel's own controls, played as a controller's are, by their identities. The
-        // device is the panel holder's (docs/fantom-0.md, "The panel holder"): the engine attaches
-        // to it.
+        // A device panel's own controls, played as a controller's are, by their identities; its
+        // pads ("pad:N" in the map) through the Performance's pad map. The device is the panel
+        // holder's (docs/fantom-0.md, "The panel holder"): the engine attaches to it.
         std::ifstream file( map, std::ios::binary );
         if( !file ) throw std::runtime_error( "cannot read the panel map " + map );
         std::stringstream text; text << file.rdbuf();
         auto parsed = PanelMap::parse( text.str() );
         std::fprintf( stderr, "oscairn: panel: %s through the panel holder at %s\n", device.c_str(), panelHolderSocket );
-        return std::make_unique<Held<PanelReader>>( panelHolderSocket, std::move( parsed ), [play = std::move( play )]( const PanelEvent& e ) {
-            if( !e.control.empty() ) play( e.control, e.input );
+        return std::make_unique<Held<PanelReader>>( panelHolderSocket, std::move( parsed ), [play = std::move( play ), pad = std::move( pad )]( const PanelEvent& e ) {
+            if( e.control.empty() || e.chatter ) return;
+            if( e.control.starts_with( "pad:" ) )
+            {
+                const auto n = std::atoi( e.control.c_str() + 4 );
+                if( n >= 1 && e.input.kind == ControlInput::Kind::Switch ) pad( uint32_t( n - 1 ), e.input.value >= .5 );
+                return;
+            }
+            play( e.control, e.input );
         } );
     }
 

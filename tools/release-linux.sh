@@ -64,9 +64,18 @@ https://github.com/oscairn/oscairn/tree/$commit
 JUCE 9.0.4, which it is built with, is at https://github.com/juce-framework/JUCE/tree/9.0.4
 EOF
 
-# shortcut: no preinstalled packages (RFC 0031): the official repository publishes macos-arm64 builds
-# only, so tools/preinstall-fetch.py fails for linux-*. Add it here, with --platform linux-$arch, when it
-# lists Linux builds of tools/preinstalled.txt.
+# The packages that come with the release (RFC 0031, docs/releasing.md), beside the programs where the
+# engine looks (hosts/audio/PreinstalledFolder.h): the official repository's signed root and index, and
+# the archives tools/preinstalled.txt lists, each checked here and again by the engine when it installs
+# them at its first start; their licenses beside the others.
+python3 -I "$here/preinstall-fetch.py" --oscairn-sign "$build/core/control/oscairn-sign" --platform linux-$arch \
+	--out "$root/bin/Preinstalled" --licenses "$licenses/Packages" || fail "a package to preinstall did not verify"
+cat >> "$licenses/SOURCE.txt" << EOF
+
+The packages that come with it, in bin/Preinstalled, are each under their own license:
+Packages/<package ID>/ holds each one's license texts and notices, and PACKAGE.txt there names
+its license and where its source is.
+EOF
 
 mkdir -p "$root/share/applications" "$root/share/icons/hicolor/1024x1024/apps"
 cp tools/linux/oscairn.desktop "$root/share/applications/oscairn.desktop"

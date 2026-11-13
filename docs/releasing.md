@@ -5,8 +5,8 @@ A release is, for now, one macOS disk image for Apple silicon,
 scan helper, bundled plugins, the Setlist and Settings apps, the themes and the
 [preinstalled packages](#preinstalled-packages)), an `Applications` link to drag it to, and
 `Licenses/`; and one tarball for each Linux CPU, `oscairn-<version>-linux-x86_64.tar.gz` and
-`oscairn-<version>-linux-arm64.tar.gz` ([below](#the-linux-tarball)), without the preinstalled
-packages.
+`oscairn-<version>-linux-arm64.tar.gz` ([below](#the-linux-tarball)), each with the
+[preinstalled packages](#preinstalled-packages).
 
 ## The version
 
@@ -113,11 +113,11 @@ the program links the system's libraries (ALSA, libcurl, FreeType, fontconfig, X
 `README.txt` lists as packages; the build must be on the oldest system the release is to run
 on, which the GitHub runners' Ubuntu 24.04 sets.
 
-No preinstalled packages: the official repository publishes `macos-arm64` builds only, so
-`tools/preinstall-fetch.py` fails for either Linux platform ("has no build for linux-arm64").
-The tarball's app starts with none, as a build from source does. Add the fetch to
-`tools/release-linux.sh` once the repository has Linux builds of what
-[`tools/preinstalled.txt`](../tools/preinstalled.txt) lists.
+Each tarball has the preinstalled packages ([below](#preinstalled-packages)) in `bin/Preinstalled`,
+where the engine looks beside the programs (`hosts/audio/PreinstalledFolder.h`), and their licenses in
+`Licenses/Packages/`; the script fetches them for `linux-<arch>`, so every package in
+`tools/preinstalled.txt` needs a build for both Linux CPUs, or the release fails ("has no build
+for linux-x86_64").
 
 Not made: an AppImage, a .deb or a Flatpak, a 32-bit or Wayland-native build, and checksums
 (the dmg has none either).
@@ -147,7 +147,7 @@ python3 -I tools/preinstall-fetch.py --oscairn-sign build/core/control/oscairn-s
     --platform macos-arm64 --out /tmp/preinstalled --licenses /tmp/preinstalled-licenses
 ```
 
-The Linux tarball has none yet ([above](#the-linux-tarball)).
+The Linux tarballs run it with `--platform linux-<arch>` into `bin/Preinstalled` ([above](#the-linux-tarball)).
 
 The 2026-11-11 set adds 11.8 MB of archives to the app (Analog's factory patches 7.4 MB of it).
 

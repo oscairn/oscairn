@@ -24,8 +24,8 @@ its menu: copy them under ~/.local/share/, with Oscairn on your PATH.
 
 To try it without sound or a MIDI device: bin/Oscairn --audio null
 
-This release comes without the instruments Oscairn FM, Analog, the Sampler, Effects and the
-Arpeggiator: the package repository has no Linux builds of them yet.
+This release comes with the instruments Oscairn FM, VA, the Sampler, Effects and the
+Arpeggiator (bin/Preinstalled), which Oscairn installs when it first starts.
 
 Licenses, and where the source of this exact build is: Licenses/.
 https://github.com/oscairn/oscairn

@@ -27,6 +27,11 @@ repository named per plugin in archives, Performances and Sounds, and what the i
 for it. Proposed, not built; its [open questions](#open-questions-on-finding-missing-plugins)
 are the owner's.
 
+Revised 2026-11-12 from the owner's decision of that day: releases stored in pieces is the plan,
+and beside the pieces the repository publishes a
+[ready-made archive per platform](#ready-made-archives-per-platform) of each version, for a
+person to install by hand. Planned, not built; its open questions are the owner's.
+
 ## Progress
 
 Checked when built and tested; the sections below say how.
@@ -64,7 +69,12 @@ Checked when built and tested; the sections below say how.
       shipped one's; another key refused naming both, nothing kept
       ([signatures](#signatures-and-freshness)); `control-repository`, `control-preinstall`. Not yet: releases stored in pieces (items, samples
       and builds as separate blobs, decompressed as they stream), `oscairn repo build`, deltas
-      (step 2), `.orepo` files; the free-space refusal and a drive pulled midway are not tested)
+      (step 2), `.orepo` files; the free-space refusal and a drive pulled midway are not tested.
+      Planned, not built (owner, 2026-11-12): pieces, and with them a ready-made `.olib` per
+      platform of each version, assembled from the pieces at publish time for downloading by hand,
+      replacing the whole archive a person can fetch from the submissions repository's Git tree
+      today; built together, with no interim archive per platform in the record
+      ([ready-made archives](#ready-made-archives-per-platform)))
 - [ ] 2. Fetching over HTTPS: refresh, incremental index updates, mirrors, resumable downloads
       (built 2026-11-06: fetching through the host's transport, JUCE's URL streams: the system's
       HTTPS on macOS, libcurl with Mbed TLS on Linux since RFC 0039's step 1 (2026-11-07, which
@@ -258,11 +268,111 @@ be another kind of the same archive. The repository stores it in pieces, each na
 A device fetches the manifest, checks its signature, and then fetches only what it needs: the
 items chosen ([RFC 0006](0006-packages-and-portability.md#choosing-what-to-import)), the
 samples it does not have, and its own platform's builds. It can put the pieces back together as
-an ordinary `.olib` archive, byte for byte the archive's entries, to pass on by USB.
+an ordinary `.olib` archive, byte for byte the archive's entries, to pass on by USB. For a
+person with a browser, the repository also publishes a
+[ready-made archive per platform](#ready-made-archives-per-platform), so nobody has to fetch the
+pieces to get one.
 
 A package can name a **blob base** of its own: an HTTPS address the publisher hosts, where its
 large files are. Their hashes are in the signed manifest, so they need no trust in that host.
 This keeps a 20 GB piano off the project's bandwidth.
+
+### Ready-made archives per platform
+
+Decided by the owner 2026-11-12: releases are stored in pieces, so that "a mac user doesn't have
+to download the linux and accelerated binaries too", and next to the pieces the repository
+publishes a ready-made `.olib` for each platform of each version. A person downloads one in a
+browser and installs it by hand, or carries it to an offline device, with no Oscairn doing the
+fetching. Today that person downloads a version's whole archive, `packages/<id>/<version>.olib`,
+from the submissions repository's Git tree; once releases are stored in pieces that file is gone
+and these replace it. Plugin forks' release notes link to them. **Planned, not built:** both come
+together, and there is no interim format with one archive per platform in the record.
+
+- **Derived, never a source.** An export is assembled from the pieces when a release is published,
+  by the job that writes the index. Devices keep fetching pieces; none needs an export for a
+  normal install, update or repair, and a repository, mirror, snapshot or USB drive without them
+  works the same. The root does not name them and the index does not hold them (below).
+- **What it holds:** the manifest and its signature (`library.json`, `library.sig`), what all
+  platforms share (every item, sample and the other entries the manifest's `files` lists), that
+  platform's plugin builds each with its signatures, and `Licenses/`. No other platform's builds.
+  It is a normal `.olib` ([format](../library-archive.md)): any Oscairn installs it by the
+  existing archive path, from the file browser or read in place from a USB drive
+  ([installing one](../library-archive.md#installing-one)), with the same signature, trust and
+  license checks as any archive.
+- **A package with no plugin builds** (an asset library, a library of Sounds or Performances) has
+  one archive, named without a platform: it is the whole release.
+- **Identity and signatures.** A package's identity is its manifest's hash, and each build carries
+  its own signatures, which are over the build's digest and do not depend on the archive. But
+  `library.json` lists every platform's builds with their paths, and `library.sig` signs those
+  exact bytes, and the reader today refuses an archive whose manifest lists a build that is not
+  there ([reading one](../library-archive.md#reading-one)). So **an archive holding one platform's
+  builds cannot keep the same manifest and still be read as the format stands**: that is an open
+  question below, with its options. Who signs, either way: only the publisher. The publisher's key
+  never leaves the publisher's machine ([publishing](#the-command)) and the repository's job holds
+  the index key, so the job does not sign an export, and the index key and root key sign nothing
+  they do not today: the root signs `repository.json` and nothing else names an export.
+- **Naming.** `<package ID>-<version>-<platform>.olib`, such as
+  `com.example.organ-2.1.0-macos-arm64.olib`, and `<package ID>-<version>.olib` for a package with
+  no builds. The platform is one of the format's five. Every part is already plain
+  (letters, digits, `.`, `-`, `_`), so the name needs no escaping.
+- **Address.** One stable pattern from the same three parts, served from the same static hosting
+  as the blobs: `<export base>/<package ID>/<version>/<file name>`. A link in a release note is
+  built from the ID, version and platform with no lookup, and does not hold a hash. **The exact
+  URL, the export base and how it maps onto GitHub Releases (whose assets are flat under a tag)
+  are to be fixed when this is built:** [hosting](#hosting-and-cost) does not settle them.
+- **Outside the index.** An export is not listed there. Its address follows from the package ID,
+  the version and a platform the index's `platforms` already lists, so the Catalog can show
+  "download for another device" with no new field; and a file no device needs for an install is
+  not a promise the signed index should make, one more hash to keep right in an index meant to
+  stay small ([size](#size)). The index's `platforms` sizes are what a device downloads, not the
+  export's, so the Catalog shows an export's size only as about the common size plus the
+  platform's.
+- **Yanked and withdrawn.** A yanked version's exports stay, as a lock may still name it and the
+  person chose it: yanking is advice ([versions](#versions-and-yanking)). A withdrawn version's
+  exports are removed in the publish that adds the withdrawal to the revocation list, and so is
+  the export of a revoked key's package. Copies already downloaded stay, as installed packages
+  do; installing one is checked as any archive is ([the revocation list](#the-revocation-list)).
+- **A revoked build inside an export.** Builds are revoked by SHA-256 and a device checks each by
+  its hash when it installs, from a repository or from an archive; an export adds no way round it.
+  An export holding a revoked build is removed.
+- **Sizes.** An export copies bytes the pieces already hold: the shared part once per platform,
+  plus that platform's builds. A package for four platforms holds its shared part five times: once
+  as pieces and once in each export. That is the trade for a file a person can download and
+  install with no Oscairn fetching it; it costs storage, not a device's downloads. Question 3
+  limits the worst case.
+
+**Open questions** (the owner's):
+
+1. **The manifest of a one-platform archive.** (a) *The same manifest.* The reader learns that a
+   listed build for another platform may be absent, a change to
+   [the archive format](../library-archive.md#reading-one) (today it refuses a missing build).
+   The identity, `library.sig` and the Catalog's same-build check stay as they are, and nothing
+   needs signing; a half-present build or a wrong digest is still refused, and the rule for which
+   absences are allowed is fixed when the reader changes. (b) *A manifest per platform,* with only
+   that platform's builds, each signed by the publisher: no reader change, but each export has its
+   own identity, which breaks "one version, one manifest hash" or makes a lock made from an export
+   name an identity the index does not list, and the publisher's own tool must sign and submit
+   every export, since the repository's job cannot. (Oscairn's own plugin packages are signed in
+   the submissions repository's import workflow, which holds the official publisher's key in a
+   protected environment, so for those the signing could happen there; other publishers sign on
+   their own machines.) This RFC leans to (a); nothing is decided.
+2. **The address after the move to object storage.** A release-asset address changes with the
+   blob base, which would break links in release notes. Either the project puts a name it
+   controls in front of the exports from the start (a CDN rule is not server-side code), or the
+   links change once and the notes are corrected.
+3. **Large packages.** A GitHub release file must be under 2 GiB, and the index builder refuses
+   an archive over 1,900 MiB ([hosting](#github-first)); a package with a blob base of its own is
+   kept off the project's bandwidth. Proposed: no export when it would be over that size or the
+   package has a blob base, so the person uses the Catalog. Then the Catalog cannot know from the
+   index that an export is missing, and either a missing link is acceptable or the index gets a
+   flag.
+4. **A revoked build among several platforms.** The manifest lists every platform's builds, so a
+   revoked Linux build is listed in the Mac export's manifest too. Does it withdraw the whole
+   version, taking every export, or only the platform whose build it is?
+5. **Revocation on a file install.** This RFC says a withdrawn version, a revoked key and a
+   revoked build are refused when installed from a repository; it does not say whether an
+   archive installed from a file (every export is one) is checked against the official
+   repository's kept list of keys and builds, beyond the trust store's own revoked keys.
 
 ### Several repositories
 
@@ -339,11 +449,12 @@ Sources:
   unzipped as it streams, so it is never stored zipped beside its contents.
 - **An `.olib` on a USB drive or a share** is read in place, without copying it to the
   instrument first. A zip's directory is at its end, so a seekable file is enough to find and
-  decompress each entry straight into staging.
+  decompress each entry straight into staging. A ready-made
+  [archive per platform](#ready-made-archives-per-platform) is one.
 - **A folder package** is copied file by file, as above.
 - **An `.olib` already in the instrument's own storage** costs its own size as well. The
-  device can install from it, but offers to remove it after; downloads never land as a whole
-  archive.
+  device can install from it, but offers to remove it after; downloads Oscairn makes never land
+  as a whole archive (one a person downloads by hand is theirs to put there).
 
 Today, reading an archive extracts every entry into a new folder before installing from it
 ([format](../library-archive.md#reading-one)). Streaming replaces that for packages.
@@ -558,7 +669,9 @@ publisher, and any package newly bringing plugin or app code, also needs a maint
 
 The Library's **Install…** offers exactly two things (decided 2026-11-07): **Catalog** and
 **File**. File installs an archive (`.olib`) chosen from the file browser, as the Library always
-has. Catalog opens the catalog on the kind of list shown: the enabled repositories' packages
+has, including a ready-made archive a person downloaded from the repository
+([per platform](#ready-made-archives-per-platform)). Catalog opens the catalog on the kind of
+list shown: the enabled repositories' packages
 holding items of that type (Performances, Sounds) or plugins, what is installed marked so, searched
 like the rest, from each repository's index as `packages.list` reads it. Opening one shows its
 page from the Catalog app's action (below). Opening a repository by its address or folder is not
@@ -663,6 +776,10 @@ plugin and app code needs System.
   computer's internet. The computer is a mirror: the device still checks every signature
   and hash itself.
 - **Device to device:** one paired instrument can serve another its cached blobs the same way.
+- **By hand:** a person can download a version's ready-made
+  [archive for the device's platform](#ready-made-archives-per-platform) in a browser and carry it
+  there. It installs by the archive path, with the same checks, and needs no repository on the
+  drive.
 
 ## Preinstalled packages
 
@@ -1598,7 +1715,9 @@ waits on them. What remains, in order:
 1. Releases stored in pieces: the index builder splits each archive into its manifest, each
    item folder as a zip, each sample and each plugin build as blobs, and a device fetches only
    the items chosen, the samples it lacks and its own platform's builds, unzipping each as it
-   streams, so peak storage is the installed size plus one entry from the web too.
+   streams, so peak storage is the installed size plus one entry from the web too. Decided
+   2026-11-12: built together with it, the ready-made `.olib` per platform of each version
+   ([above](#ready-made-archives-per-platform)), with no interim archive per platform.
 2. HTTPS on Linux devices: done by RFC 0039's step 1 (libcurl with Mbed TLS in the image,
    `JUCE_USE_CURL` on); the core's `Transport` did not change. A device whose time is unknown
    fetches nothing from the web and says to set the time first (RFC 0035, decided 2026-11-08).
@@ -1650,6 +1769,19 @@ Jacob's decisions on six of the open questions:
   GitHub Pages and package files are Releases assets. Package files move to object storage
   behind a CDN (Cloudflare R2) under a custom domain when files over 2 GiB or bandwidth require
   it; devices do not change ([hosting](#hosting-and-cost)).
+
+## Decided 2026-11-12
+
+The owner's decision: "We will plan on doing the pieces design along with the ready made olibs
+per platform."
+
+- **Releases stored in pieces** is the plan, so a device fetches the manifest, what all platforms
+  share and its own platform's builds ([package files](#package-files)). More platforms are
+  coming: linux-arm64 now, later Windows, x86_64 and hardware-accelerated builds.
+- **A ready-made `.olib` per platform** of each version, a derived export for downloading by hand,
+  replaces the whole archive in the Git tree ([the section](#ready-made-archives-per-platform)).
+  Both are built together; there is no interim archive per platform in the record. Planned, not
+  built; its open questions are the owner's.
 
 ## Open questions
 

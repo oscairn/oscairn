@@ -165,6 +165,18 @@ int main(int argc, char** argv)
                     seconds, number(field(field(r, "callback"), "seconds")), reset ? "" : ", since the last reset");
         std::printf("deadline misses %+.0f, audio underruns %+.0f over the interval (now %.0f and %.0f)\n",
                     after.first - before.first, after.second - before.second, after.first, after.second);
+        // The last Performance opened: where its time went, and how many instances it reused and loaded.
+        if(V o = field(r, "open"); !text(field(o, "name")).empty() || number(field(o, "total")) > 0)
+            std::printf("last open, %s: %.0f ms (read %.0f: loads %.0f, state loads %.0f, resets %.0f, state saves %.0f; publish %.0f), %.0f instances reused (%.0f holding their state), %.0f loaded\n",
+                        text(field(o, "name")).c_str(), number(field(o, "total")), number(field(o, "read")), number(field(o, "load")), number(field(o, "restore")), number(field(o, "reset")),
+                        number(field(o, "save")), number(field(o, "publish")), number(field(o, "reused")), number(field(o, "kept")), number(field(o, "loaded")));
+        // The instances loaded: each in use or idle (kept warm) with its memory.
+        for(V i : array(field(r, "instances")))
+        {
+            const bool inUse = field(i, "inUse")->type == json_type_true;
+            std::printf("instance %s: %.1f MiB, %s\n", text(field(i, "plugin")).c_str(), number(field(i, "memory")) / (1 << 20),
+                        inUse ? "in use" : ("idle " + std::to_string(int(number(field(i, "idle")))) + " s").c_str());
+        }
         // Each worker's blocks past its allowance in the window: played late, or silenced (heard as a dropout),
         // of those not handed over because the worker was busy; the panics that followed a block it did not
         // render (each ends the part's notes); its audio thread's page faults and involuntary context switches;

@@ -168,7 +168,7 @@ namespace
         blocks(s, 2);
         s.savePerformance(file.string());
     }
-    struct Switch { double ms = 0; uint64_t loaded = 0, reused = 0, kept = 0, beside = 0; };
+    struct Switch { double ms = 0; uint64_t loaded = 0, reused = 0, kept = 0, beside = 0; Session::Timing::Open open; };
     Switch load(Session& s, const fs::path& to)
     {
         Switch w;
@@ -177,9 +177,18 @@ namespace
         s.loadPerformance(to.string());
         w.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         w.loaded = pluginInstancesLoaded() - loaded; w.reused = s.reusedInstances() - reused; w.kept = s.keptStates() - kept; w.beside = s.besideSounds() - beside;
+        // engine.timing's open says the same, and its stages fit in its read and its whole.
+        w.open = s.engineTiming(false).open;
+        const auto& o = w.open;
+        check(o.reused == w.reused && o.kept == w.kept && o.loaded == w.loaded, "engine.timing's open counts what the change did: " + std::to_string(o.reused) + " reused, " + std::to_string(o.loaded) + " loaded");
+        check(o.total > 0 && o.total <= w.ms + 1 && o.publish <= o.total && o.load + o.restore + o.reset + o.save <= o.read + 1e-3, "engine.timing's open times add up");
         return w;
     }
-    void report(const char* what, const Switch& w) { std::printf("%-52s %7.1f ms, %2llu instances loaded, %2llu reused (%llu holding their state, %llu with sounds beside)\n", what, w.ms, (unsigned long long)w.loaded, (unsigned long long)w.reused, (unsigned long long)w.kept, (unsigned long long)w.beside); }
+    void report(const char* what, const Switch& w)
+    {
+        std::printf("%-52s %7.1f ms, %2llu instances loaded, %2llu reused (%llu holding their state, %llu with sounds beside)\n", what, w.ms, (unsigned long long)w.loaded, (unsigned long long)w.reused, (unsigned long long)w.kept, (unsigned long long)w.beside);
+        std::printf("%-52s read %.1f ms (loads %.1f, state loads %.1f, resets %.1f, state saves %.1f), publish %.1f ms\n", "", w.open.read, w.open.load, w.open.restore, w.open.reset, w.open.save, w.open.publish);
+    }
 
     // The same notes into a Session that switched and one that opened `file` fresh: every sample equal.
     // The first notes at block `start`; 0 plays one in the block the change is heard in.
@@ -270,6 +279,12 @@ int main(int argc, char** argv)
         check(w.reused == 6 && w.beside == 0 && w.loaded == 2, "A's shared synth given B's sounds beside, A's other instruments kept, not taken over, by B");
         compare(s, b, "A -> B"); quiet(s);
         check(s.warmInstances() == 2, "A's plain instruments kept warm: " + std::to_string(s.warmInstances()));
+        {
+            // engine.timing lists them idle, the rest in use.
+            const auto t = s.engineTiming(false);
+            const auto idle = std::count_if(t.instances.begin(), t.instances.end(), [](const auto& i) { return !i.inUse && i.idle > 0; });
+            check(idle == 2 && t.instances.size() > 2, "engine.timing lists the instances, those kept warm idle: " + std::to_string(idle) + " of " + std::to_string(t.instances.size()));
+        }
         w = load(s, a); report("B -> A, B silent (A's kept warm)", w);
         check(w.reused == 8 && w.beside == 0 && w.kept == 2 && w.loaded == 0, "A's instruments back, holding their state; the shared synth given A's sounds beside; B's kept warm");
         compare(s, a, "B -> A"); quiet(s);

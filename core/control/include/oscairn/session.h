@@ -632,6 +632,7 @@ namespace oscairn
         std::set<NodeId> leaving_;            // the last Performance's plugins, ringing out after a change; not part of this one
         uint64_t reused_ = 0;                 // reusedInstances()
         uint64_t keptStates_ = 0;             // keptStates()
+        Timing::Open lastOpen_;               // engine.timing's open: the last Performance opened
         uint32_t nextPart_ = 1, nextWire_ = 1;
         std::vector<Scene> scenes_;
         std::vector<SceneParameter> untouched_; // parameters scenes never touch
@@ -742,10 +743,11 @@ namespace oscairn
             uint64_t reused = 0, kept = 0;        // its nodes opened in an instance already loaded; of them, holding their state already
             std::vector<std::unique_ptr<Beside>> beside; // its nodes whose sounds were prepared in a playing instance
             Claimed claimed;                      // its nodes on the playing Performance's shared engines
+            Timing::Open stats;                   // engine.timing's open: its counts and the read's times
         };
         // A loaded instance a Performance being read may take over: kept warm (node 0), or a free one
         // of the playing graph (its node), whose state is loaded last.
-        struct Free { NodeId node = 0; std::shared_ptr<PluginHost> host; Loaded loaded; bool keep = false; }; // keep: a playing one to keep warm, not take, unless it holds the node's state
+        struct Free { NodeId node = 0; std::shared_ptr<PluginHost> host; Loaded loaded; bool keep = false; std::chrono::steady_clock::time_point idle{}; }; // keep: a playing one to keep warm, not take, unless it holds the node's state; idle: since when it was kept warm
         std::vector<Free> freeInstances(bool all) const; // all: every one that could be (a cut cuts them anyway)
         std::unique_ptr<Prepared> readTaking(const std::filesystem::path& root, bool playing, bool all, uint64_t incoming = 0); // read with what it may take over; incoming: its memory estimate
         void keepWarm(NodeId node);                       // ringOut: a node rung out kept loaded, or removed

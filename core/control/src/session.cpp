@@ -459,6 +459,20 @@ namespace oscairn
         // A worker gone may leave its address to a new one: its counts go with it.
         std::erase_if(timingBase_, [&](const auto& b) { return std::none_of(workers.begin(), workers.end(), [&](const auto& w) { return w.first == b.first; }); });
         if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); }
+        // Each instance once: a node's workers (its own, its prepared instances, its shared engine's), else the node's host.
+        std::set<const PluginHost*> seen;
+        auto instance = [&](PluginHost& h, bool inUse, double idle) { if(seen.insert(&h).second) t.instances.push_back({h.descriptor().id, h.residentBytes(), inUse, idle}); };
+        std::set<NodeId> playing(leaving_); for(const auto& [node, name] : nodes_) playing.insert(node);
+        for(const auto node : playing)
+            if(graph_.contains(node))
+            {
+                auto& h = graph_.host(node);
+                const auto w = h.workers();
+                if(w.empty()) instance(h, true, 0); else for(auto* x : w) instance(*x, true, 0);
+            }
+        const auto now = std::chrono::steady_clock::now();
+        for(const auto& w : warm_) instance(*w.host, false, std::chrono::duration<double>(now - w.idle).count());
+        t.open = lastOpen_;
         return t;
     }
 

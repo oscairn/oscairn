@@ -727,9 +727,15 @@ namespace {
     }
     // What a prepared Performance was read from; saving over it changes this.
     fs::file_time_type stamp(const fs::path& root) { return fs::last_write_time(root/"performance.json"); }
+    // Adds the milliseconds of its scope to `ms` (engine.timing's open).
+    struct Clock {
+        double& ms;std::chrono::steady_clock::time_point at=std::chrono::steady_clock::now();
+        ~Clock(){ms+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-at).count();}
+    };
 }
 
 void Session::loadPerformance(const std::string& directory) {
+    const auto began=std::chrono::steady_clock::now();
     audition_.reset(); // opening a Performance keeps what an audition tried; auditionStart sets its own after
     const auto root=performanceRoot(directory);
     // Over the budget it is refused, saying what does not fit (RFC 0025), keeping what is prepared.
@@ -742,7 +748,8 @@ void Session::loadPerformance(const std::string& directory) {
     if(prepared && (prepared->root!=root || prepared->stamp!=stamp(root)))prepared.reset();
     // Read at the cue, it may take over the playing Performance's free instances where keeping them warm would not fit (RFC 0021); a cut, any of them.
     if(!prepared)prepared=readTaking(root,!keepInstances_,!seamless,incoming);
-    open(*prepared,seamless);
+    auto stats=prepared->stats;
+    {Clock publish{stats.publish};open(*prepared,seamless);}
     if(!uncertain.empty()){notices_.push_back(uncertain);std::fprintf(stderr,"oscairn: %s\n",uncertain.c_str());}
     // engine.timing: the change's first blocks count as startup, the callback's and each worker's.
     callbackTiming_.warmUp();latenessTiming_.warmUp();
@@ -750,6 +757,7 @@ void Session::loadPerformance(const std::string& directory) {
     if(!seamless)warm_.clear(); // it cut for want of room: none kept warm (RFC 0025)
     evictOpportunistic();
     if(!keepInstances_)remember(root); // an audition is remembered only once kept
+    lastOpen_=stats;lastOpen_.total=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
 }
 
 std::unique_ptr<Session::Prepared> Session::readTaking(const fs::path& root,bool playing,bool all,uint64_t incoming) {
@@ -808,7 +816,7 @@ size_t Session::ringOutRoutes() const { size_t n=0;for(const auto& node:graph_.d
 void Session::keepWarm(NodeId n) {
     const auto loaded=loaded_.find(n);
     if(audition_ || loaded==loaded_.end() || graph_.host(n).effectResources() || !graph_.host(n).failure().empty()){graph_.remove(n);return;}
-    warm_.push_back({0,graph_.release(n),loaded->second});
+    warm_.push_back({0,graph_.release(n),loaded->second,false,std::chrono::steady_clock::now()});
     if(warm_.size()>warmLimit)warm_.erase(warm_.begin());
 }
 
@@ -865,6 +873,7 @@ bool Session::preparePerformance(const std::string& directory) {
 // Reads a Performance and loads its plugins with their state into a replacement graph, without
 // touching what plays. Throws, leaving nothing behind, on anything it cannot restore.
 std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vector<Free> free) {
+    Timing::Open stats;const auto loads=pluginInstancesLoaded();const auto began=std::chrono::steady_clock::now();
     validateTree(root);const auto doc=document(root);V d=doc.get();
     fields(d,{"format","version","info","libraries","transport","audioInputs","audioOutputs","nodes","wires","parts","mappings","pads","key","master","scenes","sceneUntouched","scene","controls","assignments","lock"});
     const auto pads=padsFrom(field(d,"pads"));const auto key=keyFrom(field(d,"key"));const auto master=masterFrom(field(d,"master"));
@@ -1008,7 +1017,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     auto restore=[&](NodeId runtime,V node,uint64_t room){
         auto& h=next->host(runtime);const auto key=text(field(node,"key"));
         if(room)h.setMemoryRoom(room);
-        h.loadSnapshot((root/"nodes"/key).string());
+        {Clock c{stats.restore};h.loadSnapshot((root/"nodes"/key).string());}
         if(room)h.setMemoryRoom(0);
         checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());
         if(integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())bad("note port layout changed");};
@@ -1023,18 +1032,18 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         auto& h=next->host(runtime);const auto key=text(field(node,"key"));
         // Its state already this node's, byte for byte: reset instead of loading it again.
         if(free[f].loaded.source==source(key)){
-            state_files::TemporaryDirectory now;h.saveSnapshot((now.path/"now").string());
-            if(sameTree(now.path/"now",root/"nodes"/key) && h.reset()){
+            state_files::TemporaryDirectory now;{Clock c{stats.save};h.saveSnapshot((now.path/"now").string());}
+            if(sameTree(now.path/"now",root/"nodes"/key) && [&]{Clock c{stats.reset};return h.reset();}()){
                 checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());++kept;return;}}
         bool savable=true;
-        if(free[f].node)try{saved.push_back({free[f].node,graph_.node(free[f].node).host,std::make_unique<state_files::TemporaryDirectory>()});h.saveSnapshot((saved.back().folder->path/"was").string());}
+        if(free[f].node)try{saved.push_back({free[f].node,graph_.node(free[f].node).host,std::make_unique<state_files::TemporaryDirectory>()});Clock c{stats.save};h.saveSnapshot((saved.back().folder->path/"was").string());}
             catch(const std::exception&){saved.pop_back();savable=false;}
         // Cleared first, as a fresh instance starts (CLAP reset: buffers, voices, envelopes, modulation),
         // which a state load alone need not do.
-        if(savable)try{h.reset();restore(runtime,node,room);return;}
+        if(savable)try{{Clock c{stats.reset};h.reset();}restore(runtime,node,room);return;}
         catch(const std::exception& e){if(memoryRefusal(e))throw;}
         const auto path=next->host(runtime).descriptor().path;
-        next->reload(runtime,path,text(field(field(node,"plugin"),"id")),room);origins[runtime]={buildDigest(path),source(key)};--reused;
+        {Clock c{stats.load};next->reload(runtime,path,text(field(field(node,"plugin"),"id")),room);}origins[runtime]={buildDigest(path),source(key)};--reused;
         if(free[f].node)std::erase(taken,free[f].node);
         restore(runtime,node,room);};
     // Roots first; siblings can refer forward to a root, never to an arbitrary chain.
@@ -1068,7 +1077,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                     runtime=next->add(standIn(node,root/"nodes"/key,refs[key],std::string("its shared engine is not here: ")+e.what()));restored=false;}}
             else if(shared && claimEngine(plugin,key,room)){runtime=next->add(claimedSound(node,key));restored=true;++reused;}
             else if(shared){
-                runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
+                runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                       [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
                 const auto host=next->node(runtime).host;
                 if(SoundContext::busParameter(*host)!=CLAP_INVALID_ID){ // else a stand-in, restored as saved
@@ -1085,7 +1094,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 runtime=next->add(free[*f].host);origins[runtime]={free[*f].loaded.build,source(key)};++reused;restored=true;
                 if(free[*f].node){taken.push_back(free[*f].node);later.push_back({runtime,key,*f});first=false;}else{warm.push_back(free[*f].host.get());restoreTaken(runtime,node,room,*f);}
                 free[*f].host.reset();}
-            else{runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
+            else{runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                        [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
                 // What another Performance may take over later: a plugin of its own, loaded (not a stand-in).
                 if(group[key]==1 && next->host(runtime).failure().empty())origins[runtime]={buildDigest(next->host(runtime).descriptor().path),source(key)};}
@@ -1293,6 +1302,9 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     auto prepared=std::make_unique<Prepared>(Prepared{root,stamp(root),std::move(next),pads,info,std::move(lock),tempo,clock=="internal"?Transport::ClockSource::Internal:Transport::ClockSource::MidiClock,
         std::move(disabled),std::move(names),std::move(wires),std::move(parts),nextPart,nextWire,std::move(scenes),std::move(untouched),nextScene,selectedScene,mappingScene,std::move(macros),nextMacro,std::move(assignments),key,master.first,master.second,std::move(roles),std::move(notices),std::move(taken),std::move(warm),std::move(origins),reused,kept,{}});
     prepared->beside=std::move(beside);prepared->claimed.contexts.swap(onPlaying.contexts);prepared->claimed.sounds.swap(onPlaying.sounds);
+    stats.name=info.name;stats.reused=reused;stats.kept=kept;stats.loaded=pluginInstancesLoaded()-loads;
+    stats.read=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
+    prepared->stats=stats;
     return prepared;
 }
 

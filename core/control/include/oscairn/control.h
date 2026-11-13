@@ -247,6 +247,21 @@ namespace oscairn
                 std::vector<std::string> parts;
             };
             std::vector<Worker> workers;
+            // Each plugin instance loaded (RFC 0045's resident instances), once however many nodes
+            // play it: its plugin, memory in bytes (residentBytes, 0 in the engine's process),
+            // whether a Performance uses it (playing or ringing out) or it is idle (kept warm), and the
+            // seconds since it went idle (0 in use).
+            struct Instance { std::string plugin; uint64_t memory = 0; bool inUse = false; double idle = 0; };
+            std::vector<Instance> instances;
+            // The last Performance opened (loadPerformance; its read may have been prepared ahead):
+            // instances reused (taken over, contexts and sounds in loaded instances) and loaded
+            // (loadPlugin calls: a process each for a plugin in a worker), of those reused the ones
+            // holding the node's state already; and milliseconds: the whole open, the read (every
+            // plugin and its state), within it the loads (process start, plugin load and activation
+            // together), the state loads (fresh and reused instances), the resets and the saves of
+            // a taken-over instance's own state, and the publish at the cue.
+            struct Open { std::string name; uint64_t reused = 0, loaded = 0, kept = 0; double total = 0, read = 0, load = 0, restore = 0, reset = 0, save = 0, publish = 0; };
+            Open open;
         };
         virtual Timing engineTiming(bool reset) = 0;
         // What a Performance needs: the open one (directory empty) or one in a folder, each plugin

@@ -698,8 +698,13 @@ namespace oscairn
                 for(const auto& w:t.workers)workers+=std::string(workers.empty()?"":",")+"{\"node\":"+std::to_string(w.node)+",\"name\":"+quote(w.name)+",\"roundTrip\":"+snapshot(w.roundTrip)+",\"allowance\":"+encode(w.allowance)+",\"late\":"+std::to_string(w.late)+",\"silent\":"+std::to_string(w.silent)+
                     ",\"collect\":"+snapshot(w.collect)+",\"wake\":"+snapshot(w.wake)+",\"run\":"+snapshot(w.run)+",\"busy\":"+std::to_string(w.busy)+",\"missPanics\":"+std::to_string(w.missPanics)+
                     ",\"minorFaults\":"+std::to_string(w.minorFaults)+",\"majorFaults\":"+std::to_string(w.majorFaults)+",\"cpu\":"+snapshot(w.cpu)+",\"involuntarySwitches\":"+std::to_string(w.involuntarySwitches)+",\"parts\":"+[&]{std::vector<std::string> q;for(const auto& x:w.parts)q.push_back(quote(x));return join(q);}()+'}';
+                std::vector<std::string> instances;
+                for(const auto& i:t.instances)instances.push_back("{\"plugin\":"+quote(i.plugin)+",\"memory\":"+std::to_string(i.memory)+",\"inUse\":"+(i.inUse?"true":"false")+",\"idle\":"+encode(i.idle)+'}');
+                const auto& o=t.open;
+                const auto open="{\"name\":"+quote(o.name)+",\"reused\":"+std::to_string(o.reused)+",\"loaded\":"+std::to_string(o.loaded)+",\"kept\":"+std::to_string(o.kept)+",\"total\":"+encode(o.total)+",\"read\":"+encode(o.read)+
+                    ",\"load\":"+encode(o.load)+",\"restore\":"+encode(o.restore)+",\"reset\":"+encode(o.reset)+",\"save\":"+encode(o.save)+",\"publish\":"+encode(o.publish)+'}';
                 return "{\"warmupBlocks\":"+std::to_string(BlockTiming::warmupBlocks)+",\"bucketBounds\":["+bounds+"],\"callback\":"+snapshot(t.callback)+
-                    ",\"lateness\":"+snapshot(t.lateness)+",\"workers\":["+workers+"]}";
+                    ",\"lateness\":"+snapshot(t.lateness)+",\"workers\":["+workers+"],\"instances\":"+join(instances)+",\"open\":"+open+"}";
             }
             if(method=="memory.state") {
                 fields(p,{});const auto m=c.memoryState();

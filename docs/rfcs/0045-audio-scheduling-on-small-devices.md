@@ -628,6 +628,15 @@ host across changes; opening a Performance loads its state into a matching free 
 new instance in a host (no new process) only when none is free, and lets unused instances go in
 the background only when the memory budget would be exceeded.
 
+Measured first (built 2026-11-13): `engine.timing` lists `instances`, each instance loaded with its
+plugin, memory, in use or idle and for how long, and `open`, the last Performance opened: the
+instances it reused and loaded, of the reused those holding their state already, and its time
+taken apart, the read (within it the loads, process start, plugin load and activation together,
+which the engine cannot tell apart; the state loads; the resets and state saves of reused
+instances) and the publish at the cue. `oscairn-engine-timing` prints both, so a switch on the
+unit shows where its time goes. `control-performance-switch` checks the counts against what the
+change did and that the stages fit in the read.
+
 ### Migration, in stages that each leave main working
 
 1. Independent of hosts: the deadline rule, the engine's main-thread service cut, the sharing

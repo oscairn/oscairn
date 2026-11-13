@@ -1330,11 +1330,13 @@ namespace oscairn
                     const auto heard=onChannel(step.merged[i],step.heardOn[i]);listener->events(c.id,&heard,1,false);
                 }
             const bool processed=step.processed;
-            // A busy control gate can discard a release; reset when rendering resumes. A host that
+            // A busy control gate can discard a release; reset when rendering resumes. A worker's late
+            // or busy block lost nothing (eventsKept), so its notes go on (RFC 0045). A host that
             // reset the plugin on its own ended every note it was sent, with no NOTE_END: a shared
             // engine's, every context's.
-            if(!processed)step.host->panic();
-            if(!processed || step.host->wasReset())for(auto& source:step.noteSources)source.route->clear();
+            const bool lost=!processed && !step.host->eventsKept();
+            if(lost)step.host->panic();
+            if(lost || step.host->wasReset())for(auto& source:step.noteSources)source.route->clear();
             ok &= processed;
             if(listener && processed){uint32_t sent=0;const auto* list=step.host->outputEvents(sent);listener->events(step.id,list,sent,true);}
             auto meter=[&](const auto& peaks,uint32_t from,uint32_t count){

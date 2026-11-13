@@ -406,6 +406,7 @@ namespace oscairn
                     connect();
                     output_.resize(maxOutputEvents);
                     pending_.reserve(4096);
+                    last_.assign(outChannels_, 0.f);
                     fadeFrames_ = faded_ = uint32_t(process_->rate * .01);
                     // RFC 0045's extra block, experimental: listed plugins in real time render each block while the
                     // engine plays their last, two buffers of the worker's block so a block that is not started
@@ -796,6 +797,9 @@ namespace oscairn
             // As the plugin said in its last block; a failed worker is silent, so asleep too.
             bool asleep() const noexcept override { return process_->failed.load() || shared_->asleep.load(std::memory_order_relaxed) != 0; }
             bool wasReset() const noexcept override { return reset_; }
+            // RFC 0045's miss policy: a block handed but not done in time, or not handed while the worker was busy
+            // with its events carried, lost nothing; with the extra block, of the block played.
+            bool eventsKept() const noexcept override { return extra_ ? playedKept_ : kept_; }
             double parameterValue(clap_id id) const noexcept override
             {
                 const auto i = index_.find(id);
@@ -825,6 +829,7 @@ namespace oscairn
             {
                 kick::clap::Statistics s;
                 s.blocks = shared_->blocks.load(); s.droppedEvents = shared_->droppedEvents.load() + sysexDrops_.load(std::memory_order_relaxed); s.processErrors = shared_->processErrors.load();
+                s.droppedEvents += carryDrops_.load(std::memory_order_relaxed);
                 s.lastMicroseconds = shared_->lastMicroseconds.load(); s.maximumMicroseconds = shared_->maximumMicroseconds.load();
                 s.lateBlocks = late_.load(std::memory_order_relaxed); s.silentBlocks = silent_.load(std::memory_order_relaxed);
                 s.deadlineMisses = shared_->deadlineMisses.load() + s.lateBlocks + s.silentBlocks;
@@ -840,7 +845,7 @@ namespace oscairn
             bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
                          const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override
             {
-                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false; missed_.store(false, std::memory_order_relaxed);
+                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false; missed_.store(false, std::memory_order_relaxed); kept_ = playedKept_ = true;
                 if(frames <= capacity_) return rendered(block(inputs, ni, outputs, no, frames, events, count, transport, 0));
                 // Larger than the shared buffer: split as the in-engine host does, rebasing events,
                 // transport and output event times.
@@ -884,7 +889,7 @@ namespace oscairn
                               const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override
             {
                 if(!frames || frames > capacity_) return false;
-                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false;
+                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false; kept_ = playedKept_ = true;
                 if(extraBlock()) { startDelayed(inputs, ni, outputs, no, frames, events, count, transport, 0); return true; }
                 started_ = start(inputs, ni, outputs, no, frames, events, count, transport, 0);
                 return true;
@@ -1002,18 +1007,41 @@ namespace oscairn
                        const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport, uint32_t offset) noexcept
             {
                 auto silence = [&] {
-                    if(outputs) for(uint32_t c = 0; c < no; ++c) if(outputs[c]) std::fill_n(outputs[c], frames, 0.f);
+                    fadeOut(outputs, no, frames);
                     busy_.store(false);
                     return false;
                 };
                 // While busy (until finish), a restart waits; it sets failed first, so a block that starts later sees it.
                 busy_.store(true);
                 auto& s = *shared_;
-                if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) return silence();
-                if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
-                // A block the worker has not finished yet: stay silent rather than queue another.
-                if(s.done.load(std::memory_order_acquire) != sequence_) { silent_.fetch_add(1, std::memory_order_relaxed); busyBlocks_.fetch_add(1, std::memory_order_relaxed); return silence(); }
+                if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; carriedBytes_->used = 0; return silence(); }
+                if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process_->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
+                // A block the worker has not finished yet: stay silent rather than queue another, its events carried
+                // to the next block handed (RFC 0045); only a release lost on the way is reset for.
+                if(s.done.load(std::memory_order_acquire) != sequence_)
+                {
+                    silent_.fetch_add(1, std::memory_order_relaxed); busyBlocks_.fetch_add(1, std::memory_order_relaxed);
+                    for(uint32_t i = 0; i < count; ++i) if(!carry(events[i], true)) kept_ = false;
+                    return silence();
+                }
                 workerTimes(s, std::chrono::steady_clock::now()); // a block the engine gave up on, done since
+                // Its sound is gone, its output events come now, at this block's start; one the worker's host did not
+                // render (a control silence there) lost its events, so the plugin is reset before this block.
+                if(abandoned_)
+                {
+                    abandoned_ = false;
+                    takeOutputs(s, offset, true);
+                    reset_ = reset_ || s.reset != 0;
+                    if(!s.ok) s.panic.store(1, std::memory_order_relaxed);
+                }
+                // The events carried, before this block's, all bounded as one block's.
+                if(carriedCount_)
+                {
+                    bool lost = false;
+                    for(uint32_t i = 0; i < count; ++i) lost = !carry(events[i], false) || lost;
+                    if(lost) s.panic.store(1, std::memory_order_relaxed); // the request below publishes it
+                    events = carried_.data(); count = carriedCount_;
+                }
                 for(uint32_t c = 0; c < inChannels_; ++c)
                 {
                     if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, audioIn(c));
@@ -1027,6 +1055,7 @@ namespace oscairn
                     if(share(s.events[kept], s.inputBytes)) ++kept;
                     else sysexDrops_.fetch_add(1, std::memory_order_relaxed);
                 }
+                carriedCount_ = 0; carriedBytes_->used = 0;
                 s.frames = frames; s.eventCount = kept; s.hasTransport = transport != nullptr;
                 s.setLimits = limitsWaiting_ && shareLimits(s);
                 if(s.setLimits) limitsWaiting_ = false;
@@ -1045,8 +1074,10 @@ namespace oscairn
                 struct Idle { std::atomic<bool>& busy; ~Idle() { busy.store(false); } } idle{busy_};
                 auto& s = *shared_;
                 const auto outputs = startedOutputs_; const auto no = startedChannels_, frames = startedFrames_, offset = startedOffset_; const auto sent = sent_;
+                // The block handed lost nothing: the worker renders it, and the plugin keeps its notes (RFC 0045).
                 auto silence = [&] {
-                    if(outputs) for(uint32_t c = 0; c < no; ++c) if(outputs[c]) std::fill_n(outputs[c], frames, 0.f);
+                    fadeOut(outputs, no, frames);
+                    abandoned_ = true;
                     return false;
                 };
                 // The budget counts from the request, however long the caller did other work since; with the
@@ -1076,18 +1107,11 @@ namespace oscairn
                     if(c < outChannels_) std::copy_n(audioOut(c), frames, outputs[c]);
                     else std::fill_n(outputs[c], frames, 0.f);
                     for(uint32_t f = 0; f < frames && faded_ + f < fadeFrames_; ++f) outputs[c][f] *= float(faded_ + f) / float(fadeFrames_);
+                    if(c < last_.size()) last_[c] = outputs[c][frames - 1];
                 }
                 faded_ = std::min(fadeFrames_, faded_ + frames);
-                // SysEx bytes are copied out of the shared block: the next chunk reuses it, and the
-                // worker must not change them under the plugins that read them.
-                for(uint32_t i = 0; i < std::min(s.outputCount, maxOutputEvents) && outputCount_ < maxOutputEvents; ++i)
-                {
-                    auto& e = output_[outputCount_] = s.outputs[i];
-                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX &&
-                       (!unshare(e, s.outputBytes) || !sysexOutput_->hold(e))) { sysexDrops_.fetch_add(1, std::memory_order_relaxed); continue; }
-                    reinterpret_cast<clap_event_header_t*>(e.bytes.data())->time += offset;
-                    ++outputCount_;
-                }
+                fadedOut_ = 0;
+                takeOutputs(s, offset, false);
                 // The worker's voice report, copied and bounded: the worker may write anything.
                 if(voiceBudget_)
                 {
@@ -1102,7 +1126,72 @@ namespace oscairn
                     }
                 }
                 reset_ = reset_ || s.reset != 0;
+                if(!s.ok) kept_ = false; // not rendered in the worker (its control gate busy): events lost there
                 return s.ok;
+            }
+            // The worker's output events into this call's. SysEx bytes are copied out of the shared block: the next
+            // chunk reuses it, and the worker must not change them under the plugins that read them. Late: a block
+            // given up on, its events at the start of this one (`offset`), else moved by it.
+            void takeOutputs(Shared& s, uint32_t offset, bool late) noexcept
+            {
+                for(uint32_t i = 0; i < std::min(s.outputCount, maxOutputEvents) && outputCount_ < maxOutputEvents; ++i)
+                {
+                    auto& e = output_[outputCount_] = s.outputs[i];
+                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX &&
+                       (!unshare(e, s.outputBytes) || !sysexOutput_->hold(e))) { sysexDrops_.fetch_add(1, std::memory_order_relaxed); continue; }
+                    auto& time = reinterpret_cast<clap_event_header_t*>(e.bytes.data())->time;
+                    time = late ? offset : time + offset;
+                    ++outputCount_;
+                }
+            }
+            // A block not heard (RFC 0045): each channel's last sample heard fades to zero over about 1 ms, then
+            // silence, and the next block heard fades in over as long (a restart's 10 ms fade-in left as it is).
+            void fadeOut(float* const* outputs, uint32_t no, uint32_t frames) noexcept
+            {
+                const uint32_t n = std::max(1u, uint32_t(process_->rate * .001));
+                if(outputs) for(uint32_t c = 0; c < no; ++c) if(outputs[c])
+                {
+                    const float from = c < last_.size() ? last_[c] : 0.f;
+                    for(uint32_t f = 0; f < frames; ++f) outputs[c][f] = fadedOut_ + f < n ? from * float(n - 1 - fadedOut_ - f) / float(n) : 0.f;
+                }
+                fadedOut_ = std::min(n, fadedOut_ + frames);
+                if(faded_ >= fadeFrames_) fadeFrames_ = n;
+                faded_ = 0;
+            }
+            // A release: losing one leaves a note stuck.
+            static bool release(const kick::clap::Event& e) noexcept
+            {
+                const auto* h = e.header();
+                if(h->space_id != CLAP_CORE_EVENT_SPACE_ID) return false;
+                if(h->type == CLAP_EVENT_NOTE_OFF || h->type == CLAP_EVENT_NOTE_CHOKE) return true;
+                if(h->type != CLAP_EVENT_MIDI) return false;
+                const auto* m = reinterpret_cast<const clap_event_midi_t*>(h)->data;
+                const int kind = m[0] & 0xf0;
+                return kind == 0x80 || (kind == 0x90 && !m[2]) || (kind == 0xb0 && ((m[1] == 64 && m[2] < 64) || m[1] == 120 || m[1] == 123));
+            }
+            // Adds an event to the carry, in order; at the block's start when it waits for a later block (its SysEx
+            // bytes copied). Bounded as one block's events: when full, the oldest event that is not a release goes
+            // (RFC 0045). False: a release was lost.
+            bool carry(const kick::clap::Event& event, bool later) noexcept
+            {
+                auto e = event;
+                if(later)
+                {
+                    reinterpret_cast<clap_event_header_t*>(e.bytes.data())->time = 0;
+                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX && !carriedBytes_->hold(e))
+                    { carryDrops_.fetch_add(1, std::memory_order_relaxed); return true; }
+                }
+                if(carriedCount_ == maxEvents)
+                {
+                    carryDrops_.fetch_add(1, std::memory_order_relaxed);
+                    uint32_t i = 0;
+                    while(i < carriedCount_ && release(carried_[i])) ++i;
+                    if(i == carriedCount_) return !release(e); // all releases: a release in drops itself, anything else goes
+                    std::move(carried_.begin() + i + 1, carried_.begin() + carriedCount_, carried_.begin() + i);
+                    --carriedCount_;
+                }
+                carried_[carriedCount_++] = e;
+                return true;
             }
 
             // RFC 0045's extra block: each call hands the worker this block and plays the one handed in the
@@ -1126,20 +1215,24 @@ namespace oscairn
                 float* const* last = heldPointers_.data() + (handed_ ? 0 : outChannels_); // the buffer the last block went to
                 float* const* next = heldPointers_.data() + (handed_ ? outChannels_ : 0);
                 playedFrames_ = startedFrames_;
+                bool kept = notStartedKept_; // a first block lost nothing; one not started, as start said
                 if(previous_ == Previous::started)
                 {
                     // Not from a worker that failed or restarted since: its shared block is not the one handed.
                     busy_.store(true);
-                    if(process_->failed.load() || process_->generation.load() != generation_) { busy_.store(false); playedOk_ = false; for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(last[c], playedFrames_, 0.f); }
-                    else playedOk_ = finish();
+                    if(process_->failed.load() || process_->generation.load() != generation_) { busy_.store(false); playedOk_ = kept = false; for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(last[c], playedFrames_, 0.f); }
+                    else { kept_ = true; playedOk_ = finish(); kept = kept_; }
                 }
                 else playedOk_ = previous_ == Previous::none; // a first block is silent; one not started was silenced
+                playedKept_ = playedKept_ && kept;
                 played_ = last;
                 if(panicLater_.exchange(false, std::memory_order_acq_rel) && !process_->failed.load()) shared_->panic.store(1, std::memory_order_release); // the worker is idle: the panic is the next block's
                 // shortcut: a block longer than the worker's is silenced here; a realtime block never is, only an offline one (not delayed).
                 const bool fits = frames <= process_->frames;
                 const auto channels = std::min(no, outChannels_);
+                kept_ = true;
                 previous_ = fits && start(inputs, ni, next, channels, frames, events, count, transport, offset) ? Previous::started : Previous::notStarted;
+                notStartedKept_ = fits && kept_;
                 if(!fits) for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(next[c], process_->frames, 0.f);
                 if(previous_ == Previous::notStarted) startedFrames_ = std::min(frames, process_->frames);
                 handed_ = !handed_;
@@ -1248,6 +1341,17 @@ namespace oscairn
             // still busy, which busyBlocks_ counts apart); panics sent right after a block not rendered (missed_).
             std::atomic<uint64_t> late_{0}, silent_{0}, busyBlocks_{0}, missPanics_{0};
             std::atomic<bool> missed_{false};
+            // RFC 0045's miss policy, audio thread: the events of blocks not handed (the worker still busy) for the
+            // next block handed, and their SysEx bytes; the events the carry dropped, full; whether this call's
+            // blocks not heard lost no events (kept_), with the extra block the block played's (playedKept_); a
+            // block given up on (abandoned_), its output events to come with the next block handed; each output
+            // channel's last sample heard, and how far a silent block has faded it out.
+            std::array<kick::clap::Event, maxEvents> carried_{};
+            uint32_t carriedCount_ = 0, fadedOut_ = 0;
+            std::unique_ptr<kick::clap::SysexPool> carriedBytes_ = std::make_unique<kick::clap::SysexPool>();
+            std::atomic<uint64_t> carryDrops_{0};
+            bool kept_ = true, playedKept_ = true, abandoned_ = false;
+            std::vector<float> last_;
             bool reset_ = false; // audio thread: wasReset, from the worker's blocks in the last call
             uint32_t sequence_ = 0, timed_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
             // The block start handed over, for finish.
@@ -1258,7 +1362,7 @@ namespace oscairn
             bool extra_ = false; std::atomic<bool> panicLater_{false};
             std::vector<float> held_; std::vector<float*> heldPointers_;
             enum class Previous { none, started, notStarted } previous_ = Previous::none;
-            bool handed_ = false, playedOk_ = true;
+            bool handed_ = false, playedOk_ = true, notStartedKept_ = true;
             float* const* played_ = nullptr; uint32_t playedFrames_ = 0;
             float* const* playOutputs_ = nullptr; uint32_t playChannels_ = 0, playFrames_ = 0;
             WorkerTiming timing_;

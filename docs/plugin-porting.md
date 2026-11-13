@@ -668,7 +668,13 @@ What changes for the plugin:
 - **Time limit:** in real time, a block may take half the block's time (the worker's allowance,
   `OSCAIRN_WORKER_BUDGET_US` or a profile's `compute.workerAllowance` to try others), counted
   from when the engine hands it over; a later one is silenced, and `session.status` counts it as
-  a silent block apart from one played late. A plugin listed in the experimental
+  a silent block apart from one played late. A late block is not a reset: the plugin finishes
+  it, its sound is discarded (its output events come at the start of the next block heard), and
+  its voices, envelopes and held notes go on; the dropout fades out and in over about 1 ms. While
+  the plugin is still busy with a late block, the engine hands it no new one and keeps those
+  blocks' events (at most one block's, releases kept first) for the next block it hands over,
+  each at time 0: after a stall, notes and note offs may arrive one or more blocks late, dropped
+  only past that bound, where a release that does not fit resets the plugin ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#the-miss-policy)). A plugin listed in the experimental
   `OSCAIRN_WORKER_EXTRA_BLOCK` gets a period more for each block and is heard one block late:
   it sees the same blocks, events and transport, so a plugin that follows the transport (an
   arpeggiator, a sequencer) sounds a block behind the others

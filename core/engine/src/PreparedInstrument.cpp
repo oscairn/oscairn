@@ -308,8 +308,10 @@ public:
             // This instance resets and ends its own notes; a failure reported upward would make
             // the graph reset the whole node, cutting the other sounds' notes too. One the host
             // reset on its own ended them already, with no NOTE_END.
-            if(!rendered)s->host->panic();
-            const bool reset=!rendered || s->host->wasReset();++ran;resets+=reset;
+            // A worker's late or busy block lost nothing (eventsKept, RFC 0045): its notes go on.
+            const bool lost=!rendered && !s->host->eventsKept();
+            if(lost)s->host->panic();
+            const bool reset=lost || s->host->wasReset();++ran;resets+=reset;
             if(reset){for(const auto& n:s->notes.notes)if(n.used)ended(n,0);s->notes.clear();}
             for(size_t c=0;c<std::min<size_t>(no,s->outputs.size());++c)if(outputs && outputs[c])
                 for(uint32_t f=0;f<frames;++f)outputs[c][f]+=s->outputs[c][f];

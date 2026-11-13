@@ -143,6 +143,11 @@ namespace oscairn
         // (a panic, an event overflow), which ends every note it was sent, that call's too, with no
         // NOTE_END (CLAP's reset has no output events). False where it cannot tell.
         virtual bool wasReset() const noexcept { return false; }
+        // Audio thread, after a process() (finishProcess) that returned false: the plugin was not heard
+        // in time but has, or will get in a later block, every event it was sent, so nothing is to be
+        // reset and its notes go on (RFC 0045's miss policy: a worker's late or busy block). False: the
+        // events were lost, and the caller resets the plugin and forgets its notes.
+        virtual bool eventsKept() const noexcept { return false; }
         // Control thread: the memory a plugin in its own worker holds (its share of the worker's
         // physical footprint on macOS, resident memory on Linux); 0 where the host cannot tell (a
         // plugin in the engine's process).

@@ -124,7 +124,8 @@ struct Statistics {
     double allowanceMicroseconds = 0;
     // Oscairn plugin workers, apart for the timing report: the silent blocks never handed over because
     // the worker was still busy with the last; the panics the engine sent right after a block the
-    // worker did not render; the page faults of the worker's audio thread (Linux; 0 elsewhere).
+    // worker did not render (since RFC 0045's miss policy, none for a late or busy block, which loses
+    // no events: only where events were lost, as a control silence in the worker); the page faults of the worker's audio thread (Linux; 0 elsewhere).
     // Also the worker's audio thread's involuntary context switches (Linux; 0 elsewhere).
     uint64_t busyBlocks = 0, missPanics = 0, minorFaults = 0, majorFaults = 0, involuntarySwitches = 0;
 };

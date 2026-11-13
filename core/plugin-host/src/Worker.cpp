@@ -191,6 +191,9 @@ namespace oscairn::worker
 #ifdef OSCAIRN_HOSTILE_SIZES
     void hostileSizes(Shared& s, uint32_t frames, uint32_t inputs, uint32_t outputs, bool wreck) noexcept; // a test's worker only: writes lies into the block's sizes, and takes them back
 #endif
+#ifdef OSCAIRN_STALLING_WORKER
+    void stall() noexcept; // a test's worker only: one block taking long, whatever the plugin
+#endif
 
     namespace
     {
@@ -326,6 +329,9 @@ namespace oscairn::worker
                 for(uint32_t i = 0; i < std::min(s.eventCount, maxEvents); ++i) if(unshare(s.events[i], s.inputBytes)) s.events[events++] = s.events[i];
 #ifdef OSCAIRN_HOSTILE_SIZES
                 hostileSizes(s, trueFrames, trueInputs, trueOutputs, false); // the plugin's host reads them
+#endif
+#ifdef OSCAIRN_STALLING_WORKER
+                stall();
 #endif
                 const bool ok = host.process(in.data(), s.inputChannels, out.data(), s.outputChannels - (s.ringOut ? 0 : s.ringOutChannels), s.frames,
                                              events ? s.events : nullptr, events, s.hasTransport ? &s.transport : nullptr);

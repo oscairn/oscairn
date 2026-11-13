@@ -2,7 +2,8 @@
 
 Status: proposed, 2026-11-13, from the FANTOM-07 measurements of that week and the owner's
 decisions of the same day ([below](#the-owners-wishes)). Steps 1 to 3 are built (measurement
-and an opt-in experiment); nothing here changes a default. Builds on plugin worker isolation
+and an opt-in experiment); step 4, the miss policy, is built and changes what a missed block
+does by default. Builds on plugin worker isolation
 ([RFC 0010](0010-plugin-worker-isolation.md)), parallel graph rendering
 ([RFC 0034](0034-parallel-graph-rendering.md)), resource budgets
 ([RFC 0025](0025-resource-budgets.md)), reliability levels
@@ -23,9 +24,9 @@ Checked when built and tested; the sections below say how.
       `engine.timing` and `oscairn-engine-timing` ([status](#step-2-status))
 - [x] 3. The extra block, experimental: a listed plugin's worker one block late, opt-in per
       plugin ID, fixed at load (`OSCAIRN_WORKER_EXTRA_BLOCK`) ([status](#step-3-status))
-- [ ] 4. A missed block no longer ends the plugin's notes: no panic for a block the worker was
+- [x] 4. A missed block no longer ends the plugin's notes: no panic for a block the worker was
       handed; the events of a block not handed carried to the next; a short fade instead of a
-      cut ([miss policy](#the-miss-policy))
+      cut ([miss policy](#the-miss-policy), [status](#step-4-status))
 - [ ] 5. "Too slow" no longer restarts a worker that is making progress
       ([when a restart is right](#when-a-restart-is-right))
 - [ ] 6. The allowance from the block's deadline and the graph's waves
@@ -111,7 +112,7 @@ same arithmetic sat in `Process::setRate`, `core/plugin-host/src/WorkerHost.cpp`
 
 ### What a miss does today
 
-Read in `WorkerHost::start`, `WorkerHost::finish` and `Graph::process`'s `finish`
+Until step 4 (below: [step 4 status](#step-4-status) says what a miss does now). Read in `WorkerHost::start`, `WorkerHost::finish` and `Graph::process`'s `finish`
 (`core/engine/src/graph.cpp`, the `if(!processed)step.host->panic();` line):
 
 1. **A block not finished within the allowance is silenced**, and the worker keeps rendering it;
@@ -320,6 +321,54 @@ which its workers inherit, and again from each worker's start), is built; `OSCAI
 leaves a process as it is, for measuring. Confirmation trial (transparent huge pages off
 system-wide, then this change) pending.
 
+### Step 4 status
+
+Built 2026-11-13, the owner's first decision. What a missed block does now:
+
+- **A block handed but not done within the allowance** is silenced and the worker goes on
+  rendering it, as before, but the plugin is not panicked and the part's note routes are kept:
+  the host reports it as not processed with its events kept (`PluginHost::eventsKept`, new), and
+  the graph (and the prepared instrument's instances) reset only where events were lost. The late
+  block's sound is discarded; its output events (note ends, a note effect's notes) are delivered
+  at the start of the next block handed, so a note effect's releases are not lost either, and a
+  reset the plugin made in it counts as the next block's.
+- **A block not handed because the worker is still busy** has its events carried to the next
+  block handed, at time 0 and in order, before that block's own; SysEx bytes copied into a pool of
+  their own. The carry holds one block's events (`maxEvents`, a graph block's capacity). Decided
+  while building, as the owner asked: when it is full, the oldest event that is not a release goes
+  (a note on, a parameter value, a controller), counted in `droppedEvents`; a release (note off or
+  choke, a MIDI note off, sustain pedal up, all notes or sound off) is never dropped for another
+  event. Only when the carry holds nothing but releases is a release lost, and then the plugin is
+  reset, as an overflow is today: the block reports its events lost (the graph panics), or, when
+  the loss happens merging the carry into the block being handed, the worker resets the plugin
+  before that block, which reports it as `wasReset`.
+- **The fade:** a silenced block starts from each channel's last sample heard and fades it to zero
+  over about 1 ms (48 frames at 48 kHz, continued across blocks shorter than that), then silence;
+  the next block heard fades in over as long. A restart's 10 ms fade-in is unchanged. No
+  allocation on the audio thread: the carry, its SysEx pool and the last samples are allocated
+  with the node.
+- **The extra block** follows the same rules: the block played's result carries whether its
+  events were kept; a panic still waits for the next block handed (commit 9ee713bf's ordering).
+- **A control silence stays a reset.** The worker's own host drops a block's events when its main
+  thread holds the control gate, so that block lost its events and the panic after it stays, as
+  the policy says ("panic only where events were really lost"). Found only when a late block's
+  result comes in (it was a control silence there), the reset goes to the plugin before the next
+  block handed.
+- **"Too slow" is unchanged** (step 5 is a separate decision): it still counts blocks silenced
+  after waiting and played late, a worker that hangs is still failed at 250 ms, and carrying events
+  does not touch either count. `worker-failures` still restarts the 2 ms fixture as too slow.
+
+Tests: `worker-miss` (new): the fixture stalling 100 ms in one block against a 10 ms allowance,
+in a graph: a note held through it sounds afterwards at its level, with no panic (`missPanics` 0);
+the dropout's largest step between samples is the sound's 48th (a cut's is the whole sound); a
+note off sent while the worker is busy takes effect afterwards (the tail instrument's release
+decays to silence); a note on sent then sounds afterwards; two parts sharing one Basic Synth
+(stalled by a test build of the worker, `oscairn-stalling-worker`) both keep their notes; the
+three single-part cases again with the extra block; the carry overflowing with controllers keeps
+the note off and drops the oldest of the rest, and overflowing with releases reports the block's
+events lost. Each check fails with the old panic, without the carry or with a cut instead of the fade, whichever it is about (checked by putting each back). `control-worker-timing`
+now expects no panic after the stall's blocks.
+
 ## Core placement
 
 What the device showed: interrupts on core 0, nothing pinned, and the display's software
@@ -489,8 +538,9 @@ Steps 2 and 11; built marked as such.
 - Blocks past the allowance by cause: played late (built), silenced after waiting (built, as
   silent), silenced because the worker was busy (built: `busy`, within silent), the
   plugin's own block longer than the period (in `deadlineMisses`).
-- Panics and note cuts caused by misses (step 4 makes them rare; until then counted: built,
-  `missPanics`, the panics sent right after a block the worker did not render).
+- Panics and note cuts caused by misses (built, `missPanics`, the panics sent right after a block
+  the worker did not render; since step 4 none follows a late or busy block, only one whose events
+  were lost: a control silence in the worker, or a carry that had to drop a release).
 - Each part's latency state: normal or one block late, since when, and how often it entered and
   left (step 8).
 - Each instance's parts and its share of their voice time, for sharing (step 9).

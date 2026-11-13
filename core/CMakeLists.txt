@@ -387,6 +387,16 @@ target_link_libraries(oscairn-worker-extra-block-test PRIVATE oscairn_engine)
 add_test(NAME worker-extra-block COMMAND oscairn-worker-extra-block-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(worker-extra-block PROPERTIES TIMEOUT 60)
+# RFC 0045's miss policy: a long block in a worker costs a faded dropout of that part, never its notes.
+add_executable(oscairn-stalling-worker plugin-host/src/worker_main.cpp plugin-host/src/Worker.cpp engine/tests/stalling_worker.cpp)
+target_compile_definitions(oscairn-stalling-worker PRIVATE OSCAIRN_STALLING_WORKER)
+target_include_directories(oscairn-stalling-worker PRIVATE plugin-host/src)
+target_link_libraries(oscairn-stalling-worker PRIVATE oscairn_plugin_host)
+add_executable(oscairn-worker-miss-test engine/tests/worker_miss.cpp)
+target_link_libraries(oscairn-worker-miss-test PRIVATE oscairn_engine)
+add_test(NAME worker-miss COMMAND oscairn-worker-miss-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-stalling-worker>
+    $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)
+set_tests_properties(worker-miss PROPERTIES TIMEOUT 60)
 add_executable(oscairn-worker-failures-test engine/tests/worker_failures.cpp)
 target_link_libraries(oscairn-worker-failures-test PRIVATE oscairn_engine)
 add_test(NAME worker-failures COMMAND oscairn-worker-failures-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>

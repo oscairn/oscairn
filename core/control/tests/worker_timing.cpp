@@ -3,7 +3,7 @@
 // RFC 0045's timing report, for telling a worker's scheduling from its work: one block the plugin
 // stalls in (the fixture's KICK_FIXTURE_STALL, which also first touches memory there) is silenced
 // after the allowance; the blocks after it are not handed over while the worker is still busy;
-// each of them is followed by a panic; then blocks are handed over again. engine.timing gives each
+// none of them is followed by a panic (RFC 0045's miss policy); then blocks are handed over again. engine.timing gives each
 // part apart: the round trip, when the engine came for the block, the worker's wake-up and run (the
 // stalled block's run too, recorded as the next block is handed over), the blocks not handed, the
 // panics after a miss and the audio thread's page faults, counted from the last reset. The audio thread's
@@ -58,7 +58,7 @@ int main(int argc, char** argv)
     // machine may miss another block or two besides).
     check(w->busy >= 10 && w->silent >= w->busy + 1 && w->silent <= w->busy + 3, "the stalled block is silenced after waiting, the rest of the stall's blocks are not handed: silent " +
           std::to_string(w->silent) + ", busy " + std::to_string(w->busy));
-    check(w->missPanics == w->silent, "every block not rendered is followed by a panic: " + std::to_string(w->missPanics));
+    check(w->missPanics == 0, "no block not rendered is followed by a panic: " + std::to_string(w->missPanics));
     check(most(w->roundTrip) >= 10'000'000 && most(w->roundTrip) < 100'000'000, "the longest round trip is the wait for the stalled block, no longer");
     check(most(w->collect) < most(w->roundTrip), "the engine came for the stalled block before it gave up on it");
     check(most(w->run) >= 100'000'000, "the stalled block's run, recorded as the next block was handed over: " + std::to_string(most(w->run)));

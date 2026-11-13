@@ -14,7 +14,7 @@
     { "kind": "buttons", "count": 31, "role": "fixed" },
     { "kind": "touchstrip", "count": 1, "role": "fixed" }
   ],
-  "screens": [ { "width": 1024, "height": 600, "touch": true, "diagonal": 178, "surface": "panel", "layout": "kick-screen" } ],
+  "screens": [ { "width": 1024, "height": 600, "touch": true, "diagonal": 178, "surface": "panel", "layout": "kick-screen", "textEntry": "onScreen" } ],
   "midi": { "din": 1, "usbDevice": true, "usbHost": true },
   "network": { "wifi": true },
   "reliability": "instrument",

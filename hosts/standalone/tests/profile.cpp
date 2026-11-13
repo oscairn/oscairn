@@ -78,6 +78,8 @@ int main()
         check(refused(replaced(fantomJson, "\"diagonal\": 140", "\"diagonal\": 1.5")), "a diagonal that is not whole millimeters");
         check(fantom.screen()->theme == "oscairn-block" && kick.screen()->theme.empty(), "the FANTOM-07's screen shows Oscairn Block until the user chooses a theme");
         check(refused(replaced(fantomJson, "\"theme\": \"oscairn-block\"", "\"theme\": \"../block\"")), "a screen's theme is a theme's ID");
+        check(fantom.screen()->textOnScreen() && kick.screen()->textOnScreen() && modx.screen()->textOnScreen() && !qemu.screen()->textOnScreen(), "a touch screen types on screen; one without touch, and absent, do not");
+        check(refused(replaced(fantomJson, "\"textEntry\": \"onScreen\"", "\"textEntry\": \"voice\"")), "a screen's textEntry is keyboard or onScreen");
         check(kick.cpuBudget() == .75 && kick.memoryBudget() == 2048ull * 1024 * 1024 * 8 / 10, "an instrument's budget: 75% of the audio thread, 80% of its memory");
         const auto desktop = loadProfile("");
         check(desktop.id == "desktop" && desktop.compute.cores >= 1 && desktop.screen() && desktop.screen()->surface == "desktop" && desktop.screen()->layout == "desktop" &&

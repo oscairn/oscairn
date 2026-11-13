@@ -70,6 +70,9 @@ namespace oscairn::standalone
         struct Screen
         {
             int width = 0, height = 0; bool touch = false; std::string surface = "desktop", layout = "desktop"; int diagonal = 0; std::string theme;
+            // How text is typed (RFC 0019): "keyboard", or "onScreen" where there is no typing keyboard: the app puts its own up (TextKeyboard.h).
+            std::string textEntry = "keyboard";
+            bool textOnScreen() const { return textEntry == "onScreen"; }
             // Pixels per millimeter; 0 when its size is not known.
             double density() const { return diagonal > 0 ? std::hypot(double(width), double(height)) / diagonal : 0.0; }
             // Pixels per design unit (RFC 0019): enough that a touch target (`touchTarget` units)

@@ -586,6 +586,13 @@
             "description": "The theme the screen shows until the user chooses one, by its ID (RFC 0019)",
             "type": "string",
             "pattern": "^[a-z0-9-]{1,64}$"
+          },
+          "textEntry": {
+            "description": "How text is typed on this screen (RFC 0019): keyboard, a typing keyboard is there (absent: this); onScreen, the app puts its own keyboard up when a text field takes focus",
+            "enum": [
+              "keyboard",
+              "onScreen"
+            ]
           }
         },
         "required": [

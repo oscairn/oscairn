@@ -14,7 +14,7 @@
     { "kind": "pads", "count": 16, "role": "notes" },
     { "kind": "buttons", "count": 26, "role": "fixed" }
   ],
-  "screens": [ { "width": 1024, "height": 600, "touch": true, "diagonal": 178, "surface": "panel", "layout": "kick-screen" } ],
+  "screens": [ { "width": 1024, "height": 600, "touch": true, "diagonal": 178, "surface": "panel", "layout": "kick-screen", "textEntry": "onScreen" } ],
   "midi": { "din": 4, "usbDevice": true, "usbHost": true },
   "cv": { "outputs": 4 },
   "network": { "wifi": true },

@@ -160,7 +160,10 @@ An illustrative profile (the values are an example, not a real product's):
   ([RFC 0019](0019-adaptive-ui.md#screens-of-any-size)). Built in: the FANTOM-07's 140 (5.5",
   its retailers' figure); the KICK's, the Ignite's, the MODX M's and the i.MX8M Mini EVK's 178
   (7"), each listed in `estimated`; QEMU's virtual screen has none and stays at one pixel per
-  design unit. The Ignite's screen now shows `kick-screen`, as the KICK's does: its panel's own
+  design unit. A screen's `textEntry` (added 2026-11-13) is `keyboard` (absent) or `onScreen`,
+  where text fields bring up the app's own keyboard ([RFC 0019](0019-adaptive-ui.md#text-entry));
+  the FANTOM-07's, the KICK's, the Ignite's and the MODX M's say `onScreen`, the EVK's and QEMU's
+  (no touch) do not. The Ignite's screen now shows `kick-screen`, as the KICK's does: its panel's own
   layout, scaled into 1024 x 600, put its screen at a third of its size.
 - **`midi`, `cv`, `network`:** what it can connect to; CV outputs mean the CV service of RFC 0004.
 - **`hardware`** (optional, added 2026-11-09 with [RFC 0004](0004-hardware-services.md#step-1-status)):

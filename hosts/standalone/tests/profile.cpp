@@ -295,17 +295,17 @@ int main()
         check(bad, "a block under 16 frames is refused");
 
         // A profile's audio device (audio.device) reaches the engine as audio options: the
-        // FANTOM-07's TDM link, all 16 slots open, main out on the (estimated) slots 0 and 1.
+        // FANTOM-07's TDM link, six channels open as on the unit, main out on channels 0 and 1.
         {
             std::string fantomJson; for(const auto& [id, text] : all) if(id == "fantom-07") fantomJson = text;
             oscairn::host::AudioConfiguration fantom;
             Profile::parse(fantomJson).configureAudio(fantom);
-            check(fantom.arguments() == std::vector<std::string>{"--output-device", "hw:1,0", "--audio-outputs", "0,1", "--device-channels", "16", "--sample-rate", "48000"},
+            check(fantom.arguments() == std::vector<std::string>{"--output-device", "hw:1,0", "--audio-outputs", "0,1", "--device-channels", "6", "--sample-rate", "48000"},
                   "the FANTOM-07's device, channels, rate and main outputs reach the engine");
             oscairn::host::AudioConfiguration none;
             Profile::parse(kickJson).configureAudio(none);
             check(none.arguments().empty(), "a profile without a device leaves the engine's audio as it was");
-            const std::string device = "\"device\": { \"name\": \"hw:1,0\", \"channels\": 16, \"rate\": 48000, \"outputs\": { \"main\": [0, 1] } }";
+            const std::string device = "\"device\": { \"name\": \"hw:1,0\", \"channels\": 6, \"rate\": 48000, \"outputs\": { \"main\": [0, 1] } }";
             const auto mapped = Profile::parse(replaced(fantomJson, device,
                 "\"device\": { \"name\": \"Interface\", \"outputs\": { \"cue\": [4, 5], \"main\": [7, 6], \"sub\": [2] }, \"inputs\": { \"main\": [1, 0] } }"));
             oscairn::host::AudioConfiguration order;

@@ -37,9 +37,9 @@ none of it settles is in
   clock of its own (SAI1's master clock is off). ALSA calls it `hw:1,0`; Roland's app opens 6
   channels each way, S32_LE. Read from the app: it plays its sampler on channels 2 to 5,
   leaves 0 and 1 silent, and samples from its first two input channels
-  ([The audio link's channels](#the-audio-links-channels)). **Whether audio played into
-  `hw:1,0` reaches MAIN OUT without Roland's app setting the BMCs up first is unknown**: that
-  is the deciding test on a unit.
+  ([The audio link's channels](#the-audio-links-channels)). **Audio played into `hw:1,0`
+  is heard without Roland's app**, on every pair tried, and Oscairn's engine has played
+  through it ([With Roland's app stopped](#with-rolands-app-stopped)).
 - **Panel:** Roland's driver (`i2c-slave-coms`, built into the kernel) makes the i.MX an I2C
   slave at 0x08 on I2C3 and gives `/dev/i2c-slave-2`. Messages are 4 bytes, with **bit 7 set on
   the first byte**. Roland's test tool names four kinds: `PMDWEncoder`, `PMDWADChange`,
@@ -256,7 +256,8 @@ no hidraw. `cpufreq` governor `ondemand`. Modules can be loaded (177 on the unit
 ### With Roland's app stopped
 
 Seen on the unit on November 12, 2026, with Roland's app stopped (`systemctl stop
-weston-term`), by reading the devices by hand and sending nothing to the BMC side.
+weston-term`), with nothing sent over the message link: the devices read by hand, and audio
+played into `hw:1,0` while a program kept reading `/dev/ttyGS0`.
 
 - **The keys arrive on `/dev/ttyGS0` with nothing sent first.** Opened raw with echo off and
   only read, it gives 18 seconds of playing as 26,096 bytes, every byte in a frame of the shape
@@ -285,6 +286,21 @@ weston-term`), by reading the devices by hand and sending nothing to the BMC sid
   ([Panel messages](#panel-messages)), and perhaps only after the host's start words (the two
   kind-0 words to 0x75 that Roland's app sends,
   [What the app does that the hardware depends on](#what-the-app-does-that-the-hardware-depends-on)).
+- **The audio link runs without Roland's app.** `aplay -D hw:1,0` played a 6-channel, S32_LE,
+  48 kHz file to its end, and the link's DMA interrupts kept their rate throughout: the BMCs
+  clock the link by themselves.
+- **Audio from Linux is heard by default, on every pair tried.** A quiet sine (about -30 dBFS)
+  on channels 2 and 3, then 4 and 5, then 0 and 1, was heard in the headphones each time, with
+  no routing or level command sent. Not measured: the pairs' levels against each other, which
+  channel of a pair is left, MAIN OUT apart from the headphones, SUB OUT, and opening all 16
+  channels.
+- **Oscairn's engine played through it.** From the chroot bundle, `oscairn-engine
+  --output-device hw:1,0 --device-channels 6 --sample-rate 48000 --audio-outputs 0,1
+  --buffer-frames 128` opened the device (JUCE named it "nocodec ... Direct hardware device
+  without any conversions") at 48,000 Hz with a 128-sample buffer; five notes sent with
+  `notes.send` on its control socket were heard from the startup synth; `deadlineMisses` and
+  `audioUnderruns` were 0 before and after, `cpuLoad` about 0.23 to 0.25 with the startup
+  synth, sequencer and delay, and about 416 MB of memory was still available.
 - **Roland's app does not come back without a power cycle.** Started again after being stopped,
   it showed "program version error" and did nothing, with nothing else holding the link. Treat
   stopping it as needing a power cycle to get it back.
@@ -484,7 +500,8 @@ What stops when Roland's app is stopped, from what it was seen to do:
   audio, 992 MiB, what the kernel sees), a 1280 × 720 touch screen, 48 kHz at 128-frame blocks, instrument
   reliability, the Performance, Groovebox, Library and Setlist apps, and its panel (below).
   **Estimated** (`estimated`): `audio` (two inputs for MIC/LINE, four outputs for MAIN and SUB
-  OUT, headphones, and the audio device below, whose slots are a guess), `controls` (Roland's counts, but whether each reaches the i.MX,
+  OUT, headphones; the audio device below is verified as far as it goes, its inputs and the
+  outputs beyond main are not), `controls` (Roland's counts, but whether each reaches the i.MX,
   and the roles below, are Oscairn's guesses) and `midi`. The controls, in order, with what
   they are in Oscairn ([RFC 0024's identities](rfcs/0024-device-profiles.md#default-targets)):
   the lever as `wheel:1` (pitch bend) and `wheel:2` (modulation); WHEEL1 and WHEEL2 as
@@ -495,26 +512,22 @@ What stops when Roland's app is stopped, from what it was seen to do:
   `screen:1` to `screen:6`; ZONE INT/EXT 1 to 8 as `button:101` to `button:108` on part mutes;
   the VALUE dial, MASTER VOLUME and every other button as fixed functions; the keys and pads as
   notes; the HOLD jack as sustain and CTRL1 and CTRL2 as expression pedals, unassigned. The
-  profile's own notes on two of these are behind what Roland's programs show: the keys reach
-  Linux over `/dev/ttyGS0` and the pads over the panel bus ([Keys](#keys),
-  [The map](#the-map)), and MASTER VOLUME never reaches the i.MX as a panel message, so its
+  profile's own notes on two of these are behind what Roland's programs show: the pads come
+  over the panel bus ([The map](#the-map)), and MASTER VOLUME never reaches the i.MX as a panel message, so its
   `volume` function has nothing to drive it.
 - **The audio device** (the profile's `audio.device`, [RFC 0024](rfcs/0024-device-profiles.md#what-a-profile-holds)):
-  `{ "name": "hw:1,0", "channels": 16, "rate": 48000, "outputs": { "main": [0, 1] } }`. The
-  engine opens `hw:1,0` with all 16 slots at 48 kHz (refusing to start at another rate), plays
-  main left and right on slots 0 and 1 and keeps the other 14 silent. JUCE, which opens it, takes
-  S32_LE when the device offers no float format. **Slots 0 and 1 are a guess**, and what the
-  app shows since points elsewhere: Roland's app leaves 0 and 1 silent and plays on 2 to 5
-  ([The audio link's channels](#the-audio-links-channels)), so `[2, 3]` and `[4, 5]` are the
-  pairs to try first. The profile is unchanged until one is heard. Sixteen channels
-  where Roland's app opens 6 are accepted (Roland's `thru.sh` opens 16), but whether the BMCs
-  listen beyond the six slots Roland's app fills is unknown (if nothing sounds, try
-  `"channels": 6`); no inputs and
-  no SUB OUT are mapped until their slots are known. To find MAIN OUT on a unit, copy the profile, change `main`
-  (for example to `[2, 3]`), start the app with `--profile` and the copy's path (the built-in
-  one is compiled in), and listen at a low level; or run `oscairn-engine` with
-  `--output-device hw:1,0 --device-channels 16 --sample-rate 48000 --audio-outputs 2,3`; the SUB OUT pair, once found,
-  goes in as `"sub": [n, n + 1]`.
+  `{ "name": "hw:1,0", "channels": 6, "rate": 48000, "outputs": { "main": [0, 1] } }`, what
+  played on the unit: the engine opens `hw:1,0` with six channels, as Roland's app does, at
+  48 kHz (refusing to start at another rate), plays main left and right on channels 0 and 1 and
+  keeps the other four silent. JUCE, which opens it, takes S32_LE when the device offers no
+  float format. Heard on the unit: the device, the rate, the six channels and main on 0 and 1
+  ([With Roland's app stopped](#with-rolands-app-stopped)). Not known yet: whether 0 and 1 are
+  MAIN OUT or only the headphones, which of the pairs 0 and 1, 2 and 3, 4 and 5 is which output,
+  and SUB OUT; no inputs are mapped until capture is checked. To try another pair, copy the
+  profile, change `main` (for example to `[2, 3]`), start the app with `--profile` and the copy's
+  path (the built-in one is compiled in), and listen at a low level; or run `oscairn-engine` with
+  `--output-device hw:1,0 --device-channels 6 --sample-rate 48000 --audio-outputs 2,3`; the SUB
+  OUT pair, once found, goes in as `"sub": [n, n + 1]`.
 - **The screen:** the profile gives its diagonal (140 mm, 5.5"), so the UI scales by its density
   ([RFC 0019](rfcs/0019-adaptive-ui.md#screens-of-any-size)): 10.5 pixels per millimeter make a
   scale of 1.55, and `kick-screen` is laid out at the screen's own 826 × 465 design units and
@@ -839,24 +852,19 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
    drops what was queued, and logs how many). Lines saying `unknown frame:` are frames not seen
    in the capture: send them back. Then send notes into MIDI IN from another instrument:
    whichever `FANTOM MIDI 0x..` input plays names the DIN socket's address.
-8. **Whether the link still runs:** `arecord -D hw:1,0 -c 16 -f S32_LE -r 48000 -d 2
-   /tmp/link.wav`. Expected: it finishes in two seconds, the BMCs driving the clocks without
-   Roland's app. Hanging until killed, or an input/output error, refutes that: they stopped
-   the clocks. Look at the file for which of the 16 slots carry signal while someone plays a
-   key. Roland's app samples from its first two inputs, taken to be slots 0 and 1, so sound
+8. **Capture:** the link runs without Roland's app (November 12: playback ran to the end,
+   [With Roland's app stopped](#with-rolands-app-stopped)); what comes back is not checked.
+   `arecord -D hw:1,0 -c 6 -f S32_LE -r 48000 -d 2 /tmp/link.wav`, and look at the file for
+   which of the six channels carry signal while someone plays a key, and with a source on
+   MIC/LINE IN. Roland's app samples from its first two inputs, taken to be slots 0 and 1, so sound
    there fits; sound on another pair only says which pair that is; silence everywhere says
    only that the BMC feeds its sampling bus when told to. Remove the file afterward.
-9. **The deciding audio test,** at low volume, headphones first: play into `hw:1,0` one pair of
-   slots at a time, `oscairn-engine --output-device hw:1,0 --device-channels 16
-   --sample-rate 48000 --audio-outputs 2,3`, then `4,5`, then `0,1`, then `6,7` and so on to
-   `14,15`, and note which pair reaches MAIN OUT, SUB OUT or the headphones, if any. Expected,
-   if the BMC mixes the sampler's channels without being told: `2,3` or `4,5` is heard, and
-   `0,1` is not (Roland's test tool has to ask for those). Heard on `0,1` refutes the second;
-   that pair then goes in the profile as `main`. If no pair sounds, repeat with
-   `--device-channels 6` and the pairs 0 to 5, then with Roland's app started and stopped once
-   more (in case its BMC set-up outlives it). If nothing ever sounds, the BMCs mix what the
-   i.MX sends only when told to over `/dev/ttyGS0`, and the next step is to record what
-   Roland's app writes there while a pad plays.
+9. **Which pair is which output.** Settled on November 12: audio from Linux is heard without
+   Roland's app on the pairs 0 and 1, 2 and 3, and 4 and 5, and Oscairn's engine plays through
+   `hw:1,0` ([With Roland's app stopped](#with-rolands-app-stopped)). Still to note, at low
+   volume, one pair at a time (`--audio-outputs 0,1`, then `2,3`, then `4,5`): which reaches
+   MAIN OUT, SUB OUT and the headphones, which channel of each is left, and whether their levels
+   differ; and whether `--device-channels 16` plays as 6 does.
 10. **A lamp** (the one step that sends the BMC side anything; skip it if in doubt). With
     Roland's app stopped:
 

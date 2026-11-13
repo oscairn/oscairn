@@ -411,7 +411,7 @@ engine opens the device JUCE lists by that name hint's description. ALSA lists `
 with `defaults.namehint.extended on`, which the OS image sets in `/etc/asound.conf`; elsewhere,
 put that line in `~/.asoundrc` to name a `hw:` address. On macOS they take a Core Audio device's name, as before.
 For example, the FANTOM-07's profile gives
-`--output-device hw:1,0 --audio-outputs 0,1 --device-channels 16 --sample-rate 48000`.
+`--output-device hw:1,0 --audio-outputs 0,1 --device-channels 6 --sample-rate 48000`.
 
 `--audio null`, on the desktop or `oscairn-engine`, opens the null device instead of any real one
 (`NullDevice.h`): a thread of its own plays the engine's callback at the pace of its rate and

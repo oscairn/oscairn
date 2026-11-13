@@ -6,9 +6,9 @@
   "platform": { "os": "linux", "cpu": "arm64", "runtime": "oscairn-buildroot-2026.08", "board": "imx8mm" },
   "compute": { "cores": 4, "realtimeCores": 1, "memory": 992 },
   "audio": { "inputs": 2, "outputs": 4, "rates": [48000], "block": 128, "headphones": true,
-    "device": { "name": "hw:1,0", "channels": 16, "rate": 48000, "outputs": { "main": [0, 1] } } },
+    "device": { "name": "hw:1,0", "channels": 6, "rate": 48000, "outputs": { "main": [0, 1] } } },
   "controls": [
-    { "kind": "keys", "count": 76, "role": "notes", "sensing": "velocity, no aftertouch; where the keys reach the i.MX (directly or through the BMC) is unknown" },
+    { "kind": "keys", "count": 76, "role": "notes", "sensing": "velocity, no aftertouch; from the BMC side over /dev/ttyGS0 (the profile's keyboard)" },
     { "kind": "wheels", "count": 1, "role": "assign", "functions": ["pitchBend"], "sensing": "the pitch bend/modulation lever, left and right" },
     { "kind": "wheels", "count": 1, "role": "assign", "functions": ["modulation"], "sensing": "the pitch bend/modulation lever, pushed away" },
     { "kind": "wheels", "count": 2, "role": "assign", "sensing": "WHEEL1 and WHEEL2" },

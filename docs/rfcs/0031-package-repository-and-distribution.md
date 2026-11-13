@@ -986,7 +986,8 @@ Read in the code on 2026-11-11:
 
 - A document names each plugin by format, ID and version, its path only a hint
   ([format](../performance-format.md)). A node loads the build at its path hint or the store's
-  build of exactly that version; any other version is not taken. Otherwise it opens as a
+  build of exactly that version, or (since 2026-11-12) the one bundled with the app, found in its
+  plugin folder by format and ID; any other version is not taken. Otherwise it opens as a
   stand-in that keeps its place, ports, parameters and saved state, plays silence and writes the
   state back byte for byte on save (`resolvePlugin` and `standIn` in
   `core/control/src/performance.cpp`, `core/plugin-host/src/unavailable_plugin.cpp`). Its

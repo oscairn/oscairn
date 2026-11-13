@@ -4,6 +4,7 @@
 #include "sheredom/json.h"
 #include "JsonInput.h"
 #include "CurveJson.h"
+#include "oscairn/discovery.h"
 #include "oscairn/package.h"
 #include "oscairn/unavailable_plugin.h"
 #include "oscairn/sound_context.h"
@@ -176,6 +177,15 @@ fs::path storedPlugin(const std::string& format,const std::string& id,const std:
     const auto builds=storedBuilds(format,id,version);const auto here=builds.find(platform());
     return here==builds.end()?fs::path():here->second;
 }
+// A plugin bundled with the app (RFC 0006: a built-in this device supplies), in its plugin folder
+// wherever the app now is, by format and ID; empty when none is. The folder holds the app's own
+// builds, which load in this process, so they are read here too.
+fs::path bundledPlugin(const fs::path& folder,const std::string& format,const std::string& id){
+    if(folder.empty())return {};
+    for(const auto& b:kick::clap::findBinaries({folder},format=="lv2"?".lv2":".clap"))
+        for(const auto& d:inspectPlugin(b).plugins)if(d.id==id)return b;
+    return {};
+}
 // A store entry's plugin.json: the plugin's format, ID, version and name, as the folder's name
 // cannot say them exactly, and its plugin package's license. Empty ID when it cannot be read.
 Control::InstalledPlugin storedIdentity(const fs::path& folder){
@@ -305,14 +315,16 @@ bool sameTree(const fs::path& a,const fs::path& b){
     for(const auto& [name,size]:files)if(state_files::read(a/name,size)!=state_files::read(b/name,size))return false;
     return true;
 }
-// A saved node's plugin: the build at its saved path, else the store's, of the saved version;
-// else its stand-in. load adds a build, version reads it, unload removes a mismatched one.
+// A saved node's plugin: the build at its saved path, else the store's, else the one bundled with
+// the app (in folder bundled), of the saved version; else its stand-in. load adds a build, version
+// reads it, unload removes a mismatched one.
 template<class Load,class Unload,class Version,class Adopt>
-NodeId resolvePlugin(V node,const fs::path& snapshot,const std::set<uint32_t>& refs,Load load,Unload unload,Version version,Adopt adopt){
+NodeId resolvePlugin(V node,const fs::path& snapshot,const std::set<uint32_t>& refs,const fs::path& bundled,Load load,Unload unload,Version version,Adopt adopt){
     const V plugin=field(node,"plugin");
     const auto format=text(field(plugin,"format")),id=text(field(plugin,"id")),saved=text(field(plugin,"version"));
     std::string reason="not installed";
-    for(const auto& candidate:{fs::path(text(field(plugin,"pathHint"))),storedPlugin(format,id,saved)}){
+    for(int i=0;i<3;++i){
+        const auto candidate=i==0?fs::path(text(field(plugin,"pathHint"))):i==1?storedPlugin(format,id,saved):bundledPlugin(bundled,format,id); // the folder read only when needed
         std::error_code e;if(candidate.empty() || !fs::exists(candidate,e))continue;
         try{const auto n=load(candidate.string(),id);const auto have=version(n);if(have==saved)return n;unload(n);reason="version "+have+" installed";}
         catch(const std::runtime_error& x){if(memoryRefusal(x))throw std::invalid_argument(x.what());reason=x.what();} // a load that failed; a refusal (the budget's) is not one
@@ -836,6 +848,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         const auto format=text(field(plugin,"format")),id=text(field(plugin,"id")),saved=text(field(plugin,"version"));
         fs::path wanted;std::error_code e;
         for(const auto& candidate:{fs::path(text(field(plugin,"pathHint"))),storedPlugin(format,id,saved)})if(!candidate.empty() && fs::exists(candidate,e)){wanted=candidate;break;}
+        if(wanted.empty())wanted=bundledPlugin(bundledPlugins_,format,id);
         if(wanted.empty())return std::nullopt;
         const auto build=buildDigest(wanted.string());if(build.empty())return std::nullopt;
         const auto& policy=placementPolicy();const auto placed=policy.plugins.find(id);
@@ -971,7 +984,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 if(!joined)for(const auto& e:playingEngines(plugin))if((joined=joinEngine(e,root/"nodes"/key,true,room))){onPlaying.contexts.push_back(joined);onPlaying.sounds.push_back({e->host,joined->own()});++reused;break;}
                 first=!joined && kinds[kind(plugin)]>1;}
             if(siblings){if(!definitions.contains(engine) || text(field(definitions.at(engine),"engine"))!=engine || !ids.contains(engine))bad("missing shared engine root");
-                const auto& source=next->host(ids.at(engine)).descriptor();if(source.id!=id || source.path!=path)bad("incompatible shared engine identity");
+                const auto& source=next->host(ids.at(engine)).descriptor();if(source.id!=id || text(field(field(definitions.at(engine),"plugin"),"pathHint"))!=path)bad("incompatible shared engine identity"); // as saved: the root may have loaded from elsewhere
                 try{
                     if(shared){runtime=next->add(claimedEngines.contains(engine)?claimedSound(node,engine):savedSound(node,root/"nodes"/key,nullptr,&next->host(ids.at(engine))));restored=true;if(claimedEngines.contains(engine))++reused;}
                     else runtime=context(next->host(ids.at(engine)),[&]{return next->addEffectContext(ids.at(engine));});}
@@ -980,7 +993,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                     runtime=next->add(standIn(node,root/"nodes"/key,refs[key],std::string("its shared engine is not here: ")+e.what()));restored=false;}}
             else if(shared && claimEngine(plugin,key,room)){runtime=next->add(claimedSound(node,key));restored=true;++reused;}
             else if(shared){
-                runtime=resolvePlugin(node,root/"nodes"/key,refs[key],[&](const std::string& p,const std::string& i){return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
+                runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                       [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
                 const auto host=next->node(runtime).host;
                 if(SoundContext::busParameter(*host)!=CLAP_INVALID_ID){ // else a stand-in, restored as saved
@@ -997,7 +1010,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 runtime=next->add(free[*f].host);origins[runtime]={free[*f].loaded.build,source(key)};++reused;restored=true;
                 if(free[*f].node){taken.push_back(free[*f].node);later.push_back({runtime,key,*f});first=false;}else{warm.push_back(free[*f].host.get());restoreTaken(runtime,node,room,*f);}
                 free[*f].host.reset();}
-            else{runtime=resolvePlugin(node,root/"nodes"/key,refs[key],[&](const std::string& p,const std::string& i){return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
+            else{runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                        [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
                 // What another Performance may take over later: a plugin of its own, loaded (not a stand-in).
                 if(group[key]==1 && next->host(runtime).failure().empty())origins[runtime]={buildDigest(next->host(runtime).descriptor().path),source(key)};}
@@ -1400,7 +1413,7 @@ std::map<std::string,NodeId> Session::addNodes(const json_value_s* document,cons
                 try{runtime=shared?adopt(unique(name),savedSound(node,snapshot,nullptr,&graph_.host(ids.at(engine)))):addEffectContext(unique(name),ids.at(engine));}
                 catch(const std::exception& e){if(memoryRefusal(e))throw;runtime=adopt(unique(name),standIn(node,snapshot,refs[key],std::string("its shared engine is not here: ")+e.what()));}}
             else if(joined)runtime=adopt(unique(name),joined);
-            else runtime=resolvePlugin(node,snapshot,refs[key],[&](const std::string& p,const std::string& i){return addInstance(unique(name),p,i);},[&](NodeId n){dropNode(n);},
+            else runtime=resolvePlugin(node,snapshot,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){return addInstance(unique(name),p,i);},[&](NodeId n){dropNode(n);},
                                        [&](NodeId n){return graph_.host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return adopt(unique(name),std::move(h));});
             added.push_back(runtime);
             if(graph_.host(runtime).descriptor().id!=id)bad("saved plugin does not match the loaded plugin: "+name);

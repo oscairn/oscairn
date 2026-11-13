@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/session.h"
+#include "oscairn/package.h"
 #include "../../../plugins/step-sequencer/Parameters.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include "AllocationGuard.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <thread>
 using namespace oscairn;
@@ -100,6 +102,29 @@ static void native(const char* synth,const char* delay,const char* seq,const fs:
     {const auto gone=root/"gone";fs::copy(file,gone,fs::copy_options::recursive);replaceText(gone/"performance.json",synth,"/missing/plugin.clap");
         Session s(48000,127);s.loadPerformance(gone.string());
         check(s.sessionStatus().failures.size()==1 && s.sessionStatus().failures[0].reason.find("not here")!=std::string::npos,"a missing plugin opens as a stand-in, reported");}
+    // Plugins bundled with the app, saved where the app's plugin folder was (another device, the app
+    // moved), open from where it is now, by format and ID: no stand-ins, the shared Delay engine too.
+    {const auto bundled=root/"bundled";fs::create_directories(bundled);
+        for(const char* p:{synth,delay,seq})fs::copy(p,bundled/fs::path(p).filename(),fs::copy_options::recursive);
+        auto text=[](const fs::path& f){const auto b=state_files::read(f,4*1024*1024);return std::string(b.begin(),b.end());};
+        auto moved=[&](const fs::path& to,const std::string& lockedSynth){fs::copy(file,to,fs::copy_options::recursive);
+            auto value=text(to/"performance.json");
+            for(const char* p:{synth,delay,seq})for(size_t at;(at=value.find(p))!=std::string::npos;)value.replace(at,std::strlen(p),"/old/app/"+fs::path(p).filename().string());
+            const auto digest=bundleDigest(synth);const auto at=value.find(digest);check(at!=std::string::npos,"the synth's lock entry");value.replace(at,digest.size(),lockedSynth);
+            state_files::write(to/"performance.json",value.data(),value.size());};
+        auto opens=[&](const fs::path& from,const char* why){
+            Session s(48000,127);s.setBundledPlugins(bundled);s.loadPerformance(from.string());
+            for(const auto& f:s.sessionStatus().failures)std::cerr<<f.name<<": "<<f.reason<<'\n';
+            check(s.sessionStatus().failures.empty() && s.effectResources(s.nodeId("long-echo"))->prepared==2,why);
+            const auto saved=fs::path(from.string()+"-saved");s.savePerformance(saved.string());return text(saved/"performance.json");};
+        moved(root/"moved",bundleDigest(synth));
+        const auto same=opens(root/"moved","bundled plugins open from the app's folder as it is now");
+        check(same.find("/bundled/"+fs::path(synth).filename().string())!=std::string::npos,"saved again, where they are now");
+        // Locked to another build of the same version: as for the saved path and the store, the build
+        // here loads (the lock names digests, loading compares versions), and the next save locks it.
+        const std::string other(64,'0');moved(root/"other-build",other);
+        const auto relocked=opens(root/"other-build","another build of the locked version loads, as from the store");
+        check(relocked.find(other)==std::string::npos && relocked.find(bundleDigest(bundled/fs::path(synth).filename()))!=std::string::npos,"the lock then names the build that played");}
     for(int which=0;which<5;++which){if(which==1)continue;const auto bad=root/("bad"+std::to_string(which));fs::copy(file,bad,fs::copy_options::recursive);
         if(which==0)replaceText(bad/"performance.json","\"version\":13","\"version\":999");
         if(which==2)fs::remove(bad/"nodes/node-1/state/state.clap");

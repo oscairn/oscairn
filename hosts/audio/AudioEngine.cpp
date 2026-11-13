@@ -164,6 +164,7 @@ namespace oscairn::host
         if(!started_)throw std::runtime_error("Requested audio channels are unavailable; no output fallback is permitted for explicit mappings");
 
         session_        = std::make_unique<Session>( sampleRate_, maxFrames, Lv2BufferLimits{}, channelMap_.layout() );
+        session_->setBundledPlugins( pluginDir );
         const auto seq   = session_->add( "sequencer", pluginDir + "/oscairn-step-sequencer.clap" );
         const auto synth = session_->add( "synth", pluginDir + "/oscairn-basic-synth.clap" );
         const auto delay = session_->add( "delay", pluginDir + "/oscairn-delay.clap" );

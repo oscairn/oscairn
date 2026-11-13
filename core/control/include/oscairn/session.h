@@ -43,6 +43,9 @@ namespace oscairn
         ~Session() override; // keeps this device's measurements (RFC 0025)
         Control& control() noexcept { return *this; }
         const Control& control() const noexcept { return *this; }
+        // The folder of the plugins bundled with the app (the engine's --plugins), where a document's
+        // plugin not at its saved path or in the store is looked for by format and ID. Set before use.
+        void setBundledPlugins(const std::filesystem::path& folder) { bundledPlugins_ = folder; }
 
         // Edits are staged; a failed commit leaves the live plan unchanged and the
         // staging area available for correction. Empty names address nodes by ID only.
@@ -618,6 +621,7 @@ namespace oscairn
         // The Performance last opened or saved, remembered in last_ once reopenPerformance has set it,
         // so tests and tools that never ask never write the user's data folder. Control thread.
         std::filesystem::path last_;
+        std::filesystem::path bundledPlugins_; // setBundledPlugins
         bool opened_ = false; // a Performance opened or saved in this engine
         void remember(const std::filesystem::path& folder);
         PerformanceInfo writeDocument(const std::string& directory,PerformanceInfo info,const Part* sound,std::vector<std::string>* left);

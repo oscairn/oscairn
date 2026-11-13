@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // A Performance of ST Final's shape, every plugin in its own worker, played in real time for a
-// while and timed as engine.timing sees it (RFC 0045): six instrument parts (a note held on each),
+// while and timed as engine.timing sees it (RFC 0045): six instrument parts (the fixture's effect in
+// the instrument's place: an instrument without sound contexts of its own renders through the
+// graph's prepared-instance pool, which takes its block whole rather than handed over and collected
+// as the Sampler's and Analog's are),
 // the sixth through an insert effect, and three effect buses every part sends to, so the longest
 // chain is three workers one after another (instrument, insert, bus effect) and the widest wave six.
 // Each plugin computes KICK_FIXTURE_WORK_US a block (150 unless set). For comparing the scheduling
 // settings (OSCAIRN_WORKER_SPIN_US, OSCAIRN_PLUGIN_PLACEMENT, OSCAIRN_WORKER_DEADLINE, ...) on one
-// machine; absolute times on another machine, or in a container, do not transfer.
+// machine; absolute times on another machine, or in a container, do not transfer. The Session's service
+// runs on a thread of its own every 5 ms, as the engine's main thread runs it (AudioEngine's timer),
+// and the CPU time of both threads is printed: the engine's own cost beside its workers'.
 // SHAPE small is Rd 73 Chill's instead: one instrument through an insert, no buses.
 //   oscairn-worker-bench WORKER FIXTURE.clap [SECONDS [SHAPE]]
 #include <oscairn/session.h>
 #include <oscairn/realtime.h>
+#include "../../plugin-host/src/StateFiles.h"
+#include <atomic>
 #include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -27,7 +35,9 @@ int main(int argc, char** argv)
     setenv("KICK_FIXTURE_WORK_US", "150", 0);
     constexpr double rate = 48000; constexpr uint32_t frames = 128;
     const auto period = std::chrono::nanoseconds(int64_t(1e9 * frames / rate));
+    oscairn::state_files::TemporaryDirectory home; setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1); // its measurements, apart
     oscairn::Session session(rate, frames);
+    session.setBudget({.75}); // as a device's profile sets it: the Session then measures every plugin each tick
     std::vector<uint32_t> buses;
     for(int b = 0; b < (small ? 0 : 3); ++b)
     {
@@ -38,12 +48,25 @@ int main(int argc, char** argv)
     for(int p = 0; p < parts; ++p)
     {
         const auto part = session.addPart("Part " + std::to_string(p + 1));
-        session.insertIntoPart(part, 0, session.add("Instrument " + std::to_string(p + 1), argv[2], "org.kick.test.synth"));
+        session.insertIntoPart(part, 0, session.add("Instrument " + std::to_string(p + 1), argv[2], "org.kick.test.effect"));
         if(p == parts - 1) session.insertIntoPart(part, 1, session.add("Insert", argv[2], "org.kick.test.effect"));
         for(const auto bus : buses) session.setSend(part, bus, .2);
     }
     session.commit();
     float l[frames], r[frames]; float* out[]{l, r};
+    auto cpuNow = [] { timespec t{}; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t); return double(t.tv_sec) + t.tv_nsec * 1e-9; };
+    // The main thread's work, every 5 ms; made before this thread turns real-time, so it does not inherit that.
+    std::atomic<bool> stop{false}, measuring{false};
+    std::atomic<double> serviceCpu{0}; std::atomic<uint64_t> services{0};
+    std::thread main([&] {
+        for(double from = 0; !stop.load();)
+        {
+            if(measuring.load() && !from) from = cpuNow();
+            session.service();
+            if(from) { services.fetch_add(1); serviceCpu.store(cpuNow() - from); }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
     oscairn::worker::makeRealtime(1e6 * frames / rate, oscairn::worker::priority::engineAudio); // as the device's thread; may be refused off a device
     auto next = std::chrono::steady_clock::now();
     auto play = [&](double s, bool notes) {
@@ -54,17 +77,23 @@ int main(int argc, char** argv)
             const auto start = std::chrono::steady_clock::now();
             std::vector<kick::clap::Event> e;
             if(notes && i == 0) e.push_back(kick::clap::Event::note(true, 60, .8));
+            oscairn::worker::callbackDeadline = start + std::chrono::nanoseconds(int64_t(double(period.count()) * (1 - oscairn::worker::mixingReserve))); // as the device's callback sets it
             session.process(out, frames, e);
+            oscairn::worker::callbackDeadline = {};
             const auto end = std::chrono::steady_clock::now();
             session.blockTimes(start.time_since_epoch().count(), end.time_since_epoch().count(), period.count());
             next += period;
             if(end > next) next = end; // behind: start again from now, as a device would after an underrun
-            if(i % 64 == 0) session.service();
         }
     };
     play(1, true); // the warm-up: workers' first blocks, a note on every part
     session.engineTiming(true);
+    measuring = true;
+    const double audioFrom = cpuNow();
+    const auto wallFrom = std::chrono::steady_clock::now();
     play(seconds, false);
+    const double audioCpu = cpuNow() - audioFrom, wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wallFrom).count();
+    stop = true; main.join();
     const auto t = session.engineTiming(false);
     auto us = [](const oscairn::Histogram& h, double q) { return h.percentileMicroseconds(q); };
     std::printf("%-16s %8s %8s %8s %8s %8s %8s %8s %6s %6s %6s\n", "worker", "rt p50", "rt p99", "rt max", "wake p50", "wake p99", "run p50", "cpu p50", "late", "silent", "busy");
@@ -83,6 +112,8 @@ int main(int argc, char** argv)
     uint64_t over = 0; for(size_t i = 7; i < c.buckets; ++i) over += c.counts[i];
     std::printf("SUMMARY workers=%zu callback_p50=%.0f callback_p99=%.0f callback_max=%.0f callback_over_1024us=%.2f%% late=%llu silent=%llu\n", t.workers.size(), us(c, .5), us(c, .99), c.maxNs / 1e3,
                 c.count() ? 100.0 * double(over) / double(c.count()) : 0.0, (unsigned long long)late, (unsigned long long)silent);
+    std::printf("ENGINE audio thread %.1f%% of a core, main thread (service, %llu ticks) %.1f%% of a core, %.0f us a tick\n", 100 * audioCpu / wall,
+                (unsigned long long)services.load(), 100 * serviceCpu.load() / wall, services.load() ? 1e6 * serviceCpu.load() / double(services.load()) : 0.0);
     // A run, not a judgment: only that every plugin played in a worker and was timed.
     return t.workers.size() == (small ? 2u : 10u) && c.count() > 0 ? 0 : 1;
 }

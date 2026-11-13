@@ -322,103 +322,170 @@ namespace oscairn::worker
             }
         };
 
-        // The worker's audio thread: one plugin block per request. The parameter IDs are read
-        // before it starts, as the main thread may re-read the plugin's parameters meanwhile.
-        void audio(PluginHost& host, Shared& s, uint32_t blockFrames, std::vector<clap_id> ids)
+        // A plugin node of the worker. The audio fields are set before the node is published to the
+        // audio thread (Audio::live) and are the audio thread's alone from then on; the parameter IDs
+        // are read before, as the main thread may re-read the plugin's parameters meanwhile.
+        struct Node
         {
+            std::shared_ptr<PluginHost> host;
+            Shared* shared = nullptr; size_t bytes = 0;
+            uint64_t revision = 0; // the parameter info the engine has
+            std::vector<const float*> in; std::vector<float*> out; std::vector<clap_id> ids;
+            uint64_t reported = 0; uint32_t seen = 0;
 #ifdef OSCAIRN_HOSTILE_SIZES
-            const uint32_t trueFrames = s.maxFrames, trueInputs = s.inputChannels, trueOutputs = s.outputChannels; // the engine's, true until the first wreck
+            uint32_t trueFrames = 0, trueInputs = 0, trueOutputs = 0; // the engine's, true until the first wreck
 #endif
-            std::vector<const float*> in(s.inputChannels);
-            std::vector<float*> out(s.outputChannels);
-            for(uint32_t c = 0; c < s.inputChannels; ++c) in[c] = s.input(c);
-            for(uint32_t c = 0; c < s.outputChannels; ++c) out[c] = s.output(c);
-            uint64_t reported = host.parameterReports();
-            makeRealtime(1e6 * blockFrames / s.sampleRate); // the block period, not the larger shared buffer
-            uint32_t seen = s.done.load(std::memory_order_acquire); // a request may already be waiting
-            std::chrono::steady_clock::time_point lastWoke{};
-            uint32_t spin = 0; // the last request's spinNs
-            for(;;)
+            void publish() const
             {
-                // RFC 0045's spin: asleep until shortly before the next block is due (a period after the last
-                // came), then polling until it comes or as long again after; only while blocks keep coming.
-                if(spin && lastWoke.time_since_epoch().count())
-                {
-                    const auto due = lastWoke + std::chrono::nanoseconds(int64_t(1e9 * s.frames / s.sampleRate));
-                    if(const auto early = due - std::chrono::nanoseconds(spin) - std::chrono::steady_clock::now(); early > std::chrono::nanoseconds::zero())
-                        waitWhileEqual(s.request, seen, early);
-                    for(const auto until = due + std::chrono::nanoseconds(spin); s.request.load(std::memory_order_acquire) == seen && std::chrono::steady_clock::now() < until;) relax();
-                }
-                waitWhileEqual(s.request, seen, std::chrono::seconds(1));
-                if(s.stop.load(std::memory_order_acquire)) return;
-                const auto next = s.request.load(std::memory_order_acquire);
-                if(next == seen) continue;
-                seen = next;
-                const auto woke = std::chrono::steady_clock::now();
-                const auto cpuAtWake = threadCpuNanoseconds();
-                lastWoke = woke; spin = std::min<uint32_t>(s.spinNs, 2'000'000);
-                if(s.panic.exchange(0, std::memory_order_acq_rel)) host.panic();
-                // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
-                if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
-                uint32_t events = 0; // SysEx pointed at this process's mapping of the pool
-                for(uint32_t i = 0; i < std::min(s.eventCount, maxEvents); ++i) if(unshare(s.events[i], s.inputBytes)) s.events[events++] = s.events[i];
+                if(!shared) return;
+                const auto& params = host->parameters();
+                for(uint32_t i = 0; i < shared->parameterCount; ++i) shared->parameterValues[i].store(host->parameterValue(params[i].id), std::memory_order_relaxed);
+            }
+        };
+
+        // The worker's one audio thread and what the control thread shares with it: the nodes with a
+        // shared block, by index (null: none there), and a count of its passes over them, odd while
+        // it is in one, so a node taken out is let go only once no pass can still be using it.
+        struct Audio
+        {
+            Doorbell* bell = nullptr;
+            std::atomic<Node*> live[maxNodes]{};
+            std::atomic<uint32_t> count{0}, passes{0};
+            std::atomic<bool> stop{false};
+            double rate = 48000; uint32_t frames = 0;
+        };
+
+        // One node's block, as the engine handed it.
+        void render(Node& n, uint32_t index, Doorbell& bell)
+        {
+            auto& s = *n.shared; auto& host = *n.host;
+            const auto woke = std::chrono::steady_clock::now();
+            const auto cpuAtWake = threadCpuNanoseconds();
+            if(s.panic.exchange(0, std::memory_order_acq_rel)) host.panic();
+            // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
+            if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
+            uint32_t events = 0; // SysEx pointed at this process's mapping of the pool
+            for(uint32_t i = 0; i < std::min(s.eventCount, maxEvents); ++i) if(unshare(s.events[i], s.inputBytes)) s.events[events++] = s.events[i];
 #ifdef OSCAIRN_HOSTILE_SIZES
-                hostileSizes(s, trueFrames, trueInputs, trueOutputs, false); // the plugin's host reads them
+            hostileSizes(s, n.trueFrames, n.trueInputs, n.trueOutputs, false); // the plugin's host reads them
 #endif
 #ifdef OSCAIRN_STALLING_WORKER
-                stall();
+            stall();
 #endif
-                const bool ok = host.process(in.data(), s.inputChannels, out.data(), s.outputChannels - (s.ringOut ? 0 : s.ringOutChannels), s.frames,
-                                             events ? s.events : nullptr, events, s.hasTransport ? &s.transport : nullptr);
-                // Values the plugin reported while processing are published with the block, so the
-                // engine reads them right after it, as from a plugin in the engine.
-                if(const auto reports = host.parameterReports(); reports != reported)
-                {
-                    reported = reports;
-                    for(uint32_t i = 0; i < s.parameterCount; ++i) s.parameterValues[i].store(host.parameterValue(ids[i]), std::memory_order_relaxed);
-                }
-                uint32_t count = 0; const auto* emitted = host.outputEvents(count);
-                uint32_t kept = 0;
-                s.outputBytes.used = 0;
-                for(uint32_t i = 0; i < count && kept < maxOutputEvents; ++i)
-                {
-                    s.outputs[kept] = emitted[i];
-                    if(share(s.outputs[kept], s.outputBytes)) ++kept;
-                }
-                s.outputCount = kept; s.ok = ok;
-                s.outputDrops.store(host.outputEventDrops() + (count - kept), std::memory_order_relaxed);
-                const auto st = host.statistics();
-                s.blocks.store(st.blocks); s.droppedEvents.store(st.droppedEvents); s.processErrors.store(st.processErrors);
-                s.deadlineMisses.store(st.deadlineMisses); s.controlSilences.store(st.controlSilences); s.idleBlocks.store(st.idleBlocks);
-                s.lastMicroseconds.store(st.lastMicroseconds); s.maximumMicroseconds.store(st.maximumMicroseconds);
-                s.asleep.store(host.asleep() ? 1 : 0, std::memory_order_relaxed);
-                s.reset = host.wasReset();
-                {
-                    double cost = 0; const oscairn_voice_budget_note_t* notes = nullptr; uint32_t noteCount = 0;
-                    s.activeVoices = host.voiceReport(cost, notes, noteCount); s.voiceCost = cost;
-                    s.voiceNoteCount = notes ? std::min(noteCount, maxVoiceNotes) : 0;
-                    std::copy_n(notes, s.voiceNoteCount, s.voiceNotes);
-                }
+            bell.rendering.store(index, std::memory_order_relaxed);
+            const bool ok = host.process(n.in.data(), s.inputChannels, n.out.data(), s.outputChannels - (s.ringOut ? 0 : s.ringOutChannels), s.frames,
+                                         events ? s.events : nullptr, events, s.hasTransport ? &s.transport : nullptr);
+            bell.rendering.store(UINT32_MAX, std::memory_order_relaxed);
+            // Values the plugin reported while processing are published with the block, so the
+            // engine reads them right after it, as from a plugin in the engine.
+            if(const auto reports = host.parameterReports(); reports != n.reported)
+            {
+                n.reported = reports;
+                for(uint32_t i = 0; i < s.parameterCount; ++i) s.parameterValues[i].store(host.parameterValue(n.ids[i]), std::memory_order_relaxed);
+            }
+            uint32_t count = 0; const auto* emitted = host.outputEvents(count);
+            uint32_t kept = 0;
+            s.outputBytes.used = 0;
+            for(uint32_t i = 0; i < count && kept < maxOutputEvents; ++i)
+            {
+                s.outputs[kept] = emitted[i];
+                if(share(s.outputs[kept], s.outputBytes)) ++kept;
+            }
+            s.outputCount = kept; s.ok = ok;
+            s.outputDrops.store(host.outputEventDrops() + (count - kept), std::memory_order_relaxed);
+            const auto st = host.statistics();
+            s.blocks.store(st.blocks); s.droppedEvents.store(st.droppedEvents); s.processErrors.store(st.processErrors);
+            s.deadlineMisses.store(st.deadlineMisses); s.controlSilences.store(st.controlSilences); s.idleBlocks.store(st.idleBlocks);
+            s.lastMicroseconds.store(st.lastMicroseconds); s.maximumMicroseconds.store(st.maximumMicroseconds);
+            s.asleep.store(host.asleep() ? 1 : 0, std::memory_order_relaxed);
+            s.reset = host.wasReset();
+            {
+                double cost = 0; const oscairn_voice_budget_note_t* notes = nullptr; uint32_t noteCount = 0;
+                s.activeVoices = host.voiceReport(cost, notes, noteCount); s.voiceCost = cost;
+                s.voiceNoteCount = notes ? std::min(noteCount, maxVoiceNotes) : 0;
+                std::copy_n(notes, s.voiceNoteCount, s.voiceNotes);
+            }
 #ifdef OSCAIRN_HOSTILE_WORKER
-                hostileReport(s);
+            hostileReport(s);
 #endif
 #ifdef OSCAIRN_HOSTILE_SIZES
-                hostileSizes(s, trueFrames, trueInputs, trueOutputs, true); // lies, for the engine's audio thread
+            hostileSizes(s, n.trueFrames, n.trueInputs, n.trueOutputs, true); // lies, for the engine's audio thread
 #endif
-                s.wokeAt = std::chrono::nanoseconds(woke.time_since_epoch()).count();
-                s.doneAt = std::chrono::nanoseconds(std::chrono::steady_clock::now().time_since_epoch()).count();
-                s.cpuNs = threadCpuNanoseconds() - cpuAtWake;
-                s.done.store(seen, std::memory_order_release);
-                wake(s.done);
-#ifdef RUSAGE_THREAD
-                // After the block is handed back, so the system call is not in its round trip.
-                if(rusage u{}; getrusage(RUSAGE_THREAD, &u) == 0)
+            s.wokeAt = std::chrono::nanoseconds(woke.time_since_epoch()).count();
+            s.doneAt = std::chrono::nanoseconds(std::chrono::steady_clock::now().time_since_epoch()).count();
+            s.cpuNs = threadCpuNanoseconds() - cpuAtWake;
+            s.done.store(n.seen, std::memory_order_release);
+            // The engine's thread is woken only when it said it sleeps on done (Shared::waiting): the
+            // fence orders the store above before that read, as the engine's orders its flag before its read of done.
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            if(s.waiting.load(std::memory_order_relaxed)) wake(s.done);
+        }
+
+        // The worker's audio thread: every node with a block pending, in node order, behind the one
+        // doorbell. RFC 0045's spin: asleep until shortly before the next period's first block is due
+        // (a period after the last period's came), then polling until one comes or as long again
+        // after; only while blocks keep coming.
+        void audio(Audio& a)
+        {
+            auto& bell = *a.bell;
+            makeRealtime(1e6 * a.frames / a.rate); // the block period, not the larger shared buffer
+            std::chrono::steady_clock::time_point periodStart{};
+            std::chrono::nanoseconds period{};
+            uint32_t spin = 0; // the spinNs of the last pass's requests
+            Node* rendered[maxNodes];
+            auto sleep = [&](uint32_t rung, std::chrono::nanoseconds timeout) {
+                bell.sleeping.store(1, std::memory_order_seq_cst);
+                if(bell.ring.load(std::memory_order_seq_cst) == rung) waitWhileEqual(bell.ring, rung, timeout);
+                bell.sleeping.store(0, std::memory_order_relaxed);
+            };
+            for(;;)
+            {
+                // Read before the pass: a block handed after it moves the ring, so it is never slept through.
+                const uint32_t rung = bell.ring.load(std::memory_order_seq_cst);
+                uint32_t n = 0;
+                a.passes.fetch_add(1, std::memory_order_seq_cst); // seq_cst with the live loads: detach's wait relies on it
+                const uint32_t count = std::min<uint32_t>(a.count.load(std::memory_order_acquire), maxNodes);
+                for(uint32_t i = 0; i < count; ++i)
                 {
-                    s.minorFaults.store(uint64_t(u.ru_minflt), std::memory_order_relaxed);
-                    s.majorFaults.store(uint64_t(u.ru_majflt), std::memory_order_relaxed);
-                    s.involuntarySwitches.store(uint64_t(u.ru_nivcsw), std::memory_order_relaxed);
+                    Node* node = a.live[i].load(std::memory_order_seq_cst);
+                    if(!node) continue;
+                    const auto next = node->shared->request.load(std::memory_order_acquire);
+                    if(next == node->seen) continue;
+                    node->seen = next;
+                    const auto& s = *node->shared;
+                    period = std::chrono::nanoseconds(int64_t(1e9 * std::min(s.frames, a.frames) / (s.sampleRate > 0 ? s.sampleRate : a.rate)));
+                    // A later wave of the same period does not move its start.
+                    if(const auto now = std::chrono::steady_clock::now(); now - periodStart > period / 2) periodStart = now;
+                    spin = std::max(n ? spin : 0u, std::min<uint32_t>(s.spinNs, 2'000'000));
+                    render(*node, i, bell);
+                    rendered[n++] = node;
                 }
+#ifdef RUSAGE_THREAD
+                // After the blocks are handed back, so the system call is not in their round trips; once a pass.
+                if(rusage u{}; n && getrusage(RUSAGE_THREAD, &u) == 0)
+                    for(uint32_t i = 0; i < n; ++i)
+                    {
+                        auto& s = *rendered[i]->shared;
+                        s.minorFaults.store(uint64_t(u.ru_minflt), std::memory_order_relaxed);
+                        s.majorFaults.store(uint64_t(u.ru_majflt), std::memory_order_relaxed);
+                        s.involuntarySwitches.store(uint64_t(u.ru_nivcsw), std::memory_order_relaxed);
+                    }
+#else
+                (void)rendered;
 #endif
+                a.passes.fetch_add(1, std::memory_order_acq_rel);
+                if(n) continue; // another node's block may have come meanwhile
+                if(a.stop.load(std::memory_order_acquire)) return;
+                if(spin && periodStart.time_since_epoch().count())
+                {
+                    const auto due = periodStart + period;
+                    if(const auto early = due - std::chrono::nanoseconds(spin) - std::chrono::steady_clock::now(); early > std::chrono::nanoseconds::zero())
+                        sleep(rung, early);
+                    for(const auto until = due + std::chrono::nanoseconds(spin); bell.ring.load(std::memory_order_acquire) == rung && std::chrono::steady_clock::now() < until;) relax();
+                    if(bell.ring.load(std::memory_order_acquire) != rung) continue;
+                    spin = 0; // blocks stopped coming: no more spinning until they come again
+                }
+                sleep(rung, std::chrono::seconds(1));
             }
         }
     }
@@ -427,45 +494,23 @@ namespace oscairn::worker
     {
         setPlacementPolicy({}); // the worker hosts the plugin itself
         for(const int signal : {SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE}) std::signal(signal, crashed);
-        struct Node
-        {
-            std::shared_ptr<PluginHost> host;
-            Shared* shared = nullptr; size_t bytes = 0;
-            std::thread audio;
-            uint64_t revision = 0; // the parameter info the engine has
-            void publish() const
-            {
-                if(!shared) return;
-                const auto& params = host->parameters();
-                for(uint32_t i = 0; i < shared->parameterCount; ++i) shared->parameterValues[i].store(host->parameterValue(params[i].id), std::memory_order_relaxed);
-            }
-            void stop()
-            {
-                if(audio.joinable())
-                {
-                    shared->stop.store(1, std::memory_order_release); shared->request.fetch_add(1, std::memory_order_release); wake(shared->request);
-                    audio.join();
-                }
-                if(shared)
-                {
-                    for(auto& m : mapped) if(m.load() == shared) m.store(nullptr);
-                    munmap(shared, bytes); shared = nullptr;
-                }
-            }
-        };
-        std::vector<std::unique_ptr<Node>> nodes; // by index; null once destroyed
+        std::vector<std::unique_ptr<Node>> nodes; // by index; null once destroyed, and the index then given to the next node
+        Audio sound; std::thread audioThread;
         EngineAssets assets; assets.socket = socket;
         Reservations reservations; reservations.socket = socket;
         kick::clap::Host::observeActivations(&Reservations::activating, &reservations);
-        uint32_t frames = 0;
+        double rate = 48000; uint32_t frames = 0; auto mode = ProcessingMode::Realtime;
         auto node = [&](uint32_t i) -> Node& { if(i >= nodes.size() || !nodes[i]) throw std::runtime_error("No such plugin node"); return *nodes[i]; };
+        auto vacant = [&] { uint32_t i = 0; while(i < nodes.size() && nodes[i]) ++i; return i; }; // the index the next node gets
         // Replies with the node's index and description, then maps the shared block the engine
-        // sends for it, if any (a node kept only to create contexts from has none), and starts
-        // its audio thread.
+        // sends for it, if any (a node kept only to create contexts from has none), and hands it to
+        // the audio thread.
         auto attach = [&](std::shared_ptr<PluginHost> host) {
+            const uint32_t index = vacant();
+            if(index >= maxNodes) throw std::runtime_error("Too many plugins in one worker");
             host->setAssets(&assets);
             auto n = std::make_unique<Node>(); n->host = std::move(host);
-            Writer w; w.u32(uint32_t(nodes.size())); describe(w, *n->host); reply(socket, w);
+            Writer w; w.u32(index); describe(w, *n->host); reply(socket, w);
             n->revision = n->host->parameterRevision();
             Reader r; r.data = receive(socket);
             if(r.u8())
@@ -478,17 +523,53 @@ namespace oscairn::worker
                 void* memory = mmap(nullptr, n->bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
                 close(fd);
                 if(memory == MAP_FAILED) throw std::runtime_error("Cannot map shared memory");
-                n->shared = static_cast<Shared*>(memory);
-                if(nodes.size() < maxNodes) mapped[nodes.size()].store(n->shared);
+                auto& s = *(n->shared = static_cast<Shared*>(memory));
+                mapped[index].store(n->shared);
                 n->publish();
-                std::vector<clap_id> ids(n->shared->parameterCount);
-                for(uint32_t i = 0; i < n->shared->parameterCount; ++i) ids[i] = n->host->parameters()[i].id;
-                n->audio = std::thread(audio, std::ref(*n->host), std::ref(*n->shared), frames, std::move(ids));
+                n->ids.resize(s.parameterCount);
+                for(uint32_t i = 0; i < s.parameterCount; ++i) n->ids[i] = n->host->parameters()[i].id;
+                for(uint32_t c = 0; c < s.inputChannels; ++c) n->in.push_back(s.input(c));
+                for(uint32_t c = 0; c < s.outputChannels; ++c) n->out.push_back(s.output(c));
+                n->reported = n->host->parameterReports();
+                n->seen = s.done.load(std::memory_order_acquire); // a request may already be waiting
+#ifdef OSCAIRN_HOSTILE_SIZES
+                n->trueFrames = s.maxFrames; n->trueInputs = s.inputChannels; n->trueOutputs = s.outputChannels;
+#endif
             }
-            nodes.push_back(std::move(n));
+            if(index == nodes.size()) nodes.emplace_back();
+            nodes[index] = std::move(n);
+            // Published at a block boundary: the audio thread takes it at its next pass.
+            if(nodes[index]->shared)
+            {
+                sound.live[index].store(nodes[index].get(), std::memory_order_release);
+                if(sound.count.load(std::memory_order_relaxed) <= index) sound.count.store(index + 1, std::memory_order_release);
+            }
             reply(socket, Writer{});
         };
-        auto stopAll = [&] { for(auto& n : nodes) if(n) n->stop(); nodes.clear(); };
+        // Takes a node from the audio thread, waiting out any pass that may still be using it (at most
+        // the blocks of one pass), then unloads it: the other nodes' audio goes on throughout.
+        auto detach = [&](uint32_t index) {
+            auto& n = *nodes[index];
+            if(n.shared)
+            {
+                sound.live[index].store(nullptr, std::memory_order_seq_cst);
+                if(const auto pass = sound.passes.load(std::memory_order_seq_cst); pass & 1)
+                    while(sound.passes.load(std::memory_order_acquire) == pass) std::this_thread::yield();
+                mapped[index].store(nullptr);
+                munmap(n.shared, n.bytes); n.shared = nullptr;
+            }
+            nodes[index].reset();
+        };
+        auto stopAll = [&] {
+            if(audioThread.joinable())
+            {
+                sound.stop.store(true, std::memory_order_release);
+                sound.bell->ring.fetch_add(1, std::memory_order_seq_cst); wake(sound.bell->ring);
+                audioThread.join();
+            }
+            for(uint32_t i = 0; i < nodes.size(); ++i) if(nodes[i]) detach(i);
+            nodes.clear();
+        };
         bool windows = false; // a plugin window opened here: from then on the platform's window events run between requests
         for(;;)
         {
@@ -501,16 +582,32 @@ namespace oscairn::worker
             if(ready < 0) { if(errno == EINTR) continue; break; }
             Reader r;
             try { r.data = receive(socket); } catch(const std::exception&) { break; }
-            struct Served { uint32_t& node; ~Served() { node = UINT32_MAX; } } served{reservations.node}; // this request only
+            struct Served { uint32_t& node; Doorbell* bell; ~Served() { node = UINT32_MAX; if(bell) bell->serving.store(UINT32_MAX, std::memory_order_relaxed); } } served{reservations.node, sound.bell}; // this request only
             try
             {
                 const auto op = Op(r.u8());
+                // The worker's rate, block and mode, then its doorbell (a descriptor); its audio thread starts.
                 if(op == Op::Init)
                 {
-                    if(!nodes.empty()) throw std::runtime_error("Plugin already loaded");
-                    const auto path = r.str(), id = r.str(); const double rate = r.f64(); frames = r.u32(); const auto room = r.u64();
-                    const auto mode = r.u8() ? ProcessingMode::Offline : ProcessingMode::Realtime;
-                    reservations.node = 0;
+                    const int fd = receiveDescriptor(socket);
+                    void* memory = MAP_FAILED;
+                    if(struct stat info{}; fstat(fd, &info) == 0 && size_t(info.st_size) >= sizeof(Doorbell))
+                        memory = mmap(nullptr, sizeof(Doorbell), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+                    close(fd);
+                    if(memory == MAP_FAILED) throw std::runtime_error("Cannot map the worker's doorbell");
+                    if(audioThread.joinable()) { munmap(memory, sizeof(Doorbell)); throw std::runtime_error("Worker already started"); }
+                    rate = r.f64(); frames = r.u32(); mode = r.u8() ? ProcessingMode::Offline : ProcessingMode::Realtime;
+                    sound.bell = static_cast<Doorbell*>(memory); sound.rate = rate; sound.frames = frames;
+                    served.bell = sound.bell;
+                    audioThread = std::thread(audio, std::ref(sound));
+                    reply(socket, Writer{});
+                    continue;
+                }
+                if(op == Op::Load)
+                {
+                    if(!sound.bell) throw std::runtime_error("Worker not started");
+                    const auto path = r.str(), id = r.str(); const auto room = r.u64();
+                    reservations.node = vacant(); sound.bell->serving.store(reservations.node, std::memory_order_relaxed);
                     attach(loadPlugin(path, id, rate, frames, mode, {}, room));
                     continue;
                 }
@@ -518,7 +615,8 @@ namespace oscairn::worker
                 const auto index = r.u32();
                 auto& n = node(index);
                 auto& host = *n.host;
-                reservations.node = op == Op::CreateEffectContext ? uint32_t(nodes.size()) : index;
+                reservations.node = op == Op::CreateEffectContext ? vacant() : index;
+                if(sound.bell) sound.bell->serving.store(reservations.node, std::memory_order_relaxed);
                 Writer w;
                 switch(op)
                 {
@@ -544,7 +642,7 @@ namespace oscairn::worker
                 case Op::SaveSnapshot: host.saveSnapshot(r.str()); break;
                 case Op::LoadSnapshot: host.loadSnapshot(r.str()); n.publish(); break;
                 case Op::CreateEffectContext: attach(host.createEffectContext()); continue;
-                case Op::DestroyNode: n.stop(); nodes[index].reset(); break;
+                case Op::DestroyNode: detach(index); break;
                 case Op::EffectResources:
                 {
                     const auto res = host.effectResources();
@@ -601,7 +699,7 @@ namespace oscairn::worker
                 case Op::SetMemoryRoom: host.setMemoryRoom(r.u64()); break;
                 case Op::Window: { const bool show = r.u8(); host.showWindow(show, r.str()); windows = windows || show; break; }
                 case Op::Reset: w.u8(host.reset()); break;
-                case Op::Reconfigure: host.reconfigure(r.f64(), frames); break;
+                case Op::Reconfigure: rate = r.f64(); host.reconfigure(rate, frames); break; // and the plugins loaded later load at it
                 default: throw std::runtime_error("Unknown worker request");
                 }
                 reply(socket, w);

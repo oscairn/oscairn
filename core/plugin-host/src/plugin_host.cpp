@@ -32,6 +32,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <stdexcept>
+#include <string_view>
 namespace oscairn
 {
 #ifdef OSCAIRN_LV2
@@ -228,6 +229,10 @@ namespace oscairn
                 PlacementPolicy initial;if(const char* w=std::getenv("OSCAIRN_PLUGIN_WORKER"))initial.worker=w;
                 if(const char* mb=std::getenv("OSCAIRN_WORKER_MEMORY_MB"))initial.memoryLimit=std::strtoull(mb,nullptr,10)<<20;
                 if(const char* s=std::getenv("OSCAIRN_PLUGIN_SCAN"))initial.scan=s;
+                if(const char* h=std::getenv("OSCAIRN_PLUGIN_HOSTS");h && *h){char* end=nullptr;const long n=std::strtol(h,&end,10);if(!*end && n>=0 && n<=64)initial.hosts=uint32_t(n);}
+                if(const char* list=std::getenv("OSCAIRN_OWN_HOST"))for(std::string_view rest=list;!rest.empty();){
+                    const auto comma=rest.find(',');if(const auto id=rest.substr(0,comma);!id.empty())initial.ownHost.emplace(id);
+                    rest=comma==rest.npos?std::string_view():rest.substr(comma+1);}
                 return initial;}();
             return p;
         }

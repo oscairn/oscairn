@@ -8,7 +8,7 @@
 // the sixth through an insert effect, and three effect buses every part sends to, so the longest
 // chain is three workers one after another (instrument, insert, bus effect) and the widest wave six.
 // Each plugin computes KICK_FIXTURE_WORK_US a block (150 unless set). For comparing the scheduling
-// settings (OSCAIRN_WORKER_SPIN_US, OSCAIRN_PLUGIN_PLACEMENT, OSCAIRN_WORKER_DEADLINE, ...) on one
+// settings (OSCAIRN_WORKER_SPIN_US, OSCAIRN_PLUGIN_HOSTS, OSCAIRN_WORKER_DEADLINE, ...) on one
 // machine; absolute times on another machine, or in a container, do not transfer. The Session's service
 // runs on a thread of its own every 5 ms, as the engine's main thread runs it (AudioEngine's timer),
 // and the CPU time of both threads is printed: the engine's own cost beside its workers'.
@@ -16,6 +16,7 @@
 //   oscairn-worker-bench WORKER FIXTURE.clap [SECONDS [SHAPE]]
 #include <oscairn/session.h>
 #include <oscairn/realtime.h>
+#include <oscairn/plugin_host.h>
 #include "../../plugin-host/src/StateFiles.h"
 #include <atomic>
 #include <chrono>
@@ -114,6 +115,11 @@ int main(int argc, char** argv)
                 c.count() ? 100.0 * double(over) / double(c.count()) : 0.0, (unsigned long long)late, (unsigned long long)silent);
     std::printf("ENGINE audio thread %.1f%% of a core, main thread (service, %llu ticks) %.1f%% of a core, %.0f us a tick\n", 100 * audioCpu / wall,
                 (unsigned long long)services.load(), 100 * serviceCpu.load() / wall, services.load() ? 1e6 * serviceCpu.load() / double(services.load()) : 0.0);
+    // The worker processes (RFC 0045: one per plugin instance, or the plugin hosts) and their resident memory beside the engine's.
+    const auto processes = oscairn::pluginHosts();
+    uint64_t memory = 0; size_t live = 0;
+    for(const auto& h : processes) if(h.pid > 0 && !h.plugins.empty()) { memory += oscairn::residentBytes(h.pid); ++live; }
+    std::printf("PROCESSES workers=%zu resident_mb=%.1f engine_mb=%.1f\n", live, double(memory) / (1 << 20), double(oscairn::residentBytes()) / (1 << 20));
     // A run, not a judgment: only that every plugin played in a worker and was timed.
     return t.workers.size() == (small ? 2u : 10u) && c.count() > 0 ? 0 : 1;
 }

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <variant>
 
@@ -234,15 +235,33 @@ namespace oscairn
         // footprint on macOS, resident memory on Linux, as its supervisor reads them.
         uint64_t memoryLimit = uint64_t(4) << 30;
         std::string scan; // the oscairn-plugin-scan helper for a fresh preset listing (RFC 0005); empty: none
+        // RFC 0045's plugin hosts: in real time, the plugins in workers share this many worker processes,
+        // each holding any plugins, an instance placed at its load in the one its plugins' measured cost
+        // makes least (setPluginCost); 0: a worker of its own for each plugin instance (RFC 0010). The
+        // memory limit is then each host's. Offline rendering always has workers of their own.
+        uint32_t hosts = 0;
+        // Plugin IDs given a worker of their own all the same, as without hosts; a plugin whose crash or
+        // hang took a shared host down joins them for the rest of the engine's life.
+        std::set<std::string> ownHost;
     };
     // Starts as OSCAIRN_PLUGIN_WORKER says: every plugin in the worker executable it names, or none;
     // OSCAIRN_WORKER_MEMORY_MB sets the memory limit; OSCAIRN_PLUGIN_SCAN names the scan helper
-    // a loaded plugin's preset listing reads through (empty: a worker's plugin lists none).
+    // a loaded plugin's preset listing reads through (empty: a worker's plugin lists none);
+    // OSCAIRN_PLUGIN_HOSTS the plugin hosts (a whole number, 0 to 64) and OSCAIRN_OWN_HOST the plugins
+    // given workers of their own (IDs separated by commas).
     void setPlacementPolicy(PlacementPolicy);
     const PlacementPolicy& placementPolicy();
     std::shared_ptr<PluginHost> loadPluginInWorker(const std::string& program, const std::string& path, const std::string& pluginId,
                                                    double sampleRate, uint32_t maxFrames, ProcessingMode mode = ProcessingMode::Realtime, uint64_t memoryLimit = 0,
                                                    uint64_t memoryRoom = 0);
+    // RFC 0045: a plugin's measured cost, a share of a block's time (0 to 1), by which its later
+    // instances are placed among the plugin hosts; one never measured counts a tenth. The Session's
+    // measurements set it. Any thread.
+    void setPluginCost(const std::string& pluginId, double share);
+    // Every plugin worker process this engine runs: its process ID (0 while it is down), whether it is
+    // one of the plugin hosts, the plugin of each of its nodes, and their cost as placement counts it.
+    struct PluginHostInfo { long pid = 0; bool pooled = false; std::vector<std::string> plugins; double cost = 0; };
+    std::vector<PluginHostInfo> pluginHosts();
     // RFC 0005: one plugin's presets, read by the isolated scan helper the placement policy names
     // (its `scan`). The plugin's preset-provider code runs in that helper process (timeout, crash
     // isolation, stderr), never in this one, and off the caller's thread. One listing per binary

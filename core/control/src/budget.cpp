@@ -201,7 +201,9 @@ namespace oscairn
                 // dropped and measured again; the memory stands.
                 const bool possible = !memoryOnly && std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
-                measured_[std::string(e->name->string, e->name->string_size)] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e6))} : Measurement{0, 0, 0, 0, uint64_t(memory), 0};
+                const std::string key(e->name->string, e->name->string_size);
+                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e6))} : Measurement{0, 0, 0, 0, uint64_t(memory), 0};
+                if(possible) setPluginCost(key.substr(0, key.find('@')), cpu); // RFC 0045, before its instances play: as last measured here
             }
         }
         catch(const std::exception&) {} // none yet, or unreadable: measured afresh
@@ -550,6 +552,7 @@ namespace oscairn
                 if(bytes && bytes != m.memory) { m.memory = bytes; measurementsChanged_ = true; }
             }
             if(std::abs(m.cpu - was) > 1e-4) measurementsChanged_ = true;
+            setPluginCost(host.descriptor().id, m.cpu); // RFC 0045: where its next instances go among the plugin hosts
         };
         for(const auto& [node, name] : nodes_) sample(node);
         std::erase_if(learning_, [&](const auto& l) { return !nodes_.count(l.first); });

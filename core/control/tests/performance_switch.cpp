@@ -443,7 +443,7 @@ int main(int argc, char** argv)
             check(t.warmInstances() == 4 && listed(false).count(instrument) == 0 && listed(true) == used, "X's instrument, the least recently used, let go; G's in use kept");
             bool ended = false;
             for(int i = 0; i < 50 && !ended; ++i) { ended = children() < workers; if(!ended) std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
-            check(ended, "its worker ended in the background");
+            if(!placementPolicy().hosts) check(ended, "its worker ended in the background"); // a plugin host stays (RFC 0045)
             std::printf("evicting one instance kept warm held the control thread %.2f ms\n", ms);
             b.device = m.committed; // no room at all: every instance kept warm goes, none in use
             t.setBudget(b);

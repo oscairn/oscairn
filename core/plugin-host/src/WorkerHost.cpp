@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Engine side of plugin workers (RFC 0010): PluginHosts whose plugins run in a child process.
-// A Process is one worker. It hosts one plugin and the native effect contexts created from it,
-// which share its engine; each of those is a WorkerHost, a graph node with its own shared
-// block for audio and events. Control calls travel over the worker's socket. A failed worker
-// is restarted, and each node gets back its state, prepared sounds and parameter values.
+// A Process is one worker. It hosts one plugin, or in a plugin host (RFC 0045) several, and the
+// native effect contexts created from each, which share its engine; each of those is a WorkerHost,
+// a graph node with its own shared block for audio and events. Control calls travel over the
+// worker's socket. A failed worker is restarted, and each node gets back its state, prepared
+// sounds and parameter values.
 #include "Worker.h"
 #include "oscairn/plugin_host.h"
 #include <algorithm>
@@ -96,13 +97,26 @@ namespace oscairn
 
         class WorkerHost;
 
+        // A plugin loaded into a worker and the effect contexts made from it: what a restarted worker
+        // loads again to make them, and the description it must repeat. Its nodes hold it.
+        struct Engine { std::string path, id, description; };
+
         // One worker process and what its nodes share: the control socket, the supervisor, the
         // block budget and the restart policy. Requests and node changes hold `control`.
         struct Process
         {
             static constexpr size_t maxRestarts = 3;
-            std::string program, path, id;
+            std::string program;
             double rate; uint32_t frames;
+            std::atomic<double> currentRate{0}; // rate, for the plugin host pool's choice without control
+            // RFC 0045: one of the pool's plugin hosts, holding the plugins placed in it (else a worker of one
+            // plugin's own); its doorbell, which its audio thread sleeps on, kept across restarts.
+            bool pooled = false;
+            int bellFd = -1; Doorbell* bell = nullptr;
+            // The worker's index of the node a crash or hang is put down to (UINT32_MAX: none), read as it failed.
+            uint32_t blamed = UINT32_MAX; // under failureMutex
+            const Engine* making = nullptr; // under control: the engine an effect context is being made from (reserve)
+            std::atomic<bool> broken{false}; // the connection closed under a request: the worker died serving it
             std::chrono::nanoseconds hangLimit{};
             // The allowance per block, and the blocks in a row that end a worker, follow the block length the engine
             // runs (block, from follow), not the most a block can be (frames): a device's buffer is not its period.
@@ -111,8 +125,8 @@ namespace oscairn
             int64_t allowanceOverrideNs = 0;
             std::chrono::nanoseconds budget() const noexcept { return std::chrono::nanoseconds(budgetNs.load(std::memory_order_relaxed)); }
             // RFC 0045's spin (spinWindow): OSCAIRN_WORKER_SPIN_US as read with the rate, and the window it gives
-            // the engine's wait for a block; real time only. Every worker's audio thread counts toward whether
-            // workers may spin too (audioThreads, against the cores).
+            // the engine's wait for a block; real time only. Every worker with a node, one audio thread each,
+            // counts toward whether workers may spin too (audioThreads, against the cores).
             std::string spinUs;
             std::atomic<int64_t> spinNs{0};
             static inline std::atomic<uint32_t> audioThreads{0};
@@ -122,15 +136,13 @@ namespace oscairn
             const uint64_t policyLimit; // the placement policy's, in bytes; 0: none
             // What the supervisor holds it to: the policy's, or its plugins' declarations plus a margin (RFC 0025, fitLimit).
             std::atomic<uint64_t> memoryLimit;
-            const ProcessingMode mode; // the plugin's clap.render mode, given it again at each restart
-            uint64_t memoryRoom = 0;  // what the plugin may declare at its first activation (RFC 0025); a restart is not refused
+            const ProcessingMode mode; // the plugins' clap.render mode, given them again at each restart
             std::filesystem::path cgroup; // Linux, with OSCAIRN_CGROUP: this worker's cgroup
             // The supervisor's latest reading of the worker, and the CPU time of the workers it replaced.
             std::atomic<uint64_t> memory{0};
             std::atomic<double> cpu{0}, cpuBefore{0};
             std::mutex control;
             int socket = -1; pid_t pid = 0; bool reaped = true;
-            std::string root; // the root plugin's description, which a restarted worker must repeat
             std::mutex nodesMutex;
             std::vector<WorkerHost*> nodes; // changed under control and nodesMutex
             std::atomic<kick::clap::AssetResolver*> assets{nullptr};
@@ -139,7 +151,8 @@ namespace oscairn
             std::atomic<uint64_t> restarted{0};
             mutable std::mutex failureMutex;
             std::string failureText, reason; // reason: supervisor thread
-            bool gaveUp = false, stopping = false;
+            std::atomic<bool> gaveUp{false};
+            bool stopping = false;
             bool restarting = false; // under control: the nodes' worker indexes are the old worker's
             std::vector<std::chrono::steady_clock::time_point> restarts;
             std::filesystem::path records; // recovery records of this worker's nodes
@@ -149,21 +162,29 @@ namespace oscairn
             std::condition_variable wakeSupervisor;
             static inline std::atomic<uint32_t> counter{0};
 
-            Process(std::string program_, std::string path_, std::string id_, double rate_, uint32_t frames_, ProcessingMode mode, uint64_t memoryLimit_)
-                : program(std::move(program_)), path(std::move(path_)), id(std::move(id_)), rate(rate_), frames(frames_), policyLimit(memoryLimit_), memoryLimit(memoryLimit_), mode(mode)
+            Process(std::string program_, double rate_, uint32_t frames_, ProcessingMode mode, uint64_t memoryLimit_)
+                : program(std::move(program_)), rate(rate_), frames(frames_), policyLimit(memoryLimit_), memoryLimit(memoryLimit_), mode(mode)
             {
                 // Read here, on the creating thread: OSCAIRN_WORKER_REPLY_SECONDS shortens it for tests.
                 if(const char* s = std::getenv("OSCAIRN_WORKER_REPLY_SECONDS")) replySeconds = std::max(1L, std::atol(s));
                 hangLimit = mode == ProcessingMode::Offline ? std::chrono::nanoseconds(std::chrono::seconds(10)) : std::chrono::nanoseconds(std::chrono::milliseconds(250));
                 setRate(rate);
                 records = std::filesystem::temp_directory_path() / ("oscairn-worker-" + std::to_string(getpid()) + "-" + std::to_string(counter.fetch_add(1)));
+                const std::string name = "/osc-" + std::to_string(getpid()) + "-bell-" + std::to_string(counter.fetch_add(1));
+                bellFd = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+                if(bellFd < 0) throw std::runtime_error("Cannot create a worker's doorbell");
+                shm_unlink(name.c_str());
+                fcntl(bellFd, F_SETFD, FD_CLOEXEC); // other plugins' workers must not inherit it
+                void* memory = ftruncate(bellFd, off_t(sizeof(Doorbell))) == 0 ? mmap(nullptr, sizeof(Doorbell), PROT_READ | PROT_WRITE, MAP_SHARED, bellFd, 0) : MAP_FAILED;
+                if(memory == MAP_FAILED) { close(bellFd); throw std::runtime_error("Cannot map a worker's doorbell"); }
+                bell = new(memory) Doorbell();
             }
 
             // The rate a (re)started worker loads its plugin at, and the block budget it sets. Under
             // control, while nothing plays (the constructor, or a rate change with the graph paused).
             void setRate(double rate_)
             {
-                rate = rate_;
+                rate = rate_; currentRate.store(rate_);
                 // Each block may take the worker's allowance (realtime.h) before it is silenced; a
                 // worker that misses a quarter second of blocks in a row, or leaves one unanswered
                 // that long, has failed. Offline rendering waits instead of silencing.
@@ -213,11 +234,11 @@ namespace oscairn
                 leaveCgroup();
                 std::error_code ignored;
                 std::filesystem::remove_all(records, ignored);
+                munmap(bell, sizeof(Doorbell)); close(bellFd);
             }
 
-            // Starts a worker process and loads the plugin in it. The reply is the root node's
-            // index and description; the caller then attaches it. Under control.
-            Reader start()
+            // Starts a worker process with no plugin in it, its audio thread waiting at the doorbell. Under control.
+            void start()
             {
                 int pair[2];
                 if(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) throw std::runtime_error("Cannot create a worker socket");
@@ -236,12 +257,26 @@ namespace oscairn
                 if(spawned != 0) { close(socket); socket = -1; pid = 0; throw std::runtime_error("Cannot start plugin worker " + program); }
                 reaped = false;
                 joinCgroup(); // before it loads anything, so the plugin is charged to its own cgroup
-                // Starting a worker gets the full 30 s, whatever the requests' timeout.
-                timeval start{std::max(30L, replySeconds), 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &start, sizeof start);
-                auto reply = exchange(Writer().u8(uint8_t(Op::Init)).str(path).str(id).f64(rate).u32(frames).u64(memoryRoom).u8(uint8_t(mode)).data);
-                memoryRoom = 0;
                 timeval t{replySeconds, 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t);
-                return reply;
+                broken.store(false);
+                bell->sleeping.store(0); bell->rendering.store(UINT32_MAX); bell->serving.store(UINT32_MAX);
+                send(socket, Writer().u8(uint8_t(Op::Init)).f64(rate).u32(frames).u8(uint8_t(mode)).data);
+                sendDescriptor(socket, bellFd);
+                try { expect(receive(socket)); } catch(const WorkerTimeout& e) { lost(e); }
+            }
+            // Loads a plugin into the worker. The reply is its node's index and description; the caller
+            // then attaches it. A load gets the full 30 s, whatever the requests' timeout. Under control.
+            Reader load(const std::string& path, const std::string& id, uint64_t memoryRoom)
+            {
+                timeval start{std::max(30L, replySeconds), 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &start, sizeof start);
+                struct Shorter { int socket; long seconds; ~Shorter() { timeval t{seconds, 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t); } } shorter{socket, replySeconds};
+                return exchange(Writer().u8(uint8_t(Op::Load)).str(path).str(id).u64(memoryRoom).data);
+            }
+            // The node whose block or request the worker was in as it failed, from its doorbell (a crash, a hang).
+            void blame()
+            {
+                const auto rendering = bell->rendering.load(std::memory_order_relaxed), serving = bell->serving.load(std::memory_order_relaxed);
+                std::lock_guard lock(failureMutex); blamed = rendering != UINT32_MAX ? rendering : serving;
             }
 
             // A reply that did not come in time: the worker is alive, and its late reply would be
@@ -251,6 +286,7 @@ namespace oscairn
             [[noreturn]] void lost(const WorkerTimeout& e)
             {
                 const std::string why = std::string("Plugin worker stopped answering: ") + e.what();
+                blame();
                 { std::lock_guard lock(failureMutex); reason = why; failureText = why; }
                 failed.store(true);
                 if(pid > 0) kill(pid, SIGKILL);
@@ -264,7 +300,7 @@ namespace oscairn
                 for(;;)
                 {
                     std::string reply;
-                    try { reply = receive(socket); } catch(const WorkerTimeout& e) { lost(e); }
+                    try { reply = receive(socket); } catch(const WorkerTimeout& e) { lost(e); } catch(const std::exception&) { broken.store(true); throw; }
                     if(!reply.empty() && reply[0] == Reserve)
                     {
                         Reader r; r.data = std::move(reply); r.at = 1;
@@ -319,8 +355,21 @@ namespace oscairn
                 if(!reaped) { kill(pid, SIGKILL); int status = 0; waitpid(pid, &status, 0); reaped = true; }
             }
 
+            // A node joins or leaves this worker; a worker with nodes is an audio thread (audioThreads).
+            void adopt(WorkerHost* n)
+            {
+                std::lock_guard lock(nodesMutex);
+                if(nodes.empty()) audioThreads.fetch_add(1, std::memory_order_relaxed);
+                nodes.push_back(n);
+            }
+            void disown(WorkerHost* n)
+            {
+                std::lock_guard lock(nodesMutex);
+                if(std::erase(nodes, n) && nodes.empty()) audioThreads.fetch_sub(1, std::memory_order_relaxed);
+            }
             void supervise();
             void restart();
+            void separate(std::vector<WorkerHost*>& list); // the plugin a shared host's failure is put down to, out to a worker of its own
             void fitLimit(bool fresh = false); // under control; fresh: a new process, held to its declarations at once
             // The limit for the nodes' declarations and one more node's (extra), or none where a node
             // declares nothing; ask: query a node whose declaration is not known (else none). Under control.
@@ -388,8 +437,9 @@ namespace oscairn
         class WorkerHost final : public PluginHost
         {
         public:
-            // Attaches a node the worker just described (index, description). Under process->control.
-            WorkerHost(std::shared_ptr<Process> process, Reader& r, bool root) : process_(std::move(process)), root_(root)
+            // Attaches a node the worker just described (index, description), of the engine a plugin loaded
+            // (root) or one an effect context was made from. Under process->control.
+            WorkerHost(std::shared_ptr<Process> worker, Reader& r, std::shared_ptr<const Engine> engine, bool root) : owner_(std::move(worker)), proc_(owner_.get()), engine_(std::move(engine)), root_(root)
             {
                 node_ = r.u32();
                 const auto at = r.at;
@@ -410,7 +460,7 @@ namespace oscairn
                 // Shared block, sized for the ports and maximum block, handed over as a descriptor.
                 // Room for large blocks, a multiple of the plugin's maximum, so the worker's host
                 // splits them exactly as an in-engine host would. The engine keeps it across restarts.
-                const auto frames = process_->frames;
+                const auto frames = process()->frames;
                 capacity_ = frames * std::max<uint32_t>(1, (8192 + frames - 1) / frames);
                 const uint32_t ring = ringOut_ ? 4 : 0; // the ring-out buffer, after the ports' channels
                 bytes_ = Shared::bytes(channels(inputs_), channels(outputs_) + ring, capacity_);
@@ -433,17 +483,18 @@ namespace oscairn
                     shared_ = new(memory) Shared();
                     inChannels_ = channels(inputs_); outChannels_ = channels(outputs_) + ring;
                     shared_->inputChannels = inChannels_; shared_->outputChannels = outChannels_; shared_->ringOutChannels = ring;
-                    shared_->maxFrames = capacity_; shared_->sampleRate = process_->rate; shared_->parameterCount = uint32_t(parameters_.size());
+                    shared_->maxFrames = capacity_; shared_->sampleRate = process()->rate; shared_->parameterCount = uint32_t(parameters_.size());
                     for(uint32_t i = 0; i < parameters_.size(); ++i) shared_->parameterValues[i].store(parameters_[i].defaultValue);
                     connect();
                     output_.resize(maxOutputEvents);
                     pending_.reserve(4096);
                     last_.assign(outChannels_, 0.f);
-                    fadeFrames_ = faded_ = uint32_t(process_->rate * .01);
+                    fadeFrames_ = faded_ = uint32_t(process()->rate * .01);
+                    generation_ = process()->generation.load(); // a host restarted before this node came is not its restart
                     // RFC 0045's extra block, experimental: listed plugins in real time render each block while the
                     // engine plays their last, two buffers of the worker's block so a block that is not started
                     // never overwrites the one being played. Fixed for the node's life.
-                    if(process_->mode == ProcessingMode::Realtime && listed(std::getenv("OSCAIRN_WORKER_EXTRA_BLOCK"), descriptor_.id))
+                    if(process()->mode == ProcessingMode::Realtime && listed(std::getenv("OSCAIRN_WORKER_EXTRA_BLOCK"), descriptor_.id))
                     {
                         extra_ = true;
                         held_.assign(size_t(2) * outChannels_ * frames, 0.f);
@@ -456,19 +507,16 @@ namespace oscairn
                     publishIds();
                 }
                 catch(...) { release(); throw; }
-                std::lock_guard lock(process_->nodesMutex);
-                process_->nodes.push_back(this);
-                Process::audioThreads.fetch_add(1, std::memory_order_relaxed);
+                process()->adopt(this);
             }
 
             ~WorkerHost() override
             {
-                Process::audioThreads.fetch_sub(1, std::memory_order_relaxed);
                 {
-                    std::lock_guard control(process_->control);
-                    { std::lock_guard lock(process_->nodesMutex); std::erase(process_->nodes, this); }
-                    if(!process_->failed.load() && process_->socket >= 0)
-                        try { process_->exchange(header(Op::DestroyNode).data); } catch(const std::exception&) {}
+                    auto control = locked();
+                    process()->disown(this);
+                    if(!process()->failed.load() && process()->socket >= 0)
+                        try { process()->exchange(header(Op::DestroyNode).data); } catch(const std::exception&) {}
                 }
                 release();
             }
@@ -481,7 +529,7 @@ namespace oscairn
                 if(reply.data.substr(reply.at) != description_) throw std::runtime_error("the plugin changed");
                 grown_ = 0; // restore counts the sounds it prepares again
                 auto& s = *shared_;
-                s.stop.store(0); s.panic.store(0); s.crashed.store(0);
+                s.panic.store(0); s.crashed.store(0); s.waiting.store(0);
                 s.request.store(requested_.load()); s.done.store(requested_.load());
                 connect();
             }
@@ -491,14 +539,14 @@ namespace oscairn
             // Under control.
             void restore()
             {
-                if(!record_.empty()) process_->exchange(header(snapshotRecord_ ? Op::LoadSnapshot : Op::LoadState).str(record_.string()).data);
+                if(!record_.empty()) process()->exchange(header(snapshotRecord_ ? Op::LoadSnapshot : Op::LoadState).str(record_.string()).data);
                 if(contexts_)
                 {
                     const auto present = contexts();
                     if(present.size() != base_.size()) throw std::runtime_error("the restored sounds differ");
                     std::map<uint32_t, uint32_t> map;
                     for(size_t i = 0; i < base_.size(); ++i) map[base_[i]] = present[i].id;
-                    for(const auto id : discarded_) process_->exchange(header(Op::DiscardSound).u32(map.at(id)).u8(1).data);
+                    for(const auto id : discarded_) process()->exchange(header(Op::DiscardSound).u32(map.at(id)).u8(1).data);
                     for(const auto& p : prepared_)
                     {
                         const auto worker = prepare(p);
@@ -508,7 +556,7 @@ namespace oscairn
                     for(const auto id : discarded_) map.erase(id);
                     ids_ = map; publishIds();
                     for(int16_t c = 0; c < 16; ++c) if(auto i = ids_.find(selected_[c]); i != ids_.end())
-                        process_->exchange(header(Op::SelectSound).u32(i->second).u32(uint32_t(c)).data);
+                        process()->exchange(header(Op::SelectSound).u32(i->second).u32(uint32_t(c)).data);
                     fresh_ = true;
                 }
                 // Only values that differ from what the new worker published, to stay within its event queue.
@@ -517,23 +565,32 @@ namespace oscairn
                 // shortcut: edits made between that switch and a crash are lost; record them apart if that matters.
                 if(!besideRecord_) for(size_t i = 0; i < values_.size(); ++i)
                     if(!(parameters_[i].flags & CLAP_PARAM_IS_READONLY) && shared_->parameterValues[i].load() != values_[i])
-                        process_->exchange(header(Op::SetParameter).u32(parameters_[i].id).f64(values_[i]).data);
+                        process()->exchange(header(Op::SetParameter).u32(parameters_[i].id).f64(values_[i]).data);
                 // The plugin's window, as the engine last asked; one that will not open does not stop the restart.
                 // shortcut: a window the person closed in the old worker opens again; the worker does not report closing.
-                if(!windowTitle_.empty()) try { process_->exchange(header(Op::Window).u8(1).str(windowTitle_).data); } catch(const std::exception&) {}
+                if(!windowTitle_.empty()) try { process()->exchange(header(Op::Window).u8(1).str(windowTitle_).data); } catch(const std::exception&) {}
             }
             bool hasWindow() const override { return window_; }
             void showWindow(bool show, const std::string& title) override
             {
-                std::lock_guard lock(controlFor());
+                auto lock = controlFor();
                 windowTitle_.clear();
-                process_->exchange(header(Op::Window).u8(show).str(title).data);
+                process()->exchange(header(Op::Window).u8(show).str(title).data);
                 if(show) windowTitle_ = title.empty() ? descriptor_.name : title;
             }
 
             void capture() { values_.resize(parameters_.size()); for(size_t i = 0; i < values_.size(); ++i) values_[i] = shared_->parameterValues[i].load(); }
             bool busy() const { return busy_.load(); }
             bool isRoot() const { return root_; }
+            const std::shared_ptr<const Engine>& engine() const { return engine_; }
+            // RFC 0045: into a worker of its own, which starts failed and is restarted with it. Under both
+            // workers' control while the node is not busy (Process::restart).
+            void moveTo(const std::shared_ptr<Process>& to)
+            {
+                process()->disown(this);
+                owner_ = to; proc_.store(to.get(), std::memory_order_release);
+                to->adopt(this);
+            }
             // The supervisor's per-node checks: a worker marked as crashing, a block left unanswered
             // past the hang limit, or too many late ones in a row.
             std::string trouble(int64_t now) const
@@ -541,14 +598,14 @@ namespace oscairn
                 if(const auto signal = shared_->crashed.load()) return "Plugin worker crashed (signal " + std::to_string(signal) + ")";
                 const auto since = requestedAt_.load(std::memory_order_acquire);
                 const bool waiting = shared_->done.load(std::memory_order_acquire) != requested_.load(std::memory_order_acquire);
-                if(waiting && since && std::chrono::nanoseconds(now - since) > process_->hangLimit)
-                    return "Plugin hung: a block was not finished within " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(process_->hangLimit).count()) + " ms";
-                if(tooSlow_.load(std::memory_order_acquire)) return "Plugin too slow: " + std::to_string(process_->missLimit) + " blocks in a row missed their deadline";
+                if(waiting && since && std::chrono::nanoseconds(now - since) > process()->hangLimit)
+                    return "Plugin hung: a block was not finished within " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(process()->hangLimit).count()) + " ms";
+                if(tooSlow_.load(std::memory_order_acquire)) return "Plugin too slow: " + std::to_string(process()->missLimit) + " blocks in a row missed their deadline";
                 return {};
             }
             void recovered() { tooSlow_.store(false); requestedAt_.store(0); }
 
-            std::string failure() const override { return process_->failure(); }
+            std::string failure() const override { return process()->failure(); }
 
             // Like the in-engine host's, never throws: a worker that fails here is the supervisor's to
             // handle, and throwing would stop the graph servicing its other nodes.
@@ -571,7 +628,7 @@ namespace oscairn
                 try
                 {
                     auto fresh = readParameters(r);
-                    std::lock_guard lock(controlFor());
+                    auto lock = controlFor();
                     if(!std::equal(fresh.begin(), fresh.end(), parameters_.begin(), parameters_.end(), [](const auto& a, const auto& b) { return a.id == b.id; })) return;
                     parameters_ = std::move(fresh);
                     revision_.fetch_add(1, std::memory_order_relaxed);
@@ -583,12 +640,12 @@ namespace oscairn
             void saveState(const std::string& directory) override { request(Op::SaveState, Writer().str(directory)); }
             void loadState(const std::string& directory) override
             {
-                std::lock_guard lock(controlFor());
+                auto lock = controlFor();
                 // Its declaration stays known: a re-activation's Reserve replaces it, and a load refused
                 // before one leaves the plugin as it was (RFC 0025).
-                process_->exchange(header(Op::LoadState).str(directory).data);
+                process()->exchange(header(Op::LoadState).str(directory).data);
                 record(Op::SaveState);
-                process_->fitLimit();
+                process()->fitLimit();
             }
             void saveSnapshot(const std::string& directory) override { request(Op::SaveSnapshot, Writer().str(directory)); }
             // The scan helper's listing (RFC 0005): the plugin's provider never runs in the worker,
@@ -601,17 +658,17 @@ namespace oscairn
             // A preset changes the plugin's state, so the recovery record is saved again.
             void loadPreset(const std::string& uri) override
             {
-                std::lock_guard lock(controlFor());
-                process_->exchange(header(Op::LoadPreset).str(uri).data);
+                auto lock = controlFor();
+                process()->exchange(header(Op::LoadPreset).str(uri).data);
                 record(Op::SaveState);
             }
             // Only on a host nothing plays (not yet, or no longer: RFC 0021), so the record can be saved at once.
             void loadSnapshot(const std::string& directory) override
             {
-                std::lock_guard lock(controlFor());
+                auto lock = controlFor();
                 // Its declaration stays known: a re-activation's Reserve replaces it, and a load refused
                 // before one leaves the plugin as it was (RFC 0025).
-                process_->exchange(header(Op::LoadSnapshot).str(directory).data);
+                process()->exchange(header(Op::LoadSnapshot).str(directory).data);
                 if(contexts_)
                 {
                     // The snapshot's sounds have fresh IDs.
@@ -619,15 +676,17 @@ namespace oscairn
                     for(const auto& c : contexts()) remember(c, allocate(c.id));
                 }
                 record(Op::SaveSnapshot);
-                process_->fitLimit();
+                process()->fitLimit();
             }
             std::shared_ptr<PluginHost> createEffectContext() override
             {
                 if(!effects_) throw std::runtime_error("Plugin has no native effect contexts");
-                std::lock_guard lock(controlFor());
-                Reader r = process_->exchange(header(Op::CreateEffectContext).data);
-                auto context = std::make_shared<WorkerHost>(process_, r, false);
-                process_->fitLimit();
+                auto lock = controlFor();
+                process()->making = engine_.get();
+                struct Made { const Engine*& making; ~Made() { making = nullptr; } } made{process()->making};
+                Reader r = process()->exchange(header(Op::CreateEffectContext).data);
+                auto context = std::make_shared<WorkerHost>(owner_, r, engine_, false);
+                process()->fitLimit();
                 return context;
             }
             std::optional<oscairn_effect_resources_t> effectResources() const override
@@ -641,14 +700,14 @@ namespace oscairn
             // it once after an operation that may have activated it, then kept.
             std::optional<oscairn_memory_t> declaredMemory() const override
             {
-                std::lock_guard lock(const_cast<WorkerHost*>(this)->controlFor());
+                auto lock = const_cast<WorkerHost*>(this)->controlFor();
                 return declaredLocked();
             }
             const std::optional<oscairn_memory_t>& declaredLocked() const // under control
             {
                 if(!declared_)
                 {
-                    Reader r = process_->exchange(header(Op::Memory).data);
+                    Reader r = process()->exchange(header(Op::Memory).data);
                     std::optional<oscairn_memory_t> m;
                     if(r.u8()) { m.emplace(); r.bytes(&*m, sizeof *m); }
                     declared_ = m;
@@ -667,7 +726,7 @@ namespace oscairn
             {
                 if(!contexts_) return {};
                 auto& self = *const_cast<WorkerHost*>(this);
-                std::lock_guard lock(self.controlFor());
+                auto lock = self.controlFor();
                 std::vector<oscairn_sound_context_info_t> result;
                 for(auto c : self.contexts())
                     for(const auto& [engine, worker] : ids_) if(worker == c.id) { c.id = engine; result.push_back(c); break; }
@@ -676,7 +735,7 @@ namespace oscairn
             uint32_t prepareSound(const std::string& name, const std::vector<oscairn_sound_parameter_t>& values, const std::string& state, const std::string& preset,
                                   const std::string& sfz, const std::string& library, const std::string& directory) override
             {
-                std::lock_guard lock(controlFor());
+                auto lock = controlFor();
                 Prepared p{0, name, values, state, preset, sfz, library, directory};
                 const auto worker = prepare(p);
                 if(!contexts_ || worker == CLAP_INVALID_ID) return worker;
@@ -686,20 +745,20 @@ namespace oscairn
             }
             bool selectSound(uint32_t id, int16_t channel) override
             {
-                std::lock_guard lock(controlFor());
+                auto lock = controlFor();
                 const auto i = ids_.find(id);
                 if(contexts_ && i == ids_.end()) { if(channel < -1 || channel > 15) throw std::invalid_argument("Invalid sound channel"); return false; }
-                if(!process_->exchange(header(Op::SelectSound).u32(contexts_ ? i->second : id).u32(uint32_t(channel)).data).u8()) return false;
+                if(!process()->exchange(header(Op::SelectSound).u32(contexts_ ? i->second : id).u32(uint32_t(channel)).data).u8()) return false;
                 if(channel < 0) selected_.fill(id); else selected_[size_t(channel)] = id;
                 return true;
             }
             bool discardSound(uint32_t id, bool cutTail) override
             {
-                std::lock_guard lock(controlFor());
+                auto lock = controlFor();
                 const auto i = ids_.find(id);
                 if(contexts_ && i == ids_.end()) return false;
-                if(!process_->exchange(header(Op::DiscardSound).u32(contexts_ ? i->second : id).u8(cutTail).data).u8()) return false;
-                if(contexts_ && grown_) { --grown_; process_->fitLimit(); }
+                if(!process()->exchange(header(Op::DiscardSound).u32(contexts_ ? i->second : id).u8(cutTail).data).u8()) return false;
+                if(contexts_ && grown_) { --grown_; process()->fitLimit(); }
                 ids_.erase(id); publishIds();
                 // One the recovery record holds is discarded again after a restart; one from before a
                 // snapshot prepared beside became the record is not in it.
@@ -741,24 +800,24 @@ namespace oscairn
             bool ringsOut() const noexcept override { return ringOut_; }
             bool chokeRetiring() override
             {
-                std::lock_guard lock(controlFor());
-                return ringOut_ && process_->exchange(header(Op::ChokeRetiring).data).u8();
+                auto lock = controlFor();
+                return ringOut_ && process()->exchange(header(Op::ChokeRetiring).data).u8();
             }
             std::array<uint32_t, 16> prepareSnapshot(const std::string& directory) override
             {
-                std::lock_guard lock(controlFor());
+                auto lock = controlFor();
                 std::set<uint32_t> before;
                 for(const auto& c : contexts()) before.insert(c.id);
                 // How many sounds the snapshot holds is the plugin's to read: room for every free context until it says.
                 const auto free = contexts_ - uint32_t(before.size());
-                Reader r = growing(free, [&] { return process_->exchange(header(Op::PrepareSnapshot).str(directory).data); });
+                Reader r = growing(free, [&] { return process()->exchange(header(Op::PrepareSnapshot).str(directory).data); });
                 std::array<uint32_t, 16> worker{};
                 for(auto& id : worker) id = r.u32();
                 // The new sounds in the order a load of the snapshot lists them, its slots': their IDs ascend.
                 std::vector<uint32_t> fresh;
                 for(const auto& c : contexts()) if(!before.count(c.id)) fresh.push_back(c.id);
                 grown_ = grown_ - free + uint32_t(fresh.size());
-                process_->fitLimit();
+                process()->fitLimit();
                 std::sort(fresh.begin(), fresh.end());
                 std::map<uint32_t, uint32_t> engine; std::vector<uint32_t> base;
                 for(const auto w : fresh) { const auto id = allocate(w); ids_[id] = w; engine[w] = id; base.push_back(id); }
@@ -774,7 +833,7 @@ namespace oscairn
                 // sounds, and the outgoing ones are lost with their voices. If the copy fails, the old record stays.
                 try
                 {
-                    const auto next = process_->records / std::to_string(++process_->saves);
+                    const auto next = process()->records / std::to_string(++process()->saves);
                     std::filesystem::create_directories(next);
                     std::filesystem::copy(directory, next, std::filesystem::copy_options::recursive);
                     std::error_code ignored;
@@ -785,7 +844,7 @@ namespace oscairn
                 catch(const std::exception&) {}
                 return selected;
             }
-            void setAssets(kick::clap::AssetResolver* assets) noexcept override { process_->assets.store(assets); }
+            void setAssets(kick::clap::AssetResolver* assets) noexcept override { process()->assets.store(assets); }
             std::vector<kick::clap::AssetReference> assetDependencies() const override
             {
                 Reader r = const_cast<WorkerHost*>(this)->request(Op::AssetDependencies);
@@ -804,7 +863,7 @@ namespace oscairn
             // With the extra block the worker may still be rendering the last block, which a panic now must not reach: it waits for the next one.
             void panic() noexcept override
             {
-                if(process_->failed.load()) return;
+                if(process()->failed.load()) return;
                 if(missed_.load(std::memory_order_relaxed)) missPanics_.fetch_add(1, std::memory_order_relaxed);
                 if(extra_) panicLater_.store(true, std::memory_order_release); else shared_->panic.store(1, std::memory_order_release);
             }
@@ -813,8 +872,8 @@ namespace oscairn
             // Every node of the worker is reconfigured by its own call, each setting the worker's rate.
             void reconfigure(double rate, uint32_t frames) override
             {
-                if(frames != process_->frames) throw std::invalid_argument("A plugin worker keeps its block size"); // its shared block's
-                { std::lock_guard lock(process_->control); process_->setRate(rate); } // first, so a worker restarting meanwhile loads at it
+                if(frames != process()->frames) throw std::invalid_argument("A plugin worker keeps its block size"); // its shared block's
+                { auto lock = locked(); process()->setRate(rate); } // first, so a worker restarting meanwhile loads at it
                 shared_->sampleRate = rate;
                 fadeFrames_ = faded_ = uint32_t(rate * .01);
                 request(Op::Reconfigure, Writer().f64(rate));
@@ -823,21 +882,21 @@ namespace oscairn
             double cpuSeconds() const override
             {
                 size_t sharing = 1;
-                { std::lock_guard nodes(process_->nodesMutex); sharing = std::max<size_t>(1, process_->nodes.size()); }
-                return (process_->cpuBefore.load() + process_->cpu.load()) / double(sharing);
+                { std::lock_guard nodes(process()->nodesMutex); sharing = std::max<size_t>(1, process()->nodes.size()); }
+                return (process()->cpuBefore.load() + process()->cpu.load()) / double(sharing);
             }
             // Its share of the worker's memory as the supervisor last read it, the measure its limit applies to.
             uint64_t residentBytes() const override
             {
-                const auto bytes = process_->memory.load();
+                const auto bytes = process()->memory.load();
                 if(!bytes) return resident_.load(); // restarting: the last reading stands
                 size_t sharing = 1;
-                { std::lock_guard nodes(process_->nodesMutex); sharing = std::max<size_t>(1, process_->nodes.size()); }
+                { std::lock_guard nodes(process()->nodesMutex); sharing = std::max<size_t>(1, process()->nodes.size()); }
                 resident_.store(bytes / sharing);
                 return bytes / sharing;
             }
             // As the plugin said in its last block; a failed worker is silent, so asleep too.
-            bool asleep() const noexcept override { return process_->failed.load() || shared_->asleep.load(std::memory_order_relaxed) != 0; }
+            bool asleep() const noexcept override { return process()->failed.load() || shared_->asleep.load(std::memory_order_relaxed) != 0; }
             bool wasReset() const noexcept override { return reset_; }
             // RFC 0045's miss policy: a block handed but not done in time, or not handed while the worker was busy
             // with its events carried, lost nothing; with the extra block, of the block played.
@@ -876,12 +935,12 @@ namespace oscairn
                 s.lastMicroseconds = shared_->lastMicroseconds.load(); s.maximumMicroseconds = shared_->maximumMicroseconds.load();
                 s.lateBlocks = late_.load(std::memory_order_relaxed); s.silentBlocks = silent_.load(std::memory_order_relaxed);
                 s.deadlineMisses = shared_->deadlineMisses.load() + s.lateBlocks + s.silentBlocks;
-                s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process_->budget()).count();
+                s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process()->budget()).count();
                 s.busyBlocks = busyBlocks_.load(std::memory_order_relaxed); s.missPanics = missPanics_.load(std::memory_order_relaxed);
                 s.minorFaults = shared_->minorFaults.load(std::memory_order_relaxed); s.majorFaults = shared_->majorFaults.load(std::memory_order_relaxed);
                 s.involuntarySwitches = shared_->involuntarySwitches.load(std::memory_order_relaxed);
                 s.controlSilences = shared_->controlSilences.load(); s.idleBlocks = shared_->idleBlocks.load();
-                s.restarts = process_->restarted.load(std::memory_order_relaxed);
+                s.restarts = process()->restarted.load(std::memory_order_relaxed);
                 return s;
             }
 
@@ -898,7 +957,7 @@ namespace oscairn
                     return rendered(false);
                 }
                 const float* in[64]; float* out[64]; bool ok = true;
-                const double rate = process_->rate;
+                const double rate = process()->rate;
                 for(uint32_t done = 0; done < frames;)
                 {
                     const auto n = std::min(capacity_, frames - done);
@@ -962,21 +1021,34 @@ namespace oscairn
                 const auto run = std::clamp<int64_t>(s.doneAt - s.wokeAt, 0, 1'000'000'000);
                 runNs_ += (run - runNs_) / 8;
             }
-            std::mutex& controlFor()
+            // The control lock of the worker this node is in. A node may move to a worker of its own while
+            // its worker restarts (RFC 0045), so the worker is looked up again once the lock is held.
+            std::unique_lock<std::mutex> locked()
             {
-                if(process_->failed.load()) throw std::runtime_error(process_->failure());
-                return process_->control;
+                for(;;)
+                {
+                    auto* p = process();
+                    std::unique_lock lock(p->control);
+                    if(p == process()) return lock;
+                }
+            }
+            std::unique_lock<std::mutex> controlFor()
+            {
+                if(process()->failed.load()) throw std::runtime_error(process()->failure());
+                auto lock = locked();
+                if(process()->failed.load()) throw std::runtime_error(process()->failure());
+                return lock;
             }
             Writer header(Op op) const { return Writer().u8(uint8_t(op)).u32(node_); }
             Reader request(Op op, const Writer& args = {})
             {
-                std::lock_guard lock(controlFor());
-                return process_->exchange(header(op).data + args.data);
+                auto lock = controlFor();
+                return process()->exchange(header(op).data + args.data);
             }
             // The worker's sound contexts with its own IDs, in slot order. Under control.
             std::vector<oscairn_sound_context_info_t> contexts()
             {
-                Reader r = process_->exchange(header(Op::SoundContexts).data);
+                Reader r = process()->exchange(header(Op::SoundContexts).data);
                 std::vector<oscairn_sound_context_info_t> result(r.u32());
                 for(auto& c : result) r.bytes(&c, sizeof c);
                 return result;
@@ -986,10 +1058,10 @@ namespace oscairn
                 Writer w = header(Op::PrepareSound); w.str(p.name).u32(uint32_t(p.values.size()));
                 for(const auto& v : p.values) w.u32(v.id).f64(v.value);
                 w.str(p.state).str(p.preset).str(p.sfz).str(p.library).str(p.directory);
-                if(!contexts_) return process_->exchange(w.data).u32();
-                const auto id = growing(1, [&] { return process_->exchange(w.data); }).u32();
+                if(!contexts_) return process()->exchange(w.data).u32();
+                const auto id = growing(1, [&] { return process()->exchange(w.data); }).u32();
                 if(id == CLAP_INVALID_ID) --grown_;
-                process_->fitLimit();
+                process()->fitLimit();
                 return id;
             }
             // RFC 0025: a sound context prepared on the running engine costs the context bytes the
@@ -998,8 +1070,8 @@ namespace oscairn
             template<class F> Reader growing(uint32_t most, F prepare)
             {
                 grown_ += most;
-                try { process_->raise(); return prepare(); }
-                catch(...) { grown_ -= most; try { process_->fitLimit(); } catch(const std::exception&) {} throw; }
+                try { process()->raise(); return prepare(); }
+                catch(...) { grown_ -= most; try { process()->fitLimit(); } catch(const std::exception&) {} throw; }
             }
             // Engine sound IDs: the worker's own until a restart, then new ones; never reused.
             uint32_t allocate(uint32_t worker) { const auto id = fresh_ ? nextId_ : worker; nextId_ = std::max(nextId_, id + 1); return id; }
@@ -1015,8 +1087,8 @@ namespace oscairn
                 if(save == Op::SaveState && !state_) return;
                 try
                 {
-                    const auto next = process_->records / std::to_string(++process_->saves);
-                    process_->exchange(header(save).str(next.string()).data);
+                    const auto next = process()->records / std::to_string(++process()->saves);
+                    process()->exchange(header(save).str(next.string()).data);
                     std::error_code ignored;
                     if(!record_.empty()) std::filesystem::remove_all(record_, ignored);
                     record_ = next; snapshotRecord_ = save == Op::SaveSnapshot; besideRecord_ = false;
@@ -1026,9 +1098,9 @@ namespace oscairn
             // Hands the worker this node's shared block, which it maps, then answers. Under control.
             void connect()
             {
-                send(process_->socket, Writer().u8(1).data);
-                sendDescriptor(process_->socket, shm_);
-                Process::expect(receive(process_->socket));
+                send(process()->socket, Writer().u8(1).data);
+                sendDescriptor(process()->socket, shm_);
+                Process::expect(receive(process()->socket));
             }
             void release() noexcept
             {
@@ -1060,9 +1132,9 @@ namespace oscairn
                 // While busy (until finish), a restart waits; it sets failed first, so a block that starts later sees it.
                 busy_.store(true);
                 auto& s = *shared_;
-                if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; carriedBytes_->used = 0; return silence(); }
-                process_->follow(frames);
-                if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process_->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
+                if(process()->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; carriedBytes_->used = 0; return silence(); }
+                process()->follow(frames);
+                if(const auto g = process()->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process()->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
                 // A block the worker has not finished yet: stay silent rather than queue another, its events carried
                 // to the next block handed (RFC 0045); only a release lost on the way is reset for.
                 if(s.done.load(std::memory_order_acquire) != sequence_)
@@ -1109,12 +1181,15 @@ namespace oscairn
                 s.ringOut = s.ringOutChannels && no >= outChannels_;
                 if(transport) s.transport = *transport;
                 // The worker spins for the next block only while every worker's audio thread and this one have a core each.
-                s.spinNs = process_->mode == ProcessingMode::Realtime && Process::audioThreads.load(std::memory_order_relaxed) + 1 <= Process::cores() ? uint32_t(process_->spinNs.load(std::memory_order_relaxed)) : 0;
+                s.spinNs = process()->mode == ProcessingMode::Realtime && Process::audioThreads.load(std::memory_order_relaxed) + 1 <= Process::cores() ? uint32_t(process()->spinNs.load(std::memory_order_relaxed)) : 0;
                 sent_ = std::chrono::steady_clock::now();
                 requestedAt_.store(sent_.time_since_epoch().count(), std::memory_order_release);
                 requested_.store(++sequence_, std::memory_order_release);
                 s.request.store(sequence_, std::memory_order_release);
-                wake(s.request);
+                // One doorbell for all the worker's nodes (RFC 0045): a system call only while its audio thread sleeps.
+                auto& bell = *process()->bell;
+                bell.ring.fetch_add(1, std::memory_order_seq_cst);
+                if(bell.sleeping.load(std::memory_order_seq_cst)) wake(bell.ring);
                 startedOutputs_ = outputs; startedChannels_ = no; startedFrames_ = frames; startedOffset_ = offset;
                 return true;
             }
@@ -1132,13 +1207,14 @@ namespace oscairn
                 };
                 // The budget counts from the request, however long the caller did other work since; with the
                 // extra block, from the request a call earlier, so a period more.
-                auto budget = extraBlock() ? process_->budget() + std::chrono::nanoseconds(int64_t(1e9 * process_->block.load(std::memory_order_relaxed) / process_->rate)) : process_->budget();
+                auto budget = extraBlock() ? process()->budget() + std::chrono::nanoseconds(int64_t(1e9 * process()->block.load(std::memory_order_relaxed) / process()->rate)) : process()->budget();
                 // RFC 0045: never past the wave's deadline (realtime.h's workerDeadline), the callback's own at the latest; with
-                // step 6, and for the extra block's block in flight, that deadline in place of the allowance.
-                if(const auto deadline = workerDeadline; deadline.time_since_epoch().count() && process_->mode == ProcessingMode::Realtime)
+                // step 6, for the extra block's block in flight, and in a plugin host (whose nodes render one after another,
+                // so a node's own allowance from its hand-over does not hold), that deadline in place of the allowance.
+                if(const auto deadline = workerDeadline; deadline.time_since_epoch().count() && process()->mode == ProcessingMode::Realtime)
                 {
                     const auto toDeadline = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - sent);
-                    budget = collect ? std::chrono::nanoseconds::zero() : workerDeadlineOnly || extraBlock() ? toDeadline : std::min(budget, toDeadline);
+                    budget = collect ? std::chrono::nanoseconds::zero() : workerDeadlineOnly || extraBlock() || process()->pooled ? toDeadline : std::min(budget, toDeadline);
                     budget = std::max(budget, std::chrono::nanoseconds::zero());
                 }
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
@@ -1147,13 +1223,21 @@ namespace oscairn
                 // worker's audio thread and this one have a core each: otherwise the core this thread spins on is one a
                 // worker it waits for may need (ST Final's nine workers on the FANTOM-07's four cores: none).
                 bool spun = false;
-                if(!ready && process_->mode == ProcessingMode::Realtime && !extraBlock() // a delayed block is waited for late in the callback: no spin
+                if(!ready && process()->mode == ProcessingMode::Realtime && !extraBlock() // a delayed block is waited for late in the callback: no spin
                    && Process::audioThreads.load(std::memory_order_relaxed) + 1 <= Process::cores())
-                    for(const auto until = checked + std::min(std::chrono::nanoseconds(process_->spinNs.load(std::memory_order_relaxed)), std::chrono::nanoseconds(budget) - (checked - sent));
+                    for(const auto until = checked + std::min(std::chrono::nanoseconds(process()->spinNs.load(std::memory_order_relaxed)), std::chrono::nanoseconds(budget) - (checked - sent));
                         !(spun = s.done.load(std::memory_order_acquire) == sequence_) && std::chrono::steady_clock::now() < until;) relax();
                 const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (std::chrono::steady_clock::now() - sent));
                 // The round trip as this thread sees it: done when first found done, or given up.
-                const bool done = ready || spun || (waitWhileEqual(s.done, sequence_ - 1, left) && s.done.load(std::memory_order_acquire) == sequence_);
+                // Asleep on done, saying so: the worker makes the wake-up's system call only then (Shared::waiting).
+                auto sleep = [&] {
+                    s.waiting.store(1, std::memory_order_relaxed);
+                    std::atomic_thread_fence(std::memory_order_seq_cst);
+                    const bool woke = waitWhileEqual(s.done, sequence_ - 1, left);
+                    s.waiting.store(0, std::memory_order_relaxed);
+                    return woke;
+                };
+                const bool done = ready || spun || (sleep() && s.done.load(std::memory_order_acquire) == sequence_);
                 // Late by the clock counts toward "too slow" even when the wait itself woke late; a
                 // block done before the caller came for it was not late.
                 const auto seen = ready ? checked : std::chrono::steady_clock::now();
@@ -1214,7 +1298,7 @@ namespace oscairn
             // silence, and the next block heard fades in over as long (a restart's 10 ms fade-in left as it is).
             void fadeOut(float* const* outputs, uint32_t no, uint32_t frames) noexcept
             {
-                const uint32_t n = std::max(1u, uint32_t(process_->rate * .001));
+                const uint32_t n = std::max(1u, uint32_t(process()->rate * .001));
                 if(outputs) for(uint32_t c = 0; c < no; ++c) if(outputs[c])
                 {
                     const float from = c < last_.size() ? last_[c] : 0.f;
@@ -1288,16 +1372,16 @@ namespace oscairn
             void handDelayed(const float* const* inputs, uint32_t ni, uint32_t frames, const kick::clap::Event* events, uint32_t count,
                              const clap_event_transport_t* transport, uint32_t offset) noexcept
             {
-                if(panicLater_.exchange(false, std::memory_order_acq_rel) && !process_->failed.load()) shared_->panic.store(1, std::memory_order_release);
+                if(panicLater_.exchange(false, std::memory_order_acq_rel) && !process()->failed.load()) shared_->panic.store(1, std::memory_order_release);
                 // shortcut: a block longer than the worker's is silenced here; a realtime block never is, only an offline one (not delayed).
-                const bool fits = frames <= process_->frames;
+                const bool fits = frames <= process()->frames;
                 auto* next = spare();
                 kept_ = true;
                 previous_ = fits && start(inputs, ni, next, std::min(playChannels_, outChannels_), frames, events, count, transport, offset) ? Previous::started : Previous::notStarted;
                 if(previous_ == Previous::notStarted)
                 {
                     notStartedKept_ = fits && kept_;
-                    startedOutputs_ = next; startedFrames_ = std::min(frames, process_->frames);
+                    startedOutputs_ = next; startedFrames_ = std::min(frames, process()->frames);
                 }
             }
             // The call's block kept to hand over later: its inputs, events (SysEx bytes copied) and transport.
@@ -1305,7 +1389,7 @@ namespace oscairn
                        const clap_event_transport_t* transport, uint32_t offset) noexcept
             {
                 stagedFrames_ = frames; stagedOffset_ = offset;
-                const auto n = std::min(frames, process_->frames);
+                const auto n = std::min(frames, process()->frames);
                 for(uint32_t c = 0; c < inChannels_; ++c)
                 {
                     if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], n, stagedInPointers_[c]);
@@ -1327,7 +1411,7 @@ namespace oscairn
                 playOutputs_ = outputs; playChannels_ = no; playFrames_ = frames;
                 deferred_ = false; played_ = nullptr;
                 // Nothing the worker had before it failed or restarted is heard.
-                const bool stale = process_->failed.load() || process_->generation.load() != generation_;
+                const bool stale = process()->failed.load() || process()->generation.load() != generation_;
                 if(previous_ == Previous::waiting)
                 {
                     if(stale) { previous_ = Previous::notStarted; notStartedKept_ = false; }
@@ -1442,10 +1526,16 @@ namespace oscairn
             void missed(std::atomic<uint64_t>& count) noexcept
             {
                 count.fetch_add(1, std::memory_order_relaxed);
-                if(++consecutiveMisses_ >= process_->missLimit) tooSlow_.store(true, std::memory_order_release);
+                if(++consecutiveMisses_ >= process()->missLimit) tooSlow_.store(true, std::memory_order_release);
             }
 
-            std::shared_ptr<Process> process_;
+            // The worker this node is in: owner_ keeps it, proc_ is what the audio thread and the others read. Both
+            // change only when the node moves to a worker of its own, under both workers' control, while it is
+            // not busy (Process::restart); the worker it leaves is a pooled host, which the pool keeps.
+            std::shared_ptr<Process> owner_;
+            std::atomic<Process*> proc_;
+            Process* process() const noexcept { return proc_.load(std::memory_order_acquire); }
+            std::shared_ptr<const Engine> engine_;
             mutable std::atomic<uint64_t> resident_{0}; // the last reading of residentBytes
             mutable std::optional<std::optional<oscairn_memory_t>> declared_; // what it declared at its last activation, as far as known
             uint32_t grown_ = 0; // sound contexts prepared since then, each costing its declared context bytes (RFC 0025)
@@ -1551,26 +1641,28 @@ namespace oscairn
         {
             const auto list = [&] { std::lock_guard nodesLock(nodesMutex); return nodes; }(); // nodes change only under control
             if(list.empty() && !extra) return {};
-            uint64_t declared = 0, shared = 0;
-            auto add = [&](oscairn_memory_t m, uint32_t grown = 0) {
+            uint64_t declared = 0;
+            std::map<const Engine*, uint64_t> shared;
+            auto add = [&](oscairn_memory_t m, const Engine* engine, uint32_t grown = 0) {
                 // Every node of one engine reports the same shared bytes (memory.h), so the largest
                 // is the engine's: counted once even when its root node is gone and only its effect
-                // contexts remain, still holding those bytes. Sounds prepared since its declaration
+                // contexts remain, still holding those bytes; each plugin loaded in a host (RFC 0045)
+                // is an engine of its own. Sounds prepared since its declaration
                 // count its context bytes each (at most 256 of credible bytes: no overflow).
                 credible(m);
                 m.context_bytes += m.context_bytes * grown;
                 credible(m);
                 declared = sum(declared, m.context_bytes + m.asset_bytes);
-                shared = std::max(shared, m.shared_bytes);
+                shared[engine] = std::max(shared[engine], m.shared_bytes);
             };
             for(auto* n : list)
             {
                 const auto* m = ask ? &n->declaredLocked() : n->knownDeclaration();
                 if(!m || !*m) return {};
-                add(**m, n->grown());
+                add(**m, n->engine().get(), n->grown());
             }
-            if(extra) add(*extra);
-            declared = sum(declared, shared);
+            if(extra) add(*extra, making); // a node being made: an effect context of that engine, or a plugin being loaded (none)
+            for(const auto& [engine, bytes] : shared) declared = sum(declared, bytes);
             return sum(sum(declared, declared / 2), uint64_t(64) << 20);
         }
         uint64_t Process::sum(uint64_t a, uint64_t b)
@@ -1637,6 +1729,8 @@ namespace oscairn
                 if(waitpid(pid, &status, WNOHANG) == pid)
                 {
                     reaped = true;
+                    // A plugin's crash, not a kill from outside (the engine's own, the system's out-of-memory killer).
+                    if(WIFSIGNALED(status) && WTERMSIG(status) != SIGKILL) blame();
                     fail(WIFSIGNALED(status) ? "Plugin worker crashed (signal " + std::to_string(WTERMSIG(status)) + ")"
                                              : "Plugin worker exited (status " + std::to_string(WEXITSTATUS(status)) + ")");
                     continue;
@@ -1653,6 +1747,7 @@ namespace oscairn
                 const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
                 std::string why;
                 { std::lock_guard nodesLock(nodesMutex); for(auto* n : nodes) if(why = n->trouble(now); !why.empty()) break; }
+                if(why.starts_with("Plugin worker crashed") || why.starts_with("Plugin hung")) blame(); // not one too slow: that is the host's load
                 if(!why.empty()) fail(why);
             }
         }
@@ -1672,9 +1767,10 @@ namespace oscairn
             }
             restarts.push_back(now);
             std::lock_guard controlLock(control); // the nodes stay as they are while restarting
-            const auto list = [&] { std::lock_guard l(nodesMutex); return nodes; }();
+            auto list = [&] { std::lock_guard l(nodesMutex); return nodes; }();
             for(auto* n : list) while(n->busy()) std::this_thread::sleep_for(std::chrono::milliseconds(1)); // audio leaves its last block
             for(auto* n : list) n->capture();
+            if(pooled) separate(list);
             try
             {
                 // A worker failed by a lost reply was killed but not yet reaped.
@@ -1683,18 +1779,26 @@ namespace oscairn
                 cpuBefore.store(cpuBefore.load() + cpu.exchange(0)); memory.store(0);
                 restarting = true;
                 struct Restarting { bool& flag; ~Restarting() { flag = false; } } guard{restarting};
-                Reader r = start();
-                const auto rootNode = std::find_if(list.begin(), list.end(), [](auto* n) { return n->isRoot(); });
-                if(rootNode != list.end()) (*rootNode)->reconnect(r);
-                else
+                start();
+                // Each plugin again, in the order its node came, then the effect contexts made from it. One
+                // whose own node is gone is loaded only to make its contexts from, then let go.
+                std::vector<std::shared_ptr<const Engine>> engines;
+                for(auto* n : list) if(std::find(engines.begin(), engines.end(), n->engine()) == engines.end()) engines.push_back(n->engine());
+                for(const auto& e : engines)
                 {
-                    // The root node is gone; a new one is needed only to create the contexts from.
-                    r.u32();
-                    if(r.data.substr(r.at) != root) throw std::runtime_error("the plugin changed");
-                    send(socket, Writer().u8(0).data); expect(receive(socket));
+                    Reader r = load(e->path, e->id, 0); // a restart is not refused for memory (RFC 0025)
+                    const auto rootNode = std::find_if(list.begin(), list.end(), [&](auto* n) { return n->isRoot() && n->engine() == e; });
+                    uint32_t from = 0;
+                    if(rootNode != list.end()) { (*rootNode)->reconnect(r); from = (*rootNode)->workerNode(); }
+                    else
+                    {
+                        from = r.u32();
+                        if(r.data.substr(r.at) != e->description) throw std::runtime_error("the plugin changed");
+                        send(socket, Writer().u8(0).data); expect(receive(socket));
+                    }
+                    for(auto* n : list) if(!n->isRoot() && n->engine() == e) { Reader c = exchange(Writer().u8(uint8_t(Op::CreateEffectContext)).u32(from).data); n->reconnect(c); }
+                    if(rootNode == list.end()) exchange(Writer().u8(uint8_t(Op::DestroyNode)).u32(from).data);
                 }
-                for(auto* n : list) if(!n->isRoot()) { Reader c = exchange(Writer().u8(uint8_t(Op::CreateEffectContext)).u32(0).data); n->reconnect(c); }
-                if(rootNode == list.end()) exchange(Writer().u8(uint8_t(Op::DestroyNode)).u32(0).data);
                 restarting = false;
                 for(auto* n : list) n->restore();
                 // What each node declares now, its restored state's (RFC 0025), not the old worker's.
@@ -1713,6 +1817,95 @@ namespace oscairn
             restarted.fetch_add(1, std::memory_order_relaxed);
             failed.store(false);
         }
+
+        // RFC 0045's plugin hosts: a fixed number of worker processes (the placement policy's `hosts`),
+        // started as instances need them and kept for the engine's life, each holding any plugins. An
+        // instance goes to the host with the least measured cost (its plugins' costs, as the Session last
+        // measured them, a share of the block each); a plugin on the policy's own-host list, or one a shared
+        // host's crash or hang was put down to, gets a worker of its own instead. Every worker is listed
+        // (pluginHosts). Main thread, but for own(), which a restart calls.
+        struct Pool
+        {
+            std::mutex mutex;
+            std::vector<std::shared_ptr<Process>> hosts;
+            std::vector<std::weak_ptr<Process>> all;
+            std::set<std::string> crashed;
+            std::map<std::string, double> costs;
+            static constexpr double unmeasured = .1; // a plugin not measured yet, a tenth of the block
+
+            void track(const std::shared_ptr<Process>& p)
+            {
+                std::lock_guard lock(mutex);
+                std::erase_if(all, [](const auto& w) { return w.expired(); });
+                all.push_back(p);
+            }
+            bool own(const std::string& id, const PlacementPolicy& policy)
+            {
+                std::lock_guard lock(mutex);
+                return policy.ownHost.count(id) || crashed.count(id);
+            }
+            void crashedIn(const std::string& id) { std::lock_guard lock(mutex); crashed.insert(id); }
+            double cost(Process& p) // under mutex
+            {
+                std::lock_guard nodes(p.nodesMutex);
+                double total = 0;
+                for(auto* n : p.nodes) { const auto c = costs.find(n->descriptor().id); total += c == costs.end() ? unmeasured : c->second; }
+                return total;
+            }
+            // The host for one more instance: a new one while there are fewer than the policy's, else the
+            // one that costs least (then holds fewest nodes); null when every one is restarting or given up.
+            std::shared_ptr<Process> pick(const std::string& program, double rate, uint32_t frames, uint64_t limit, uint32_t count)
+            {
+                std::lock_guard lock(mutex);
+                std::erase_if(hosts, [](const auto& p) { return p->gaveUp.load(); }); // its nodes keep it; a new host takes its place
+                std::shared_ptr<Process> best; double least = 0; size_t fewest = 0, matching = 0;
+                for(const auto& p : hosts)
+                {
+                    if(p->program != program || p->frames != frames || p->policyLimit != limit || p->currentRate.load() != rate) continue;
+                    ++matching;
+                    if(p->failed.load()) continue;
+                    const double c = cost(*p);
+                    const size_t n = [&] { std::lock_guard nodes(p->nodesMutex); return p->nodes.size(); }();
+                    if(!best || c < least || (c == least && n < fewest)) { best = p; least = c; fewest = n; }
+                }
+                if(matching >= count) return best;
+                auto p = std::make_shared<Process>(program, rate, frames, ProcessingMode::Realtime, limit);
+                p->pooled = true;
+                { std::lock_guard control(p->control); p->start(); }
+                p->supervisor = std::thread([q = p.get()] { q->supervise(); });
+                hosts.push_back(p);
+                std::erase_if(all, [](const auto& w) { return w.expired(); });
+                all.push_back(p);
+                return p;
+            }
+        };
+        Pool& pool() { static Pool p; return p; }
+
+        // RFC 0045: when a shared host failed by a crash or a hang put down to one of its plugins, that
+        // plugin's nodes go to a worker of their own, which starts failed and is restarted with them by its
+        // own supervisor, and the plugin gets a worker of its own from then on; the host restarts with the
+        // others. Alone in its host, it is restarted there as before. Under control, the nodes idle.
+        void Process::separate(std::vector<WorkerHost*>& list)
+        {
+            uint32_t index;
+            { std::lock_guard lock(failureMutex); index = blamed; blamed = UINT32_MAX; }
+            const auto culprit = std::find_if(list.begin(), list.end(), [&](auto* n) { return n->workerNode() == index; });
+            if(index == UINT32_MAX || culprit == list.end()) return;
+            const auto engine = (*culprit)->engine();
+            if(std::all_of(list.begin(), list.end(), [&](auto* n) { return n->engine() == engine; })) return;
+            pool().crashedIn(engine->id);
+            auto own = std::make_shared<Process>(program, rate, frames, mode, policyLimit);
+            own->generation.store(generation.load() + 1); // its nodes start afresh, faded in
+            { std::lock_guard lock(own->failureMutex); own->reason = own->failureText = reason; }
+            own->failed.store(true);
+            {
+                std::lock_guard control(own->control);
+                for(auto* n : list) if(n->engine() == engine) n->moveTo(own);
+            }
+            std::erase_if(list, [&](auto* n) { return n->engine() == engine; });
+            own->supervisor = std::thread([q = own.get()] { q->supervise(); });
+            pool().track(own);
+        }
     }
 
     namespace { std::atomic<int64_t> serviceInterval{0}; }
@@ -1726,17 +1919,62 @@ namespace oscairn
     std::shared_ptr<PluginHost> loadPluginInWorker(const std::string& program, const std::string& path, const std::string& id,
                                                    double sampleRate, uint32_t maxFrames, ProcessingMode mode, uint64_t memoryLimit, uint64_t memoryRoom)
     {
-        auto process = std::make_shared<Process>(program, path, id, sampleRate, maxFrames, mode, memoryLimit);
-        process->memoryRoom = memoryRoom;
+        // RFC 0045: in real time, with plugin hosts, into the pool's host that costs least.
+        std::shared_ptr<Process> process;
+        if(const auto& policy = placementPolicy(); mode == ProcessingMode::Realtime && policy.hosts && !pool().own(id, policy))
+            process = pool().pick(program, sampleRate, maxFrames, memoryLimit, policy.hosts);
+        const bool pooled = process != nullptr;
+        if(!pooled) process = std::make_shared<Process>(program, sampleRate, maxFrames, mode, memoryLimit); // a worker of its own
         std::shared_ptr<PluginHost> host;
+        try
         {
             std::lock_guard lock(process->control);
-            Reader r = process->start();
-            process->root = r.data.substr(r.at + 4);
-            host = std::make_shared<WorkerHost>(process, r, true);
-            process->fitLimit(true);
+            if(process->failed.load()) throw std::runtime_error(process->failure()); // a host that failed since it was picked
+            if(!pooled) process->start();
+            Reader r = process->load(path, id, memoryRoom);
+            auto engine = std::make_shared<const Engine>(Engine{path, id, r.data.substr(r.at + 4)});
+            host = std::make_shared<WorkerHost>(process, r, std::move(engine), true);
+            process->fitLimit(!pooled);
         }
-        process->supervisor = std::thread([p = process.get()] { p->supervise(); });
+        catch(...)
+        {
+            // A plugin that took a shared host down as it loaded gets a worker of its own from then on; the
+            // host's supervisor restarts it with the others.
+            if(pooled && process->broken.load()) pool().crashedIn(id);
+            throw;
+        }
+        if(!pooled)
+        {
+            process->supervisor = std::thread([p = process.get()] { p->supervise(); });
+            pool().track(process);
+        }
         return host;
+    }
+
+    void setPluginCost(const std::string& pluginId, double share)
+    {
+        if(!std::isfinite(share) || share < 0) return;
+        std::lock_guard lock(pool().mutex);
+        pool().costs[pluginId] = std::min(share, 1.0);
+    }
+
+    std::vector<PluginHostInfo> pluginHosts()
+    {
+        std::vector<std::shared_ptr<Process>> all;
+        {
+            std::lock_guard lock(pool().mutex);
+            for(const auto& w : pool().all) if(auto p = w.lock()) all.push_back(std::move(p));
+        }
+        std::vector<PluginHostInfo> result;
+        for(const auto& p : all)
+        {
+            PluginHostInfo info;
+            { std::lock_guard control(p->control); info.pid = p->reaped ? 0 : long(p->pid); }
+            info.pooled = p->pooled;
+            { std::lock_guard nodes(p->nodesMutex); for(auto* n : p->nodes) info.plugins.push_back(n->descriptor().id); }
+            { std::lock_guard lock(pool().mutex); info.cost = pool().cost(*p); }
+            result.push_back(std::move(info));
+        }
+        return result;
     }
 }

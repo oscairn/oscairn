@@ -706,6 +706,19 @@ What changes for the plugin:
   restarted. Each plugin gets back its state as last loaded, the sounds prepared since and
   their selections, and its current parameter values, and its output fades in. Held notes and
   tails are lost. After three restarts within a minute it stays silent.
+- **Sharing a process (plugin hosts):** with `OSCAIRN_PLUGIN_HOSTS` (a device profile's
+  `compute.pluginHosts`; 3 on the FANTOM-07) several instances, of any plugins, share one worker
+  process, a plugin host ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#plugin-hosts-and-resident-instances)).
+  Nothing new may be assumed: a plugin already had to keep nothing per process in globals
+  shared between instances, and that now covers other plugins too (another plugin's libraries,
+  allocator use and threads are in the same process). Every instance in a host is processed on
+  that host's one audio thread, one after another, never two at once, and on a device the time
+  limit is the audio callback's deadline, which the host's instances share, not half a block each; instances are loaded into
+  and unloaded from a host on its main thread while the others keep playing. A crash or hang in
+  any plugin takes the whole host down: every instance in it is restarted as above, and the
+  plugin it was put down to (the one whose block or main-thread call the host was in) gets a
+  worker of its own from then on. The memory limit is the host's, from every declaration in
+  it; `session.status` shares the host's CPU time and memory among its instances.
 - **Parameter info:** an info rescan is forwarded with the worker's next service. A rescan
   that changes the parameters' IDs or order is ignored until the plugin is loaded again.
 - **Reporting:** `session.status` lists each plugin in a worker with its CPU time and memory.

@@ -374,6 +374,9 @@ foreach(entry IN LISTS control_worker_tests)
     list(POP_FRONT parts name)
     add_test(NAME ${name}-workers COMMAND ${parts})
     set_tests_properties(${name}-workers PROPERTIES TIMEOUT ${switch_timeout} ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
+    # RFC 0045: again with every plugin in three plugin hosts, several to a process.
+    add_test(NAME ${name}-hosts COMMAND ${parts})
+    set_tests_properties(${name}-hosts PROPERTIES TIMEOUT ${switch_timeout} ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_PLUGIN_HOSTS=3")
 endforeach()
 
 add_executable(oscairn-recording-test tests/recording.cpp)

@@ -25,9 +25,12 @@ namespace oscairn::worker
     {
         std::atomic<uint32_t> request{0};
         alignas(64) std::atomic<uint32_t> done{0};
-        alignas(64) std::atomic<uint32_t> stop{0}, panic{0};
+        alignas(64) std::atomic<uint32_t> panic{0};
         std::atomic<uint32_t> crashed{0}; // the signal that is ending the worker, set as it dies
         std::atomic<uint32_t> asleep{0};  // the plugin said, in the last block, that it is asleep (CLAP_PROCESS_SLEEP)
+        // The engine's: its thread is (about to be) asleep on done, so the worker wakes it; otherwise the
+        // worker makes no system call to hand a block back (RFC 0045, plugin hosts).
+        std::atomic<uint32_t> waiting{0};
         uint32_t frames = 0, eventCount = 0, hasTransport = 0, ok = 0, outputCount = 0;
         uint32_t inputChannels = 0, outputChannels = 0, maxFrames = 0, parameterCount = 0;
         // outputChannels ends with ringOutChannels (4 for a plugin with a ring-out buffer, RFC 0005, else
@@ -89,9 +92,23 @@ namespace oscairn::worker
     }
     static_assert(std::atomic<uint32_t>::is_always_lock_free && std::atomic<double>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free);
 
-    // Requests. Init and Shutdown concern the worker; every other request is followed by the
-    // index of the plugin node it addresses (a worker hosts one plugin and the effect contexts
-    // created from it).
+    // A worker process's one doorbell (RFC 0045, plugin hosts): its single audio thread sleeps on
+    // ring, which the engine moves after handing any of its nodes a block, and then renders every
+    // node with a request pending, in node order. The engine makes the wake-up system call only
+    // while the worker says it sleeps. rendering and serving name the node the audio thread renders
+    // and the node the control thread serves (UINT32_MAX: none), read by the engine after a crash or
+    // hang to tell which plugin it was; the worker may write anything, so the engine only looks
+    // the index up among its own nodes.
+    struct alignas(64) Doorbell
+    {
+        std::atomic<uint32_t> ring{0};
+        std::atomic<uint32_t> sleeping{0};
+        alignas(64) std::atomic<uint32_t> rendering{UINT32_MAX}, serving{UINT32_MAX};
+    };
+
+    // Requests. Init, Load and Shutdown concern the worker; every other request is followed by
+    // the index of the plugin node it addresses. A worker holds the plugins loaded into it (one,
+    // or several in a plugin host, RFC 0045) and the effect contexts created from each.
     enum class Op : uint8_t
     {
         Init = 1, Service, SetParameter, Gesture, ParameterText, SaveState, LoadState, Shutdown,
@@ -102,7 +119,8 @@ namespace oscairn::worker
         PrepareSnapshot, // a native snapshot's sounds prepared beside the playing ones (RFC 0021)
         ChokeRetiring, // sound-snapshots' choke_retiring (RFC 0005)
         SaveSound, SoundValues, // sound-snapshots draft 4: one sound on its own, a sound's values (RFC 0021)
-        Reconfigure // the plugin activated again at a new sample rate, the block size kept
+        Reconfigure, // the plugin activated again at a new sample rate, the block size kept
+        Load // one more plugin in the worker, beside those it holds (Init sets the rate and block first)
     };
     // First byte of every message from the worker: a reply, or a request to the engine made while
     // the worker serves one (the plugin resolving a sound asset or finding an asset library; a node about to activate, with
@@ -139,6 +157,7 @@ namespace oscairn::worker
     void sendDescriptor(int socket, int fd);
     int receiveDescriptor(int socket);
 
-    // The worker process: hosts one plugin and its effect contexts, serving control requests on `socket`.
+    // The worker process: hosts the plugins loaded into it and their effect contexts, serving control
+    // requests on `socket`, every node's blocks rendered by one audio thread.
     int run(int socket);
 }

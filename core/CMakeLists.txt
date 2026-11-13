@@ -413,6 +413,13 @@ add_test(NAME worker-failures COMMAND oscairn-worker-failures-test $<TARGET_FILE
     $<TARGET_FILE:kick-clap-fixture-process_crash> $<TARGET_FILE:kick-clap-fixture-process_hang> $<TARGET_FILE:kick-clap-fixture-slow>
     $<TARGET_FILE:kick-clap-fixture-leak> ${worker_timing})
 set_tests_properties(worker-failures PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+# RFC 0045's plugin hosts: placement by cost, the same sound as in the engine, a host killed while playing, a
+# plugin crashing a shared host moved to a worker of its own, instances loaded and unloaded beside one playing.
+add_executable(oscairn-plugin-hosts-test engine/tests/plugin_hosts.cpp)
+target_link_libraries(oscairn-plugin-hosts-test PRIVATE oscairn_engine)
+add_test(NAME plugin-hosts COMMAND oscairn-plugin-hosts-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:kick-clap-fixture-note_crash> ${worker_timing})
+set_tests_properties(plugin-hosts PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 if(BUILD_TESTING) # the Legacy Sampler
     add_executable(oscairn-worker-recovery-test engine/tests/worker_recovery.cpp)
     target_link_libraries(oscairn-worker-recovery-test PRIVATE oscairn_engine)
@@ -456,4 +463,7 @@ foreach(entry IN LISTS worker_tests)
     # These check identical results, not timing; they render faster than real time on ordinary
     # threads, so each worker block may take up to worker_budget before it counts as missed.
     set_tests_properties(${name}-workers PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=${worker_budget}")
+    # RFC 0045: again with every plugin in three plugin hosts, several to a process.
+    add_test(NAME ${name}-hosts COMMAND ${parts})
+    set_tests_properties(${name}-hosts PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=${worker_budget};OSCAIRN_PLUGIN_HOSTS=3")
 endforeach()

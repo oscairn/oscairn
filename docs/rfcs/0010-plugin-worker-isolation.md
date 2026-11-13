@@ -23,6 +23,11 @@ Checked when built and tested; the sections below say how.
       change ([RFC 0021](0021-sounds-performances-and-library.md#seamless-switching)) can
       retire a plugin in a worker as soon as it is done (the shared block's `asleep`, set after
       each block; a failed worker counts as asleep; `worker-host` checks it)
+- [x] Plugin hosts ([RFC 0045](0045-audio-scheduling-on-small-devices.md#plugin-hosts-and-resident-instances),
+      stage 2, 2026-11-13): behind `OSCAIRN_PLUGIN_HOSTS` (a profile's `compute.pluginHosts`), a fixed
+      pool of workers each holding any plugins, placed by measured cost; one audio thread and one
+      doorbell per worker in both modes; a crash takes down one host, whose instances come back,
+      and the plugin it is put down to gets a worker of its own (`plugin-hosts`, the `-hosts` test runs)
 
 ## Problem
 
@@ -69,6 +74,11 @@ LV2 host code, behind a small shim. Which plugins share a worker is a policy:
 - **Shared by engine:** all instances of one native engine with sound or effect contexts run
   together, since they share decoded audio, voices and context lifetimes (RFC 0005, 0007).
 - Overrides per plugin and per Sound, as in Bitwig and REAPER.
+- **Plugin hosts** (RFC 0045, built 2026-11-13): a few workers, about the cores less one, each
+  holding instances of any plugins the engine placed there by measured cost, never by plugin
+  identity; a plugin on the own-host list, or one that crashed a shared host, keeps a worker of
+  its own. Every worker, of one plugin or many, renders its nodes on one audio thread behind one
+  doorbell.
 
 ### Audio hand-off
 

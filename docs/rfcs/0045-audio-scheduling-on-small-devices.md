@@ -592,7 +592,8 @@ Proposed (step 7):
 ## Plugin hosts and resident instances
 
 Status: design, approved by the owner 2026-11-13 ("the resident host processes thing sounds like
-a good idea ... go"); not built. Constraints from him: crash isolation between the engine and
+a good idea ... go"); stage 2, the hosts themselves, built the same day
+([status](#stage-2-status-plugin-hosts-2026-11-13)); stages 3 to 5 not built. Constraints from him: crash isolation between the engine and
 every plugin stays; the engine treats every plugin alike (no first-party fast path); any CLAP
 plugin works. Placing plugins in the engine's process is not the path.
 
@@ -737,7 +738,8 @@ out of swap. Only where the app sets the budget: `--engine-only` runs without on
 1. Independent of hosts: the deadline rule, the engine's main-thread service cut, the sharing
    stopgap (`OSCAIRN_SHARING=cpu`), the spin, admission per core (RFC 0025), all built
    2026-11-13.
-2. A worker process that holds several instances of different plugins: `Op::Init` loads the first,
+2. **Built 2026-11-13** ([stage 2 status](#stage-2-status-plugin-hosts-2026-11-13)), but for the
+   chain placed together. A worker process that holds several instances of different plugins: `Op::Init` loads the first,
    a new `Op::Load` adds another node (the node index, shared block and control protocol are per
    node already: a worker holds a root and its effect contexts today); one audio thread per
    process serving every node with a request pending, in order, behind one doorbell word, so a
@@ -757,6 +759,98 @@ What oscairn-worker-bench measures before and after each stage: hand-overs a blo
 threads, the callback's distribution, engine CPU (audio and main thread), resident memory of all
 processes; on the unit, `oscairn-engine-timing` per worker (to become per host) and `top`.
 
+### Stage 2 status: plugin hosts (2026-11-13)
+
+Built, behind `OSCAIRN_PLUGIN_HOSTS` (the profile's `compute.pluginHosts`; 3 on the FANTOM-07, 0
+and so a worker per instance everywhere else). What was built and decided while building:
+
+- **One audio thread and one doorbell per worker, in both modes.** `Op::Init` now starts a worker
+  with no plugin (the rate, the block, the mode and the doorbell, a small shared block of its own);
+  `Op::Load` loads a plugin into it, as often as wanted, beside those it holds. The worker's single
+  audio thread sleeps on the doorbell's ring, which the engine moves after handing any node a
+  block, and renders every node with a block pending, in node order, until a pass finds none. A
+  worker of one plugin and its effect contexts, which had an audio thread per node, now has one.
+  Nodes are published to the audio thread at a pass's boundary and taken from it after the pass
+  that may use them, so loading and unloading an instance never stops the others.
+- **No system call that wakes nobody.** The engine makes the wake-up's call only while the worker
+  says it sleeps on its doorbell, and the worker wakes the engine only while the engine says it
+  sleeps on the node's `done` (both sides a store, a full fence, then a read of the other's word).
+  Before, every hand-over cost the engine a futex wake and every result the worker one, waiting or
+  not.
+- **Placement at load, by measured cost, never by plugin identity.** An instance goes, as it loads,
+  to the host whose nodes cost least (each plugin's cost the Session's measurement of its busiest
+  sustained share of the block, `setPluginCost`, fed from `measured_` as it loads and as it
+  measures; a plugin never measured counts a tenth); ties go to the host with fewer nodes; while
+  there are fewer hosts than the policy's, a new one is started. Instances never move while they
+  play; a Performance's load or a part's added instance is where placement happens.
+  **Not built: a part's chain placed together** (that needs the chain known at load, stage 3).
+- **Hosts are resident.** Started as instances need them, kept for the engine's life, also when
+  empty (stage 4's first part: a Performance switch reloads instances into running hosts, no new
+  process). The interface to the Session's resident pool (being built elsewhere) is `loadPlugin`
+  as before, `pluginHosts()` (each worker process: its process ID, pooled or not, its nodes'
+  plugins, their cost) and `setPluginCost`; `performance.cpp` is untouched.
+- **Waiting in a host.** A host's nodes render one after another, so a node's own allowance from
+  its hand-over (half a period) does not hold: a node in a host waits to the callback's deadline
+  (as step 6 does), the allowance only where no deadline is set.
+- **A crash takes down one host.** The supervisor restarts it with every instance it held, each
+  from its recovery record (each plugin loaded again in the order its node came, then its effect
+  contexts; one whose own node is gone loaded only to make its contexts from). The host's memory
+  limit counts each plugin's shared bytes once (they were the largest of all nodes' when a worker
+  held one plugin). "Too slow" and the hang limit still act per node, so on the host.
+- **The plugin a failure is put down to gets a worker of its own.** On a crash by a crash signal
+  (not SIGKILL, which is the engine's own or the system's) or a hang, the doorbell says which node
+  the audio thread was rendering, else which node's request the main thread was serving; that
+  plugin's nodes move to a worker of their own (it starts failed, and its own supervisor restarts it
+  with them), the host restarts with the others, and the plugin's later instances get workers of
+  their own for the engine's life, as do those on `OSCAIRN_OWN_HOST` (`compute.ownHost`). A plugin
+  whose load takes a host down joins them too. A crash on a plugin's own thread while the audio
+  thread renders another is put down to that other: a known limit.
+- **Spin.** Workers count as audio threads per process now, so three hosts and the engine's thread
+  on four cores spin (the rule of [spinning before sleeping](#spinning-before-sleeping) unchanged).
+
+Tests: `plugin-hosts` (new): seven instances placed by cost in two hosts, an effect at half the
+block beside one instrument and five instruments in the other, the hosts staying, empty, when the
+instances go; three instruments and an effect in hosts sounding sample for sample as in the
+engine; **a host killed with SIGKILL while it plays (from another thread, as a crash comes): the
+other host's effect sounds exactly as without the kill and misses no block, no callback runs past
+the period, and the killed host's two effects come back and play as before** (10 of 10 runs on
+macOS, back within 10 to 30 blocks); a plugin crashing a shared host (the fixture's crash on key 0)
+moves to a worker of its own and a later instance of it gets one too, the other plugin back in its
+host, each restarted once; instances loaded into and unloaded from a host while one plays there,
+which sounds as before and misses nothing. Every graph and Session test that runs with workers runs
+again with three hosts (`-hosts`). Found on the way, not changed: an instrument without sound
+contexts renders through the graph's prepared instances, which wait for each worker block in turn
+(`process`, not handed over and collected), and a block on an audio helper thread has no callback
+deadline (`callbackDeadline` is the callback thread's), so such a worker's wait runs to its
+allowance; with a dead host the instrument after it in the wave then missed its block.
+
+Measured with `oscairn-worker-bench` (ST Final's shape: ten fixture plugins at 150 us a block;
+10 s, three runs each, medians; before is main at 79770480), not on the unit:
+
+| | before | a worker per instance (this build) | three hosts | before, spin 200 | three hosts, spin 200 |
+|---|---|---|---|---|---|
+| Linux container (4 CPUs): worker processes / resident MB | 10 / not printed | 10 / 39.1 | 3 / 17.4 | 10 | 3 / 17.4 |
+| engine audio thread, % of a core | 9.5 | 9.7 | 8.9 | 37.4 | 38.0 |
+| engine main thread (service every 5 ms), % | 5.6 | 5.8 | 5.7 | 5.3 | 5.4 |
+| blocks late / silent in 10 s | 67 / 95 | 121 / 200 | 20 / 30 | 29 / 132 | 39 / 218 |
+| macOS (M-series): resident MB / callback p50 (us) / audio thread % | not printed / 626 / 4.8 | 91 / 645 / 5.8 | 34 / 751 / 5.1 | | |
+
+The container's spread between runs of one setting was as large as the differences between the
+first three columns (single: silent 66 to 261); only memory and the process count are clear.
+System calls over 6 s of the ST shape under `strace -f -c` in the container (which slows
+everything, so most blocks are late and every hand-over sleeps): futex calls a block 41 before,
+37 with a worker per instance, 24 with three hosts; `getrusage` 10 a block before (one per worker
+block), 7 with hosts (one per pass). On macOS three hosts lengthen the callback (751 against
+645 us at the median): ten workers ran in parallel on a machine with more cores than workers,
+and three hosts render serially what ten processes rendered at once; on four cores ten workers
+cannot all run at once either.
+
+**The spin with hosts:** three hosts and the engine's thread fit four cores, so the profile's
+spin applies again, and in the container it cost the engine's thread about 29 points of a core
+(9 % to 38 %) and missed more blocks, not fewer. The unit should be measured with and without it
+(the A/B plan below) before the profile keeps both; the engine's thread at 65 % on the unit with
+the spin on is the same effect.
+
 ## The device A/B plan
 
 On bundle c4bc60da or later, engine alone (`--engine-only`), the performance governor as the
@@ -772,6 +866,9 @@ Stop with `./oscairn-fantom-stop` between configurations.
 | + spin (profile default 200) | `./oscairn-fantom-start --engine-only` | Rd 73 Chill: wake p50 near 0, round trip p50 drops by the wake; ST Final: no worker spin (more workers than cores), the engine's waits shorter by its own wake-up |
 | + deadline allowance | `OSCAIRN_WORKER_DEADLINE=1 ./oscairn-fantom-start --engine-only` | fewer silent blocks for the instrument in a chain; callback max never above 2.27 ms from waiting |
 | + parts not shared | `OSCAIRN_SHARING=cpu ./oscairn-fantom-start --engine-only` | ST Final's five Sampler parts in five workers every time; no worker above its allowance at rest |
+| plugin hosts (profile default since stage 2) | `./oscairn-fantom-start --engine-only` | ST Final in three worker processes (`ps`), engine audio thread above the no-spin figure while the spin is on; memory about 25 to 40 MB less per process removed; then kill one host's process (`kill -9`) while ST Final plays: the other hosts' parts go on, the killed host's come back within about 0.1 s (21 to 72 ms on macOS) |
+| hosts, no spin | `OSCAIRN_WORKER_SPIN_US=0 ./oscairn-fantom-start --engine-only` | engine audio thread lower than with the spin; whether blocks go late or silent more often decides the spin |
+| a worker per instance | `OSCAIRN_PLUGIN_HOSTS=0 ./oscairn-fantom-start --engine-only` | as before stage 2, for comparing |
 
 Read from `oscairn-engine-timing`: each worker's `wake` and `round trip` p50/p99/max, `silenced`
 and `not handed: busy`, the callback's duration p50 and max, the deadline misses over the

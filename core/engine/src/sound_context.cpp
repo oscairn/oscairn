@@ -87,7 +87,11 @@ namespace oscairn
     {
         engine_->host->service();
         if(later_) return; // its channel selects another node's sound, or a retired one, until select()
-        for(const auto& c : engine_->host->soundContexts()) if(c.selected_channels >> channel_ & 1) { sound_.store(c.id, std::memory_order_relaxed); own_ = c.id; }
+        // Never throws, as the host's service(): a worker that failed is the supervisor's to restart,
+        // and an exception here would end the control thread's servicing (and the engine) for it.
+        std::vector<oscairn_sound_context_info_t> contexts;
+        try { contexts = engine_->host->soundContexts(); } catch(const std::exception&) { return; }
+        for(const auto& c : contexts) if(c.selected_channels >> channel_ & 1) { sound_.store(c.id, std::memory_order_relaxed); own_ = c.id; }
     }
 
     void SoundContext::setValues(const std::map<clap_id, double>& values)

@@ -16,14 +16,20 @@
 #include "AllocationGuard.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace oscairn;
 namespace fs = std::filesystem;
@@ -304,6 +310,41 @@ int main(int argc, char** argv)
         const auto listed = rpc.dispatch(R"({"jsonrpc":"2.0","id":5,"method":"graph.get"})");
         check(added && added->find("\"node\":") != std::string::npos && listed && count(*listed, "\"shared\":{\"engine\":" + std::to_string(first)) == 3, "graph.add of a Basic Synth joins the instance");
     }
+
+#ifndef _WIN32
+    // A shared engine's worker that fails and is given up (crashed past its restarts; on the unit,
+    // too slow): the Session goes on servicing, its parts silent. An exception from a share's
+    // service() used to end the control thread's work, and the engine with it.
+    if(!placementPolicy().worker.empty())
+    {
+        Session s(48000, frames);
+        const auto first = s.add("one", synth);
+        s.shareInstrument("two", first);
+        s.commit();
+        std::string why;
+        for(int kill = 0; kill < 8 && why.find("not restarted") == std::string::npos; ++kill)
+        {
+            if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+            {
+                char line[32];
+                while(std::fgets(line, sizeof line, list)) ::kill(std::atoi(line), SIGKILL);
+                pclose(list);
+            }
+            // Its restart (or giving up) before the next kill.
+            for(int i = 0; i < 300 && why.find("not restarted") == std::string::npos; ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                const auto f = s.sessionStatus().failures;
+                why = f.empty() ? "" : f[0].reason;
+                if(i > 20 && why.empty()) break;
+            }
+        }
+        check(why.find("not restarted") != std::string::npos, "the worker given up: " + why);
+        bool serviced = true;
+        try { for(int i = 0; i < 3; ++i) s.service(); } catch(const std::exception& e) { serviced = false; std::fprintf(stderr, "service threw: %s\n", e.what()); }
+        check(serviced, "a share of a worker given up does not stop the Session's service");
+    }
+#endif
 
     if(failures) { std::fprintf(stderr, "%d failures\n", failures); return 1; }
     std::puts("ok: parts sharing one engine");

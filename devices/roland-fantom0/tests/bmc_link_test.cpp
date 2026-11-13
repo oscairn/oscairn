@@ -288,11 +288,60 @@ namespace
         check( in.peek() == std::char_traits<char>::eof() && !logged.empty() && logged[0].find( "cannot be made raw" ) != std::string::npos, "a device not made raw gets nothing" );
         ::unlink( file );
     }
+
+    // Hostile bytes, for a sanitizer build to watch: the unknown frames a unit logged, long frames of
+    // every awkward length split at every byte, and random streams cut at random places. Nothing to
+    // compare, only that the parser stays inside its buffer and every frame it hands on is whole.
+    // OSCAIRN_STRESS=N runs N times as many random streams.
+    void fuzz()
+    {
+        const Bytes unitShort{ 0x04, 0xa1, 0x60, 0x00, 0xf0, 0xf7, 0x05, 0x01, 0x00, 0x00, 0x00, 0x02 };
+        Bytes unitLong{ 0x05, 0xa1, 0x60, 0x00, 0x84, 0x0c, 0xc0, 0x60, 0x6b, 0xc1, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00 };
+        unitLong.resize( 16 + 0x20, 0x5a );
+        uint64_t frames = 0;
+        auto frame = [&]( const BmcFrame& f ) { uint8_t m[3]; bmcKey( f, m ); bmcMidi( f, m ); ++frames; if( !f.isLong && f.length > 7 ) check( false, "a short frame's count fits" ); };
+        auto feed = [&]( BmcLinkParser& p, const Bytes& s, size_t at ) { p.feed( s.data(), at, frame ); p.feed( s.data() + at, s.size() - at, frame ); };
+        auto header = [&]( uint8_t first, uint32_t length ) {
+            Bytes h = unitLong; h.resize( 16 ); h[0] = first;
+            for( int i = 0; i < 4; ++i ) h[size_t( 12 + i )] = uint8_t( length >> ( 8 * i ) );
+            return h;
+        };
+        for( const uint32_t length : { 0u, 1u, 15u, 16u, 17u, 32u, 4095u, 4096u, 4097u, 65535u, 1u << 20, ( 1u << 20 ) + 1, 1u << 31, 0xFFFFFFFFu } )
+            for( const uint8_t first : { uint8_t( 0x05 ), uint8_t( 9 << 1 | 1 ) } )
+            {
+                // The header alone, then as much payload as fits a test, then keys: split at every byte.
+                auto big = header( first, length );
+                big.resize( 16 + std::min<size_t>( length, 5000 ), 0x80 );
+                const auto s = join( { key( true, 60, 100 ), unitShort, big, unitLong, key( false, 60, 40 ), unitShort } );
+                for( size_t at = 0; at <= s.size(); ++at ) { BmcLinkParser p; feed( p, s, at ); }
+            }
+        uint32_t seed = 12345;
+        auto next = [&] { seed = seed * 1664525u + 1013904223u; return seed >> 8; };
+        const char* stress = std::getenv( "OSCAIRN_STRESS" );
+        const long rounds = 20000 * std::max( 1L, stress ? std::atol( stress ) : 1L );
+        BmcLinkParser p; // one parser across all of them, as a reader keeps it
+        const Bytes pieces[]{ unitShort, unitLong, key( true, 64, 1 ), key( false, 64, 1, 0 ), longFrame( 112 ), header( 0x13, 4096 ), header( 0x13, 4097 ), header( 0x05, 0x20 ) };
+        for( long r = 0; r < rounds; ++r )
+        {
+            Bytes s;
+            for( int n = int( next() % 6 ); n-- > 0; )
+            {
+                if( next() % 3 ) { const auto& x = pieces[next() % std::size( pieces )]; s.insert( s.end(), x.begin(), x.end() ); }
+                else for( int k = int( next() % 40 ); k-- > 0; ) s.push_back( uint8_t( next() ) );
+                if( !s.empty() && next() % 4 == 0 ) s[next() % s.size()] ^= uint8_t( 1u << ( next() % 8 ) ); // a flipped bit
+            }
+            feed( p, s, s.empty() ? 0 : next() % ( s.size() + 1 ) );
+            if( next() % 1000 == 0 ) p.reset();
+        }
+        check( frames > 0, "the fuzzed streams gave frames" );
+        std::printf( "fuzz: %ld random streams, %llu frames\n", rounds, (unsigned long long)frames );
+    }
 }
 
 int main()
 {
     parser();
+    fuzz();
     if( const char* path = std::getenv( "OSCAIRN_BMC_CAPTURE" ) ) capture( path );
     else std::printf( "OSCAIRN_BMC_CAPTURE unset: the capture check is skipped\n" );
     reader();

@@ -989,6 +989,8 @@ namespace oscairn::standalone
                 if( profile.compute.workerAllowance ) setenv( "OSCAIRN_WORKER_BUDGET_US", std::to_string( profile.compute.workerAllowance ).c_str(), 0 );
                 // How long an audio thread waiting on a worker spins before it sleeps (realtime.h's spinWindow); likewise.
                 if( profile.compute.workerSpin ) setenv( "OSCAIRN_WORKER_SPIN_US", std::to_string( profile.compute.workerSpin ).c_str(), 0 );
+                // Each worker waits to its wave's deadline in place of its allowance (RFC 0045 step 6); likewise.
+                if( profile.compute.workerDeadline ) setenv( "OSCAIRN_WORKER_DEADLINE", "1", 0 );
                 if( socket.isEmpty() && helper.empty() )
                     if( const auto missed = applyMemoryPolicy( -999 ); !missed.empty() && profile.reliability != "desktop" )
                         std::fprintf( stderr, "oscairn: %s\n", missed.c_str() );

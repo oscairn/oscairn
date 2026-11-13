@@ -573,6 +573,7 @@ namespace oscairn
         std::atomic<Listener*> listener_{ nullptr };
         bool panicInput_=false,panicNotes_=false;
         std::atomic<bool> parallel_{ true }; // see setParallel
+        bool deadlines_ = false; // RFC 0045 step 6 (OSCAIRN_WORKER_DEADLINE): each wave's workers wait to its deadline, not their allowance
         std::atomic<float> voiceBudget_{ 0 }; // see setVoiceBudget
         AudioHelpers* helpers_ = nullptr; // RFC 0034: renders a wave's plugins in this process
         double freeBeats_ = 0; // audio thread: oscairn.beat's position at the next block's start

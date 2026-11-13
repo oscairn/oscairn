@@ -72,6 +72,10 @@
           "minimum": 0,
           "maximum": 1000000
         },
+        "workerDeadline": {
+          "type": "boolean",
+          "description": "each plugin worker waits for its block until its wave's deadline (the audio callback's, less what the waves after it take) in place of its allowance; omitted or false: the allowance (RFC 0045 step 6)"
+        },
         "workerSpin": {
           "type": "integer",
           "description": "how long, in microseconds, an audio thread waiting on a plugin worker spins before it sleeps: the engine for a block's result, a worker around its next block when every worker's audio thread has a core; held to half the allowance; omitted or 0: it sleeps at once (RFC 0045)",

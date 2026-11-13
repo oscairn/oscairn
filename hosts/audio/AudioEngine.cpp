@@ -686,6 +686,7 @@ namespace oscairn::host
         if(!realtime_){realtime_=true;oscairn::worker::makeRealtime(1e6*numSamples/sampleRate_,oscairn::worker::priority::engineAudio);}
 #endif
         const double now=juce::Time::getMillisecondCounterHiRes()*0.001;
+        const auto callbackStart=std::chrono::steady_clock::now();
         if(lastCallback_>0 && now-lastCallback_>2.0*numSamples/sampleRate_)lateCallbacks_.fetch_add(1,std::memory_order_relaxed);
         lastCallback_=now;
         if(!started_ || numOutputs<1)
@@ -720,6 +721,8 @@ namespace oscairn::host
         droppedMidi_+=notes_.dropped;
         const bool panic=inputOverflow || notes_.dropped;
         if(panic){droppedMidi_+=notes_.count;notes_.count=0;}
+        // RFC 0045: no wait on a worker past this callback's deadline, its start plus the period less the engine's own reserve.
+        oscairn::worker::callbackDeadline=callbackStart+std::chrono::nanoseconds(int64_t(1e9*numSamples/sampleRate_*(1-oscairn::worker::mixingReserve)));
         channelMap_.process(inputs,static_cast<uint32_t>(numInputs),outputs,static_cast<uint32_t>(numOutputs),static_cast<uint32_t>(numSamples),
             [&](const float* const* in,uint32_t ni,float* const* out,uint32_t no,uint32_t frames,uint32_t offset){
                 if(offset==0 && panic)session_->panicInput();
@@ -728,6 +731,7 @@ namespace oscairn::host
                 queueMidiOut(offset,now);
                 return rendered;
             });
+        oscairn::worker::callbackDeadline={};
         blockSeconds_   = now;
         lastBlockStart_ = blockSample_;
         blockSample_ += numSamples;

@@ -1353,6 +1353,13 @@ on the display; `--engine-only` the engine alone.
    is due ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#spinning-before-sleeping)).
    `OSCAIRN_WORKER_SPIN_US=0 ./oscairn-fantom-start` turns it off for comparing.
 
+   No wait on a worker goes past the audio callback's deadline (its start plus the period less
+   15 %); with the extra block the engine takes a worker's last block only if it is done.
+   `OSCAIRN_WORKER_DEADLINE=1 ./oscairn-fantom-start` makes each worker wait to its wave's deadline
+   instead of its allowance
+   ([RFC 0045 step 6](rfcs/0045-audio-scheduling-on-small-devices.md#the-allowance-from-the-deadline-step-6-status)),
+   off in the profile until measured.
+
 3. **The kernel beside them,** for comparison, with nothing of Oscairn running but the holder:
 
    ```sh

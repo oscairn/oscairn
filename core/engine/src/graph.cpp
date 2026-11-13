@@ -3,6 +3,7 @@
 #include "NoteRoute.h"
 #include "PreparedInstrument.h"
 #include "AudioHelpers.h"
+#include "oscairn/realtime.h"
 
 #include "oscairn/harmony.h"
 #include "oscairn/sound_context.h"
@@ -83,7 +84,8 @@ namespace oscairn
             std::vector<kick::clap::Event> merged;
             uint32_t mergedCount = 0;
             bool processed = false, started = false;
-            float cost = 0; // the microseconds its last rendering took in this process (whether a wave is worth the helpers)
+            float cost = 0; // the microseconds its last rendering took in this process (whether a wave is worth the helpers), or its worker's round trip
+            std::chrono::steady_clock::time_point handed{}; // audio thread: when its worker was handed the block (cost)
             bool budgeted = false; // its notes are in the shared budget (VoiceBudget), which measures its cost per note
             // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
             std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
@@ -120,6 +122,7 @@ namespace oscairn
         std::vector<Step>              steps;
         std::vector<uint32_t> waves; // RFC 0034: where each wave of steps ends; a wave's steps render at the same time
         std::vector<uint32_t> local; // audio thread: the wave's steps rendering in this process
+        std::vector<float> after; // audio thread, RFC 0045 step 6: each wave's reserve, what the waves after it took in the last block (microseconds)
         std::vector<Key>               keys;
         VoiceBudget budget; // see Graph::setVoiceBudget
     };
@@ -236,6 +239,7 @@ namespace oscairn
         for(auto& g:liveTarget_)g.store(1.f,std::memory_order_relaxed);
         liveFrom_.fill(1.f);liveTo_.fill(1.f);
         if(const char* serial=std::getenv("OSCAIRN_GRAPH_SERIAL");serial && *serial && *serial!='0')parallel_.store(false); // RFC 0034, for measuring
+        deadlines_=worker::deadlineAllowance();
         helpers_=&AudioHelpers::shared(1e6*maxFrames/sampleRate);
     }
 
@@ -930,6 +934,7 @@ namespace oscairn
         }
         plan->keys.reserve( kick::clap::Host::maxProcessEvents ); // as many as merged holds (every other key is capped at its size): never reallocating
         plan->local.resize( plan->steps.size() );
+        plan->after.resize( plan->waves.size() );
         return plan.release();
     }
 
@@ -1315,7 +1320,7 @@ namespace oscairn
             step.voiceLimit=limit;step.voiceLimits=parts;step.voiceContexts=entries;step.activity->voiceLimit=limit;
             step.host->setVoiceLimits(limit,parts.data(),entries);
         };
-        auto start=[&](Plan::Step& step){return step.host->startProcess(step.in.data(),step.audioInputs,step.out.data(),step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
+        auto start=[&](Plan::Step& step){step.handed=std::chrono::steady_clock::now();return step.host->startProcess(step.in.data(),step.audioInputs,step.out.data(),step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
         auto render=[&](Plan::Step& step){step.processed=step.host->process(step.in.data(),step.audioInputs,step.out.data(),step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
         // The shared budget (RFC 0018): its limit for this block, and what the plugins took.
         plan->budget.limit=voiceBudget_.load(std::memory_order_relaxed);
@@ -1495,13 +1500,28 @@ namespace oscairn
                 }
             }
         };
+        // RFC 0045: no wait on a worker past the callback's deadline (realtime.h); with step 6, each wave's
+        // workers wait to it less what the waves after theirs took in the last block, the costliest of each.
+        const auto callbackEnds=worker::callbackDeadline;
+        worker::workerDeadline=callbackEnds;
+        const bool deadlines=callbackEnds.time_since_epoch().count() && deadlines_;
+        worker::workerDeadlineOnly=deadlines;
+        if(float later=0;deadlines)
+            for(size_t w=plan->waves.size();w-->0;)
+            {
+                plan->after[w]=later;
+                float most=0;
+                for(uint32_t i=w?plan->waves[w-1]:0;i<plan->waves[w];++i)most=std::max(most,plan->steps[i].cost);
+                later+=most;
+            }
         if(!parallel_.load(std::memory_order_relaxed))
             for(auto& step:plan->steps){prepare(step);limitVoices(step);render(step);finish(step);}
-        else for(uint32_t first=0;const auto end:plan->waves)
+        else for(uint32_t first=0,wave=0;const auto end:plan->waves)
         {
             // A wave: each plugin in a worker starts as soon as its inputs are ready; the others
             // render meanwhile, here and on the audio helpers; then every one finishes, in plan order.
             uint32_t locals=0;
+            if(deadlines)worker::workerDeadline=callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave]));
             for(uint32_t i=first;i<end;++i){auto& step=plan->steps[i];prepare(step);limitVoices(step);step.started=start(step);if(!step.started)plan->local[locals++]=i;}
             struct Job
             {
@@ -1520,10 +1540,16 @@ namespace oscairn
             for(uint32_t k=0;k<locals;++k){const float c=plan->steps[plan->local[k]].cost;total+=c;largest=std::max(largest,c);}
             if(total-largest>=helpers_->worth())helpers_->run(locals,&Job::render,&job);
             else for(uint32_t k=0;k<locals;++k)Job::render(&job,k);
-            for(uint32_t i=first;i<end;++i)if(plan->steps[i].started)plan->steps[i].processed=plan->steps[i].host->finishProcess();
+            for(uint32_t i=first;i<end;++i)if(auto& step=plan->steps[i];step.started)
+            {
+                step.processed=step.host->finishProcess();
+                // A block given up on took the time it was allowed, not what the worker needs: the last kept.
+                if(step.processed)step.cost=std::chrono::duration<float,std::micro>(std::chrono::steady_clock::now()-step.handed).count();
+            }
             for(uint32_t i=first;i<end;++i)finish(plan->steps[i]);
-            first=end;
+            first=end;++wave;
         }
+        worker::workerDeadline={};worker::workerDeadlineOnly=false;
 
         // MIDI for external outputs (setMidiTaps), from the input or a node's note outputs.
         for(auto& tap:plan->taps)

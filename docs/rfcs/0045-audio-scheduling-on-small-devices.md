@@ -30,8 +30,9 @@ Checked when built and tested; the sections below say how.
       cut ([miss policy](#the-miss-policy), [status](#step-4-status))
 - [ ] 5. "Too slow" no longer restarts a worker that is making progress
       ([when a restart is right](#when-a-restart-is-right))
-- [ ] 6. The allowance from the block's deadline and the graph's waves
-      ([the allowance it should be](#the-allowance-it-should-be))
+- [x] 6. The allowance from the block's deadline and the graph's waves, behind its setting
+      (`compute.workerDeadline`); no wait on a worker past the callback's deadline, always
+      ([status](#the-allowance-from-the-deadline-step-6-status))
 - [ ] 7. One profile field for the audio cores; the display and the app off them
       ([core placement](#core-placement))
 - [ ] 8. The extra block entered and left under measured load, with hysteresis, per instance
@@ -347,6 +348,44 @@ unit (not measured): `wake` p50 from the 256-512 us bucket to under 64 us, and f
 blocks at rest. Tested: control-session holds and lets go of a stand-in file, writes the 0,
 keeps one request across a device restart, asks for nothing under `keep`, and goes on when the
 node is absent; devices-fantom-start hands the variable on.
+
+### The allowance from the deadline (step 6 status)
+
+Evidence (2026-11-13, ST Final with the extra block on for the Analog and the Sampler): one
+Sampler worker running long (3.07 ms mean, 8.6 ms max per block) made the engine's callback take
+4,096 us at the median and 5.8 ms at most against a 2,667 us period, with 3,519 deadline misses in
+10 s and every other part dropping blocks. The engine waited for the slow worker up to its
+allowance plus a period (4 ms) inside the callback: a wait longer than the period overruns the
+device whatever the allowance says, and starves every other part with it.
+
+Built (2026-11-13):
+
+- **A hard rule, always on where the engine runs an audio device:** no wait on any worker extends
+  the callback past its deadline, the callback's start plus the period less a reserve for the
+  engine's own work after the last wave (mixing, taps, meters, the recorder's copy). The host's
+  callback sets the deadline for its length (`realtime.h`'s `callbackDeadline`, set in
+  `AudioEngine`); the graph passes it to every wait (`workerDeadline`); `WorkerHost::finish` waits
+  for the smaller of its allowance and the time to it. A block not done by then is given up as a
+  block past the allowance always was (faded, its events kept, RFC 0045's miss policy). **With the
+  extra block** the engine takes the last block only if it is done and otherwise fades the part
+  without waiting at all: that block already had a whole period. A host with no device (the
+  tests, an offline render) sets no deadline, and the allowance alone applies as before.
+- **The engine's reserve: 15 % of the period** (`mixingReserve`; 400 us at 128 frames and 48 kHz).
+  Chosen, not measured: the engine's own work after the last wave was not measured apart on the
+  unit. 15 % leaves 2,267 us for the waves at 128 frames.
+- **Step 6, behind `compute.workerDeadline` (`OSCAIRN_WORKER_DEADLINE=1`), off by default
+  everywhere:** each worker waits until its wave's deadline in place of its allowance: the
+  callback's deadline less what the waves after its wave took in the last block (the costliest
+  step of each later wave: a worker's round trip, a plugin's rendering here). Parallel workers of
+  one wave share that deadline; only a serial chain divides the time. A block given up on keeps
+  its step's last cost, so one miss does not inflate the reserve of the waves before it.
+
+Tests: control-worker-deadline (on macOS: a worker stalling 230 ms with a 200 ms allowance is
+waited for 200 ms without a deadline, 2.3 ms with the deadline set, not at all with the extra
+block; a chain of two workers each taking 3 ms against a 1 ms allowance misses every block under
+the allowance and none under step 6 with a 100 ms deadline; 100 of 100 runs in the Linux
+container, where a busy host stalled single runs by up to 150 ms, so each bound is the best of
+three runs). Not measured on the unit.
 
 ### Spinning before sleeping
 

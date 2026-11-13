@@ -121,10 +121,10 @@ namespace oscairn::standalone
         }
         if(const auto v = root.getProperty("compute"); !v.isVoid())
         {
-            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin"}, "compute");
+            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin", "workerDeadline"}, "compute");
             p.compute = {count(o, "cores", 1024), count(o, "realtimeCores", 1024), count(o, "memory", 1 << 24), count(o, "storage", 1 << 30),
                          count(o, "osMemory", 1 << 24), count(o, "performanceMemory", 1 << 24), numbers(o, "audioThreadCores", 63),
-                         count(o, "workerAllowance", 1'000'000), count(o, "workerSpin", 1'000'000)};
+                         count(o, "workerAllowance", 1'000'000), count(o, "workerSpin", 1'000'000), flag(o, "workerDeadline")};
             require(p.compute.realtimeCores <= p.compute.cores, "more realtime cores than cores");
             for(const auto c : p.compute.audioThreadCores) require(c < p.compute.cores, "audioThreadCores names a core past cores");
             require(o.hasProperty("osMemory") == o.hasProperty("performanceMemory"), "osMemory and performanceMemory come together");

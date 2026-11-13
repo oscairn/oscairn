@@ -105,6 +105,12 @@ namespace oscairn::worker
         return std::min<std::chrono::nanoseconds>(std::chrono::microseconds(us), allowance / 2);
     }
 
+    bool deadlineAllowance() noexcept
+    {
+        const char* v = std::getenv("OSCAIRN_WORKER_DEADLINE");
+        return v && *v && std::string(v) != "0";
+    }
+
     uint32_t usableCores() noexcept
     {
 #ifdef __linux__

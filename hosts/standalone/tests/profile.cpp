@@ -107,6 +107,8 @@ int main()
               "an allowance that is not a whole number of microseconds");
         check(Profile::parse(replaced(json, cores, cores + ", \"workerSpin\": 200")).compute.workerSpin == 200 && Profile::parse(json).compute.workerSpin == 0 &&
               refused(replaced(json, cores, cores + ", \"workerSpin\": -1")), "the spin before sleeping on a worker, in microseconds; none named, none");
+        check(Profile::parse(replaced(json, cores, cores + ", \"workerDeadline\": true")).compute.workerDeadline && !Profile::parse(json).compute.workerDeadline &&
+              refused(replaced(json, cores, cores + ", \"workerDeadline\": 1")), "waiting to the deadline, true or false; none named, the allowance");
         check(refused(replaced(json, "\"width\": 1024", "\"width\": 0")), "a screen with no size");
         check(refused("[1, 2]"), "not an object");
         // Control groups: a role each; rows or paging for an assign group of knobs; modes for faders only.

@@ -1099,7 +1099,8 @@ namespace oscairn
                 startedOutputs_ = outputs; startedChannels_ = no; startedFrames_ = frames; startedOffset_ = offset;
                 return true;
             }
-            bool finish() noexcept
+            // collect: take the block if it is done, without waiting (the extra block's last block, which had a period).
+            bool finish(bool collect = false) noexcept
             {
                 struct Idle { std::atomic<bool>& busy; ~Idle() { busy.store(false); } } idle{busy_};
                 auto& s = *shared_;
@@ -1112,7 +1113,15 @@ namespace oscairn
                 };
                 // The budget counts from the request, however long the caller did other work since; with the
                 // extra block, from the request a block earlier, so a period more.
-                const auto budget = extraBlock() ? process_->budget() + std::chrono::nanoseconds(int64_t(1e9 * process_->block.load(std::memory_order_relaxed) / process_->rate)) : process_->budget();
+                auto budget = extraBlock() ? process_->budget() + std::chrono::nanoseconds(int64_t(1e9 * process_->block.load(std::memory_order_relaxed) / process_->rate)) : process_->budget();
+                // RFC 0045: never past the wave's deadline (realtime.h's workerDeadline), the callback's own at the latest; with
+                // step 6, that deadline in place of the allowance. Nothing to wait for the extra block's last block when there is one.
+                if(const auto deadline = workerDeadline; deadline.time_since_epoch().count() && process_->mode == ProcessingMode::Realtime)
+                {
+                    const auto toDeadline = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - sent);
+                    budget = collect ? std::chrono::nanoseconds::zero() : workerDeadlineOnly && !extraBlock() ? toDeadline : std::min(budget, toDeadline);
+                    budget = std::max(budget, std::chrono::nanoseconds::zero());
+                }
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
                 const auto checked = std::chrono::steady_clock::now();
                 // RFC 0045's spin: polled for up to the spin window (within the allowance) before sleeping.
@@ -1256,7 +1265,7 @@ namespace oscairn
                     // Not from a worker that failed or restarted since: its shared block is not the one handed.
                     busy_.store(true);
                     if(process_->failed.load() || process_->generation.load() != generation_) { busy_.store(false); playedOk_ = kept = false; for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(last[c], playedFrames_, 0.f); }
-                    else { kept_ = true; playedOk_ = finish(); kept = kept_; }
+                    else { kept_ = true; playedOk_ = finish(workerDeadline.time_since_epoch().count() != 0); kept = kept_; }
                 }
                 else playedOk_ = previous_ == Previous::none; // a first block is silent; one not started was silenced
                 playedKept_ = playedKept_ && kept;

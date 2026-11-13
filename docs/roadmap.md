@@ -333,7 +333,9 @@ Decided 2026-11-08, from what the milestone test found:
      - [x] the worker allowance a named, supported setting (`compute.workerAllowance`)
      - [x] blocks past the allowance counted apart: played late and silenced
      - [x] the extra block, experimental and opt-in per plugin (`OSCAIRN_WORKER_EXTRA_BLOCK`)
-     - [ ] the miss policy, the deadline allowance, core placement, automatic latency, splitting
+     - [x] the deadline allowance, behind `compute.workerDeadline`; no wait on a worker past the
+       callback's deadline
+     - [ ] the miss policy, core placement, automatic latency, splitting
        under load, readiness and the timing report
 4. **Sequencers** ([the comparison](sequencer-evaluation.md) of the KICK firmware's sequencer
    with chillbeast's work, zynseq and hosted plugins)

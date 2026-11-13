@@ -54,6 +54,19 @@ namespace oscairn::worker
         __builtin_ia32_pause();
 #endif
     }
+    // RFC 0045: the time by which the audio callback running on this thread must be done with its
+    // workers, its start plus the period less the engine's own reserve (mixingReserve of the period, for
+    // what follows the last wave: mixing, taps, meters, the recorder's copy). The host's device callback
+    // sets it for its length (a host without a device, a test, leaves it unset: no deadline). The graph
+    // sets workerDeadline from it for each wave, the time any wait on a worker of that wave ends at
+    // the latest: the callback's deadline, or with OSCAIRN_WORKER_DEADLINE (compute.workerDeadline,
+    // step 6) the callback's deadline less what the later waves took in the last block. No wait on a
+    // worker goes past it, the allowance's or the extra block's; unset (the epoch), the allowance alone.
+    constexpr double mixingReserve = .15;
+    inline thread_local std::chrono::steady_clock::time_point callbackDeadline{}, workerDeadline{};
+    inline thread_local bool workerDeadlineOnly = false; // the graph's: step 6, workerDeadline in place of the allowance
+    // Whether OSCAIRN_WORKER_DEADLINE asks for step 6 (a graph reads it as it is made).
+    bool deadlineAllowance() noexcept;
     // What became of a block the engine handed a worker, once it came for it: on time (done when it
     // came, or found done within the allowance); late, found done but past the allowance, its sound
     // played all the same (the engine's own thread woke late); or silent, not done within the

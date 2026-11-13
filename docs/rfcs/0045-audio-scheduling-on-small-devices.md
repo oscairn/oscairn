@@ -474,14 +474,19 @@ Steps 2 and 11; built marked as such.
 
 - Each worker's allowance (built) and, with step 6, the allowance it got per block (a histogram).
 - Blocks past the allowance by cause: played late (built), silenced after waiting (built, as
-  silent), silenced because the worker was busy (built inside silent; step 11 splits it), the
+  silent), silenced because the worker was busy (built: `busy`, within silent), the
   plugin's own block longer than the period (in `deadlineMisses`).
-- Panics and note cuts caused by misses (step 4 makes them rare; until then step 11 counts them).
+- Panics and note cuts caused by misses (step 4 makes them rare; until then counted: built,
+  `missPanics`, the panics sent right after a block the worker did not render).
 - Each part's latency state: normal or one block late, since when, and how often it entered and
   left (step 8).
 - Each instance's parts and its share of their voice time, for sharing (step 9).
 - The wake-up cost of each worker: its round trip less its block time inside the worker, which
-  shows a worker waiting for a core (step 7's measurement).
+  shows a worker waiting for a core (step 7's measurement). Built: the round trip taken apart,
+  `collect` (until the engine's thread came for the block), `wake` (until the worker's audio
+  thread ran) and `run` (the worker's whole block, the panic's reset included), each a histogram
+  in `engine.timing`; with each worker's audio-thread page faults (`minorFaults`, `majorFaults`).
+  Tested by `control-worker-timing`: one block stalled in the plugin, every part apart.
 - The callback's duration and lateness, and the device's underruns, as now.
 
 ## Decisions for the owner

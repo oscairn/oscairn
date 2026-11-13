@@ -204,6 +204,14 @@ struct Plugin {
         { auto* memory = new char[size_t(1) << 20]; std::memset(memory, 1, size_t(1) << 20); static volatile char* keep; keep = memory; } // 1 MiB a block, never freed
 #endif
         auto& s = get(p); s.audio(); ++processCalls;
+        // KICK_FIXTURE_STALL=CALL:MICROSECONDS[:KIB]: the process call numbered CALL (from 1, in this process) takes
+        // that long more, and first touches KIB of memory it never touched before (kept, so each page is a fault).
+        struct Stall { long call = 0, us = 0, kib = 0; };
+        static const Stall stall = [] { Stall s; if (const char* v = std::getenv("KICK_FIXTURE_STALL")) std::sscanf(v, "%ld:%ld:%ld", &s.call, &s.us, &s.kib); return s; }();
+        if (stall.call == processCalls.load()) {
+            if (stall.kib > 0) { static volatile char* kept; kept = static_cast<char*>(std::malloc(size_t(stall.kib) << 10)); for (long i = 0; kept && i < stall.kib << 10; i += 4096) kept[i] = 1; }
+            std::this_thread::sleep_for(std::chrono::microseconds(stall.us));
+        }
         if (blockProcess.exchange(false)) { enteredProcess=true; while (!releaseProcess.load()) std::this_thread::yield(); }
         if (!s.active || !s.processing || !b->frames_count || b->frames_count > s.maxFrames) ++threadErrors;
         if (s.kind == 4) return CLAP_PROCESS_ERROR;

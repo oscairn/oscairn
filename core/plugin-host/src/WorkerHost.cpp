@@ -762,6 +762,7 @@ namespace oscairn
             void panic() noexcept override
             {
                 if(process_->failed.load()) return;
+                if(missed_.load(std::memory_order_relaxed)) missPanics_.fetch_add(1, std::memory_order_relaxed);
                 if(extra_) panicLater_.store(true, std::memory_order_release); else shared_->panic.store(1, std::memory_order_release);
             }
             bool inWorker() const noexcept override { return true; }
@@ -819,7 +820,7 @@ namespace oscairn
             }
             uint64_t outputEventDrops() const noexcept override { return shared_->outputDrops.load(std::memory_order_relaxed); }
             const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { count = outputCount_; return output_.data(); }
-            BlockTiming* roundTrips() noexcept override { return &roundTrips_; }
+            WorkerTiming* workerTiming() noexcept override { return &timing_; }
             kick::clap::Statistics statistics() const noexcept override
             {
                 kick::clap::Statistics s;
@@ -828,6 +829,8 @@ namespace oscairn
                 s.lateBlocks = late_.load(std::memory_order_relaxed); s.silentBlocks = silent_.load(std::memory_order_relaxed);
                 s.deadlineMisses = shared_->deadlineMisses.load() + s.lateBlocks + s.silentBlocks;
                 s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process_->budget).count();
+                s.busyBlocks = busyBlocks_.load(std::memory_order_relaxed); s.missPanics = missPanics_.load(std::memory_order_relaxed);
+                s.minorFaults = shared_->minorFaults.load(std::memory_order_relaxed); s.majorFaults = shared_->majorFaults.load(std::memory_order_relaxed);
                 s.controlSilences = shared_->controlSilences.load(); s.idleBlocks = shared_->idleBlocks.load();
                 s.restarts = process_->restarted.load(std::memory_order_relaxed);
                 return s;
@@ -836,14 +839,14 @@ namespace oscairn
             bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
                          const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override
             {
-                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false;
-                if(frames <= capacity_) return block(inputs, ni, outputs, no, frames, events, count, transport, 0);
+                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false; missed_.store(false, std::memory_order_relaxed);
+                if(frames <= capacity_) return rendered(block(inputs, ni, outputs, no, frames, events, count, transport, 0));
                 // Larger than the shared buffer: split as the in-engine host does, rebasing events,
                 // transport and output event times.
                 if(count > maxEvents || (count && !events) || (no && !outputs) || ni > 64 || no > 64)
                 {
                     if(outputs) for(uint32_t c = 0; c < no; ++c) if(outputs[c]) std::fill_n(outputs[c], frames, 0.f);
-                    return false;
+                    return rendered(false);
                 }
                 const float* in[64]; float* out[64]; bool ok = true;
                 const double rate = process_->rate;
@@ -873,7 +876,7 @@ namespace oscairn
                     if(reset_ && done + n < frames) panic(); // the later chunks' notes end too, as wasReset says
                     done += n;
                 }
-                return ok;
+                return rendered(ok);
             }
             // A block larger than the shared buffer is split, so it is not started: process() renders it.
             bool startProcess(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
@@ -885,7 +888,7 @@ namespace oscairn
                 started_ = start(inputs, ni, outputs, no, frames, events, count, transport, 0);
                 return true;
             }
-            bool finishProcess() noexcept override { return extraBlock() ? finishDelayed() : started_ && finish(); }
+            bool finishProcess() noexcept override { return rendered(extraBlock() ? finishDelayed() : started_ && finish()); }
 
         private:
             struct Prepared
@@ -895,6 +898,17 @@ namespace oscairn
                 std::string state, preset, sfz, library, directory;
             };
 
+            // What the caller is told of the block, remembered so a panic right after a block not rendered is counted.
+            bool rendered(bool ok) noexcept { missed_.store(!ok, std::memory_order_relaxed); return ok; }
+            // The worker's stamps for the block last handed, once it is done: recorded once, in finish or at the next hand-over.
+            void workerTimes(const Shared& s, std::chrono::steady_clock::time_point now) noexcept
+            {
+                if(timed_ == sequence_) return;
+                timed_ = sequence_;
+                const int64_t sent = std::chrono::nanoseconds(sent_.time_since_epoch()).count(), at = std::chrono::nanoseconds(now.time_since_epoch()).count();
+                timing_.wake.record(s.wokeAt - sent, at);
+                timing_.run.record(s.doneAt - s.wokeAt, at);
+            }
             std::mutex& controlFor()
             {
                 if(process_->failed.load()) throw std::runtime_error(process_->failure());
@@ -994,9 +1008,10 @@ namespace oscairn
                 busy_.store(true);
                 auto& s = *shared_;
                 if(process_->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) return silence();
-                if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; roundTrips_.warmUp(); } // restarted
+                if(const auto g = process_->generation.load(); g != generation_) { generation_ = g; faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
                 // A block the worker has not finished yet: stay silent rather than queue another.
-                if(s.done.load(std::memory_order_acquire) != sequence_) { silent_.fetch_add(1, std::memory_order_relaxed); return silence(); }
+                if(s.done.load(std::memory_order_acquire) != sequence_) { silent_.fetch_add(1, std::memory_order_relaxed); busyBlocks_.fetch_add(1, std::memory_order_relaxed); return silence(); }
+                workerTimes(s, std::chrono::steady_clock::now()); // a block the engine gave up on, done since
                 for(uint32_t c = 0; c < inChannels_; ++c)
                 {
                     if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, audioIn(c));
@@ -1039,12 +1054,14 @@ namespace oscairn
                 const auto checked = std::chrono::steady_clock::now();
                 const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (checked - sent));
                 // The round trip as this thread sees it: done when first found done, or given up.
-                auto roundTrip = [&](std::chrono::steady_clock::time_point seen) { roundTrips_.record(std::chrono::nanoseconds(seen - sent).count(), std::chrono::nanoseconds(seen.time_since_epoch()).count()); };
                 const bool done = ready || (waitWhileEqual(s.done, sequence_ - 1, left) && s.done.load(std::memory_order_acquire) == sequence_);
                 // Late by the clock counts toward "too slow" even when the wait itself woke late; a
                 // block done before the caller came for it was not late.
                 const auto seen = ready ? checked : std::chrono::steady_clock::now();
-                roundTrip(seen);
+                const auto at = std::chrono::nanoseconds(seen.time_since_epoch()).count();
+                timing_.roundTrip.record(std::chrono::nanoseconds(seen - sent).count(), at);
+                timing_.collect.record(std::chrono::nanoseconds(checked - sent).count(), at);
+                if(done) workerTimes(s, seen);
                 switch(blockOutcome(ready, done, seen - sent, budget))
                 {
                 case BlockOutcome::silent: missed(silent_); return silence();
@@ -1225,10 +1242,12 @@ namespace oscairn
             std::atomic<uint32_t> requested_{0};
             std::atomic<int64_t> requestedAt_{0};
             std::atomic<bool> tooSlow_{false}, busy_{false};
-            // Blocks past the allowance: played late, or silenced (also those silenced at once while the worker was still busy).
-            std::atomic<uint64_t> late_{0}, silent_{0};
+            // Blocks past the allowance: played late, or silenced (also those silenced at once while the worker was
+            // still busy, which busyBlocks_ counts apart); panics sent right after a block not rendered (missed_).
+            std::atomic<uint64_t> late_{0}, silent_{0}, busyBlocks_{0}, missPanics_{0};
+            std::atomic<bool> missed_{false};
             bool reset_ = false; // audio thread: wasReset, from the worker's blocks in the last call
-            uint32_t sequence_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
+            uint32_t sequence_ = 0, timed_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
             // The block start handed over, for finish.
             float* const* startedOutputs_ = nullptr; uint32_t startedChannels_ = 0, startedFrames_ = 0, startedOffset_ = 0; bool started_ = false;
             std::chrono::steady_clock::time_point sent_{};
@@ -1240,7 +1259,7 @@ namespace oscairn
             bool handed_ = false, playedOk_ = true;
             float* const* played_ = nullptr; uint32_t playedFrames_ = 0;
             float* const* playOutputs_ = nullptr; uint32_t playChannels_ = 0, playFrames_ = 0;
-            BlockTiming roundTrips_;
+            WorkerTiming timing_;
             std::array<kick::clap::Event, maxEvents> chunk_{};
             std::vector<kick::clap::Event> output_, pending_;
             std::unique_ptr<kick::clap::SysexPool> sysexOutput_ = std::make_unique<kick::clap::SysexPool>(); // output_'s SysEx bytes

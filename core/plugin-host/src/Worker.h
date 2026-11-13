@@ -45,6 +45,11 @@ namespace oscairn::worker
         oscairn_voice_budget_note_t voiceNotes[maxVoiceNotes]{};
         std::atomic<uint64_t> outputDrops{0}, blocks{0}, droppedEvents{0}, processErrors{0}, deadlineMisses{0}, controlSilences{0}, idleBlocks{0};
         std::atomic<double> lastMicroseconds{0}, maximumMicroseconds{0};
+        // The worker's, for the timing report: when its audio thread ran for the last block and when
+        // it was done with it, in steady_clock nanoseconds (the clock is the system's, the same in
+        // both processes); and its audio thread's page faults so far (Linux).
+        int64_t wokeAt = 0, doneAt = 0;
+        std::atomic<uint64_t> minorFaults{0}, majorFaults{0};
         kick::clap::Event events[maxEvents];
         kick::clap::Event outputs[maxOutputEvents];
         std::atomic<double> parameterValues[maxParameters];

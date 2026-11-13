@@ -433,13 +433,16 @@ namespace oscairn
     {
         Timing t{callbackTiming_.read(), latenessTiming_.read(), {}};
         for(const auto& [node,name] : nodes_)
-            if(auto* r = graph_.host(node).roundTrips())
+            if(auto* r = graph_.host(node).workerTiming())
             {
-                // Late and silent blocks counted from the last reset (from the call, not the next block as the histograms).
+                // The counts from the last reset (from the call, not the next block as the histograms).
                 const auto st = graph_.host(node).statistics();
-                const auto [late, silent] = timingBase_.count(node) ? timingBase_[node] : std::pair<uint64_t, uint64_t>{};
-                t.workers.push_back({node, name, r->read(), st.allowanceMicroseconds, st.lateBlocks - std::min(late, st.lateBlocks), st.silentBlocks - std::min(silent, st.silentBlocks)});
-                if(reset) { r->reset(); timingBase_[node] = {st.lateBlocks, st.silentBlocks}; }
+                const auto base = timingBase_.count(node) ? timingBase_[node] : kick::clap::Statistics{};
+                auto since = [](uint64_t now, uint64_t then) { return now - std::min(then, now); };
+                t.workers.push_back({node, name, r->roundTrip.read(), st.allowanceMicroseconds, since(st.lateBlocks, base.lateBlocks), since(st.silentBlocks, base.silentBlocks),
+                                     r->collect.read(), r->wake.read(), r->run.read(), since(st.busyBlocks, base.busyBlocks), since(st.missPanics, base.missPanics),
+                                     since(st.minorFaults, base.minorFaults), since(st.majorFaults, base.majorFaults)});
+                if(reset) { r->reset(); timingBase_[node] = st; }
             }
         if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); std::erase_if(timingBase_, [&](const auto& b) { return !nodes_.count(b.first); }); }
         return t;

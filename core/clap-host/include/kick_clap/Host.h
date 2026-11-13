@@ -122,6 +122,10 @@ struct Statistics {
     // silenced; both are in deadlineMisses. The allowance per block, 0 for a plugin in the engine.
     uint64_t lateBlocks = 0, silentBlocks = 0;
     double allowanceMicroseconds = 0;
+    // Oscairn plugin workers, apart for the timing report: the silent blocks never handed over because
+    // the worker was still busy with the last; the panics the engine sent right after a block the
+    // worker did not render; the page faults of the worker's audio thread (Linux; 0 elsewhere).
+    uint64_t busyBlocks = 0, missPanics = 0, minorFaults = 0, majorFaults = 0;
 };
 
 // oscairn.hardware (oscairn-clap/hardware.h, RFC 0004): the process's accelerators, which every

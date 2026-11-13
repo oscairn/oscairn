@@ -532,7 +532,8 @@ namespace oscairn
             h.maxNs=int64_t(std::llround(number(field(v,"max"))*1e3));h.maxAt=int64_t(std::llround(number(field(v,"maxAt"))*1e9));return h;};
         auto snapshot=[&](V v){return BlockTiming::Snapshot{histogram(field(v,"steady")),histogram(field(v,"startup")),number(field(v,"seconds"))};};
         Timing t{snapshot(field(r,"callback")),snapshot(field(r,"lateness")),{}};
-        for(auto w:array(field(r,"workers")))t.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),snapshot(field(w,"roundTrip")),number(field(w,"allowance")),uint64_t(integer(field(w,"late"))),uint64_t(integer(field(w,"silent")))});
+        for(auto w:array(field(r,"workers")))t.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),snapshot(field(w,"roundTrip")),number(field(w,"allowance")),uint64_t(integer(field(w,"late"))),uint64_t(integer(field(w,"silent"))),
+            snapshot(field(w,"collect")),snapshot(field(w,"wake")),snapshot(field(w,"run")),uint64_t(integer(field(w,"busy"))),uint64_t(integer(field(w,"missPanics"))),uint64_t(integer(field(w,"minorFaults"))),uint64_t(integer(field(w,"majorFaults")))});
         return t;
     }
     Control::Estimate RemoteControl::estimate(const std::string& directory) {

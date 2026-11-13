@@ -110,4 +110,18 @@ namespace oscairn
         int64_t origin_ = 0;
         bool started_ = false;
     };
+
+    // A plugin worker's blocks as the engine takes them (RFC 0045's timing report), each measurement
+    // a BlockTiming recorded by the thread that takes the block's result. roundTrip: from handing the
+    // block over until the engine found it done or gave up waiting. collect: from the hand-over until
+    // the engine's thread came for the result (the round trip less the engine's wait), long when that
+    // thread was busy elsewhere or not running. wake: from the hand-over until the worker's audio thread
+    // ran; run: from then until the worker was done with the block; both as the worker stamped them,
+    // recorded once the engine sees the block done, if only as it hands over the next.
+    struct WorkerTiming
+    {
+        BlockTiming roundTrip, collect, wake, run;
+        void reset() noexcept { roundTrip.reset(); collect.reset(); wake.reset(); run.reset(); }
+        void warmUp() noexcept { roundTrip.warmUp(); collect.warmUp(); wake.warmUp(); run.warmUp(); }
+    };
 }

@@ -252,7 +252,8 @@ public:
             result.blocks=std::max(result.blocks,v.blocks);result.droppedEvents+=v.droppedEvents;result.processErrors+=v.processErrors;
             result.lastMicroseconds+=v.lastMicroseconds;result.maximumMicroseconds+=v.maximumMicroseconds;
             result.deadlineMisses+=v.deadlineMisses;result.controlSilences+=v.controlSilences;result.idleBlocks+=v.idleBlocks;result.restarts+=v.restarts;
-            result.lateBlocks+=v.lateBlocks;result.silentBlocks+=v.silentBlocks;result.allowanceMicroseconds=std::max(result.allowanceMicroseconds,v.allowanceMicroseconds);}
+            result.lateBlocks+=v.lateBlocks;result.silentBlocks+=v.silentBlocks;result.allowanceMicroseconds=std::max(result.allowanceMicroseconds,v.allowanceMicroseconds);
+            result.busyBlocks+=v.busyBlocks;result.missPanics+=v.missPanics;result.minorFaults+=v.minorFaults;result.majorFaults+=v.majorFaults;}
         result.droppedEvents+=drops_.load();result.processErrors+=errors_.load();return result;
     }
     bool process(const float* const*,uint32_t,float* const* outputs,uint32_t no,uint32_t frames,const Event* events,uint32_t count,const clap_event_transport_t* transport) noexcept override {
@@ -361,7 +362,7 @@ public:
         for(const auto& s:desired_.instances)if(s)s->host->reconfigure(rate,frames);rate_=rate;}
     double cpuSeconds() const override {double n=0;for(const auto& s:desired_.instances)if(s)n+=s->host->cpuSeconds();return n;}
     // shortcut: a pool reports its first instance's round trips only; merge the instances' if pooled instruments need watching.
-    BlockTiming* roundTrips() noexcept override {return base().roundTrips();}
+    WorkerTiming* workerTiming() noexcept override {return base().workerTiming();}
 };
 }
 std::shared_ptr<PluginHost> preparedInstrument(std::shared_ptr<PluginHost> h,double rate,uint32_t frames,ProcessingMode mode,Lv2BufferLimits limits) {

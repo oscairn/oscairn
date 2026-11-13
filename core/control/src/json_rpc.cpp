@@ -695,7 +695,9 @@ namespace oscairn
                 auto snapshot=[&](const BlockTiming::Snapshot& s){return "{\"seconds\":"+encode(s.seconds)+",\"steady\":"+histogram(s.steady)+",\"startup\":"+histogram(s.startup)+'}';};
                 std::string bounds,workers;
                 for(size_t i=0;i+1<Histogram::buckets;++i)bounds+=(bounds.empty()?"":",")+std::to_string(Histogram::upperMicroseconds(i));
-                for(const auto& w:t.workers)workers+=std::string(workers.empty()?"":",")+"{\"node\":"+std::to_string(w.node)+",\"name\":"+quote(w.name)+",\"roundTrip\":"+snapshot(w.roundTrip)+",\"allowance\":"+encode(w.allowance)+",\"late\":"+std::to_string(w.late)+",\"silent\":"+std::to_string(w.silent)+'}';
+                for(const auto& w:t.workers)workers+=std::string(workers.empty()?"":",")+"{\"node\":"+std::to_string(w.node)+",\"name\":"+quote(w.name)+",\"roundTrip\":"+snapshot(w.roundTrip)+",\"allowance\":"+encode(w.allowance)+",\"late\":"+std::to_string(w.late)+",\"silent\":"+std::to_string(w.silent)+
+                    ",\"collect\":"+snapshot(w.collect)+",\"wake\":"+snapshot(w.wake)+",\"run\":"+snapshot(w.run)+",\"busy\":"+std::to_string(w.busy)+",\"missPanics\":"+std::to_string(w.missPanics)+
+                    ",\"minorFaults\":"+std::to_string(w.minorFaults)+",\"majorFaults\":"+std::to_string(w.majorFaults)+'}';
                 return "{\"warmupBlocks\":"+std::to_string(BlockTiming::warmupBlocks)+",\"bucketBounds\":["+bounds+"],\"callback\":"+snapshot(t.callback)+
                     ",\"lateness\":"+snapshot(t.lateness)+",\"workers\":["+workers+"]}";
             }

@@ -10,6 +10,7 @@
 #include <thread>
 #include <poll.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -308,6 +309,7 @@ namespace oscairn::worker
                 const auto next = s.request.load(std::memory_order_acquire);
                 if(next == seen) continue;
                 seen = next;
+                const auto woke = std::chrono::steady_clock::now();
                 if(s.panic.exchange(0, std::memory_order_acq_rel)) host.panic();
                 // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
                 if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
@@ -353,8 +355,18 @@ namespace oscairn::worker
 #ifdef OSCAIRN_HOSTILE_SIZES
                 hostileSizes(s, trueFrames, trueInputs, trueOutputs, true); // lies, for the engine's audio thread
 #endif
+                s.wokeAt = std::chrono::nanoseconds(woke.time_since_epoch()).count();
+                s.doneAt = std::chrono::nanoseconds(std::chrono::steady_clock::now().time_since_epoch()).count();
                 s.done.store(seen, std::memory_order_release);
                 wake(s.done);
+#ifdef RUSAGE_THREAD
+                // After the block is handed back, so the system call is not in its round trip.
+                if(rusage u{}; getrusage(RUSAGE_THREAD, &u) == 0)
+                {
+                    s.minorFaults.store(uint64_t(u.ru_minflt), std::memory_order_relaxed);
+                    s.majorFaults.store(uint64_t(u.ru_majflt), std::memory_order_relaxed);
+                }
+#endif
             }
         }
     }

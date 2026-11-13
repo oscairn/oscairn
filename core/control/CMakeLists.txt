@@ -76,6 +76,12 @@ add_test(NAME control-session COMMAND oscairn-session-test
     $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_delay>)
 set_tests_properties(control-session PROPERTIES TIMEOUT 30)
 
+# RFC 0045's timing report: one stalled block in a worker, and each part of it apart.
+add_executable(oscairn-worker-timing-test tests/worker_timing.cpp)
+target_link_libraries(oscairn-worker-timing-test PRIVATE oscairn_control_json oscairn_control)
+add_test(NAME control-worker-timing COMMAND oscairn-worker-timing-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>)
+set_tests_properties(control-worker-timing PROPERTIES TIMEOUT 60)
+
 add_executable(oscairn-json-rpc-test tests/json_rpc.cpp)
 target_include_directories(oscairn-json-rpc-test PRIVATE ../clap-host/tests)
 target_link_libraries(oscairn-json-rpc-test PRIVATE oscairn_control_json)

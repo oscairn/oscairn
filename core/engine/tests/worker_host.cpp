@@ -155,12 +155,20 @@ void roundTrips(const std::string& worker, const std::string& fixture)
     constexpr uint32_t frames = 64;
     auto remote = oscairn::loadPluginInWorker(worker, fixture, "org.kick.test.sleep", 48000, frames, oscairn::ProcessingMode::Offline); // no budget to miss on a busy machine
     std::vector<float> l(frames), r(frames); float* out[]{l.data(), r.data()};
-    auto* timing = remote->roundTrips();
-    check(timing != nullptr, "a plugin in a worker times its round trips");
-    if(!timing) return;
+    auto* parts = remote->workerTiming();
+    check(parts != nullptr, "a plugin in a worker times its round trips");
+    if(!parts) return;
+    auto* timing = &parts->roundTrip;
     const auto blocks = oscairn::BlockTiming::warmupBlocks + 10;
     for(uint32_t i = 0; i < blocks; ++i) remote->process(nullptr, 0, out, 2, frames, nullptr, 0, nullptr);
     auto t = timing->read();
+    // Its parts, each block once: when the engine came for it, the worker's wake-up and its run.
+    for(auto* part : {&parts->collect, &parts->wake, &parts->run})
+    {
+        const auto p = part->read();
+        check(p.startup.count() == oscairn::BlockTiming::warmupBlocks && p.steady.count() == 10 && p.steady.maxNs >= 0, "each part of the round trip is timed once a block");
+    }
+    check(parts->run.read().steady.maxNs > 0 && parts->run.read().steady.maxNs <= t.steady.maxNs, "the worker's run takes some time, within the round trip");
     check(t.startup.count() == oscairn::BlockTiming::warmupBlocks && t.steady.count() == 10, "the first blocks are startup, the rest steady: " +
           std::to_string(t.startup.count()) + ", " + std::to_string(t.steady.count()));
     check(t.startup.maxNs > 0 && t.steady.maxNs > 0 && t.seconds > 0, "each round trip takes some time");

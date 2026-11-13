@@ -137,6 +137,9 @@ namespace oscairn
         // valid until finishProcess; inputs, events and transport are taken at the start.
         virtual bool startProcess(const float* const*, uint32_t, float* const*, uint32_t, uint32_t, const kick::clap::Event*, uint32_t, const clap_event_transport_t*) noexcept { return false; }
         virtual bool finishProcess() noexcept { return false; }
+        // RFC 0045's extra block: the plugin is heard a block late, and finishProcess may wait for the block
+        // handed a call earlier; the graph calls it after the other finishes of its wave. Any thread.
+        virtual bool oneBlockLate() const noexcept { return false; }
         // Audio thread, after process(): the plugin said it makes no more sound until it gets
         // input (CLAP_PROCESS_SLEEP). False where a host cannot tell.
         virtual bool asleep() const noexcept { return false; }

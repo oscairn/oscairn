@@ -1540,7 +1540,8 @@ namespace oscairn
             for(uint32_t k=0;k<locals;++k){const float c=plan->steps[plan->local[k]].cost;total+=c;largest=std::max(largest,c);}
             if(total-largest>=helpers_->worth())helpers_->run(locals,&Job::render,&job);
             else for(uint32_t k=0;k<locals;++k)Job::render(&job,k);
-            for(uint32_t i=first;i<end;++i)if(auto& step=plan->steps[i];step.started)
+            // RFC 0045: plugins a block late last, so waiting for their blocks in flight overlaps the wave's others.
+            for(const bool late:{false,true})for(uint32_t i=first;i<end;++i)if(auto& step=plan->steps[i];step.started && step.host->oneBlockLate()==late)
             {
                 step.processed=step.host->finishProcess();
                 // A block given up on took the time it was allowed, not what the worker needs: the last kept.

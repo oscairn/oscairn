@@ -448,6 +448,8 @@ namespace oscairn
                         extra_ = true;
                         held_.assign(size_t(2) * outChannels_ * frames, 0.f);
                         for(uint32_t c = 0; c < 2 * outChannels_; ++c) heldPointers_.push_back(held_.data() + size_t(c) * frames);
+                        stagedIn_.assign(size_t(std::max(1u, inChannels_)) * frames, 0.f);
+                        for(uint32_t c = 0; c < inChannels_; ++c) stagedInPointers_.push_back(stagedIn_.data() + size_t(c) * frames);
                     }
                     // The sounds present from the start keep their IDs.
                     if(contexts_) for(const auto& c : contexts()) remember(c, c.id);
@@ -840,6 +842,7 @@ namespace oscairn
             // RFC 0045's miss policy: a block handed but not done in time, or not handed while the worker was busy
             // with its events carried, lost nothing; with the extra block, of the block played.
             bool eventsKept() const noexcept override { return extra_ ? playedKept_ : kept_; }
+            bool oneBlockLate() const noexcept override { return extra_; }
             double parameterValue(clap_id id) const noexcept override
             {
                 const auto i = index_.find(id);
@@ -955,6 +958,9 @@ namespace oscairn
                 timing_.wake.record(s.wokeAt - sent, at);
                 timing_.run.record(s.doneAt - s.wokeAt, at, s.cpuNs);
                 timing_.cpu.record(s.cpuNs, at);
+                // What a block usually takes in the worker (an eighth of each new one), for the extra block's catching up; the worker's stamps bounded.
+                const auto run = std::clamp<int64_t>(s.doneAt - s.wokeAt, 0, 1'000'000'000);
+                runNs_ += (run - runNs_) / 8;
             }
             std::mutex& controlFor()
             {
@@ -1125,21 +1131,21 @@ namespace oscairn
                     return false;
                 };
                 // The budget counts from the request, however long the caller did other work since; with the
-                // extra block, from the request a block earlier, so a period more.
+                // extra block, from the request a call earlier, so a period more.
                 auto budget = extraBlock() ? process_->budget() + std::chrono::nanoseconds(int64_t(1e9 * process_->block.load(std::memory_order_relaxed) / process_->rate)) : process_->budget();
                 // RFC 0045: never past the wave's deadline (realtime.h's workerDeadline), the callback's own at the latest; with
-                // step 6, that deadline in place of the allowance. Nothing to wait for the extra block's last block when there is one.
+                // step 6, and for the extra block's block in flight, that deadline in place of the allowance.
                 if(const auto deadline = workerDeadline; deadline.time_since_epoch().count() && process_->mode == ProcessingMode::Realtime)
                 {
                     const auto toDeadline = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - sent);
-                    budget = collect ? std::chrono::nanoseconds::zero() : workerDeadlineOnly && !extraBlock() ? toDeadline : std::min(budget, toDeadline);
+                    budget = collect ? std::chrono::nanoseconds::zero() : workerDeadlineOnly || extraBlock() ? toDeadline : std::min(budget, toDeadline);
                     budget = std::max(budget, std::chrono::nanoseconds::zero());
                 }
                 const bool ready = s.done.load(std::memory_order_acquire) == sequence_;
                 const auto checked = std::chrono::steady_clock::now();
                 // RFC 0045's spin: polled for up to the spin window (within the allowance) before sleeping.
                 bool spun = false;
-                if(!ready && process_->mode == ProcessingMode::Realtime)
+                if(!ready && process_->mode == ProcessingMode::Realtime && !extraBlock()) // a delayed block is waited for late in the callback: no spin
                     for(const auto until = checked + std::min(std::chrono::nanoseconds(process_->spinNs.load(std::memory_order_relaxed)), std::chrono::nanoseconds(budget) - (checked - sent));
                         !(spun = s.done.load(std::memory_order_acquire) == sequence_) && std::chrono::steady_clock::now() < until;) relax();
                 const auto left = std::max(std::chrono::nanoseconds(0), std::chrono::nanoseconds(budget) - (std::chrono::steady_clock::now() - sent));
@@ -1251,10 +1257,16 @@ namespace oscairn
                 return true;
             }
 
-            // RFC 0045's extra block: each call hands the worker this block and plays the one handed in the
-            // last call, so the node sounds exactly one block late and the worker has a period more for
-            // each block. The engine waits for the last block here, at the start, for what is left of its
-            // allowance. Its outputs, events, voice report and reset come with it. Audio thread.
+            // RFC 0045's extra block: each call plays the block handed a call earlier, so the node sounds exactly one
+            // block late. The block in flight is taken at the call's start when it is done, and the call's own block
+            // handed at once; otherwise the call's block is kept (staged) and finishDelayed, which the graph calls
+            // after the wave's other workers, waits for the one in flight to the callback's deadline (never past it;
+            // its allowance and a period without one), then hands the kept block. Every block thus has from its
+            // hand-over to the next callback's deadline, at least a period. A block that misses even that is faded,
+            // and the block kept behind it goes to the worker as soon as the worker is free, heard in that call: one
+            // long block costs one block. Only while the worker is still busy a call later is that kept block lost
+            // too, its events going with the next one. Its outputs, events, voice report and reset come with the
+            // block played. Audio thread.
             bool extraBlock() const noexcept { return extra_; }
             static bool listed(const char* list, const std::string& id)
             {
@@ -1266,42 +1278,118 @@ namespace oscairn
                 }
                 return false;
             }
+            // The held buffer the block in flight is not in.
+            float* const* spare() const noexcept { return heldPointers_.data() + (startedOutputs_ == heldPointers_.data() ? outChannels_ : 0); }
+            // Hands the idle worker a block into the spare buffer, a panic waiting for it first.
+            void handDelayed(const float* const* inputs, uint32_t ni, uint32_t frames, const kick::clap::Event* events, uint32_t count,
+                             const clap_event_transport_t* transport, uint32_t offset) noexcept
+            {
+                if(panicLater_.exchange(false, std::memory_order_acq_rel) && !process_->failed.load()) shared_->panic.store(1, std::memory_order_release);
+                // shortcut: a block longer than the worker's is silenced here; a realtime block never is, only an offline one (not delayed).
+                const bool fits = frames <= process_->frames;
+                auto* next = spare();
+                kept_ = true;
+                previous_ = fits && start(inputs, ni, next, std::min(playChannels_, outChannels_), frames, events, count, transport, offset) ? Previous::started : Previous::notStarted;
+                if(previous_ == Previous::notStarted)
+                {
+                    notStartedKept_ = fits && kept_;
+                    startedOutputs_ = next; startedFrames_ = std::min(frames, process_->frames);
+                }
+            }
+            // The call's block kept to hand over later: its inputs, events (SysEx bytes copied) and transport.
+            void stage(const float* const* inputs, uint32_t ni, uint32_t frames, const kick::clap::Event* events, uint32_t count,
+                       const clap_event_transport_t* transport, uint32_t offset) noexcept
+            {
+                stagedFrames_ = frames; stagedOffset_ = offset;
+                const auto n = std::min(frames, process_->frames);
+                for(uint32_t c = 0; c < inChannels_; ++c)
+                {
+                    if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], n, stagedInPointers_[c]);
+                    else std::fill_n(stagedInPointers_[c], n, 0.f);
+                }
+                stagedBytes_->used = 0; stagedCount_ = 0;
+                for(uint32_t i = 0; i < std::min(count, maxEvents) && events; ++i)
+                {
+                    auto e = events[i];
+                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX && !stagedBytes_->hold(e)) { sysexDrops_.fetch_add(1, std::memory_order_relaxed); continue; }
+                    staged_[stagedCount_++] = e;
+                }
+                stagedTransport_ = transport ? *transport : clap_event_transport_t{}; stagedHasTransport_ = transport != nullptr;
+            }
+            void handStaged() noexcept { handDelayed(stagedInPointers_.data(), inChannels_, stagedFrames_, staged_.data(), stagedCount_, stagedHasTransport_ ? &stagedTransport_ : nullptr, stagedOffset_); }
             void startDelayed(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
                               const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport, uint32_t offset) noexcept
             {
-                float* const* last = heldPointers_.data() + (handed_ ? 0 : outChannels_); // the buffer the last block went to
-                float* const* next = heldPointers_.data() + (handed_ ? outChannels_ : 0);
-                playedFrames_ = startedFrames_;
-                bool kept = notStartedKept_; // a first block lost nothing; one not started, as start said
+                playOutputs_ = outputs; playChannels_ = no; playFrames_ = frames;
+                deferred_ = false; played_ = nullptr;
+                // Nothing the worker had before it failed or restarted is heard.
+                const bool stale = process_->failed.load() || process_->generation.load() != generation_;
+                if(previous_ == Previous::waiting)
+                {
+                    if(stale) { previous_ = Previous::notStarted; notStartedKept_ = false; }
+                    else if(shared_->done.load(std::memory_order_acquire) == sequence_)
+                    {
+                        // Free again: the block kept behind a missed one goes now and is heard in this call, when what a
+                        // block usually takes fits before the deadline.
+                        const auto deadline = workerDeadline;
+                        if(!deadline.time_since_epoch().count() || std::chrono::steady_clock::now() + std::chrono::nanoseconds(runNs_) < deadline)
+                        {
+                            handStaged();
+                            if(previous_ == Previous::started) { stage(inputs, ni, frames, events, count, transport, offset); deferred_ = true; return; }
+                        }
+                        else
+                        {
+                            // It would miss too, and every block after it: its sound is given up, its events go with this
+                            // call's block, handed now with a whole period more, and the part is in step again.
+                            silent_.fetch_add(1, std::memory_order_relaxed);
+                            bool kept = true;
+                            for(uint32_t i = 0; i < stagedCount_; ++i) kept = carry(staged_[i], true) && kept;
+                            playedOk_ = false; playedKept_ = kept;
+                            handDelayed(inputs, ni, frames, events, count, transport, offset);
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        // Still busy: the kept block is not heard; its events go with the next block handed.
+                        silent_.fetch_add(1, std::memory_order_relaxed); busyBlocks_.fetch_add(1, std::memory_order_relaxed);
+                        bool kept = true;
+                        for(uint32_t i = 0; i < stagedCount_; ++i) kept = carry(staged_[i], true) && kept;
+                        playedOk_ = false; playedKept_ = kept;
+                        stage(inputs, ni, frames, events, count, transport, offset);
+                        return;
+                    }
+                }
+                bool kept = true;
                 if(previous_ == Previous::started)
                 {
-                    // Not from a worker that failed or restarted since: its shared block is not the one handed.
                     busy_.store(true);
-                    if(process_->failed.load() || process_->generation.load() != generation_) { busy_.store(false); playedOk_ = kept = false; for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(last[c], playedFrames_, 0.f); }
-                    else { kept_ = true; playedOk_ = finish(workerDeadline.time_since_epoch().count() != 0); kept = kept_; }
+                    if(stale) { busy_.store(false); playedOk_ = kept = false; }
+                    else if(shared_->done.load(std::memory_order_acquire) == sequence_) { kept_ = true; playedOk_ = finish(true); kept = kept_; played_ = startedOutputs_; playedFrames_ = startedFrames_; }
+                    else { stage(inputs, ni, frames, events, count, transport, offset); deferred_ = true; return; } // waited for in finishDelayed
                 }
-                else playedOk_ = previous_ == Previous::none; // a first block is silent; one not started was silenced
-                playedKept_ = playedKept_ && kept;
-                played_ = last;
-                if(panicLater_.exchange(false, std::memory_order_acq_rel) && !process_->failed.load()) shared_->panic.store(1, std::memory_order_release); // the worker is idle: the panic is the next block's
-                // shortcut: a block longer than the worker's is silenced here; a realtime block never is, only an offline one (not delayed).
-                const bool fits = frames <= process_->frames;
-                const auto channels = std::min(no, outChannels_);
-                kept_ = true;
-                previous_ = fits && start(inputs, ni, next, channels, frames, events, count, transport, offset) ? Previous::started : Previous::notStarted;
-                notStartedKept_ = fits && kept_;
-                if(!fits) for(uint32_t c = 0; c < outChannels_; ++c) std::fill_n(next[c], process_->frames, 0.f);
-                if(previous_ == Previous::notStarted) startedFrames_ = std::min(frames, process_->frames);
-                handed_ = !handed_;
-                playOutputs_ = outputs; playChannels_ = no; playFrames_ = frames;
+                else if(previous_ == Previous::notStarted) { playedOk_ = false; kept = notStartedKept_; }
+                else playedOk_ = true; // a first block is silent
+                playedKept_ = kept;
+                handDelayed(inputs, ni, frames, events, count, transport, offset);
             }
             bool finishDelayed() noexcept
             {
-                for(uint32_t c = 0; c < playChannels_; ++c)
+                if(deferred_)
+                {
+                    busy_.store(true);
+                    kept_ = true;
+                    playedOk_ = finish(false); // its sound, or (missed) the fade
+                    playedKept_ = kept_; played_ = startedOutputs_; playedFrames_ = startedFrames_;
+                    if(shared_->done.load(std::memory_order_acquire) == sequence_) handStaged();
+                    else previous_ = Previous::waiting;
+                }
+                if(!played_ && !playedOk_) fadeOut(playOutputs_, playChannels_, playFrames_);
+                else for(uint32_t c = 0; c < playChannels_; ++c)
                 {
                     if(!playOutputs_ || !playOutputs_[c]) continue;
                     // shortcut: a block of another length than the last plays what the last had, then silence; a device's blocks keep one length.
-                    const auto n = c < outChannels_ ? std::min(playedFrames_, playFrames_) : 0;
+                    const auto n = played_ && c < outChannels_ ? std::min(playedFrames_, playFrames_) : 0;
                     if(n) std::copy_n(played_[c], n, playOutputs_[c]);
                     std::fill(playOutputs_[c] + n, playOutputs_[c] + playFrames_, 0.f);
                 }
@@ -1418,8 +1506,15 @@ namespace oscairn
             // and the one this block goes to; what became of the last block, and what this call plays.
             bool extra_ = false; std::atomic<bool> panicLater_{false};
             std::vector<float> held_; std::vector<float*> heldPointers_;
-            enum class Previous { none, started, notStarted } previous_ = Previous::none;
-            bool handed_ = false, playedOk_ = true, notStartedKept_ = true;
+            // waiting: the block handed was given up on and the worker is still in it; the call's block is kept (staged).
+            enum class Previous { none, started, notStarted, waiting } previous_ = Previous::none;
+            bool playedOk_ = true, notStartedKept_ = true, deferred_ = false;
+            int64_t runNs_ = 0; // what a block usually takes in the worker (workerTimes)
+            std::vector<float> stagedIn_; std::vector<float*> stagedInPointers_;
+            std::array<kick::clap::Event, maxEvents> staged_{};
+            uint32_t stagedCount_ = 0, stagedFrames_ = 0, stagedOffset_ = 0;
+            std::unique_ptr<kick::clap::SysexPool> stagedBytes_ = std::make_unique<kick::clap::SysexPool>();
+            clap_event_transport_t stagedTransport_{}; bool stagedHasTransport_ = false;
             float* const* played_ = nullptr; uint32_t playedFrames_ = 0;
             float* const* playOutputs_ = nullptr; uint32_t playChannels_ = 0, playFrames_ = 0;
             WorkerTiming timing_;

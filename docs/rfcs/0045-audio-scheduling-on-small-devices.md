@@ -367,9 +367,8 @@ Built (2026-11-13):
   `AudioEngine`); the graph passes it to every wait (`workerDeadline`); `WorkerHost::finish` waits
   for the smaller of its allowance and the time to it. A block not done by then is given up as a
   block past the allowance always was (faded, its events kept, RFC 0045's miss policy). **With the
-  extra block** the engine takes the last block only if it is done and otherwise fades the part
-  without waiting at all: that block already had a whole period. A host with no device (the
-  tests, an offline render) sets no deadline, and the allowance alone applies as before.
+  extra block** see [below](#the-extra-block-under-the-deadline-2026-11-13). A host with no device
+  (the tests, an offline render) sets no deadline, and the allowance alone applies as before.
 - **The engine's reserve: 15 % of the period** (`mixingReserve`; 400 us at 128 frames and 48 kHz).
   Chosen, not measured: the engine's own work after the last wave was not measured apart on the
   unit. 15 % leaves 2,267 us for the waves at 128 frames.
@@ -386,6 +385,39 @@ block; a chain of two workers each taking 3 ms against a 1 ms allowance misses e
 the allowance and none under step 6 with a 100 ms deadline; 100 of 100 runs in the Linux
 container, where a busy host stalled single runs by up to 150 ms, so each bound is the best of
 three runs). Not measured on the unit.
+
+### The extra block under the deadline (2026-11-13)
+
+The rule above first took an extra-block worker's block only if it was done when the next
+callback started, with no wait. On the unit (bundle 79770480, ST Final, the extra block for Analog
+and the Sampler) the Analog part behind the arpeggiator, 2.40 ms a block on average and 3.2 to
+3.9 ms at most against a 2,667 us period, then lost 1,982 blocks in 10 s, 965 of them not handed
+because the worker was still busy: taken at the next callback's start, a block had a period less
+the jitter of its hand-over, and a block not taken left the worker busy for the next hand-over,
+so one long block cost two. Before the rule the engine waited up to the allowance and a period
+(4 ms), which let it through but could stall the callback.
+
+Built (2026-11-13): the block in flight is taken at the callback's start when it is done, and the
+callback's own block is handed at once (the usual case: the hand-over stays early). When it is not
+done, the callback's block is kept (inputs, events and transport copied), and the graph collects
+the block in flight after every other worker of its wave (`PluginHost::oneBlockLate`), waiting for
+it to the callback's deadline, never past it and with no spin, then hands the kept block. Every
+block thus has from its hand-over to the next callback's deadline: at least a period, up to a
+period and the deadline (4.9 ms at 128 frames). A block that misses even that is faded; the block
+kept behind it is handed as soon as the worker is free and heard in that callback, when what the
+worker's blocks usually take (an average of an eighth each) fits before its deadline; otherwise
+that block's sound is given up too, its events going with the callback's own block, handed at once
+so the part is in step again rather than missing every block after. One long block costs one
+block while it ends before the next callback; a block longer than two periods keeps the worker
+through the next hand-over and costs two.
+
+Tests: control-worker-deadline, paced in real time with the callback's deadline set, the extra
+block for the fixture: a 2.4 ms block every period loses none of 2,000 and no callback runs past
+the period; 5.5 ms blocks lose nearly every block (a "too slow" restart's first blocks are silent
+without counting) and no callback waits past its deadline (on macOS 2.28 ms at most; the bound has
+2.5 ms of slack for the container's late timers, which ran 1.3 ms past); among 1 ms blocks one of
+4 ms loses none, one of 5 ms one, one of 5.5 ms two (exactly so on macOS; at most so in the
+container, whose late timers can give a block more time). Not measured on the unit.
 
 ### The sharing bias, a stopgap (2026-11-13)
 

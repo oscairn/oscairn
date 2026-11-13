@@ -16,6 +16,9 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#ifdef __linux__
+#include <pthread.h>
+#endif
 
 using namespace oscairn;
 
@@ -291,6 +294,10 @@ int main(int argc, char** argv)
             check(!canLock || (lockedKb > 0 && lockedKb + 64 >= residentKb), "and has its memory locked (" + std::to_string(lockedKb) + " of " + std::to_string(residentKb) + " kB)");
             check(missed.empty() ? read("/proc/self/oom_score_adj") == "-999" && status("/proc/self", "VmLck") > 0 : missed.find("oom_score_adj") != std::string::npos || !canLock,
                   "the engine locked and last in the out-of-memory order, or saying why not: " + (missed.empty() ? std::string("done") : missed));
+            pthread_attr_t defaults; size_t stack = 0;
+            check(pthread_getattr_default_np(&defaults) == 0 && pthread_attr_getstacksize(&defaults, &stack) == 0 && stack == size_t(1) << 20,
+                  "threads made after it get a 1 MiB stack, not RLIMIT_STACK's: " + std::to_string(stack));
+            pthread_attr_destroy(&defaults);
             std::printf("instrument level here: %s\n", missed.empty() ? "locked, oom_score_adj -999" : missed.c_str());
             unsetenv("OSCAIRN_RELIABILITY");
         }

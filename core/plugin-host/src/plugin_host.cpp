@@ -21,6 +21,7 @@
 #include <libproc.h>
 #endif
 #ifdef __linux__
+#include <pthread.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #endif
@@ -258,11 +259,21 @@ namespace oscairn
         rlimit memlock{};
         const bool unlimited = getrlimit(RLIMIT_MEMLOCK, &memlock) == 0 && memlock.rlim_cur == RLIM_INFINITY;
         const int flags = MCL_CURRENT | (unlimited ? MCL_FUTURE : 0);
+        // Locked, a thread's whole stack is resident from its start: glibc's default is RLIMIT_STACK,
+        // 8 MiB, which made thread stacks 82 of the engine's 118 MB resident and 8 of a worker's 16.
+        // Threads made from here on without a size of their own (std::thread, JUCE's, libraries')
+        // get 1 MiB: Windows' default, twice what macOS gives a secondary thread, which plugins are
+        // written for; the deepest stack measured on the engine's and workers' threads while
+        // playing was 12 KiB. The main thread's stack is not a thread's and is unchanged.
+        pthread_attr_t stack;
+        const bool sized = pthread_attr_init(&stack) == 0 && pthread_attr_setstacksize(&stack, size_t(1) << 20) == 0 && pthread_setattr_default_np(&stack) == 0;
+        pthread_attr_destroy(&stack);
         if(mlockall(flags) != 0) missed += std::string("memory not locked (") + std::strerror(errno) + "; RLIMIT_MEMLOCK too low?)";
         else if(!unlimited) missed += "future memory not locked: RLIMIT_MEMLOCK is " + std::to_string(uint64_t(memlock.rlim_cur));
         // Lowering it below 0 needs CAP_SYS_RESOURCE; raising it does not.
         std::ofstream adj("/proc/self/oom_score_adj");adj<<oomScoreAdj<<std::flush;
         if(!adj)missed+=std::string(missed.empty()?"":"; ")+"oom_score_adj not set to "+std::to_string(oomScoreAdj);
+        if(!sized)missed+=std::string(missed.empty()?"":"; ")+"thread stacks left at their default size";
         return missed;
 #else
         (void)oomScoreAdj;

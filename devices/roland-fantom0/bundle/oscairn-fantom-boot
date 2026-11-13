@@ -7,18 +7,20 @@
 #   1. Roland's application instead, when MENU is held (gpio-keys, key 139; WRITE held at power-on
 #      is the bootloader's update mode), or the file var/oscairn/stock-next-boot exists (removed
 #      as it is honored), or MENU cannot be read.
-#   2. Otherwise oscairn-fantom-start --cold: Roland's application never ran this boot.
-#   3. If that fails (the engine not answering session.status within 20 seconds among it), what it
+#   2. Otherwise oscairn-fantom-start --cold: Roland's application never ran this boot. It
+#      starts the app on the display, which starts its engine.
+#   3. If that fails (the engine not answering session.status in time among it), what it
 #      started is stopped, the panel holder too, and Roland's application is started instead.
 #   4. Once Oscairn runs, it stays: go.sh is the main process of weston-term.service, so when this
 #      returns go.sh ends, and systemd, with a unit's default settings, stops the unit and kills
-#      what is left in its control group, the panel holder and the engine with it (setsid leaves
-#      a session, not a control group), which would silence the panel until the next power-on. So
-#      it waits, checking each second, for as long as the engine runs. If the engine ends without
-#      oscairn-fantom-stop (which leaves var/oscairn/run/stopped to say it was on purpose), it is
-#      taken to have failed: step 3's fallback. Stopped on purpose, it goes on waiting while the
-#      panel holder runs (an engine started again by hand, which clears the file, is watched the
-#      same way), and returns once neither runs: nothing is left for systemd to stop.
+#      what is left in its control group, the panel holder, the app and the engine with it (setsid
+#      leaves a session, not a control group), which would silence the panel until the next
+#      power-on. So it waits, checking each second, for as long as the app or the engine runs. If
+#      both have ended without oscairn-fantom-stop (which leaves var/oscairn/run/stopped to say it
+#      was on purpose), Oscairn is taken to have failed: step 3's fallback. Stopped on purpose, it
+#      goes on waiting while the panel holder runs (Oscairn started again by hand, which clears
+#      the file, is watched the same way), and returns once none of them runs: nothing is left
+#      for systemd to stop.
 #      A small loop in the unit's own process, rather than systemd-run --scope, which would need
 #      systemd's bus and more of it on the unit than go.sh relies on.
 #
@@ -86,15 +88,15 @@ fallback() {
 watch() {
 	quiet=""
 	while :; do
-		if [ -n "$(named oscairn-engine)" ]; then
+		if [ -n "$(named Oscairn)$(named oscairn-engine)" ]; then
 			[ -n "$quiet" ] || say "Oscairn runs; staying in the foreground while it does"
 			quiet=1
 		elif [ -e "$state/run/stopped" ]; then
 			[ -n "$(named oscairn-panel-h)" ] || { say "stopped on purpose and the panel holder is gone: nothing left to keep"; exit 0; }
-			[ "$quiet" = held ] || say "the engine was stopped on purpose (oscairn-fantom-stop); staying while the panel holder runs"
+			[ "$quiet" = held ] || say "Oscairn was stopped on purpose (oscairn-fantom-stop); staying while the panel holder runs"
 			quiet=held
 		else
-			fallback "the engine ended without oscairn-fantom-stop"
+			fallback "the app and its engine ended without oscairn-fantom-stop"
 		fi
 		sleep "$poll"
 	done

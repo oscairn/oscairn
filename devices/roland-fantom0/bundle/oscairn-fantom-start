@@ -15,14 +15,18 @@
 #      the holder taking over must stay under about a second. A holder already running is kept;
 #   5. holds every CPU at its top frequency (the performance governor) while Oscairn runs,
 #      recording what each had for oscairn-fantom-stop;
-#   6. starts the engine (oscairn-engine-run) with the profile's options
-#      (etc/default/oscairn-engine, written from the profile when the bundle was built): the
-#      audio device, the keys on /dev/ttyGS0 and the panel, which it reads from the holder. As it
-#      opens /dev/ttyGS0 the engine tells Roland's sound engine Local Switch off (the profile's
-#      keyboard.localOff), so it does not sound the keys under Oscairn; Roland's application has
-#      stopped by then. It stays off until a power cycle;
+#   6. starts the app on the display (/usr/bin/Oscairn --profile with the profile's id, on :0),
+#      which starts its own engine with the profile's audio device, keys, panel and input keys,
+#      when the profile has a screen; with --engine-only, or for a profile without one, the
+#      engine alone (oscairn-engine-run) with the profile's options instead
+#      (etc/default/oscairn-engine, written from the profile when the bundle was built), its
+#      startup Performance played by the panel through the profile's control groups. Either way
+#      the engine reads the panel from the holder and, as it opens /dev/ttyGS0, tells Roland's
+#      sound engine Local Switch off (the profile's keyboard.localOff), so it does not sound the
+#      keys under Oscairn; Roland's application has stopped by then. It stays off until a power
+#      cycle;
 #   7. reports whether the engine came up: its session.status, asked within 20 seconds of its
-#      start, or its log's last lines and a failure.
+#      start (40 for the app's), or its log's last lines and a failure.
 #
 # Between Roland's application stopping and the engine opening /dev/ttyGS0 nothing reads the
 # keys' link; Roland's sound engine then queues what is not read, and after a long gap on the
@@ -31,20 +35,22 @@
 # Each step is logged here and to var/oscairn/log/oscairn-fantom.log in the bundle (the bundle's
 # var/log is a link to its /tmp, which stop-chroot.sh unmounts). oscairn-fantom-stop stops it.
 #
-#   ./oscairn-fantom-start [--dry-run] [--cold]
+#   ./oscairn-fantom-start [--dry-run] [--cold] [--engine-only]
 #
 # --dry-run checks what it can without changing anything (another start, Roland's application,
 # who holds the panel) and prints the steps it would take instead of taking them. --cold is for
 # a boot on which Roland's application never ran (oscairn-fantom-boot): there is nothing to stop,
-# and Roland's application running is a failure.
+# and Roland's application running is a failure. --engine-only starts the engine without the
+# app, for measuring the engine alone and for tests.
 set -u
 root=$(cd "$(dirname "$0")" && pwd)
-dry="" cold=""
+dry="" cold="" alone=""
 for a in "$@"; do
 	case "$a" in
 	--dry-run) dry=1 ;;
 	--cold) cold=1 ;;
-	*) echo "usage: $0 [--dry-run] [--cold]" >&2; exit 2 ;;
+	--engine-only) alone=1 ;;
+	*) echo "usage: $0 [--dry-run] [--cold] [--engine-only]" >&2; exit 2 ;;
 	esac
 done
 # Stand-ins for a test, off the unit; on the unit these are left unset.
@@ -78,6 +84,8 @@ if [ -z "$dry" ]; then
 fi
 engine=$(named oscairn-engine)
 [ -z "$engine" ] || fail "Oscairn's engine already runs (pid $engine); oscairn-fantom-stop stops it"
+app=$(named Oscairn)
+[ -z "$app" ] || fail "Oscairn's app already runs (pid $app); oscairn-fantom-stop stops it"
 
 # 2. The chroot's mounts first: mounting changes nothing Roland's application uses, and done
 # now it is not in the gap below.
@@ -137,9 +145,8 @@ fi
 # [ -n "$cold" ] && send the start word here
 
 # -- Not done yet; each goes here when it is known: --------------------------------------------
-# Oscairn's app on the display: Weston and Xwayland keep running; the app as an X11 client on :0
-#   from the chroot (Xwayland's abstract socket) is untried.
-# USB MIDI on USB MEMORY: modprobe snd-usb-audio, outside the chroot (Roland's module).
+# USB MIDI on USB MEMORY: modprobe snd-usb-audio, outside the chroot (Roland's module); on
+#   November 12 the kernel loaded it by itself when a keyboard was plugged in.
 # ------------------------------------------------------------------------------------------------
 
 # 5. The CPUs at their top frequency: on the unit, with ondemand at 128 frames the engine took
@@ -154,7 +161,7 @@ for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
 done
 [ -e "$g" ] || say "no CPU frequency governor here: nothing to set"
 
-# 6. The engine, with the profile's options. The cores its audio threads keep to: this script's
+# 6. The app, or the engine alone, with the profile's options. The cores its audio threads keep to: this script's
 # environment's OSCAIRN_AUDIO_THREAD_CORES ("1-3"), else the file's (the profile's
 # compute.audioThreadCores); none, anywhere. start-chroot.sh passes no environment on, so it is
 # handed over here.
@@ -162,12 +169,49 @@ cores=${OSCAIRN_AUDIO_THREAD_CORES:-}
 [ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"
 cores=${cores:-${OSCAIRN_AUDIO_THREAD_CORES:-}}
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
+rm -f "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
+# The app, on a profile with a screen (OSCAIRN_HEADLESS=0): Weston and Xwayland keep running
+# when Roland's application stops, and Xwayland's abstract socket for :0 reaches into the
+# chroot. By its full path, which it finds its engine and plugins beside; its locked memory
+# unlimited for the engine it starts, as oscairn-engine-run does for one alone.
+if [ -z "$alone" ] && [ "${OSCAIRN_HEADLESS:-1}" = 0 ] && [ -n "${OSCAIRN_PROFILE:-}" ]; then
+	set -- /usr/bin/Oscairn --profile "$OSCAIRN_PROFILE" --plugins /usr/lib/clap
+	say "starting the app: $*${cores:+ (audio threads on cores $cores)}"
+	if [ -n "$dry" ]; then
+		say "would run: $root/start-chroot.sh setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES=$cores }sh -c 'ulimit -l unlimited; exec \"\$@\"' sh $*"
+		exit 0
+	fi
+	rm -rf "$root/tmp/oscairn-0"
+	"$root/start-chroot.sh" setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} \
+		sh -c 'ulimit -l unlimited || echo "oscairn-fantom-start: cannot raise the locked-memory limit; continuing" >&2; exec "$@"' sh "$@" \
+		>> "$state/log/oscairn-app.log" 2>&1 &
+	echo $! > "$state/run/app.pid"
+	# Its engine's control socket, in the app's runtime folder (the bundle's /tmp/oscairn-0).
+	i=0
+	until sock=$(ls "$root"/tmp/oscairn-0/engine-*.sock 2>/dev/null | head -n 1) && [ -S "$sock" ]; do
+		i=$((i + 1))
+		[ $i -le 400 ] && kill -0 "$(cat "$state/run/app.pid")" 2>/dev/null || { tail -n 20 "$state/log/oscairn-app.log"; fail "the app's engine did not start (var/oscairn/log/oscairn-app.log)"; }
+		nap
+	done
+	inside=/tmp/oscairn-0/${sock##*/}
+	"$root/start-chroot.sh" /usr/bin/oscairn-control-request "$inside" '{"jsonrpc":"2.0","id":1,"method":"session.status"}' > "$state/run/status" 2>&1 &
+	request=$!
+	while kill -0 $request 2>/dev/null; do
+		i=$((i + 1))
+		[ $i -le 600 ] || { kill $request 2>/dev/null; break; }
+		nap
+	done
+	wait $request && grep -q '"result"' "$state/run/status" || { tail -n 20 "$state/log/oscairn-app.log"; fail "the app's engine does not answer session.status (var/oscairn/log/oscairn-app.log)"; }
+	say "session.status: $(cut -c1-400 "$state/run/status")"
+	say "the app runs (pid $(cat "$state/run/app.pid")); its engine's control socket is $sock"
+	exit 0
+fi
 say "starting the engine: oscairn-engine-run $OSCAIRN_ENGINE_ARGS${cores:+ (audio threads on cores $cores)}"
 if [ -n "$dry" ]; then
 	say "would run: $root/start-chroot.sh setsid env ${cores:+OSCAIRN_AUDIO_THREAD_CORES=$cores }oscairn-engine-run $OSCAIRN_ENGINE_ARGS"
 	exit 0
 fi
-rm -f "$root/run/oscairn/engine.sock" "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
+rm -f "$root/run/oscairn/engine.sock"
 eval "set -- $OSCAIRN_ENGINE_ARGS"
 # setsid: the bundle's own, as the panel holder detaches itself with; the ssh session ending
 # then does not take the engine with it.

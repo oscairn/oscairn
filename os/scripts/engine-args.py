@@ -4,6 +4,7 @@
 
     OSCAIRN_HEADLESS     1 when the profile has no screen: the session never starts X or the app
     OSCAIRN_RELIABILITY  the profile's reliability level, which the engine reads (RFC 0025)
+    OSCAIRN_PROFILE      the profile's id, which a script starting the app passes it (--profile)
     OSCAIRN_ENGINE_ARGS  oscairn-engine's audio options, as the app passes them to the engine it
                          starts: the block, the audio device and its channel map (audio.device),
                          the panel, the input keys and the keyboard; with a panel, the profile's
@@ -62,6 +63,7 @@ def settings(profile):
     return {
         "OSCAIRN_HEADLESS": "0" if profile.get("screens") else "1",
         "OSCAIRN_RELIABILITY": profile.get("reliability", "desktop"),
+        "OSCAIRN_PROFILE": profile.get("id", ""),
         "OSCAIRN_ENGINE_ARGS": " ".join(shlex.quote(a) for a in engine_args(profile)),
         "OSCAIRN_AUDIO_THREAD_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("audioThreadCores", [])),
     }

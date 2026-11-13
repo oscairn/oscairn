@@ -1,7 +1,7 @@
 #!/bin/sh
 # Stops what oscairn-fantom-start started (docs/fantom-0.md, "Starting Oscairn on the unit"):
-# the engine, the CPUs' governors as they were, then the chroot's mounts. Run by hand, as root,
-# from outside the chroot.
+# the app and its engine, or the engine alone, the CPUs' governors as they were, then the
+# chroot's mounts. Run by hand, as root, from outside the chroot.
 #
 # The panel holder is left running unless --panel is given: the panel only keeps reporting while
 # something holds its device, and left unheld it went silent until the next power-on, so stopping
@@ -48,10 +48,18 @@ end() {
 	done
 }
 
+app=$(named Oscairn)
 engine=$(named oscairn-engine)
-# Said before the engine ends: oscairn-fantom-boot, watching it, then knows it was on purpose and
-# does not start Roland's application. oscairn-fantom-start clears it.
+# Said before the app or engine ends: oscairn-fantom-boot, watching them, then knows it was on
+# purpose and does not start Roland's application. oscairn-fantom-start clears it.
 if [ -n "$dry" ]; then say "would mark the stop as on purpose ($state/run/stopped)"; else mkdir -p "$state/run" && : > "$state/run/stopped"; fi
+# The app first, which stops the engine it started; then any engine left.
+if [ -n "$app" ]; then
+	say "stopping the app (pid $(echo $app))"
+	end 100 $app
+	[ -n "$dry" ] || engine=$(named oscairn-engine)
+fi
+rm -f "$state/run/app.pid" 2>/dev/null
 if [ -n "$engine" ]; then
 	say "stopping the engine (pid $(echo $engine))"
 	end 100 $engine

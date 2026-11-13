@@ -38,6 +38,15 @@ else
 	check "no governor here: it says so" "echo \"\$out\" | grep -q 'no CPU frequency governor here: nothing to set'"
 fi
 
+cp "$bundle/etc/default/oscairn-engine" "$bundle/engine-defaults"
+printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
+out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
+check "a profile with a screen: the app, by its full path, on the display" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid env DISPLAY=:0 sh -c .ulimit -l unlimited; exec' && echo \"\$out\" | grep -q 'sh /usr/bin/Oscairn --profile fantom-07 --plugins /usr/lib/clap' && ! echo \"\$out\" | grep -q oscairn-engine-run"
+out=$(OSCAIRN_AUDIO_THREAD_CORES=1-3 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
+check "the app with the audio threads' cores" "echo \"\$out\" | grep -q 'setsid env DISPLAY=:0 OSCAIRN_AUDIO_THREAD_CORES=1-3 sh -c'"
+out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1); status=$?
+check "--engine-only: the engine alone" "[ $status = 0 ] && echo \"\$out\" | grep -q 'setsid env oscairn-engine-run --output-device' && ! echo \"\$out\" | grep -q Oscairn"
+mv "$bundle/engine-defaults" "$bundle/etc/default/oscairn-engine"
 out=$(OSCAIRN_AUDIO_THREAD_CORES=1-3 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
 check "the audio threads' cores from the environment, handed to the engine" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=1-3 oscairn-engine-run --output-device'"
 echo "OSCAIRN_AUDIO_THREAD_CORES='2,3'" >> "$bundle/etc/default/oscairn-engine"
@@ -101,7 +110,13 @@ supervise
 sleep 0.5
 check "the engine running: boot stays" "kill -0 $watcher && grep -q 'Oscairn runs; staying in the foreground' '$bundle/watch.out'"
 gone 4242
-check "the engine ended without oscairn-fantom-stop: the fallback, then Roland's application" "until_done $watcher && grep -q 'the engine ended without oscairn-fantom-stop' '$bundle/watch.out' && grep -q 'would run: $bundle/oscairn-fantom-stop --panel' '$bundle/watch.out' && grep -q 'would run: /home/root/mi078' '$bundle/watch.out'"
+check "the engine ended without oscairn-fantom-stop: the fallback, then Roland's application" "until_done $watcher && grep -q 'ended without oscairn-fantom-stop' '$bundle/watch.out' && grep -q 'would run: $bundle/oscairn-fantom-stop --panel' '$bundle/watch.out' && grep -q 'would run: /home/root/mi078' '$bundle/watch.out'"
+running Oscairn 4240
+supervise
+sleep 0.5
+check "the app running, without its engine yet: boot stays" "kill -0 $watcher && grep -q 'Oscairn runs; staying in the foreground' '$bundle/watch.out'"
+gone 4240
+check "the app ended: the fallback" "until_done $watcher && grep -q 'the app and its engine ended without oscairn-fantom-stop' '$bundle/watch.out'"
 running oscairn-engine 4242
 running oscairn-panel-h 4243
 supervise

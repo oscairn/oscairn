@@ -23,6 +23,7 @@ assert engine.engine_args(fantom) == [
     "--keyboard-device", "/dev/ttyGS0", "--keyboard-local", "off"], engine.engine_args(fantom)
 assert engine.settings(fantom)["OSCAIRN_HEADLESS"] == "0"
 assert engine.settings(fantom)["OSCAIRN_RELIABILITY"] == "instrument"
+assert engine.settings(fantom)["OSCAIRN_PROFILE"] == "fantom-07"
 
 placed = {**fantom, "compute": {**fantom["compute"], "audioThreadCores": [1, 2, 3]}}
 assert engine.settings(placed)["OSCAIRN_AUDIO_THREAD_CORES"] == "1,2,3", "the audio threads' cores as a CPU list"

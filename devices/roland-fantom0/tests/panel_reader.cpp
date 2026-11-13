@@ -79,7 +79,7 @@ namespace
     {
         std::ifstream in(shipped); std::stringstream text; text << in.rdbuf();
         const auto fantom = PanelMap::parse(text.str());
-        check(fantom.controls.size() == 132 && fantom.estimated.empty() && fantom.analogDeadband == 1, "the FANTOM-07's map parses, every entry with its id");
+        check(fantom.controls.size() == 129 && fantom.estimated.empty() && fantom.analogDeadband == 1, "the FANTOM-07's map parses, every entry with its id");
         // Roland's layout (docs/fantom-0.md). Slider 1 (analog 9) at 1000: byte 2 holds the ID's top
         // two bits and, from bit 2, the value's top five, which must not read as ID bits.
         auto f = decode(fantom, {0x84, 9, uint8_t((1000 >> 7) << 2), uint8_t(1000 & 0x7F)});
@@ -95,9 +95,17 @@ namespace
         check(analog(16, 127).control == "fader:8" && near(analog(16, 127).input.value, 1) && near(analog(17, 64).input.value, 64 / 127.) && analog(17, 64).control == "knob:1",
               "slider 8 (analog 16) and knob 1 on 0 to 127");
         check(near(analog(7, 1023).input.value, 1) && near(analog(5, 512).input.value, 512 / 1023.) && analog(5, 512).control == "wheel:3", "the lever and WHEEL1 on 0 to 1023");
-        // The pads, in Roland's order of switches 88 to 103, and the CTRL jacks' plug sensing.
-        check(decode(fantom, {0x82, 91, 0, 0}).control == "pad:1" && decode(fantom, {0x82, 88, 0, 0}).control == "pad:2" && decode(fantom, {0x81, 103, 0, 0}).control == "pad:14" &&
-              decode(fantom, {0x81, 103, 0, 0}).input.value == 0, "pads 1, 2 and 14 from switches 91, 88 and 103");
+        check(analog(0, 1023).control == "knob:9" && near(analog(0, 1023).input.value, 1) && near(analog(1, 512).input.value, 512 / 1023.), "CUTOFF and RESONANCE on 0 to 1023");
+        // The pads as the owner pressed them on November 12: from the bottom left, left to right,
+        // row by row upward, switches 101, 103, 102, 100, then 98, 97, 96, 99, 92, 94, 95, 93, 91,
+        // 88, 89, 90; the pad map counts from the bottom left too.
+        const std::vector<uint32_t> pressed{101, 103, 102, 100, 98, 97, 96, 99, 92, 94, 95, 93, 91, 88, 89, 90};
+        bool inOrder = true;
+        for(size_t i = 0; i < pressed.size(); ++i) inOrder = inOrder && decode(fantom, {0x82, uint8_t(pressed[i]), 0, 0}).control == "pad:" + std::to_string(i + 1);
+        check(inOrder && decode(fantom, {0x81, 90, 0, 0}).input.value == 0, "pad 1 the bottom left, pad 16 the top right");
+        check(decode(fantom, {0x82, 23, 0, 0}).control == "sampling" && decode(fantom, {0x82, 22, 0, 0}).control == "padMode", "SAMPLING is switch 23, PAD MODE 22");
+        check(decode(fantom, {0x82, 104, 0, 0}).control.empty() && decode(fantom, {0x82, 105, 0, 0}).control.empty() && decode(fantom, {0x82, 106, 0, 0}).control.empty(),
+              "WRITE, MENU and TEMPO are not on the panel bus");
         check(decode(fantom, {0x82, 35, 0, 0}).control == "ctrl1Sense" && decode(fantom, {0x82, 38, 0, 0}).control == "ctrl2Ring", "the CTRL jacks' sensing, fixed");
         auto refused = [](const std::string& json) { try { PanelMap::parse(json); } catch(const std::invalid_argument&) { return true; } return false; };
         check(!refused(mapJson(controls)), "the test's map parses");

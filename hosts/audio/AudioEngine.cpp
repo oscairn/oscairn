@@ -435,6 +435,23 @@ namespace oscairn::host
         if( serviced_ ) serviced_();
     }
 
+    void AudioEngine::contained( const std::function<void()>& work ) noexcept
+    {
+        try { work(); return; }
+        catch( const std::exception& e )
+        {
+            if( lastFailure_ == e.what() ) return;
+            lastFailure_ = e.what();
+            std::fprintf( stderr, "oscairn: the engine's main-thread work failed, and goes on: %s\n", e.what() );
+        }
+        catch( ... )
+        {
+            if( lastFailure_ == "?" ) return;
+            lastFailure_ = "?";
+            std::fprintf( stderr, "oscairn: the engine's main-thread work failed, and goes on\n" );
+        }
+    }
+
     void AudioEngine::openMidiOutputs()
     {
         std::vector<std::unique_ptr<juce::MidiOutput>> outputs;

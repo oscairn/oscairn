@@ -61,7 +61,7 @@ namespace oscairn::host
 
         uint8_t push( const juce::MidiMessage& message, const juce::MidiInput* input, int raw, uint8_t source ); // the input's source number
         uint8_t sourceNumber( const juce::String& identifier, const std::vector<uint8_t>& taken ); // maxSources for none
-        void handleAsyncUpdate() override { playPads(); session_->serviceControllers(); if( serviced_ ) serviced_(); } // a control moved: its model, at once
+        void handleAsyncUpdate() override { contained( [this] { playPads(); session_->serviceControllers(); if( serviced_ ) serviced_(); } ); } // a control moved: its model, at once
         void playPads(); // the panel's pads pressed and released since, in order
         void openMidiInputs();
 #ifdef __linux__
@@ -69,7 +69,13 @@ namespace oscairn::host
 #endif
         void openMidiOutputs();
         void queueMidiOut( uint32_t offset, double seconds ) noexcept; // audio thread: the session's MIDI out, for the sender
-        void timerCallback() override { service(); }
+        void timerCallback() override { contained( [this] { service(); } ); }
+        // The main thread's work, from JUCE's timer and async update, which do not catch: an
+        // exception from it would end the engine (std::terminate). It is logged, once until a
+        // different one comes, and the engine goes on; what failed (a plugin's worker) is the
+        // session status's to report.
+        void contained( const std::function<void()>& work ) noexcept;
+        std::string lastFailure_;
         // The audio device (Control::audioDevices, setAudio), on the control thread.
         Control::AudioDevices listDevices();
         Control::AudioDevices setDevice( const Control::AudioSetting& setting );

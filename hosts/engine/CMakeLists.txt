@@ -23,6 +23,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME engine-timing COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/engine_timing.py"
         $<TARGET_FILE:oscairn_engine_host> $<TARGET_FILE:oscairn-engine-timing>)
     set_tests_properties(engine-timing PROPERTIES TIMEOUT 90)
+    add_test(NAME engine-worker-given-up COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/worker_given_up.py"
+        $<TARGET_FILE:oscairn_engine_host> $<TARGET_FILE:oscairn_basic_synth>)
+    set_tests_properties(engine-worker-given-up PROPERTIES TIMEOUT 90)
 endif()
 
 # The control socket served as the engine serves it, without an audio device.

@@ -1059,6 +1059,15 @@ int main(int argc, char** argv)
                     check(catalog->opened() && fact["Publisher"] == "KICK, key " + standalone::fingerprint(signing::keyId(publisherKey)) && fact["License"] == "MIT" && fact["Version"] == "1.0.0" &&
                               fact["Summary"] == "A test synth" && fact["Repository"] == "Test repository" && fact["Needs"] == "Nothing else" && fact["Size"].contains("installed") && catalog->install.isEnabled(),
                           "its details: summary, version, license, publisher and key fingerprint, repository, size and what it needs: " + fact["Publisher"].toStdString());
+                    // Ready-made archives (RFC 0031): a folder repository has no web address to link them at.
+                    check(catalog->downloadLinks.empty() && !fact.count("Download for another device"), "from a folder, no download links");
+                    standalone::Offer linked;
+                    linked.version.exports = {{"linux-arm64", "https://packages.example.test/exports/org.kick.x/1.0.0/org.kick.x-1.0.0-linux-arm64.olib"}, {"", "https://packages.example.test/exports/org.kick.y/1.0.0/org.kick.y-1.0.0.olib"}};
+                    const auto links = standalone::downloads(linked);
+                    check(links.size() == 2 && links[0].first == "linux-arm64" && links[0].second == juce::String(linked.version.exports[0].second) && links[1].first == "All platforms",
+                          "each ready-made archive a version lists is a download link by its platform");
+                    linked.version.withdrawn.reason = "a test withdrawal";
+                    check(standalone::downloads(linked).empty(), "and a withdrawn version offers none");
                     settle();
                     over(*catalog, "catalog-details");
                     catalog->install.triggerClick();

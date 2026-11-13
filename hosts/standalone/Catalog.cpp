@@ -124,6 +124,14 @@ namespace oscairn::standalone
                "\n\nInstalling the repository's build replaces the installed one.";
     }
 
+    std::vector<std::pair<juce::String, juce::String>> downloads(const Offer& o)
+    {
+        std::vector<std::pair<juce::String, juce::String>> out;
+        if(o.version.withdrawn.reason.empty())
+            for(const auto& [platform, address] : o.version.exports) out.push_back({platform.empty() ? juce::String("All platforms") : text(platform), text(address)});
+        return out;
+    }
+
     CodeQuestion codeQuestion(const Control::PackageJob& refused, const std::string& publisher, const std::string& publisherKey)
     {
         juce::StringArray all, unsigned_, strangers; // every build refused; those unsigned; the keys no one vouches for
@@ -311,12 +319,20 @@ namespace oscairn::standalone
         install.setTooltip(o.installable ? juce::String() : whyNot(o.version));
         for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &content, &search, &list}) c->setVisible(false);
         backButton.setVisible(true); install.setVisible(!o.installed || o.update || o.otherBuild); // installed and current: nothing to install
+        downloadLinks.clear();
+        for(const auto& [label, address] : downloads(o))
+        {
+            auto& link = *downloadLinks.emplace_back(std::make_unique<juce::HyperlinkButton>(label, juce::URL(address)));
+            link.setTooltip("Download the ready-made archive for " + label + ", to install by hand or carry to another device");
+            addAndMakeVisible(link);
+        }
         resized(); repaint();
     }
 
     void Catalog::back()
     {
         opened_.reset();
+        downloadLinks.clear();
         for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &content, &search, &list}) c->setVisible(true);
         backButton.setVisible(false); install.setVisible(false);
         resized(); repaint();
@@ -343,6 +359,7 @@ namespace oscairn::standalone
                                                                               : o.otherBuild ? ", a different build: it does not match this repository's"
                                                                               : o.record.dependency ? ", installed " + withWhat(o) : "")});
         if(!o.installable) out.push_back({"On this device", whyNot(v)});
+        if(!downloads(o).empty()) out.push_back({"Download for another device", {}}); // its links, laid out on this row (resized())
         // Said, and what the user can do about it; never removed or disabled for them.
         if(const auto said = withdrawnSaying(o); said.isNotEmpty())
             out.insert(out.begin(), {"Withdrawn", said + (o.update ? ". Update to " + text(v.version) + " replaces it" : juce::String()) +
@@ -396,6 +413,16 @@ namespace oscairn::standalone
         if(opened_) { install.setBounds(bottom.removeFromRight(std::max(touch ? 130 : 110, install.getBestWidthForHeight(control)))); bottom.removeFromRight(gap); }
         statusArea_ = bottom;
         list.setBounds(area);
+        // The download links on their fact's row, as paint() lays the facts out.
+        auto rows = area.reduced(16, 8);
+        const int row = touch ? 44 : 32, column = touch ? 170 : 130;
+        for(const auto& [name, value] : facts())
+        {
+            auto r = rows.removeFromTop(row);
+            if(name != "Download for another device") continue;
+            r.removeFromLeft(column);
+            for(auto& link : downloadLinks) { link->setBounds(r.withWidth(1)); link->changeWidthToFitText(); r.removeFromLeft(link->getWidth() + 16); }
+        }
     }
 
     void Catalog::paintOverChildren(juce::Graphics& g)

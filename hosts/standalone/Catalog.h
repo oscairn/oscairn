@@ -62,6 +62,11 @@ namespace oscairn::standalone
     /// button that does it, -1 when there is none; keys: the public keys trusting trusts.
     struct CodeQuestion { juce::String title, message; juce::StringArray buttons; int trust = -1, anyway = -1; std::vector<std::string> keys; };
     CodeQuestion codeQuestion(const Control::PackageJob& refused, const std::string& publisher, const std::string& publisherKey);
+    /// "Download for another device" (RFC 0031): each ready-made archive of the offered version,
+    /// by its platform ("All platforms" for a package with no builds) and its address, to open in a
+    /// browser; none for a withdrawn version, or where the listing has none (the index's noExport, or
+    /// a folder whose web address is not known).
+    std::vector<std::pair<juce::String, juce::String>> downloads(const Offer& offer);
 
     /// The Catalog (RFC 0031), an interim view in the Library until the Catalog app
     /// (oscairn.catalog) exists: the enabled repositories' packages holding Performances, Sounds,
@@ -99,6 +104,7 @@ namespace oscairn::standalone
         juce::TextEditor search;
         juce::TextButton performances{"Performances"}, sounds{"Sounds"}, plugins{"Plugins"}, content{"Content"}, close{"Close"}, backButton{"Back"}, install{"Install"};
         juce::ListBox list{"Catalog", this};
+        std::vector<std::unique_ptr<juce::HyperlinkButton>> downloadLinks; // the opened package's downloads(), each opening its address
         std::vector<std::pair<juce::String, juce::String>> facts() const; // the opened package's details, each named
         void paint(juce::Graphics&) override;
         void paintOverChildren(juce::Graphics&) override; // why nothing is listed, over the list

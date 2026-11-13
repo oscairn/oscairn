@@ -358,7 +358,7 @@ name; what it plays is now the slider set as defined above.
 - A device whose panel has a real mode button (the MODX's mode keys, the FANTOM's CTRL/ASSIGN
   buttons) moves the group through its profile's `modes` and the screen follows. Whether a
   panel's button reaches a group's mode today is to check: nothing in the app moves a fader
-  mode yet, and the FANTOM-0's panel controls are still estimated (`fantom-07.json`).
+  mode yet, and the FANTOM-0's panel map (`fantom-07.json`) has not been tried on a unit.
 - **That button's slider mode is its default assignment, and it can be overridden** (the owner,
   2026-11-11). The profile declares it as a `fixed` button whose function is `sliderMode`
   (stepping the fader group through its `modes`). It is a control like any other: it resolves

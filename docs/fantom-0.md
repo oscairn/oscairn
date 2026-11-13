@@ -36,9 +36,11 @@ files, threads and memory maps. What that survey showed is in
   slave at 0x08 on I2C3 and gives `/dev/i2c-slave-2`. Messages are 4 bytes, with **bit 7 set on
   the first byte**. Roland's test tool names four kinds: `PMDWEncoder`, `PMDWADChange`,
   `PMDWSwitchOn` and `PMDWSwitchOff` (encoders, analog controls, switches pressed and released),
-  and analog sources `HOLD`, `WHEEL1`, `WHEEL2`, `BENDER` and `SLIDER1` to `SLIDER8`. **Where the
-  kind, the ID, the value and the step sit in the bytes is unknown.** Three buttons are not on
-  the panel bus at all: WRITE, MENU and TEMPO are GPIO keys (below).
+  and analog sources `HOLD`, `WHEEL1`, `WHEEL2`, `BENDER` and `SLIDER1` to `SLIDER8`. Where the
+  kind, the ID, the value and the step sit in the bytes, and each control's ID, are now read
+  from Roland's test tool and app ([The map](#the-map)); none of it has been seen on a unit
+  yet. Three buttons are not on the panel bus at all: WRITE, MENU and TEMPO are GPIO keys
+  (below).
 - **Keys:** a separate keyboard CPU scans them. **Where they reach the i.MX is unknown**, but
   the survey narrows it: nothing on the i.MX reads a UART, the panel bus was quiet, and the one
   busy link to the BMCs is a USB serial line (below); the keys most likely reach the BMC first.
@@ -380,13 +382,49 @@ an identity above, or a fixed control's function from the profile (`enter`, `pla
 value is divided by `max` (or the layout's `analogMax`) for 0 to 1; an encoder's delta is
 multiplied by `step` (or `encoderStep`).
 
-The shipped map is **entirely provisional**, marked `"estimated": ["layout", "controls"]`. Its
-layout is a guess (the kind in the low four bits of byte 0, the ID in byte 1, a 14-bit value in
-bytes 2 and 3 seven bits each, a signed 7-bit step in byte 2, analog values to 1023 after the
-spec's "1,024 step" lever and wheels); none of it has been seen on a unit. Its `controls`
-list every control the panel may send **without an `id`**, so none is mapped: every message
-shows as unknown until the IDs are filled in from captures. Nothing reaches a control by a
-guessed ID.
+The shipped map's layout and IDs are **read from Roland's programs, not yet seen on a unit**:
+the layout from the factory test tool (`qctest`), which prints each message's kind, number and
+value, and from the app (`mi078`), which reads the same bits; the IDs from the test tool's
+tables of names, which the app's own table of switch numbers matches entry for entry. Its
+`estimated` list is empty: no part of it is a guess any more, and the first run of
+`oscairn-panel-dump` on the unit is what confirms it. The layout:
+
+| Byte | Bits | What |
+|---|---|---|
+| 0 | 7 | always set: a message starts here |
+| 0 | 6 and 5 | who sent it: 0 the panel's own processor, otherwise a BMC |
+| 0 | 4 to 0 | the kind: 1 switch off, 2 switch on, 3 encoder, 4 analog |
+| 1 | 6 to 0 | the ID's low seven bits |
+| 2 | 2 to 0 | a switch's or encoder's ID, top three bits (an analog ID: bits 1 and 0, its top two) |
+| 2 | 6 to 3 | an encoder's step, top four bits |
+| 2 | 6 to 2 | an analog value, top five bits |
+| 3 | 3 to 0 | an encoder's step, low four bits: eight bits in all, signed |
+| 3 | 6 to 0 | an analog value, low seven bits: twelve bits in all |
+
+`controls` gives each control Roland's number for it, in Oscairn's order. What the names rest
+on: Roland's test tool names every number (its `STEP01` to `STEP16` are the tone category
+buttons, `C1` to `C6` the FUNCTION knobs E1 to E6 and their pushes, `VAL` the VALUE dial,
+`VOLUME1` to `VOLUME8` the control knobs, `SELECT` and `CHAIN` SCENE SELECT and SCENE CHAIN,
+`ZONE1` to `ZONE8` the ZONE INT/EXT buttons); matching those names to the panel's legends is
+Oscairn's reading, to check with the dump. Still Oscairn's own choice: `analogMax`, 1023. The
+value field holds 0 to 4095; Roland's pedal adjustment checks a reading against 500 to 1024,
+which points at a 10-bit scale, but no top value has been seen.
+
+Not in the map, with Roland's numbers for them:
+
+- **The pads:** switches 88 to 103, on and off with no velocity, in the order pad 2, 3, 4, 1, 5,
+  8, 6, 7, 11, 10, 9, 12, 16, 13, 15, 14. The reader has nothing to play a pad with yet.
+- **The HOLD jack:** analog 2, a position and not a switch, so a half-damper pedal reads as one.
+  The controller layer's footswitch takes a switch; nothing turns the position into one yet.
+- **The CTRL jacks' plug sensing:** switches 35 and 36 (CTRL1 and CTRL2, Roland's "sense") and
+  37 and 38 (their ring contacts). Roland's app passes a CTRL jack's position on only while its
+  sense switch is on.
+- **MASTER VOLUME:** Roland's tables have no number for it. It never reaches the i.MX as a panel
+  message (inferred: it acts on the BMC side or in the analog path).
+- **WRITE, MENU and TEMPO:** numbers 104 to 106 in Roland's tables and in the map, but the panel
+  bus never carries them: they are GPIO keys, and Roland's programs make the messages
+  themselves from `/dev/input/event1`.
+- Switches 39, 51, 63, 81, 84 and 85 are unused; Roland's app drops them.
 
 ### What it does not do yet
 
@@ -401,7 +439,7 @@ guessed ID.
   parts as its own MIDI message; a panel message has none, so `wheel:1` and `wheel:2` play only
   what a Performance or Sound assigns them.
 
-## Mapping the panel on a unit
+## Checking the panel map on a unit
 
 On the FANTOM, with Oscairn's engine not reading the panel (Roland's app stopped too, with
 `systemctl stop weston-term`, so only one program reads the device):
@@ -414,20 +452,25 @@ Each message prints on a line: its four bytes, the kind, ID and value the map's 
 and the control it maps to, or `-`. Ctrl-C (or `--seconds N`) ends it with a table of every kind
 and ID seen, how often, and its lowest and highest value. Then:
 
-1. **The layout first.** Press and release one button slowly, turn one encoder each way, move
-   one slider end to end, and look at the raw bytes: which byte changes with the kind, which
-   stays the control's own, which carries the value. Copy the map, change `layout` until the
-   kinds and IDs read sensibly, and run the dump again with the copy.
-2. **Then each control,** one at a time, in the order of the map's `controls`: move it, read its
-   kind and ID from the table, and add the `id` to its entry. Note each analog control's highest
-   value as its `max` if it is not the layout's `analogMax`, and give an encoder that turns the
-   wrong way a negative `step`.
-3. **Check:** with the filled map the dump shows a control on every line and `-` for nothing
-   you moved. Run the app with `--panel-map` pointing at the copy and move the sliders: the
-   part levels follow.
+1. **The layout first.** Press and release ENTER slowly, turn the VALUE dial one click each
+   way, and move slider 1 end to end. The map is right if the lines read `switchOn` then
+   `switchOff` with ID 62 and `enter`; `encoder` with ID 6, `data` and a small value, positive
+   one way and negative the other; and `analog` with ID 9, `fader:1` and a value that rises
+   steadily with the slider, the ID never changing as it moves. A kind of `unknown`, an ID that
+   jumps while one control moves, or a value that wraps mid-travel refutes the layout: send
+   back the raw bytes.
+2. **Then each control,** one at a time, in the order of the map's `controls`: move it and
+   check the line names it. A control that shows another's name refutes that ID: note the kind
+   and ID the table gives it. Note each analog control's lowest and highest value (the table's
+   `low` and `high`): they settle `analogMax`, or a `max` of its own for a control that differs.
+   Give an encoder that turns the wrong way a negative `step`.
+3. **What is not in the map** should show with `-`: each pad as a switch from 88 to 103, a
+   pedal in HOLD as analog 2, and a plug going into CTRL1 as switch 35. WRITE, MENU and TEMPO
+   should show nothing at all.
+4. **Check:** run the app with `--panel-map` pointing at the map (or a corrected copy) and move
+   the sliders: the part levels follow.
 
-Send back the filled map and the dump's tables, and remove `"controls"` from `estimated`
-(`"layout"` too once it is confirmed).
+Send back the dump's tables, and a corrected map if anything differed.
 
 ## What needs the owner at the instrument
 
@@ -457,7 +500,7 @@ watch -n1 'grep -E "30a40000|32e50000|32e40000|serial|Write|Menu|Tempo|gt1151" /
    that `/proc/asound/card1/pcm0p/sub0/status` and `pcm0c/sub0/status` say `closed` and that
    no process holds `/dev/i2c-slave-2` (`ls -l /proc/*/fd 2>/dev/null | grep i2c-slave`).
    `systemctl start weston-term` (or a reboot) brings it back.
-6. **The panel's layout and IDs:** [Mapping the panel on a unit](#mapping-the-panel-on-a-unit),
+6. **The panel's layout and IDs:** [Checking the panel map on a unit](#checking-the-panel-map-on-a-unit),
    with `oscairn-panel-dump` in the bundle.
 7. **Whether the link still runs:** `arecord -D hw:1,0 -c 16 -f S32_LE -r 48000 -d 2
    /tmp/link.wav`. It finishing in two seconds means the BMCs still drive the bit clock without

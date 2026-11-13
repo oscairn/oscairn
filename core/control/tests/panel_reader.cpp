@@ -5,8 +5,8 @@
 // through the map's layout (fields of whole bytes, or of parts of them), an unknown ID reported
 // with its bytes, and a new map taking effect;
 // then the controls they name played in a Session as a MIDI controller's are (controller_input.h),
-// heard at the next block; and oscairn-panel-dump reading a pty. Also: the FANTOM-07's
-// provisional map parses, and a broken map is refused.
+// heard at the next block; and oscairn-panel-dump reading a pty. Also: the FANTOM-07's map
+// decodes messages in Roland's layout, and a broken map is refused.
 #include "oscairn/panel_reader.h"
 #include "oscairn/session.h"
 
@@ -69,7 +69,17 @@ namespace
     {
         std::ifstream in(shipped); std::stringstream text; text << in.rdbuf();
         const auto fantom = PanelMap::parse(text.str());
-        check(fantom.controls.empty() && fantom.estimated.size() == 2, "the FANTOM-07's map parses, estimated, with no control mapped yet");
+        check(fantom.controls.size() == 112 && fantom.estimated.empty(), "the FANTOM-07's map parses, every entry with its id");
+        // Roland's layout (docs/fantom-0.md). Slider 1 (analog 9) at 1000: byte 2 holds the ID's top
+        // two bits and, from bit 2, the value's top five, which must not read as ID bits.
+        auto f = decode(fantom, {0x84, 9, uint8_t((1000 >> 7) << 2), uint8_t(1000 & 0x7F)});
+        check(f.kind == PanelMap::Kind::Analog && f.id == 9 && f.value == 1000 && f.control == "fader:1", "the FANTOM's slider 1 at 1000: id " + std::to_string(f.id));
+        // The VALUE dial (encoder 6) three steps back: -3 is 0xFD, its top four bits in byte 2 from bit 3, its low four in byte 3.
+        f = decode(fantom, {0x83, 6, 0xF << 3, 0xD});
+        check(f.kind == PanelMap::Kind::Encoder && f.id == 6 && f.value == -3 && f.control == "data", "the FANTOM's VALUE dial, three steps back: " + std::to_string(f.value));
+        // ENTER (switch 62) pressed and released; bits 5 and 6 of byte 0 say who sent it, not the kind.
+        f = decode(fantom, {0xA2, 62, 0, 0});
+        check(f.kind == PanelMap::Kind::SwitchOn && f.control == "enter" && decode(fantom, {0x81, 62, 0, 0}).kind == PanelMap::Kind::SwitchOff, "the FANTOM's ENTER, on and off");
         auto refused = [](const std::string& json) { try { PanelMap::parse(json); } catch(const std::invalid_argument&) { return true; } return false; };
         check(!refused(mapJson(controls)), "the test's map parses");
         check(refused(mapJson(controls + R"(, {"kind": "analog", "id": 3, "control": "fader:9"})")), "two analog controls on one id");

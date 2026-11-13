@@ -20,7 +20,7 @@ namespace oscairn
     // A device panel that does not speak MIDI (a profile's `panel`, RFC 0024): 4-byte messages from
     // a character device, the first byte of each with bit 7 set (Roland's i2c-slave-rx driver on the
     // FANTOM-0, /dev/i2c-slave-2). Where the kind, ID, value and step sit in a message is the map's
-    // `layout`, data and not code, because it is not known yet (docs/fantom-0.md); the map then
+    // `layout`, data and not code (docs/fantom-0.md says how the FANTOM-0's is known); the map then
     // names the control each kind and ID is, by identity ("fader:1", as overrides name them) or, for
     // a fixed control, by its profile function ("enter").
     struct PanelMap

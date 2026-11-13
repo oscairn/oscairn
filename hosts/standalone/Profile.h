@@ -90,8 +90,9 @@ namespace oscairn::standalone
         struct Panel { std::string protocol, device, map; } panel;
         // Keys that are not MIDI, read by the engine (devices/roland-fantom0's BmcLink.h): the protocol, which
         // names the firmware on the other side (roland-bmc-stock: Roland's own BMC firmware, built
-        // with OSCAIRN_ROLAND_FANTOM0), and the character device. Empty: none.
-        struct Keyboard { std::string protocol, device; } keyboard;
+        // with OSCAIRN_ROLAND_FANTOM0), and the character device. Empty: none. localOff: the
+        // engine turns the instrument's own sound engine's Local Switch off when it starts reading.
+        struct Keyboard { std::string protocol, device; bool localOff = false; } keyboard;
         // RFC 0004: its accelerators and device clocks (CPU-only: none).
         hardware::Capabilities hardware;
         struct Network { bool ethernet = false, wifi = false; } network;

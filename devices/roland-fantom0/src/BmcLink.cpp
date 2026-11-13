@@ -23,8 +23,8 @@ namespace oscairn::host
 
     void BmcLinkReader::standardError( const std::string& line ) { std::fprintf( stderr, "oscairn: keys: %s\n", line.c_str() ); }
 
-    BmcLinkReader::BmcLinkReader( std::string path, Message message, Log log, std::chrono::milliseconds settle )
-        : path_( std::move( path ) ), message_( std::move( message ) ), log_( std::move( log ) ), settle_( settle ), thread_( [this] { run(); } ) {}
+    BmcLinkReader::BmcLinkReader( std::string path, Message message, Log log, std::chrono::milliseconds settle, bool localOff )
+        : path_( std::move( path ) ), message_( std::move( message ) ), log_( std::move( log ) ), settle_( settle ), localOff_( localOff ), thread_( [this] { run(); } ) {}
 
     BmcLinkReader::~BmcLinkReader()
     {
@@ -47,7 +47,7 @@ namespace oscairn::host
 
     bool BmcLinkReader::open( bool report )
     {
-        const int fd = ::open( path_.c_str(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC );
+        const int fd = ::open( path_.c_str(), ( localOff_ ? O_RDWR : O_RDONLY ) | O_NOCTTY | O_NONBLOCK | O_CLOEXEC );
         if( fd < 0 ) { if( report && log_ ) log_( "cannot open " + path_ + ": " + std::strerror( errno ) ); return false; }
         // Echo off before any read: with it on, the tty layer would send each byte received back to the sound chips.
         termios t{};
@@ -66,6 +66,12 @@ namespace oscairn::host
             if( report && log_ ) log_( path_ + " cannot be made raw with echo off; not reading it, so nothing read is sent back" );
             ::close( fd );
             return false;
+        }
+        if( localOff_ ) // raw with echo off by now: Local Switch off, once
+        {
+            localOff_ = false;
+            const auto n = ::write( fd, bmcLocalOff.data(), bmcLocalOff.size() );
+            if( log_ ) log_( n == ssize_t( bmcLocalOff.size() ) ? "Local Switch off sent" : "Local Switch off not sent: " + std::string( n < 0 ? std::strerror( errno ) : "a short write" ) );
         }
         fd_ = fd;
         parser_.reset();

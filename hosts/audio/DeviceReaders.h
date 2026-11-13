@@ -32,7 +32,9 @@ namespace oscairn::host
     struct KeyboardInput { std::string name, key; };
     std::vector<KeyboardInput> keyboardInputs();
     /// The keyboard at `device`, each MIDI message handed over by input (an index into
-    /// keyboardInputs()) on the reader's thread; nullptr: this build reads no keyboard.
+    /// keyboardInputs()) on the reader's thread; nullptr: this build reads no keyboard. With
+    /// `localOff`, the instrument's own sound engine is told Local Switch off once, when the
+    /// device is first opened.
     using PlayMidi = std::function<void( size_t input, const uint8_t* bytes, size_t size )>;
-    std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play );
+    std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play, bool localOff );
 }

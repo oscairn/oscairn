@@ -6,7 +6,8 @@
 # The panel holder is left running unless --panel is given: the panel only keeps reporting while
 # something holds its device, and left unheld it went silent until the next power-on, so stopping
 # the holder silences the panel. Roland's application is not started again: started after a stop
-# it shows "program version error". A power cycle returns the instrument to Roland's system.
+# it shows "program version error", and Local Switch, which the engine turned off, is not turned
+# back on. A power cycle returns the instrument to Roland's system, Local Switch on.
 #
 #   ./oscairn-fantom-stop [--panel] [--dry-run]
 set -u
@@ -76,4 +77,4 @@ if [ -n "$dry" ]; then
 elif ! "$root/stop-chroot.sh"; then
 	[ -n "$panel" ] || say "expected while the panel holder runs: it keeps the bundle's /dev in use"
 fi
-say "Roland's application is not started again (restarted, it shows \"program version error\"); a power cycle returns the instrument to Roland's system"
+say "Roland's application is not started again (restarted, it shows \"program version error\") and Local Switch stays off; a power cycle returns the instrument to Roland's system"

@@ -42,6 +42,8 @@ def engine_args(profile, panels="/usr/share/oscairn/panels"):
     keyboard = profile.get("keyboard")
     if keyboard:
         args += ["--keyboard-device", keyboard["device"]]
+        if keyboard.get("localOff"):
+            args += ["--keyboard-local", "off"]
     return args
 
 

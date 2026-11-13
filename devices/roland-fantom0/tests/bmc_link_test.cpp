@@ -8,7 +8,9 @@
 // absurd length losing it. Then the reader on a pty in place of /dev/ttyGS0: raw with echo off
 // once open, nothing sent back, the zones' MIDI words ignored, a key with Local Switch off read,
 // what comes in its first moments dropped, a held note ended when the device ends, and no spinning
-// while it is gone.
+// while it is gone. With localOff: the Local Switch frames, byte for byte, written once, only
+// after the device is raw with echo off, nothing else ever, and reading goes on; a device that
+// cannot be made raw gets nothing.
 //
 // With OSCAIRN_BMC_CAPTURE naming a capture of a unit's link (kept off the repository), it also
 // parses that from every byte offset of its first 2 KiB and prints the counts.
@@ -242,6 +244,50 @@ namespace
         }
         check( std::chrono::steady_clock::now() - stopping < 300ms, "it stops promptly, in its pause too" );
     }
+
+    void localSwitch()
+    {
+        check( Bytes( bmcLocalOff.begin(), bmcLocalOff.end() ) == Bytes{ 0x0e, 0x00, 0xef, 0x01, 0x00, 0x00, 0x00, 0xcf, 0x00, 0x00, 0x00, 0x05,
+                                                                           0x10, 0x00, 0xef, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x0c, 0xff, 0x07 },
+               "the Local Switch off frames, as traced" );
+        const int master = ::posix_openpt( O_RDWR | O_NOCTTY );
+        check( master >= 0 && ::grantpt( master ) == 0 && ::unlockpt( master ) == 0, "a pty" );
+        const std::string path = ::ptsname( master );
+        ::fcntl( master, F_SETFL, O_NONBLOCK );
+        std::mutex lock;
+        Messages heard;
+        Bytes sent;
+        auto drain = [&] { uint8_t b[256]; ssize_t n; while( ( n = ::read( master, b, sizeof b ) ) > 0 ) sent.insert( sent.end(), b, b + n ); };
+        {
+            BmcLinkReader reader( path, [&]( size_t, const uint8_t* b, size_t n ) { std::lock_guard l( lock ); heard.emplace_back( b, b + n ); }, {}, 0ms, true );
+            for( auto until = std::chrono::steady_clock::now() + 3s; sent.size() < bmcLocalOff.size() && std::chrono::steady_clock::now() < until; std::this_thread::sleep_for( 5ms ) ) drain();
+            termios t{};
+            check( ::tcgetattr( master, &t ) == 0 && !( t.c_lflag & ( ECHO | ICANON ) ), "raw with echo off when it writes" );
+            check( reader.stats().opened == 1 && sent == Bytes( bmcLocalOff.begin(), bmcLocalOff.end() ), "Local Switch off written once, exactly" );
+            std::this_thread::sleep_for( 200ms );
+            const auto k = key( true, 60, 100 );
+            check( ::write( master, k.data(), k.size() ) == ssize_t( k.size() ), "a key" );
+            for( auto until = std::chrono::steady_clock::now() + 3s; std::chrono::steady_clock::now() < until; std::this_thread::sleep_for( 5ms ) ) { std::lock_guard l( lock ); if( !heard.empty() ) break; }
+            { std::lock_guard l( lock ); check( heard == Messages{ { 0x90, 60, 100 } }, "and the link is read after it" ); }
+            std::this_thread::sleep_for( 200ms );
+            drain();
+            check( sent.size() == bmcLocalOff.size(), "and nothing else is written" );
+        }
+        ::close( master );
+
+        // A device that cannot be made raw (a plain file) gets nothing written.
+        char file[] = "/tmp/oscairn-bmc-link-XXXXXX";
+        const int fd = ::mkstemp( file );
+        ::close( fd );
+        std::vector<std::string> logged;
+        {
+            BmcLinkReader reader( file, {}, [&]( const std::string& line ) { std::lock_guard l( lock ); logged.push_back( line ); }, 0ms, true );
+            std::this_thread::sleep_for( 300ms );
+        }
+        std::ifstream in( file, std::ios::binary );
+        check( in.peek() == std::char_traits<char>::eof() && !logged.empty() && logged[0].find( "cannot be made raw" ) != std::string::npos, "a device not made raw gets nothing" );
+        ::unlink( file );
+    }
 }
 
 int main()
@@ -250,6 +296,7 @@ int main()
     if( const char* path = std::getenv( "OSCAIRN_BMC_CAPTURE" ) ) capture( path );
     else std::printf( "OSCAIRN_BMC_CAPTURE unset: the capture check is skipped\n" );
     reader();
+    localSwitch();
     if( failures ) return 1;
     std::printf( "ok: the link's frames, their place found again, and its reader\n" );
     return 0;

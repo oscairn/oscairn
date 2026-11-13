@@ -287,9 +287,12 @@ played into `hw:1,0` while a program kept reading `/dev/ttyGS0`.
   the BMC plays its tone from the keys, so Oscairn playing from them sounds together with it.
   With Local Switch set to OFF in Roland's own menu (MENU > SYSTEM > MIDI) and then the app
   stopped, the instrument stayed silent while the owner played: Roland's engine keeps the
-  setting after its app stops, so Oscairn can play over a silent instrument without sending
-  anything, if the setting was made first. Not known: whether it survives a power cycle without
-  Roland's System Write.
+  setting after its app stops. It does not survive a power cycle (it was on again after one, and
+  Roland's sound with it). On a fresh boot with Local Switch on, after Roland's app was stopped,
+  writing the two Local Switch frames ([The message link](#the-message-link)) to `/dev/ttyGS0`,
+  raw with echo off, turned it off: in the 12 seconds of playing after, the link carried only the
+  keys' own frames, and no zone's MIDI word. The engine now sends them when it starts
+  ([The key reader](#the-key-reader)).
 - **The panel reports only while a program holds its device** (measured that evening, and
   what Roland's driver does: [The panel's driver](#the-panels-driver)). Taken over within about
   a second of Roland's app letting go of `/dev/i2c-slave-2`, the panel went on sending with
@@ -735,14 +738,16 @@ its `/tmp`, which `stop-chroot.sh` unmounts):
 
 Between Roland's app stopping and the engine opening `/dev/ttyGS0` nothing reads the keys' link,
 and Roland's sound engine queues what is not read; after a long gap on the unit it was left with
-notes stuck on. The few seconds the script takes were harmless. It reminds that Roland's
-engine sounds the keys too unless Local Switch was set to OFF in Roland's menu first (Oscairn
-sends nothing to turn it off), and has marked places for what is not done yet: the app on the
+notes stuck on. The few seconds the script takes were harmless. Roland's engine is
+told Local Switch off by the engine as it opens the keys' link (the profile's
+`keyboard.localOff`), after Roland's app has stopped; the script has marked places for what is
+not done yet: the app on the
 display (Xwayland's `:0` from the chroot, untried) and USB MIDI (`modprobe snd-usb-audio`,
 outside the chroot). `--dry-run` checks what it can without
 changing anything (another start, Roland's app, who holds the panel) and prints the rest.
 
 `oscairn-fantom-stop` stops the engine, puts the governors back, and unmounts the chroot. It
+does not turn Local Switch back on: a power cycle does. It
 leaves the panel holder running, so the panel goes on reporting; `--panel` stops the holder too,
 after which the panel stays silent until the next power-on. While the holder runs the bundle's
 `/dev` stays mounted (the holder has the device open through it). It never starts Roland's app:
@@ -761,7 +766,7 @@ cd /home/root/oscairn
 
 What the owner means to do once Oscairn is stable enough: Roland's start script (`go.sh`) runs
 `oscairn-fantom-start` instead of Roland's app, and the script grows as the steps above get done
-(Local Switch, the display). Before that step is taken it needs:
+(the display, for one). Before that step is taken it needs:
 
 - **A fallback to Roland's app** when Oscairn does not start. Roland's app must be started while
   nothing has taken the panel: it cannot come back after a stop without a power cycle, so the
@@ -913,9 +918,15 @@ Not in the map, with Roland's numbers for them:
 
 `oscairn::host::BmcLinkReader` ([devices/roland-fantom0/src/BmcLink.h](../devices/roland-fantom0/src/BmcLink.h)), built only
 with `OSCAIRN_ROLAND_FANTOM0`, reads `/dev/ttyGS0` on a thread of its own, polling with a 100 ms
-timeout. **It never writes to the device:** it opens it read-only and, before reading, makes it
-raw with echo and flow control off, and reads the settings back; where they do not hold it does
-not read (with echo on, the tty layer would send each byte received back to the BMC side). Once
+timeout. Before reading or writing anything it makes the device raw with echo and flow control
+off, and reads the settings back; where they do not hold it neither reads nor writes (with echo
+on, the tty layer would send each byte received back to the BMC side). **It writes one thing
+only:** with the profile's `keyboard.localOff` (`--keyboard-local off`), the two Local Switch off
+frames ([The message link](#the-message-link)), once, the first time the device is open and raw;
+it then opens the device for reading and writing, and otherwise read-only. A failed write is
+logged (`Local Switch off not sent: ...`, or `Local Switch off sent` when it went) and reading
+goes on. The frames are the stock BMC firmware's, as Roland's app sends them; the setting holds
+until a power cycle, and nothing turns it back on. Once
 open it reads without pause, whatever the engine is doing and whether or not the input is
 ignored, since what it does not read waits and Roland's engine then holds its notes. If the
 device fails or ends it is opened again a second later.
@@ -958,7 +969,7 @@ device fails or ends it is opened again a second later.
 The profile's `keyboard` says which reader and which device:
 
 ```json
-"keyboard": { "protocol": "roland-bmc-stock", "device": "/dev/ttyGS0" }
+"keyboard": { "protocol": "roland-bmc-stock", "device": "/dev/ttyGS0", "localOff": true }
 ```
 
 The protocol names the firmware on the other side: `roland-bmc-stock` is the link as Roland's
@@ -968,8 +979,9 @@ device to the engine it starts (`--keyboard-device`, which the app also takes on
 line). As with the panel, the engine reads it with `--audio null` too: it is a device named on
 purpose, not one found by listing. A build without `OSCAIRN_ROLAND_FANTOM0` leaves the reader out
 and says so when a profile has a keyboard. Tested on frames built in the test and on a pty in
-place of the device (`engine-bmc-link`), and its parser on the owner's capture; it has not run on
-the unit.
+place of the device (`engine-bmc-link`: the Local Switch frames byte for byte, written once,
+after the device is raw, nothing else written, and none to a device that cannot be made raw),
+and its parser on the owner's captures; it has not run on the unit.
 
 ## Checking the panel map on a unit
 
@@ -1031,9 +1043,9 @@ work left open, then older checks still to do.
    OUT gets none by default), and the pairs' levels against each other, at low volume, one pair
    at a time (`--audio-outputs 0,1`, then `2,3`, then `4,5`); and whether `--device-channels 16`
    plays as 6 does.
-5. **Local Switch over a power cycle:** set it to OFF in Roland's menu, power off and on, and see
-   whether Roland's engine is still silent under Oscairn, without and then with Roland's System
-   Write.
+5. **Local Switch from the engine:** after a power cycle (Local Switch is on again then),
+   `oscairn-fantom-start`; the engine log should say `Local Switch off sent`, and playing should
+   sound Oscairn only, with no zone's MIDI word on the link.
 6. **The display:** with Weston running and Roland's app stopped, start the app in the bundle
    with `DISPLAY=:0` and see whether it reaches Xwayland.
 

@@ -712,6 +712,10 @@
           "type": "string",
           "pattern": "^/dev/",
           "maxLength": 256
+        },
+        "localOff": {
+          "type": "boolean",
+          "description": "The engine tells the instrument's own sound engine Local Switch off once, when it first opens the device, so the instrument does not also sound the keys (roland-bmc-stock: system parameter 0xCF to 0xEF). Default false"
         }
       },
       "required": [

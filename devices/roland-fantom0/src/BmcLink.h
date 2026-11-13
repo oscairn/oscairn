@@ -181,6 +181,15 @@ namespace oscairn::host
         Stats stats_;
     };
 
+    /// The one thing Oscairn writes to the link: Local Switch off, so Roland's own sound engine does
+    /// not sound the keys under Oscairn. Two frames, traced from Roland's stock app on 2026-11-12 as
+    /// it turned Local Switch off in its menu, with the stock BMC firmware (roland-bmc-stock):
+    /// system parameter 0xCF, value 0 (1 would be on), to address 0xEF, then its fixed companion
+    /// frame. The sound engine keeps the setting until a power cycle.
+    inline constexpr std::array<uint8_t, 24> bmcLocalOff{
+        0x0e, 0x00, 0xef, 0x01, 0x00, 0x00, 0x00, 0xcf, 0x00, 0x00, 0x00, 0x05,
+        0x10, 0x00, 0xef, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x0c, 0xff, 0x07 };
+
     /// The link's MIDI sources, by sender address, in the order their inputs are listed: the keys
     /// (0x02), then the addresses Roland's app takes MIDI from its MIDI ports on (docs/fantom-0.md;
     /// which is DIN and which USB is not known, so each is named by its address).
@@ -189,9 +198,10 @@ namespace oscairn::host
 
     /// Reads the link on a thread of its own and hands each MIDI message to `message` there, by
     /// input (an index into bmcSources): the keys from their own frames (bmcKey), the other sources
-    /// from their MIDI words (bmcMidi). It never writes to the device: it opens it read-only, and
-    /// before reading makes it raw with echo and flow control off, checked by reading the settings
-    /// back; where they do not hold it does not read. It polls with a timeout (so stopping waits at
+    /// from their MIDI words (bmcMidi). Before reading it makes the device raw with echo and flow
+    /// control off, checked by reading the settings back; where they do not hold it neither reads
+    /// nor writes. It writes nothing but, with `localOff`, bmcLocalOff once, the first time the
+    /// device is open and raw (read-only otherwise); a failed write is logged and reading goes on. It polls with a timeout (so stopping waits at
     /// most that), and reads without pause while open: the sound chips queue what is not read, and
     /// Roland's engine then holds its notes. A device that fails or ends is opened again a second
     /// later.
@@ -211,7 +221,7 @@ namespace oscairn::host
         using Message = std::function<void( size_t input, const uint8_t* bytes, size_t size )>;
         using Log = std::function<void( const std::string& )>; // empty: no log
         static void standardError( const std::string& line );
-        BmcLinkReader( std::string path, Message message, Log log = standardError, std::chrono::milliseconds settle = std::chrono::milliseconds( 500 ) );
+        BmcLinkReader( std::string path, Message message, Log log = standardError, std::chrono::milliseconds settle = std::chrono::milliseconds( 500 ), bool localOff = false );
         ~BmcLinkReader(); // stops and joins
         BmcLinkReader( const BmcLinkReader& ) = delete;
         BmcLinkReader& operator=( const BmcLinkReader& ) = delete;
@@ -231,6 +241,7 @@ namespace oscairn::host
         Message message_;
         Log log_;
         std::chrono::milliseconds settle_;
+        bool localOff_; // still to be sent (reader thread)
         std::mutex lock_; // the pause's wake
         std::condition_variable stopped_;
         std::atomic<bool> stop_{ false };

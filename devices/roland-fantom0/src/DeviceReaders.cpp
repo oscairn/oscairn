@@ -57,8 +57,8 @@ namespace oscairn::host
         return inputs;
     }
 
-    std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play )
+    std::unique_ptr<DeviceReader> openKeyboard( const std::string& device, PlayMidi play, bool localOff )
     {
-        return std::make_unique<Held<BmcLinkReader>>( device, std::move( play ) );
+        return std::make_unique<Held<BmcLinkReader>>( device, std::move( play ), BmcLinkReader::standardError, std::chrono::milliseconds( 500 ), localOff );
     }
 }

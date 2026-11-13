@@ -55,7 +55,7 @@ int main()
         const auto fantom = loadProfile("fantom-07");
         check(fantom.screen()->width == 1280 && fantom.screen()->height == 720 && fantom.screen()->touch && fantom.screen()->layout == "kick-screen" &&
               fantom.panel.protocol == "roland-i2c-slave" && fantom.panel.device == "/dev/i2c-slave-2" && kick.panel.device.empty() &&
-              fantom.keyboard.protocol == "roland-bmc-stock" && fantom.keyboard.device == "/dev/ttyGS0" && kick.keyboard.device.empty(),
+              fantom.keyboard.protocol == "roland-bmc-stock" && fantom.keyboard.device == "/dev/ttyGS0" && fantom.keyboard.localOff && kick.keyboard.device.empty(),
               "the FANTOM-07: a 1280 x 720 touch screen showing the KICK's layout, its I2C panel and its keys over Roland's link; the KICK has neither");
         std::string fantomJson; for(const auto& [id, text] : all) if(id == "fantom-07") fantomJson = text;
         check(refused(replaced(fantomJson, "\"roland-i2c-slave\"", "\"korg-serial\"")), "a panel of a protocol with no reader");
@@ -63,6 +63,7 @@ int main()
         check(refused(replaced(fantomJson, "\"roland-bmc-stock\"", "\"roland-bmc\"")), "a keyboard of a protocol with no reader");
         check(refused(replaced(fantomJson, "\"/dev/ttyGS0\"", "\"ttyGS0\"")), "a keyboard device outside /dev");
         check(refused(replaced(fantomJson, "\"device\": \"/dev/ttyGS0\"", "\"device\": \"/dev/ttyGS0\", \"map\": \"x\"")), "a keyboard takes no map");
+        check(refused(replaced(fantomJson, "\"localOff\": true", "\"localOff\": 1")), "localOff is true or false");
         // Density (RFC 0019): the FANTOM-07's 5.5" screen is dense enough to scale its UI so a
         // touch target stays 6.5 mm across; the KICK's 7" and the MODX M's are not.
         check(std::abs(fantom.screen()->density() - 10.49) < .01 && std::abs(fantom.screen()->scale() - 1.55f) < .01f && kick.screen()->scale() == 1.f &&

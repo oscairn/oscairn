@@ -340,8 +340,8 @@ namespace oscairn::standalone
         }
         if(const auto v = root.getProperty("keyboard"); !v.isVoid())
         {
-            const auto& o = object(v, "keyboard"); fields(o, {"protocol", "device"}, "keyboard");
-            p.keyboard = {text(o, "protocol"), text(o, "device")};
+            const auto& o = object(v, "keyboard"); fields(o, {"protocol", "device", "localOff"}, "keyboard");
+            p.keyboard = {text(o, "protocol"), text(o, "device"), flag(o, "localOff")};
             require(p.keyboard.protocol == "roland-bmc-stock", "a keyboard's protocol is roland-bmc-stock");
             require(p.keyboard.device.starts_with("/dev/"), "a keyboard's device is in /dev");
         }

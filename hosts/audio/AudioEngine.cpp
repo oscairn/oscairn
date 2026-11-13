@@ -215,7 +215,7 @@ namespace oscairn::host
         if( !config.keyboardDevice.empty() )
             keyboard_ = openKeyboard( config.keyboardDevice, [this]( size_t input, const uint8_t* bytes, size_t size ) {
                 incoming( juce::MidiMessage( bytes, int( size ) ), nullptr, -1, keyboardSources_[input] );
-            } );
+            }, config.keyboardLocalOff );
         openMidiOutputs();
         sender_.startThread();
         midiDevicesChanged_ = juce::MidiDeviceListConnection::make( [this] { midiDevicesDirty_ = true; } );

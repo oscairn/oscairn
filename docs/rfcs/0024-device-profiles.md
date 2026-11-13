@@ -180,8 +180,10 @@ An illustrative profile (the values are an example, not a real product's):
   `roland-i2c-slave` likewise names what Roland's stock panel firmware sends. The engine lists the
   keys as a MIDI input named `FANTOM keys`, and MIDI arriving over the same link from the
   instrument's MIDI ports as one input per sender (`FANTOM MIDI 0x81`), so they play like any
-  other input ([running on a FANTOM-0](../fantom-0.md#the-key-reader)). A controller's profile has
-  none.
+  other input ([running on a FANTOM-0](../fantom-0.md#the-key-reader)). `localOff` (added
+  2026-11-12, default false) has the engine tell the instrument's own sound engine Local Switch
+  off when it opens the device, so it does not sound the keys under Oscairn: the one thing the
+  reader writes. A controller's profile has none.
 - **`reliability`:** its level (RFC 0027): `desktop`, `instrument` or `pass-through`.
 - **`apps`:** the apps installed with it (RFC 0022), by app ID; the user can add others. The
   built-in ones are `oscairn.performance`, `oscairn.library`, `oscairn.setlist`,

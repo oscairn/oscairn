@@ -887,6 +887,7 @@ namespace oscairn::standalone
                 {
 #if OSCAIRN_ROLAND_FANTOM0
                     if(!args.contains("--keyboard-device"))audio.keyboardDevice=profile.keyboard.device;
+                    if(!args.contains("--keyboard-device") && profile.keyboard.localOff)audio.keyboardLocalOff=true;
 #else
                     std::fprintf(stderr,"oscairn: %s's keys are not read: this build has no reader for them (OSCAIRN_ROLAND_FANTOM0)\n",profile.name.c_str());
 #endif

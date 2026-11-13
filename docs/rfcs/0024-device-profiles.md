@@ -118,6 +118,12 @@ An illustrative profile (the values are an example, not a real product's):
   reservations in manifests, the app knows its own apps' (RFC 0025's illustrative figures:
   Performance 150, Library 120, Setlist 60, Groovebox 200 MiB; not measured). None of the
   built-in profiles sets them yet.
+
+  Optional `audioThreadCores` (added 2026-11-12): the cores, each below `cores`, the engine's
+  and workers' audio threads may run on (`"audioThreadCores": [1, 2, 3]`), for keeping them off
+  a core that takes the interrupts without an external `taskset`. Linux only; other threads are
+  not moved. It reaches the engine as `OSCAIRN_AUDIO_THREAD_CORES`
+  ([developer guide](../developer-guide.md#environment-variables)). No built-in profile sets it.
 - **`audio`:** its interface, the sample rates and the block size it runs at, headphones (a cue
   bus). Optional `device` (added 2026-11-09): the audio device the engine opens instead of the
   default, for a product whose interface is not ALSA's default or not plain stereo (the

@@ -22,7 +22,9 @@ namespace oscairn::standalone
         struct Platform { std::string os, cpu, runtime, board; } platform;
         // memory and storage in MiB; osMemory and performanceMemory (RFC 0025's memory classes, both
         // or neither): what the OS and everything beside Oscairn need, and the floor for Performances.
-        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; } compute;
+        // audioThreadCores (optional): the cores the audio threads may run on (OSCAIRN_AUDIO_THREAD_CORES,
+        // realtime.h); empty: anywhere.
+        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; std::vector<int> audioThreadCores; } compute;
         // `device` (optional): the audio device the engine opens instead of the default: its name (an
         // ALSA address such as hw:1,0 or PCM name on Linux, a device's name on macOS), its channel
         // count (all opened in each direction used; 0: those mapped), the rate it must run at (0:

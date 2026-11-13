@@ -96,6 +96,8 @@ if [ -n "$headless" ]; then
 	# The engine's control socket, in a directory only root can reach, as the engine requires.
 	mkdir -p /run/oscairn && chmod 700 /run/oscairn
 	export OSCAIRN_RELIABILITY="${OSCAIRN_RELIABILITY:-desktop}"
+	# The cores the audio threads may run on (the profile's compute.audioThreadCores); the app sets it itself.
+	[ -n "${OSCAIRN_AUDIO_THREAD_CORES:-}" ] && export OSCAIRN_AUDIO_THREAD_CORES
 	eval "set -- $OSCAIRN_ENGINE_ARGS"
 	while true; do
 		rm -f /run/oscairn/engine.sock

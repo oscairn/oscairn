@@ -7,6 +7,8 @@
     OSCAIRN_ENGINE_ARGS  oscairn-engine's audio options, as the app passes them to the engine it
                          starts: the block, the audio device and its channel map (audio.device),
                          the panel and the keyboard. Quoted for the shell: the session evaluates it.
+    OSCAIRN_AUDIO_THREAD_CORES  compute.audioThreadCores as a CPU list ("1,2,3"), the cores the
+                         engine's and workers' audio threads may run on; empty: anywhere
 
     engine-args.py PROFILE.json
 """
@@ -52,6 +54,7 @@ def settings(profile):
         "OSCAIRN_HEADLESS": "0" if profile.get("screens") else "1",
         "OSCAIRN_RELIABILITY": profile.get("reliability", "desktop"),
         "OSCAIRN_ENGINE_ARGS": " ".join(shlex.quote(a) for a in engine_args(profile)),
+        "OSCAIRN_AUDIO_THREAD_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("audioThreadCores", [])),
     }
 
 

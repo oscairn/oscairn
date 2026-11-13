@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/session.h"
 #include "oscairn/midi_input.h"
+#include "oscairn/realtime.h"
 #include "AllocationGuard.h"
 
 #include <algorithm>
@@ -469,6 +470,12 @@ namespace
         t.record( 60'000, 5'001'000'000 );
         s = t.read();
         check( s.startup.count() == 1 && s.steady.count() == 1 && s.seconds == .001, "a warm-up's blocks are startup again" );
+
+        // OSCAIRN_AUDIO_THREAD_CORES, as makeRealtime reads it.
+        check( oscairn::worker::cpuMask( "1-3" ) == 0b1110 && oscairn::worker::cpuMask( "0,2,5-6" ) == 0b1100101 && oscairn::worker::cpuMask( "63" ) == uint64_t( 1 ) << 63,
+               "a CPU list as the kernel writes one" );
+        check( !oscairn::worker::cpuMask( "" ) && !oscairn::worker::cpuMask( "3-1" ) && !oscairn::worker::cpuMask( "1," ) && !oscairn::worker::cpuMask( "64" ) &&
+               !oscairn::worker::cpuMask( "a" ) && !oscairn::worker::cpuMask( nullptr ), "a malformed one is none" );
     }
 
     // The session's callback timing from times a host gives it (blockTimes): deterministic

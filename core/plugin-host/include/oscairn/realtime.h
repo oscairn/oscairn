@@ -23,6 +23,11 @@ namespace oscairn::worker
         constexpr int workerAudio = 70; // workers' and the graph's helpers' audio threads
     }
     // The calling thread at real-time priority: a time constraint of the period on macOS, SCHED_FIFO
-    // at linuxPriority on Linux.
+    // at linuxPriority on Linux. On Linux, with OSCAIRN_AUDIO_THREAD_CORES set (a CPU list as the kernel
+    // writes one: "1-3", "2,3"), also kept to those CPUs; every audio thread calls this (the engine's,
+    // the graph's helpers', each worker's), and no other thread does.
     bool makeRealtime(double periodMicroseconds, int linuxPriority = priority::workerAudio) noexcept;
+    // A CPU list's CPUs as bits; 0 for an empty or malformed list or a CPU past 63.
+    // shortcut: CPUs 0 to 63 only; use cpu_set_t throughout for a part with more.
+    uint64_t cpuMask(const char* list) noexcept;
 }

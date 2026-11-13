@@ -85,6 +85,11 @@ int main()
         check(refused(replaced(json, "\"surface\": \"panel\"", "\"surface\": \"hologram\"")), "an unknown surface");
         check(refused(replaced(json, "\"block\": 128", "\"block\": 4")), "a block too small");
         check(refused(replaced(json, "\"cores\": 4, \"realtimeCores\": 1", "\"cores\": 1, \"realtimeCores\": 4")), "more realtime cores than cores");
+        const std::string cores = "\"cores\": 4, \"realtimeCores\": 1";
+        check(Profile::parse(replaced(json, cores, cores + ", \"audioThreadCores\": [1, 2, 3]")).compute.audioThreadCores == std::vector<int>{1, 2, 3} &&
+              Profile::parse(json).compute.audioThreadCores.empty(), "the cores audio threads may run on; none named, anywhere");
+        check(refused(replaced(json, cores, cores + ", \"audioThreadCores\": [4]")) && refused(replaced(json, cores, cores + ", \"audioThreadCores\": \"1-3\"")),
+              "a core past its cores, or not a list");
         check(refused(replaced(json, "\"width\": 1024", "\"width\": 0")), "a screen with no size");
         check(refused("[1, 2]"), "not an object");
         // Control groups: a role each; rows or paging for an assign group of knobs; modes for faders only.

@@ -56,6 +56,16 @@
           "minimum": 0,
           "maximum": 1024
         },
+        "audioThreadCores": {
+          "type": "array",
+          "description": "the cores the engine's and workers' audio threads may run on, each less than cores; omitted: anywhere",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63
+          },
+          "maxItems": 64
+        },
         "memory": {
           "type": "integer",
           "minimum": 0,

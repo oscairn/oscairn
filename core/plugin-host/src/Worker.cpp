@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <thread>
 #include <poll.h>
 #include <sys/mman.h>
@@ -56,6 +58,24 @@ namespace oscairn::worker
 #endif
     }
 
+    uint64_t cpuMask(const char* list) noexcept
+    {
+        if(!list || !*list) return 0;
+        uint64_t mask = 0;
+        for(const char* p = list;;)
+        {
+            char* end = nullptr;
+            const long first = std::strtol(p, &end, 10);
+            if(end == p || first < 0 || first > 63) return 0;
+            long last = first;
+            if(*end == '-') { p = end + 1; last = std::strtol(p, &end, 10); if(end == p || last < first || last > 63) return 0; }
+            for(long c = first; c <= last; ++c) mask |= uint64_t(1) << c;
+            if(!*end) return mask;
+            if(*end != ',') return 0;
+            p = end + 1;
+        }
+    }
+
     bool makeRealtime(double periodUs, int linuxPriority) noexcept
     {
 #ifdef __APPLE__
@@ -66,6 +86,15 @@ namespace oscairn::worker
         return thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY, reinterpret_cast<thread_policy_t>(&policy), THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
 #else
         (void)periodUs; sched_param p{}; p.sched_priority = linuxPriority;
+        if(const char* list = std::getenv("OSCAIRN_AUDIO_THREAD_CORES"); list && *list)
+        {
+            cpu_set_t cpus; CPU_ZERO(&cpus);
+            const auto mask = cpuMask(list);
+            for(int c = 0; c < 64; ++c) if(mask >> c & 1) CPU_SET(c, &cpus);
+            // Once per audio thread, at its start; said, not fatal: the thread runs anywhere then.
+            if(const int e = mask ? pthread_setaffinity_np(pthread_self(), sizeof cpus, &cpus) : EINVAL; e != 0)
+                std::fprintf(stderr, "oscairn: OSCAIRN_AUDIO_THREAD_CORES=%s not applied to an audio thread: %s\n", list, std::strerror(e));
+        }
         return pthread_setschedparam(pthread_self(), SCHED_FIFO, &p) == 0;
 #endif
     }

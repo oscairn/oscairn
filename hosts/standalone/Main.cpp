@@ -906,6 +906,9 @@ namespace oscairn::standalone
                 // RFC 0025: the reliability level reaches the engine and its workers, which lock their
                 // memory and take their places in the out-of-memory order on Linux; this process when it is the engine.
                 setenv( "OSCAIRN_RELIABILITY", profile.reliability.c_str(), 1 );
+                // The cores the engine's and workers' audio threads may run on (realtime.h); one set by the session wins.
+                if( std::string cores; !profile.compute.audioThreadCores.empty() )
+                    { for( auto c : profile.compute.audioThreadCores ) cores += ( cores.empty() ? "" : "," ) + std::to_string( c ); setenv( "OSCAIRN_AUDIO_THREAD_CORES", cores.c_str(), 0 ); }
                 if( socket.isEmpty() && helper.empty() )
                     if( const auto missed = applyMemoryPolicy( -999 ); !missed.empty() && profile.reliability != "desktop" )
                         std::fprintf( stderr, "oscairn: %s\n", missed.c_str() );

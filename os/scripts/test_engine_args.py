@@ -23,7 +23,11 @@ assert engine.engine_args(fantom) == [
 assert engine.settings(fantom)["OSCAIRN_HEADLESS"] == "0"
 assert engine.settings(fantom)["OSCAIRN_RELIABILITY"] == "instrument"
 
+placed = {**fantom, "compute": {**fantom["compute"], "audioThreadCores": [1, 2, 3]}}
+assert engine.settings(placed)["OSCAIRN_AUDIO_THREAD_CORES"] == "1,2,3", "the audio threads' cores as a CPU list"
+
 kick = load("kick")
+assert engine.settings(kick)["OSCAIRN_AUDIO_THREAD_CORES"] == "", "none named: anywhere"
 assert engine.engine_args(kick) == ["--buffer-frames", "128"], "no device: the engine's default device, as before"
 
 pedal = {**kick, "screens": []}

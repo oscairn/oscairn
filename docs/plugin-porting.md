@@ -782,8 +782,9 @@ What changes for the plugin:
 A Linux build (`linux-arm64`, and `linux-x86_64` too) runs on the device's image, so it may
 load only what every image carries and need no newer glibc or libstdc++ than the image's:
 
-- **Libraries (`DT_NEEDED`):** glibc's `libc.so.6`, `libm.so.6`, `libdl.so.2`, `libpthread.so.0`,
-  `librt.so.1` and the loader, `ld-linux-aarch64.so.1` (`ld-linux-x86-64.so.2` on x86-64);
+- **Libraries (`DT_NEEDED`):** glibc's `libc.so.6`, `libm.so.6`, `libmvec.so.1`, `libdl.so.2`,
+  `libpthread.so.0`, `librt.so.1` and the loader, `ld-linux-aarch64.so.1`
+  (`ld-linux-x86-64.so.2` on x86-64);
   GCC's `libgcc_s.so.1` and `libstdc++.so.6`; ALSA's `libasound.so.2`; and the windowing and
   font libraries `libX11.so.6`, `libXext.so.6`, `libXrandr.so.2`, `libXinerama.so.1`,
   `libXcursor.so.1`, `libXrender.so.1`, `libfreetype.so.6` and `libfontconfig.so.1`. Each is in

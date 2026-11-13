@@ -159,6 +159,11 @@ int main(int argc, char** argv)
             const auto found = outsideLibraries(root / "newer.so.clap");
             check(found.size() == 1 && found[0].find(version) != std::string::npos, std::string("refused: ") + version + join(found));
         }
+        // glibc's vector math library, which GCC's -ffast-math calls into, is held to the same glibc.
+        write(root / "mvec.so.clap", elf({"libc.so.6", "libm.so.6", "libmvec.so.1"}, {}, {"GLIBC_2.17", "GLIBC_2.38", "GLIBC_2.39"}));
+        check(outsideLibraries(root / "mvec.so.clap").empty(), "libmvec up to the image's glibc passes:" + join(outsideLibraries(root / "mvec.so.clap")));
+        write(root / "mvec.so.clap", elf({"libc.so.6", "libmvec.so.1"}, {}, {"GLIBC_2.38", "GLIBC_2.45"}));
+        check(outsideLibraries(root / "mvec.so.clap").size() == 1, "libmvec needing a newer glibc is refused:" + join(outsideLibraries(root / "mvec.so.clap")));
 
         // Untrusted bytes: every truncation and random corruptions are reported or pass, never crash.
         std::mt19937 rng(7);

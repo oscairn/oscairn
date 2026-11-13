@@ -260,7 +260,7 @@ namespace oscairn
                     }
                 }
                 static const std::set<std::string> system{
-                    "libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0", "librt.so.1", "libgcc_s.so.1", "libstdc++.so.6",
+                    "libc.so.6", "libm.so.6", "libmvec.so.1", "libdl.so.2", "libpthread.so.0", "librt.so.1", "libgcc_s.so.1", "libstdc++.so.6",
                     "ld-linux-aarch64.so.1", "ld-linux-x86-64.so.2", "libasound.so.2", "libfreetype.so.6", "libfontconfig.so.1",
                     "libX11.so.6", "libXext.so.6", "libXrandr.so.2", "libXinerama.so.1", "libXcursor.so.1", "libXrender.so.1"};
                 for(const auto offset : needed)

@@ -108,8 +108,9 @@ or `readelf`, so a macOS build is checked on Linux too:
   bundle, so it is outside; so are `/opt/homebrew`, `/usr/local` and every other path.
 - **Linux:** every `DT_NEEDED` is one of the libraries every Oscairn image carries, or a file in
   the bundle found through an `$ORIGIN` rpath, and every `DT_RPATH` and `DT_RUNPATH` entry starts
-  with `$ORIGIN`. The libraries: glibc's (`libc.so.6`, `libm.so.6`, `libdl.so.2`,
-  `libpthread.so.0`, `librt.so.1`, `ld-linux-aarch64.so.1`, `ld-linux-x86-64.so.2`), GCC's
+  with `$ORIGIN`. The libraries: glibc's (`libc.so.6`, `libm.so.6`, `libmvec.so.1`,
+  `libdl.so.2`, `libpthread.so.0`, `librt.so.1`, `ld-linux-aarch64.so.1`,
+  `ld-linux-x86-64.so.2`), GCC's
   (`libgcc_s.so.1`, `libstdc++.so.6`), `libasound.so.2` (the host does audio and MIDI, but JUCE
   plugins link ALSA through `juce_audio_devices` even when they never open a device), and the
   desktop's windowing and font libraries the image builds with it (`libX11.so.6`,

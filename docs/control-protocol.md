@@ -1108,10 +1108,13 @@ is listed.
   `performance.setInfo` takes `{name,description,tags}` and an optional `color` (empty when
   absent; the ID is kept) and returns the same. These are not undoable edits.
 - `library.query` takes optional `text` (case-insensitive, over name, description and tags),
-  `tags` (all must match), `favorites`, `recent`, `kind` (`performance` or `sound`; both when
-  absent), `source` (`mine` for the user's own items, or an installed library's ID), `id` (that
+  `tags` (all must match), `favorites`, `recent`, `kind` (one item type's kind, such as
+  `performance` or `sound`; every type when absent), `type` (item types by ID,
+  [RFC 0023](rfcs/0023-item-types.md): one, such as `oscairn.performance`, or a list of up to 32,
+  any of them; every type when absent; an ID the device does not know is invalid), `source`
+  (`mine` for the user's own items, or an installed library's ID), `id` (that
   item only) and `limit` (1–1000, default 200). It returns `{items,tags,total}`: items with `id`,
-  `kind`, `name`, `description`, `path`, `tags`, `favorite`, `recent` (1 is the most recent,
+  `kind`, `type` (its type's ID), `name`, `description`, `path`, `tags`, `favorite`, `recent` (1 is the most recent,
   0 none) and `color`, sorted by name or, with `recent`, most recent first; `tags` counts each
   tag over every match but those the user hid, and `total` counts matches before the limit;
   `tagColors` lists the colors the user gave tags (`{tag,color}`) and `hiddenTags` every hidden one.

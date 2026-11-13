@@ -289,9 +289,11 @@ namespace oscairn
         // unfit: with a budget set, why it does not fit this device, from its plugins' estimates
         // (RFC 0025: measured here, else their packages'); empty when it fits or is not known.
         struct LibraryItem { std::string id, kind = "performance", name, description, path; std::vector<std::string> tags; bool favorite = false; uint32_t recent = 0; std::string color, revision, hash, library; Origin origin; std::string unfit = {}; };
-        // kind: "performance" or "sound"; empty for both. source: "mine" for the user's own items, an
-        // installed library's ID for its items, empty for all. id: that item only, empty for any.
-        struct LibraryQuery { std::string text; std::vector<std::string> tags; bool favorites = false, recent = false; uint32_t limit = 200; std::string kind, source, id; };
+        // kind: one item type's kind ("performance", "sound"...); empty for every type. types: item
+        // types by ID or kind (RFC 0023), any of them; empty for every type. source: "mine" for the
+        // user's own items, an installed library's ID for its items, empty for all. id: that item
+        // only, empty for any.
+        struct LibraryQuery { std::string text; std::vector<std::string> tags; bool favorites = false, recent = false; uint32_t limit = 200; std::string kind, source, id; std::vector<std::string> types = {}; };
         // tags: each tag over every match with its count, but those the user hid from the tag list;
         // tagColors: the colors the user gave tags; hiddenTags: every tag the user hid.
         struct LibraryResult { std::vector<LibraryItem> items; std::vector<std::pair<std::string, uint32_t>> tags; uint32_t total = 0;

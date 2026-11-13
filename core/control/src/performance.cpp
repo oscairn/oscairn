@@ -347,6 +347,8 @@ std::string nextFree(const std::string& name,const std::function<bool(const std:
     return next;
 }
 // An item type the library indexes (RFC 0023), by its kind; its document's name and format.
+// A document's plugins: none in a type whose documents hold none.
+std::vector<V> nodeList(V doc){const V nodes=member(doc,"nodes");return nodes?array(nodes,256):std::vector<V>{};}
 ItemType typeOf(const std::string& kind){auto t=itemType(kind);if(!t || !t->indexed())bad("no item type "+kind+" in the library");return *t;}
 std::string documentOf(const std::string& kind){return typeOf(kind).document;}
 std::string formatOf(const std::string& kind){return typeOf(kind).format;}
@@ -367,7 +369,7 @@ std::vector<assets::Ref> Session::assetsOf(const fs::path& manifest) {
     const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
     if(!doc)bad("invalid JSON in "+manifest.string());
     std::vector<assets::Ref> out;
-    for(auto node:array(field(doc.get(),"nodes"),256))if(member(node,"assets"))
+    for(auto node:nodeList(doc.get()))if(member(node,"assets"))
         for(auto a:array(field(node,"assets"),65536))out.push_back({text(field(a,"library")),text(field(a,"path")),text(field(a,"sha256")),member(a,"optional") && boolean(field(a,"optional"))});
     return out;
 }
@@ -462,7 +464,7 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
         for(const auto& m:manifests){
             const auto bytes=state_files::read(m,4*1024*1024);
             const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
-            for(auto node:array(field(doc.get(),"nodes"),256)){
+            for(auto node:nodeList(doc.get())){
                 const V plugin=field(node,"plugin");
                 const auto format=text(field(plugin,"format")),id=text(field(plugin,"id")),version=text(field(plugin,"version"));
                 const auto name=version.empty()?id:id+" "+version; // LV2 plugins have no version yet
@@ -2018,7 +2020,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         for(const auto& i:items){
             const auto bytes=state_files::read(manifest(i),4*1024*1024);
             const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
-            for(auto node:array(field(doc.get(),"nodes"),256)){const V plugin=field(node,"plugin");used.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
+            for(auto node:nodeList(doc.get())){const V plugin=field(node,"plugin");used.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
         }
         std::set<std::pair<std::string,std::string>> revoked; // builds not installed, by plugin ID and path (a bundle holding several plugins is listed for each)
         std::set<std::pair<std::string,std::string>> replaced; // builds here, by plugin ID and platform, that `replace` puts the archive's over
@@ -2344,7 +2346,7 @@ std::vector<Control::InstalledPlugin> Session::installedPlugins() {
         const std::unique_ptr<json_value_s,decltype(&std::free)> doc{json_parse(bytes.data(),bytes.size()),&std::free};
         if(!doc)continue;
         std::set<std::tuple<std::string,std::string,std::string>> plugins;
-        for(auto node:array(field(doc.get(),"nodes"),256)){const V plugin=field(node,"plugin");plugins.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
+        for(auto node:nodeList(doc.get())){const V plugin=field(node,"plugin");plugins.insert({text(field(plugin,"format")),text(field(plugin,"id")),text(field(plugin,"version"))});}
         uses.push_back({item.name.empty()?"Untitled":item.name,std::move(plugins)});
     }catch(const std::exception&){}
     std::vector<InstalledPlugin> out;

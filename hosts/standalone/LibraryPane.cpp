@@ -3,6 +3,7 @@
 #include "Executable.h"
 #include "PerformanceColors.h"
 #include "SigningKeys.h"
+#include "oscairn/item_types.h"
 #include "oscairn/package.h"
 #include "oscairn/repository.h"
 
@@ -11,6 +12,8 @@ namespace oscairn::standalone
     namespace
     {
         juce::String text(const std::string& s) { return juce::String::fromUTF8(s.c_str()); }
+        // An item type's name, one or many (RFC 0023); the kind itself for a type not known.
+        juce::String noun(const std::string& kind, bool many) { const auto t = itemType(kind); return text(t ? (many ? t->plural : t->name) : kind); }
         const juce::String separator = juce::String::fromUTF8("  ·  "); // a const char* added to a String is not read as UTF-8
         constexpr int longPress = 500; // ms: a press this long opens the menu a right click does
         bool menuGesture(const juce::MouseEvent& e) { return e.mods.isPopupMenu() || (e.getLengthOfMousePress() >= longPress && !e.mouseWasDraggedSinceMouseDown()); }
@@ -182,13 +185,13 @@ namespace oscairn::standalone
         signer_ = describeSigner(a.signer);
         own.setRadioGroupId(1); locked.setRadioGroupId(1);
         (a.kind == "library" ? locked : own).setToggleState(true, juce::dontSendNotification);
-        for(const bool sound : {false, true})
+        for(const auto& type : itemTypes())
         {
             bool headed = false;
             for(const auto& i : a.items)
             {
-                if((i.kind == "sound") != sound) continue;
-                if(!headed) { list.addAndMakeVisible(headings.add(new juce::Label({}, sound ? "Sounds" : "Performances"))); headed = true; }
+                if(i.kind != type.kind()) continue;
+                if(!headed) { list.addAndMakeVisible(headings.add(new juce::Label({}, text(type.plural)))); headed = true; }
                 auto* b = items.add(new juce::ToggleButton(text(i.name.empty() ? "Untitled" : i.name)));
                 b->setToggleState(true, juce::dontSendNotification); list.addAndMakeVisible(b); ids.push_back(i.id);
             }
@@ -352,8 +355,7 @@ namespace oscairn::standalone
     // What to type, as long as the box allows: touch sizes leave it narrower.
     void LibraryPane::updatePlaceholder()
     {
-        const bool sound = query_.kind == "sound";
-        const juce::String what = sound ? "Sounds" : "Performances";
+        const auto what = noun(query_.kind, true);
         search_.setTextToShowWhenEmpty(mode() == 2 ? "Search " + what : "Search " + what + " by name, tag or description", ink(Ink::Muted));
     }
 
@@ -441,7 +443,7 @@ namespace oscairn::standalone
         for(size_t i = 0; i < result_.items.size(); ++i) if(result_.items[i].id == selected) list_.selectRow(int(i), true, true);
         const bool sound = query_.kind == "sound";
         if(awaiting_) { awaiting_ = false; tell(text(engine_.soundMessage())); } // what an install or export did, or why not
-        if(message_.isEmpty()) status_.setText(juce::String(result_.total) + (sound ? (result_.total == 1 ? " Sound" : " Sounds") : (result_.total == 1 ? " Performance" : " Performances")), juce::dontSendNotification);
+        if(message_.isEmpty()) status_.setText(juce::String(result_.total) + " " + noun(query_.kind, result_.total != 1), juce::dontSendNotification);
         const bool none = result_.total == 0 && query_.text.empty() && query_.tags.empty() && !query_.favorites && !query_.recent && query_.source.empty();
         if(none) empty.setText(libraryEmpty(sound, installedPluginPackages(engine_)), juce::dontSendNotification);
         empty.setVisible(none); browse.setVisible(none && mode_ == Mode::Play);

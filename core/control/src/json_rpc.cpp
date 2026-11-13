@@ -6,6 +6,7 @@
 #include "CurveJson.h"
 #include "PropertyWire.h"
 #include "sheredom/json.h"
+#include "oscairn/item_types.h"
 
 #include <algorithm>
 #include <array>
@@ -838,10 +839,17 @@ namespace oscairn
                 return "{\"id\":"+quote(i.id)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"tags\":"+tags(i.tags)+",\"color\":"+quote(i.color)+",\"unsaved\":"+(i.unsaved?"true":"false")+'}';
             }
             if(method=="library.query") {
-                fields(p,{"text","tags","favorites","recent","limit","kind","source","id"});Control::LibraryQuery q;
+                fields(p,{"text","tags","favorites","recent","limit","kind","type","source","id"});Control::LibraryQuery q;
+                // Item types the library indexes (RFC 0023), by kind or by ID.
+                auto indexed=[](const std::string& t){const auto type=itemType(t);return type && type->indexed();};
                 if(member(p,"id")){q.id=std::string(string(member(p,"id")));if(q.id.empty())invalid("Empty library ID");}
                 if(member(p,"source")){q.source=std::string(string(member(p,"source")));if(q.source.empty())invalid("Empty library source");}
-                if(member(p,"kind")){q.kind=std::string(string(member(p,"kind")));if(q.kind!="performance" && q.kind!="sound")invalid("Unknown library kind");}
+                if(member(p,"kind")){q.kind=std::string(string(member(p,"kind")));if(!indexed(q.kind) || itemType(q.kind)->kind()!=q.kind)invalid("Unknown library kind");}
+                if(const auto t=member(p,"type")){
+                    if(t->type==json_type_string)q.types.push_back(std::string(string(t)));
+                    else for(auto x:array(t,32,1))q.types.push_back(std::string(string(x)));
+                    for(const auto& x:q.types)if(!indexed(x) || itemType(x)->id!=x)invalid("Unknown item type");
+                }
                 if(member(p,"text"))q.text=std::string(string(member(p,"text")));
                 if(member(p,"tags"))for(auto t:array(member(p,"tags"),32,0))q.tags.push_back(std::string(string(t)));
                 if(member(p,"favorites"))q.favorites=boolean(member(p,"favorites"));
@@ -851,7 +859,8 @@ namespace oscairn
                 try{r=c.libraryQuery(q);}catch(const std::exception& e){throw Failure{-32005,e.what()};}
                 std::vector<std::string> items,counts;
                 for(const auto& i:r.items){std::vector<std::string> t;for(const auto& x:i.tags)t.push_back(quote(x));
-                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+'}');}
+                    const auto type=itemType(i.kind);
+                    items.push_back("{\"id\":"+quote(i.id)+",\"kind\":"+quote(i.kind)+",\"type\":"+quote(type?type->id:i.kind)+",\"name\":"+quote(i.name)+",\"description\":"+quote(i.description)+",\"path\":"+quote(i.path)+",\"tags\":"+join(t)+",\"favorite\":"+(i.favorite?"true":"false")+",\"recent\":"+std::to_string(i.recent)+",\"color\":"+quote(i.color)+",\"revision\":"+quote(i.revision)+",\"hash\":"+quote(i.hash)+",\"library\":"+quote(i.library)+(i.unfit.empty()?std::string():",\"unfit\":"+quote(i.unfit))+'}');}
                 for(const auto& [tag,n]:r.tags)counts.push_back("{\"tag\":"+quote(tag)+",\"count\":"+std::to_string(n)+'}');
                 std::vector<std::string> colors,hidden;
                 for(const auto& [tag,color]:r.tagColors)colors.push_back("{\"tag\":"+quote(tag)+",\"color\":"+quote(color)+'}');

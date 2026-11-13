@@ -11,7 +11,7 @@ namespace oscairn
     {
         if(audition_) auditionStop(false);
         const auto* item = library().find(id);
-        if(!item) throw std::invalid_argument("no such library item");
+        if(!item || (item->kind != "sound" && item->kind != "performance")) throw std::invalid_argument("no such Performance or Sound in the library");
         const auto found = *item;
         if(found.kind == "sound") findPart(part); // throws for one that is not there
         Auditioning a;

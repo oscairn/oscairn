@@ -9,6 +9,7 @@ A library, an exported Performance or Sound, or a plugin package is one archive 
 | `library.sig` | Optional: the whole archive's signature, `{key, signature}` over `oscairn-archive-1\0` and the manifest's exact bytes ([signatures](#signatures)) |
 | `Performances/<folder>/` | Each Performance as the library keeps it: `performance.json` ([format](performance-format.md)) and `nodes/` |
 | `Sounds/<folder>/` | Each Sound the same way, `sound.json` and `nodes/` |
+| `<type folder>/<folder>/` | Each item of any other [item type](rfcs/0023-item-types.md) the reading device knows, in its type's folder, as the library keeps it |
 | `Assets/<first 16 hex digits of the SHA-256>/<file>` | Each sample the items' plugins use, once; in an [asset package](#asset-packages), `Assets/<path>`, the library's files at their paths |
 | `Plugins/<format>/<id>@<version>/<platform>/<bundle>` | Each plugin build the items use ([RFC 0006](rfcs/0006-packages-and-portability.md)), a file or a bundle folder as installed; characters other than letters, digits, `.`, `-`, `@` and `_` in the ID and version are `_` |
 | `Licenses/<file>` | Its license texts and notices ([license and source](#license-and-source)) |
@@ -20,12 +21,12 @@ The manifest:
 | `format`, `version` | Exactly `oscairn.library` and integer `3` |
 | `id` | The library's ID: its folder's name when installed as a library, and what imported copies record as their `origin`; 1 to 64 letters, digits, `.`, `-` and `_`, the first one a letter or digit and the last not a `.` |
 | `name` | Its name |
-| `kind` | `library`, `performance` for an exported Performance, `sound` for an exported Sound (its ID and name are that item's), `plugin` for a [plugin package](#plugin-packages): plugin builds and no items, or `asset` for an [asset package](#asset-packages). Any other kind is refused |
+| `kind` | `library`, `performance` for an exported Performance, `sound` for an exported Sound, or another item type's kind for one exported item of that type (its ID and name are that item's), `plugin` for a [plugin package](#plugin-packages): plugin builds and no items, or `asset` for an [asset package](#asset-packages). Any other kind is refused |
 | `assets` | An asset package's library: its `version` and `files` ([asset packages](#asset-packages)); `null` for every other kind |
 | `dependencies` | `{"assets": [...]}`: the asset libraries a plugin package needs, each `{id, version}`, the least version; empty for every other kind. `packages`, beside it: the packages a library, Performance or Sound needs ([below](#package-dependencies)). Not built: no reader takes it yet |
 | `license` | Its license, an SPDX expression (at most 256 bytes); empty when it names none. A plugin package names one |
 | `source` | `null`, or where its source is: `{url, revision}`, an `https://` address and the exact commit or tag (at most 2048 and 128 bytes, no spaces or control characters) |
-| `items` | Each item's `kind` (`performance` or `sound`), `id` (as plain as the library's: an exported item's ID is its archive's), `name`, `path`, its folder in the archive, and `signatures` (optional) |
+| `items` | Each item's `kind` (its [item type](rfcs/0023-item-types.md)'s: `performance`, `sound`, or another type's), `id` (as plain as the library's: an exported item's ID is its archive's), `name`, `path`, its folder in the archive, and `signatures` (optional) |
 | `plugins` | Each plugin's `format`, `id`, `version`, `name` and `builds`: each build's `platform` (such as `macos-arm64` or `linux-arm64`), `path` in the archive, `sha256`, its digest as a [Performance's lock](performance-format.md) gives it, `signatures` (optional) and `estimate` (optional, [RFC 0025](rfcs/0025-resource-budgets.md#status): `{cpu,memory}`, its busiest block's share of the block's time, 0 to 64, and the bytes it holds, at most 1 TiB, as `oscairn-plugin-check` measures it on that platform; installing keeps it beside the build as `estimate.json`, and a device that has not measured the plugin counts it at this) |
 | `files` | Every other entry's SHA-256, by its path |
 | `pluginRepositories` | Optional: where the plugins its items use are published ([below](#where-plugins-are-published)). Not built: no reader takes it yet |
@@ -337,8 +338,9 @@ packages are in the same snapshot, and libraries are installed after the package
 An archive is untrusted. Reading extracts it into a new folder of its own, refusing, and leaving
 nothing behind:
 
-- an entry outside `library.json`, `Performances/`, `Sounds/`, `Assets/`, `Plugins/` and
-  `Licenses/`;
+- an entry outside `library.json`, `library.sig`, the folders of the item types the device knows
+  (`Performances/`, `Sounds/`, `Assets/` and each other type's, [RFC 0023](rfcs/0023-item-types.md)),
+  `Plugins/` and `Licenses/`, and an item of a type the device does not know;
 - a plugin package naming no license, or under the GPL, LGPL or AGPL without its `source` or a
   file under `Licenses/`, and a `source` that is not an `https://` address and a revision;
 - a plugin or asset package whose license names a `LicenseRef-` without a file under
@@ -427,7 +429,7 @@ that. A pulled drive or a bad hash leaves nothing behind.
   that differs from an installed library's only in letter case names the same folder on a
   case-insensitive file system (macOS's and Windows's by default), so there it is refused: two
   libraries never share a folder.
-- **Into the user's own storage:** each item is copied into `Performances/` or `Sounds/` under a
+- **Into the user's own storage:** each item is copied into its type's folder (`Performances/`, `Sounds/`...) under a
   new ID and a new revision, its info's `origin` recording the archive's ID, the item's ID there
   and the copy's content hash. A Performance's parts that came from a Sound in the archive point
   at that Sound's copy. Installing again skips an item whose copy is still there with that hash;

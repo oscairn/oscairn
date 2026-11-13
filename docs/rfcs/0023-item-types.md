@@ -11,7 +11,7 @@ Status: proposed, 2026-11-01. Builds on the library
 Checked when built and tested; the sections below say how.
 
 - [x] 1. Built-in types: today's Performances, Sounds and samples described as types, with no change in behavior
-- [ ] 2. Queries and requests by type: `library.query` by `type`, `oscairn.pick.<type>` actions, archives by type
+- [x] 2. Queries and requests by type: `library.query` by `type`, `oscairn.pick.<type>` actions, archives by type
 - [ ] 3. Installed types: declared by packages, for documents with an info block and for folders indexed in place
 - [ ] 4. Extractors: sandboxed metadata readers for files with no info block (audio, plugin presets)
 - [ ] 5. A database index, for libraries of tens of thousands of items
@@ -32,6 +32,17 @@ Where this RFC left a choice, the smaller reading was taken:
   top-level folders are its types' folders, `Plugins` and `Licenses`. A type's folder may not be
   one Oscairn keeps in the data folder (`Plugins`, `Licenses`, `Libraries`, `AssetLibraries`,
   `Keys`, `AppData`, `library`, `assets`), and two types never share a folder, in any letter case.
+- **Step 2.** `library.query` takes `type`, one type ID or a list (any of them); `kind` stays,
+  one kind, and each item says its `type`. No type declares `fields` yet, so a query returns no
+  facets; they come with the types that declare them (step 3). Picks are named by kind,
+  `oscairn.pick.<kind>`, so Oscairn's stay `oscairn.pick.performance` and `oscairn.pick.sound` as
+  RFC 0022 named them, and another type's is `oscairn.pick.<its ID>`; the Library offers one for
+  every type it indexes. Not built in this step: `oscairn.send.<type>` beyond the Setlist's
+  `oscairn.send.performance`, replacement pickers, and the SDK's picker component. Archives hold
+  one folder per type the device knows; an item of a type it does not know is refused, as before,
+  until installed types (step 3) give the type a place to be kept. The gate's pick is the
+  desktop Library's; the core test (`control-item-types`) shows the library indexing, querying,
+  exporting and installing a type added in the test, and the Library's code asks for any type by kind.
 
 ## Problem
 

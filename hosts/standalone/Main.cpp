@@ -24,6 +24,7 @@
 #include "DeviceScreen.h"
 #include "Engine.h"
 #include "Layout.h"
+#include "oscairn/item_types.h"
 #include "LibraryPane.h"
 #include "Launcher.h"
 #include "KeyboardWindow.h"
@@ -166,11 +167,12 @@ namespace oscairn::standalone
                 engine_.onNotesOff = [this] { keyboards_->releaseAll(); };
             }
 
-            // What the built-in apps offer each other (RFC 0022): the Library picks; Play hears the
-            // setlist's entry playing. Apps that are processes (the Setlist) offer theirs from
-            // their manifests, found in Apps/ beside this program.
-            actions_.offer(pickPerformance,"Library",[this](const std::string&,Actions::Answer answer){showPicker(std::move(answer),"performance");});
-            actions_.offer(pickSound,"Library",[this](const std::string&,Actions::Answer answer){showPicker(std::move(answer),"sound");});
+            // What the built-in apps offer each other (RFC 0022): the Library picks, an item of
+            // every type it indexes (RFC 0023: oscairn.pick.<kind>); Play hears the setlist's
+            // entry playing. Apps that are processes (the Setlist) offer theirs from their
+            // manifests, found in Apps/ beside this program.
+            for(const auto& type:itemTypes())if(type.indexed())
+                actions_.offer("oscairn.pick."+type.kind(),"Library",[this,kind=type.kind()](const std::string&,Actions::Answer answer){showPicker(std::move(answer),kind);});
             actions_.offer(sendSetlistEntry,"Performance",[this](const std::string& id,Actions::Answer answer){setlistEntry_=id;answer("shown");});
             const auto binary=executableFile().getParentDirectory();
             // Apps run as processes only against an engine on a socket (not --in-process).
@@ -629,7 +631,8 @@ namespace oscairn::standalone
                 if(pending)pending(id);
             };
             closePicker();
-            const juce::String title=kind=="sound"?"Choose a Sound":"Choose a Performance";
+            const auto type=itemType(kind);
+            const juce::String title="Choose a "+juce::String::fromUTF8((type?type->name:kind).c_str());
             if(auto* p=panel()){
                 // Over the screen, in a frame whose Back cancels; what was over it comes back after.
                 auto cancel=barShell();cancel.home=cancel.back=[pane]{pane->onPicked({});};cancel.apps={};

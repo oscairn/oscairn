@@ -140,6 +140,12 @@ with tempfile.TemporaryDirectory(prefix='oscairn-library-') as temporary:
         assert sound['left'] == ['the input to synth', 'synth to the output'] and (home / 'Sounds/Lead Sound.osound/sound.json').is_file()
         assert [i['id'] for i in rpc('library.query', {'kind': 'sound'})['items']] == [sound['id']]
         assert rpc('library.query', {'kind': 'performance'})['total'] == 1
+        # By type (RFC 0023): one ID or a list; each item says its type; a type not known is invalid.
+        assert [i['id'] for i in rpc('library.query', {'type': 'oscairn.sound'})['items']] == [sound['id']]
+        assert rpc('library.query', {'type': ['oscairn.sound', 'oscairn.performance']})['total'] == 2
+        assert rpc('library.query', {'type': 'oscairn.sound'})['items'][0]['type'] == 'oscairn.sound'
+        rpc('library.query', {'type': 'org.example.none'}, expect_error=True)
+        rpc('library.query', {'kind': 'oscairn.sound'}, expect_error=True)
         added = rpc('parts.fromSound', {'id': sound['id']})['part']
         loaded = rpc('parts.loadSound', {'part': part, 'id': sound['id']})
         assert loaded == {'accepted': True, 'flagged': ['the wire from the input to synth was removed', 'the wire from synth to the output was removed']}, loaded

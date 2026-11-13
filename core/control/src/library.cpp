@@ -307,6 +307,8 @@ namespace oscairn
         Control::LibraryResult result;
         const auto text = lower(q.text);
         std::vector<Control::LibraryItem> found;
+        std::vector<std::string> kinds; // the types asked for, by kind (RFC 0023)
+        for(const auto& t : q.types) kinds.push_back(itemType(t) ? itemType(t)->kind() : t);
         for(auto item : items_)
         {
             item.favorite = std::find(favorites_.begin(), favorites_.end(), item.id) != favorites_.end();
@@ -316,6 +318,7 @@ namespace oscairn
             if(!std::all_of(q.tags.begin(), q.tags.end(), [&](const std::string& t) { return std::find(item.tags.begin(), item.tags.end(), t) != item.tags.end(); })) continue;
             if(q.favorites && !item.favorite) continue;
             if(!q.kind.empty() && item.kind != q.kind) continue;
+            if(!kinds.empty() && std::find(kinds.begin(), kinds.end(), item.kind) == kinds.end()) continue;
             if(!q.id.empty() && item.id != q.id) continue;
             if(!q.source.empty() && item.library != (q.source == "mine" ? std::string() : q.source)) continue;
             if(q.recent && !item.recent) continue;

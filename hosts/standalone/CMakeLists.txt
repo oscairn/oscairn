@@ -320,3 +320,10 @@ if(APPLE)
     list(REMOVE_ITEM window_tests desktop-window-order)
     set_property(TEST ${window_tests} APPEND PROPERTY ENVIRONMENT "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:oscairn_hidden_windows>")
 endif()
+
+# Popups on a device's screen, at its window's scale (RFC 0019): menus, alerts and lists one touch target tall.
+juce_add_console_app(oscairn_popups_test PRODUCT_NAME "Oscairn Popups Test")
+target_sources(oscairn_popups_test PRIVATE tests/popups.cpp Theme.cpp DesktopProfile.cpp)
+target_link_libraries(oscairn_popups_test PRIVATE oscairn_standalone_icons oscairn_audio_host juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_popups_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_test(NAME desktop-popups COMMAND oscairn_popups_test "${CMAKE_CURRENT_SOURCE_DIR}/themes")

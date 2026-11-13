@@ -455,7 +455,8 @@ int main(int argc, char** argv)
                 // From the Setlist, Add asks for a pick, which the Library answers.
                 const auto folder = data.getChildFile("Setlists");
                 setlist = std::make_unique<standalone::SetlistPane>(engine, actions);
-                auto saved = [&] { Control::Setlist s; engine.setlist(setlist->setlist().info.id, s); return s; };
+                // As the library has it: read once the engine answers (not while it opens a Performance).
+                auto saved = [&] { Control::Setlist s; wait([&] { return engine.setlist(setlist->setlist().info.id, s).empty(); }); return s; };
                 standalone::setDesktopMode(*setlist, 1); setlist->setSize(700, 760);
                 setlist->create("Friday");
                 setlist->addFromLibrary();

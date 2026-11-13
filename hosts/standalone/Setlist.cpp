@@ -204,6 +204,8 @@ namespace oscairn::standalone
 
     void SetlistPane::save()
     {
+        // While the engine opens a Performance, a change to a saved setlist waits its turn rather than being lost.
+        if(!setlist_.info.id.empty() && engine_.connected() && engine_.soundBusy()) { engine_.edit([s = setlist_](Control& c) { c.saveSetlist(s); }); return; }
         std::string id;
         if(const auto error = engine_.saveSetlist(setlist_, id); !error.empty()) { say(text(error)); return; }
         const bool renewed = id != setlist_.info.id; // new, or a locked library's saved as the user's own

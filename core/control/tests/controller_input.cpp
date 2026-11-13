@@ -3,7 +3,7 @@
 // RFC 0011's instant controls: a controller's MIDI into the engine moves what its control plays
 // within one block, with no control thread, socket or plan compile on the way; and pickup,
 // latching and momentary buttons, relative encoders and groups' rows behave as the app's
-// mapping did; and, with the engine's threads as they run, how long a move takes to be heard
+// mapping did; a device's PLAY and STOP buttons start and stop the transport; and, with the engine's threads as they run, how long a move takes to be heard
 // (MIDI to the rendered level, paced like an audio device, judged in blocks rendered) and to
 // reach a client's cached values over the socket (what a UI shows, judged against the clock).
 #include "oscairn/session.h"
@@ -238,6 +238,21 @@ namespace
         s.service();
         check(near(render(s), .5 * .8 * .5 + .5 * .75), "and the model's");
         check(s.plansCompiled() == plans, "no plan compiled for any of it: " + std::to_string(s.plansCompiled() - plans));
+    }
+
+    // A device's transport buttons, by their function's name as its panel reader gives them (the
+    // FANTOM-07's PLAY and STOP): the transport is stopped at start, PLAY pressed starts it, STOP
+    // pressed stops it, and a release does nothing; with the control thread not run.
+    void transportButtons()
+    {
+        Session s(48000, frames);
+        auto playing = [&] { render(s); return s.transportState().playing; };
+        using Kind = ControlInput::Kind;
+        check(!playing(), "the transport is stopped at start");
+        check(s.controllerControl("play", {Kind::Switch, 1}) && playing(), "PLAY pressed starts the transport");
+        check(!s.controllerControl("play", {Kind::Switch, 0}) && playing(), "its release plays nothing and leaves it playing");
+        check(s.controllerControl("stop", {Kind::Switch, 1}) && !playing(), "STOP pressed stops it");
+        check(!s.controllerControl("stop", {Kind::Switch, 0}) && !playing(), "and its release plays nothing");
     }
 
     // Scene buttons: a scene that changes only live levels, pans and parameters, at once, heard
@@ -646,7 +661,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 2) { std::fprintf(stderr, "usage: %s FIXTURE\n", argv[0]); return 2; }
-    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
+    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); transportButtons(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
     catch(const std::exception& e) { forbidAllocation = false; std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(!failures) std::puts("ok: a controller's MIDI into the engine moves its controls' targets within one block");
     return failures ? 1 : 0;

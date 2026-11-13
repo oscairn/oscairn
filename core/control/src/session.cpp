@@ -572,7 +572,16 @@ namespace oscairn
         return v;
     }
     void Session::controllerMidi( uint8_t source, const uint8_t* bytes, size_t size ) noexcept { controllers_->midi( source, bytes, size ); }
-    bool Session::controllerControl( const std::string& control, ControlInput input ) noexcept { return controllers_->control( control, input ); }
+    bool Session::controllerControl( const std::string& control, ControlInput input ) noexcept
+    {
+        if( control == "play" || control == "stop" ) // on the press, as the app's Play and Stop; a release plays nothing
+        {
+            const bool press = input.kind == ControlInput::Kind::Switch && input.value >= .5;
+            if( press ) setPlaying( control == "play" );
+            return press;
+        }
+        return controllers_->control( control, input );
+    }
     void Session::setControllerWake( std::function<void()> wake ) { controllers_->setWake( std::move( wake ) ); }
     void Session::serviceControllers() { controllers_->service(); sendParameters(); }
 

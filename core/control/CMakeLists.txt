@@ -123,6 +123,9 @@ if(Python3_Interpreter_FOUND)
     # The package repository template's index builder (RFC 0031), signed with oscairn-sign.
     add_test(NAME package-repository-index COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/test_build_index.py" $<TARGET_FILE:oscairn-sign>)
     set_tests_properties(package-repository-index PROPERTIES TIMEOUT 120)
+    # Its checks of revoked.json, at least as strict as a device's reading of the list.
+    add_test(NAME package-repository-revocations COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/test_revocations.py" $<TARGET_FILE:oscairn-sign>)
+    set_tests_properties(package-repository-revocations PROPERTIES TIMEOUT 300)
     # Installing from a repository that index builder made (RFC 0031 step 1), through RPC.
     add_test(NAME control-repository COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/repository.py" $<TARGET_FILE:oscairn-json-rpc-test> $<TARGET_FILE:oscairn_basic_synth>
         $<TARGET_FILE:oscairn-sign> $<TARGET_FILE:kick-clap-fixture-normal> "${PROJECT_SOURCE_DIR}/tools/package-repository/template/scripts/build-index.py")

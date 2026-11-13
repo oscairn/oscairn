@@ -98,7 +98,9 @@ Checked when built and tested; the sections below say how.
       root key after the serial is taken; withdrawn versions and revoked keys' packages listed as
       withdrawn and never installed, the official list's keys and builds applying to every
       repository; what is installed reported (`packages.installed`'s `withdrawn`, the Catalog),
-      never removed; `control-repository`, `desktop-gaps`. Not yet: the takedown policy, the
+      never removed; `control-repository`, `desktop-gaps`. 2026-11-12: the index builder refuses a
+      `revoked.json` a device could not read, or one revoking the repository's own root or index
+      key, naming each entry's problem (`package-repository-revocations`). Not yet: the takedown policy, the
       official list in system images, revoked builds in what is installed, remembering revoked
       index keys; the official list applying to another repository is not tested)
 - [ ] 5. Discovery: Install… in the Library, the Catalog app, compatibility filters

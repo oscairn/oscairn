@@ -754,7 +754,9 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
 
     def publish(name, serial, revoked=None, change=None):
         (repo / 'revoked.json').write_text(json.dumps({'format': 'oscairn.repository-revocations', 'version': 1, 'keys': [], 'builds': [], 'versions': [], **(revoked or {})}))
-        out = site(name, serial)
+        # Every release counts as published (--previous is the same tree), so a revoked key's stay
+        # listed rather than refused as new ones.
+        out = site(name, serial, '--previous', repo)
         if change:  # the root changed after it was built, and signed again
             root = json.loads((out / 'repository.json').read_text())
             change(out, root)
@@ -811,14 +813,16 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         check(state['state'] == 'failed' and 'older than one this device has seen (22)' in state['error'] and keys['publisher'][1] in kept_list(),
               'an older list comes only with its older root, which is refused; the newer list stays kept: ' + state['error'])
 
-        def malformed(out, root):
-            bad = b'{"format":"oscairn.repository-revocations","version":1,"keys":"none","builds":[],"versions":[]}'
-            sha = hashlib.sha256(bad).hexdigest()
-            (out / 'revocations' / f'{sha}.json').write_bytes(bad)
-            root['revocations'] = {'path': f'revocations/{sha}.json', 'sha256': sha, 'size': len(bad)}
+        def malformed(bad):  # a list the index builder refuses, put in after it ran
+            def change(out, root):
+                sha = hashlib.sha256(bad).hexdigest()
+                (out / 'revocations' / f'{sha}.json').write_bytes(bad)
+                root['revocations'] = {'path': f'revocations/{sha}.json', 'sha256': sha, 'size': len(bad)}
+            return change
+        no_date = b'{"format":"oscairn.repository-revocations","version":1,"keys":[],"builds":[],"versions":[{"id":"org.kick.test.synth","version":"1.0.0","reason":"no date"}]}'
         before = kept_list()
-        for name, revoked, change, why in (('revoking23', {'versions': [{'id': 'org.kick.test.synth', 'version': '1.0.0', 'reason': 'no date'}]}, None, 'revocation list: date'),
-                                           ('revoking23b', None, malformed, 'has no `keys` list'),
+        for name, revoked, change, why in (('revoking23', None, malformed(no_date), 'revocation list: date'),
+                                           ('revoking23b', None, malformed(b'{"format":"oscairn.repository-revocations","version":1,"keys":"none","builds":[],"versions":[]}'), 'has no `keys` list'),
                                            ('revoking23c', None, lambda out, root: root.pop('revocations'), 'names no revocation list')):
             publish(name, 23, revoked, change)
             state = job('packages.list', {'source': str(at)})

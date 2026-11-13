@@ -93,6 +93,11 @@ FEATURES = [
 ]
 
 
+# Oscairn's options that only set up the image's own kernel. An image without one (a root
+# filesystem for a chroot on another system's kernel) cannot set them: that kernel decides.
+KERNEL_ONLY_OPTIONS = {"BR2_PACKAGE_OSCAIRN_USB_GADGET"}
+
+
 def read_config(path):
     """A Kconfig file's set options, as {name: value} (unset and commented options left out)."""
     values = {}
@@ -132,7 +137,7 @@ def check(name, br2, profile, kernel=None, target=None):
         if declared and f.test_only:
             problem(f, "is for tests only, and no product's profile declares it")
         for option in f.options:
-            if declared and option not in br2:
+            if declared and option not in br2 and (option not in KERNEL_ONLY_OPTIONS or "BR2_LINUX_KERNEL" in br2):
                 problem(f, f"declared by the profile, but {option} is not set")
             if not declared and option in br2:
                 problem(f, f"not in the profile, but {option} is set")

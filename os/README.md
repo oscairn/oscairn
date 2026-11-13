@@ -195,7 +195,11 @@ build, so a mismatch fails the build. For each feature, from the profile:
 | Camera | `camera` (none yet) | `CONFIG_MEDIA_SUPPORT` | the media subsystem, libcamera, libv4l |
 
 At build time it reads Buildroot's `.config`, the kernel's resolved `.config` and the target
-folder. `os/scripts/test_image_profile.py` (the `image-profile-consistency` test in the CMake
+folder. An image without a kernel of its own (a root filesystem for a chroot on another system's
+kernel) has no kernel config to check, and needs no `BR2_PACKAGE_OSCAIRN_USB_GADGET`: the kernel
+it runs on decides.
+
+`os/scripts/test_image_profile.py` (the `image-profile-consistency` test in the CMake
 build) checks every product defconfig against its profile from the Buildroot options alone, and
 each rule on a made-up pedal with nothing optional: one thing of a missing feature left in (an
 option, a package, a kernel option, a file, a program naming a library), or a declared feature

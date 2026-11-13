@@ -97,9 +97,11 @@ with tempfile.TemporaryDirectory(prefix="oscairn-image-") as temporary:
     fails("a product profile declaring the simulated accelerator", needle="for tests only",
           profile={**pedal, "hardware": {"accelerators": [{"id": "sim0", "kind": "simulated", "abi": "oscairn.sim/1",
                                                            "operations": ["oscairn.sim.sine/1"]}]}})
-    fails("a USB device port without the gadget option", profile={**pedal, "midi": {"usbDevice": True}},
+    fails("a USB device port without the gadget option", br2={"BR2_LINUX_KERNEL": "y"}, profile={**pedal, "midi": {"usbDevice": True}},
           kernel_extra={"CONFIG_USB_GADGET": "y", "CONFIG_USB_CONFIGFS_F_MIDI": "y", "CONFIG_USB_CONFIGFS_F_UAC2": "y"},
           needle="BR2_PACKAGE_OSCAIRN_USB_GADGET is not set")
+    expect(check.check("pedal", base, {**pedal, "midi": {"usbDevice": True}}) == [],
+           "an image without a kernel of its own (a chroot bundle) needs no gadget option for a USB device port")
 
 # The command line fails a mismatched image (as post-build.sh runs it, failing the build).
 with tempfile.TemporaryDirectory(prefix="oscairn-image-") as temporary:

@@ -595,7 +595,9 @@ int main(int argc, char** argv)
                 check(wait([&] { return !engine.soundBusy(); }) && archive.existsAsFile() && engine.soundMessage() == "Performance exported.", "exported: " + engine.soundMessage());
                 Control::Archive exported;
                 check(engine.archiveContents(archive.getFullPathName().toStdString(), exported).empty() && exported.kind == "performance", "its contents read back");
-                // Installed back as the user's own, the default for an export: a copy under a new ID.
+                // Installed back as the user's own, the default for an export: the open Performance,
+                // not in the library, a copy under a new ID; its part's Sound, still in the library
+                // as it was exported, not added twice (a copy of it is the Library's Duplicate).
                 // The library answers only while the engine is free: wait for an answer, not a guess.
                 auto total = [&] { std::optional<Control::LibraryResult> r; wait([&] { return (r = engine.library({})).has_value(); }); return r ? r->total : ~0u; };
                 const auto before = total();
@@ -609,8 +611,8 @@ int main(int argc, char** argv)
                 standalone::SoundAction in; in.kind = standalone::SoundAction::InstallArchive; in.directory = archive.getFullPathName().toStdString(); in.acceptCode = true;
                 engine.soundAction(std::move(in));
                 const auto count = exported.items.size(); // the Performance, and the Sound its part still is
-                check(wait([&] { return !engine.soundBusy(); }) && engine.soundMessage() == "Installed " + std::to_string(count) + ".", "installed: " + engine.soundMessage());
-                check(count == 2 && total() == before + count, "copies of the Performance and its part's Sound, under new IDs");
+                check(wait([&] { return !engine.soundBusy(); }) && engine.soundMessage() == "Installed 1, 1 already here.", "installed: " + engine.soundMessage());
+                check(count == 2 && total() == before + 1, "a copy of the Performance under a new ID, and its part's Sound not again");
                 library.showKind("performance"); library.refresh();
                 wait([&] { return library.items().size() == 4; });
                 snapshot(library, "library-installed");

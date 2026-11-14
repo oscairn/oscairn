@@ -1,2 +1,2 @@
-{"format": "oscairn.type", "version": 1, "id": "org.oscairn.samplepack.sample", "name": "Sample", "plural": "Samples",
+{"format": "oscairn.type", "version": 1, "id": "org.oscairn.sample-types.sample", "name": "Sample", "plural": "Samples",
  "recognize": {"extensions": [".osp"]}, "storage": "content", "folder": "Samples", "identity": "content", "handler": "sample", "fields": []}

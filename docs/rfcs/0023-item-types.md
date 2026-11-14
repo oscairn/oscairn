@@ -115,7 +115,7 @@ Where this RFC left a choice, the smaller reading was taken:
   arranges the files, each item stored once by its id and shared by everything that uses it;
   that a sample's records are consolidated into multi-record packs on the device is the handler's
   own layout, not a fourth model. In archives each item is `<type folder>/<id><extension>`. The
-  package `org.oscairn.samplepack` declares the two types (`Samples`, `Waveforms`), so a device
+  package `org.oscairn.sample-types` declares the two types (`Samples`, `Waveforms`), so a device
   without a sampler need not have them and another package may declare other types the same way
   once Oscairn has a handler for them; a handler's type is not forgotten while its store holds
   anything. Items refer to them by id through `oscairn.assets` references (`sample:<id>`,

@@ -39,7 +39,7 @@ namespace
     {
         const auto stage = file.parent_path() / (file.stem().string() + ".stage");
         fs::create_directories(stage / "Types");
-        fs::copy(types, stage / "Types" / "org.oscairn.samplepack", fs::copy_options::recursive);
+        fs::copy(types, stage / "Types" / "org.oscairn.sample-types", fs::copy_options::recursive);
         Package p; p.id = file.stem().string(); p.name = p.id; p.kind = "library";
         for(const auto& f : files)
         {
@@ -85,8 +85,8 @@ int main(int argc, char** argv)
         const auto typesArchive = temp.path / "types.olib";
         {
             const auto stage = temp.path / "types.stage";
-            fs::create_directories(stage / "Types"); fs::copy(types, stage / "Types" / "org.oscairn.samplepack", fs::copy_options::recursive);
-            Package p; p.id = "org.oscairn.samplepack"; p.name = "Sample pack types"; p.kind = "library";
+            fs::create_directories(stage / "Types"); fs::copy(types, stage / "Types" / "org.oscairn.sample-types", fs::copy_options::recursive);
+            Package p; p.id = "org.oscairn.sample-types"; p.name = "Sample pack types"; p.kind = "library";
             writePackage(typesArchive, p, stage);
         }
         const auto content = temp.path / "content.olib", more = temp.path / "more.olib";
@@ -94,7 +94,8 @@ int main(int argc, char** argv)
         archive(more, types, {s[2].pack, s[4].pack});
         const auto export_ = temp.path / "export.olib";
 
-        // A device that knows neither type refuses an archive of samples that does not declare them.
+        // A sample package that needs the types package and does not carry the types: refused, naming
+        // it, on a device without it; installed once the types package is.
         {
             device(temp.path / "z");
             Session z(48000, 64);
@@ -103,16 +104,23 @@ int main(int argc, char** argv)
             const auto name = "Samples/" + s[0].pack.filename().string();
             fs::create_directories(bare / "Samples"); fs::copy_file(s[0].pack, bare / name);
             Package p; p.id = "bare"; p.name = "bare"; p.kind = "library"; p.files[name] = assets::sha256File(bare / name);
+            p.packageDependencies = {{"org.oscairn.sample-types", "1.0.0"}};
             std::ofstream(bare / "library.json", std::ios::binary) << manifestJson(p);
-            const auto why = refusal([&] { z.installArchive(bare.string(), false); });
-            check(why.find("outside its folders") != std::string::npos, "samples of an unknown type are refused: " + why);
+            const auto why = refusal([&] { z.installArchive(bare.string(), true); });
+            check(why.find("no item type this device knows") != std::string::npos && why.find("org.oscairn.sample-types 1.0.0") != std::string::npos,
+                  "without the types package, a sample package is refused naming it: " + why);
+            z.installArchive(typesArchive.string(), true);
+            const auto done = z.installArchive(bare.string(), true);
+            check(z.assets().samples().find(s[0].id) && done.notes.empty(), "with it, the sample package installs: " + (done.notes.empty() ? std::string() : done.notes[0]));
+            check(refusal([&] { z.uninstallLibrary("org.oscairn.sample-types"); }).find("needed by bare") != std::string::npos, "and the types package stays while it is needed");
+            z.uninstallLibrary("bare"); z.uninstallLibrary("org.oscairn.sample-types");
         }
         std::string sound;
         {
             device(temp.path / "a");
             Session a(48000, 64);
             a.installArchive(typesArchive.string(), true);
-            check(itemType("org.oscairn.samplepack.sample") && handlerType("waveform"), "the types package installs both types");
+            check(itemType("org.oscairn.sample-types.sample") && handlerType("waveform"), "the types package installs both types");
             const std::string head = R"({"format":"oscairn.type","version":1,"id":"com.example.other","name":"Other","plural":"Others","folder":"Others","fields":[],)";
             check(refusal([&] { readItemType(head + R"("recognize":{"extensions":[".osp"]},"storage":"content","identity":"content","handler":"midi"})"); }).find("not one Oscairn has") != std::string::npos, "a handler Oscairn lacks is refused");
             check(refusal([&] { readItemType(head + R"("recognize":{"extensions":[".wav"]},"storage":"content","identity":"content","handler":"sample"})"); }).find("stored and identified by content") != std::string::npos, "a handler's type has its files' extension");

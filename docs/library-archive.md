@@ -262,12 +262,12 @@ Built 2026-11-14. Samples in [Oscairn Sample Packs](https://github.com/oscairn/s
 (`.osp`, its `docs/format.md`) and waveforms (`.owf`, its `docs/waveform.md`) are items of two
 [item types](rfcs/0023-item-types.md) kept by handlers: code in Oscairn, built on the samplepack
 library, that verifies such an item, stores it and finds it. A type names its handler in its
-manifest; the package `org.oscairn.samplepack` declares both (its manifests are in
-`core/control/types/org.oscairn.samplepack/`), and a device that has not installed it, or an
+manifest; the package `org.oscairn.sample-types` declares both (its manifests are in
+`core/control/types/org.oscairn.sample-types/`), and a device that has not installed it, or an
 archive declaring them, knows neither:
 
 ```json
-{"format": "oscairn.type", "version": 1, "id": "org.oscairn.samplepack.sample", "name": "Sample", "plural": "Samples",
+{"format": "oscairn.type", "version": 1, "id": "org.oscairn.sample-types.sample", "name": "Sample", "plural": "Samples",
  "recognize": {"extensions": [".osp"]}, "storage": "content", "folder": "Samples", "identity": "content", "handler": "sample", "fields": []}
 ```
 

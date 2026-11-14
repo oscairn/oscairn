@@ -1,2 +1,2 @@
-{"format": "oscairn.type", "version": 1, "id": "org.oscairn.samplepack.waveform", "name": "Waveform", "plural": "Waveforms",
+{"format": "oscairn.type", "version": 1, "id": "org.oscairn.sample-types.waveform", "name": "Waveform", "plural": "Waveforms",
  "recognize": {"extensions": [".owf"]}, "storage": "content", "folder": "Waveforms", "identity": "content", "handler": "waveform", "fields": []}

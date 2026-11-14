@@ -344,7 +344,7 @@ def main(tool):
         sample, small = "Samples/" + "a" * 64 + ".osp", "Assets/0123456789abcdef/small.wav"
         with zipfile.ZipFile(held, "w") as z:
             z.writestr("library.json", "{}")
-            z.writestr("Types/org.oscairn.samplepack/sample.json", json.dumps({"id": "org.oscairn.samplepack.sample", "folder": "Samples", "handler": "sample"}))
+            z.writestr("Types/org.oscairn.sample-types/sample.json", json.dumps({"id": "org.oscairn.sample-types.sample", "folder": "Samples", "handler": "sample"}))
             z.writestr(sample, b"x" * 4096)
             z.writestr(small, b"y")
         (temp / "cache-held").mkdir()

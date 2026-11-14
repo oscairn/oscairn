@@ -79,7 +79,8 @@ set_tests_properties(control-session PROPERTIES TIMEOUT 30)
 # RFC 0045's timing report: one stalled block in a worker, and each part of it apart.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(oscairn-tick-signal-test tests/tick_signal.cpp)
-    target_include_directories(oscairn-tick-signal-test PRIVATE ../plugin-host/include) # header only
+    target_include_directories(oscairn-tick-signal-test PRIVATE ../plugin-host/include) # headers only
+    target_link_libraries(oscairn-tick-signal-test PRIVATE kick_clap_host) # the include folders plugin_host.h needs
     add_test(NAME control-tick-signal COMMAND oscairn-tick-signal-test)
     set_tests_properties(control-tick-signal PROPERTIES TIMEOUT 30)
 endif()

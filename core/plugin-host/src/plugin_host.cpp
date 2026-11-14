@@ -235,7 +235,9 @@ namespace oscairn
         {
             static PlacementPolicy p=[]{
                 PlacementPolicy initial;if(const char* w=std::getenv("OSCAIRN_PLUGIN_WORKER"))initial.worker=w;
-                if(const char* mb=std::getenv("OSCAIRN_WORKER_MEMORY_MB"))initial.memoryLimit=std::strtoull(mb,nullptr,10)<<20;
+                if(const char* mb=std::getenv("OSCAIRN_WORKER_MEMORY_MB")){char* end=nullptr;const auto n=std::strtoull(mb,&end,10);
+                    if(*mb>='0' && *mb<='9' && !*end)initial.memoryLimit=n<<20;
+                    else std::fprintf(stderr,"oscairn: OSCAIRN_WORKER_MEMORY_MB=%s is not a whole number of megabytes, ignored (the limit stays %llu)\n",mb,(unsigned long long)(initial.memoryLimit>>20));}
                 if(const char* s=std::getenv("OSCAIRN_PLUGIN_SCAN"))initial.scan=s;
                 if(const char* h=std::getenv("OSCAIRN_PLUGIN_HOSTS");h && *h){char* end=nullptr;const long n=std::strtol(h,&end,10);if(!*end && n>=0 && n<=64)initial.hosts=uint32_t(n);}
                 if(const char* list=std::getenv("OSCAIRN_OWN_HOST"))for(std::string_view rest=list;!rest.empty();){

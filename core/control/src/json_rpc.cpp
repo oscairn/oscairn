@@ -1289,7 +1289,7 @@ namespace oscairn
                     fields(p,{"output","input","sampleRate","bufferSize"});
                     if( auto v = member(p,"output") ) set.output = std::string(string(v));
                     if( auto v = member(p,"input") ) set.input = std::string(string(v));
-                    if( auto v = member(p,"sampleRate") ) set.sampleRate = number(v);
+                    if( auto v = member(p,"sampleRate") ) set.sampleRate = integer(v);
                     if( auto v = member(p,"bufferSize") ) set.bufferSize = integer(v);
                 }
                 else fields(p,{});

@@ -48,6 +48,7 @@ try:
     error(rpc('audio.devices'), -32005)
     error(rpc('audio.set', {'sampleRate': 48000}), -32005)
     error(rpc('audio.set', {'rate': 48000}), -32602)
+    error(rpc('audio.set', {'sampleRate': 48000.25}), -32602)
     assert rpc('state.info', {'node':'synth'})['result'] == {'supported':True}
     presets = rpc('presets.list', {'node':'synth'})['result']['presets']  # the Basic Synth's factory presets (RFC 0005)
     assert [p['name'] for p in presets] == ['Warm', 'Bright', 'Pressure swell', 'Detuned saws', 'Square vibrato'] and presets[0]['uri'] == 'clap-preset:1:#warm'

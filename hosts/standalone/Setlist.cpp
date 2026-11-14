@@ -281,9 +281,13 @@ namespace oscairn::standalone
         const auto* slot = slotAt(index);
         if(!slot || slot->empty) return;
         if(!opens(index)) { say(nameAt(index) + (slot->id.empty() ? " is a placeholder: it has no Performance." : " is not in the library.")); return; }
-        if(engine_.soundBusy()) { say("Still opening the last one."); return; }
         if(!engine_.connected()) { say("The engine is not answering; the slot did not open."); return; }
+        // Opening one already, this waits its turn, and a later step replaces it: the last chosen opens.
+        const auto label = juce::String(index + 1) + ". " + nameAt(index);
         SoundAction open; open.kind = SoundAction::LoadFromLibrary; open.libraryId = slot->id;
+        open.done = [safe = juce::Component::SafePointer<SetlistPane>(this), index, label](const std::string& error) {
+            if(safe && safe->current_ == index) safe->say(error.empty() ? label : text(error));
+        };
         engine_.soundAction(std::move(open));
         // The next one is prepared while this one plays, so going to it only switches.
         for(int next = index + 1; next < count(); ++next)
@@ -292,7 +296,7 @@ namespace oscairn::standalone
         current_ = index;
         if(const int p = pageOf(index); p != page_) showPage(p);
         list_.selectRow(index - first());
-        say(juce::String(index + 1) + ". " + nameAt(index));
+        say("Opening " + label + "..."); // the slot plays once its job is done, which says so
         updateButtons(); repaint(); grid_->repaint();
         if(onCurrent) onCurrent();
     }

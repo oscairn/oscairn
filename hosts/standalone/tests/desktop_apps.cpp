@@ -288,6 +288,76 @@ int main(int argc, char** argv)
                 engine.edit([](Control& c) { c.setBudget({}); c.setAlwaysAvailable({}); });
             }
 
+            // A slot whose load takes 6 s (the test fixture's state, slow once): the engine answers
+            // everyone meanwhile, so the app lives on; two more steps during it open the last one
+            // only; the app killed during another such load is started again and comes back.
+            if(const char* fixture = std::getenv("OSCAIRN_TEST_FIXTURE"))
+            {
+                engine.edit([&](Control& c) {
+                    const auto slow = c.add("slow", fixture, "org.kick.test.synth");
+                    c.connectNotes(graphInput, slow); c.connectAudio(slow, graphOutput); c.commit();
+                    c.setPerformanceInfo({"", "Slow One", "", {}}); c.savePerformanceToLibrary("Slow One", true);
+                });
+                check(wait([&] { return (library = engine.library(all)) && library->items.size() == 4; }), "the slow one in the library");
+                // The setlist ends ... Slow One, Verse Keys, Big Strings; the app starts on the slot before them.
+                std::vector<standalone::AppProcesses::Notice> notices;
+                standalone::AppProcesses processes(engine, actions, apps, {themes});
+                processes.onNotice = [&](const standalone::AppProcesses::Notice& n) { notices.push_back(n); std::fprintf(stderr, "  notice: %s\n", n.text.toRawUTF8()); };
+                processes.setFront("oscairn.setlist");
+                for(const auto* name : {"Slow One", "Verse Keys", "Big Strings"})
+                {
+                    std::string answer = "?";
+                    actions.request(standalone::sendPerformance, idOf(name), [&](const std::string& a) { answer = a; });
+                    check(wait([&] { return answer == "Added to Setlist"; }), std::string("sent ") + name);
+                }
+                processes.stop("oscairn.setlist");
+                wait([&] { return processes.pid("oscairn.setlist") < 0; });
+                const auto slots = int(standalone::slotsOf(savedSetlist()).size());
+                const auto stateFile = data.getChildFile("AppData/oscairn.setlist/state.json");
+                const auto state = juce::JSON::parse(stateFile);
+                check(state.getDynamicObject() != nullptr, "the app kept its state");
+                if(auto* o = state.getDynamicObject()) { o->setProperty("current", slots - 4); stateFile.replaceWithText(juce::JSON::toString(state)); }
+                const auto marker = data.getChildFile("slow-once");
+                ::setenv("KICK_FIXTURE_SLOW_LOAD_ONCE", marker.getFullPathName().toRawUTF8(), 1);
+                LocalClient probe; probe.connect(socket.string());
+                auto busy = [&] { try { return probe.call("session.status", "{}", 1000).find("-32009") != std::string::npos; } catch(const std::exception&) { return false; } };
+                std::string answer = "?";
+                auto step = [&](const char* by) { answer = "?"; actions.request(standalone::stepSetlist, by, [&](const std::string& a) { answer = a; }); return wait([&] { return answer != "?"; }) ? answer : std::string("?"); };
+                auto said = [&](const juce::String& text) { return std::any_of(notices.begin(), notices.end(), [&](const auto& n) { return n.text.contains(text); }); };
+                processes.setFront("oscairn.setlist"); // stopped above, which put it behind
+                notices.clear();
+                marker.replaceWithText("once");
+                check(step("1") == idOf("Slow One"), "next, starting the app on the slot before: the slow one");
+                const auto pid = processes.pid("oscairn.setlist");
+                check(wait([&] { return busy(); }, 5000), "the engine is busy opening it");
+                check(step("1") == idOf("Verse Keys") && step("1") == idOf("Big Strings") && busy(), "two more steps during the load answer at once");
+                std::string opened;
+                check(wait([&] { if(const auto i = engine.performanceInfo(); i) opened = i->name; return opened == "Big Strings" && !busy(); }, 30000), "the last chosen opened: " + opened);
+                Control::LibraryQuery recent; recent.kind = "performance"; recent.recent = true;
+                uint32_t slowRank = 0, versesRank = 0;
+                if(const auto r = engine.library(recent)) for(const auto& i : r->items) { if(i.name == "Slow One") slowRank = i.recent; if(i.name == "Verse Keys") versesRank = i.recent; }
+                check(slowRank == 2 && versesRank > slowRank, "the one between was never opened: Slow One " + std::to_string(slowRank) + ", Verse Keys " + std::to_string(versesRank));
+                check(processes.pid("oscairn.setlist") == pid && processes.state("oscairn.setlist") == standalone::AppProcesses::State::Running && notices.empty(),
+                      "the app lived through the load, with nothing said");
+                check(!processes.log("oscairn.setlist").contains("connection closed"), "its connection never closed");
+                // Back to the slow one, killed while it loads: started again, it gets its connection and comes back.
+                marker.replaceWithText("once");
+                check(step("-1") == idOf("Verse Keys") && step("-1") == idOf("Slow One"), "back two slots, to the slow one");
+                check(wait([&] { return busy(); }, 5000), "the engine is busy opening it again");
+                const auto killed = processes.pid("oscairn.setlist");
+                entry = "?";
+                ::kill(killed, SIGKILL);
+                check(wait([&] { return processes.pid("oscairn.setlist") > 0 && processes.pid("oscairn.setlist") != killed; }, 3000) && busy(), "started again during the load: " + std::to_string(processes.pid("oscairn.setlist")));
+                check(wait([&] { return entry == idOf("Slow One"); }, 30000) && processes.state("oscairn.setlist") == standalone::AppProcesses::State::Running, "it got its connection and came back with its state");
+                check(!said("did not start") && !said("not responding"), "never 'did not start', nor 'not responding'");
+                check(playing(), "sound went on");
+                if(failures) std::fprintf(stderr, "  its log:\n%s\n", processes.log("oscairn.setlist").getLastCharacters(6000).toRawUTF8());
+                ::unsetenv("KICK_FIXTURE_SLOW_LOAD_ONCE");
+                processes.stop("oscairn.setlist");
+                wait([&] { return processes.pid("oscairn.setlist") < 0; });
+            }
+            else std::puts("skipped: a slow load (set OSCAIRN_TEST_FIXTURE to the test fixture)");
+
             // The KICK's screen with the Setlist shown: the shell's frame under its top bar, and the
             // app's own window where the shell puts it (the app renders itself, as it would there).
             if(argc >= 5)

@@ -253,9 +253,9 @@ juce_add_console_app(oscairn_desktop_apps_test PRODUCT_NAME "Oscairn Desktop App
 target_sources(oscairn_desktop_apps_test PRIVATE tests/desktop_apps.cpp AppProcesses.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm> DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_link_libraries(oscairn_desktop_apps_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_desktop_apps_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
-add_dependencies(oscairn_desktop_apps_test oscairn_setlist_app oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker)
+add_dependencies(oscairn_desktop_apps_test oscairn_setlist_app oscairn_step_sequencer oscairn_basic_synth oscairn-plugin-scan oscairn-plugin-worker kick-clap-fixture-normal)
 add_test(NAME desktop-apps COMMAND oscairn_desktop_apps_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" "${oscairn_apps}" "${CMAKE_CURRENT_SOURCE_DIR}/themes")
-set_tests_properties(desktop-apps PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}")
+set_tests_properties(desktop-apps PROPERTIES TIMEOUT 180 ENVIRONMENT "${shell_environment}")
 # The Settings app as a process of its own, held to `system`; its pages per profile; the Audio page
 # against a socket session whose audio host is a stand-in (no device is opened).
 juce_add_console_app(oscairn_desktop_settings_test PRODUCT_NAME "Oscairn Desktop Settings Test")

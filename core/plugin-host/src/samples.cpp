@@ -45,7 +45,11 @@ namespace oscairn::assets
             return std::string("SP_ERR_") + name + " (" + std::to_string(code) + ")";
         }
 
-        // A read-only mapping of a whole file; empty for an empty file.
+        // A read-only mapping of a whole file; empty for an empty file. Never locked: under the
+        // memory policy's MCL_FUTURE (RFC 0025) a readable mapping is read in whole and locked by
+        // the mmap itself, which a 1 GiB pack or an archive's thousands of samples cannot afford.
+        // Mapped unreadable (nothing is read in), unlocked, then made readable, its pages are read
+        // as they are touched and the kernel may take them back like any file cache.
         struct Mapping
         {
             const uint8_t* data = nullptr; size_t size = 0;
@@ -56,7 +60,15 @@ namespace oscairn::assets
                 struct stat info{};
                 if(::fstat(fd, &info) != 0) { ::close(fd); failErrno("cannot read " + file.string()); }
                 size = size_t(info.st_size);
+#ifdef __linux__
+                void* p = size ? ::mmap(nullptr, size, PROT_NONE, MAP_SHARED, fd, 0) : nullptr;
+                if(p && p != MAP_FAILED && (::munlock(p, size) != 0 || ::mprotect(p, size, PROT_READ) != 0))
+                {
+                    const int e = errno; ::munmap(p, size); errno = e; p = MAP_FAILED;
+                }
+#else
                 void* p = size ? ::mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0) : nullptr;
+#endif
                 ::close(fd);
                 if(p == MAP_FAILED) failErrno("cannot map " + file.string());
                 data = static_cast<const uint8_t*>(p);
@@ -90,6 +102,20 @@ namespace oscairn::assets
             }
         }
         struct Fd { int fd; ~Fd() { if(fd >= 0) ::close(fd); } };
+        // `length` bytes of `from` at `offset` written at `at`, through `buffer`: memory bounded by it, whatever the length.
+        void copyAt(const fs::path& from, uint64_t offset, uint64_t length, int fd, uint64_t at, const fs::path& file, std::vector<uint8_t>& buffer)
+        {
+            Fd in{::open(from.c_str(), O_RDONLY | O_CLOEXEC)};
+            if(in.fd < 0) failErrno("cannot read " + from.string());
+            while(length)
+            {
+                const auto n = ::pread(in.fd, buffer.data(), size_t(std::min<uint64_t>(length, buffer.size())), off_t(offset));
+                if(n < 0) { if(errno == EINTR) continue; failErrno("cannot read " + from.string()); }
+                if(n == 0) fail("cannot read " + from.string() + ": it is shorter than when it was verified");
+                writeAt(fd, buffer.data(), size_t(n), at, file);
+                offset += uint64_t(n); at += uint64_t(n); length -= uint64_t(n);
+            }
+        }
         // Writers in every process take turns on the folder's lock file.
         struct FolderLock
         {
@@ -265,7 +291,8 @@ namespace oscairn::assets
         try
         {
             auto at = committed;
-            for(auto& r : records) { r.entry.offset = at; writeAt(fd.fd, r.bytes, r.entry.length, at, pack.path); at += r.entry.length; }
+            std::vector<uint8_t> buffer(size_t(1) << 20);
+            for(auto& r : records) { r.entry.offset = at; copyAt(*r.file, r.from, r.entry.length, fd.fd, at, pack.path, buffer); at += r.entry.length; }
             sync(fd.fd, pack.path);
             if(killAt("records")) std::raise(SIGKILL);
             auto live = pack.index;
@@ -293,8 +320,9 @@ namespace oscairn::assets
     size_t SamplePacks::install(const std::vector<fs::path>& files)
     {
         // Every file verified first, from wherever it came: it opens as it is (never recovered),
-        // holds one live record, which passes full verification, and is named by its id.
-        struct Verified { Mapping file; sp_index_entry entry; };
+        // holds one live record, which passes full verification, and is named by its id. One file
+        // mapped at a time; the commit copies each record from its file through a fixed buffer.
+        struct Verified { fs::path file; sp_index_entry entry; };
         std::vector<Verified> verified;
         auto scratch = std::make_unique<sp_verify_scratch>();
         for(const auto& file : files)
@@ -312,7 +340,7 @@ namespace oscairn::assets
             if(const auto s = sp_pack_verify(m.data, m.size, scratch.get(), table.data(), table.size()); s != SP_OK) refuse("it does not pass verification: " + status(s));
             const auto index = indexOf(m.data, m.size);
             if(index.size() != 1 || hex(index[0].id) != name.substr(0, 64)) refuse("its record's id is not its name");
-            verified.push_back({std::move(m), index[0]});
+            verified.push_back({file, index[0]});
         }
         std::lock_guard lock(mutex_);
         FolderLock folder(folder_);
@@ -332,7 +360,7 @@ namespace oscairn::assets
                 pack = &create();
                 end = pack->length;
             }
-            pending.push_back({v.file.data + v.entry.offset, {{}, 0, v.entry.length, v.entry.preload}});
+            pending.push_back({&v.file, v.entry.offset, {{}, 0, v.entry.length, v.entry.preload}});
             std::memcpy(pending.back().entry.id, v.entry.id, 32);
             end += v.entry.length;
         }

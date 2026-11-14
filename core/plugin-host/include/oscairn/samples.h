@@ -40,7 +40,7 @@ namespace oscairn::assets
         std::vector<PackInfo> packs(); // for diagnostics
     private:
         struct Pack { std::filesystem::path path; uint64_t length = 0; std::vector<sp_index_entry> index; }; // index sorted by id
-        struct Record { const uint8_t* bytes; sp_index_entry entry; };
+        struct Record { const std::filesystem::path* file; uint64_t from; sp_index_entry entry; }; // the record at `from` in `file`
         const std::filesystem::path folder_;
         std::mutex mutex_;
         bool loaded_ = false;

@@ -226,6 +226,12 @@ foreach(placement IN ITEMS engine worker)
     set_tests_properties(control-sample-packs-${placement} PROPERTIES TIMEOUT 120)
 endforeach()
 set_tests_properties(control-sample-packs-worker PROPERTIES ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
+# An archive of samples far larger than the bound installs in bounded memory, locked and resident.
+add_executable(oscairn-install-memory-test control/tests/install_memory.cpp)
+target_link_libraries(oscairn-install-memory-test PRIVATE oscairn_control)
+add_dependencies(oscairn-install-memory-test samplepack_cli)
+add_test(NAME control-install-memory COMMAND oscairn-install-memory-test "${SAMPLEPACK_CLI}" "${CMAKE_CURRENT_SOURCE_DIR}/control/types/org.oscairn.sample-types")
+set_tests_properties(control-install-memory PROPERTIES TIMEOUT 120)
 
 if(BUILD_TESTING) # the Legacy Sampler
     add_executable(oscairn-sampler-test engine/tests/sampler.cpp)

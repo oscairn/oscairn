@@ -48,14 +48,17 @@ with tempfile.TemporaryDirectory(prefix='oscairn-dependencies-') as temporary:
     repo = temp / 'submissions'
     shutil.copytree(builder.parents[1], repo)
 
-    def record(package_id, olib, platforms):
+    def record(package_id, olib, platforms, needs=(), requires=None):
         data = olib.read_bytes()
-        (olib.parent / f'{olib.stem}.json').write_text(json.dumps({
+        dependencies = {'dependencies': {'assets': [], 'packages': [{'id': n, 'version': '1.0.0'} for n in needs]}} if needs else {}
+        if requires:
+            dependencies['requires'] = {'oscairn': requires}
+        (olib.parent / f'{olib.stem}.json').write_text(json.dumps({**dependencies,
             'format': 'oscairn.repository-release', 'version': 1, 'id': package_id, 'release': olib.stem, 'publisher': 'org.kick',
             'summary': 'A test package', 'license': 'MIT', 'tags': [], 'platforms': platforms,
             'archive': {'path': olib.name, 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}, 'yanked': None}))
 
-    def library(package_id, needs=(), types=None):
+    def library(package_id, needs=(), types=None, requires=None):
         """A library package with no items: the types it declares (as a type manifest's folder), needing `needs`."""
         olib = repo / 'packages' / package_id / '1.0.0.olib'
         olib.parent.mkdir(parents=True)
@@ -68,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-dependencies-') as temporary:
             (tree / 'Types' / package_id / 'sample.json').write_text(json.dumps(manifest))
         depends = [a for n in needs for a in ('--package-dependency', n, '1.0.0')]
         run(tool, 'library-package', '--license', 'MIT', '--key', temp / 'publisher.key', *depends, olib, package_id, package_id, tree)
-        record(package_id, olib, [])
+        record(package_id, olib, [], needs, requires)
 
     def plugin_package(package_id, needs):
         olib = repo / 'packages' / package_id / '1.0.0.olib'
@@ -79,13 +82,15 @@ with tempfile.TemporaryDirectory(prefix='oscairn-dependencies-') as temporary:
         run(tool, 'build', temp / 'publisher.key', 'clap', package_id, '1.0.0', here, build)
         run(tool, 'plugin-package', '--license', 'MIT', '--package-dependency', needs, '1.0.0', '--key', temp / 'publisher.key',
             olib, 'clap', package_id, '1.0.0', 'Test Keys', f'{here}={build}')
-        record(package_id, olib, [here])
+        record(package_id, olib, [here], [needs])
 
     library('org.kick.types', types=type_manifest)
     library('org.kick.content', needs=['org.kick.types'])
     plugin_package('org.kick.keys', 'org.kick.content')
     library('org.kick.loop-a', needs=['org.kick.loop-b'])
     library('org.kick.loop-b', needs=['org.kick.loop-a'])
+    # The repository's checks refuse a dependency it does not hold at all; one only for a newer system is as absent to this device.
+    library('org.kick.absent', requires='99')
     library('org.kick.needy', needs=['org.kick.absent'])
 
     (temp / 'index-key.pub').write_text(keys['index'][1] + '\n')

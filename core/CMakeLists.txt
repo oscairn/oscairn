@@ -360,6 +360,12 @@ set_tests_properties(voice-budget-parallel PROPERTIES TIMEOUT 120 ENVIRONMENT "O
 add_executable(oscairn-load-guard-test engine/tests/load_guard.cpp)
 target_link_libraries(oscairn-load-guard-test PRIVATE oscairn_engine)
 add_dependencies(oscairn-load-guard-test oscairn-voice-fixture oscairn-plugin-worker)
+# The output guard: a plugin's NaN, Inf or runaway block not heard, a loud one heard, in the engine and in a worker.
+add_executable(oscairn-output-guard-test engine/tests/output_guard.cpp)
+target_link_libraries(oscairn-output-guard-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-output-guard-test oscairn-voice-fixture oscairn-plugin-worker)
+add_test(NAME output-guard COMMAND oscairn-output-guard-test $<TARGET_FILE:oscairn-voice-fixture> $<TARGET_FILE:oscairn-plugin-worker>)
+set_tests_properties(output-guard PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_BUDGET_US=50000")
 add_test(NAME voice-budget-workers COMMAND oscairn-voice-budget-test $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(voice-budget-workers PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=60;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_PLUGIN_HOSTS=1") # one plugin host: the three parts one lane, as the budget's total takes them
 # RFC 0018 step 4: oscairn.voice-budget, the Basic Synth's one pool across sounds and the

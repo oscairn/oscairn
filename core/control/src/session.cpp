@@ -421,6 +421,10 @@ namespace oscairn
             const auto st = host.statistics();
             result.deadlineMisses += st.deadlineMisses; result.lateBlocks += st.lateBlocks; result.silentBlocks += st.silentBlocks;
             if(auto why = host.failure(); !why.empty()) result.failures.push_back({node, name, std::move(why)});
+            // The output guard: a plugin whose every block for a quarter second was not heard has failed, though it plays on.
+            else if(const auto g = graph_.outputGuard(node); double(g.inARow) * maxFrames_ >= .25 * sampleRate_)
+                result.failures.push_back({node, name, "Plugin output out of range: " + std::to_string(g.inARow) + " blocks in a row not finite or past +120 dBFS, silenced"});
+            result.badOutputBlocks += graph_.outputGuard(node).blocks;
             if(const auto cpu = host.cpuSeconds(); cpu > 0)
             {
                 // Since it was loaded, or taken over by this Performance (RFC 0045's resident instances).

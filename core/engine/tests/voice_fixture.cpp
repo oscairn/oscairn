@@ -8,7 +8,9 @@
 // voices within the host's limit through the SDK's voice-budget-plugin.hpp, as an engine outside
 // the sound-contexts helper (a sampler playing regions) would. OSCAIRN_FIXTURE_SPIKE=CALL:CALLS:US: from
 // its process call numbered CALL (from 1, in this instance) for CALLS calls, each spends US microseconds
-// more, as a block held up from outside or a sustained load beside the voices.
+// more, as a block held up from outside or a sustained load beside the voices. OSCAIRN_FIXTURE_OUTPUT=CALL:VALUE[:CALLS],...:
+// its process calls CALL to CALL+CALLS-1 (one by default) write VALUE (nan, inf, any number) into the left channel's
+// middle frame, as a plugin gone wrong (or legitimately loud).
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -28,6 +30,7 @@ struct Plugin {
     double rate=48000,microseconds=0;uint32_t chokeFrames=144,layers=1,frames=128;
     std::array<Voice,128> voices{};uint64_t started=0,calls=0;
     long spikeAt=0,spikeCalls=0;double spikeUs=0; // OSCAIRN_FIXTURE_SPIKE
+    struct Bad { long at=0,calls=1; float value=0; }; std::array<Bad,8> bad{}; size_t badCount=0; // OSCAIRN_FIXTURE_OUTPUT
     oscairn::voices::Limits limits; // oscairn.voice-budget's, audio thread
     double loudness(const Voice& v) const {return v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
     uint32_t sounding() const {uint32_t n=0;for(const auto& v:voices)n+=v.active && !v.choking;return n;}
@@ -99,6 +102,12 @@ struct Plugin {
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_VOICE_US"))microseconds=std::atof(us);
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LAYERS"))layers=std::clamp(std::atoi(l),1,16);
         if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
+        for(const char* v=std::getenv("OSCAIRN_FIXTURE_OUTPUT");v && *v && badCount<bad.size();){
+            char word[32]{};long at=0,calls=1;
+            if(std::sscanf(v,"%ld:%31[^:,]:%ld",&at,word,&calls)<2)break;
+            bad[badCount++]={at,calls,std::strtof(word,nullptr)};
+            v=std::strchr(v,',');if(v)++v;
+        }
         api.desc=&descriptor;api.plugin_data=this;
         api.init=[](const clap_plugin_t*){return true;};
         api.destroy=[](const clap_plugin_t* p){delete &self(p);};
@@ -121,6 +130,7 @@ struct Plugin {
                 s.event(h,at,b->out_events);
             }
             s.render(left,right,done,b->frames_count,b->out_events);
+            for(size_t i=0;i<s.badCount;++i)if(long(s.calls+1)>=s.bad[i].at && long(s.calls+1)<s.bad[i].at+s.bad[i].calls)left[b->frames_count/2]=s.bad[i].value;
             // The voices' cost: busy, as DSP is, for their time.
             const long call=long(++s.calls);
             const double extra=s.spikeCalls && call>=s.spikeAt && call<s.spikeAt+s.spikeCalls?s.spikeUs:0;

@@ -695,6 +695,11 @@ What changes for the plugin:
   the same time, each in its worker ([RFC 0034](rfcs/0034-parallel-graph-rendering.md)); effect
   contexts of one instance never do. Missing a quarter second of blocks in a row (at least 8), or leaving one
   unanswered for 250 ms, is a failure. Offline rendering waits instead.
+- **Output range:** a block with a sample past +120 dBFS (a million) is not heard, in a worker or in the
+  engine: it fades out over 1 ms from the last good samples, the plugin playing on unrestarted,
+  counted in `session.status`'s `badOutputBlocks`; a quarter second of such blocks in a row lists
+  the plugin among `failures` until its output is back in range. A sample that is NaN or infinite
+  stops the plugin at once, as before.
 - **Memory limit:** 4 GiB by default (`OSCAIRN_WORKER_MEMORY_MB` changes it; 0 is none), read
   every 10 ms as the physical footprint on macOS and resident memory on Linux. When every
   plugin in the worker declares its memory (`oscairn.memory`), the limit is what they declare

@@ -235,6 +235,13 @@ namespace oscairn
         /// A node's cost as the budget sees it, and the notes it gave up so far (-1: not measured).
         struct NoteCost { double rest = -1, perNote = -1; uint64_t stolen = 0, hardChokes = 0; };
         NoteCost noteCost( NodeId node ) const;
+        /// The output guard: a node's blocks not heard for a sample not finite or past outputBound (+120 dBFS), in
+        /// all and in a row up to its last block; each faded out over 1 ms, the plugin playing on. Any thread.
+        /// +120 dBFS, not less: audio ports also carry data (the harmony follower fixture's chords and keys, to about
+        /// 120,000); a runaway (2.7e8 seen) is far past it.
+        static constexpr float outputBound = 1e6f;
+        struct OutputGuard { uint64_t blocks = 0; uint32_t inARow = 0; };
+        OutputGuard outputGuard( NodeId node ) const;
         void disconnectAudio( NodeId from, NodeId to );
         void disconnectNotes( NodeId from, NodeId to );
 
@@ -476,6 +483,7 @@ namespace oscairn
             // stand in until then), and the notes it gave up: faded out, and choked at the hard limit.
             std::atomic<float> rest{-1}, perNote{-1}, seedRest{-1}, seedNote{-1};
             std::atomic<uint64_t> stolen{0}, hardChokes{0};
+            std::atomic<uint64_t> badOutput{0}; std::atomic<uint32_t> badRun{0}; // see outputGuard
             // Its plugin left the plan holding notes no release reached; audio thread (Graph::beginBlock).
             std::atomic<bool> stranded{false};
             // Audio thread, from a plugin with oscairn.voice-budget (step 4): it gives up its own

@@ -90,6 +90,7 @@ namespace oscairn
             uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
             bool inProcess = false; // it renders in the engine's process (no PluginHost::lane): within the callback's time
             std::array<float,5> recent{}; uint8_t recentAt = 0, recentN = 0; // audio thread: its last blocks' times, for the budget (typical)
+            std::vector<float> lastOut; uint32_t fadedFor = 0; // audio thread, the output guard: each channel's last good sample, and the frames faded since
             bool lateLane = false; // every plugin on its lane renders a block late (RFC 0045's extra block): a period to render in
             // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
             std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
@@ -628,6 +629,12 @@ namespace oscairn
         const auto& a=*it->second.activity;
         return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed)};
     }
+    Graph::OutputGuard Graph::outputGuard( NodeId node ) const
+    {
+        const auto it=nodes_.find(node);
+        if(it==nodes_.end() || !it->second.activity)return {};
+        return {it->second.activity->badOutput.load(std::memory_order_relaxed),it->second.activity->badRun.load(std::memory_order_relaxed)};
+    }
     uint32_t Graph::sounding( NodeId node ) const
     {
         const auto it=nodes_.find(node);
@@ -945,6 +952,7 @@ namespace oscairn
             step.outputBuffer.resize(size_t(step.audioOutputs)*maxFrames_);
             for(uint32_t c=0;c<step.audioInputs;++c)step.in.push_back(step.inputBuffer.data()+size_t(c)*maxFrames_);
             for(uint32_t c=0;c<step.audioOutputs;++c)step.out.push_back(step.outputBuffer.data()+size_t(c)*maxFrames_);
+            step.lastOut.assign(step.audioOutputs,0.f);
             step.merged.resize( kick::clap::Host::maxProcessEvents ); // maxBlockEvents notes, plus the beat and up to 32 harmony changes
         }
         plan->keys.reserve( kick::clap::Host::maxProcessEvents ); // as many as merged holds (every other key is capped at its size): never reallocating
@@ -1370,6 +1378,22 @@ namespace oscairn
             auto v=step.recent;std::nth_element(v.begin(),v.begin()+step.recentN/2,v.begin()+step.recentN);
             return v[step.recentN/2];
         };
+        // The output guard: a block with a sample not finite or past outputBound (+120 dBFS: no plugin's legitimate
+        // level, a live parameter's runaway is) is not heard: it fades from the last good samples over 1 ms, as a
+        // worker's missed block, and is counted on the node (outputGuard); the plugin plays on, unrestarted. One
+        // pass, branch-free and vectorized; a NaN fails the comparison.
+        auto guard=[&](Plan::Step& step){
+            uint32_t bad=0;
+            for(uint32_t c=0;c<step.audioOutputs;++c){const float* x=step.out[c];for(uint32_t i=0;i<frames;++i)bad|=uint32_t(!(std::fabs(x[i])<=outputBound));}
+            auto count=[&](Graph::Activity& a){
+                if(bad){a.badOutput.fetch_add(1,std::memory_order_relaxed);a.badRun.store(a.badRun.load(std::memory_order_relaxed)+1,std::memory_order_relaxed);}
+                else a.badRun.store(0,std::memory_order_relaxed);};
+            if(step.activity)count(*step.activity);else for(auto& c:step.contexts)count(*c.activity);
+            if(!bad){for(uint32_t c=0;c<step.audioOutputs;++c)step.lastOut[c]=step.out[c][frames-1];step.fadedFor=0;return;}
+            const uint32_t n=std::max(1u,uint32_t(sampleRate_*.001));
+            for(uint32_t c=0;c<step.audioOutputs;++c)for(uint32_t f=0;f<frames;++f)step.out[c][f]=step.fadedFor+f<n?step.lastOut[c]*float(n-1-step.fadedFor-f)/float(n):0.f;
+            step.fadedFor=std::min(n,step.fadedFor+frames);
+        };
         auto finish=[&](Plan::Step& step)
         {
             if(listener && step.contexts.empty())listener->events(step.id,step.merged.data(),step.mergedCount,false);
@@ -1380,6 +1404,7 @@ namespace oscairn
                     const auto heard=onChannel(step.merged[i],step.heardOn[i]);listener->events(c.id,&heard,1,false);
                 }
             const bool processed=step.processed;
+            if(processed)guard(step);
             // A busy control gate can discard a release; reset when rendering resumes. A worker's late
             // or busy block lost nothing (eventsKept), so its notes go on (RFC 0045). A host that
             // reset the plugin on its own ended every note it was sent, with no NOTE_END: a shared

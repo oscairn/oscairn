@@ -131,6 +131,8 @@ namespace oscairn
             // Of the workers' blocks past their allowance (RFC 0045): those played late, and those
             // silenced, the ones heard as a dropout. Both are in deadlineMisses; neither is an underrun.
             uint64_t lateBlocks = 0, silentBlocks = 0;
+            // The plugins' blocks not heard for output not finite or past +120 dBFS (the engine's output guard), in all.
+            uint64_t badOutputBlocks = 0;
             uint64_t audioDeviceList = 0; // changes when the host's audio devices come or go: audioDevices() again
             uint64_t midiPortList = 0; // changes when MIDI inputs come or go, or a port's profiles or ignoring change: midiPorts() again
             // The keys held now on each source that has any (a MIDI input's source, or 0 for the

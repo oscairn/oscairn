@@ -2280,6 +2280,48 @@ int main(int argc, char** argv)
         }
         std::filesystem::remove(path);
     }
+    // A Performance the budget refuses (RFC 0025), the last one at the app's start (RFC 0028) and opened
+    // from the library: each time the app is told the engine's reason, which it shows over the screen until OK.
+    {
+        const auto synthPath = (std::filesystem::path(argv[1]) / "oscairn-basic-synth.clap").string();
+        std::string folder;
+        {
+            Session s(48000, 128);
+            const auto synth = s.add("synth", synthPath);
+            s.connectNotes(graphInput, synth); s.connectAudio(synth, graphOutput); s.commit();
+            s.setPerformanceInfo({"", "Too Big", "", {}});
+            s.savePerformanceToLibrary("Too Big", true);
+            Control::LibraryQuery q; q.text = "Too Big";
+            for(const auto& item : s.libraryQuery(q).items) folder = item.path;
+        }
+        // The synth measured at half the audio time, from enough blocks to be sure; the budget allows a fifth.
+        data.getChildFile("measurements.json").replaceWithText("{\"version\":5,\"plugins\":{\"org.oscairn.basic-synth@0.1.0 " + bundleDigest(synthPath) +
+                                                              "\":{\"cpu\":0.5,\"rest\":0.5,\"voice\":0,\"voices\":0,\"memory\":1048576,\"samples\":10000}}}");
+        data.getChildFile("library").createDirectory();
+        data.getChildFile("library/last.json").replaceWithText("{\"performance\":\"" + folder + "\"}");
+        const auto path = socket.string() + "-refused";
+        Served served(path, [](Session& s) { s.setBudget({.2, 0}); });
+        {
+            standalone::Engine engine(argv[1], path);
+            auto until = [](auto done) { for(int i = 0; i < 1000 && !done(); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); return done(); };
+            std::vector<std::string> said;
+            engine.onNotOpened = [&](const std::string& why) { said.push_back(why); };
+            standalone::SoundAction reopen; reopen.kind = standalone::SoundAction::ReopenPerformance;
+            engine.soundAction(reopen);
+            check(!folder.empty() && until([&] { return !said.empty(); }) && said[0].find("Too Big") != std::string::npos && said[0].find("needs 50%") != std::string::npos,
+                  "the last Performance refused at the start: the app hears why: " + (said.empty() ? std::string("nothing") : said[0]));
+            std::string id;
+            Control::LibraryQuery q; q.text = "Too Big";
+            if(const auto items = engine.library(q)) for(const auto& item : items->items) id = item.id;
+            standalone::SoundAction open; open.kind = standalone::SoundAction::LoadFromLibrary; open.libraryId = id;
+            engine.soundAction(open);
+            check(!id.empty() && until([&] { return said.size() == 2; }) && said[1].find("needs 50%") != std::string::npos,
+                  "opened from the library and refused: the app hears why: " + (said.size() < 2 ? std::string("nothing") : said[1]));
+            standalone::LaunchNotice notice("The Performance did not open", juce::String(said.empty() ? "" : said[0]));
+            check(notice.message().contains("needs 50%") && notice.ok.isVisible() && !notice.letGo.isVisible(), "the notice over the screen says it, with OK");
+        }
+        std::filesystem::remove(path);
+    }
     std::filesystem::remove(socket);
     data.deleteRecursively();
     if(!failures) std::puts("ok: the desktop's controls for what the control API had first");

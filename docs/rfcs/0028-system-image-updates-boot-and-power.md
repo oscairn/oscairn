@@ -67,7 +67,8 @@ data folder (`library/last.json`) and opens it when the app asks (`performance.r
 app has set the budget (RFC 0025), so it is admitted as any open is; the app asks as its window
 opens, off its message thread, and the window shows Untitled until it has opened (not with
 `--snapshot` or `--play`, nor `--in-process`, whose engine opens no Performances). One that is gone, unreadable, over the budget or
-needing a plugin that is not installed leaves Untitled open, and the app says why. An engine still
+needing a plugin that is not installed leaves Untitled open, and the app says why over the screen
+until OK (a notice that went by itself after 8 s could be missed at a start). An engine still
 running when the app comes back keeps what it has. It opens what was saved, not edits made since:
 the desktop app asks before a quit would lose them ([RFC 0030](0030-system-shell-launcher-and-navigation.md)). Until a budget is set the engine knows none, so
 it opens nothing before the app has connected; the boot ordering above (the last Performance before

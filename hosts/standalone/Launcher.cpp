@@ -274,17 +274,21 @@ namespace oscairn::standalone
         app_.setBounds(getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)));
     }
 
-    LaunchNotice::LaunchNotice(const juce::String& name, const Control::Launch& refused) : title_(name + " did not open")
+    LaunchNotice::LaunchNotice(const juce::String& name, const Control::Launch& refused) : LaunchNotice(name + " did not open", juce::String())
     {
         // The engine names apps by ID: Oscairn's own by their names here.
         auto reason = juce::String::fromUTF8(refused.reason.c_str());
         for(const auto& [id, shown] : {std::pair{"oscairn.performance", "Performance"}, {"oscairn.library", "Library"}, {"oscairn.setlist", "Setlist"}, {"oscairn.groovebox", "Groovebox"}, {"oscairn.recordings", "Recordings"}}) reason = reason.replace(id, shown);
         message_ = "It " + reason + ".";
-        setTitle(title_);
         ok.setButtonText(refused.offerNext ? "Cancel" : "OK");
+        letGo.setVisible(refused.offerNext);
+    }
+
+    LaunchNotice::LaunchNotice(const juce::String& title, const juce::String& message) : title_(title), message_(message)
+    {
+        setTitle(title_);
         addAndMakeVisible(ok);
         addChildComponent(letGo);
-        letGo.setVisible(refused.offerNext);
         letGo.setColour(juce::TextButton::buttonColourId, ink(Ink::Accent)); letGo.setColour(juce::TextButton::textColourOffId, ink(Ink::Accent).contrasting());
         letGo.setTooltip("The next song then opens when you go to it, not at once");
     }

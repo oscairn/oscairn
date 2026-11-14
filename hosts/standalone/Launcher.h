@@ -140,11 +140,12 @@ namespace oscairn::standalone
 
     /// Why an app did not open (RFC 0025), over the screen: what it needs and what closing would
     /// free, as the engine said it; Let the next song go when only the prepared next setlist entry
-    /// is in the way.
+    /// is in the way. Also why a Performance did not open, as the engine said it, until OK.
     class LaunchNotice : public juce::Component
     {
     public:
         LaunchNotice(const juce::String& name, const Control::Launch& refused);
+        LaunchNotice(const juce::String& title, const juce::String& message);
         const juce::String& message() const { return message_; }
         juce::TextButton letGo{"Let the next song go"}, ok{"OK"};
         void paint(juce::Graphics&) override;

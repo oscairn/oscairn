@@ -476,10 +476,12 @@ namespace oscairn::standalone
         if(soundJobKind_==SoundAction::Replace || loaded)textCache_.clear();
         if(result.error.empty() && (soundJobKind_==SoundAction::SavePerformance || soundJobKind_==SoundAction::SaveToLibrary))soundMessage_="Performance saved.";
         if(result.error.empty() && loaded && !reopened)soundMessage_="Performance opened. Press Play or play a note.";
-        if(reopened && onReopened)onReopened(result.error.empty()?result.message:result.error);
         if(result.error.empty() && soundJobKind_==SoundAction::SaveSound)soundMessage_="Sound saved.";
         if(result.error.empty() && (soundJobKind_==SoundAction::LoadSound || soundJobKind_==SoundAction::PartFromSound)){textCache_.clear();soundMessage_="Sound loaded.";}
         if(result.error.empty() && soundJobKind_==SoundAction::ImportPerformance){textCache_.clear();soundMessage_="Performance imported.";}
+        // Not opened: said over the screen, whatever asked (a lost connection is said as one instead).
+        if(onNotOpened && !result.disconnected && (reopened || soundJobKind_==SoundAction::LoadPerformance || soundJobKind_==SoundAction::LoadFromLibrary))
+            if(const auto& why=reopened && result.error.empty()?result.message:result.error;!why.empty())onNotOpened(why);
         if(result.disconnected)
         {
             pendingControls_.clear();

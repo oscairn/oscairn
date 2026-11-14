@@ -194,15 +194,19 @@ namespace oscairn::standalone
                 // A notice of what happened goes by itself; one asking for a choice stays.
                 juce::Timer::callAfterDelay(8000,[safe=juce::Component::SafePointer<Window>(this),text=n.text]{if(safe && safe->appNotice_->text()==text)safe->appNotice_->show({});});
             };
-            // Why the last Performance did not open at start (RFC 0028), said as an app's notice is.
-            engine_.onReopened=[this](const std::string& why){if(!why.empty())appProcesses_->onNotice({{},juce::String::fromUTF8(why.c_str())});};
+            // Why a Performance did not open, the last one at start (RFC 0028) or any other (RFC 0025), until OK: one that goes by itself can be missed.
+            engine_.onNotOpened=[this](const std::string& why){
+                auto notice=std::make_unique<LaunchNotice>("The Performance did not open",juce::String::fromUTF8(why.c_str()));
+                notice->ok.onClick=[this]{juce::MessageManager::callAsync([safe=juce::Component::SafePointer<Window>(this)]{if(safe)safe->showNotice(nullptr);});}; // after the click is done with it
+                showNotice(std::move(notice));
+            };
             show( first );
             setVisible( true );
         }
 
         ~Window() override
         {
-            engine_.onReopened={};
+            engine_.onNotOpened={};
             engine_.openBrowser={};
             engine_.openPads={};
             engine_.openParts={};
@@ -461,13 +465,15 @@ namespace oscairn::standalone
         {
             const auto id = appId( name );
             const auto reserve = appProcesses_->find( id ) ? appProcesses_->reservation( id ) : uint64_t( Profile::appMemory( id ) ) << 20;
-            return askToLaunch( engine_, { id, reserve }, name, std::move( retry ),
-                [this]( std::unique_ptr<LaunchNotice> notice ) {
-                    notice_ = std::move( notice );
-                    if( !notice_ ) return;
-                    setDesktopMode( *notice_, panel() || inputMode_ == InputMode::Touch ? 2 : 1 );
-                    addAndMakeVisible( *notice_ ); notice_->setBounds( getLocalBounds() );
-                } );
+            return askToLaunch( engine_, { id, reserve }, name, std::move( retry ), [this]( std::unique_ptr<LaunchNotice> notice ) { showNotice( std::move( notice ) ); } );
+        }
+        // A notice over the screen until its OK (none: the last one goes).
+        void showNotice( std::unique_ptr<LaunchNotice> notice )
+        {
+            notice_ = std::move( notice );
+            if( !notice_ ) return;
+            setDesktopMode( *notice_, panel() || inputMode_ == InputMode::Touch ? 2 : 1 );
+            addAndMakeVisible( *notice_ ); notice_->setBounds( getLocalBounds() );
         }
         void showGroovebox(){showApp(groovebox_,"Groovebox",[this]{return new SequencerPane(engine_);},1100,760);}
         // The Recordings app (RFC 0020): the takes, kept running with its state like the others.

@@ -2,9 +2,9 @@ add_subdirectory(clap-host)
 
 find_package(Threads REQUIRED)
 add_library(oscairn_plugin_host STATIC plugin-host/src/plugin_host.cpp plugin-host/src/unavailable_plugin.cpp plugin-host/src/discovery.cpp plugin-host/src/assets.cpp
-    plugin-host/src/Worker.cpp plugin-host/src/WorkerHost.cpp)
+    plugin-host/src/samples.cpp plugin-host/src/Worker.cpp plugin-host/src/WorkerHost.cpp)
 target_include_directories(oscairn_plugin_host PUBLIC plugin-host/include)
-target_link_libraries(oscairn_plugin_host PUBLIC kick_clap_host PRIVATE Threads::Threads)
+target_link_libraries(oscairn_plugin_host PUBLIC kick_clap_host samplepack::samplepack PRIVATE Threads::Threads)
 target_compile_options(oscairn_plugin_host PRIVATE -Wall -Wextra)
 if(OSCAIRN_LV2)
     find_package(PkgConfig REQUIRED)
@@ -203,6 +203,15 @@ add_test(NAME assets COMMAND oscairn-assets-test)
 add_executable(oscairn-samplepack-test engine/tests/samplepack.cpp)
 target_link_libraries(oscairn-samplepack-test PRIVATE samplepack::samplepack)
 add_test(NAME samplepack COMMAND oscairn-samplepack-test "${samplepack_SOURCE_DIR}/tests/data/colored-mono-b1024-l4-r44100")
+# samplepack's command-line tool, for the tests to make sample packs from synthetic audio.
+set(SAMPLEPACK_CLI "${CMAKE_BINARY_DIR}/samplepack-cargo/cli/release/samplepack")
+add_custom_target(samplepack_cli ALL ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/samplepack-cargo/cli"
+    ${SAMPLEPACK_CARGO} build --release --locked --offline -p samplepack-cli
+    BYPRODUCTS "${SAMPLEPACK_CLI}" WORKING_DIRECTORY "${samplepack_SOURCE_DIR}" VERBATIM)
+add_executable(oscairn-sample-store-test engine/tests/sample_store.cpp)
+target_link_libraries(oscairn-sample-store-test PRIVATE oscairn_plugin_host)
+add_dependencies(oscairn-sample-store-test samplepack_cli)
+add_test(NAME sample-store COMMAND oscairn-sample-store-test "${SAMPLEPACK_CLI}")
 
 if(BUILD_TESTING) # the Legacy Sampler
     add_executable(oscairn-sampler-test engine/tests/sampler.cpp)

@@ -110,6 +110,11 @@ struct AssetResolver {
     // state's mapped paths): where it is when a registered or installed library holds it, else a
     // copy in the user library. Throws std::exception carrying the reason.
     virtual AssetReference create(const std::string&) { throw std::runtime_error("this host has no sound asset store"); }
+    // Where an installed sample's record is (oscairn.assets draft 4's resolve_sample): its pack and
+    // the record's offset, length and preload span, by the sample's id (64 lowercase hex digits).
+    // Throws std::exception carrying the reason.
+    struct SampleLocation { std::string pack; uint64_t offset = 0, length = 0, preload = 0; };
+    virtual SampleLocation resolveSample(const std::string&) { throw std::runtime_error("this host has no sample store"); }
 };
 
 struct Statistics {

@@ -499,8 +499,42 @@ namespace oscairn::assets
         return false;
     }
 
+    SamplePacks& Store::samples() const
+    {
+        std::lock_guard lock(mutex_);
+        if(!samples_) samples_ = std::make_unique<SamplePacks>(root() / "samples");
+        return *samples_;
+    }
+    Waveforms& Store::waveforms() const
+    {
+        std::lock_guard lock(mutex_);
+        if(!waveforms_) waveforms_ = std::make_unique<Waveforms>(root() / "waveforms");
+        return *waveforms_;
+    }
+    Store::SampleLocation Store::resolveSample(const std::string& id)
+    {
+        const auto at = samples().find(id);
+        if(!at) fail("sample " + id + " is not installed");
+        return {at->pack.string(), at->offset, at->length, at->preload};
+    }
+
     fs::path Store::resolve(Ref& ref) const
     {
+        if(std::string handler, id; contentRef(ref.path, handler, id))
+        {
+            // The digest of such a reference is its item's id (RFC 0009), not a file's hash.
+            if(!ref.sha256.empty() && ref.sha256 != id) fail(ref.path + ": its digest is not its id");
+            ref.sha256 = id;
+            if(handler == "sample")
+            {
+                if(const auto at = samples().find(id)) return at->pack;
+                fail("sample " + id + " is not installed");
+            }
+            const auto file = waveforms().path(id);
+            for(const auto& sample : waveforms().samples(id))
+                if(!samples().find(sample)) fail("waveform " + id + " names sample " + sample + ", which is not installed");
+            return file;
+        }
         std::lock_guard lock(mutex_); load();
         checkRelative(ref.path);
         if(!libraries_.count(ref.library)) { loaded_ = false; load(); } // registered by another process since

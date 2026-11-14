@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <kick_clap/Host.h>
+#include "oscairn/samples.h"
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -84,10 +86,20 @@ namespace oscairn::assets
         bool locate(const std::filesystem::path& directory, std::string& library, std::string& relative) const;
         // The local file for ref, verified. An empty sha256 accepts the current file and is filled
         // in; a given sha256 must match, and may be satisfied by identical bytes in any library.
+        // A reference to a sample or waveform by its id ("sample:<id>", "waveform:<id>", samples.h)
+        // resolves through the stores below, whatever its library: a sample to its pack, a waveform
+        // to its file once every sample it names is installed. Its sha256 is the id, filled in when
+        // empty, refused when another.
         std::filesystem::path resolve(Ref& ref) const;
         std::string resolve(const std::string& library, const std::string& path, std::string& sha256) override;
+        SampleLocation resolveSample(const std::string& id) override;
+        // The samples and waveforms installed here: root's samples/ and waveforms/.
+        SamplePacks& samples() const;
+        Waveforms& waveforms() const;
         const std::filesystem::path& root() const;
     private:
+        mutable std::unique_ptr<SamplePacks> samples_; // made on first use, as root is found
+        mutable std::unique_ptr<Waveforms> waveforms_;
         struct Entry { uintmax_t size; int64_t modified; std::string sha256; };
         using Index = std::map<std::string, Entry>; // relative path → entry
         mutable std::filesystem::path root_;

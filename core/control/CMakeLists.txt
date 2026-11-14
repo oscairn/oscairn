@@ -92,8 +92,8 @@ set_tests_properties(control-worker-bench PROPERTIES TIMEOUT 60)
 # RFC 0045: no wait on a worker past the callback's deadline; step 6's deadline in place of the allowance.
 add_executable(oscairn-worker-deadline-test tests/worker_deadline.cpp)
 target_link_libraries(oscairn-worker-deadline-test PRIVATE oscairn_control)
-add_test(NAME control-worker-deadline COMMAND oscairn-worker-deadline-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>)
-set_tests_properties(control-worker-deadline PROPERTIES TIMEOUT 60)
+add_test(NAME control-worker-deadline COMMAND oscairn-worker-deadline-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> ${worker_timing})
+set_tests_properties(control-worker-deadline PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
 
 add_executable(oscairn-json-rpc-test tests/json_rpc.cpp)
 target_include_directories(oscairn-json-rpc-test PRIVATE ../clap-host/tests)

@@ -72,6 +72,12 @@ target_include_directories(oscairn_engine PUBLIC engine/include)
 target_link_libraries(oscairn_engine PUBLIC oscairn_plugin_host)
 target_compile_options(oscairn_engine PRIVATE -Wall -Wextra)
 
+# Sanitizers slow rendering several times over; there the paced tests check containment, not timing.
+# CI's virtual machines cannot keep real time either (GitHub sets CI).
+if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize" OR DEFINED ENV{CI})
+    set(worker_timing --no-timing)
+endif()
+
 add_subdirectory(control)
 
 add_executable(oscairn-sequencer-timing-test engine/tests/sequencer_timing.cpp)
@@ -389,11 +395,6 @@ target_link_libraries(oscairn-hostile-worker PRIVATE oscairn_plugin_host)
 add_test(NAME voice-extension-hostile COMMAND oscairn-voice-extension-test $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-voice-fixture> $<TARGET_FILE:oscairn-hostile-worker>)
 set_tests_properties(voice-extension-hostile PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_BUDGET_US=50000")
 
-# Sanitizers slow rendering several times over; there the test checks containment, not timing.
-# CI's virtual machines cannot keep real time either (GitHub sets CI).
-if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize" OR DEFINED ENV{CI})
-    set(worker_timing --no-timing)
-endif()
 # RFC 0045's load guard in real time: notes give way before a worker's block is missed, with no budget and with the profiles' budget.
 add_test(NAME load-guard COMMAND oscairn-load-guard-test $<TARGET_FILE:oscairn-voice-fixture> ${worker_timing})
 set_tests_properties(load-guard PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=100;OSCAIRN_WORKER_BUDGET_US=1000;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")

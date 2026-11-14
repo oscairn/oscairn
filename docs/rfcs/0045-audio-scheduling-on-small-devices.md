@@ -730,6 +730,9 @@ CPU, plugins with few parameters and no voices); it is the next thing to profile
   budget or none; and every lane's together are held to the budget (with none, 80 % of a block) on
   each of RFC 0025's audio cores (`usableCores() - 1`), a lane's limit leaving the others what they
   took in the last block. `budget.set {"cpu":64}` therefore no longer turns the guard off.
+  `load-guard` also plays with the instrument profile's 75 % budget (before the correction its
+  overloaded worker was restarted as too slow), runs alone (`RUN_SERIAL`), and checks only that
+  notes give way where they should under `--no-timing` (sanitizers, CI), as the other paced tests.
 
 Expected (an estimate, not measured) for ST Final on the unit with A+B: three host processes in
 place of nine; at most three hand-overs a wave and two waves (instruments with their inserts, then

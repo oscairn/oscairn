@@ -5,12 +5,15 @@
 // part B a few. Without the guard A's worker misses blocks or is restarted as too slow (its notes
 // lost); with it A's notes give way (by the budget's order), A's worker is not restarted, misses
 // (almost) none once the first are given up and its blocks fit the allowance, and B, on its own
-// lane, loses nothing. Usage: voice-fixture (OSCAIRN_PLUGIN_WORKER set,
-// OSCAIRN_FIXTURE_VOICE_US the cost of a voice, OSCAIRN_WORKER_BUDGET_US the allowance).
+// lane, loses nothing. The same with a CPU budget set as the standalone app's profiles set it (75% of a
+// block, more than the allowance): the allowance still bounds the lane. Usage: voice-fixture
+// [--no-timing] (OSCAIRN_PLUGIN_WORKER set, OSCAIRN_FIXTURE_VOICE_US the cost of a voice,
+// OSCAIRN_WORKER_BUDGET_US the allowance). --no-timing checks only that notes give way where they should.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -45,21 +48,26 @@ Result play(const char* plugin,double budget){
 }
 
 int main(int argc,char** argv){try{
-    if(argc!=2)return 2;
+    if(argc<2)return 2;
+    const bool timing=!(argc>2 && !std::strcmp(argv[2],"--no-timing"));
     auto render=[&](double budget){
         Result r;std::exception_ptr error;
         std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{r=play(argv[1],budget);}catch(...){error=std::current_exception();}}).join();
         if(error)std::rethrow_exception(error);
         return r;
     };
-    const auto open=render(0),guarded=render(-1);
-    for(const auto* r:{&open,&guarded})
-        std::printf("%s: A missed %llu blocks after block %u, restarted %llu times, last block %.0f us; A gave up %llu notes (%llu choked), B %llu\n",r==&open?"no guard":"guard",(unsigned long long)r->misses,settle,(unsigned long long)r->restarts,r->last,
+    const auto open=render(0),guarded=render(-1),budgeted=render(.75*frames/48000.0*1e6); // instrument reliability's budget, 2,000 us
+    for(const auto* r:{&open,&guarded,&budgeted})
+        std::printf("%s: A missed %llu blocks after block %u, restarted %llu times, last block %.0f us; A gave up %llu notes (%llu choked), B %llu\n",r==&open?"no guard":r==&guarded?"guard":"guard, 75% budget",(unsigned long long)r->misses,settle,(unsigned long long)r->restarts,r->last,
             (unsigned long long)r->stolen,(unsigned long long)r->chokes,(unsigned long long)r->bStolen);
-    check(open.misses>50 || open.restarts>0,"without the guard A's worker misses blocks, or is restarted as too slow and its notes are lost");
-    check(guarded.stolen+guarded.chokes>0,"with the guard A's notes give way");
-    check(guarded.restarts==0 && guarded.misses<=5,"with the guard A's worker is never restarted and misses (almost) no block once its notes have given way");
-    check(guarded.last>0 && guarded.last<=1000,"with the guard A's blocks fit its allowance: "+std::to_string(guarded.last)+" us");
-    check(guarded.bStolen==0,"B's notes, on a lane of their own, are not given up for A's");
+    if(timing)check(open.misses>50 || open.restarts>0,"without the guard A's worker misses blocks, or is restarted as too slow and its notes are lost");
+    for(const auto* r:{&guarded,&budgeted}){
+        const std::string with=r==&guarded?"with the guard":"with a 75% budget";
+        check(r->stolen+r->chokes>0,with+" A's notes give way");
+        check(r->bStolen==0,with+" B's notes, on a lane of their own, are not given up for A's");
+        if(!timing)continue;
+        check(r->restarts==0 && r->misses<=5,with+" A's worker is never restarted and misses (almost) no block once its notes have given way: "+std::to_string(r->restarts)+" restarts, "+std::to_string(r->misses)+" missed");
+        check(r->last>0 && r->last<=1000,with+" A's blocks fit its allowance: "+std::to_string(r->last)+" us");
+    }
     return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"load-guard: %s\n",e.what());return 1;}}

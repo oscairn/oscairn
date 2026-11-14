@@ -360,8 +360,6 @@ set_tests_properties(voice-budget-parallel PROPERTIES TIMEOUT 120 ENVIRONMENT "O
 add_executable(oscairn-load-guard-test engine/tests/load_guard.cpp)
 target_link_libraries(oscairn-load-guard-test PRIVATE oscairn_engine)
 add_dependencies(oscairn-load-guard-test oscairn-voice-fixture oscairn-plugin-worker)
-add_test(NAME load-guard COMMAND oscairn-load-guard-test $<TARGET_FILE:oscairn-voice-fixture>)
-set_tests_properties(load-guard PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=100;OSCAIRN_WORKER_BUDGET_US=1000;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
 add_test(NAME voice-budget-workers COMMAND oscairn-voice-budget-test $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(voice-budget-workers PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=60;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_PLUGIN_HOSTS=1") # one plugin host: the three parts one lane, as the budget's total takes them
 # RFC 0018 step 4: oscairn.voice-budget, the Basic Synth's one pool across sounds and the
@@ -390,6 +388,9 @@ set_tests_properties(voice-extension-hostile PROPERTIES TIMEOUT 60 ENVIRONMENT "
 if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize" OR DEFINED ENV{CI})
     set(worker_timing --no-timing)
 endif()
+# RFC 0045's load guard in real time: notes give way before a worker's block is missed, with no budget and with the profiles' budget.
+add_test(NAME load-guard COMMAND oscairn-load-guard-test $<TARGET_FILE:oscairn-voice-fixture> ${worker_timing})
+set_tests_properties(load-guard PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=100;OSCAIRN_WORKER_BUDGET_US=1000;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
 # RFC 0045's extra block: a listed plugin one block late, sample for sample, others on time.
 add_executable(oscairn-worker-extra-block-test engine/tests/worker_extra_block.cpp)
 target_link_libraries(oscairn-worker-extra-block-test PRIVATE oscairn_engine)

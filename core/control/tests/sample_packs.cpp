@@ -113,6 +113,10 @@ int main(int argc, char** argv)
             Session a(48000, 64);
             a.installArchive(typesArchive.string(), true);
             check(itemType("org.oscairn.samplepack.sample") && handlerType("waveform"), "the types package installs both types");
+            const std::string head = R"({"format":"oscairn.type","version":1,"id":"com.example.other","name":"Other","plural":"Others","folder":"Others","fields":[],)";
+            check(refusal([&] { readItemType(head + R"("recognize":{"extensions":[".osp"]},"storage":"content","identity":"content","handler":"midi"})"); }).find("not one Oscairn has") != std::string::npos, "a handler Oscairn lacks is refused");
+            check(refusal([&] { readItemType(head + R"("recognize":{"extensions":[".wav"]},"storage":"content","identity":"content","handler":"sample"})"); }).find("stored and identified by content") != std::string::npos, "a handler's type has its files' extension");
+            check(refusal([&] { addItemType(readItemType(head + R"("recognize":{"extensions":[".osp"]},"storage":"content","identity":"content","handler":"sample"})")); }).find("kept by its handler") != std::string::npos, "two types never name one handler");
             a.installArchive(content.string(), false);
             check(held(a) == 4, "four samples installed");
             uint64_t last = 0; bool ordered = true;

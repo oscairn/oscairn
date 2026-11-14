@@ -36,6 +36,9 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja lilv lv2
 
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
+
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_LV2=ON
@@ -110,6 +113,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Ninja
         run: brew install ninja
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
+
       - name: Configure
         run: cmake -S . -B build-standalone -G Ninja -DCMAKE_BUILD_TYPE=Release -DOSCAIRN_STANDALONE=ON
       - name: Build
@@ -129,6 +135,9 @@ jobs:
           repository: lv2/lv2
           ref: 0bcde338db1c63bbc503b4d1f6d7b55ed43154af
           path: upstream-lv2
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
+
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug

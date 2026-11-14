@@ -11,6 +11,7 @@ copy_licenses() {
 	cp core/control/third_party/monocypher/LICENCE.md "$licenses/Monocypher-BSD-2-Clause-or-CC0.md"
 	cp hosts/standalone/icons/LICENSE "$licenses/Lucide-ISC.txt"
 	cp hosts/standalone/themes/oscairn-dark/fonts/OFL.txt "$licenses/Inter-OFL-1.1.txt"
+	cp "$juce/../samplepack-src/LICENSE" "$licenses/samplepack-MIT.txt" # fetched beside JUCE, in the build's _deps
 	cp "$juce/LICENSE.md" "$licenses/JUCE.md"
 	cp "$juce/JUCE.spdx.json" "$licenses/JUCE.spdx.json"
 	# What JUCE's modules the app links carry from others (JUCE.spdx.json lists all of them).

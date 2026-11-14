@@ -103,7 +103,8 @@ and [documentation index](docs/README.md).
 ## Try it
 
 Needs CMake 3.21+, Ninja and a C++20 compiler (on macOS: Xcode command line tools, and
-`brew install cmake ninja`).
+`brew install cmake ninja`), and Rust 1.95.0 through rustup for the sample pack library
+(`tools/install-rust.sh` installs it; configuring says so when it is missing).
 
 ### The desktop app
 

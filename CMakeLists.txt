@@ -46,6 +46,28 @@ FetchContent_Declare(JUCE
     GIT_SHALLOW ON
     PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/hosts/juce-patches/apply.cmake)
 
+# Oscairn Sample Packs and waveforms (github.com/oscairn/samplepack, MIT): the one reader of .osp
+# and .owf files for the host and the Sampler, in Rust behind a C interface, at a pinned commit.
+# Its CMake module builds the static library with cargo, offline, at the Rust release its
+# rust-toolchain.toml pins; a local checkout can stand in with FETCHCONTENT_SOURCE_DIR_SAMPLEPACK.
+set(OSCAIRN_SAMPLEPACK_COMMIT c87aa70d2aec4445e70140172e7dfad038ae31d0)
+set(OSCAIRN_RUST_VERSION 1.95.0)
+FetchContent_Declare(samplepack GIT_REPOSITORY https://github.com/oscairn/samplepack.git GIT_TAG ${OSCAIRN_SAMPLEPACK_COMMIT})
+FetchContent_MakeAvailable(samplepack)
+find_program(SAMPLEPACK_CARGO cargo HINTS "$ENV{CARGO_HOME}/bin" "$ENV{HOME}/.cargo/bin")
+set(rust_help "install rustup (https://rustup.rs) and run: rustup toolchain install ${OSCAIRN_RUST_VERSION} --profile minimal --component clippy,rustfmt --target aarch64-unknown-linux-gnu (or pass -DSAMPLEPACK_CARGO=<cargo ${OSCAIRN_RUST_VERSION}>)")
+if(NOT SAMPLEPACK_CARGO)
+    message(FATAL_ERROR "Oscairn needs Rust ${OSCAIRN_RUST_VERSION} (cargo) to build samplepack: ${rust_help}")
+endif()
+# In samplepack's folder, so rustup takes its pinned release; never installing one at configure time.
+execute_process(COMMAND ${CMAKE_COMMAND} -E env RUSTUP_AUTO_INSTALL=0 ${SAMPLEPACK_CARGO} --version
+    WORKING_DIRECTORY "${samplepack_SOURCE_DIR}" RESULT_VARIABLE rust_result OUTPUT_VARIABLE rust_found ERROR_VARIABLE rust_error OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT rust_result EQUAL 0 OR NOT rust_found MATCHES "^cargo ${OSCAIRN_RUST_VERSION}[ ]")
+    message(FATAL_ERROR "Oscairn needs Rust ${OSCAIRN_RUST_VERSION} to build samplepack; ${SAMPLEPACK_CARGO} gives \"${rust_found}${rust_error}\": ${rust_help}")
+endif()
+list(APPEND CMAKE_MODULE_PATH "${samplepack_SOURCE_DIR}/cmake")
+include(SamplePack) # samplepack::samplepack
+
 add_subdirectory(core)
 add_subdirectory(devices/roland-fantom0)
 add_subdirectory(plugins)

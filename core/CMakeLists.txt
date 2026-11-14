@@ -200,6 +200,9 @@ set_tests_properties(sound-contexts PROPERTIES TIMEOUT 30)
 add_executable(oscairn-assets-test engine/tests/assets.cpp)
 target_link_libraries(oscairn-assets-test PRIVATE oscairn_plugin_host)
 add_test(NAME assets COMMAND oscairn-assets-test)
+add_executable(oscairn-samplepack-test engine/tests/samplepack.cpp)
+target_link_libraries(oscairn-samplepack-test PRIVATE samplepack::samplepack)
+add_test(NAME samplepack COMMAND oscairn-samplepack-test "${samplepack_SOURCE_DIR}/tests/data/colored-mono-b1024-l4-r44100")
 
 if(BUILD_TESTING) # the Legacy Sampler
     add_executable(oscairn-sampler-test engine/tests/sampler.cpp)

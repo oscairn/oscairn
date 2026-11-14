@@ -1,0 +1,6 @@
+config BR2_PACKAGE_OSCAIRN_SAMPLEPACK
+	bool
+	help
+	  The samplepack source (Oscairn Sample Packs and waveforms),
+	  for the oscairn package, which builds its static library
+	  with cargo. Nothing is installed on the target.

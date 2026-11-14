@@ -10,14 +10,19 @@ OSCAIRN_SITE = $(BR2_EXTERNAL_OSCAIRN_PATH)/../..
 OSCAIRN_SITE_METHOD = local
 OSCAIRN_OVERRIDE_SRCDIR_RSYNC_EXCLUSIONS = --exclude '/build*' --exclude '/demo'
 OSCAIRN_LICENSE = AGPL-3.0-or-later, MIT (CLAP), MIT (oscairn-clap headers), MIT (miniz), BSD-2-Clause or CC0-1.0 (Monocypher), \
-	Unlicense (json.h)
+	Unlicense (json.h), MIT (samplepack, in the oscairn-samplepack package's licenses)
 OSCAIRN_LICENSE_FILES = LICENSE core/clap-host/third_party/clap/LICENSE core/clap-ext/LICENSE \
 	core/control/third_party/miniz/LICENSE core/control/third_party/monocypher/LICENCE.md \
 	core/control/third_party/sheredom/json.h
-OSCAIRN_DEPENDENCIES = host-pkgconf
+OSCAIRN_DEPENDENCIES = host-pkgconf oscairn-samplepack
 # Nothing is downloaded while building; without tests (Buildroot passes BUILD_TESTING=OFF) the
 # Legacy Sampler is not fetched.
 OSCAIRN_CONF_OPTS += -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+# samplepack comes from its own package and is built with the Rust release the build container
+# installs (os/docker/Dockerfile: rustup in /opt/rust, RUSTUP_HOME and CARGO_HOME set there),
+# for the target's triple; OSCAIRN_CARGO names another cargo of that release.
+OSCAIRN_CARGO ?= /opt/rust/cargo/bin/cargo
+OSCAIRN_CONF_OPTS += -DFETCHCONTENT_SOURCE_DIR_SAMPLEPACK=$(OSCAIRN_SAMPLEPACK_SRCDIR) -DSAMPLEPACK_CARGO=$(OSCAIRN_CARGO)
 
 ifeq ($(BR2_PACKAGE_OSCAIRN_LV2),y)
 OSCAIRN_DEPENDENCIES += lilv

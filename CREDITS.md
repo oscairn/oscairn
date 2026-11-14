@@ -88,6 +88,11 @@ authoritative.
   itself (AGPL-3.0-or-later) is in its own repository,
   [oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler), which Oscairn builds at a pinned
   commit for its tests only; neither is in the desktop app or the OS image.
+- **samplepack:** the Oscairn contributors ([oscairn/samplepack](https://github.com/oscairn/samplepack),
+  MIT). The reader of Oscairn Sample Packs (`.osp`) and waveforms (`.owf`), with its FLAC subset
+  decoder, in Rust behind a C interface; built from its source at the commit the top-level
+  `CMakeLists.txt` pins (`OSCAIRN_SAMPLEPACK_COMMIT`) and linked into the host. Not vendored:
+  fetched when Oscairn is configured, and from the `oscairn-samplepack` package in the OS image.
 
 ## Archives
 

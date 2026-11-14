@@ -20,6 +20,9 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
 
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
+
       - name: Build the dmg
         run: tools/release-macos.sh
 
@@ -46,6 +49,9 @@ jobs:
 
       - name: Install the build's packages
         run: sudo apt-get update && sudo apt-get install -y ninja-build libasound2-dev libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev libxi-dev
+
+      - name: Install Rust 1.95.0 (samplepack's pinned release)
+        run: tools/install-rust.sh
 
       - name: Build the tarball
         run: tools/release-linux.sh

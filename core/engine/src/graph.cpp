@@ -1433,7 +1433,7 @@ namespace oscairn
                 for(uint32_t c=0;c<std::min(count,meterChannels);++c)
                 {
                     float peak=0;
-                    for(uint32_t i=0;i<frames;++i)peak=std::max(peak,std::abs(step.out[from+c][i]));
+                    for(uint32_t i=0;i<frames;++i)peak=std::fmax(peak,std::abs(step.out[from+c][i]));
                     auto& held=(*peaks)[c];
                     for(float seen=held.load(std::memory_order_relaxed);peak>seen && !held.compare_exchange_weak(seen,peak,std::memory_order_relaxed););
                 }};
@@ -1448,7 +1448,7 @@ namespace oscairn
                 a.sounding.store(sounding,std::memory_order_relaxed);
                 if(processed)
                 {
-                    float loudest=0;for(uint32_t c=0;c<context.channels;++c)for(uint32_t i=0;i<frames;++i)loudest=std::max(loudest,std::abs(step.out[context.offset+c][i]));
+                    float loudest=0;for(uint32_t c=0;c<context.channels;++c)for(uint32_t i=0;i<frames;++i)loudest=std::fmax(loudest,std::abs(step.out[context.offset+c][i]));
                     a.quiet.store(loudest<1e-5f?a.quiet.load(std::memory_order_relaxed)+frames:0,std::memory_order_relaxed);
                     a.asleep.store(step.host->asleep(),std::memory_order_relaxed);
                 }
@@ -1463,7 +1463,7 @@ namespace oscairn
                 a.sounding.store(sounding,std::memory_order_relaxed);
                 if(processed)
                 {
-                    float loudest=0;for(uint32_t c=0;c<step.audioOutputs;++c)for(uint32_t i=0;i<frames;++i)loudest=std::max(loudest,std::abs(step.out[c][i]));
+                    float loudest=0;for(uint32_t c=0;c<step.audioOutputs;++c)for(uint32_t i=0;i<frames;++i)loudest=std::fmax(loudest,std::abs(step.out[c][i]));
                     a.quiet.store(loudest<1e-5f?a.quiet.load(std::memory_order_relaxed)+frames:0,std::memory_order_relaxed);
                     a.asleep.store(step.host->asleep(),std::memory_order_relaxed);
                 }

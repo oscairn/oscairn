@@ -466,6 +466,8 @@ target_link_libraries(oscairn-worker-memory-env-test PRIVATE oscairn_plugin_host
 add_test(NAME worker-memory-env COMMAND oscairn-worker-memory-env-test 512 512)
 add_test(NAME worker-memory-env-not-a-number COMMAND oscairn-worker-memory-env-test abc 4096)
 add_test(NAME worker-memory-env-negative COMMAND oscairn-worker-memory-env-test -5 4096)
+add_executable(oscairn-peak-fmax-test engine/tests/peak_fmax.cpp)
+add_test(NAME peak-fmax COMMAND oscairn-peak-fmax-test)
 add_executable(oscairn-worker-failures-test engine/tests/worker_failures.cpp)
 target_link_libraries(oscairn-worker-failures-test PRIVATE oscairn_engine)
 add_test(NAME worker-failures COMMAND oscairn-worker-failures-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>

@@ -104,6 +104,25 @@ Where this RFC left a choice, the smaller reading was taken:
   installed ones included), and an install refuses an archive missing one but for placeholders,
   and remaps them in a copy, to the one already here when it has that content. A general way
   stays open.
+- **Handlers** (2026-11-14): what a manifest cannot say for items stored by content, the code
+  that verifies an item, stores it and finds it, is Oscairn's, named by the type as an
+  extractor is: `"handler": "sample"` (samples in Oscairn Sample Packs) or `"handler":
+  "waveform"`, both built on the samplepack library. A type naming a handler Oscairn lacks is
+  refused, as is one naming a handler another type names; a handler's type is stored and
+  identified `content`, its files of the handler's extension (`.osp`, `.owf`), and for it
+  `content` identity is the id the handler computes from the content (a sample's over its
+  decoded audio), not the SHA-256 of the file. They fit the **by content** model: Oscairn
+  arranges the files, each item stored once by its id and shared by everything that uses it;
+  that a sample's records are consolidated into multi-record packs on the device is the handler's
+  own layout, not a fourth model. In archives each item is `<type folder>/<id><extension>`. The
+  package `org.oscairn.samplepack` declares the two types (`Samples`, `Waveforms`), so a device
+  without a sampler need not have them and another package may declare other types the same way
+  once Oscairn has a handler for them; a handler's type is not forgotten while its store holds
+  anything. Items refer to them by id through `oscairn.assets` references (`sample:<id>`,
+  `waveform:<id>`, [RFC 0009](0009-sound-assets-and-dependencies.md#implementation-status)), a
+  waveform to its samples through its file; exports and installs follow those references
+  ([library archive](../library-archive.md#samples-and-waveforms)). Not built: a build without
+  the handlers (it would refuse the types), and library index entries for these items.
 
 ## Problem
 

@@ -304,6 +304,32 @@ resolve individually by content, which already covers a folder registered again 
 Registration runs on the engine's control thread and blocks other control requests while a
 large folder is hashed.
 
+Items by id (2026-11-14): samples in Oscairn Sample Packs and waveforms, items of
+[RFC 0023](0023-item-types.md) types kept by handlers rather than files
+([library archive](../library-archive.md#samples-and-waveforms)):
+
+- **The reference rule changes for them.** A reference may name an item by its id instead of a
+  file: `path` `sample:<id>` or `waveform:<id>`, `library` empty, and `sha256` the id. The digest
+  of such a reference is its item's id by its kind's rule (the samplepack library's sample id over
+  the decoded audio, its waveform id over the waveform's body), not the SHA-256 of a file; an empty
+  `sha256` is filled in with the id, another is refused. Content identity, the first decision
+  above, still holds: two archives' copies of one sample are one sample.
+- **Storage changes for them.** A sample is not kept as a file in the store: its record is copied
+  byte for byte into the device's own multi-record packs (`assets/samples/`), appended to, never
+  rewritten, and found through an index in memory; a waveform is `assets/waveforms/<id>.owf`.
+  Records are fully verified once, at install, by the library.
+- **`oscairn.assets/draft-4`** adds `resolve_sample(host, ref, path, capacity, location, message,
+  capacity)`: the pack's path and the record's offset, length and preload span, valid while the
+  plugin holds the sound prepared. `resolve` answers a waveform reference with its file once every
+  sample it names is installed. A plugin in a worker asks the engine, as for `resolve`.
+  `control-sample-packs-engine` and `-worker` (a test instrument resolving and decoding samples in
+  each process), `sample-store`.
+- Not done: cleanup of samples and waveforms nothing references (the references are recorded as
+  any other's, in documents and `assets/roots.tsv`, so the explicit roots of step 4 can find them),
+  compaction of the packs, and the identity guard (a pack's size and time kept to skip
+  re-verification); a sample's rate, channels and length are not checked against what a sound
+  expects (format I-1), as references do not record them.
+
 ## Ruled out
 
 - Copying assets into each Performance: too much storage.

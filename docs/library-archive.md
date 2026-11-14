@@ -11,7 +11,8 @@ A library, an exported Performance, Sound or setlist, or a plugin package is one
 | `Sounds/<folder>/` | Each Sound the same way, `sound.json` and `nodes/` |
 | `Setlists/<folder>/` | Each setlist, `setlist.json` ([format](setlist-format.md), [below](#setlists)) |
 | `<type folder>/<folder>/` | Each item of any other [item type](rfcs/0023-item-types.md) the reading device knows, in its type's folder, as the library keeps it |
-| `Assets/<first 16 hex digits of the SHA-256>/<file>` | Each sample the items' plugins use, once; in an [asset package](#asset-packages), `Assets/<path>`, the library's files at their paths |
+| `Assets/<first 16 hex digits of the SHA-256>/<file>` | Each sample file the items' plugins use, once; in an [asset package](#asset-packages), `Assets/<path>`, the library's files at their paths |
+| `<type folder>/<id><extension>` | Each item of a type kept by a handler that the items use: with the sample pack types, `Samples/<id>.osp` and `Waveforms/<id>.owf` ([samples and waveforms](#samples-and-waveforms)) |
 | `Plugins/<format>/<id>@<version>/<platform>/<bundle>` | Each plugin build the items use ([RFC 0006](rfcs/0006-packages-and-portability.md)), a file or a bundle folder as installed; characters other than letters, digits, `.`, `-`, `@` and `_` in the ID and version are `_` |
 | `Licenses/<file>` | Its license texts and notices ([license and source](#license-and-source)) |
 | `Types/<package ID>/<file>.json` | A library's: each [item type](rfcs/0023-item-types.md#the-manifest) it declares, its ID under that package ID, or the type of an exported item a package declared; installed with it ([RFC 0023](rfcs/0023-item-types.md) step 3) |
@@ -37,7 +38,8 @@ An export holds the Performance, the library Sound of each part that is still th
 part unedited since it was loaded or saved, and the library holding that revision), and with
 **edited Sounds**, the Sound of each part edited since, as the library has it. Every sample their
 plugins list goes in once, by its hash, whatever [asset library](#asset-packages) it came from: no
-library's files are kept out. The license texts of each asset
+library's files are kept out; every sample and waveform of the sample pack types they list goes
+in by its id, a waveform with the samples it names ([below](#samples-and-waveforms)). The license texts of each asset
 library whose files go in go with them, under `Licenses/<library ID>/`. Each plugin they use goes in with every build there is:
 this device's from its `pathHint` while that build still has the document's locked digest, else
 from the plugin store, and the store's builds for other platforms (installed from archives, or
@@ -254,6 +256,54 @@ nothing uses, and the stored files no library's tree links. Anything else on the
 as a copy of a Performance made by hand or an archive on a USB drive, cannot be seen, so a
 library installed by hand is never collected.
 
+## Samples and waveforms
+
+Built 2026-11-14. Samples in [Oscairn Sample Packs](https://github.com/oscairn/samplepack)
+(`.osp`, its `docs/format.md`) and waveforms (`.owf`, its `docs/waveform.md`) are items of two
+[item types](rfcs/0023-item-types.md) kept by handlers: code in Oscairn, built on the samplepack
+library, that verifies such an item, stores it and finds it. A type names its handler in its
+manifest; the package `org.oscairn.samplepack` declares both (its manifests are in
+`core/control/types/org.oscairn.samplepack/`), and a device that has not installed it, or an
+archive declaring them, knows neither:
+
+```json
+{"format": "oscairn.type", "version": 1, "id": "org.oscairn.samplepack.sample", "name": "Sample", "plural": "Samples",
+ "recognize": {"extensions": [".osp"]}, "storage": "content", "folder": "Samples", "identity": "content", "handler": "sample", "fields": []}
+```
+
+The waveform type is the same with `waveform`, `Waveforms`, `.owf` and handler `waveform`.
+
+- **Identity.** A sample's id is the SHA-256 the format defines over its decoded audio, a
+  waveform's the one its format defines over its body: 64 lowercase hex digits, computed and
+  checked only by the library. The host never parses audio.
+- **In an archive.** Each is a file in its type's folder named by its id: a sample as a
+  one-record pack, `Samples/<id>.osp`, the record copied byte for byte; a waveform as its file,
+  `Waveforms/<id>.owf`. They are listed in `files` and covered by the archive's signature like
+  any file, the types' manifests under `Types/` beside them. Nothing else may be in such a folder.
+  Their order in the archive is the order an install appends them in: an export writes each
+  sound's together, in the order its plugins list them.
+- **References.** A plugin lists `sample:<id>` or `waveform:<id>` in its asset dependencies,
+  `library` empty and `sha256` the id (the digest of such a reference is its item's id by its
+  kind's rule, not a file's hash). `oscairn.assets` resolves a waveform to its file once every
+  sample it names is installed, and `resolve_sample` (draft 4) a sample to its pack and the
+  record's offset, length and preload span. A Performance or Sound records these references as
+  it records any other, and does not open while one is missing.
+- **Exported.** An export carries every sample and waveform its sounds' plugins list, a
+  waveform with each sample it names, and only those, whatever archive or package they came
+  from.
+- **Installed.** Before anything else of the archive, each waveform passes the library's check
+  and its id recomputed is its file name's, and each sample file opens as a pack as it is (never
+  recovered), holds one live record, which passes the library's full verification, and is named
+  by its id; one that does not refuses the install, naming it, with nothing kept. Then each
+  sample this device does not have is appended to the device's own packs in the archive's order
+  and each waveform copied in; one already here is skipped.
+- **On the device** (`assets/` in the data folder): the samples' records sit in packs of the
+  device's own, `samples/pack-000001.osp` and on, each at most 1 GiB, appended to by the
+  format's protocol and never rewritten; `waveforms/<id>.owf` one file each. The index of where
+  each sample is lives in memory, 56 bytes a sample (5.6 MB for 100,000), rebuilt at each start
+  from the packs' trailers; a pack whose last append was cut short is cut back to its last commit.
+  A type kept by a handler is not forgotten while its store holds anything.
+
 ## License and source
 
 A package carries its license texts and notices under `Licenses/` (`COPYING`, `NOTICE`,
@@ -430,7 +480,10 @@ nothing behind:
   and one in a plugin or asset package;
 - a setlist that does not read as its [format](setlist-format.md) says, or one of whose slots names a
   Performance the archive does not list as an item of kind `performance` (a placeholder, with no
-  ID, names none).
+  ID, names none);
+- in the folder of a type kept by a handler, anything but files named `<64 lowercase hex
+  digits><the type's extension>`; and, when installing, such a file the handler refuses
+  ([samples and waveforms](#samples-and-waveforms)).
 
 **An archive made for one device** (decided 2026-11-12,
 [RFC 0031](rfcs/0031-package-repository-and-distribution.md#ready-made-archives-per-platform)):
@@ -508,7 +561,8 @@ that. A pulled drive or a bad hash leaves nothing behind.
 - **Samples** go into the user's sample library (RFC 0009) by their hash either way, one the
   device already has (from another archive, an asset library or a repository) not stored again, so they stay
   when a library is uninstalled. A sample an item needs that is in neither the archive nor the
-  device is reported.
+  device is reported. Samples and waveforms of the sample pack types go into the device's own
+  packs and waveform folder ([above](#samples-and-waveforms)), verified first.
 - **Plugins:** every build of each plugin the installed items use, or of each plugin in a
   plugin package, goes into the plugin store,
   each whole or not at all, so this device can pass the others on in its own exports (a desktop

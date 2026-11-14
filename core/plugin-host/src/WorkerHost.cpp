@@ -1873,7 +1873,7 @@ namespace oscairn
             // one that costs least (then holds fewest nodes); null when every one is restarting or given up.
             std::shared_ptr<Process> pick(const std::string& program, double rate, uint32_t frames, uint64_t limit, uint32_t count)
             {
-                std::lock_guard lock(mutex);
+                std::unique_lock lock(mutex);
                 std::erase_if(hosts, [](const auto& p) { return p->gaveUp.load(); }); // its nodes keep it; a new host takes its place
                 std::shared_ptr<Process> best; double least = 0; size_t fewest = 0, matching = 0;
                 for(const auto& p : hosts)
@@ -1888,11 +1888,22 @@ namespace oscairn
                 if(matching >= count) return best;
                 auto p = std::make_shared<Process>(program, rate, frames, ProcessingMode::Realtime, limit);
                 p->pooled = true;
-                { std::lock_guard control(p->control); p->start(); }
-                p->supervisor = std::thread([q = p.get()] { q->supervise(); });
+                // Listed before it starts, and started without the pool's lock (a process start, its first reply): a pick
+                // meanwhile may choose it, and waits for the start on its control.
+                std::unique_lock control(p->control);
                 hosts.push_back(p);
-                std::erase_if(all, [](const auto& w) { return w.expired(); });
-                all.push_back(p);
+                lock.unlock();
+                try { p->start(); }
+                catch(...)
+                {
+                    p->failed.store(true); // a pick holding it gives up on it (loadPluginInWorker)
+                    control.unlock();
+                    std::lock_guard again(mutex); std::erase(hosts, p);
+                    throw;
+                }
+                control.unlock();
+                p->supervisor = std::thread([q = p.get()] { q->supervise(); });
+                track(p);
                 return p;
             }
         };
@@ -1952,13 +1963,15 @@ namespace oscairn
         std::shared_ptr<Process> process;
         if(const auto& policy = placementPolicy(); mode == ProcessingMode::Realtime && policy.hosts && !pool().own(id, policy))
             process = pool().pick(program, sampleRate, maxFrames, memoryLimit, policy.hosts);
+        if(process && [&] { std::lock_guard lock(process->control); return process->failed.load(); }())
+            process = nullptr; // a host that failed since it was picked: a worker of its own instead
         const bool pooled = process != nullptr;
         if(!pooled) process = std::make_shared<Process>(program, sampleRate, maxFrames, mode, memoryLimit); // a worker of its own
         std::shared_ptr<PluginHost> host;
         try
         {
             std::lock_guard lock(process->control);
-            if(process->failed.load()) throw std::runtime_error(process->failure()); // a host that failed since it was picked
+            if(process->failed.load()) throw std::runtime_error(process->failure()); // failed in the moment since
             if(!pooled) process->start();
             Reader r = process->load(path, id, memoryRoom);
             auto engine = std::make_shared<const Engine>(Engine{path, id, r.data.substr(r.at + 4)});

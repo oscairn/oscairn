@@ -950,6 +950,10 @@ down with `Rotate left`), and a finger's touch "seems to be correct"; where touc
 been measured (XTest input goes in after the touch matrix, and screenshots read the X server's
 picture before it is turned).
 
+Shared memory: each app killed (SIGKILL or SIGTERM; a normal quit freed it) left its 3.7 MB X11
+window image behind as a SysV segment, 90 of them (315 MiB, swap full) on November 13; JUCE is
+patched (`hosts/juce-patches`) to mark the segment for removal once the X server has attached it.
+
 ## Starting at power-on (not done)
 
 What the owner means to do once Oscairn is stable enough: Roland's start script

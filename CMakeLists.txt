@@ -37,6 +37,15 @@ set(OSCAIRN_LV2_SOURCE_DIR "" CACHE PATH "Optional LV2 source checkout for unmod
 option(BUILD_TESTING "Build the tests that need the Legacy Sampler" ON)
 enable_testing()
 
+# JUCE, for the app, the engine and Modular, declared once here so every user gets the same
+# patched copy (hosts/juce-patches); fetched only by a component that needs it.
+include(FetchContent)
+FetchContent_Declare(JUCE
+    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+    GIT_TAG 9.0.4
+    GIT_SHALLOW ON
+    PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/hosts/juce-patches/apply.cmake)
+
 add_subdirectory(core)
 add_subdirectory(devices/roland-fantom0)
 add_subdirectory(plugins)

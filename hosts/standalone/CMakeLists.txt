@@ -284,6 +284,13 @@ if(Python3_Interpreter_FOUND)
         $<TARGET_FILE:oscairn_standalone> "${CMAKE_CURRENT_BINARY_DIR}/launch")
     set_tests_properties(desktop-launch PROPERTIES TIMEOUT 420)
 endif()
+# Linux: the app's X11 window image leaves no SysV shared-memory segment behind when the app is
+# killed, quits or is resized, on an Xvfb of the test's own (skipped without Xvfb).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
+    add_test(NAME desktop-xshm-segments COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop_xshm_segments.py"
+        $<TARGET_FILE:oscairn_standalone> "${CMAKE_CURRENT_BINARY_DIR}/xshm-segments")
+    set_tests_properties(desktop-xshm-segments PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+endif()
 # macOS: Settings, opened from the real app, comes in front of its window as the active app. It
 # shows windows and takes the active app from whoever is working: skipped unless OSCAIRN_WINDOW_TESTS=1
 # is set, as desktop-phase3b-engines is without its folder, and then run alone.

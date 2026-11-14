@@ -1,0 +1,34 @@
+JUCE 9.0.4's X11 window image (XBitmapImage, MIT-SHM) creates a SysV shared-memory segment and
+marks it for removal only in its destructor, so the segment outlives a process that is killed or
+crashes: one 3.7 MB segment per start of the app on the FANTOM-07 (docs/fantom-0.md). Marked for
+removal as soon as the X server has attached it, it is freed by the kernel with the last
+attachment. A segment the server could not attach (XShmAttach returning 0) is released too.
+
+--- a/modules/juce_gui_basics/native/juce_XWindowSystem_linux.cpp
++++ b/modules/juce_gui_basics/native/juce_XWindowSystem_linux.cpp
+@@ -996,6 +996,15 @@
+                                 usingXShm = true;
+                             else
+                                 jassertfalse;
++
++                            // Marked for removal once the server has attached it, so the kernel frees it
++                            // with the last attachment however this process ends (killed, crashed or exited).
++                            X11Symbols::getInstance()->xSync (display, False);
++
++                            if (! usingXShm)
++                                shmdt (segmentInfo.shmaddr);
++
++                            shmctl (segmentInfo.shmid, IPC_RMID, nullptr);
+                         }
+                         else
+                         {
+@@ -1065,8 +1074,8 @@
+ 
+             X11Symbols::getInstance()->xFlush (display);
+ 
++            // Already marked for removal at creation; its id may belong to another segment once freed.
+             shmdt (segmentInfo.shmaddr);
+-            shmctl (segmentInfo.shmid, IPC_RMID, nullptr);
+         }
+         else
+        #endif

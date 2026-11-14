@@ -4,7 +4,8 @@
 #
 ################################################################################
 
-# Source only: the oscairn package builds the JUCE modules it uses.
+# Source only: the oscairn package builds the JUCE modules it uses. Buildroot applies the *.patch
+# here, links to the ones in hosts/juce-patches that the CMake build applies.
 OSCAIRN_JUCE_VERSION = 9.0.4
 OSCAIRN_JUCE_SOURCE = $(OSCAIRN_JUCE_VERSION).tar.gz
 OSCAIRN_JUCE_SITE = https://github.com/juce-framework/JUCE/archive/refs/tags

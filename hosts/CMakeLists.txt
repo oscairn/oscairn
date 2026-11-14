@@ -86,12 +86,7 @@ if(UNIX)
 endif()
 
 if(OSCAIRN_STANDALONE OR OSCAIRN_ENGINE)
-    include(FetchContent)
-    FetchContent_Declare(JUCE
-        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG 9.0.4
-        GIT_SHALLOW ON)
-    FetchContent_MakeAvailable(JUCE)
+    FetchContent_MakeAvailable(JUCE) # declared in the top CMakeLists.txt
     # HTTPS on Linux is libcurl (JUCE_USE_CURL, RFC 0039). JUCE goes on without it and the build
     # fails later at curl/curl.h, so say what is missing here.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

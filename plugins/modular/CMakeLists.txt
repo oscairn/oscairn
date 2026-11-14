@@ -2,9 +2,7 @@
 # CLAP plugin. Its engine and patch code use JUCE, so this component links JUCE's core,
 # audio-basics and data-structures modules.
 if(NOT TARGET juce::juce_core)
-    include(FetchContent)
-    FetchContent_Declare(JUCE GIT_REPOSITORY https://github.com/juce-framework/JUCE.git GIT_TAG 9.0.4 GIT_SHALLOW ON)
-    FetchContent_MakeAvailable(JUCE)
+    FetchContent_MakeAvailable(JUCE) # declared in the top CMakeLists.txt
 endif()
 
 set(upstream_sources upstream/modular/mt_modular_engine.cpp upstream/modular/mt_modular_modules.cpp upstream/modular/mt_modular_patch.cpp)

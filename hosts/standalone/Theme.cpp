@@ -93,6 +93,8 @@ void drawListRow(juce::Graphics& g,juce::Rectangle<int> r,int index,juce::Colour
     }
 }
 void drawInked(juce::Graphics& g,const juce::String& s,juce::Rectangle<int> r,const juce::Font& font,juce::Justification h) {
+    // Outside what is being painted (a part of the window drawn again): nothing to shape or trace. Its ink may reach past r by a line.
+    if(s.isEmpty() || !g.clipRegionIntersects(r.expanded(0,int(std::ceil(font.getHeight())))))return;
     // Measured from the outlines: a glyph arrangement's boxes are the font's whole line height.
     auto inkOf=[](const juce::GlyphArrangement& a){juce::Path p;a.createPath(p);return p.getBounds();};
     juce::GlyphArrangement mark;mark.addLineOfText(font,s==s.toUpperCase()?"H":"x",0,0);

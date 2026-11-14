@@ -162,14 +162,14 @@ int main(int argc, char** argv)
                 pump(100); render = 4; pump(1000);
                 auto c = counter.counts(window);
                 const double bar = screen.width * standalone::TopBar::heightFor(home) * screen.scale();
-                std::printf("%-26s %6d frames %10lld pixels (the top bar is %.0f)\n", "Home, the tempo changed", c.frames, (long long) c.pixels, bar);
+                std::printf("%-26s %6d frames %10lld pixels (the top bar is %.0f) %7.2f ms\n", "Home, the tempo changed", c.frames, (long long) c.pixels, bar, c.ms);
                 check(c.frames > 0 && c.pixels < bar / 4, "the tempo changed: only it is drawn again");
                 // ...and a tile's line of state.
                 start();
                 library = "122 Performances";
                 pump(1500);
                 c = counter.counts(window);
-                std::printf("%-26s %6d frames %10lld pixels (a tile is %.0f)\n", "Home, a tile's state", c.frames, (long long) c.pixels, 200.0 * 120 * screen.scale() * screen.scale());
+                std::printf("%-26s %6d frames %10lld pixels (a tile is %.0f) %7.2f ms\n", "Home, a tile's state", c.frames, (long long) c.pixels, 200.0 * 120 * screen.scale() * screen.scale(), c.ms);
                 check(c.frames > 0 && c.pixels < 200.0 * 120 * screen.scale() * screen.scale() / 3, "a tile's state changed: only its line is drawn again");
                 panel.overlay(nullptr);
             }

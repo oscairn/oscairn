@@ -28,7 +28,7 @@ namespace {
 constexpr uint32_t frames=128;
 const auto period=std::chrono::microseconds(frames*1'000'000/48000);
 const auto deadline=std::chrono::nanoseconds(int64_t(double(std::chrono::nanoseconds(period).count())*(1-worker::mixingReserve)));
-uint64_t gaveUp(const Graph& g,NodeId n){const auto c=g.noteCost(n);return c.stolen+c.stolenForDevice+c.hardChokes+c.stolenForLoss;}
+uint64_t gaveUp(const Graph& g,NodeId n){const auto c=g.noteCost(n);return c.stolen+c.stolenForDevice+c.hardChokes+c.stolenForLoss+c.stolenForDeadline;}
 const char* const effect="org.oscairn.test.costly-effect";
 
 // Plays `blocks` blocks on a real-time thread paced at the period, `notes` first; slack: the callback's time left

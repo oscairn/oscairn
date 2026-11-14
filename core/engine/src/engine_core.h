@@ -59,7 +59,7 @@ typedef struct
     bool stranded, own_voices, honors_volume;
     float per_note_scale;
     uint32_t voice_limit, over_limit;
-    uint64_t faded_for_loss, lost;
+    uint64_t faded_for_loss, lost, faded_for_deadline;
 } oscairn_activity;
 
 /* A note connection into a step: its ledger, zones (copied), the routes sharing its part's note
@@ -147,7 +147,7 @@ typedef struct
                             oscairn_event* merged, uint32_t capacity, int16_t* heard, bool* overflow); \
     void p##notes_finish(oscairn_notes* notes, uint32_t step, const oscairn_finish* finish); \
     uint32_t p##notes_voice_limit(const oscairn_notes* notes, uint32_t step, uint32_t voices); \
-    void p##notes_end(oscairn_notes* notes);
+    void p##notes_end(oscairn_notes* notes, float slack);
 
 /* route_new: a ledger for a destination with `ports` note ports, bit p of clap_ports set where port p
  *   takes CLAP notes (else MIDI), and a stolen note's fade of fade_frames (0: choked at once).
@@ -168,7 +168,9 @@ typedef struct
  * notes_finish: after the step's plugin rendered: its notes counted and costed, a lost block marked on
  *   its lane and the lanes before it (the Rust core), its NOTE_ENDs taken.
  * notes_voice_limit: oscairn.voice-budget: the voices a step that gives up its own may keep.
- * notes_end: the block is done: the lanes judged against their limits, the timing report kept. */
+ * notes_end: the block is done: the lanes judged against their limits, the timing report kept; slack,
+ *   the microseconds left before the callback's deadline once the block was collected (NaN: unknown),
+ *   which the Rust core gives notes up for when it runs low. */
 OSCAIRN_CORE_API(rust_core_)
 OSCAIRN_CORE_API(cpp_core_)
 

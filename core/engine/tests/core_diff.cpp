@@ -286,7 +286,7 @@ void run(uint64_t seed,uint32_t blocks)
         }
         if(out[0].sent.size()!=out[1].sent.size() || !same(out[0].sent.data(),out[1].sent.data(),out[0].sent.size()*sizeof(Event)))fail("tap events",seed,b,-1);
         if(out[0].held!=out[1].held)fail("harmony keys",seed,b,-1);
-        for(auto& side:sides)side->core.notesEnd(side->notes);
+        for(auto& side:sides)side->core.notesEnd(side->notes,NAN);
         // Every route's state and every activity, compared.
         for(size_t r=0;r<sides[0]->routes.size();++r)
         {

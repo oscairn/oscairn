@@ -46,6 +46,7 @@ pub struct Activity {
     pub over_limit: AtomicU32,
     pub faded_for_loss: AtomicU64,
     pub lost: AtomicU64,
+    pub faded_for_deadline: AtomicU64,
 }
 
 /// The blocks a plugin that gives up its own voices may sound more than its limit before its notes
@@ -406,6 +407,13 @@ impl Budget {
         if let Some(a) = best.and_then(|v| self.steal(rs, v, 0)) {
             a.faded_for_loss.fetch_add(1, Relaxed);
             self.loss_hold = LOSS_HOLD_BLOCKS;
+        }
+    }
+    /// The engine's own time is running out (the callback's slack): one note fades across every lane,
+    /// quietest released first.
+    pub fn deadline(&mut self, rs: &mut Routes) {
+        if let Some(a) = self.choose(rs, None, false, false).and_then(|v| self.steal(rs, v, 0)) {
+            a.faded_for_deadline.fetch_add(1, Relaxed);
         }
     }
     /// oscairn.voice-budget: the voices a node on `lane` that gives up its own may keep from the next

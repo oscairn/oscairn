@@ -341,9 +341,9 @@ pub unsafe extern "C" fn rust_core_notes_voice_limit(notes: *const Notes, step: 
 /// # Safety
 /// `notes` is live and used by no other call.
 #[no_mangle]
-pub unsafe extern "C" fn rust_core_notes_end(notes: *mut Notes) {
+pub unsafe extern "C" fn rust_core_notes_end(notes: *mut Notes, slack: f32) {
     // SAFETY: live notes used by nothing else (the caller's contract).
-    unsafe { &mut *notes }.end(&mut Routes(()));
+    unsafe { &mut *notes }.end(&mut Routes(()), slack);
 }
 
 #[cfg(test)]
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn layouts() {
         assert_eq!(size_of::<Event>(), 64);
-        assert_eq!(size_of::<Activity>(), 128);
+        assert_eq!(size_of::<Activity>(), 136);
         assert_eq!((offset_of!(Activity, rest), offset_of!(Activity, stolen), offset_of!(Activity, lane_limit)), (28, 48, 72));
         assert_eq!((offset_of!(Activity, stranded), offset_of!(Activity, per_note_scale), offset_of!(Activity, over_limit)), (92, 96, 104));
         assert_eq!(size_of::<Zones>(), 8 * 72 + 8);
@@ -388,7 +388,7 @@ mod tests {
     static ALLOCATOR: Counting = Counting;
 
     // A block allocates nothing: routing a flood of notes past a tight budget (steals, chokes, fades),
-    // NOTE_ENDs, the watchdog, the lanes judged, lost blocks.
+    // NOTE_ENDs, the watchdog, the lanes judged, lost blocks, the callback's slack running low.
     #[test]
     fn blocks_allocate_nothing() {
         let activity = Activity::default();
@@ -452,12 +452,12 @@ mod tests {
                 rust_core_notes_begin(notes, &timing);
                 rust_core_notes_route(notes, 0, keys.as_mut_ptr(), 64, 128, &mut next_id, merged.as_mut_ptr(), 1057, std::ptr::null_mut(), &mut overflow);
                 rust_core_notes_finish(notes, 0, &finish);
-                rust_core_notes_end(notes);
+                rust_core_notes_end(notes, if b % 2 == 0 { 10.0 } else { f32::NAN });
             }
         }
         COUNTING.with(|c| c.set(false));
         assert!(budgeted && activity.stolen.load(Relaxed) + activity.hard_chokes.load(Relaxed) > 0, "notes were given up");
-        assert!(activity.faded_for_loss.load(Relaxed) > 0, "for lost blocks too");
+        assert!(activity.faded_for_loss.load(Relaxed) > 0 && activity.faded_for_deadline.load(Relaxed) > 0, "for lost blocks and the deadline too");
         assert_eq!(ALLOCATIONS.load(Relaxed), 0);
         // SAFETY: made above, freed once.
         unsafe {

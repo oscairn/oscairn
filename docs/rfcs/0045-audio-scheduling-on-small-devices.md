@@ -51,6 +51,7 @@ Checked when built and tested; the sections below say how.
   - [x] 12a. Every plugin's notes can be given up, however it takes notes or reports its voices
   - [x] 12b. Lost blocks a trigger, on the lane and every instrument lane before it
   - [x] 12c. An instrument's lane limit leaves room for the chain after it
+  - [x] 12d. The callback's own slack a trigger, across every lane
 
 ## Problem
 
@@ -842,6 +843,17 @@ to, which has rule 12a and none after it). Its rules, as built:
   out. Tested by `guard` (chain): an instrument of ten notes at 90 us into an effect of 700 us into
   a bus effect of 600 us, each in its own worker, waiting to the deadline (step 6): before, the
   instrument's limit 1,813 us and nothing given up; after, 772 us and 4 notes faded (single runs).
+- 12d. The callback's slack. After each block the engine measures the time left before the
+  callback's deadline once every step was collected (`callbackDeadline` less now; none in a host
+  without one). Under 10% of a period in two of the last four blocks, this one among them, one note
+  fades across every lane, quietest released first (whatever its cost: load from outside the audio,
+  the app or the engine's other threads, leaves notes as the only thing to give). Counted as
+  `fadedForDeadline`. Tested by `guard` (deadline): two parts in the engine's process, each well
+  within its lane, with 100 us left before the deadline after each block: before, nothing given up;
+  after, 12 notes faded; with the callback's whole time, none (single runs). To be measured on the
+  unit: a Performance whose callback runs near the deadline at rest (ST Final's take, callback up to
+  about 2,000 us of 2,266) should give up few notes for it; if it gives up many, the threshold is
+  too high for that device.
 
 ## Core placement
 

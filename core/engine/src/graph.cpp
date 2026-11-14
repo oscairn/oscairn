@@ -621,7 +621,7 @@ namespace oscairn
         const auto& a=*found;
         return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed),
                 a.stolenForDevice.load(std::memory_order_relaxed),a.laneLimit.load(std::memory_order_relaxed),a.laneTook.load(std::memory_order_relaxed),
-                a.stolenForLoss.load(std::memory_order_relaxed),a.lostBlocks.load(std::memory_order_relaxed)};
+                a.stolenForLoss.load(std::memory_order_relaxed),a.lostBlocks.load(std::memory_order_relaxed),a.stolenForDeadline.load(std::memory_order_relaxed)};
     }
     Graph::OutputGuard Graph::outputGuard( NodeId node ) const
     {
@@ -1585,7 +1585,9 @@ namespace oscairn
                                        &emitTo<decltype(emit)>,&emit,nullptr);
         }
         for(const auto& r:plan->outputRoutes)mix(r,outputs[r.to]);
-        OSCAIRN_CORE(notes_end)(plan->notes.get()); // the lanes judged, the timing report kept
+        // The lanes judged, the callback's time left once the block is collected (RFC 0045's guard), the timing report kept.
+        const float slack=callbackEnds.time_since_epoch().count()?std::chrono::duration<float,std::micro>(callbackEnds-std::chrono::steady_clock::now()).count():NAN;
+        OSCAIRN_CORE(notes_end)(plan->notes.get(),slack);
         return ok;
     }
 

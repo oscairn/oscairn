@@ -514,7 +514,7 @@ namespace oscairn
                 if(sound && !instances.insert(sound->engine()->host.get()).second) continue;
                 const auto c = graph_.noteCost(n, true);
                 guard.limit = std::max(guard.limit, c.laneLimit); guard.took = std::max(guard.took, c.laneTook);
-                guard.faded += c.stolen; guard.fadedForTotal += c.stolenForDevice; guard.choked += c.hardChokes; guard.fadedForLoss += c.stolenForLoss; guard.lost += c.lostBlocks;
+                guard.faded += c.stolen; guard.fadedForTotal += c.stolenForDevice; guard.choked += c.hardChokes; guard.fadedForLoss += c.stolenForLoss; guard.lost += c.lostBlocks; guard.fadedForDeadline += c.stolenForDeadline;
             }
             if(reset) { r->reset(); timingBase_[host] = st; }
         }

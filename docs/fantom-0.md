@@ -606,7 +606,10 @@ What stops when Roland's app is stopped, from what it was seen to do:
   memory, not only past 32 (RFC 0045's resident instances). The arithmetic, from the unit: of the
   992 MiB the kernel sees, `free -m` gives 952, so 40 are never ours; the engine's own resident
   memory, about 133 MB with ST Final open, is counted nowhere else (the budget counts the app's own
-  process and each plugin instance), so it goes in `osMemory`; the remaining 77 MiB are for the
+  process and each plugin instance), so it goes in `osMemory`; of it 45 MB were the capture
+  buffer's two minutes (RFC 0020), locked, which the budget also counts as committed: the profile's
+  `captureSeconds` makes it 30 seconds, what Capture saves, 11.5 MB (2026-11-14, not yet measured on
+  the unit); the remaining 77 MiB are for the
   kernel's caches, Weston, Xwayland and the other daemons beyond the headroom the app's reservations
   already hold (the Performance and Library apps, always available, reserve 150 and 120 MiB at
   their placeholders while the whole app measured 38 MB). With the margin (5 %, 50 MiB) and the

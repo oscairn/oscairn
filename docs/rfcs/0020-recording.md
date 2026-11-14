@@ -725,8 +725,10 @@ over the control socket, with no audio device:
   overruns. Play plays the selected take only when pressed (Stop stops it; selecting plays
   nothing); Rename and Delete (asked first) for closed takes; Show in Finder on the desktop. The
   buffer's length is chosen there (off, 1, 2, 5 or 10 minutes), saved in the configuration
-  folder's `capture`; by default 2 minutes on a device with 2 GB or less, 10 minutes above, as
-  proposed under "Length", and sent again after an engine restart.
+  folder's `capture`; by default the profile's `captureSeconds` where it names one (the FANTOM-07:
+  30 seconds, what Capture saves, 2026-11-14), else 2 minutes on a device with 2 GB or less, 10
+  minutes above, as proposed under "Length", and sent again after an engine restart. The rings are
+  allocated when the buffer is turned on, at the app's start with the default, and none while it is off.
 - The test checks: the top bar's Record and Capture when the shell asks; Record starting a take
   and the bar showing its time; Record stopping it; Capture saving a take; the app listing this
   run's takes and one copied in as an earlier run's, with its name and date, newest first; a take

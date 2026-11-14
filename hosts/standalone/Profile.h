@@ -30,7 +30,9 @@ namespace oscairn::standalone
         // each worker waits to its wave's deadline in place of its allowance (OSCAIRN_WORKER_DEADLINE, RFC 0045 step 6).
         // pluginHosts (optional): the plugin hosts the plugins in workers share (OSCAIRN_PLUGIN_HOSTS, RFC 0045); 0: a
         // worker per plugin instance. ownHost (optional): plugin IDs given a worker of their own all the same (OSCAIRN_OWN_HOST).
-        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; std::vector<int> audioThreadCores; int workerAllowance = 0, workerSpin = 0; bool workerDeadline = false; int pluginHosts = 0; std::vector<std::string> ownHost; } compute;
+        // captureSeconds (optional, 0 to 3600): the retroactive buffer's length until one is chosen (RFC 0020), held in
+        // memory, locked at instrument level; -1, none named: 2 minutes with 2 GB or less, 10 minutes above.
+        struct Compute { int cores = 0, realtimeCores = 0, memory = 0, storage = 0, osMemory = 0, performanceMemory = 0; std::vector<int> audioThreadCores; int workerAllowance = 0, workerSpin = 0; bool workerDeadline = false; int pluginHosts = 0; std::vector<std::string> ownHost; int captureSeconds = -1; } compute;
         // `device` (optional): the audio device the engine opens instead of the default: its name (an
         // ALSA address such as hw:1,0 or PCM name on Linux, a device's name on macOS), its channel
         // count (all opened in each direction used; 0: those mapped), the rate it must run at (0:

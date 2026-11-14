@@ -94,6 +94,12 @@
           "minimum": 0,
           "maximum": 1000000
         },
+        "captureSeconds": {
+          "type": "integer",
+          "description": "the retroactive buffer's length in seconds until one is chosen in Recordings (RFC 0020), held in memory (11.5 MB a minute of stereo at 48 kHz) and locked at instrument level; 0: off, nothing allocated; omitted: 2 minutes with 2 GB or less, 10 minutes above",
+          "minimum": 0,
+          "maximum": 3600
+        },
         "memory": {
           "type": "integer",
           "minimum": 0,

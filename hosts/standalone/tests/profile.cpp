@@ -107,6 +107,10 @@ int main()
               "an allowance that is not a whole number of microseconds");
         check(Profile::parse(replaced(json, cores, cores + ", \"workerSpin\": 200")).compute.workerSpin == 200 && Profile::parse(json).compute.workerSpin == 0 &&
               refused(replaced(json, cores, cores + ", \"workerSpin\": -1")), "the spin before sleeping on a worker, in microseconds; none named, none");
+        // RFC 0020: the retroactive buffer's length until one is chosen; the FANTOM-07's what Capture saves.
+        check(Profile::parse(replaced(json, cores, cores + ", \"captureSeconds\": 0")).compute.captureSeconds == 0 && Profile::parse(json).compute.captureSeconds == -1 &&
+              loadProfile("fantom-07").compute.captureSeconds == 30 && refused(replaced(json, cores, cores + ", \"captureSeconds\": 3601")),
+              "the capture buffer's length in seconds, 0 to 3600; none named, the default by memory");
         check(Profile::parse(replaced(json, cores, cores + ", \"workerDeadline\": true")).compute.workerDeadline && !Profile::parse(json).compute.workerDeadline &&
               refused(replaced(json, cores, cores + ", \"workerDeadline\": 1")), "waiting to the deadline, true or false; none named, the allowance");
         check(Profile::parse(replaced(json, cores, cores + ", \"pluginHosts\": 3, \"ownHost\": [\"org.example.a\"]")).compute.pluginHosts == 3 &&

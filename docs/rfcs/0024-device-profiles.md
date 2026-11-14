@@ -130,6 +130,12 @@ An illustrative profile (the values are an example, not a real product's):
   ([RFC 0045](0045-audio-scheduling-on-small-devices.md#the-allowance-today)); omitted or 0, half
   the block's period. For trying values on a device; it reaches the engine as
   `OSCAIRN_WORKER_BUDGET_US`. No built-in profile sets it.
+
+  Optional `captureSeconds` (added 2026-11-14): the retroactive buffer's length until one is
+  chosen in Recordings ([RFC 0020](0020-recording.md)), 0 to 3600 seconds; 0 turns it off and
+  nothing is allocated; omitted, 2 minutes with 2 GB or less and 10 minutes above. It is memory
+  held (11.5 MB a minute of stereo at 48 kHz), locked at `instrument`. The FANTOM-07's is 30, what
+  Capture saves (11.5 MB, where 2 minutes cost 46 MB of its 992 MiB).
 - **`audio`:** its interface, the sample rates and the block size it runs at, headphones (a cue
   bus). Optional `device` (added 2026-11-09): the audio device the engine opens instead of the
   default, for a product whose interface is not ALSA's default or not plain stereo (the

@@ -8,7 +8,8 @@
 namespace oscairn::standalone
 {
     /// The retroactive buffer's length (RFC 0020): what was saved in the configuration folder, or
-    /// the device's default, 2 minutes with 2 GB or less and 10 minutes above. 0 is off.
+    /// the device's default, its profile's captureSeconds, else 2 minutes with 2 GB or less and 10
+    /// minutes above. 0 is off: no buffer is allocated.
     double readCaptureSeconds(const juce::File& configuration, const Profile& profile);
     void writeCaptureSeconds(const juce::File& configuration, double seconds);
 

@@ -22,6 +22,7 @@ namespace oscairn::standalone
     {
         const auto saved = captureFile(configuration).loadFileAsString().trim();
         if(saved.isNotEmpty() && saved.containsOnly("0123456789.")) return std::clamp(saved.getDoubleValue(), 0.0, 3600.0);
+        if(profile.compute.captureSeconds >= 0) return profile.compute.captureSeconds; // the device's own
         return profile.compute.memory > 0 && profile.compute.memory <= 2048 ? 120 : 600; // RFC 0020's proposed defaults
     }
 

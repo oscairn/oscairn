@@ -343,6 +343,11 @@ target_include_directories(oscairn-shared-parts-test PRIVATE ../clap-host/tests)
 target_link_libraries(oscairn-shared-parts-test PRIVATE oscairn_control_json)
 add_test(NAME control-shared-parts COMMAND oscairn-shared-parts-test $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(control-shared-parts PROPERTIES TIMEOUT ${switch_timeout})
+# RFC 0045: a plugin's cost recorded per sound, whether its part shared the instance; admission's verdict whatever played before.
+add_executable(oscairn-shared-costs-test tests/shared_costs.cpp)
+target_link_libraries(oscairn-shared-costs-test PRIVATE oscairn_control)
+add_test(NAME control-shared-costs COMMAND oscairn-shared-costs-test $<TARGET_FILE:oscairn_basic_synth>)
+set_tests_properties(control-shared-costs PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 
 add_executable(oscairn-sound-presets-test tests/sound_presets.cpp)
 target_link_libraries(oscairn-sound-presets-test PRIVATE oscairn_control_json)

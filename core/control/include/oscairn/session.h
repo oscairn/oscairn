@@ -424,7 +424,7 @@ namespace oscairn
         // worker's CPU times of its blocks (recorded as the next block is handed over) before it counts.
         struct Learning
         {
-            struct Pending { double microseconds = 0; uint32_t voices = 0; uint64_t blocks = 0; bool quiet = false; };
+            struct Pending { double microseconds = 0; uint32_t voices = 0; uint64_t blocks = 0; bool quiet = false; uint32_t sounds = 1; }; // sounds: on the instance (RFC 0045)
             uint64_t blocks = 0, quiet = 0; // the plugin's blocks at the last tick; blocks since a note last sounded
             uint32_t samples = 0, restN = 0, voiceN = 0;
             double fast = 0;

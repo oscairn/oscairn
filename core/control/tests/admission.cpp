@@ -60,7 +60,7 @@ int main(int argc, char** argv)
     check(!key.empty(), "the fixture's measurement key");
     const auto cores = std::max(1u, worker::usableCores() - 1);
     auto figures = [&](int samples) {
-        std::ofstream(home / "measurements.json") << "{\"version\":3,\"plugins\":{\"" << key << "\":{\"cpu\":0.4,\"rest\":0.4,\"voice\":0,\"voices\":0,\"memory\":1000,\"samples\":" << samples << "}}}";
+        std::ofstream(home / "measurements.json") << "{\"version\":4,\"plugins\":{\"" << key << "\":{\"cpu\":0.4,\"rest\":0.4,\"voice\":0,\"voices\":0,\"memory\":1000,\"samples\":" << samples << "}}}";
     };
     auto open = [&](const fs::path& performance, std::string& notices) {
         Session s(rate, frames);

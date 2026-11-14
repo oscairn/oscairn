@@ -549,6 +549,42 @@ included, each time; so do they with `OSCAIRN_SHARING=cpu`, an instance each. On
 change the same test listed 5, then 4 + 1, then 3 + 2. Its earlier checks, that a change between
 the separate and the shared layouts loads no instance, still hold.
 
+#### A sound's cost, not an instance's
+
+Before: `Session::measure` (`core/control/src/budget.cpp`) sampled a shared instance once, on its
+first context (the only one `statistics()` answers for), and recorded the instance's whole block
+under the plugin as one figure, with the first part's voices as its voices; admission (`nodeCost`,
+`estimate`) then counted that figure for each node playing the plugin alone and nothing for the
+other nodes of a saved engine. So five Sampler parts sharing one instance recorded 52 % of a core
+as what one Sampler costs, and the same Performance, its parts costed apart, was refused. Each
+layout changed the figure that admission judged the next one by.
+
+Now an instance several parts share is recorded per sound: its block's share of the period over
+the sounds on it (its contexts, the outgoing Performance's included while they ring out), at rest
+and per voice (a sound's share less a sound's rest, over its share of all its parts' voices); its
+memory only from an instance playing one sound. Admission counts each node its own sound's figure,
+shared or not, and the CPU figures of `measurements.json` version 3 are measured again (version 4;
+the memory kept). The layout no longer depends on any measurement (above), so nothing can flip
+between two layouts through it.
+
+What a sound's figure still depends on: an instance's own cost at rest (its process and wake-up,
+the plugin's fixed work a block) is shared by its sounds, so a sound measured sharing records its
+share of it and one measured alone all of it. In `control-shared-costs` (the Basic Synth in the
+engine's process, M-series, eight runs): at rest 0.0045 to 0.0059 of the period alone, 0.0017 to
+0.0019 per sound of three sharing, which is the same instance cost three ways; per voice 0.00065
+to 0.00073 alone and 0.00064 to 0.0007 sharing. Before, the per voice figure of the shared
+instance was 2.7 times the lone part's. So admission's figure for a plugin moves by at most that
+cost at rest with whether it was last measured sharing, and no longer with how many notes the
+other parts held. Admission does not hold a shared instance's sounds to one core's budget (one
+lane): the load guard sheds their voices, and a split under load (step 9) is where it would go.
+
+Tested by `control-shared-costs`: one Basic Synth part alone and three sharing an instance, each
+at rest for 1,200 blocks and then holding eight notes a part for 3,000: the cost per voice within
+a factor of 1.8 either way (0.92 to 1.06 seen in eight runs; 2.7 on the code before); a Performance of three
+such parts, saved with an instance each, estimated after either history against a budget of 1.5
+times the lone part's cost at eight notes: fits both times (before, it fit after the lone part and
+not after the three sharing).
+
 ### The app's process and the audio (2026-11-14)
 
 Why the app is worse than the engine alone on the unit, measured with ST Final (bundle 79770480

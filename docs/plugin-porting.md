@@ -234,7 +234,9 @@ Performance fills instances with its parts of the plugin in order, each instance
 room for, the same way on every load whatever played before ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#the-same-layout-on-every-load-2026-11-13));
 changing to one prepares its sounds beside a playing instance's, as above, selected at the cue on
 channels of their own, only where all its parts of the plugin fit there. A part alone keeps an
-instance of its own. The host sends a part's notes and its parameter edits on its channel, and
+instance of its own. An instance several parts share is measured once and its cost recorded per
+sound, so admission counts each part at what one sound costs, shared or not: a package's
+`--estimate`, measured on one part, is what each part of the plugin is counted at. The host sends a part's notes and its parameter edits on its channel, and
 takes its sound from its output port. A plugin offers this with native sound contexts and their
 snapshot with `save_sound` and `sound_values`, more than one output port, a stepped output-bus
 parameter tagged `OSCAIRN_ROLE_OUTPUT_BUS`, no audio input and no note output; the full list,

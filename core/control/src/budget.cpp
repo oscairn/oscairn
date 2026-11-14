@@ -12,6 +12,7 @@
 #include "sheredom/json.h"
 #include "JsonInput.h"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -48,7 +49,7 @@ namespace oscairn
         // note before a block counts as at rest (a release tail is not).
         constexpr double restBlocks = 4000, fastBlocks = 400, fallBlocks = 60000, quietSeconds = .5;
         constexpr uint32_t enoughSamples = 100, seedSamples = 4;
-        constexpr int measurementsVersion = 3; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops, its memory kept
+        constexpr int measurementsVersion = 4; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops, its memory kept; 3: a shared instance's CPU all its sounds', its memory kept
         fs::path measurementsFile() { return dataHome() / "measurements.json"; }
         std::string percent(double share) { char text[32]; std::snprintf(text, sizeof(text), "%.0f%%", share * 100); return text; }
     }
@@ -136,9 +137,8 @@ namespace oscairn
     Control::Cost Session::nodeCost(const Graph& graph, NodeId node, const std::string& name, uint32_t limit) const
     {
         const auto& host = graph.host(node);
+        // RFC 0045: the CPU measured is a sound's (Session::measure), so each node sharing an instance counts its own.
         auto c = costOf(pluginKey(graph, node), name, host.descriptor().id, limit);
-        // A shared instance's measurement is the instance's, all its parts': counted once, on its lead context.
-        if(const auto* context = dynamic_cast<const SoundContext*>(&host); context && !context->leads()) c.cpu = 0;
         const auto declared = declaredBy(host);
         std::optional<oscairn_effect_resources_t> resources;
         if(!declared) try { resources = host.effectResources(); } catch(const std::exception&) {}
@@ -185,8 +185,8 @@ namespace oscairn
             const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(bytes.data(), bytes.size()), &std::free};
             const auto* version = detail::member(doc.get(), "version");
             const double read = version && version->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(version->payload)->number, nullptr) : 0;
-            if(read != measurementsVersion && read != 2) return;
-            const bool memoryOnly = read == 2; // version 2's CPU figures were overstated: measured again; its memory stands
+            if(read != measurementsVersion && read != 3 && read != 2) return;
+            const bool memoryOnly = read != measurementsVersion; // version 2's CPU figures were overstated, version 3's an instance's however many sounds shared it: measured again; the memory stands
             const auto* plugins = detail::member(doc.get(), "plugins");
             if(!plugins || plugins->type != json_type_object) return;
             for(auto* e = static_cast<const json_object_s*>(plugins->payload)->start; e; e = e->next)
@@ -470,7 +470,10 @@ namespace oscairn
     // typical block of the window), so a block the thread was not scheduled for (a kernel stall, whether the
     // engine then silenced the block or not) counts for no more than the work, and one that
     // computed counts in full. Split by the notes sounding through the plugin: with none for
-    // quietSeconds, at rest; with some, per voice.
+    // quietSeconds, at rest; with some, per voice. RFC 0045: an instance several parts share is
+    // measured once, on its first context, and recorded per sound (its share over the sounds on it,
+    // its voices all its parts'), so a figure does not depend on how many parts shared the instance
+    // it was measured on; its memory is recorded only from an instance playing one sound.
     // shortcut: one sample a tick, and a bucket's top for the CPU bound; read the worker's CPU time per block itself if admission must be exact.
     void Session::measure()
     {
@@ -493,10 +496,24 @@ namespace oscairn
             const uint64_t blocks = st.blocks > L.blocks ? st.blocks - L.blocks : 0;
             const bool clean = L.blocks && blocks; // ran since the last tick
             L.blocks = st.blocks;
-            const auto voices = graph_.sounding(node);
+            auto voices = graph_.sounding(node);
+            uint32_t sounds = 1;
+            if(const auto* context = dynamic_cast<const SoundContext*>(&host))
+            {
+                sounds = std::max(1, std::popcount(context->engine()->channels)); // the outgoing Performance's contexts on it too, which it renders
+                voices = 0;
+                auto add = [&](NodeId n) {
+                    const auto* other = graph_.contains(n) ? dynamic_cast<const SoundContext*>(&graph_.host(n)) : nullptr;
+                    if(!other || other->engine() != context->engine()) return;
+                    const auto v = graph_.sounding(n);
+                    voices = v == UINT32_MAX || voices == UINT32_MAX ? UINT32_MAX : voices + v;
+                };
+                for(const auto& [n, x] : nodes_) add(n);
+                for(const auto n : leaving_) add(n);
+            }
             L.quiet = voices == 0 ? L.quiet + blocks : 0;
             auto accept = [&](const Learning::Pending& s, double boundMicroseconds) {
-                const double share = std::min(1.0, std::min(s.microseconds, boundMicroseconds) / blockMicroseconds);
+                const double share = std::min(1.0, std::min(s.microseconds, boundMicroseconds) / blockMicroseconds) / s.sounds; // a sound's
                 auto weight = [&](uint32_t& n) { return std::max(1.0 / (n++ + 1), std::min(1.0, s.blocks / restBlocks)); };
                 L.fast = L.samples++ ? L.fast + (share - L.fast) * std::min(1.0, s.blocks / fastBlocks) : share;
                 m.cpu = std::max(L.fast, m.cpu * std::exp(-double(s.blocks) / fallBlocks));
@@ -512,13 +529,13 @@ namespace oscairn
                 {
                     if(!L.voiceN && m.voice > 0) L.voiceN = seedSamples;
                     // The rest comes off only once it is known; until then the whole sample is the voices' (an upper bound).
-                    m.voice += (std::max(0.0, share - (L.restN >= enoughSamples ? m.rest : 0.0)) / s.voices - m.voice) * weight(L.voiceN);
+                    m.voice += (std::max(0.0, share - (L.restN >= enoughSamples ? m.rest : 0.0)) * s.sounds / s.voices - m.voice) * weight(L.voiceN); // a sound's share over its share of the voices
                     m.voices = std::max(m.voices, s.voices);
                 }
                 else return;
                 m.samples = std::min<uint32_t>(m.samples + 1, 1'000'000);
             };
-            const Learning::Pending now{st.lastMicroseconds, voices, blocks, L.quiet >= quietBlocks};
+            const Learning::Pending now{st.lastMicroseconds, voices, blocks, L.quiet >= quietBlocks, sounds};
             if(auto* timing = host.workerTiming())
             {
                 const auto counts = timing->cpu.read().steady.counts;
@@ -545,7 +562,7 @@ namespace oscairn
             else if(clean) accept(now, INFINITY);
             if(m.voices) graph_.seedNoteCost(node, m.rest * blockMicroseconds, m.voice * blockMicroseconds);
             if(std::abs(m.rest - wasRest) > 1e-4 || std::abs(m.voice - wasVoice) > 1e-5) measurementsChanged_ = true;
-            if(memoryNow)
+            if(memoryNow && sounds == 1)
             {
                 auto bytes = host.residentBytes();
                 if(!bytes) if(const auto it = loadedBytes_.find(node); it != loadedBytes_.end()) bytes = it->second;
@@ -710,9 +727,7 @@ namespace oscairn
             const auto id = text(detail::member(plugin, "id")), key = text(detail::member(e->value, "key"));
             const auto digest = buildDigest(text(detail::member(plugin, "pathHint"))); // the build it will load, where it is here
             coming.push_back(costOf(id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest), text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0));
-            if(partOf.count(key)) coming.back().part = partOf.at(key);
-            // A node sharing another's instance (its engine another node's key): the instance is counted once, on that node.
-            if(const auto engine = text(detail::member(e->value, "engine")); !engine.empty() && engine != key) coming.back().cpu = 0;
+            if(partOf.count(key)) coming.back().part = partOf.at(key); // a node sharing an instance counts its own sound's CPU (RFC 0045)
         }
         return estimateOf(coming, playing);
     }

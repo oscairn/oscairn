@@ -48,6 +48,14 @@ namespace oscairn
         void release() { released_ = true; }
         bool attached() const { return attached_; }
         bool released() const { return released_; }
+        /// The apps this client's memory.launch admitted and no memory.closed of its own let go: let
+        /// go by the transport when it closes, as an app's own connections are (a shell killed).
+        const std::vector<std::string>& launched() const { return launched_; }
+        void launched( const std::string& app, bool running )
+        {
+            std::erase( launched_, app );
+            if( running ) launched_.push_back( app );
+        }
         /// The apps.* methods go to `relay`; without one they are refused.
         void relayApps( AppRelay* relay ) { apps_ = relay; }
         AppRelay* apps() const { return apps_; }
@@ -61,6 +69,7 @@ namespace oscairn
         Control& control_;
         AppRelay* apps_ = nullptr;
         std::optional<uint32_t> permissions_;
+        std::vector<std::string> launched_;
         bool params_ = false, transport_ = false, graph_ = false, allChanges_ = false;
         bool status_ = false, attached_ = false, released_ = false;
         uint64_t paramsCursor_ = 0, graphCursor_ = 0;

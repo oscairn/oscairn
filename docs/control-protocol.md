@@ -1278,7 +1278,9 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   app or letting committed memory go; `offerNext` when only the committed next entry stands in
   the way, and `dropNext` then lets it go and admits. `memory.closed` takes `{app}`; an app whose
   every connection (`apps.connect`'s) has closed, with none back within 3 s, has its reservation let
-  go as if it had been sent.
+  go as if it had been sent; so has an app launched by a connection that closed without sending it
+  (a shell killed with its Settings open), unless another open connection launched it too or it has
+  a connection of its own.
   `memory.state` (`{}`) returns `{device,reserved,share,floor,margin,committed,opportunistic,
   available,systemAvailable,running,alwaysAvailable,nextPrepared,nextCommitted}`: `available` the
   budget's floor for the system's available memory (`budget.set`'s optional `available`, in bytes;

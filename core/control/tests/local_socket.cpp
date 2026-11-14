@@ -220,6 +220,19 @@ namespace
             bool released = false;
             for(int i = 0; i < 60 && !released; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); released = !reserved(); }
             check(released, "an app gone without memory.closed releases its reservation");
+            // An app a shell launched in its own process (no connection of its own: the JUCE app's
+            // Settings) goes with that shell's connection, a shell killed without memory.closed.
+            auto fd2 = pair(); f.server.adopt(fd2[0]);
+            LocalClient shell; shell.adopt(fd2[1]);
+            shell.call("memory.launch", R"({"app":"com.example.settings","reserve":1048576})");
+            auto settings = [&] { return host.call("memory.state").find("com.example.settings") != std::string::npos; };
+            check(settings(), "a shell's launch is reserved");
+            shell.disconnect();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            check(settings(), "and kept within the grace");
+            released = false;
+            for(int i = 0; i < 60 && !released; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); released = !settings(); }
+            check(released, "a shell gone without memory.closed releases what it launched");
         });
         check(f.server.clients() == 1, "the host remains");
     }

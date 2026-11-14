@@ -277,6 +277,9 @@ namespace oscairn
         // once none is back within appGrace, so an app that dies without memory.closed holds none, and
         // one its host starts again at once (a new connection first, then the process) keeps its own.
         std::map<std::string,uint64_t> appsGone;
+        // Apps launched (memory.launch) by a connection that closed, a shell killed: theirs goes the
+        // same way unless another connection launched it or the app has one of its own.
+        std::map<std::string,uint64_t> launchesGone;
         static constexpr uint64_t appGrace=3000000000;
         uint32_t nextRequest=1;
         int passing=-1; // the descriptor apps.connect is answered with, until it is queued
@@ -731,17 +734,27 @@ namespace oscairn
         // Timed by the clock, not poll()'s start: a long request (a load) may have run since, closing a
         // connection on the helper thread meanwhile.
         const auto gone=s.clock();
-        for(const auto& peer:s.peers)if(peer->stream.fd<0 && !peer->app.empty())s.appsGone.emplace(peer->app,gone);
-        std::erase_if(s.peers,[](const auto& peer){return peer->stream.fd<0;});
-        for(auto it=s.appsGone.begin();it!=s.appsGone.end();)
+        for(const auto& peer:s.peers)if(peer->stream.fd<0)
         {
-            const auto& app=it->first;
-            auto connected=[&](const auto& list){return std::any_of(list.begin(),list.end(),[&](const auto& p){return p->app==app && p->stream.fd>=0;});};
-            const bool back=connected(s.peers) || connected(s.joining);
-            if(!back && gone>=it->second && gone-it->second<Impl::appGrace){++it;continue;}
-            if(!back)s.control.appClosed(app); // the engine's own thread, as every request's
-            it=s.appsGone.erase(it);
+            if(!peer->app.empty())s.appsGone.emplace(peer->app,gone);
+            for(const auto& app:peer->rpc.launched())s.launchesGone.emplace(app,gone);
         }
+        std::erase_if(s.peers,[](const auto& peer){return peer->stream.fd<0;});
+        auto release=[&](std::map<std::string,uint64_t>& apps,bool launches)
+        {
+            for(auto it=apps.begin();it!=apps.end();)
+            {
+                const auto& app=it->first;
+                auto holds=[&](const auto& p){return p->app==app || (launches && std::ranges::find(p->rpc.launched(),app)!=p->rpc.launched().end());};
+                auto connected=[&](const auto& list){return std::any_of(list.begin(),list.end(),[&](const auto& p){return holds(p) && p->stream.fd>=0;});};
+                const bool back=connected(s.peers) || connected(s.joining);
+                if(!back && gone>=it->second && gone-it->second<Impl::appGrace){++it;continue;}
+                if(!back)s.control.appClosed(app); // the engine's own thread, as every request's
+                it=apps.erase(it);
+            }
+        };
+        release(s.appsGone,false);
+        release(s.launchesGone,true);
         if(auto* w=s.watch.get())
         {
             // What the watcher looks at next: new requests, and room for replies held back.

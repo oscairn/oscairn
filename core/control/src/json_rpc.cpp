@@ -696,9 +696,10 @@ namespace oscairn
             if(method=="memory.launch") {
                 const auto app=appMemory(p);Control::Launch l;
                 try{l=c.launchApp(app,member(p,"dropNext") && boolean(member(p,"dropNext")));}catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
+                if(l.admitted)client.launched(app.app,true);
                 return std::string("{\"admitted\":")+(l.admitted?"true":"false")+",\"offerNext\":"+(l.offerNext?"true":"false")+",\"reason\":"+quote(l.reason)+'}';
             }
-            if(method=="memory.closed") {fields(p,{"app"});c.appClosed(std::string(string(member(p,"app"))));return R"({"closed":true})";}
+            if(method=="memory.closed") {fields(p,{"app"});const std::string app(string(member(p,"app")));c.appClosed(app);client.launched(app,false);return R"({"closed":true})";}
             if(method=="engine.timing") {
                 fields(p,{"reset"});const auto t=c.engineTiming(member(p,"reset") && boolean(member(p,"reset")));
                 auto histogram=[](const Histogram& h){std::string b;for(auto n:h.counts)b+=(b.empty()?"":",")+std::to_string(n);

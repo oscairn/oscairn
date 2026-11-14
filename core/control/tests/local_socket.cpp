@@ -692,6 +692,7 @@ namespace
     {
         TemporaryDirectory directory;const auto saved=directory.child("slow"),marker=directory.child("slow-once");
         Fixture f(plugin);f.session.savePerformance(saved);
+        const auto socket=directory.child("control.sock");f.server.listen(socket);
         auto job=pair(),ui=pair(),host=pair();f.server.adopt(job[0]);f.server.adopt(ui[0]);f.server.adopt(host[0]);
         std::ofstream(marker)<<'x';::setenv("KICK_FIXTURE_SLOW_LOAD_ONCE",marker.c_str(),1);
         using Clock=std::chrono::steady_clock;
@@ -701,9 +702,12 @@ namespace
             std::atomic<bool> loaded=false;std::string reply;double seconds=0;
             std::thread loading([&]{const auto began=Clock::now();try{reply=loader.call("performance.load","{\"directory\":\""+saved+"\"}",30000);}catch(const std::exception& e){reply=e.what();}
                 seconds=std::chrono::duration<double>(Clock::now()-began).count();loaded=true;});
-            double slowest=0;size_t busy=0,calls=0;bool connected=false,prepareRefused=false;
+            double slowest=0;size_t busy=0,calls=0,joined=0,cutOff=0;bool connected=false,prepareRefused=false;
             while(!loaded)
             {
+                // A client connecting meanwhile, many times over (more than the server's clients), says hello and leaves.
+                try{LocalClient late;late.connect(socket);joined+=late.call("session.hello","{}",1000).find("protocolVersion")!=std::string::npos;}
+                catch(const std::exception& e){if(!cutOff++)std::cerr<<"a client connecting during the load: "<<e.what()<<'\n';}
                 for(const char* method:{"session.status","controls.set","notes.send"})
                 {
                     const auto params=std::string_view(method)=="controls.set"?R"({"control":1,"value":0.5})":std::string_view(method)=="notes.send"?R"({"on":false,"key":60})":"{}";
@@ -720,10 +724,11 @@ namespace
             loading.join();
             check(reply.find("\"loaded\":true")!=std::string::npos,"the load completes: "+reply);
             check(seconds>=5,"and was slow: "+std::to_string(seconds)+" s");
-            std::cerr<<"busy: "<<calls<<" calls during a "<<seconds<<" s load, "<<busy<<" refused as busy, the slowest answered in "<<slowest*1000<<" ms\n";
+            std::cerr<<"busy: "<<calls<<" calls during a "<<seconds<<" s load, "<<busy<<" refused as busy, the slowest answered in "<<slowest*1000<<" ms; "<<joined<<" clients connected and said hello meanwhile\n";
             check(slowest<0.1,"every call during it answered in under 100 ms, the slowest "+std::to_string(slowest*1000)+" ms");
             check(busy>=calls/2 && watcher.connected(),"refused as busy, the 1 s client still connected");
             check(connected,"apps.connect answered during the load");
+            check(joined>LocalServer::maxClients && !cutOff,"clients connecting during the load are accepted and answered: "+std::to_string(joined)+" said hello, "+std::to_string(cutOff)+" cut off");
             check(prepareRefused,"a second long request during it is refused as busy");
             bool free=false,announced=false;
             for(int i=0;i<200 && !(free && announced);++i)

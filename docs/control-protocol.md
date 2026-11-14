@@ -622,6 +622,9 @@ engine meanwhile:
   pings go out once a second: apps keep their connections, a shell can start an app and hand
   it its connection during a load, and silence while the engine was busy is not held against
   an app (each app's unanswered-ping clock starts again when the request ends).
+- A client connecting meanwhile is accepted and answered as any other (its `session.hello`
+  runs), and a client that leaves gives up its place at once, so connecting again and again
+  during a load never finds the server full of clients already gone.
 - Any other request with an ID is refused at once, within milliseconds: error `-32009`,
   `data: {busy, ms}`, the method running and for how long so far. **A request refused as busy
   did not run**, so asking again is safe, unlike after a timeout. A batch is refused member by

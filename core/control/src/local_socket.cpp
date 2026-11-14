@@ -472,7 +472,8 @@ namespace oscairn
                 // ECONNABORTED, EMFILE and the like belong to that connection: never stop the engine.
                 if(fd<0){std::fprintf(stderr,"oscairn: accept: %s\n",std::strerror(errno));break;}
                 try{
-                    if(size_t(std::count_if(peers.begin(),peers.end(),[](const auto& p){return p->app.empty();})+std::count_if(joining.begin(),joining.end(),[](const auto& p){return p->app.empty();}))>=maxClients){::close(fd);continue;}
+                    auto counts=[](const auto& p){return p->app.empty() && p->stream.fd>=0;}; // a client gone during a long request is not let go of until it ends
+                    if(size_t(std::count_if(peers.begin(),peers.end(),counts)+std::count_if(joining.begin(),joining.end(),counts))>=maxClients){::close(fd);continue;}
                     into.push_back(std::make_unique<Peer>(fd,control,nextPeer++));into.back()->rpc.relayApps(&relay);}
                 catch(const std::exception& e){std::fprintf(stderr,"oscairn: a new control client: %s\n",e.what());}
             }
@@ -539,7 +540,8 @@ namespace oscairn
                 {
                     auto& stream=peer->stream;
                     if(stream.fd<0 || peer.get()==runner)continue;
-                    try{if(!stream.eof)for(const auto& n:peer->notices)stream.queue(n);peer->notices.clear();stream.flush();}
+                    try{if(!stream.eof)for(const auto& n:peer->notices)stream.queue(n);peer->notices.clear();stream.flush();
+                        if(stream.eof && stream.input.find('\n')==std::string::npos && stream.output.empty())stream.close();} // gone: its place free for a client connecting meanwhile
                     catch(const std::exception&){stream.close();}
                 }
         }

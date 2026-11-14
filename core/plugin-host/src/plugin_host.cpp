@@ -14,6 +14,7 @@
 #include <fstream>
 #include <future>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <unistd.h>
@@ -27,12 +28,16 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #endif
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 namespace oscairn
 {
 #ifdef OSCAIRN_LV2
@@ -303,13 +308,17 @@ namespace oscairn
         const int flags = MCL_CURRENT | (unlimited ? MCL_FUTURE : 0);
         // Locked, a thread's whole stack is resident from its start: glibc's default is RLIMIT_STACK,
         // 8 MiB, which made thread stacks 82 of the engine's 118 MB resident and 8 of a worker's 16.
-        // Threads made from here on without a size of their own (std::thread, JUCE's, libraries')
-        // get 1 MiB: Windows' default, twice what macOS gives a secondary thread, which plugins are
-        // written for; the deepest stack measured on the engine's and workers' threads while
-        // playing was 12 KiB. The main thread's stack is not a thread's and is unchanged.
+        // Threads made from here on without a size of their own get threadStack (plugin_host.h);
+        // the threads off the audio path that are Oscairn's own (ServiceThread) give back what they
+        // do not touch. The main thread's stack is not a thread's and is unchanged.
         pthread_attr_t stack;
-        const bool sized = pthread_attr_init(&stack) == 0 && pthread_attr_setstacksize(&stack, size_t(1) << 20) == 0 && pthread_setattr_default_np(&stack) == 0;
+        const bool sized = pthread_attr_init(&stack) == 0 && pthread_attr_setstacksize(&stack, threadStack) == 0 && pthread_setattr_default_np(&stack) == 0;
         pthread_attr_destroy(&stack);
+#ifdef __GLIBC__
+        // Each glibc arena is a 64 MiB reservation (no memory until used), and what its threads freed
+        // stays in it, locked; at most two keep that spread small. The audio threads do not allocate.
+        mallopt(M_ARENA_MAX, 2);
+#endif
         if(mlockall(flags) != 0) missed += std::string("memory not locked (") + std::strerror(errno) + "; RLIMIT_MEMLOCK too low?)";
         else if(!unlimited) missed += "future memory not locked: RLIMIT_MEMLOCK is " + std::to_string(uint64_t(memlock.rlim_cur));
         // Lowering it below 0 needs CAP_SYS_RESOURCE; raising it does not.
@@ -321,6 +330,58 @@ namespace oscairn
         (void)oomScoreAdj;
         return "memory locking and the out-of-memory order are Linux only";
 #endif
+    }
+
+    namespace
+    {
+        void* serve(void* run) noexcept
+        {
+            std::unique_ptr<std::function<void()>> f(static_cast<std::function<void()>*>(run));
+#ifdef __linux__
+            // Below this frame, less a page for the calls just made, nothing is in use yet.
+            pthread_attr_t a;
+            if(pthread_getattr_np(pthread_self(), &a) == 0)
+            {
+                void* low = nullptr; size_t size = 0;
+                const auto page = uintptr_t(sysconf(_SC_PAGESIZE));
+                const auto end = (uintptr_t(__builtin_frame_address(0)) - page) & ~(page - 1);
+                if(pthread_attr_getstack(&a, &low, &size) == 0 && end > uintptr_t(low))
+                {
+                    munlock(low, end - uintptr_t(low));
+                    madvise(low, end - uintptr_t(low), MADV_DONTNEED);
+                }
+                pthread_attr_destroy(&a);
+            }
+#endif
+            try { (*f)(); } catch(...) { std::terminate(); } // as std::thread does
+            return nullptr;
+        }
+    }
+
+    ServiceThread::ServiceThread(std::function<void()> run)
+    {
+        auto f = std::make_unique<std::function<void()>>(std::move(run));
+        pthread_attr_t a;
+        int e = pthread_attr_init(&a);
+        if(!e) e = pthread_attr_setstacksize(&a, threadStack);
+        if(!e) e = pthread_create(&thread_, &a, serve, f.get());
+        pthread_attr_destroy(&a);
+        if(e) throw std::system_error(e, std::generic_category(), "Cannot start a thread");
+        f.release(); running_ = true;
+    }
+
+    ServiceThread& ServiceThread::operator=(ServiceThread&& o) noexcept
+    {
+        if(running_) std::terminate();
+        thread_ = o.thread_; running_ = std::exchange(o.running_, false);
+        return *this;
+    }
+
+    void ServiceThread::join()
+    {
+        if(!running_) throw std::system_error(EINVAL, std::generic_category(), "No thread to join");
+        if(const int e = pthread_join(thread_, nullptr)) throw std::system_error(e, std::generic_category(), "Cannot join a thread");
+        running_ = false;
     }
 
     std::string applyCpuPolicy()

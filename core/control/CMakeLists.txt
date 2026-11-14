@@ -77,6 +77,10 @@ add_test(NAME control-session COMMAND oscairn-session-test
 set_tests_properties(control-session PROPERTIES TIMEOUT 30)
 
 # RFC 0045's timing report: one stalled block in a worker, and each part of it apart.
+add_executable(oscairn-memory-lock-test tests/memory_lock.cpp)
+target_link_libraries(oscairn-memory-lock-test PRIVATE oscairn_control)
+add_test(NAME control-memory-lock COMMAND oscairn-memory-lock-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)
+set_tests_properties(control-memory-lock PROPERTIES TIMEOUT 60)
 add_executable(oscairn-worker-timing-test tests/worker_timing.cpp)
 target_link_libraries(oscairn-worker-timing-test PRIVATE oscairn_control_json oscairn_control)
 add_test(NAME control-worker-timing COMMAND oscairn-worker-timing-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)

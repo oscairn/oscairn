@@ -609,6 +609,27 @@ stay resident too, so a sampler or a reverb never takes a page fault from disk w
   recorder ring would throw `std::bad_alloc` instead of printing a warning. With a finite
   limit the process locks what it has and reports "future memory not locked: RLIMIT_MEMLOCK
   is N".
+- Thread stacks (2026-11-14). Locked, a thread's stack is resident whole from its start, so
+  each thread class has its size: a thread made without a size of its own (the audio threads
+  among them: the device callback's, the graph's helpers', each worker's; JUCE's, libcurl's and
+  plugins' own threads) gets 512 KiB (`threadStack`), what macOS gives a secondary thread, which
+  that code runs with there; the deepest stack seen on any thread under the test suite (an
+  `LD_PRELOAD` probe reading each stack's resident pages at the thread's exit, nothing locked)
+  was 96 KiB, on the engine's and workers' threads 16 KiB. Oscairn's own threads off the audio
+  path (each worker's supervisor in the engine, one per worker process, and the releaser of
+  instances let go) are `ServiceThread`s: as one starts it unlocks and gives back its stack
+  below its frame, so it costs the pages it touches (12 KiB in `control-memory-lock`) and faults
+  in as it grows. Measured in the Linux container (an engine and five workers on the null device,
+  one Performance and two instances kept warm): the engine 60 to 62 MB PSS before, 47 to 49 after;
+  each fixture worker 0.5 MB less. `control-memory-lock` checks that no page fault reaches the
+  thread rendering or a worker's audio thread across 2,000 blocks with notes. Found while
+  building it, not explained: the first time a held note is struck again on an instrument two
+  parts share, its worker's audio thread takes two minor faults (in the container, with the old
+  sizes too); the test plays that once before it counts.
+- glibc's allocator arenas: each is a 64 MiB reservation with no memory behind it until used
+  (the seven on the FANTOM-07 cost no resident memory), but what other threads freed stays in its
+  arena, locked. At `instrument` and above a process has at most two (`M_ARENA_MAX`); the audio
+  threads do not allocate, so the control threads share them.
 - The sample file cache is page cache, not mapped by a locked process, so it stays reclaimable.
 - The image raises `RLIMIT_MEMLOCK` to unlimited for the engine and workers: `oscairn-session`
   sets it before starting the app, and they inherit it (RFC 0028). Desktop Linux usually

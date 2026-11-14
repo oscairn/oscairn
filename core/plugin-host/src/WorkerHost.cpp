@@ -157,7 +157,7 @@ namespace oscairn
             std::vector<std::chrono::steady_clock::time_point> restarts;
             std::filesystem::path records; // recovery records of this worker's nodes
             uint32_t saves = 0;
-            std::thread supervisor;
+            ServiceThread supervisor; // off the audio path: costs the stack it touches (RFC 0025)
             std::mutex superviseMutex;
             std::condition_variable wakeSupervisor;
             static inline std::atomic<uint32_t> counter{0};
@@ -1907,7 +1907,7 @@ namespace oscairn
                     throw;
                 }
                 control.unlock();
-                p->supervisor = std::thread([q = p.get()] { q->supervise(); });
+                p->supervisor = ServiceThread([q = p.get()] { q->supervise(); });
                 track(p);
                 return p;
             }
@@ -1948,7 +1948,7 @@ namespace oscairn
                 for(auto* n : list) if(n->engine() == engine) n->moveTo(own);
             }
             std::erase_if(list, [&](auto* n) { return n->engine() == engine; });
-            own->supervisor = std::thread([q = own.get()] { q->supervise(); });
+            own->supervisor = ServiceThread([q = own.get()] { q->supervise(); });
             pool().track(own);
         }
     }
@@ -1992,7 +1992,7 @@ namespace oscairn
         }
         if(!pooled)
         {
-            process->supervisor = std::thread([p = process.get()] { p->supervise(); });
+            process->supervisor = ServiceThread([p = process.get()] { p->supervise(); });
             pool().track(process);
         }
         return host;

@@ -824,7 +824,7 @@ void Session::letGo(const std::function<bool(const Free&)>& which) {
     if(later.empty())return;
     {std::lock_guard lock(releaseMutex_);
         for(auto& h:later)releasing_.push_back(std::move(h));
-        if(!releaser_.joinable())releaser_=std::thread([this]{
+        if(!releaser_.joinable())releaser_=ServiceThread([this]{
             std::unique_lock lock(releaseMutex_);
             for(;;){
                 releaseWake_.wait(lock,[&]{return releaseStop_ || !releasing_.empty();});

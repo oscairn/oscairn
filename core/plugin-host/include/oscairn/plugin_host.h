@@ -4,11 +4,15 @@
 #include "oscairn/timing.h"
 #include <array>
 #include <chrono>
+#include <exception>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <utility>
 #include <variant>
+#include <pthread.h>
 
 namespace oscairn
 {
@@ -196,6 +200,31 @@ namespace oscairn
     // the out-of-memory killer's order (oom_score_adj: the engine -999, a worker 300). Returns what
     // could not be done, empty when everything asked was done or nothing was asked.
     std::string applyMemoryPolicy(int oomScoreAdj);
+    // Thread stacks under that lock. threadStack: what a thread made without a size of its own gets
+    // from applyMemoryPolicy on (std::thread, JUCE's, libraries', plugins'; the audio threads among
+    // them: the device callback's, the graph's helpers', each worker's), all of it locked and
+    // resident: 512 KiB, what macOS gives a secondary thread, which plugins, JUCE and libcurl run
+    // with there. The deepest stack measured on any thread under the test suite was 96 KiB (a test
+    // thread running plugins in its own process); on the engine's and workers' threads, 16 KiB.
+    constexpr size_t threadStack = size_t(512) << 10;
+    // A thread off the audio path (a worker's supervisor, the releaser of instances let go): as it
+    // starts, its stack below the frame it is in is unlocked and given back, so it costs the pages
+    // it touches, faulted in as it grows, not its whole size locked. Joinable as std::thread is;
+    // std::system_error when it cannot be made. Unlocking is Linux only; elsewhere a plain thread.
+    class ServiceThread
+    {
+    public:
+        ServiceThread() = default;
+        explicit ServiceThread(std::function<void()> run);
+        ServiceThread(ServiceThread&& o) noexcept : thread_(o.thread_), running_(std::exchange(o.running_, false)) {}
+        ServiceThread& operator=(ServiceThread&& o) noexcept;
+        ~ServiceThread() { if(running_) std::terminate(); }
+        bool joinable() const noexcept { return running_; }
+        void join();
+    private:
+        pthread_t thread_{};
+        bool running_ = false;
+    };
     // Linux only, a no-op elsewhere: the process (and the processes it starts) never has its memory backed
     // by transparent huge pages, so khugepaged's collapse of a 2 MB range cannot hold the process's
     // mmap lock while an audio thread faults (RFC 0045). Before the process allocates audio memory and

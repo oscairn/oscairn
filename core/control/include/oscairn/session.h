@@ -765,7 +765,7 @@ namespace oscairn
         std::condition_variable releaseWake_;
         std::vector<std::shared_ptr<PluginHost>> releasing_; // under releaseMutex_
         bool releaseStop_ = false;                           // under releaseMutex_
-        std::thread releaser_;                               // started at the first instance let go
+        ServiceThread releaser_;                             // started at the first instance let go
         std::map<NodeId,Loaded> loaded_;                  // Prepared::loaded of the nodes in graph_
         std::vector<Free> warm_;                          // instances kept warm, least recently used first
         // The outgoing sounds of instances taken over with sounds prepared beside (RFC 0021), discarded

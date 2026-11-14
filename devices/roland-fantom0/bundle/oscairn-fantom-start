@@ -3,7 +3,8 @@
 # (docs/fantom-0.md, "Starting Oscairn on the unit"). Run by hand, as root, from outside the
 # chroot; nothing starts it at boot and Roland's go.sh is not touched. In order:
 #
-#   1. refuses to run while another start runs or Oscairn's engine already runs;
+#   1. refuses to run while another start runs or Oscairn's engine already runs, and removes
+#      the SysV shared memory that ended processes left unattached (a killed app's window image);
 #   2. mounts the bundle's /proc, /sys, /dev, /run and /tmp (start-chroot.sh), so the panel
 #      holder can start the moment Roland's application has gone;
 #   3. stops Roland's application (systemctl stop weston-term) if it runs, and waits until its
@@ -60,6 +61,7 @@ done
 # Stand-ins for a test, off the unit; on the unit these are left unset.
 panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
 proc=${OSCAIRN_PROC:-/proc}
+ipcrm=${OSCAIRN_IPCRM:-ipcrm}
 state=$root/var/oscairn
 log=$state/log/oscairn-fantom.log
 [ -n "$dry" ] || mkdir -p "$state/log" "$state/run" || exit 1
@@ -90,6 +92,23 @@ engine=$(named oscairn-engine)
 [ -z "$engine" ] || fail "Oscairn's engine already runs (pid $engine); oscairn-fantom-stop stops it"
 app=$(named Oscairn)
 [ -z "$app" ] || fail "Oscairn's app already runs (pid $app); oscairn-fantom-stop stops it"
+
+# SysV shared memory left behind by earlier app processes: before JUCE's window image was marked
+# for removal at creation (hosts/juce-patches), each killed app left a 3.7 MB segment that filled
+# swap after a crash loop (docs/fantom-0.md). Removed only when nothing can still use it: a
+# private segment (key 0), attached nowhere, of this user, whose creator has ended.
+left=$(awk -v me="$(id -u)" 'NR == 1 { for (i = 1; i <= NF; i++) c[$i] = i; next }
+	$c["key"] == 0 && $c["nattch"] == 0 && $c["uid"] == me && $c["cuid"] == me { print $c["shmid"], $c["cpid"], $c["size"] }' "$proc/sysvipc/shm" 2>/dev/null |
+	while read -r id cpid size; do [ -d "$proc/$cpid" ] || echo "$id:$cpid:$size"; done)
+if [ -n "$left" ] && ! command -v "$ipcrm" > /dev/null 2>&1; then
+	say "no $ipcrm here: not removing the shared memory ended processes left ($(echo $left | wc -w) segments)"
+else
+	for s in $left; do
+		id=${s%%:*} rest=${s#*:}
+		say "removing shared memory $id left by ended process ${rest%%:*} (${rest#*:} bytes)"
+		run "$ipcrm" -m "$id" || say "$ipcrm -m $id failed; continuing"
+	done
+fi
 
 # 2. The chroot's mounts first: mounting changes nothing Roland's application uses, and done
 # now it is not in the gap below.

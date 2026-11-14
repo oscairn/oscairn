@@ -953,6 +953,8 @@ picture before it is turned).
 Shared memory: each app killed (SIGKILL or SIGTERM; a normal quit freed it) left its 3.7 MB X11
 window image behind as a SysV segment, 90 of them (315 MiB, swap full) on November 13; JUCE is
 patched (`hosts/juce-patches`) to mark the segment for removal once the X server has attached it.
+`oscairn-fantom-start` also removes segments ended processes left (key 0, attached nowhere, its
+user's, creator gone) with `ipcrm`, so a crash loop cannot fill memory that way again.
 
 ## Starting at power-on (not done)
 

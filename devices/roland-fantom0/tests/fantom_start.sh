@@ -137,6 +137,25 @@ check "a wrong option is refused" "! '$bundle/oscairn-fantom-start' --now > /dev
 out=$("$bundle/oscairn-fantom-start" --dry-run --cold 2>&1); status=$?
 check "--cold: nothing to stop, the rest as usual" "[ $status = 0 ] && ! echo \"\$out\" | grep -q weston-term && echo \"\$out\" | grep -q 'oscairn-panel-holder'"
 
+# SysV shared memory left by ended processes, on a stand-in /proc: only 101 qualifies (key 0, no
+# attachment, this user's, its creator gone); 102 is attached, 103 has a key, 104's creator runs,
+# 105 is another user's.
+shm=$bundle/shmproc me=$(id -u)
+mkdir -p "$shm/sysvipc" "$shm/4244"
+{
+	echo "       key      shmid perms                  size  cpid  lpid nattch   uid   gid  cuid  cgid      atime      dtime      ctime                   rss                  swap"
+	for row in "0 101 777 3686400 999991 0" "0 102 777 3686400 999992 1" "1234 103 600 4096 999993 0" "0 104 777 3686400 4244 0"; do
+		set -- $row
+		echo "$1 $2 $3 $4 $5 $5 $6 $me 0 $me 0 0 0 0 0 0"
+	done
+	echo "0 105 777 3686400 999994 999994 0 $((me + 1)) 0 $((me + 1)) 0 0 0 0 0 0"
+} > "$shm/sysvipc/shm"
+out=$(OSCAIRN_PROC=$shm "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
+check "a dry run removes the shared memory an ended process left, and only that" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: ipcrm -m 101$' && [ \$(echo \"\$out\" | grep -c 'ipcrm -m') = 1 ]"
+out=$(OSCAIRN_PROC=$shm OSCAIRN_IPCRM=no-such-ipcrm "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
+check "without ipcrm: says so and goes on" "[ $status = 0 ] && echo \"\$out\" | grep -q 'no no-such-ipcrm here: not removing the shared memory ended processes left (1 segments)' && ! echo \"\$out\" | grep -q 'ipcrm -m'"
+rm -rf "$shm"
+
 boot() { out=$(OSCAIRN_KEY_HELD="sh -c 'exit $1'" OSCAIRN_PROC="$bundle/proc" "$bundle/oscairn-fantom-boot" --dry-run 2>&1); status=$?; }
 boot 0
 check "boot, MENU held: Roland's application" "[ $status = 0 ] && echo \"\$out\" | grep -q 'MENU is held' && echo \"\$out\" | grep -q 'would run: /home/root/mi078' && ! echo \"\$out\" | grep -q 'starting Oscairn'"

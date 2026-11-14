@@ -80,4 +80,12 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   folders): passed once on the Mac. Docs: rust-ui.md (Setlist, adding a screen, building and
   testing, device run recipe), RFC 0030 section. Buildroot packaging not done (offline crates,
   cross linking): said in the docs.
+- Checks (single runs, Mac unless said): full ctest of build-ui (app, engine, BUILD_TESTING=OFF,
+  before OSCAIRN_UI was on): 226/226 passed, 2 skipped (desktop-phase3b-engines,
+  desktop-window-order). With -DOSCAIRN_UI=ON: ctest `ui-rust` passed (30 Rust tests, the real
+  engine included). Container (Ubuntu 24.04 arm64): kms binary built, NEEDED libxkbcommon.so.0,
+  libudev.so.1, libinput.so.10, libfontconfig.so.1, glibc up to 2.35, sha256 c3fc7aae...;
+  the desktop build under Xvfb showing Home with no engine, after 10 s: RSS 17.9 MB, PSS 15.2 MB
+  (anon 2.3 MB), 4 threads. Not measured: the KMS build's memory (no display in the container).
+  trail check: no conflicts, 7 worth a look (word matches with unrelated engine learnings).
 </content>

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
@@ -223,6 +224,20 @@ namespace oscairn
                 throw std::runtime_error("Malformed RPC notification envelope");
             return doc;
         }
+        std::string idToken(const json_value_s* id)
+        {
+            if(id->type==json_type_string){const auto* s=static_cast<const json_string_s*>(id->payload);return quote({s->string,s->string_size});}
+            if(id->type==json_type_number){const auto* n=static_cast<const json_number_s*>(id->payload);return std::string(n->number,n->number_size);}
+            return "null";
+        }
+        std::string methodOf(const json_value_s* request)
+        {
+            const auto* m=member(request,"method");
+            if(!m || m->type!=json_type_string)return {};
+            const auto* s=static_cast<const json_string_s*>(m->payload);return {s->string,s->string_size};
+        }
+        // A request taking longer than this holds the control thread: the helper answers the rest meanwhile.
+        constexpr auto takeover=std::chrono::milliseconds(25);
     }
 
     struct LocalServer::Impl
@@ -231,6 +246,9 @@ namespace oscairn
         int listener=-1;
         std::string path;
         dev_t device=0;ino_t inode=0;
+        // Held by the control thread through poll(), but while it runs a request; the helper takes it
+        // to answer while that request runs on (help()), as do the relay's calls from either thread.
+        std::recursive_mutex transport;
         // app: the app on this connection (RFC 0022), empty for any other client; main: the one
         // apps.connect gave its host (pinged, and sent requests), not one it asked for itself.
         struct Peer
@@ -241,6 +259,7 @@ namespace oscairn
             std::vector<std::string> notices; // relayed to it, sent with its notifications
             // apps.connect's: a copy of the other end, held until this connection speaks (see connect).
             int kept=-1; uint64_t keptSince=0; bool spoke=false;
+            bool held=false; // a line the helper may not answer waits, with the rest after it, for the control thread
             Peer(int fd,Control& c,uint64_t n):stream(fd),rpc(c),id(n){}
             ~Peer(){if(kept>=0)::close(kept);}
             void notice(std::string_view method,const std::string& params){notices.push_back("{\"jsonrpc\":\"2.0\",\"method\":"+quote(method)+",\"params\":"+params+'}');}
@@ -269,6 +288,7 @@ namespace oscairn
             }
             std::string connect(JsonRpc& rpc,const std::string& named,std::optional<uint32_t> permissions) override
             {
+                std::lock_guard lock(s.transport);
                 auto& from=of(rpc);
                 const auto app=named.empty()?from.app:named; // an app's own, unnamed
                 if(app.empty())throw std::invalid_argument("apps.connect names the app");
@@ -296,6 +316,7 @@ namespace oscairn
             }
             std::string request(JsonRpc& rpc,const std::string& app,const std::string& action,const std::string& argument) override
             {
+                std::lock_guard lock(s.transport);
                 auto& from=of(rpc);
                 Peer* to=nullptr;
                 if(!from.app.empty())
@@ -317,6 +338,7 @@ namespace oscairn
             }
             std::string answer(JsonRpc& rpc,uint64_t request,const std::string& result) override
             {
+                std::lock_guard lock(s.transport);
                 auto& from=of(rpc);
                 const auto it=s.requests.find(uint32_t(request));
                 if(it==s.requests.end() || it->second.answerer!=from.id)throw std::invalid_argument("No such request for this connection");
@@ -327,6 +349,7 @@ namespace oscairn
             }
             std::string pong(JsonRpc& rpc,uint64_t ping) override
             {
+                std::lock_guard lock(s.transport);
                 auto& from=of(rpc);
                 if(from.main && ping<=from.pings && ping>from.answered){from.answered=uint32_t(ping);if(from.answered==from.pings)from.silentSince=0;}
                 return R"({"accepted":true})";
@@ -368,9 +391,185 @@ namespace oscairn
             }
         };
         std::unique_ptr<Watch> watch;
-        explicit Impl(Control& c):control(c){}
+        // A request that runs long (a Performance's load or prepare, a plugin opening) holds the
+        // control thread. Past `takeover` the helper answers the other clients meanwhile: what needs
+        // no Control (session.hello, the apps relay, pings) runs, every other request is refused as
+        // busy (-32009: it did not run) and its client is told once the engine is free
+        // (engine.busy). It never touches Control, so Control stays on the one control thread.
+        std::mutex runMutex;std::condition_variable runStarted;
+        std::atomic<uint64_t> started{0};std::atomic<bool> running{false},stopping{false};
+        Peer* runner=nullptr;const std::string* runLine=nullptr;Clock::time_point runSince; // under transport
+        std::string runMethod;bool served=false;std::set<uint64_t> refused;                 // what the helper did
+        uint64_t hostNow=0;Clock::time_point hostAt;                                       // poll()'s clock, carried on:
+        uint64_t clock()const{return hostNow+uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-hostAt).count());}
+        std::thread helper;
+        void answer(Peer& peer,const std::optional<std::string>& reply)
+        {
+            const int passed=std::exchange(passing,-1);
+            if(!reply){if(passed>=0)::close(passed);return;}
+            size_t at=0;
+            try{at=peer.stream.queue(*reply);}catch(...){if(passed>=0)::close(passed);throw;}
+            if(passed>=0)peer.stream.descriptors.push_back({at,passed}); // apps.connect's connection, with its reply
+        }
+        // Dispatches one of peer's requests on the control thread, `lock` (transport) let go meanwhile.
+        std::optional<std::string> run(Peer& peer,const std::string& line,std::unique_lock<std::recursive_mutex>& lock)
+        {
+            runner=&peer;runLine=&line;runSince=Clock::now();served=false;
+            {std::lock_guard g(runMutex);++started;running=true;}
+            runStarted.notify_one();
+            lock.unlock();
+            struct Relock{Impl& s;std::unique_lock<std::recursive_mutex>& lock;~Relock(){s.running=false;lock.lock();s.runner=nullptr;s.runLine=nullptr;}};
+            std::optional<std::string> reply;
+            {Relock relock{*this,lock};reply=peer.rpc.dispatch(line);}
+            if(served)
+            {
+                // Those refused may ask again; silence while the engine could not read pongs is not an app's.
+                const auto ms=std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-runSince).count());
+                for(auto* list:{&peers,&joining})
+                    for(auto& p:*list)
+                    {
+                        if(refused.count(p->id))p->notice("engine.busy","{\"busy\":false,\"method\":"+quote(runMethod)+",\"ms\":"+ms+'}');
+                        if(p->silentSince)p->silentSince=clock(); // now, not when poll() began
+                        p->held=false;
+                    }
+                refused.clear();served=false;
+            }
+            return reply;
+        }
+        // The helper's answer to a line it reads while a request runs; nullopt sets held: a
+        // notification (or a batch with one) has no reply to say it did not run, so it waits.
+        std::optional<std::string> refuse(Peer& peer,const std::string& line)
+        {
+            if(!detail::jsonPreflight(line,JsonRpc::maxDepth).empty())return peer.rpc.dispatch(line); // its error; nothing runs
+            Document doc(json_parse(line.data(),line.size()),&std::free);
+            if(!doc || (doc->type!=json_type_object && doc->type!=json_type_array))return peer.rpc.dispatch(line);
+            static const std::set<std::string> controlFree{"session.hello","apps.connect","apps.request","apps.answer","apps.pong"};
+            if(doc->type==json_type_object && controlFree.count(methodOf(doc.get())))return peer.rpc.dispatch(line);
+            const auto ms=std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-runSince).count());
+            std::vector<std::string> out;
+            auto busy=[&](const json_value_s* request){
+                const auto* id=member(request,"id");
+                if(request->type!=json_type_object || !id)return false;
+                out.push_back("{\"jsonrpc\":\"2.0\",\"id\":"+idToken(id)+",\"error\":{\"code\":-32009,\"message\":"+quote("The engine is busy ("+runMethod+"); this did not run. Ask again when it is done.")+
+                              ",\"data\":{\"busy\":"+quote(runMethod)+",\"ms\":"+ms+"}}}");
+                return true;};
+            bool all=true;
+            if(doc->type==json_type_object)all=busy(doc.get());
+            else for(auto* e=static_cast<const json_array_s*>(doc->payload)->start;e && all;e=e->next)all=busy(e->value);
+            if(!all){peer.held=true;return std::nullopt;}
+            refused.insert(peer.id);
+            if(doc->type==json_type_object)return out.front();
+            std::string batch="[";for(const auto& r:out)batch+=(batch.size()>1?",":"")+r;return batch+']';
+        }
+        void accept(std::vector<std::unique_ptr<Peer>>& into)
+        {
+            if(listener<0)return;
+            for(size_t i=0;i<maxClients;++i)
+            {
+                const auto fd=::accept(listener,nullptr,nullptr);
+                if(fd<0 && errno==EINTR)continue;
+                if(fd<0 && again())break;
+                // ECONNABORTED, EMFILE and the like belong to that connection: never stop the engine.
+                if(fd<0){std::fprintf(stderr,"oscairn: accept: %s\n",std::strerror(errno));break;}
+                try{
+                    if(size_t(std::count_if(peers.begin(),peers.end(),[](const auto& p){return p->app.empty();})+std::count_if(joining.begin(),joining.end(),[](const auto& p){return p->app.empty();}))>=maxClients){::close(fd);continue;}
+                    into.push_back(std::make_unique<Peer>(fd,control,nextPeer++));into.back()->rpc.relayApps(&relay);}
+                catch(const std::exception& e){std::fprintf(stderr,"oscairn: a new control client: %s\n",e.what());}
+            }
+        }
+        // Once a second, each host hears how long its apps have left a ping unanswered, then each
+        // app's main connection is pinged; its client library answers (RFC 0022).
+        void heartbeat(uint64_t now)
+        {
+            if(lastPing && now>=lastPing && now-lastPing<1000000000)return;
+            lastPing=now;
+            std::map<uint64_t,std::vector<std::string>> status;
+            for(auto* list:{&peers,&joining})
+                for(const auto& p:*list)
+                    if(p->main && p->stream.fd>=0)
+                        status[p->host].push_back("{\"app\":"+quote(p->app)+",\"silent\":"+std::to_string(p->silentSince && !served && now>p->silentSince?(now-p->silentSince)/1000000:0)+'}');
+            for(auto* list:{&peers,&joining})
+                for(auto& p:*list)
+                    if(const auto it=status.find(p->id);it!=status.end())
+                    {
+                        std::string text;
+                        for(const auto& a:it->second)text+=(text.empty()?"":",")+a;
+                        p->notice("apps.status","{\"apps\":["+text+"]}");
+                    }
+            for(auto* list:{&peers,&joining})
+                for(auto& p:*list)
+                    if(p->main){++p->pings;if(!p->silentSince)p->silentSince=now;p->notice("apps.ping","{\"ping\":"+std::to_string(p->pings)+'}');}
+        }
+        // The helper's turn: the other clients read and answered once, without waiting. Under transport.
+        void serve()
+        {
+            const auto now=clock();
+            if(!served)
+            {
+                served=true;
+                const Document doc(json_parse(runLine->data(),runLine->size()),&std::free);
+                runMethod=doc && doc->type==json_type_object?methodOf(doc.get()):"a batch";
+            }
+            accept(joining); // not peers, which the control thread is walking
+            for(auto* list:{&peers,&joining})
+                for(size_t i=0;i<list->size();++i) // the relay may add to joining meanwhile
+                {
+                    auto& peer=*(*list)[i];auto& stream=peer.stream;
+                    if(&peer==runner || stream.fd<0)continue;
+                    try
+                    {
+                        size_t requests=0,reads=0;std::string line;
+                        while(!peer.held && requests<maxRequestsPerTick)
+                        {
+                            if(stream.line(line))
+                            {
+                                if(line.size()>JsonRpc::maxMessageBytes)throw std::runtime_error("Request too large");
+                                auto reply=refuse(peer,line);
+                                if(peer.held){stream.input.insert(0,line+'\n');break;}
+                                answer(peer,reply);++requests;peer.spoke=true;
+                            }
+                            else if(reads++>=16 || !stream.read(JsonRpc::maxMessageBytes+1))break;
+                        }
+                    }
+                    catch(const std::exception&){stream.close();} // failure isolates this client
+                }
+            heartbeat(now);
+            for(auto* list:{&peers,&joining})
+                for(auto& peer:*list)
+                {
+                    auto& stream=peer->stream;
+                    if(stream.fd<0 || peer.get()==runner)continue;
+                    try{if(!stream.eof)for(const auto& n:peer->notices)stream.queue(n);peer->notices.clear();stream.flush();}
+                    catch(const std::exception&){stream.close();}
+                }
+        }
+        void help()
+        {
+            for(;;)
+            {
+                uint64_t seen;
+                {std::unique_lock g(runMutex);runStarted.wait(g,[&]{return stopping || running;});if(stopping)return;seen=started;}
+                std::this_thread::sleep_for(takeover);
+                std::unique_lock lock(transport);
+                while(!stopping && running && started==seen)
+                {
+                    serve();
+                    std::vector<pollfd> fds;
+                    if(listener>=0)fds.push_back({listener,POLLIN,0});
+                    for(auto* list:{&peers,&joining})
+                        for(const auto& p:*list)
+                            if(p->stream.fd>=0 && p.get()!=runner)fds.push_back({p->stream.fd,short((p->stream.eof || p->held?0:POLLIN)|(p->stream.output.empty()?0:POLLOUT)),0});
+                    lock.unlock();
+                    ::poll(fds.data(),nfds_t(fds.size()),10); // the pings' clock, and a closed fd, end it too
+                    lock.lock();
+                }
+            }
+        }
+        explicit Impl(Control& c):control(c){helper=std::thread([this]{help();});}
         ~Impl()
         {
+            {std::lock_guard g(runMutex);stopping=true;}
+            runStarted.notify_one();helper.join();
             watch.reset(); // before the sockets it watches close
             if(listener>=0)::close(listener);
             struct stat info{};
@@ -432,16 +631,9 @@ namespace oscairn
     void LocalServer::poll(uint64_t now)
     {
         auto& s=*impl_;
-        if(s.listener>=0)
-            for(size_t i=0;i<maxClients;++i)
-            {
-                const auto fd=::accept(s.listener,nullptr,nullptr);
-                if(fd<0 && errno==EINTR)continue;
-                if(fd<0 && again())break;
-                // ECONNABORTED, EMFILE and the like belong to that connection: never stop the engine.
-                if(fd<0){std::fprintf(stderr,"oscairn: accept: %s\n",std::strerror(errno));break;}
-                try{adopt(fd);}catch(const std::exception& e){std::fprintf(stderr,"oscairn: a new control client: %s\n",e.what());}
-            }
+        std::unique_lock lock(s.transport);
+        s.hostNow=now;s.hostAt=Clock::now();
+        s.accept(s.peers);
         for(auto& peer:s.peers)
         {
             auto& stream=peer->stream;
@@ -455,15 +647,7 @@ namespace oscairn
                     {
                         if(line.size()>JsonRpc::maxMessageBytes)throw std::runtime_error("Request too large");
                         const bool wasAttached=peer->rpc.attached(),wasReleased=peer->rpc.released();
-                        auto reply=peer->rpc.dispatch(line);
-                        const int passed=std::exchange(s.passing,-1);
-                        if(!reply){if(passed>=0)::close(passed);}
-                        else
-                        {
-                            size_t at=0;
-                            try{at=stream.queue(*reply);}catch(...){if(passed>=0)::close(passed);throw;}
-                            if(passed>=0)stream.descriptors.push_back({at,passed}); // apps.connect's connection, with its reply
-                        }
+                        s.answer(*peer,s.run(*peer,line,lock));
                         if(!wasAttached && peer->rpc.attached()){s.everAttached=true;s.abandoned=false;} // a UI back after a crash keeps it again
                         // The last window quitting normally: the user quit the app, whatever crashed before.
                         if(!wasReleased && peer->rpc.released() && std::none_of(s.peers.begin(),s.peers.end(),[&](const auto& p){return p!=peer && p->rpc.attached() && !p->rpc.released();}))s.abandoned=false;
@@ -485,25 +669,7 @@ namespace oscairn
                 if(!peer->keptSince)peer->keptSince=now;
                 else if(peer->spoke || now<peer->keptSince || now-peer->keptSince>=5000000000){::close(peer->kept);peer->kept=-1;}
             }
-        // Apps (RFC 0022): once a second, each host hears how long its apps have left a ping
-        // unanswered, then each app's main connection is pinged; its client library answers.
-        if(!s.lastPing || now<s.lastPing || now-s.lastPing>=1000000000)
-        {
-            s.lastPing=now;
-            std::map<uint64_t,std::vector<std::string>> status;
-            for(const auto& p:s.peers)
-                if(p->main && p->stream.fd>=0)
-                    status[p->host].push_back("{\"app\":"+quote(p->app)+",\"silent\":"+std::to_string(p->silentSince?(now-p->silentSince)/1000000:0)+'}');
-            for(auto& p:s.peers)
-                if(const auto it=status.find(p->id);it!=status.end())
-                {
-                    std::string list;
-                    for(const auto& a:it->second)list+=(list.empty()?"":",")+a;
-                    p->notice("apps.status","{\"apps\":["+list+"]}");
-                }
-            for(auto& p:s.peers)
-                if(p->main){++p->pings;if(!p->silentSince)p->silentSince=now;p->notice("apps.ping","{\"ping\":"+std::to_string(p->pings)+'}');}
-        }
+        s.heartbeat(s.clock()); // past a long request, poll()'s own time is stale
         // Then what changed, to every client: a request one client made reaches the others in this poll.
         bool more=false;
         for(auto& peer:s.peers)

@@ -685,6 +685,59 @@ namespace
             check(retired,"remote explicit hosted retirement");
         });
     }
+    // A long request (a Performance whose plugin's state takes 6 s to load) holds the control thread.
+    // The other clients are answered at once meanwhile: what needs that thread is refused as busy
+    // (it did not run), the apps relay works, and those refused hear when the engine is free.
+    void busyClient(const char* plugin)
+    {
+        TemporaryDirectory directory;const auto saved=directory.child("slow"),marker=directory.child("slow-once");
+        Fixture f(plugin);f.session.savePerformance(saved);
+        auto job=pair(),ui=pair(),host=pair();f.server.adopt(job[0]);f.server.adopt(ui[0]);f.server.adopt(host[0]);
+        std::ofstream(marker)<<'x';::setenv("KICK_FIXTURE_SLOW_LOAD_ONCE",marker.c_str(),1);
+        using Clock=std::chrono::steady_clock;
+        clientWhileRendering(f,[&]{
+            LocalClient loader,watcher,shell;loader.adopt(job[1]);watcher.adopt(ui[1]);shell.adopt(host[1]);
+            check(watcher.call("subscribe",R"({"topics":["graph.changed","params.changed"]})").find("accepted")!=std::string::npos,"subscribed before the load");
+            std::atomic<bool> loaded=false;std::string reply;double seconds=0;
+            std::thread loading([&]{const auto began=Clock::now();try{reply=loader.call("performance.load","{\"directory\":\""+saved+"\"}",30000);}catch(const std::exception& e){reply=e.what();}
+                seconds=std::chrono::duration<double>(Clock::now()-began).count();loaded=true;});
+            double slowest=0;size_t busy=0,calls=0;bool connected=false,prepareRefused=false;
+            while(!loaded)
+            {
+                for(const char* method:{"session.status","controls.set","notes.send"})
+                {
+                    const auto params=std::string_view(method)=="controls.set"?R"({"control":1,"value":0.5})":std::string_view(method)=="notes.send"?R"({"on":false,"key":60})":"{}";
+                    const auto began=Clock::now();std::string answer;
+                    try{answer=watcher.call(method,params,1000);}catch(const std::exception& e){check(false,std::string("a call during the load failed: ")+e.what());}
+                    slowest=std::max(slowest,std::chrono::duration<double>(Clock::now()-began).count());++calls;
+                    busy+=answer.find("-32009")!=std::string::npos;
+                }
+                // An app started again meanwhile gets its connection; a second long request is refused.
+                if(busy && !connected){shell.call("apps.connect",R"({"app":"com.example.setlist"})",1000);const int fd=shell.takeDescriptor();connected=fd>=0;if(fd>=0)::close(fd);}
+                if(busy && !prepareRefused)prepareRefused=watcher.call("performance.prepare","{\"directory\":\""+saved+"\"}",1000).find("-32009")!=std::string::npos;
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            loading.join();
+            check(reply.find("\"loaded\":true")!=std::string::npos,"the load completes: "+reply);
+            check(seconds>=5,"and was slow: "+std::to_string(seconds)+" s");
+            std::cerr<<"busy: "<<calls<<" calls during a "<<seconds<<" s load, "<<busy<<" refused as busy, the slowest answered in "<<slowest*1000<<" ms\n";
+            check(slowest<0.1,"every call during it answered in under 100 ms, the slowest "+std::to_string(slowest*1000)+" ms");
+            check(busy>=calls/2 && watcher.connected(),"refused as busy, the 1 s client still connected");
+            check(connected,"apps.connect answered during the load");
+            check(prepareRefused,"a second long request during it is refused as busy");
+            bool free=false,announced=false;
+            for(int i=0;i<200 && !(free && announced);++i)
+            {
+                watcher.poll();
+                for(const auto& n:watcher.takeNotifications()){free=free || n.find("\"engine.busy\"")!=std::string::npos;announced=announced || n.find("graph.changed")!=std::string::npos || n.find("session.resync")!=std::string::npos;}
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            check(free,"those refused hear the engine is free");
+            check(announced,"the load is announced");
+            check(watcher.call("session.status").find("\"result\"")!=std::string::npos,"and answered again");
+        });
+        ::unsetenv("KICK_FIXTURE_SLOW_LOAD_ONCE");
+    }
     void propertyClient(const char* plugin)
     {
         TemporaryDirectory directory;const auto sample=directory.child("sample.wav");
@@ -894,6 +947,7 @@ int main(int argc,char** argv)
         }
         if(argc==3 && std::string_view(argv[2])=="--properties"){propertyClient(argv[1]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--instances"){instanceClient(argv[1]);return 0;}
+        if(argc==3 && std::string_view(argv[2])=="--busy"){busyClient(argv[1]);return 0;}
         if(argc==4 && std::string_view(argv[2])=="--effects"){effectClient(argv[1],argv[3]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--sounds"){soundClient(argv[1]);return 0;}
         if(argc==4 && std::string_view(argv[2])=="--parts"){partsClient(argv[1],argv[3]);return 0;}

@@ -11,6 +11,10 @@ namespace oscairn
 {
     /// Unix-domain stream transport for JSON-RPC. All methods belong to the control
     /// thread. poll() never waits; neither audio nor MIDI callbacks call this class.
+    /// A request that runs long (a Performance's load) holds the control thread; meanwhile a
+    /// thread of the server's own answers the other clients without touching Control:
+    /// session.hello and apps.* run, any other request is refused as busy (-32009, it did not
+    /// run) and its client hears engine.busy once the engine is free (docs/control-protocol.md).
     class LocalServer
     {
     public:

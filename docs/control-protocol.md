@@ -541,6 +541,7 @@ Example:
 | -32006 | Message, nesting or batch limit exceeded |
 | -32007 | Recording refused; `data.reason` says why ([Recording](#recording)) |
 | -32008 | Not open to this app's connection; `data.permissions` lists what would do ([Permissions](#permissions)) |
+| -32009 | The engine is busy with another client's long request; this one did not run. `data.busy` names that request, `data.ms` how long it has run ([Long requests](#long-requests)) |
 
 Input is limited to 65,536 bytes, 32 nested arrays/objects and 64 requests per batch.
 The adapter checks byte/depth limits before parsing and batch size before dispatching any
@@ -588,7 +589,8 @@ The control thread calls `LocalServer::poll(monotonicNanoseconds)` regularly; th
 never waits for socket readiness. There are at most 8 clients (and 16 apps' connections, below), 16 documents dispatched
 per client per tick, roughly 64 KiB read/written per client per tick, and 1 MiB queued
 output per client. A document may contain up to 64 batch members. Method execution
-(including plugin loading and graph commits) remains synchronous on the control thread.
+(including plugin loading and graph commits) remains synchronous on the control thread; while
+a request runs long, the server answers the other clients itself ([Long requests](#long-requests)).
 Oversized frames, I/O failures and full output queues disconnect that client. Malformed
 JSON within a bounded frame receives an RPC error and does not discard later frames.
 A write-half-close drains complete requests and responses before closing. Each `poll()`
@@ -606,6 +608,37 @@ its own. `engine-pump` serves a session exactly so, without an audio device: req
 answered in about 0.03 ms (median; 0.1 ms worst) rather than 3 ms (6 ms worst) on the 5 ms
 timer the engine used before, a change another client made is heard in under 0.1 ms, and
 the process stays at about 1% CPU idle.
+
+### Long requests
+
+Opening a Performance (`library.load`, `performance.load`, `performance.prepare`,
+`performance.reopen`, an audition), adding a plugin, installing a library: a request that loads
+plugins or reads samples can take seconds (4 to 20 on a FANTOM), and holds the control thread
+while it runs. It never holds the other clients. Once a request has run for 25 ms, a thread
+of the local server's own answers everyone else until it is done, and never calls into the
+engine meanwhile:
+
+- `session.hello` and `apps.*` (connect, request, answer, pong) run as ever, and the apps'
+  pings go out once a second: apps keep their connections, a shell can start an app and hand
+  it its connection during a load, and silence while the engine was busy is not held against
+  an app (each app's unanswered-ping clock starts again when the request ends).
+- Any other request with an ID is refused at once, within milliseconds: error `-32009`,
+  `data: {busy, ms}`, the method running and for how long so far. **A request refused as busy
+  did not run**, so asking again is safe, unlike after a timeout. A batch is refused member by
+  member.
+- A notification (no ID: no reply to say it did not run), or a batch holding one, waits for the
+  control thread with the rest of its connection's requests behind it.
+- Each client refused hears `engine.busy {busy: false, method, ms}` when the request ends (no
+  subscription needed); that request's own client gets its reply as usual, and what it changed
+  goes out as ever (`graph.changed`, `session.resync`).
+
+So a second long request during one is refused as busy, not queued: it is the client's to ask
+again, and for a setlist stepped twice during a load, only the slot chosen last is asked for
+(the Setlist app's jobs wait their turn, and the newest replaces one waiting).
+
+Notes, `controls.set`, `params.set` and the like are refused during a long request too: they
+need the control thread. The keys and panel of a device reach the audio thread without it and
+play on, as the open Performance does until the new one is published.
 
 ### Apps
 
@@ -1003,8 +1036,8 @@ next `performance.load` (or `library.load`) of that folder only publishes it. It
 now (budgets below); its load is then a cut. One Performance is prepared at a time: preparing
 another, loading a different one, or an empty `directory` lets it go; preparing the one already
 prepared, unchanged since, keeps it and returns as it did. A folder saved over
-since it was prepared is read again at the load. Preparing takes as long as a load and blocks
-other control calls meanwhile; only the load gets faster.
+since it was prepared is read again at the load. Preparing takes as long as a load and holds
+the control thread meanwhile (other clients are answered, refused as busy: [Long requests](#long-requests)); only the load gets faster.
 `performance.reopen` takes `{}` and returns `{"notice":""}`: at the app's start, once it has set
 the budget, the engine opens the Performance last opened or saved on this device (a library item,
 or a folder saved with `performance.save`), as `performance.load` would. The engine remembers it

@@ -1045,17 +1045,23 @@ from 300 to 172 MB over a session. What was built:
   its plugins' parameter values into the shared block, playing or not, and the engine asked each
   instance kept warm for a service (a request and an answer) every tick, or every 20 ms on a
   device. Now the control thread copies the values only when its audio thread has rendered a
-  block since the last copy, and with none rendered its tick is 100 ms instead of 10 (every
-  request still copies them after it); the engine services instances kept warm once a second (a
-  plugin's main-thread callbacks, which an idle one needs rarely). The audio thread still wakes
-  once a second from its doorbell wait, as before. Tried first and not kept: the control thread
-  sleeping until a request. In the Linux container `control-performance-switch-workers` then
-  failed 1 run in 5 (blocks silenced after instances kept warm were taken over) and took 42 to
-  54 s, against 0 in 5 and 30 to 40 s with the old tick and 0 in 5 and 34 to 42 s with the 100 ms
-  one; why, not found. Measured in the Linux container: a worker kept warm 0.5 % of a core before,
-  0.0 % in 10 s after (below `/proc`'s 10 ms resolution); on macOS 10 to 11 ms of CPU in 6 s.
-  `control-residents-workers` holds each worker kept warm to 0.3 % of a core while another
-  Performance plays.
+  block since the last copy, every 10 ms while it renders, and with none rendered it sleeps until
+  a request (every request still copies them after it); the engine services instances kept warm
+  once a second (a plugin's main-thread callbacks, which an idle one needs rarely). The audio
+  thread still wakes once a second from its doorbell wait, as before. Nothing on the audio path
+  depends on the control thread's tick: it serves the socket and copies values the engine reads,
+  and the audio thread waits on its doorbell. A first build kept a 100 ms tick after
+  `control-performance-switch-workers` failed 1 run in 5 in the Linux container with the control
+  thread sleeping (blocks silenced after takeovers) and 0 in 5 with a tick; those runs were not
+  interleaved, one setting after the other while other builds loaded the host, and later, at a
+  host load average of 140 to 186, the test timed out with the 100 ms tick as with the sleep, and
+  its silenced blocks came with wake-ups of the workers' audio threads of 2 to 12 ms and round trips
+  of 53 ms, which points to the host's scheduling (not shown). On the unit the engine holds the CPU wake-up
+  latency request while it plays ([CPU wake-up latency](#cpu-wake-up-latency)); a takeover's first
+  blocks after a worker kept warm a long time are to be checked there (`oscairn-engine-timing`'s
+  wake). Measured in the Linux container: a worker kept warm 0.5 % of a core before, 0.0 % in 10 s
+  after (below `/proc`'s 10 ms resolution). `control-residents-workers` holds each worker kept warm
+  to 0.3 % of a core while another Performance plays.
 - **By the memory the system really has.** The profile's `compute.availableMemory` (MiB; the
   budget's `available`, Linux's MemAvailable) is what must stay available. Once a second, while
   less is available, instances kept warm are let go, oldest and largest first (the longest idle

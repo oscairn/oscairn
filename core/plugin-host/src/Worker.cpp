@@ -592,15 +592,13 @@ namespace oscairn::worker
         uint32_t refreshed = 0; // sound.rendered when the values were last refreshed
         for(;;)
         {
-            // A plugin's values change in its blocks and in requests (each refreshes them after it), so with no
-            // block rendered since the last refresh (an instance kept warm, a Performance not playing) the tick
-            // copies nothing. The tick itself stays: with this thread woken only by requests, blocks were silenced
-            // after instances kept warm were taken over in the Linux container and the switches ran slower
-            // (control-performance-switch-workers failed 1 run in 5, 42 to 54 s; with the tick 0 in 5, 30 to 40 s;
-            // why, not found).
+            // A plugin's values change in its blocks and in requests (each refreshes them after it). While its
+            // audio thread renders, they are copied every 10 ms; with no block rendered since the last copy (an
+            // instance kept warm, a Performance not playing) this thread sleeps until the engine asks: nothing
+            // the audio thread does depends on it (it serves the socket; the audio thread its doorbell).
             const uint32_t rendered = sound.rendered.load(std::memory_order_relaxed);
             pollfd p{socket, POLLIN, 0};
-            int ready = poll(&p, 1, windows ? 0 : rendered != refreshed ? 10 : 100);
+            int ready = poll(&p, 1, windows ? 0 : rendered != refreshed ? 10 : -1);
             if(ready == 0 && windows && kick::clap::runWindowEvents(socket, 10)) ready = poll(&p, 1, 0);
             else if(ready == 0 && windows) ready = poll(&p, 1, 10); // a platform whose plugins run their windows themselves
             // The plugin is serviced only when the engine asks, as in the engine; values are refreshed meanwhile.

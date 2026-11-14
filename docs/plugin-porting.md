@@ -69,6 +69,28 @@ An `oscairn.ui` extension without `param_hint` is ignored, not refused.
   not reach plugins; physical-control mapping routes them. Clock, start, continue, stop and
   song position drive the transport. To hear pitch bend and the mod wheel, a plugin offers
   the MIDI dialect on its note port.
+- **Pedals:** the sustain pedal (CC 64) and the others reach a plugin as MIDI, unchanged and
+  per channel, half-pedal values included; the host holds no note for a CLAP-dialect plugin, so
+  an instrument sustains its own voices (a note-off with CC 64 at 64 or more keeps the voice;
+  the pedal's release ends those no key holds). A FANTOM's HOLD jack and a computer keyboard's
+  pedal arrive the same way, and so does `notes.controller` from the control socket. A part says
+  whose pedals it takes (its input's `receive`: every device's, the default, none, or those of
+  the devices it plays from), at its input, which is its first plugin's, a note effect such as an
+  arpeggiator included: a pedal it does not take reaches neither it nor the instrument after it.
+  With several pedals the host is to send the largest value of those the part takes, so a part
+  is held while any of them is down (the note router does this once the engine core's port
+  does; until then each part gets the pedals of the devices its zones hear, the last one moved
+  winning).
+- **The transport's stop, for note effects:** a plugin whose notes feed another (an
+  arpeggiator, a sequencer) gets, on every press of STOP or `transport.set` with
+  `"playing":false`, whether or not the transport was playing, MIDI CC 123 (All Notes Off) on
+  each channel of its note port 0, straight from the host after the graph's routing: stop
+  generating, let go of latched or held input keys, and send note-offs for what sounds, so
+  the notes ring through their release. Keep your settings (an arpeggiator's Hold stays on;
+  the next key latches again). Do not choke there: CC 120 (All Sound Off), a `NOTE_CHOKE` with
+  key or channel −1 and `reset()` (the player's Panic) are the cuts. The host's other policy
+  (`Session::StopNoteEffects::Cut`) sends that all-notes choke at a stop instead. A note effect
+  also sees the transport's playing flag fall when it was playing; treat both the same.
 - **Hardware MIDI output:** a part can send its MIDI to hardware outputs too ([RFC 0012](rfcs/0012-sync-external-midi-and-multi-device.md#step-1-status)).
   A sequencer's or MIDI effect's note output reaches them as MIDI: notes, pressure (as
   aftertouch) and its MIDI events' channel messages; parameter events and other CLAP events

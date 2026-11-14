@@ -1273,12 +1273,11 @@ showed. Roland numbers them the other way up, its pad 1 the top left (switch 91)
 is taken to be printed; the printed labels are not yet checked. The CTRL jacks' plug sensing is switches 35 and 36 (CTRL1 and
 CTRL2, Roland's "sense") and 37 and 38 (their ring contacts), as fixed controls nothing plays
 (`ctrl1Sense`, `ctrl2Sense`, `ctrl1Ring`, `ctrl2Ring`); Roland's app passes a CTRL jack's position
-on only while its sense switch is on.
+on only while its sense switch is on. The HOLD jack is analog 2, `footswitch:1`: a position and not a switch, so a
+half-damper pedal reads as one; the CTRL jacks are `pedal:1` and `pedal:2` (analog 3 and 4).
 
 Not in the map, with Roland's numbers for them:
 
-- **The HOLD jack:** analog 2, a position and not a switch, so a half-damper pedal reads as one.
-  The controller layer's footswitch takes a switch; nothing turns the position into one yet.
 - **MASTER VOLUME:** Roland's tables have no number for it. It never reaches the i.MX as a panel
   message (inferred: it acts on the BMC side or in the analog path).
 - **WRITE, MENU and TEMPO:** numbers 104 to 106 in Roland's tables, but the panel bus never
@@ -1367,17 +1366,34 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
 
 ### What it does not do yet
 
-- **The HOLD jack:** on the panel bus, decoded and shown by the dump, played by nothing
-  ([The map](#the-map)).
 - **Lamps:** none is set; they go over `/dev/ttyGS0` ([Lamps](#lamps)), which Oscairn only reads.
 - **Fixed controls** (the VALUE dial, cursor, ENTER, EXIT, transport and the rest) decode and show
   in the dump, and WRITE, MENU and TEMPO reach the engine from `gpio-keys`, but the engine has
   nothing to give most of them to: the controller layer plays assignable controls only. PLAY and
   STOP drive the transport, and the controls the map gives a `navigate` move the app's lists
-  ([The panel in lists](#the-panel-in-lists)).
-- **The lever and pedals with nothing assigned:** a MIDI controller's wheel then reaches the
-  parts as its own MIDI message; a panel message has none, so `wheel:1` and `wheel:2` play only
-  what a Performance or Sound assigns them.
+  ([The panel in lists](#the-panel-in-lists)). REC, TR-REC, PATTERN, SONG and the rest of that
+  cluster play nothing: a recording starts and stops only from an app (`record.start`,
+  `record.stop`), apart from the transport.
+- **STOP ends arpeggios:** each press, whether the transport was playing or not, also sends every
+  note effect of the Performance (its arpeggiators) MIDI CC 123, All Notes Off, straight to the
+  plugin: it stops and its notes ring out through their release; Hold stays on. Before, the
+  transport was never playing while an arpeggio ran free, so STOP changed nothing and only Panic
+  ended a latched arpeggio. The arpeggiator 0.1.7 still cuts on CC 123 (it chokes, as on its own
+  transport stop) until it treats CC 123 as a release ([plugin porting](plugin-porting.md)). Not
+  yet tried on the unit.
+- **The pedals:** the HOLD jack is `footswitch:1` in the map (analog 2), whose profile function is
+  sustain: with nothing assigned to it, its position goes to the parts as CC 64 (0 to 127, so a
+  half-damper pedal passes as one) from the built-in source, as the keys' notes, and reaches every part,
+  a part played only from another keyboard too, unless the part's `receive` says otherwise, once
+  the note router applies that (today a part whose devices leave out the built-in keys does not
+  get it). Not yet seen on the
+  unit: which way a pedal reads (some switch pedals are inverted), and whether the BMC also sends
+  CC 64 with the keys (Roland's app takes one from that link), which would arrive twice. CTRL1 and
+  CTRL2 (`pedal:1`, `pedal:2`) have no function in the profile: they play what a Performance or
+  Sound assigns them. A pedal or footswitch with a standard controller's function (sustain,
+  sostenuto, soft, foot, expression and so on) sends that controller; the lever and wheels do not:
+  a MIDI controller's wheel reaches the parts as its own MIDI message, a panel message has none,
+  so `wheel:1` and `wheel:2` play only what a Performance or Sound assigns them.
 
 ## The key reader
 

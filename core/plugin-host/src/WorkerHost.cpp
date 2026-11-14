@@ -929,6 +929,8 @@ namespace oscairn
             uint64_t outputEventDrops() const noexcept override { return shared_->outputDrops.load(std::memory_order_relaxed); }
             const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { count = outputCount_; return output_.data(); }
             WorkerTiming* workerTiming() noexcept override { return &timing_; }
+            // The budget's every block: the one value, not statistics()' gathering of every counter.
+            double blockMicroseconds() const noexcept override { return shared_->lastMicroseconds.load(std::memory_order_relaxed); }
             kick::clap::Statistics statistics() const noexcept override
             {
                 kick::clap::Statistics s;

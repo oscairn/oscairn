@@ -275,6 +275,9 @@ selection. Apply queued `select` calls at the start of `process()`, before input
 apply a channel-addressed parameter event to the sound that channel selects, never to a global
 value or to every sound. The bus stored in a sound's saved state (0, as `save_sound` writes it)
 is overwritten by this event: do not reapply saved state after preparing.
+The host also activates each shared sound's bus port with `clap.audio-ports-activation` (see
+[Several output ports](#several-output-ports)) before that sound plays, keeps it active while the
+sound rings out after a change, and deactivates it once the sound is gone; main stays active.
 An instance holds as many parts as it has sounds, ports and channels; the host takes another
 instance past that. The Basic Synth (eight sounds, its Default one of them; eight sound buses
 beside its main output) does all of it; the Legacy Sampler has one output, so each Legacy Sampler
@@ -299,7 +302,9 @@ The host tells the plugin which output ports it takes sound from with CLAP's
   with more than one, once its wiring is first worked out (when it is added or its Performance
   loads), and again for each port whose state changes. A port is active when a
   wire takes sound from it (a lane of a ports split, or a wire drawn in Routing); the main ports
-  are always active.
+  are always active. On an instance several parts share, each part's sound bus is active while
+  its sound plays or rings out, by the same rule. A part whose wires leave a port other than main
+  never shares an instance, so a port is a lane or a sound bus, never both.
 - Return true from `can_activate_while_processing`: then each call comes on the audio thread
   just before a `process` call, between blocks, and the change is heard in that block with no
   gap. A plugin that returns false is told while deactivated: Oscairn deactivates and activates
@@ -311,7 +316,8 @@ The host tells the plugin which output ports it takes sound from with CLAP's
 - The state is not saved: the host tells it again after every load, a worker restart included.
 
 The element-ports fixture (`core/engine/tests/audio_fixture.cpp`, `org.oscairn.test.element-ports`)
-does all of it in a few lines; `control-parts` plays it through a ports split.
+does all of it in a few lines; `control-parts` plays it through a ports split. The Basic Synth
+does it for its sound buses, and `control-shared-parts` checks each sharing part's own meter.
 
 ### Presets
 

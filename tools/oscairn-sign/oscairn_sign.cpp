@@ -36,6 +36,7 @@ namespace
                    "  oscairn-sign plugin-package [--key <key-file>] [--plugin <id> <name>]... [--allow-outside-libraries]\n"
                    "                             --license <spdx> [--license-file <file>]... [--source <url> <commit-or-tag>]\n"
                    "                             [--asset-dependency <library-id> <least-version>]...\n"
+                   "                             [--package-dependency <package-id> <least-version>]...\n"
                    "                             [--estimate <platform> <cpu> <memory-bytes>]...\n"
                    "                             <archive.olib> <format> <id> <version> <name> <platform>=<build>...\n"
                    "      pack plugin builds, each with the signatures in <build>.sig beside it, into a\n"
@@ -48,15 +49,24 @@ namespace
                    "      expression), license texts and notices (into Licenses/) and source (an https://\n"
                    "      address and the exact commit or tag) travel in it; under the GPL, LGPL or AGPL\n"
                    "      the source and a license file are required. --asset-dependency names an asset\n"
-                   "      library it needs, and the least version. --estimate gives that platform's build\n"
+                   "      library it needs, and the least version; --package-dependency a package of any\n"
+                   "      kind it needs (installed first from a repository). --estimate gives that platform's build\n"
                    "      its resource estimate (RFC 0025), as oscairn-plugin-check prints it: its busiest\n"
                    "      block's share of the block's time and the bytes it holds; a device that has not\n"
                    "      measured the plugin itself counts it at this\n"
                    "  oscairn-sign asset-package [--key <key-file>] --license <spdx> [--license-file <file>]...\n"
-                   "                            [--source <url> <commit-or-tag>]\n"
+                   "                            [--source <url> <commit-or-tag>] [--package-dependency <package-id> <least-version>]...\n"
                    "                            <archive.olib> <library-id> <version> <name> <folder>\n"
                    "      pack every file in <folder> (hidden ones aside) as an asset library, each by its\n"
                    "      path, SHA-256 and size, into an asset package; with --key, signed whole\n"
+                   "  oscairn-sign library-package [--key <key-file>] [--license <spdx>] [--license-file <file>]...\n"
+                   "                              [--source <url> <commit-or-tag>] [--package-dependency <package-id> <least-version>]...\n"
+                   "                              [--type <type-manifest.json>]... <archive.olib> <id> <name> <folder>\n"
+                   "      pack <folder>, a tree as an archive holds it, into a library with no items: the\n"
+                   "      item types it declares (Types/<id>/<file>.json) and the files of types kept by a\n"
+                   "      handler (Samples/<id>.osp, Waveforms/<id>.owf), in name order; with --key, signed\n"
+                   "      whole. --type makes a type another package declares known for packing and\n"
+                   "      checking, not packed: the package names that one with --package-dependency\n"
                    "  oscairn-sign verify [--into <folder>] [--platform <platform>] <archive.olib>\n"
                    "      check every signature and hash in an archive and say who signed what, and each\n"
                    "      build's libraries from outside the system and its bundle (lines \"outside ...\");\n"
@@ -167,6 +177,7 @@ int main(int argc, char** argv)
                 else if(rest[0] == "--license-file" && rest.size() > 1) { licenseFiles.push_back(rest[1]); rest.erase(rest.begin(), rest.begin() + 2); }
                 else if(rest[0] == "--source" && rest.size() > 2) { p.sourceUrl = rest[1]; p.sourceRevision = rest[2]; rest.erase(rest.begin(), rest.begin() + 3); }
                 else if(rest[0] == "--asset-dependency" && rest.size() > 2) { p.assetDependencies.push_back({rest[1], rest[2]}); rest.erase(rest.begin(), rest.begin() + 3); }
+                else if(rest[0] == "--package-dependency" && rest.size() > 2) { p.packageDependencies.push_back({rest[1], rest[2]}); rest.erase(rest.begin(), rest.begin() + 3); }
                 else if(rest[0] == "--estimate" && rest.size() > 3) { estimates[rest[1]] = {std::stod(rest[2]), std::stoull(rest[3])}; rest.erase(rest.begin(), rest.begin() + 4); }
                 else return usage();
             }
@@ -238,6 +249,7 @@ int main(int argc, char** argv)
                 else if(rest[0] == "--license" && rest.size() > 1) { p.license = rest[1]; rest.erase(rest.begin(), rest.begin() + 2); }
                 else if(rest[0] == "--license-file" && rest.size() > 1) { licenseFiles.push_back(rest[1]); rest.erase(rest.begin(), rest.begin() + 2); }
                 else if(rest[0] == "--source" && rest.size() > 2) { p.sourceUrl = rest[1]; p.sourceRevision = rest[2]; rest.erase(rest.begin(), rest.begin() + 3); }
+                else if(rest[0] == "--package-dependency" && rest.size() > 2) { p.packageDependencies.push_back({rest[1], rest[2]}); rest.erase(rest.begin(), rest.begin() + 3); }
                 else return usage();
             }
             if(rest.size() != 5) return usage();
@@ -264,6 +276,57 @@ int main(int argc, char** argv)
             writePackage(rest[0], p, staged, key.get());
             try { readPackage(rest[0], {}); } catch(...) { fs::remove(rest[0]); throw; } // as a reader takes it
             std::printf("packed asset library %s %s with %zu files%s\n", p.id.c_str(), p.assetVersion.c_str(), p.assets.size(),
+                        key ? (", signed by " + signing::keyId(key->publicKey)).c_str() : "");
+            return 0;
+        }
+        if(a.size() >= 5 && a[0] == "library-package")
+        {
+            std::vector<std::string> rest(a.begin() + 1, a.end());
+            std::unique_ptr<signing::Key> key;
+            Package p;
+            std::vector<fs::path> licenseFiles;
+            while(!rest.empty() && rest[0].rfind("--", 0) == 0)
+            {
+                if(rest[0] == "--key" && rest.size() > 1) { key = std::make_unique<signing::Key>(signing::loadKey(rest[1])); rest.erase(rest.begin(), rest.begin() + 2); }
+                else if(rest[0] == "--license" && rest.size() > 1) { p.license = rest[1]; rest.erase(rest.begin(), rest.begin() + 2); }
+                else if(rest[0] == "--license-file" && rest.size() > 1) { licenseFiles.push_back(rest[1]); rest.erase(rest.begin(), rest.begin() + 2); }
+                else if(rest[0] == "--source" && rest.size() > 2) { p.sourceUrl = rest[1]; p.sourceRevision = rest[2]; rest.erase(rest.begin(), rest.begin() + 3); }
+                else if(rest[0] == "--package-dependency" && rest.size() > 2) { p.packageDependencies.push_back({rest[1], rest[2]}); rest.erase(rest.begin(), rest.begin() + 3); }
+                else if(rest[0] == "--type" && rest.size() > 1)
+                {
+                    auto t = readItemType(readFile(rest[1]));
+                    t.owner = t.id.substr(0, t.id.rfind('.')); // a package's type, under its ID
+                    if(!itemType(t.id)) addItemType(t);
+                    rest.erase(rest.begin(), rest.begin() + 2);
+                }
+                else return usage();
+            }
+            if(rest.size() != 4) return usage();
+            p.kind = "library"; p.id = rest[1]; p.name = rest[2];
+            const fs::path folder = rest[3];
+            if(!fs::is_directory(folder)) throw std::runtime_error("no folder " + folder.string());
+            std::random_device random;
+            const auto staged = fs::temp_directory_path() / ("oscairn-pack-" + std::to_string(random()) + std::to_string(random()));
+            struct Gone { fs::path p; ~Gone() { std::error_code e; fs::remove_all(p, e); } } gone{staged};
+            fs::copy(folder, staged, fs::copy_options::recursive);
+            // The files of the types a handler keeps, in name order: the order an install appends them in.
+            std::vector<ItemType> kept;
+            for(const auto& t : itemTypes()) if(!t.handler.empty()) kept.push_back(t);
+            std::error_code e;
+            for(const auto& owner : fs::directory_iterator(staged / "Types", e))
+                for(const auto& f : fs::directory_iterator(owner.path(), e))
+                    if(const auto t = readDeclaredType(readFile(f.path()), owner.path().filename().string()); !t.handler.empty()) kept.push_back(t);
+            for(const auto& t : kept)
+            {
+                std::vector<std::string> names;
+                for(const auto& f : fs::directory_iterator(staged / t.folder, e)) names.push_back(t.folder + "/" + f.path().filename().string());
+                std::sort(names.begin(), names.end());
+                p.contents.insert(p.contents.end(), names.begin(), names.end());
+            }
+            stageLicenses(licenseFiles, staged);
+            writePackage(rest[0], p, staged, key.get());
+            try { readPackage(rest[0], {}); } catch(...) { fs::remove(rest[0]); throw; } // as a reader takes it
+            std::printf("packed library %s with %zu files of handler types%s\n", p.id.c_str(), p.contents.size(),
                         key ? (", signed by " + signing::keyId(key->publicKey)).c_str() : "");
             return 0;
         }

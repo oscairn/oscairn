@@ -63,6 +63,17 @@ check "and the display left as it is" "! echo \"\$out\" | grep -q -e weston.serv
 out=$(OSCAIRN_UI=rust OSCAIRN_UI_ROTATION=90 OSCAIRN_UDEV_RULES="$bundle/rules" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "ui rust: the engine alone, then the Rust UI" "[ $status = 0 ] && echo \"\$out\" | grep -q 'setsid env oscairn-engine-run --output-device' && echo \"\$out\" | grep -q 'SLINT_KMS_ROTATION=90 /usr/bin/oscairn-ui --profile fantom-07 --socket /run/oscairn/engine.sock --handover' && ! echo \"\$out\" | grep -q -e /usr/bin/Oscairn -e /usr/bin/Xorg"
 check "and touch turned with it, by a rule at run time" "echo \"\$out\" | grep -q 'would write $bundle/rules/99-oscairn-touch.rules (LIBINPUT_CALIBRATION_MATRIX 0 1 0 -1 0 1)' && [ ! -e \"$bundle/rules\" ]"
+# The handover file read as the keeper reads it, with and without its newline (an unterminated
+# line once made the keeper start the Rust UI again in place of the JUCE app).
+eval "$(grep '^handed_over()' "$scripts/oscairn-fantom-start")"
+mkdir -p "$bundle/tmp"; root=$bundle
+printf settings > "$bundle/tmp/oscairn-handover"
+check "a handover file without a newline names its app" "handed_over && [ \"\$app\" = settings ]"
+printf 'library\n' > "$bundle/tmp/oscairn-handover"
+check "and one with it" "handed_over && [ \"\$app\" = library ]"
+: > "$bundle/tmp/oscairn-handover"
+check "an empty one names none" "! handed_over"
+rm -rf "$bundle/tmp"
 out=$(OSCAIRN_UI=rust "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "ui rust with --engine-only: no UI" "! echo \"\$out\" | grep -q oscairn-ui"
 out=$(OSCAIRN_UI=qt "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?

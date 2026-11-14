@@ -179,6 +179,11 @@ pub fn handover() -> Option<&'static str> {
     APP.with(|a| a.borrow().as_ref().and_then(|a| a.handover))
 }
 
+/// The handover file: the app's name as a whole line, newline and all, as the start script reads it.
+pub fn write_handover(file: &std::path::Path, app: &str) -> std::io::Result<()> {
+    std::fs::write(file, format!("{app}\n"))
+}
+
 impl App {
     fn ui(&self) -> Option<Shell> {
         self.ui.upgrade()

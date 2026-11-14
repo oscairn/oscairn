@@ -299,6 +299,11 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!((s.ui.get_screen(), cursor(s)), (0, None), "the cursor dropped with its screen");
     s.ui.global::<HomeState>().invoke_tapped(4); // Settings: a JUCE screen
     assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Settings", Some("settings")));
+    let file = std::env::temp_dir().join(format!("oscairn-ui-handover-{}", std::process::id()));
+    shell::write_handover(&file, shell::handover().unwrap()).unwrap();
+    let written = std::fs::read_to_string(&file).unwrap();
+    let _ = std::fs::remove_file(&file);
+    assert_eq!(written, "settings\n", "a whole line, as the start script reads it");
     s.frame();
     s.save("home-opening-settings");
     shell::act(Action::Move { pane: None, by: 1 });

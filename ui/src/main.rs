@@ -50,7 +50,7 @@ fn main() -> Result<(), slint::PlatformError> {
     shell::start(&ui, socket.into(), &profile, handover.is_some(), post).map_err(|e| slint::PlatformError::Other(e.to_string()))?;
     ui.run()?;
     if let (Some(file), Some(app)) = (handover, shell::handover()) {
-        if let Err(e) = std::fs::write(&file, app) {
+        if let Err(e) = shell::write_handover(file.as_ref(), app) {
             eprintln!("oscairn-ui: cannot write the handover file {file}: {e}");
             std::process::exit(1);
         }

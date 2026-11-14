@@ -395,6 +395,8 @@ touch_rule() {
 # Runs the Rust UI on the display, and again whenever it ends: after a handover (status 3, the
 # app's name in the bundle's tmp/oscairn-handover), once the JUCE app it gave the display to has
 # ended; after a crash, 1, 2 then 4 seconds later, left ended a fourth time within a minute.
+# The app named in the handover file, a line with or without its newline (read fails on one without).
+handed_over() { app=; read -r app < "$root/tmp/oscairn-handover" || [ -n "$app" ]; }
 keep_ui() {
 	fails=0
 	token=$(cat "$proc/sys/kernel/random/uuid" 2>/dev/null || date +%s)
@@ -408,7 +410,7 @@ keep_ui() {
 			< /dev/null >> "$state/log/oscairn-ui.log" 2>&1
 		status=$?
 		ours || exit 0
-		if [ $status = 3 ] && read -r app < "$root/tmp/oscairn-handover"; then
+		if [ $status = 3 ] && handed_over; then
 			say "the Rust UI hands the display to the JUCE app for $app"
 			"$root/start-chroot.sh" /usr/bin/Xorg :0 vt7 -novtswitch -nolisten tcp -noreset -nocursor -logfile /var/oscairn/log/Xorg.log < /dev/null &
 			xserver=$!

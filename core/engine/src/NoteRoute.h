@@ -150,6 +150,12 @@ struct NoteRoute
     }
     // The notes it holds until their plugin ends them, released and fading ones included.
     uint32_t live() const noexcept {uint32_t count=0;for(const auto& n:active())count+=n.used;return count;}
+    // The note-end watchdog: a released note whose plugin sends no NOTE_END (none, or one lost) would hold
+    // its slot, a voice to the budget, for ever. Called once its plugin has been silent a while, which a
+    // release still sounding is not: those slots are freed. A key down, a pedal holding it (a MIDI note's
+    // release waits for the pedal) or a fade under way keeps its slot.
+    void expire() noexcept
+    {for(auto& n:active())if(n.used && !n.held && n.fadeAt<0 && clap[n.address.port_index] && pedal[n.address.port_index&15][n.address.channel&15]<64)drop(n);}
     // Chokes a note at `at` without (more of) a fade, at the budget's hard limit.
     void choke(Note& n,uint32_t at) noexcept
     {

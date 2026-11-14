@@ -13,6 +13,7 @@
 // middle frame, as a plugin gone wrong (or legitimately loud). OSCAIRN_FIXTURE_BLOCK_US: the microseconds
 // every block spends per 128 frames, sounding or not (default 0). OSCAIRN_FIXTURE_CPU_CLOCK=1: the time
 // spent is the thread's CPU time, not the clock's, so the cost is exact however the thread is scheduled.
+// OSCAIRN_FIXTURE_NO_END=1: it sends no NOTE_END, as a plugin that loses them.
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -33,6 +34,7 @@ struct Plugin {
     double rate=48000,microseconds=0,blockMicroseconds=0;bool cpuClock=false;uint32_t chokeFrames=144,layers=1,frames=128;
     std::array<Voice,128> voices{};uint64_t started=0,calls=0;
     long spikeAt=0,spikeCalls=0;double spikeUs=0; // OSCAIRN_FIXTURE_SPIKE
+    bool noEnd=false; // OSCAIRN_FIXTURE_NO_END
     struct Bad { long at=0,calls=1; float value=0; }; std::array<Bad,8> bad{}; size_t badCount=0; // OSCAIRN_FIXTURE_OUTPUT
     oscairn::voices::Limits limits; // oscairn.voice-budget's, audio thread
     double loudness(const Voice& v) const {return v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
@@ -51,7 +53,7 @@ struct Plugin {
         clap_event_note_t e{};e.header={sizeof(e),at,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_END,0};
         e.note_id=v.id;e.port_index=0;e.channel=v.channel;e.key=v.key;v.active=false;
         for(const auto& o:voices)if(o.active && o.id==v.id && o.channel==v.channel && o.key==v.key)return; // the note sounds on in another layer
-        out->try_push(out,&e.header);
+        if(!noEnd)out->try_push(out,&e.header);
     }
     bool matches(const Voice& v,int32_t id,int16_t channel,int16_t key) const
     {return v.active && (id<0 || v.id==id) && (channel<0 || v.channel==channel) && (key<0 || v.key==key);}
@@ -105,6 +107,7 @@ struct Plugin {
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_VOICE_US"))microseconds=std::atof(us);
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_BLOCK_US"))blockMicroseconds=std::atof(us);
         cpuClock=std::getenv("OSCAIRN_FIXTURE_CPU_CLOCK")!=nullptr;
+        noEnd=std::getenv("OSCAIRN_FIXTURE_NO_END")!=nullptr;
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LAYERS"))layers=std::clamp(std::atoi(l),1,16);
         if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
         for(const char* v=std::getenv("OSCAIRN_FIXTURE_OUTPUT");v && *v && badCount<bad.size();){

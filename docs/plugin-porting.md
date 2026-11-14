@@ -645,7 +645,8 @@ stepped, hidden and read-only flags. How the editors use them:
   plugin that does neither clicks. The shared budget costs each note by the plugin's measured
   time per block (`process`'s wall time above its time at rest, shared among the notes it holds
   until their `NOTE_END`), so a plugin that sends `NOTE_END` late, or never, is charged for
-  voices it no longer plays; and it steals only CLAP notes, never a MIDI-only plugin's. An instrument built on the
+  voices it no longer plays (until its output has been silent for 2 s, when the host lets go of the
+  released notes it never ended; a release still sounding is never cut); and it steals only CLAP notes, never a MIDI-only plugin's. An instrument built on the
   SDK's `sound-contexts-plugin.hpp` gets both: it multiplies each voice's samples by
   `amplitude(voice, offset)`, and a choked voice fades over 3 ms before it ends.
 - **Pitch bend and the mod wheel:** apply MIDI pitch bend per channel, to held and released

@@ -1504,6 +1504,13 @@ namespace oscairn
             step.paramCount = 0;step.releaseCount=0;step.releaseOverflow=false;
             uint32_t endedCount=0;const auto* ended=step.host->outputEvents(endedCount);
             for(uint32_t i=0;i<endedCount;++i)for(auto& source:step.noteSources){auto e=ended[i];if(endedOn(e,source.channel))source.route->ended(e);}
+            // Silent for noteEndQuiet (a shared engine: its context's bus), its released notes no plugin ended are let go.
+            // shortcut: silence is the node's, not the note's, so one sounding release keeps a dead one; per-voice loudness if that is seen.
+            for(auto& source:step.noteSources)if(source.route->top){
+                const Graph::Activity* a=step.activity.get();
+                if(!a)for(const auto& c:step.contexts)if(c.channel==source.channel)a=c.activity.get();
+                if(a && a->quiet.load(std::memory_order_relaxed)>=uint64_t(noteEndQuiet*sampleRate_))source.route->expire();
+            }
 
             // This step's param-target lane events become parameter events for their
             // targets, which come later in this block.

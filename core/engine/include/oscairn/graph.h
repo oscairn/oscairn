@@ -247,6 +247,9 @@ namespace oscairn
         /// +120 dBFS, not less: audio ports also carry data (the harmony follower fixture's chords and keys, to about
         /// 120,000); a runaway (2.7e8 seen) is far past it.
         static constexpr float outputBound = 1e6f;
+        /// The note-end watchdog: a node silent (below -100 dBFS) this many seconds lets go of the released notes
+        /// its plugin never ended with NOTE_END, so they no longer hold slots or count as voices.
+        static constexpr double noteEndQuiet = 2;
         struct OutputGuard { uint64_t blocks = 0; uint32_t inARow = 0; };
         OutputGuard outputGuard( NodeId node ) const;
         void disconnectAudio( NodeId from, NodeId to );

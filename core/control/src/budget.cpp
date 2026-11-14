@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -566,6 +567,8 @@ namespace oscairn
                 } // else a release tail, or notes not counted: the busiest load only
             }
             if(m.voices) graph_.seedNoteCost(node, m.rest * blockMicroseconds, m.voice * blockMicroseconds);
+            // An effect's learned cost with signal, which the load guard counts while it sleeps (RFC 0045's guard, 12e).
+            else if(!host.noteInputPorts() && m.cpu > 0) graph_.seedNoteCost(node, m.cpu * blockMicroseconds, -1);
             if(std::abs(m.rest - wasRest) > 1e-4 || std::abs(m.voice - wasVoice) > 1e-5) measurementsChanged_ = true;
             // What it declares (oscairn.memory), kept for estimates of a Performance not open: from its own
             // instance, not an effect context (whose share is its context's).
@@ -588,19 +591,34 @@ namespace oscairn
     // RFC 0025, per core: plugins in workers render in parallel on the audio cores (all but one: the
     // system's and the display's), each part's chain one plugin after another within a block. So a
     // Performance fits when its total fits the budget's share of every audio core, and its costliest
-    // chain the budget's share of one block. Figures from too few blocks that would refuse it let it
-    // open, said (uncertain).
-    Control::Estimate Session::estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing) const
+    // chain the budget's share of one block, a part's counting the buses it plays through or sends to after
+    // its own (RFC 0045's guard, 12e: `feeds`, each part's buses). Figures from too few blocks that would refuse
+    // it let it open, said (uncertain).
+    Control::Estimate Session::estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds) const
     {
         Estimate e;
         e.plugins = plugins; e.budget = budget_;
         e.cores = std::max(1u, worker::usableCores() - 1);
-        std::map<std::string, double> chains;
+        // The costliest chain: a part's own and then the costliest way on through the buses it feeds (no loops: the format refuses them).
+        auto longestOf = [&](const std::map<std::string, double>& chains, double alone) {
+            std::map<std::string, double> way;
+            std::function<double(const std::string&)> through = [&](const std::string& part) {
+                if(const auto w = way.find(part); w != way.end()) return w->second;
+                double next = 0;
+                if(const auto f = feeds.find(part); f != feeds.end()) for(const auto& bus : f->second) next = std::max(next, through(bus));
+                const auto c = chains.find(part);
+                return way[part] = (c == chains.end() ? 0 : c->second) + next;
+            };
+            for(const auto& [part, cpu] : chains) alone = std::max(alone, through(part));
+            return alone;
+        };
+        std::map<std::string, double> chains; double alone = 0;
         for(const auto& c : plugins)
         {
             e.cpu += c.cpu; e.memory += c.memory;
-            e.longest = std::max(e.longest, c.part.empty() ? c.cpu : chains[c.part] += c.cpu);
+            if(c.part.empty()) alone = std::max(alone, c.cpu); else chains[c.part] += c.cpu;
         }
+        e.longest = longestOf(chains, alone);
         if(budget_.cpu <= 0) return e;
         double cpu = e.cpu; uint64_t memory = e.memory;
         for(const auto& c : playing) { cpu += c.cpu; memory += c.memory; }
@@ -616,9 +634,9 @@ namespace oscairn
             for(const auto& c : plugins)
             {
                 const double x = c.measured && !c.certain ? c.cpu / 4 : c.cpu;
-                total += x; longest = std::max(longest, c.part.empty() ? x : quartered[c.part] += x);
+                total += x; if(c.part.empty()) longest = std::max(longest, x); else quartered[c.part] += x;
             }
-            e.uncertain = memoryFits && total <= budget_.cpu * e.cores && longest <= budget_.cpu;
+            e.uncertain = memoryFits && total <= budget_.cpu * e.cores && longestOf(quartered, longest) <= budget_.cpu;
         }
         // A plugin not yet measured and with no estimate of its package's never refuses one for its CPU (the
         // owner, 2026-11-13): its default guess counts while the rest fits, but one whose CPU fits without the
@@ -632,9 +650,9 @@ namespace oscairn
             {
                 if(guessed(c)) continue;
                 const double x = !c.certain ? c.cpu / 4 : c.cpu;
-                total += x; longest = std::max(longest, c.part.empty() ? x : known[c.part] += x);
+                total += x; if(c.part.empty()) longest = std::max(longest, x); else known[c.part] += x;
             }
-            e.uncertain = total <= budget_.cpu * e.cores && longest <= budget_.cpu;
+            e.uncertain = total <= budget_.cpu * e.cores && longestOf(known, longest) <= budget_.cpu;
         }
         e.fits = (memoryFits && cpuFits) || e.uncertain;
         // shortcut: a change is seamless only while both Performances' totals fit one block's budget, as before the
@@ -699,9 +717,16 @@ namespace oscairn
             for(const auto& p : parts_) if(nodesOf(p).count(node)) { open.back().part = "part " + std::to_string(p.id); break; }
         }
         for(const auto node : leaving_) if(graph_.contains(node)) ringing.push_back(nodeCost(graph_, node));
+        Feeds feeds; // each part's buses: the one it plays through, and those it sends to
+        for(const auto& p : parts_)
+        {
+            auto& f = feeds["part " + std::to_string(p.id)];
+            if(p.bus) f.push_back("part " + std::to_string(p.bus));
+            for(const auto& s : p.sends) if(s.level > 0) f.push_back("part " + std::to_string(s.bus));
+        }
         // The open one fits on its own; what rings out from the last only makes it not seamless,
         // so adding a plugin right after a change is not refused for a tail.
-        if(directory.empty()) return estimateOf(open, ringing);
+        if(directory.empty()) return estimateOf(open, ringing, feeds);
         auto playing = open; playing.insert(playing.end(), ringing.begin(), ringing.end());
         // A Performance or a Sound in a folder: its plugins by identity, from its document.
         const auto file = fs::path(directory) / (fs::exists(fs::path(directory) / "sound.json") ? "sound.json" : "performance.json");
@@ -713,13 +738,19 @@ namespace oscairn
         // Each node's part's note limit, by its key: in the part's chain or a split's lanes.
         std::map<std::string, uint32_t> limits;
         std::map<std::string, std::string> partOf; // a node's part, by its key, for the chains
-        size_t partIndex = 0;
+        Feeds its; // each part's buses, by its ID
+        auto number = [](const json_value_s* v) { return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : 0.0; };
         if(const auto* parts = detail::member(doc.get(), "parts"); parts && parts->type == json_type_array)
             for(auto* p = static_cast<const json_array_s*>(parts->payload)->start; p; p = p->next)
             {
                 const auto* limit = detail::member(detail::member(p->value, "input"), "maxNotes");
                 const uint32_t n = limit && limit->type == json_type_number ? uint32_t(std::strtoul(static_cast<const json_number_s*>(limit->payload)->number, nullptr, 10)) : 0;
-                const auto part = text(detail::member(p->value, "name")) + "#" + std::to_string(partIndex++);
+                const auto part = "part " + std::to_string(uint64_t(number(detail::member(p->value, "id"))));
+                auto& f = its[part];
+                if(const auto bus = uint64_t(number(detail::member(p->value, "bus")))) f.push_back("part " + std::to_string(bus));
+                if(const auto* sends = detail::member(p->value, "sends"); sends && sends->type == json_type_array)
+                    for(auto* x = static_cast<const json_array_s*>(sends->payload)->start; x; x = x->next)
+                        if(number(detail::member(x->value, "level")) > 0) f.push_back("part " + std::to_string(uint64_t(number(detail::member(x->value, "bus")))));
                 auto chain = [&](const json_value_s* c) {
                     if(c && c->type == json_type_array) for(auto* k = static_cast<const json_array_s*>(c->payload)->start; k; k = k->next) { limits[text(k->value)] = n; partOf[text(k->value)] = part; }
                 };
@@ -739,6 +770,6 @@ namespace oscairn
                                     text(detail::member(plugin, "pathHint"))));
             if(partOf.count(key)) coming.back().part = partOf.at(key); // a node sharing an instance counts its own sound's CPU (RFC 0045)
         }
-        return estimateOf(coming, playing);
+        return estimateOf(coming, playing, its);
     }
 }

@@ -484,7 +484,8 @@ namespace oscairn
         void armPressure(bool on);
         void pollPressure();
         uint32_t noteLimit(NodeId node) const; // its part's, or 0
-        Estimate estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing) const;
+        using Feeds = std::map<std::string, std::vector<std::string>>; // each part's buses (estimateOf)
+        Estimate estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds = {}) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel
 

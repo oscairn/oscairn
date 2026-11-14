@@ -52,6 +52,9 @@ Checked when built and tested; the sections below say how.
   - [x] 12b. Lost blocks a trigger, on the lane and every instrument lane before it
   - [x] 12c. An instrument's lane limit leaves room for the chain after it
   - [x] 12d. The callback's own slack a trigger, across every lane
+  - [x] 12e. Effects at their cost awake, and a part's buses on its chain at admission
+  - [ ] 12f. Bursts at note-on: a note's start cost counted when it starts (not done)
+  - [ ] 12g. Step 5 above: "too slow" never restarts a worker making progress (not done)
 
 ## Problem
 
@@ -854,6 +857,17 @@ to, which has rule 12a and none after it). Its rules, as built:
   unit: a Performance whose callback runs near the deadline at rest (ST Final's take, callback up to
   about 2,000 us of 2,266) should give up few notes for it; if it gives up many, the threshold is
   too high for that device.
+- 12e. Effects at their real cost. In the guard an effect asleep on silence counts, on its lane and
+  on the chains before it (12c), at its time when it last ran awake, and one never awake at its
+  learned cost with signal (the Session seeds it from the measurements, as `rest`); so the first note
+  into a sleeping chain is costed before it wakes. At admission a part's chain counts the buses it
+  plays through or sends to at any level after its own, the costliest way on (RFC 0025's longest
+  chain). An effect not yet measured still never refuses a Performance for its CPU (the owner's
+  rule of 2026-11-13 stands); the proposal's "never free" holds only in the guard, from its first
+  block. Tested by `guard` (asleep): the chain's case after its notes end and the effects sleep:
+  before, the instrument's limit 1,811 us; after, 773 us; and by `control-admission`: a part of one
+  effect at 40 % sending at 40 % to a bus of one at 40 %: before, longest 40 % and it fits; after,
+  80 % and refused (single runs).
 
 ## Core placement
 

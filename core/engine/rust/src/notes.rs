@@ -40,7 +40,8 @@ pub struct Step {
     recent: [f32; 5], // its last blocks' times, for the median the lane's limit is held against
     recent_at: usize,
     recent_n: usize,
-    cost: f32, // its last block's usual time
+    cost: f32,  // its last block's usual time; an effect asleep, its cost awake
+    awake: f32, // an effect's usual time when it last ran awake
 }
 
 impl Step {
@@ -67,6 +68,7 @@ impl Step {
             recent_at: 0,
             recent_n: 0,
             cost: 0.0,
+            awake: 0.0,
         }
     }
     /// Its usual block, the median of its last five: a block held up from outside moves nothing, two in
@@ -340,11 +342,19 @@ impl Notes {
         }
         if *budgeting {
             let usual = step.typical(r.took);
+            // An effect asleep on silence counts at its cost awake (one never awake at its learned cost, its seed),
+            // so the first note into its chain is costed before it wakes.
             step.cost = usual;
+            if let (false, Some(a)) = (step.budgeted, &step.activity) {
+                if !a.asleep.load(Relaxed) {
+                    step.awake = usual;
+                }
+                step.cost = usual.max(if step.awake > 0.0 { step.awake } else { a.rest_now() });
+            }
             if let Some(lane) = budget.lanes.get_mut(step.lane) {
                 lane.took += usual;
                 if !step.budgeted {
-                    lane.others_took += usual;
+                    lane.others_took += step.cost;
                 }
             }
             if let (true, Some(a)) = (step.budgeted, &step.activity) {

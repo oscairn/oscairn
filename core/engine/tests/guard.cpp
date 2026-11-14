@@ -6,9 +6,11 @@
 //   chain: an instrument (90 us a voice, ten notes) into an effect of 700 us into a bus effect of 600 us, each in a
 //     worker of its own, waiting to the callback's deadline: the instrument's lane leaves room for the chain after
 //     it, so its notes give way though each lane is within its own time.
+//   asleep: the chain's effects asleep on silence after the notes end: the instrument's lane still leaves room for
+//     them at their cost awake, so the first notes into it are costed before they wake.
 //   deadline: instruments in the engine's process, each well within its lane, while the callback has almost no time
 //     left after its block (load from outside the audio): notes give way across the lanes; with time to spare, none.
-// Usage: voice-fixture [--no-timing|--timing] [losses|chain|deadline] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
+// Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
 // notes give way; a name runs that case alone.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
@@ -92,6 +94,22 @@ Chain chain(const char* plugin){
     return {gaveUp(g,instrument),g.noteCost(instrument).laneLimit};
 }
 
+// The chain's case, its notes released and the effects asleep: the instrument lane's limit then.
+double asleep(const char* plugin){
+    setenv("OSCAIRN_WORKER_DEADLINE","1",1);setenv("OSCAIRN_FIXTURE_VOICE_US","90",1);
+    Graph g(48000,frames);
+    const auto instrument=g.add(plugin);
+    setenv("OSCAIRN_FIXTURE_EFFECT_US","700",1);const auto insert=g.add(plugin,effect);
+    setenv("OSCAIRN_FIXTURE_EFFECT_US","600",1);const auto bus=g.add(plugin,effect);
+    unsetenv("OSCAIRN_FIXTURE_EFFECT_US");unsetenv("OSCAIRN_WORKER_DEADLINE");
+    g.connectNotes(graphInput,instrument);g.connectAudio(instrument,insert);g.connectAudio(insert,bus);g.connectAudio(bus,graphOutput);
+    g.commit();g.setVoiceBudget(-1);
+    play(g,1200,[&](uint32_t block){
+        if(block==200){std::vector<Event> e;for(int i=0;i<3;++i)e.push_back(Event::note(false,48+i*3,0,0,0));return e;}
+        return held(block,3);},std::chrono::microseconds(-2));
+    return g.noteCost(instrument).laneLimit;
+}
+
 struct Deadline { uint64_t tight=0,ample=0; };
 Deadline late(const char* plugin){
     const std::string worker=std::getenv("OSCAIRN_PLUGIN_WORKER")?std::getenv("OSCAIRN_PLUGIN_WORKER"):"";
@@ -128,6 +146,11 @@ int main(int argc,char** argv){try{
     std::printf("chain: the instrument gave up %llu notes, its lane's limit %.0f us\n",(unsigned long long)c.gaveUp,c.limit);
     check(c.gaveUp>0,"an instrument's notes give way for the chain after it");
     check(c.limit>0 && c.limit<.8*(std::chrono::duration<double,std::micro>(deadline).count()-1300)+50,"its lane's limit leaves room for the chain after it: "+std::to_string(c.limit));
+    }
+    if(only.empty() || only=="asleep"){
+    const double limit=asleep(argv[1]);
+    std::printf("asleep: the instrument lane's limit with the chain after it asleep %.0f us\n",limit);
+    check(limit>0 && limit<.8*(std::chrono::duration<double,std::micro>(deadline).count()-1300)+50,"an effect asleep counts at its cost awake: "+std::to_string(limit));
     }
     if(only.empty() || only=="deadline"){
     const auto d=late(argv[1]);

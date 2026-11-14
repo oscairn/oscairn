@@ -4,7 +4,8 @@
 // plugin after another. Each plugin measured at 40 % of a block, with a 75 % budget: three parts of
 // one plugin each fit (120 % in all, spread over the cores), where one sum against one block refused
 // them; a part with two in a chain (80 % in one block) is refused, saying so; the same from figures
-// of too few blocks opens, with a notice.
+// of too few blocks opens, with a notice. And a part sending to a bus counts the bus's chain after its own (RFC 0045's
+// guard, 12e): a part of one at 40 % sending at 40 % to a bus of one at 40 % needs 80 % of one block, and is refused.
 //   oscairn-admission-test FIXTURE.clap
 #include "oscairn/session.h"
 #include "oscairn/realtime.h"
@@ -35,7 +36,7 @@ int main(int argc, char** argv)
     fs::create_directories(home);
     ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1);
     // Two Performances of the fixture's effect: three parts of one each; and a part of two in a chain beside one of one.
-    const auto spread = temp.path / "spread", chained = temp.path / "chained";
+    const auto spread = temp.path / "spread", chained = temp.path / "chained", sent = temp.path / "sent";
     std::string key;
     {
         Session s(rate, frames);
@@ -56,6 +57,14 @@ int main(int argc, char** argv)
         const auto two = s.addPart("Two"); s.insertIntoPart(two, 0, s.add("first", fixture, "org.kick.test.effect")); s.insertIntoPart(two, 1, s.add("second", fixture, "org.kick.test.effect"));
         s.commit();
         s.savePerformance(chained.string());
+    }
+    {
+        Session s(rate, frames);
+        const auto bus = s.addPart("Bus", {PartInput::Kind::Bus}); s.insertIntoPart(bus, 0, s.add("reverb", fixture, "org.kick.test.effect"));
+        const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, s.add("instrument", fixture, "org.kick.test.effect"));
+        s.setSend(part, bus, .4);
+        s.commit();
+        s.savePerformance(sent.string());
     }
     check(!key.empty(), "the fixture's measurement key");
     const auto cores = std::max(1u, worker::usableCores() - 1);
@@ -81,6 +90,9 @@ int main(int argc, char** argv)
         const auto c = s.estimate(chained.string());
         std::printf("chained: %.2f in all, longest %.2f, fits %d\n", c.cpu, c.longest, int(c.fits));
         check(std::abs(c.longest - .8) < 1e-6 && !c.fits, "a chain of two at 40 % each (80 % of one block) does not fit");
+        const auto b = s.estimate(sent.string());
+        std::printf("sent: %.2f in all, longest %.2f, fits %d\n", b.cpu, b.longest, int(b.fits));
+        check(std::abs(b.longest - .8) < 1e-6 && !b.fits, "a part sending to a bus counts the bus's chain after its own: 80 % of one block does not fit");
     }
     std::string notices;
     const auto refused = open(chained, notices);

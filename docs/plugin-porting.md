@@ -223,7 +223,11 @@ it frees comes only as the release ends: keep releases short, or take CLAP notes
 each plugin's cost per note from its blocks; one whose report says no voices while notes sound (or
 no cost) is costed by its notes as one without the report, and is held to its limit as one that
 keeps within it only while the voices it reports, or else its notes, stay within it: a report of
-zero never exempts a plugin from giving notes up. A plugin with it gives up its own voices within a limit
+zero never exempts a plugin from giving notes up. An effect is never given up, so its time is held back
+for it: while it sleeps on silence it is still counted at its cost with signal, before the
+instruments in front of it (their lanes leave room for the effects after them before the callback's
+deadline), and a part's chain at admission counts the buses it sends to. An effect that sleeps
+cheaply but costs much once woken should say so in its package estimate. A plugin with it gives up its own voices within a limit
 the host sets between blocks; an instance one part plays alone gets one entry, for the selected
 contexts (a plugin without sound contexts reads that entry), and parts sharing an instance get one
 each with the part's reserve and priority. The host supports it in the engine's process and in a

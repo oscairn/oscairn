@@ -945,6 +945,10 @@ namespace oscairn
             {
                 try { return request(Op::SetParameter, Writer().u32(id).f64(value)).u8(); } catch(const std::exception&) { return false; }
             }
+            bool sendEvent(const kick::clap::Event& e) noexcept override
+            {
+                try { return request(Op::Event, Writer().bytes(e.bytes.data(), e.bytes.size())).u8(); } catch(const std::exception&) { return false; }
+            }
             bool parameterGesture(clap_id id, bool begin) noexcept override
             {
                 try { return request(Op::Gesture, Writer().u32(id).u8(begin)).u8(); } catch(const std::exception&) { return false; }

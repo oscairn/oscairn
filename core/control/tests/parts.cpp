@@ -1260,6 +1260,32 @@ namespace
         s.note(false, 62, 0); x.run(s);
     }
 
+    // The transport's stop ends what note effects hold, whether or not it was playing (a FANTOM's
+    // STOP with a latched arpeggio): sent to the note effect only, so another part's held key plays on.
+    // The Transpose stands in for an arpeggiator: on CC 123 it releases what it sounds, on a choke cuts it.
+    void stopEndsNoteEffects(const char* fixture, const char* transpose)
+    {
+        for(const auto policy : {Session::StopNoteEffects::Release, Session::StopNoteEffects::Cut})
+        {
+            Session s(48000, frames);
+            s.setStopNoteEffects(policy);
+            const auto tr = s.add("transpose", transpose), a = s.add("a", fixture, "org.kick.test.synth"), b = s.add("b", fixture, "org.kick.test.synth");
+            s.setParameter(a, 7, .5); s.setParameter(b, 7, .25);
+            const auto arp = s.addPart("Arp"); s.insertIntoPart(arp, 0, tr); s.insertIntoPart(arp, 1, a);
+            const auto pad = s.addPart("Pad"); s.insertIntoPart(pad, 0, b); s.commit();
+            Audio x;
+            s.note(true, 60, 1); x.run(s); x.run(s);
+            check(near(x.l[0], .75), "both parts sound: " + std::to_string(x.l[0]));
+            s.setPlaying(false); x.run(s); x.run(s); // stopped already: the stop still reaches the note effect
+            const char* how = policy == Session::StopNoteEffects::Release ? "released" : "cut";
+            check(near(x.l[0], .25), std::string("a stop ends the note effect's note (") + how + "), the other part's held key plays on: " + std::to_string(x.l[0]));
+            s.note(false, 60, 0); x.run(s);
+            s.note(true, 62, 1); x.run(s); x.run(s);
+            check(near(x.l[0], .75), std::string("and the next key plays through the note effect again (") + how + "): " + std::to_string(x.l[0]));
+            s.note(false, 62, 0); x.run(s);
+        }
+    }
+
     // A sustain pedal from notes.controller's Session::controller holds a released key; its release lets
     // it go. The MIDI fixture sustains as an instrument does (the CLAP one ignores the pedal).
     void pedalFromControl(const char* fixture)
@@ -2702,6 +2728,7 @@ int main(int argc, char** argv)
         hardwarePanic(argv[1], temp.path);
         audition(argv[1], temp.path);
         allNotesOff(argv[1], argv[5]);
+        stopEndsNoteEffects(argv[1], argv[5]);
         pedalFromControl(argv[1]);
         partPedals(argv[1], temp.path);
         unavailable(argv[1], temp.path);

@@ -696,6 +696,7 @@ namespace oscairn
     void Session::service()
     {
         controllers_->service(); // first: what the controls played reaches the model before anything reads it
+        if( stopped_.exchange( false, std::memory_order_acquire ) ) stopNoteEffects();
         graph_.service();
         tendResidents(); // instances kept warm: serviced once a second, let go when stale or when memory runs short
         if( prepared_ ) prepared_->next->service(); // its plugins' main-thread callbacks while it waits
@@ -763,6 +764,26 @@ namespace oscairn
             }
         }
         sendParameters();
+    }
+
+    // A stop: each plugin of this Performance whose notes a note wire takes on to another node
+    // (setStopNoteEffects).
+    void Session::stopNoteEffects()
+    {
+        std::set<NodeId> effects;
+        for( const auto& w : wires_ ) if( w.kind == WireKind::Notes && w.from != graphInput && nodes_.count( w.from ) ) effects.insert( w.from );
+        for( const auto node : effects )
+        {
+            auto& host = graph_.host( node );
+            if( stopPolicy_ == StopNoteEffects::Cut )
+            {
+                clap_event_note_t choke{};
+                choke.header = { sizeof choke, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_CHOKE, 0 };
+                choke.note_id = -1; choke.port_index = 0; choke.channel = -1; choke.key = -1;
+                host.sendEvent( kick::clap::Event::from( choke ) );
+            }
+            else for( uint8_t channel = 0; channel < 16; ++channel ) host.sendEvent( kick::clap::Event::midi( uint8_t( 0xb0 | channel ), 123, 0 ) );
+        }
     }
 
     // The parameter values and gestures waiting, to their plugins: what each takes now.

@@ -673,6 +673,7 @@ namespace oscairn::worker
                 // Published at once, so the engine reads the new value right after setting it, as in the engine.
                 case Op::SetParameter: { const auto id = r.u32(); const auto v = r.f64(); w.u8(host.setParameter(id, v)); n.publish(); break; }
                 case Op::Gesture: { const auto id = r.u32(); const bool begin = r.u8(); w.u8(host.parameterGesture(id, begin)); break; }
+                case Op::Event: { kick::clap::Event e; r.bytes(e.bytes.data(), e.bytes.size()); w.u8(host.sendEvent(e)); break; }
                 case Op::ParameterText: { const auto id = r.u32(); w.str(host.parameterText(id, r.f64())); break; }
                 case Op::SaveState: host.saveState(r.str()); break;
                 case Op::LoadState: host.loadState(r.str()); n.publish(); break;

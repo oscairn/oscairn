@@ -175,6 +175,7 @@ namespace oscairn
             std::string parameterText(clap_id id, double value) const override { return host.parameterText(id,value); }
             bool setParameter(clap_id id, double value) noexcept override { return host.setParameter(id,value); }
             bool parameterGesture(clap_id id, bool begin) noexcept override { return host.parameterGesture(id,begin); }
+            bool sendEvent(const kick::clap::Event& e) noexcept override { return host.enqueue(e); }
             bool popOutput(kick::clap::Event& event) noexcept override { return host.popOutput(event); }
             uint64_t outputEventDrops() const noexcept override { return host.outputEventDrops(); }
             const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { return host.outputEvents(count); }

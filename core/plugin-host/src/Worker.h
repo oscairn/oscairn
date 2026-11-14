@@ -149,7 +149,8 @@ namespace oscairn::worker
         SaveSound, SoundValues, // sound-snapshots draft 4: one sound on its own, a sound's values (RFC 0021)
         Reconfigure, // the plugin activated again at a new sample rate, the block size kept
         Load, // one more plugin in the worker, beside those it holds (Init sets the rate and block first)
-        ActiveOutputs // the output ports the engine takes sound from (clap.audio-ports-activation)
+        ActiveOutputs, // the output ports the engine takes sound from (clap.audio-ports-activation)
+        Event // one event to the plugin at its next block (PluginHost::sendEvent)
     };
     // First byte of every message from the worker: a reply, or a request to the engine made while
     // the worker serves one (the plugin resolving a sound asset or finding an asset library; a node about to activate, with

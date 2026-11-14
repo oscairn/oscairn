@@ -125,6 +125,10 @@ namespace oscairn
         virtual bool takesSysex() const noexcept { return true; }
         virtual bool emitsSysex() const noexcept { return true; }
         virtual void panic() noexcept = 0;
+        // An event straight to the plugin at its next block, past the graph's note routing (the
+        // transport's stop to a note effect, Session::stopNoteEffects); main thread. False: not
+        // taken, or a host that cannot.
+        virtual bool sendEvent(const kick::clap::Event&) noexcept { return false; }
         virtual uint32_t noteOutputPorts() const noexcept = 0;
         virtual double parameterValue(clap_id id) const noexcept = 0;
         // Changes when the plugin reports new parameter values while processing; audio thread.

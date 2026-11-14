@@ -254,7 +254,15 @@ namespace oscairn
         bool setParameter( NodeId node, uint32_t param, double value ) override; // an edit (undo.cpp)
         bool parameterGesture( NodeId node, uint32_t param, bool begin ) override;
 
-        void setPlaying( bool playing ) override { playing_.store( playing ); }
+        // A stop also ends what note effects hold (stopNoteEffects), whether or not the transport was playing.
+        void setPlaying( bool playing ) override { playing_.store( playing ); if( !playing ) stopped_.store( true, std::memory_order_release ); }
+        // What a stop sends every note effect (a plugin whose notes feed another node: an
+        // arpeggiator holding a latched chord) at the next service, straight to the plugin.
+        // Release (the default): MIDI CC 123, All Notes Off, on every channel: it stops generating
+        // and lets its notes go, ringing through their release. Cut: an all-notes choke (key and
+        // channel -1), cutting them. Neither changes its settings (an arpeggiator's Hold stays on).
+        enum class StopNoteEffects { Release, Cut };
+        void setStopNoteEffects( StopNoteEffects policy ) noexcept { stopPolicy_ = policy; }
         void setTempo( double bpm ) override;
         void setClockSource( Transport::ClockSource source ) override { clockSource_.store( source ); }
         Transport::ClockSource clockSource() const override { return clockSource_.load(); }
@@ -881,6 +889,9 @@ namespace oscairn
         mutable uint32_t nextFound_ = 1u << 24; // apart from this run's own numbers
         Transport::ClockSource following_ = Transport::ClockSource::Internal;
         std::atomic<bool> playing_{ false };
+        std::atomic<bool> stopped_{ false }; // setPlaying(false) since the last service: note effects to stop
+        StopNoteEffects stopPolicy_ = StopNoteEffects::Release;
+        void stopNoteEffects();
         std::atomic<double> tempo_{ 120.0 };
         std::atomic<Transport::ClockSource> clockSource_{ Transport::ClockSource::Internal };
         // engine.timing's callback histograms (blockTimes, audio thread) and the last callback's start.

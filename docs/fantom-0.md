@@ -1202,7 +1202,12 @@ of the four kinds. `controls` lists each
 control's `kind` (`encoder`, `analog`, or `switch` for both switch kinds), `id` and `control`:
 an identity above, or a fixed control's function from the profile (`enter`, `play`). An analog
 value is divided by `max` (or the layout's `analogMax`) for 0 to 1; an encoder's delta is
-multiplied by `step` (or `encoderStep`).
+multiplied by `step` (or `encoderStep`). A control may also have a `navigate`: what it does in
+the app's lists, whatever the device ([The panel in lists](#the-panel-in-lists)): an `action`
+(`move`, `confirm` or `cancel`), optionally a `pane` (the list pane from the left, 0 first) and,
+on a switch that moves, `steps` a press moves by. An encoder's `navigate` is a move by its
+steps (a negative `step` turns it round); an analog control cannot navigate (an absolute
+position has no steps; not yet). A device with no entry for a role does not have that control.
 
 The shipped map's layout and IDs are **read from Roland's programs**, and on the unit every
 control the owner touched decoded to its name
@@ -1254,6 +1259,61 @@ Not in the map, with Roland's numbers for them:
   ([WRITE, MENU and TEMPO](#write-menu-and-tempo)).
 - Switches 39, 51, 63, 81, 84 and 85 are unused; Roland's app drops them.
 
+### The panel in lists
+
+Which physical control does what in a list is the **panel map's** (`navigate` on a control,
+[schema](panel-map.schema.json)); the app knows only the actions: move a pane's cursor by some
+steps, confirm the item under it, cancel. The FANTOM-07's map (read from Roland's tables, so
+the controls' names are as sure as the rest of the map; what each does on the unit is
+**unverified** until tried):
+
+| Control | Map entry | In a list |
+|---|---|---|
+| VALUE dial | `data`, encoder 6 | moves the cursor of the pane last touched by the message's steps (up to 6, so a fast turn goes fast) |
+| E1, the knob at the left under the screen | `screen:1`, encoder 0 | moves the first (left) pane's cursor |
+| E6, at the right | `screen:6`, encoder 5 | moves the last (right) pane's cursor |
+| E1 and E6 pushed | `pushE1`, `pushE6` | confirm in the first and the last pane |
+| ENTER | `enter` | confirms in the pane last touched |
+| EXIT | `exit` | drops the cursors; with none, goes back as the shell's Back does |
+| DEC and INC | `dec`, `inc` | move the cursor one back and forward |
+| CURSOR UP and DOWN | `cursorUp`, `cursorDown` | move it one back and forward |
+
+E2 to E5 have no `navigate`: on Play and the editors they play the page's parameters as before.
+With one list on screen both E1 and E6 move it. The VALUE dial has no push of its own on the
+panel map (ENTER is its push); CURSOR LEFT and RIGHT have none yet.
+
+How it reaches the app: the panel reader decodes a message, finds its control's `navigate` and
+hands both to the engine. The engine counts
+what the panel did to lists by navigation (`controllers.get`'s `navigation`:
+[the protocol](control-protocol.md)) and the app reads the totals and takes the difference. The
+app tells the engine whether any list is on screen (`controllers.view`'s `lists`): with one, a
+control that has a `navigate` navigates and plays nothing, so turning E1 on the Library's list
+does not also move Play's first knob; with none (Play, the editors), it plays what it is
+assigned and navigates only where it plays nothing (the VALUE dial, ENTER, EXIT). So on pages
+that show lists (the Library, the Setlist's list, the Recordings, the plugin and package
+lists, Settings' pages, the Parts list and Home's tiles) E1 and E6 scroll, and on Play and the
+editors they play parameters as before.
+
+In the app a list has a **cursor** apart from its selection and from what is open: moving it
+opens and loads nothing, it is drawn as a 2 px accent border round the row, the row's own look
+unchanged (a move repaints the two rows it touches, a page turn the view once), and nothing is
+drawn at rest. Confirming does what a tap does (the Library opens the Performance, Home opens
+the app, Settings opens the page). The cursor goes when a row is tapped, the page changes (a
+view put in or taken out of its parent, the Setlist or Settings page changing) or the list is
+off screen, with no timeout. Past the rows shown, the list turns a page at a time (the rows shown
+less one). On a computer the arrow, page, Home, End, Return and Escape keys move, confirm and
+drop the cursor of the list that has the keyboard, and the mouse wheel scrolls as before.
+Home's tiles go in reading order for the dial and knobs; its up and down keys move a row.
+
+A control that is an absolute position (a slider, some other device's encoder that sends where
+it is and not how far it moved) cannot navigate: the map refuses it; reading the change from
+successive positions is not done. Another device's map says, for example, `{ "kind": "encoder",
+"id": 3, "control": "jog", "navigate": { "action": "move" } }` for a jog dial, `{ "kind":
+"switch", "id": 8, "control": "up", "navigate": { "action": "move", "steps": -1 } }` for a button,
+`"navigate": { "action": "move", "pane": 2 }` for the third pane's knob, and confirm and cancel
+for its OK and BACK; the panel reader's test decodes such a map (four knobs, one jog dial, no
+`screen:` names).
+
 ### WRITE, MENU and TEMPO
 
 `oscairn::host::InputKeys` ([devices/roland-fantom0/src/InputKeys.h](../devices/roland-fantom0/src/InputKeys.h)),
@@ -1284,7 +1344,9 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
 - **Lamps:** none is set; they go over `/dev/ttyGS0` ([Lamps](#lamps)), which Oscairn only reads.
 - **Fixed controls** (the VALUE dial, cursor, ENTER, EXIT, transport and the rest) decode and show
   in the dump, and WRITE, MENU and TEMPO reach the engine from `gpio-keys`, but the engine has
-  nothing to give them to: the controller layer plays assignable controls only.
+  nothing to give most of them to: the controller layer plays assignable controls only. PLAY and
+  STOP drive the transport, and the controls the map gives a `navigate` move the app's lists
+  ([The panel in lists](#the-panel-in-lists)).
 - **The lever and pedals with nothing assigned:** a MIDI controller's wheel then reaches the
   parts as its own MIDI message; a panel message has none, so `wheel:1` and `wheel:2` play only
   what a Performance or Sound assigns them.

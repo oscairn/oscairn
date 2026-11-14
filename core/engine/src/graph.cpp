@@ -1053,7 +1053,7 @@ namespace oscairn
                                 MidiMessage m;if(!toMidi(e,old.channel,m))return;
                                 if(midiOutCount_==maxMidiOut){eventDrops_.fetch_add(1,std::memory_order_relaxed);return;}
                                 m.ports=old.ports;midiOut_[midiOutCount_++]=m;};
-                            for(const auto& n:old.route->notes)if(n.used)send(old.route->release(n,0,false));
+                            for(const auto& n:old.route->active())if(n.used)send(old.route->release(n,0,false));
                             for(int p=0;p<16;++p)for(int c=0;c<16;++c)if(old.route->pedal[p][c]>=64)send(kick::clap::Event::midi(uint8_t(0xb0|c),64,0));
                             old.route->clear();
                         }
@@ -1487,7 +1487,7 @@ namespace oscairn
                         if(each>0 && a.perNote.load(std::memory_order_relaxed)<0)a.seedNote.store(float(each),std::memory_order_relaxed);
                         a.observe(took,voices);a.perNoteScale=live?std::max(1.f,float(voices)/float(live)):1.f;
                         a.overLimit=a.voiceLimit && voices>a.voiceLimit?a.overLimit+1:0;
-                        for(uint32_t i=0;i<count;++i)for(auto& source:step.noteSources)for(auto& slot:source.route->notes)
+                        for(uint32_t i=0;i<count;++i)for(auto& source:step.noteSources)for(auto& slot:source.route->active())
                             if(slot.used && (notes[i].note_id>=0?slot.id==notes[i].note_id:(source.channel<0?slot.address.channel:source.channel)==notes[i].channel && slot.key==notes[i].key))slot.velocity=notes[i].loudness;
                     }
                 }

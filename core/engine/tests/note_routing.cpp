@@ -339,7 +339,8 @@ int main(int argc,char** argv){try{
     {
         // The held-key mask a harmony reads (heldKeys) is kept as notes come and go, never rebuilt from
         // the slots: after random events through every path that holds, lifts or lets a slot go, it
-        // matches a rescan. A CLAP route with and without a fade, sharing a note limit, and a MIDI one.
+        // matches a rescan, and no slot past top (which bounds the scans) is used. A CLAP route with
+        // and without a fade, sharing a note limit, and a MIDI one.
         uint32_t seed=7;auto next=[&](uint32_t n){seed=seed*1664525u+1013904223u;return (seed>>8)%n;};
         NoteRoute fading(16u),choking(16u),midiOut(16u);fading.clap.fill(true);choking.clap.fill(true);fading.fadeFrames=64;
         NoteRoute* const peers[]{&fading,&choking};
@@ -350,7 +351,7 @@ int main(int argc,char** argv){try{
         auto agrees=[](const NoteRoute& r){
             std::array<uint64_t,2> keys{};
             for(const auto& n:r.notes)if(n.used && n.held && n.key>=0 && n.key<128)keys[size_t(n.key/64)]|=uint64_t(1)<<(n.key%64);
-            return keys==r.heldKeys;};
+            return keys==r.heldKeys && std::none_of(r.notes.begin()+r.top,r.notes.end(),[](const NoteRoute::Note& n){return n.used;});};
         for(int step=0;step<200000;++step)
         {
             auto& r=*std::array{&fading,&choking,&midiOut}[next(3)];
@@ -371,7 +372,7 @@ int main(int argc,char** argv){try{
             case 11:if(!next(500))r.clear();else if(!next(500))r.retire(emit,[](size_t,int){return uint8_t(0);});
                 else{r.fade(128,emit);r.advance(128);}break;
             }
-            check(agrees(r),"after step "+std::to_string(step)+", the held keys kept match a rescan of the slots");
+            check(agrees(r),"after step "+std::to_string(step)+", the held keys kept match a rescan of the slots and none is used past top");
         }
     }
     std::cout<<"ok: route ownership, retirement, sustain, physical MIDI overflow, the steal fade, draining, retiring, moving a tap and the held keys kept\n";

@@ -92,12 +92,16 @@ struct NoteRoute
     // held, lifted and let go (hold, lift, drop), so a harmony (RFC 0033) reads them without a scan.
     std::array<uint64_t,2> heldKeys{};
     std::array<uint16_t,128> heldCount{};
+    // One past the last slot used (slots are taken lowest first): the scans of used slots stop there.
+    uint16_t top=0;
+    std::span<Note> active() noexcept {return {notes.data(),top};}
+    std::span<const Note> active() const noexcept {return {notes.data(),top};}
     explicit NoteRoute(uint32_t ports):ports(ports) {} // a MIDI destination: MIDI's notes on every port
     explicit NoteRoute(const PluginHost& host,uint32_t fadeFrames=0):ports(host.noteInputPorts()),fadeFrames(fadeFrames) {for(uint32_t p=0;p<clap.size();++p)clap[p]=host.usesClapNotes(p);}
-    void clear() noexcept {for(auto& n:notes)n.used=false;for(auto& p:pedal)p.fill(0);fading=0;heldKeys={};heldCount={};}
+    void clear() noexcept {for(auto& n:active())n.used=false;for(auto& p:pedal)p.fill(0);fading=0;heldKeys={};heldCount={};top=0;}
     void hold(Note& n) noexcept {n.held=true;if(n.key>=0 && n.key<128 && !heldCount[n.key]++)heldKeys[n.key/64]|=uint64_t(1)<<(n.key%64);}
     void lift(Note& n) noexcept {if(n.used && n.held && n.key>=0 && n.key<128 && !--heldCount[n.key])heldKeys[n.key/64]&=~(uint64_t(1)<<(n.key%64));n.held=false;}
-    void drop(Note& n) noexcept {lift(n);n.used=false;}
+    void drop(Note& n) noexcept {lift(n);n.used=false;while(top && !notes[top-1].used)--top;}
     // Whether an event from `source` may release or shape a note: untagged events reach every note.
     static bool from(const Note& n,uint8_t source) noexcept {return source==untaggedSource || n.source==source;}
     static bool matches(const Note& n,int32_t id,int16_t port,int16_t channel,int16_t key) noexcept
@@ -110,12 +114,12 @@ struct NoteRoute
     }
     // Notes still sounding by the player's hand: keys down, or released under the sustain pedal.
     uint32_t sounding() const noexcept
-    {uint32_t count=0;for(const auto& n:notes)if(n.used && (n.held || pedal[n.address.port_index&15][n.address.channel&15]>=64))++count;return count;}
+    {uint32_t count=0;for(const auto& n:active())if(n.used && (n.held || pedal[n.address.port_index&15][n.address.channel&15]>=64))++count;return count;}
     void ended(const Event& e) noexcept
     {
         if(e.header()->space_id!=CLAP_CORE_EVENT_SPACE_ID || e.header()->type!=CLAP_EVENT_NOTE_END || e.header()->size!=sizeof(clap_event_note_t))return;
         const auto& end=*reinterpret_cast<const clap_event_note_t*>(e.header());
-        for(auto& n:notes)if(n.used && (end.note_id<0 || n.id==end.note_id) &&
+        for(auto& n:active())if(n.used && (end.note_id<0 || n.id==end.note_id) &&
             (end.port_index<0 || n.address.port_index==end.port_index) &&
             (end.channel<0 || n.address.channel==end.channel) && (end.key<0 || n.key==end.key))
             {
@@ -132,7 +136,7 @@ struct NoteRoute
         bool ok=true;
         while(fading) {
             Note* next=nullptr;fading=0;
-            for(auto& n:notes)if(n.used && n.fadeAt>=0){++fading;if(!next || n.fadeAt<next->fadeAt)next=&n;}
+            for(auto& n:active())if(n.used && n.fadeAt>=0){++fading;if(!next || n.fadeAt<next->fadeAt)next=&n;}
             if(!next || uint32_t(next->fadeAt)>=until)break;
             const auto at=uint32_t(next->fadeAt);
             if(next->faded==fadeSteps){next->fadeAt=-1;ok=emit(release(*next,at,true)) && ok;continue;}
@@ -145,7 +149,7 @@ struct NoteRoute
         return ok;
     }
     // The notes it holds until their plugin ends them, released and fading ones included.
-    uint32_t live() const noexcept {uint32_t count=0;for(const auto& n:notes)count+=n.used;return count;}
+    uint32_t live() const noexcept {uint32_t count=0;for(const auto& n:active())count+=n.used;return count;}
     // Chokes a note at `at` without (more of) a fade, at the budget's hard limit.
     void choke(Note& n,uint32_t at) noexcept
     {
@@ -158,12 +162,12 @@ struct NoteRoute
     {n.stolen=true;lift(n);n.fadeAt=int32_t(at);n.faded=fadeFrames?0:fadeSteps;++fading;}
     // A block of `frames` done: fades carry on from the next block's start.
     void advance(uint32_t frames) noexcept
-    {if(fading)for(auto& n:notes)if(n.used && n.fadeAt>=0)n.fadeAt=std::max(0,n.fadeAt-int32_t(frames));}
+    {if(fading)for(auto& n:active())if(n.used && n.fadeAt>=0)n.fadeAt=std::max(0,n.fadeAt-int32_t(frames));}
     template<class Emit,class RemainingPedal> bool retire(Emit&& emit,RemainingPedal&& remainingPedal) noexcept
     {
         bool ok=true;
         std::array<std::array<bool,16>,16> panicChannels{};
-        for(auto& n:notes)if(n.used) {
+        for(auto& n:active())if(n.used) {
             if(clap[n.address.port_index])ok=emit(release(n,0,true)) && ok;
             else panicChannels[n.address.port_index][n.address.channel]=true;
         }
@@ -202,7 +206,7 @@ struct NoteRoute
                 e=Event::note(kind==0x90 && m.data[2],m.data[1],m.data[2]/127.0,h->time,channel,m.port_index);midi=true;h=e.header();
             } else if(kind==0xb0 && m.data[1]==64) {
                 pedal[m.port_index][channel]=m.data[2];
-                if(!clap[m.port_index] && m.data[2]<64)for(auto& n:notes)
+                if(!clap[m.port_index] && m.data[2]<64)for(auto& n:active())
                     if(n.used && !n.held && n.address.port_index==m.port_index && n.address.channel==channel){end(n,h->time);drop(n);}
                 return emit(e);
             } else if(kind==0xb0 && (m.data[1]==120 || m.data[1]==123)) {
@@ -232,9 +236,9 @@ struct NoteRoute
                 if(!limit)return true;
                 for(;;) {
                     Note* victim=nullptr;NoteRoute* owner=nullptr;size_t playing=0,held=0;int16_t low=INT16_MAX,high=-1;
-                    for(const auto* r:routes)for(const auto& slot:r->notes)if(slot.used && !slot.stolen && r->clap[slot.address.port_index] && slot.held){++held;low=std::min(low,slot.key);high=std::max(high,slot.key);}
+                    for(const auto* r:routes)for(const auto& slot:r->active())if(slot.used && !slot.stolen && r->clap[slot.address.port_index] && slot.held){++held;low=std::min(low,slot.key);high=std::max(high,slot.key);}
                     auto spared=[&](const Note& n){return n.held && held>2 && (n.key==low || n.key==high);};
-                    for(auto* r:routes)for(auto& slot:r->notes)if(slot.used && !slot.stolen && r->clap[slot.address.port_index]) {
+                    for(auto* r:routes)for(auto& slot:r->active())if(slot.used && !slot.stolen && r->clap[slot.address.port_index]) {
                         ++playing;
                         if(!victim || (spared(*victim) && !spared(slot)) || (spared(*victim)==spared(slot) &&
                            ((victim->held && !slot.held) || (victim->held==slot.held && slot.id<victim->id)))){victim=&slot;owner=r;}
@@ -264,7 +268,7 @@ struct NoteRoute
                 }
                 for(auto& slot:notes)if(!slot.used) {
                     if(nextId>INT32_MAX)return false;
-                    slot={n,static_cast<int32_t>(nextId++),true,false,midi,false,key,zone,source};slot.velocity=float(velocity);hold(slot);
+                    slot={n,static_cast<int32_t>(nextId++),true,false,midi,false,key,zone,source};slot.velocity=float(velocity);hold(slot);top=std::max(top,uint16_t(&slot-notes.data()+1));
                     auto copy=n;copy.key=key;copy.velocity=velocity;copy.note_id=clap[n.port_index]?slot.id:-1;return emit(Event::from(copy));
                 }
                 return false;
@@ -281,10 +285,10 @@ struct NoteRoute
             const auto n=*reinterpret_cast<const clap_event_note_t*>(h);const bool choke=h->type==CLAP_EVENT_NOTE_CHOKE;
             // A repeated MIDI key releases its oldest note, in each zone that played it.
             std::array<Note*,NoteZones::capacity+1> oldest{};
-            if(midi)for(auto& slot:notes)if(slot.held && slot.midi && from(slot,source) && matches(slot,-1,n.port_index,n.channel,n.key))
+            if(midi)for(auto& slot:active())if(slot.held && slot.midi && from(slot,source) && matches(slot,-1,n.port_index,n.channel,n.key))
                 if(auto& o=oldest[size_t(slot.zone+1)];!o || slot.id<o->id)o=&slot;
             bool ok=true,sent=false;
-            for(auto& slot:notes)if(!slot.stolen && from(slot,source) && matches(slot,n.note_id,n.port_index,n.channel,n.key) && (!midi || &slot==oldest[size_t(slot.zone+1)])) {
+            for(auto& slot:active())if(!slot.stolen && from(slot,source) && matches(slot,n.note_id,n.port_index,n.channel,n.key) && (!midi || &slot==oldest[size_t(slot.zone+1)])) {
                 // A note whose voice already ended needs only the key's release, once: not one per slot.
                 if(slot.voiceEnded && sent){drop(slot);continue;}
                 sent=true;
@@ -302,7 +306,7 @@ struct NoteRoute
         {
             const auto expression=*reinterpret_cast<const clap_event_note_expression_t*>(h);bool ok=true;
             const bool volume=expression.expression_id==CLAP_NOTE_EXPRESSION_VOLUME;
-            for(auto& slot:notes)if(from(slot,source) && matches(slot,expression.note_id,expression.port_index,expression.channel,expression.key)) {
+            for(auto& slot:active())if(from(slot,source) && matches(slot,expression.note_id,expression.port_index,expression.channel,expression.key)) {
                 if(volume && slot.stolen)continue; // its fade owns its volume
                 if(volume)slot.volume=expression.value;
                 auto copy=expression;copy.note_id=clap[slot.address.port_index]?slot.id:-1;
@@ -317,7 +321,7 @@ struct NoteRoute
             auto remap=[&]<class T>(const T& parameter) {
                 if(parameter.note_id<0 && parameter.key<0)return emit(e);
                 bool ok=true;
-                for(const auto& slot:notes)if(matches(slot,parameter.note_id,parameter.port_index,parameter.channel,parameter.key)) {
+                for(const auto& slot:active())if(matches(slot,parameter.note_id,parameter.port_index,parameter.channel,parameter.key)) {
                     auto copy=parameter;copy.note_id=clap[slot.address.port_index]?slot.id:-1;
                     copy.port_index=slot.address.port_index;copy.channel=slot.address.channel;copy.key=slot.key;
                     ok=emit(Event::from(copy)) && ok;

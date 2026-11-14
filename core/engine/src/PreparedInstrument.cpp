@@ -105,12 +105,12 @@ class PreparedInstrument final:public PluginHost {
         if(e.valid() && e.header()->space_id==CLAP_CORE_EVENT_SPACE_ID && e.header()->type==CLAP_EVENT_NOTE_CHOKE){
             const auto& choke=*reinterpret_cast<const clap_event_note_t*>(e.header());
             std::array<std::array<bool,16>,16> channels{};
-            for(const auto& n:s.notes.notes)if(n.used && !s.notes.clap[n.address.port_index] && NoteRoute::matches(n,choke.note_id,choke.port_index,choke.channel,choke.key))
+            for(const auto& n:s.notes.active())if(n.used && !s.notes.clap[n.address.port_index] && NoteRoute::matches(n,choke.note_id,choke.port_index,choke.channel,choke.key))
                 channels[n.address.port_index][n.address.channel]=true;
             for(size_t p=0;p<16;++p)for(int c=0;c<16;++c)if(channels[p][c])
                 {
                     if(!append(s,Event::midi(0xb0|c,120,0,e.header()->time,p)))return false;
-                    for(auto& n:s.notes.notes)if(NoteRoute::matches(n,-1,p,c,-1)){ended(n,e.header()->time);s.notes.drop(n);}
+                    for(auto& n:s.notes.active())if(NoteRoute::matches(n,-1,p,c,-1)){ended(n,e.header()->time);s.notes.drop(n);}
                 }
         }
         return s.notes.route(e,nextNote_,[&](const Event& out){return append(s,out);},[&](const auto& n,uint32_t t){ended(n,t);});
@@ -312,17 +312,17 @@ public:
             const bool lost=!rendered && !s->host->eventsKept();
             if(lost)s->host->panic();
             const bool reset=lost || s->host->wasReset();++ran;resets+=reset;
-            if(reset){for(const auto& n:s->notes.notes)if(n.used)ended(n,0);s->notes.clear();}
+            if(reset){for(const auto& n:s->notes.active())if(n.used)ended(n,0);s->notes.clear();}
             for(size_t c=0;c<std::min<size_t>(no,s->outputs.size());++c)if(outputs && outputs[c])
                 for(uint32_t f=0;f<frames;++f)outputs[c][f]+=s->outputs[c][f];
             uint32_t n=0;const auto* emitted=s->host->outputEvents(n);
             for(uint32_t i=0;i<n;++i)if(emitted[i].valid() && emitted[i].header()->space_id==CLAP_CORE_EVENT_SPACE_ID && emitted[i].header()->type==CLAP_EVENT_NOTE_END){
                 const auto& end=*reinterpret_cast<const clap_event_note_t*>(emitted[i].header());
-                for(const auto& note:s->notes.notes)if(note.used && (end.note_id<0 || end.note_id==note.id) &&
+                for(const auto& note:s->notes.active())if(note.used && (end.note_id<0 || end.note_id==note.id) &&
                     (end.port_index<0 || end.port_index==note.address.port_index) && (end.channel<0 || end.channel==note.address.channel) && (end.key<0 || end.key==note.address.key))ended(note,end.header.time);
                 s->notes.ended(emitted[i]);
             }
-            s->owned.store(std::count_if(s->notes.notes.begin(),s->notes.notes.end(),[](const auto& n){return n.used;}));
+            s->owned.store(s->notes.live());
             asleep_=asleep_ && s->host->asleep();
         }
         reset_=ran && resets==ran;

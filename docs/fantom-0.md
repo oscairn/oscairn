@@ -628,6 +628,15 @@ What stops when Roland's app is stopped, from what it was seen to do:
   and only in effect when the app sets the budget (an engine started with `--engine-only` has none,
   so it keeps instances warm by count). To check on the unit: `free -m` and swap use with ST Final
   open and after switching to and from it, and `oscairn-engine-timing`'s instances.
+  **Provisional (2026-11-14): `availableMemory` 200 and `captureSeconds` 30.** What would settle
+  them on the unit: for `availableMemory`, a session switching between Performances (ST Final among
+  them) with the app drawing, logging MemAvailable (`/proc/meminfo`, each second), swap in use,
+  `/proc/pressure/memory` and the callback's lateness (`oscairn-engine-timing`); the floor is the
+  least MemAvailable at which no stall, no swap growth and no memory pressure is seen, with a
+  margin, and it must leave room for the Performances it is meant to keep warm. For
+  `captureSeconds`, the engine's PSS and Locked (`/proc/PID/smaps_rollup`) and `memory.state`'s
+  committed figure with the app started, against the 45 MB of two minutes: 30 seconds should hold
+  about 11.5 MB; whether 30 seconds is long enough is the musicians' call, as Capture saves 30.
   **Estimated** (`estimated`): `audio` (two inputs for MIC/LINE, four outputs for MAIN and SUB
   OUT, headphones; the audio device below is verified as far as it goes, its inputs and the
   outputs beyond main are not), `controls` (Roland's counts, but whether each reaches the i.MX,

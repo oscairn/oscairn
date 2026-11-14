@@ -796,6 +796,28 @@ What changes for the plugin:
   host from them only through CLAP's thread-safe functions (such as `request_callback`), and
   stop them by `destroy`. A restart ends the process and them with it. `process` must not wait
   for them: a block that does is late like any other.
+- **Locked memory and large files:** on a device (the instrument and pass-through levels, Linux)
+  the worker locks its memory before it loads a plugin: `mlockall(MCL_CURRENT | MCL_FUTURE)`,
+  `MCL_FUTURE` where `RLIMIT_MEMLOCK` is unlimited, as on an Oscairn image ([RFC 0025](rfcs/0025-resource-budgets.md)).
+  So everything you allocate is resident and locked from the moment it is mapped, which is what
+  the audio thread needs, and so is every file you `mmap` readable: the kernel reads the whole
+  file in at the `mmap` call and keeps it locked, unevictable, counted in the worker's resident
+  memory and its memory limit. A sample pack is up to 1 GiB; mapped, it cannot fit a 1 GB
+  device, and the out-of-memory killer ends your worker or others. So:
+  - **Do not map large files** (sample packs, the paths `resolve_sample` gives). Open a
+    descriptor and read them with `pread` (after `posix_fadvise(POSIX_FADV_WILLNEED)` if you
+    like): what you need at prepare (each region's head, loop bodies) into memory you allocate,
+    and what you stream on a thread of your own, never the audio thread, into a small fixed
+    buffer you allocate once. That memory is locked, as it should be: declare it with
+    `oscairn.memory`. The host never locks the page cache, so what `pread` reads through it can be
+    taken back by the kernel, and nothing in the worker stops you opening and reading the store's
+    files from your own threads.
+  - **A mapping you want unlocked** (a small table of contents, an index): `munlock` needs no
+    privilege and works under the lock, but after `mmap` the file has already been read in
+    whole. Map it `PROT_NONE`, `munlock` the range, then `mprotect` it `PROT_READ`: nothing is
+    read in by the `mmap`, its pages are read as you touch them and are not locked. Never touch
+    such pages on the audio thread: a page the kernel took back is a disk read there.
+  The engine reads the store's files the same way.
 - **How their CPU counts:** the budget ([Behaving well](#behaving-well), RFC 0025) measures
   each block's `process` call on the worker's audio thread, in wall time, as in the engine; the
   time limit is how long the engine waits for the block. Neither counts a helper thread's CPU

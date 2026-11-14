@@ -4,6 +4,7 @@
 // locked; a ServiceThread (off the audio path) keeps locked only what it touches. And locking still
 // does its job: across a render of a Performance in workers, notes playing, neither the thread
 // rendering (an audio thread's stack, threadStack) nor any worker's audio thread takes a page fault.
+// A large file read after the lock with pread, or mapped unlocked, locks none of it.
 // Linux only, where memory can be locked (RLIMIT_MEMLOCK unlimited or high enough); elsewhere it says so.
 //   oscairn-memory-lock-test WORKER FIXTURE.clap BASIC-SYNTH.clap
 #include <oscairn/session.h>
@@ -19,8 +20,11 @@
 #include <vector>
 #ifdef __linux__
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
+#include <unistd.h>
 #endif
 
 namespace
@@ -28,12 +32,9 @@ namespace
     int failures = 0;
     void check(bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } }
 #ifdef __linux__
-    // The calling thread's stack: its mapping's Rss and Locked, in kB, from /proc/self/smaps.
-    std::pair<uint64_t, uint64_t> stackKb()
+    // The mapping holding `at`: its Rss and Locked, in kB, from /proc/self/smaps.
+    std::pair<uint64_t, uint64_t> mappingKb(uintptr_t at)
     {
-        pthread_attr_t a; void* low = nullptr; size_t size = 0;
-        pthread_getattr_np(pthread_self(), &a); pthread_attr_getstack(&a, &low, &size); pthread_attr_destroy(&a);
-        const auto at = uintptr_t(low) + size - 1;
         std::ifstream smaps("/proc/self/smaps"); std::string line; bool in = false; uint64_t rss = 0, locked = 0;
         while(std::getline(smaps, line))
         {
@@ -44,6 +45,20 @@ namespace
             if(line.rfind("Locked:", 0) == 0) locked = std::strtoull(line.c_str() + 7, nullptr, 10);
         }
         return {rss, locked};
+    }
+    // The calling thread's stack's.
+    std::pair<uint64_t, uint64_t> stackKb()
+    {
+        pthread_attr_t a; void* low = nullptr; size_t size = 0;
+        pthread_getattr_np(pthread_self(), &a); pthread_attr_getstack(&a, &low, &size); pthread_attr_destroy(&a);
+        return mappingKb(uintptr_t(low) + size - 1);
+    }
+    // The process's locked memory in kB.
+    uint64_t lockedKb()
+    {
+        std::ifstream status("/proc/self/status");
+        for(std::string line; std::getline(status, line);) if(line.rfind("VmLck:", 0) == 0) return std::strtoull(line.c_str() + 6, nullptr, 10);
+        return 0;
     }
     uint64_t faults() { rusage u{}; getrusage(RUSAGE_THREAD, &u); return uint64_t(u.ru_minflt + u.ru_majflt); }
 #endif
@@ -91,6 +106,42 @@ int main(int argc, char** argv)
         std::printf("TLS and crypto libraries: %llu mappings, %llu kB locked\n", (unsigned long long)mapped, (unsigned long long)locked);
         check(locked == 0 && (mapped > 0 || !crypto), "TLS and crypto libraries are not locked: " + std::to_string(locked) + " kB");
     }
+
+    // A file read after the lock, as a plugin in a worker reads its samples (a worker applies this
+    // policy before it loads a plugin; docs/plugin-porting.md, "Locked memory and large files"):
+    // mapped readable it is read in whole and locked at the mmap; read with pread through a
+    // buffer, or mapped PROT_NONE, unlocked and then made readable, none of it is locked.
+    if(missed.find("future memory not locked") == std::string::npos)
+    {
+        constexpr size_t size = size_t(32) << 20;
+        const auto file = home.path / "samples.osp";
+        {
+            std::ofstream out(file, std::ios::binary); const std::vector<char> chunk(size_t(1) << 20, 'x');
+            for(size_t at = 0; at < size; at += chunk.size()) out.write(chunk.data(), std::streamsize(chunk.size()));
+        }
+        const int fd = open(file.c_str(), O_RDONLY | O_CLOEXEC);
+        std::vector<char> buffer(size_t(1) << 20);
+        const auto before = lockedKb();
+        size_t got = 0;
+        for(size_t at = 0; at < size; at += buffer.size()) if(const auto n = pread(fd, buffer.data(), buffer.size(), off_t(at)); n > 0) got += size_t(n);
+        const auto read = lockedKb() - before;
+        void* whole = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+        const auto mapped = whole == MAP_FAILED ? std::pair<uint64_t, uint64_t>{} : mappingKb(uintptr_t(whole));
+        if(whole != MAP_FAILED) munmap(whole, size);
+        void* lazy = mmap(nullptr, size, PROT_NONE, MAP_SHARED, fd, 0);
+        const bool made = lazy != MAP_FAILED && munlock(lazy, size) == 0 && mprotect(lazy, size, PROT_READ) == 0;
+        uint64_t touched = 0;
+        if(made) for(size_t at = 0; at < size; at += 4096) touched += uint64_t(static_cast<volatile const char*>(lazy)[at] == 'x');
+        const auto unlocked = made ? mappingKb(uintptr_t(lazy)) : std::pair<uint64_t, uint64_t>{};
+        if(lazy != MAP_FAILED) munmap(lazy, size);
+        close(fd);
+        std::printf("a 32 MB file after the lock: read with pread, +%llu kB locked; mapped readable, %llu kB resident, %llu locked; mapped unlocked and read, %llu resident, %llu locked\n",
+                    (unsigned long long)read, (unsigned long long)mapped.first, (unsigned long long)mapped.second, (unsigned long long)unlocked.first, (unsigned long long)unlocked.second);
+        check(got == size && read == 0, "a file read with pread locks nothing: +" + std::to_string(read) + " kB");
+        check(mapped.second * 1024 >= size, "a file mapped readable is read in and locked whole at the mmap: " + std::to_string(mapped.second) + " kB");
+        check(made && touched == size / 4096 && unlocked.second == 0, "a file mapped PROT_NONE, unlocked, then made readable is read as touched and not locked: " + std::to_string(unlocked.second) + " kB");
+    }
+    else std::printf("future memory not locked here (%s): a file read after the lock is not checked\n", missed.c_str());
 
     // A Performance's shape in workers: two instruments, one through an effect.
     constexpr double rate = 48000; constexpr uint32_t frames = 128;

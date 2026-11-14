@@ -17,6 +17,7 @@
 
 int main(int argc, char** argv)
 {
+    oscairn::ignoreTickSignal();
     if(argc != 2 && argc != 3) return 2;
     std::signal(SIGPIPE, SIG_IGN);
 #if defined(__linux__) && !defined(OSCAIRN_SANITIZED)

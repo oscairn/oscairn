@@ -16,6 +16,7 @@ namespace
 }
 int main(int argc,char** argv)
 {
+    oscairn::ignoreTickSignal();
     std::string plugins=OSCAIRN_PLUGIN_DIR,socket;
     bool managed=false;
     oscairn::host::AudioConfiguration audioConfig;

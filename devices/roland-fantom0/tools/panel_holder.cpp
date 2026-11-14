@@ -7,6 +7,7 @@
 // started it can go.
 //   oscairn-panel-holder DEVICE [--socket NAME]
 #include "oscairn/panel_reader.h"
+#include "oscairn/plugin_host.h"
 
 #include <cstdio>
 #include <ctime>
@@ -15,6 +16,7 @@
 
 int main(int argc, char** argv)
 {
+    oscairn::ignoreTickSignal();
     if(!(argc == 2 || (argc == 4 && std::string(argv[2]) == "--socket")))
     {
         std::fprintf(stderr, "usage: oscairn-panel-holder DEVICE [--socket NAME]\n");

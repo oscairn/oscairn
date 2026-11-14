@@ -4,6 +4,7 @@
 #include "oscairn/timing.h"
 #include <array>
 #include <chrono>
+#include <csignal>
 #include <exception>
 #include <functional>
 #include <map>
@@ -206,6 +207,15 @@ namespace oscairn
     // the out-of-memory killer's order (oom_score_adj: the engine -999, a worker 300). Returns what
     // could not be done, empty when everything asked was done or nothing was asked.
     std::string applyMemoryPolicy(int oomScoreAdj);
+    // Linux only: ignores signal 42 (SIGRTMIN + 8), first thing in an Oscairn process's main. See
+    // docs/fantom-0.md, "Signal 42": Roland's tickgen module keeps sending it to a stale pid.
+    inline void ignoreTickSignal()
+    {
+#ifdef __linux__
+        // Roland's tickgen module keeps sending signal 42 every millisecond to a stale pid (its application's); a process that gets that pid number is killed unless it ignores it.
+        std::signal(SIGRTMIN + 8, SIG_IGN);
+#endif
+    }
     // Thread stacks under that lock. threadStack: what a thread made without a size of its own gets
     // from applyMemoryPolicy on (std::thread, JUCE's, libraries', plugins'; the audio threads among
     // them: the device callback's, the graph's helpers', each worker's), all of it locked and

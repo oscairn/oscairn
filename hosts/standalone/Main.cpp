@@ -886,6 +886,7 @@ namespace oscairn::standalone
 
         void initialise( const juce::String& commandLine ) override
         {
+            oscairn::ignoreTickSignal();
             commandLine_ = commandLine;
             const auto args = juce::StringArray::fromTokens( commandLine, true );
             offscreen = args.contains( "--snapshot" );

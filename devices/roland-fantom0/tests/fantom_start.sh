@@ -38,6 +38,14 @@ else
 	check "no governor here: it says so" "echo \"\$out\" | grep -q 'no CPU frequency governor here: nothing to set'"
 fi
 
+# Signal 42 (Roland's tickgen sends it to a stale pid): a child the script starts, here a cat of
+# /proc/PID/comm standing in, has it ignored (SigIgn bit 41, mask 0x20000000000).
+mkdir "$bundle/fakebin"
+printf '#!/bin/sh\nsed -n "s/^SigIgn:[[:space:]]*//p" /proc/self/status >> "%s/sigign"\nexec /bin/cat "$@"\n' "$bundle" > "$bundle/fakebin/cat"
+chmod +x "$bundle/fakebin/cat"
+PATH="$bundle/fakebin:$PATH" "$bundle/oscairn-fantom-start" --dry-run > /dev/null 2>&1
+check "a child of the start script has signal 42 ignored" "[ -s '$bundle/sigign' ] && [ \$(( 0x\$(head -n 1 '$bundle/sigign') >> 41 & 1 )) = 1 ]"
+
 cp "$bundle/etc/default/oscairn-engine" "$bundle/engine-defaults"
 printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
 out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?

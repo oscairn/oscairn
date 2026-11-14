@@ -50,6 +50,8 @@
 # and Roland's application running is a failure. --engine-only starts the engine without the
 # app, for measuring the engine alone and for tests.
 set -u
+# Roland's tickgen module keeps sending signal 42 every millisecond to a stale pid (its application's, never cleared); a process that gets that pid number is killed unless it ignores it. An ignored signal stays ignored across fork and exec, so everything started below is protected.
+trap '' 42
 root=$(cd "$(dirname "$0")" && pwd)
 dry="" cold="" alone=""
 for a in "$@"; do

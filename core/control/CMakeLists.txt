@@ -77,6 +77,12 @@ add_test(NAME control-session COMMAND oscairn-session-test
 set_tests_properties(control-session PROPERTIES TIMEOUT 30)
 
 # RFC 0045's timing report: one stalled block in a worker, and each part of it apart.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(oscairn-tick-signal-test tests/tick_signal.cpp)
+    target_include_directories(oscairn-tick-signal-test PRIVATE ../plugin-host/include) # header only
+    add_test(NAME control-tick-signal COMMAND oscairn-tick-signal-test)
+    set_tests_properties(control-tick-signal PROPERTIES TIMEOUT 30)
+endif()
 add_executable(oscairn-memory-lock-test tests/memory_lock.cpp)
 target_link_libraries(oscairn-memory-lock-test PRIVATE oscairn_control)
 add_test(NAME control-memory-lock COMMAND oscairn-memory-lock-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)

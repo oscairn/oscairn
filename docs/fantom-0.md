@@ -256,6 +256,22 @@ bandwidth); CPU isolation available but no `isolcpus` on the command line; huge 
 none reserved; transparent ones on `madvise`); **no PSI** (4.19 predates it); **no uinput**;
 no hidraw. `cpufreq` governor `ondemand`. Modules can be loaded (177 on the unit).
 
+### Signal 42
+
+Roland's kernel module `tickgen` has a kernel thread that, every millisecond, sends signal 42
+(SIGRTMIN + 8, "Real-time signal 8") to two pids that Roland's application registers through
+ioctls on `/proc/tickgen` (read from the module's disassembly; the unit has no kernel tracing, so
+the sending was not watched). Nothing clears them when that application ends, and Oscairn starts
+after it has run, so the signal goes on to a pid number nothing of Roland's holds. Once the pid
+space wraps, whatever process or thread gets that number is killed within a millisecond unless it
+ignores, blocks or handles signal 42. The app once ended with status 170 (128 + 42), which fits.
+Oscairn changes only its own processes' signal disposition: `oscairn-fantom-start` runs
+`trap '' 42` before it starts anything (an ignored signal stays ignored across fork and exec), and
+the engine, the plugin workers, the app and the panel holder each call `ignoreTickSignal()`
+first thing. Nothing of Roland's is modified. Residual risk: a process Oscairn does not start (an
+SSH session's shell, a system daemon) that gets the stale pid number can still be killed. The
+complete fix is to reset the pids tickgen holds, which writes to Roland's module and is not done.
+
 ### With Roland's app stopped
 
 Seen on the unit on November 12, 2026, with Roland's app stopped (`systemctl stop

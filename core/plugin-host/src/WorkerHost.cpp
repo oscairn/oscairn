@@ -142,7 +142,8 @@ namespace oscairn
             std::atomic<uint64_t> memory{0};
             std::atomic<double> cpu{0}, cpuBefore{0};
             std::mutex control;
-            int socket = -1; pid_t pid = 0; bool reaped = true;
+            int socket = -1; pid_t pid = 0;
+            std::atomic<bool> reaped{true}; // fail() sets it from the supervisor without control, which a hung request may hold
             std::mutex nodesMutex;
             std::vector<WorkerHost*> nodes; // changed under control and nodesMutex
             std::atomic<kick::clap::AssetResolver*> assets{nullptr};
@@ -882,20 +883,22 @@ namespace oscairn
             // Its share of the CPU time of this worker and those it replaced, as the supervisor last read it.
             double cpuSeconds() const override
             {
-                size_t sharing = 1;
-                { std::lock_guard nodes(process()->nodesMutex); sharing = std::max<size_t>(1, process()->nodes.size()); }
-                return (process()->cpuBefore.load() + process()->cpu.load()) / double(sharing);
+                auto* p = process();
+                return (p->cpuBefore.load() + p->cpu.load()) / double(sharing(*p));
             }
             // Its share of the worker's memory as the supervisor last read it, the measure its limit applies to.
             uint64_t residentBytes() const override
             {
-                const auto bytes = process()->memory.load();
+                auto* p = process();
+                const auto bytes = p->memory.load();
                 if(!bytes) return resident_.load(); // restarting: the last reading stands
-                size_t sharing = 1;
-                { std::lock_guard nodes(process()->nodesMutex); sharing = std::max<size_t>(1, process()->nodes.size()); }
-                resident_.store(bytes / sharing);
-                return bytes / sharing;
+                const auto share = bytes / sharing(*p);
+                resident_.store(share);
+                return share;
             }
+            // The nodes on worker p, under its nodesMutex, which adopt and disown write under: p read once,
+            // as moveTo may point this node at another worker meanwhile (its old one's lock then guards nothing here).
+            static size_t sharing(Process& p) { std::lock_guard nodes(p.nodesMutex); return std::max<size_t>(1, p.nodes.size()); }
             // As the plugin said in its last block; a failed worker is silent, so asleep too.
             bool asleep() const noexcept override { return process()->failed.load() || shared_->asleep.load(std::memory_order_relaxed) != 0; }
             bool wasReset() const noexcept override { return reset_; }

@@ -211,6 +211,11 @@ namespace
         long shared = 0;
         for(const auto& h : pooled()) if(count(h.plugins, "org.kick.test.midi") && count(h.plugins, "org.kick.test.synth")) shared = h.pid;
         check(shared > 0, "the instrument and the crashing one share a host");
+        // Its memory and CPU read meanwhile, as the engine's status reads them while the supervisor moves
+        // it to a worker of its own (a data race on the host's node list under ThreadSanitizer, once).
+        std::atomic<bool> moving{true}; uint64_t read = 0;
+        auto& crashing = p.graph.host(c);
+        std::thread status([&] { while(moving.load()) read += crashing.residentBytes() + uint64_t(crashing.cpuSeconds()); });
         auto next = std::chrono::steady_clock::now();
         uint32_t block = 0;
         for(; block < 1500; ++block)
@@ -219,6 +224,7 @@ namespace
             p.play(block == 20 ? std::vector<Event>{Event::note(true, 0, 1)} : std::vector<Event>{}); // key 0 crashes the note_crash fixture
             if(block > 20 && p.graph.host(a).statistics().restarts && p.graph.host(c).statistics().restarts && p.graph.host(c).failure().empty()) break;
         }
+        moving.store(false); status.join();
         check(p.graph.host(a).statistics().restarts == 1 && p.graph.host(c).statistics().restarts == 1, "both came back, once each");
         bool own = false, back = false;
         for(const auto& h : oscairn::pluginHosts())

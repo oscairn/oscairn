@@ -16,8 +16,10 @@
 #include <functional>
 #include <regex>
 #include <cstring>
+#include <chrono>
+#include <csignal>
 #include <thread>
-#ifdef __linux__
+#ifndef _WIN32
 #include <unistd.h>
 #endif
 #include <string>
@@ -2372,6 +2374,41 @@ namespace
         check(s.parts()[0].chain == std::vector<NodeId>{inst} && near(x.l[frames - 1], 7), "the split removed: the plugin plays alone, into main: " + std::to_string(x.l[frames - 1]));
     }
 
+#ifndef _WIN32
+    // The ports split of portSplits with its plugin in a worker, where the engine forwards the taken
+    // ports (Op::ActiveOutputs): named once the split is made, again after a lane is removed and
+    // added, and again to a worker killed and restarted, the routing the same after it.
+    void portSplitsInWorker(const char* fixture, const char* audio)
+    {
+        Session s(48000, frames);
+        const auto inst = s.add("Elements", audio, "org.oscairn.test.element-ports");
+        const auto a = s.add("Insertion A", fixture, "org.kick.test.effect"), b = s.add("Insertion B", fixture, "org.kick.test.effect");
+        s.setParameter(a, 7, .5); s.setParameter(b, 7, .25);
+        const auto part = s.addPart("Sampler", {PartInput::Kind::None});
+        const auto split = s.addSplit(part, 0, {}, Split::Kind::Ports, inst);
+        s.insertIntoPart(part, 0, a, {split, 1}); s.insertIntoPart(part, 0, b, {split, 2}); s.commit();
+        Audio x; x.run(s); x.run(s);
+        const auto level = [&] { return x.l[frames - 1]; };
+        check(near(level(), 4 + .5 + .5), "in a worker, the ports named: A and B through their lanes, main dry: " + std::to_string(level()));
+        s.removeLane(part, split, 2); s.commit(); x.run(s); x.run(s);
+        check(near(level(), 4 + 2 + .5), "in a worker, B's lane removed: its element in main: " + std::to_string(level()));
+        check(s.addLane(part, split) == 2, "added again");
+        s.insertIntoPart(part, 0, b, {split, 2}); s.commit(); x.run(s); x.run(s);
+        check(near(level(), 5), "in a worker, B's lane added again: " + std::to_string(level()));
+        int killed = 0;
+        if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+        {
+            char line[32];
+            while(std::fgets(line, sizeof line, list)) if(::kill(std::atoi(line), SIGKILL) == 0) ++killed;
+            pclose(list);
+        }
+        check(killed > 0, "a worker to kill");
+        bool dipped = false; // the kill is heard (silence, or the old routing) before the restart is
+        for(int i = 0; i < 500 && !(dipped && near(level(), 5)); ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); s.service(); s.process(nullptr, 0, x.out, 2, frames); dipped = dipped || !near(level(), 5); }
+        check(dipped && near(level(), 5), "the worker restarted, told its ports again: the same routing: " + std::to_string(level()));
+    }
+#endif
+
     // A solo undone, committed and saved: the same file as before it, playing the same. Each part
     // soloed and heard (a muted one unmuted), then put back as it was: a copy of the parts, since
     // parts() is the live model and the edits change it.
@@ -2503,9 +2540,18 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc < 8) { std::fprintf(stderr, "usage: %s FIXTURE AUDIO_FIXTURE DELAY SPLITTERS TRANSPOSE FOLLOWER VOICES\n", argv[0]); return 2; }
+    if(argc < 8) { std::fprintf(stderr, "usage: %s FIXTURE AUDIO_FIXTURE DELAY SPLITTERS TRANSPOSE FOLLOWER VOICES [--ports-workers]\n", argv[0]); return 2; }
     try
     {
+#ifndef _WIN32
+        if(argc > 8 && !std::strcmp(argv[8], "--ports-workers")) // only this, with OSCAIRN_PLUGIN_WORKER set
+        {
+            portSplitsInWorker(argv[1], argv[2]);
+            if(failures) { std::fprintf(stderr, "%d failures\n", failures); return 1; }
+            std::puts("ok: a ports split in a worker");
+            return 0;
+        }
+#endif
         state_files::TemporaryDirectory temp;
         ownership(argv[1], argv[3]);
         channels(argv[2]);

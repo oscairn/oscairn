@@ -259,7 +259,7 @@ namespace oscairn
                 joinCgroup(); // before it loads anything, so the plugin is charged to its own cgroup
                 timeval t{replySeconds, 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t);
                 broken.store(false);
-                bell->sleeping.store(0); bell->rendering.store(UINT32_MAX); bell->serving.store(UINT32_MAX);
+                bell->sleeping.store(0); bell->rendering.store(UINT32_MAX); bell->serving.store(UINT32_MAX); bell->faulted.store(UINT32_MAX);
                 send(socket, Writer().u8(uint8_t(Op::Init)).f64(rate).u32(frames).u8(uint8_t(mode)).data);
                 sendDescriptor(socket, bellFd);
                 try { expect(receive(socket)); } catch(const WorkerTimeout& e) { lost(e); }
@@ -272,12 +272,11 @@ namespace oscairn
                 struct Shorter { int socket; long seconds; ~Shorter() { timeval t{seconds, 0}; setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t); } } shorter{socket, replySeconds};
                 return exchange(Writer().u8(uint8_t(Op::Load)).str(path).str(id).u64(memoryRoom).data);
             }
-            // The node whose block or request the worker was in as it failed, from its doorbell (a crash, a hang).
-            void blame()
-            {
-                const auto rendering = bell->rendering.load(std::memory_order_relaxed), serving = bell->serving.load(std::memory_order_relaxed);
-                std::lock_guard lock(failureMutex); blamed = rendering != UINT32_MAX ? rendering : serving;
-            }
+            // The worker's index of the node a failure is put down to (UINT32_MAX: none known), from its doorbell:
+            // the thread that crashed (faulted), the audio thread that hung (rendering), the request not
+            // answered (serving); for blocks too slow, the costliest node's.
+            void blame(const std::atomic<uint32_t>& index) { std::lock_guard lock(failureMutex); blamed = index.load(std::memory_order_relaxed); }
+            void blameCostliest();
 
             // A reply that did not come in time: the worker is alive, and its late reply would be
             // read as the next request's, so it is failed and killed, and the supervisor reaps and
@@ -286,7 +285,7 @@ namespace oscairn
             [[noreturn]] void lost(const WorkerTimeout& e)
             {
                 const std::string why = std::string("Plugin worker stopped answering: ") + e.what();
-                blame();
+                blame(bell->serving);
                 { std::lock_guard lock(failureMutex); reason = why; failureText = why; }
                 failed.store(true);
                 if(pid > 0) kill(pid, SIGKILL);
@@ -370,6 +369,7 @@ namespace oscairn
             void supervise();
             void restart();
             void separate(std::vector<WorkerHost*>& list); // the plugin a shared host's failure is put down to, out to a worker of its own
+            void moveOut(std::vector<WorkerHost*>& list, std::shared_ptr<const Engine> engine); // a plugin's nodes, out of the list to a worker of their own
             void fitLimit(bool fresh = false); // under control; fresh: a new process, held to its declarations at once
             // The limit for the nodes' declarations and one more node's (extra), or none where a node
             // declares nothing; ask: query a node whose declaration is not known (else none). Under control.
@@ -583,6 +583,7 @@ namespace oscairn
             bool busy() const { return busy_.load(); }
             bool isRoot() const { return root_; }
             const std::shared_ptr<const Engine>& engine() const { return engine_; }
+            double lastBlockMicroseconds() const { return shared_->lastMicroseconds.load(std::memory_order_relaxed); } // the worker's word, for blame only
             // RFC 0045: into a worker of its own, which starts failed and is restarted with it. Under both
             // workers' control while the node is not busy (Process::restart).
             void moveTo(const std::shared_ptr<Process>& to)
@@ -1731,7 +1732,7 @@ namespace oscairn
                 {
                     reaped = true;
                     // A plugin's crash, not a kill from outside (the engine's own, the system's out-of-memory killer).
-                    if(WIFSIGNALED(status) && WTERMSIG(status) != SIGKILL) blame();
+                    if(WIFSIGNALED(status) && WTERMSIG(status) != SIGKILL) blame(bell->faulted);
                     fail(WIFSIGNALED(status) ? "Plugin worker crashed (signal " + std::to_string(WTERMSIG(status)) + ")"
                                              : "Plugin worker exited (status " + std::to_string(WEXITSTATUS(status)) + ")");
                     continue;
@@ -1748,7 +1749,9 @@ namespace oscairn
                 const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
                 std::string why;
                 { std::lock_guard nodesLock(nodesMutex); for(auto* n : nodes) if(why = n->trouble(now); !why.empty()) break; }
-                if(why.starts_with("Plugin worker crashed") || why.starts_with("Plugin hung")) blame(); // not one too slow: that is the host's load
+                if(why.starts_with("Plugin worker crashed")) blame(bell->faulted);
+                else if(why.starts_with("Plugin hung")) blame(bell->rendering);
+                else if(why.starts_with("Plugin too slow")) blameCostliest(); // in a plugin host every plugin's blocks are late behind the costliest
                 if(!why.empty()) fail(why);
             }
         }
@@ -1760,18 +1763,31 @@ namespace oscairn
             const auto now = std::chrono::steady_clock::now();
             std::erase_if(restarts, [&](auto t) { return now - t > std::chrono::minutes(1); });
             auto report = [&](const std::string& text) { std::lock_guard lock(failureMutex); failureText = reason + "; " + text; };
-            if(restarts.size() >= maxRestarts)
+            // A plugin host failing again and again for no plugin known (memory over its limit, a crash on a thread of
+            // a plugin's own) is not given up, which would silence every plugin in it: its plugins each go to a worker
+            // of their own, which give up alone, and it restarts with the one left.
+            const bool split = restarts.size() >= maxRestarts && pooled && [&] {
+                std::lock_guard l(nodesMutex);
+                return std::any_of(nodes.begin(), nodes.end(), [&](auto* n) { return n->engine() != nodes.front()->engine(); });
+            }();
+            if(restarts.size() >= maxRestarts && !split)
             {
                 gaveUp = true;
                 report("not restarted: " + std::to_string(maxRestarts) + " restarts within a minute");
                 return;
             }
+            if(split) restarts.clear();
             restarts.push_back(now);
             std::lock_guard controlLock(control); // the nodes stay as they are while restarting
             auto list = [&] { std::lock_guard l(nodesMutex); return nodes; }();
             for(auto* n : list) while(n->busy()) std::this_thread::sleep_for(std::chrono::milliseconds(1)); // audio leaves its last block
             for(auto* n : list) n->capture();
-            if(pooled) separate(list);
+            if(split)
+            {
+                { std::lock_guard lock(failureMutex); blamed = UINT32_MAX; }
+                while(std::any_of(list.begin(), list.end(), [&](auto* n) { return n->engine() != list.front()->engine(); })) moveOut(list, list.front()->engine());
+            }
+            else if(pooled) separate(list);
             try
             {
                 // A worker failed by a lost reply was killed but not yet reaped.
@@ -1882,6 +1898,14 @@ namespace oscairn
         };
         Pool& pool() { static Pool p; return p; }
 
+        void Process::blameCostliest()
+        {
+            std::lock_guard nodesLock(nodesMutex);
+            const WorkerHost* costliest = nullptr;
+            for(const auto* n : nodes) if(!costliest || n->lastBlockMicroseconds() > costliest->lastBlockMicroseconds()) costliest = n;
+            std::lock_guard lock(failureMutex); blamed = costliest ? costliest->workerNode() : UINT32_MAX;
+        }
+
         // RFC 0045: when a shared host failed by a crash or a hang put down to one of its plugins, that
         // plugin's nodes go to a worker of their own, which starts failed and is restarted with them by its
         // own supervisor, and the plugin gets a worker of its own from then on; the host restarts with the
@@ -1895,6 +1919,10 @@ namespace oscairn
             const auto engine = (*culprit)->engine();
             if(std::all_of(list.begin(), list.end(), [&](auto* n) { return n->engine() == engine; })) return;
             pool().crashedIn(engine->id);
+            moveOut(list, engine);
+        }
+        void Process::moveOut(std::vector<WorkerHost*>& list, std::shared_ptr<const Engine> engine)
+        {
             auto own = std::make_shared<Process>(program, rate, frames, mode, policyLimit);
             own->generation.store(generation.load() + 1); // its nodes start afresh, faded in
             { std::lock_guard lock(own->failureMutex); own->reason = own->failureText = reason; }
@@ -1939,9 +1967,9 @@ namespace oscairn
         }
         catch(...)
         {
-            // A plugin that took a shared host down as it loaded gets a worker of its own from then on; the
-            // host's supervisor restarts it with the others.
-            if(pooled && process->broken.load()) pool().crashedIn(id);
+            // A plugin that took a shared host down as it loaded, or kept it from answering (failed by the lost reply), gets
+            // a worker of its own from then on; the host's supervisor restarts it with the others.
+            if(pooled && (process->broken.load() || process->failed.load())) pool().crashedIn(id);
             throw;
         }
         if(!pooled)

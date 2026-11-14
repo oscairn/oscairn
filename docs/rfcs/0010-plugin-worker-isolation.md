@@ -27,7 +27,10 @@ Checked when built and tested; the sections below say how.
       stage 2, 2026-11-13): behind `OSCAIRN_PLUGIN_HOSTS` (a profile's `compute.pluginHosts`), a fixed
       pool of workers each holding any plugins, placed by measured cost; one audio thread and one
       doorbell per worker in both modes; a crash takes down one host, whose instances come back,
-      and the plugin it is put down to gets a worker of its own (`plugin-hosts`, the `-hosts` test runs)
+      and the plugin it is put down to gets a worker of its own (`plugin-hosts`, the `-hosts` test runs);
+      since review, a crash is put down by the thread that crashed, a load that never answered to the
+      plugin loaded, blocks too slow to the costliest plugin, and a host failing three times in a minute
+      for no plugin known splits into workers of their own instead of being given up
 
 ## Problem
 

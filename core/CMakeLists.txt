@@ -424,7 +424,7 @@ set_tests_properties(worker-failures PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
 add_executable(oscairn-plugin-hosts-test engine/tests/plugin_hosts.cpp)
 target_link_libraries(oscairn-plugin-hosts-test PRIVATE oscairn_engine)
 add_test(NAME plugin-hosts COMMAND oscairn-plugin-hosts-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
-    $<TARGET_FILE:kick-clap-fixture-note_crash> ${worker_timing})
+    $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:kick-clap-fixture-slow> $<TARGET_FILE:kick-clap-fixture-leak> ${worker_timing})
 set_tests_properties(plugin-hosts PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 if(BUILD_TESTING) # the Legacy Sampler
     add_executable(oscairn-worker-recovery-test engine/tests/worker_recovery.cpp)

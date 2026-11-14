@@ -4,8 +4,10 @@
 // measured cost; every node renders exactly as in the engine; killing a host while it plays leaves
 // the engine and the other host playing without a missed block, and brings the dead host's instances
 // back; a plugin that crashes a shared host gets a worker of its own and the others come back in the
-// host; loading and unloading instances in a running host leaves the instance playing there alone.
-//   oscairn-plugin-hosts-test WORKER NORMAL.clap NOTE_CRASH.clap [--no-timing]
+// host; loading and unloading instances in a running host leaves the instance playing there alone; a
+// plugin too slow for its host is put down to and gets a worker of its own; a host failing again and
+// again for no plugin known (memory) splits into workers of their own rather than silencing them all.
+//   oscairn-plugin-hosts-test WORKER NORMAL.clap NOTE_CRASH.clap SLOW.clap LEAK.clap [--no-timing]
 // --no-timing reports the missed blocks and callbacks past the period instead of failing on them.
 #include <oscairn/graph.h>
 #include <oscairn/realtime.h>
@@ -29,10 +31,11 @@ namespace
 
     constexpr double rate = 48000; constexpr uint32_t frames = 128;
     const auto period = std::chrono::nanoseconds(int64_t(1e9 * frames / rate));
-    const char* worker = nullptr; const char* normal = nullptr; const char* noteCrash = nullptr;
+    const char* worker = nullptr; const char* normal = nullptr; const char* noteCrash = nullptr; const char* slow = nullptr; const char* leak = nullptr;
     bool timing = true;
 
-    void placeIn(uint32_t hosts) { oscairn::PlacementPolicy p; p.worker = hosts ? worker : ""; p.hosts = hosts; oscairn::setPlacementPolicy(p); }
+    // memory: each host's limit; one not yet used also gives hosts of its own, apart from the earlier cases'.
+    void placeIn(uint32_t hosts, uint64_t memory = uint64_t(4) << 30) { oscairn::PlacementPolicy p; p.worker = hosts ? worker : ""; p.hosts = hosts; p.memoryLimit = memory; oscairn::setPlacementPolicy(p); }
     std::vector<oscairn::PluginHostInfo> pooled()
     {
         auto all = oscairn::pluginHosts();
@@ -55,6 +58,8 @@ namespace
             return n;
         }
         // One block, as a device's callback runs it: its deadline set (the engine's reserve kept); false past the period.
+        // Without a callback's deadline, as worker-failures plays: a worker's block past its allowance is missed.
+        void playUnbounded(const std::vector<Event>& events) { graph.process(nullptr, 0, out, 4, frames, nullptr, events.data(), uint32_t(events.size())); }
         bool play(const std::vector<Event>& events = {})
         {
             const auto start = std::chrono::steady_clock::now();
@@ -230,6 +235,55 @@ namespace
         oscairn::setPluginCost("org.kick.test.effect", 0);
     }
 
+    // A plugin too slow in a shared host (the slow fixture, 2 ms a block) is put down to: the host's blocks are all
+    // late behind it, but it alone goes to a worker of its own (and gives up there), and the other comes back in
+    // the host once and plays on. Its ID gets a worker of its own from then on: last of the cases using it.
+    void tooSlow()
+    {
+        placeIn(1, uint64_t(3) << 30); // a host apart from the earlier cases'
+        Player p;
+        const auto a = p.add(normal, "org.kick.test.midi", 0), s = p.add(slow, "org.kick.test.effect", 1);
+        p.graph.commit();
+        auto next = std::chrono::steady_clock::now();
+        for(uint32_t block = 0; block < 3000; ++block)
+        {
+            std::this_thread::sleep_until(next); next += period;
+            p.playUnbounded(notes(block));
+            if(p.graph.host(s).failure().find("not restarted") != std::string::npos && p.graph.host(a).failure().empty() && block % 40 == 39) break;
+        }
+        const auto failure = p.graph.host(a).failure();
+        { const auto st = p.graph.host(s).statistics(); std::printf("too slow: slow plugin %llu blocks, last %.0f us, late %llu, silent %llu, misses %llu, restarts %llu\n", (unsigned long long)st.blocks, st.lastMicroseconds, (unsigned long long)st.lateBlocks, (unsigned long long)st.silentBlocks, (unsigned long long)st.deadlineMisses, (unsigned long long)st.restarts); }
+        check(failure.empty() && p.graph.host(a).statistics().restarts == 1, "the instrument beside a plugin too slow comes back once and plays on: " + std::to_string(p.graph.host(a).statistics().restarts) + " restarts, \"" + failure + "\"");
+        check(p.graph.host(s).failure().find("too slow") != std::string::npos, "the slow plugin is the one stopped: \"" + p.graph.host(s).failure() + "\"");
+        bool own = false;
+        for(const auto& h : oscairn::pluginHosts()) if(!h.pooled && h.plugins == std::vector<std::string>{"org.kick.test.effect"}) own = true;
+        check(own, "the slow plugin is in a worker of its own");
+    }
+
+    // A host stopped again and again for memory, which no plugin is put down to (the leak fixture, 1 MiB a block
+    // past a 128 MiB limit), is not given up with every plugin in it silent: its plugins go to workers of their own,
+    // and only the leaking one is given up.
+    void leaking()
+    {
+        placeIn(1, uint64_t(128) << 20);
+        Player p;
+        const auto a = p.add(normal, "org.kick.test.midi", 0), l = p.add(leak, "org.kick.test.stepped", 1); // an ID no earlier case put in a worker of its own
+        p.graph.commit();
+        auto next = std::chrono::steady_clock::now();
+        for(uint32_t block = 0; block < 6000; ++block)
+        {
+            std::this_thread::sleep_until(next); next += period;
+            p.playUnbounded(notes(block));
+            if(p.graph.host(l).failure().find("not restarted") != std::string::npos && p.graph.host(a).failure().empty() && block % 40 == 39) break;
+        }
+        check(p.graph.host(l).failure().find("too much memory") != std::string::npos && p.graph.host(l).failure().find("not restarted") != std::string::npos,
+              "the leaking plugin is given up: \"" + p.graph.host(l).failure() + "\"");
+        check(p.graph.host(a).failure().empty(), "the instrument beside it is not: \"" + p.graph.host(a).failure() + "\"");
+        bool apart = true;
+        for(const auto& h : oscairn::pluginHosts()) if(count(h.plugins, "org.kick.test.midi") && count(h.plugins, "org.kick.test.stepped")) apart = false;
+        check(apart, "the two are in workers of their own");
+    }
+
     // Stage 4's hook: instances loaded into and unloaded from the running hosts while one plays.
     void residency()
     {
@@ -269,9 +323,9 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc < 4) { std::fprintf(stderr, "usage: %s WORKER NORMAL.clap NOTE_CRASH.clap [--no-timing]\n", argv[0]); return 2; }
-    worker = argv[1]; normal = argv[2]; noteCrash = argv[3];
-    timing = !(argc > 4 && std::strcmp(argv[4], "--no-timing") == 0);
+    if(argc < 6) { std::fprintf(stderr, "usage: %s WORKER NORMAL.clap NOTE_CRASH.clap SLOW.clap LEAK.clap [--no-timing]\n", argv[0]); return 2; }
+    worker = argv[1]; normal = argv[2]; noteCrash = argv[3]; slow = argv[4]; leak = argv[5];
+    timing = !(argc > 6 && std::strcmp(argv[6], "--no-timing") == 0);
     try
     {
         placement();
@@ -279,6 +333,8 @@ int main(int argc, char** argv)
         killed();
         separated();
         residency();
+        tooSlow();
+        leaking();
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     return failures ? 1 : 0;

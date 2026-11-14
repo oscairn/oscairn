@@ -96,14 +96,15 @@ namespace oscairn::worker
     // ring, which the engine moves after handing any of its nodes a block, and then renders every
     // node with a request pending, in node order. The engine makes the wake-up system call only
     // while the worker says it sleeps. rendering and serving name the node the audio thread renders
-    // and the node the control thread serves (UINT32_MAX: none), read by the engine after a crash or
-    // hang to tell which plugin it was; the worker may write anything, so the engine only looks
-    // the index up among its own nodes.
+    // and the node the control thread serves (UINT32_MAX: none), read by the engine after a hang to
+    // tell which plugin it was; faulted, set by the crash handler, the one the thread that crashed
+    // was in (its rendering or serving; UINT32_MAX for none, or a thread of the plugins' own). The
+    // worker may write anything, so the engine only looks the index up among its own nodes.
     struct alignas(64) Doorbell
     {
         std::atomic<uint32_t> ring{0};
         std::atomic<uint32_t> sleeping{0};
-        alignas(64) std::atomic<uint32_t> rendering{UINT32_MAX}, serving{UINT32_MAX};
+        alignas(64) std::atomic<uint32_t> rendering{UINT32_MAX}, serving{UINT32_MAX}, faulted{UINT32_MAX};
     };
 
     // Requests. Init, Load and Shutdown concern the worker; every other request is followed by

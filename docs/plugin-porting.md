@@ -722,9 +722,14 @@ What changes for the plugin:
   limit is the audio callback's deadline, which the host's instances share, not half a block each; instances are loaded into
   and unloaded from a host on its main thread while the others keep playing. A crash or hang in
   any plugin takes the whole host down: every instance in it is restarted as above, and the
-  plugin it was put down to (the one whose block or main-thread call the host was in) gets a
-  worker of its own from then on. The memory limit is the host's, from every declaration in
-  it; `session.status` shares the host's CPU time and memory among its instances.
+  plugin it was put down to gets a worker of its own from then on: for a crash, the one the
+  crashing thread was in (the host's audio thread's block or its main thread's call; none for a
+  thread of a plugin's own); for a hang, the block or call not finished; for a load that never
+  answered, the plugin being loaded; for blocks too slow, the costliest. A host failing three
+  times in a minute for no plugin known (memory over its limit, a crash on a plugin's own thread)
+  is not given up: its plugins each go to a worker of their own, which give up alone. The memory
+  limit is the host's, from every declaration in it; `session.status` shares the host's CPU time
+  and memory among its instances.
 - **Parameter info:** an info rescan is forwarded with the worker's next service. A rescan
   that changes the parameters' IDs or order is ignored until the plugin is loaded again.
 - **Reporting:** `session.status` lists each plugin in a worker with its CPU time and memory.

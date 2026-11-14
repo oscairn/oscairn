@@ -267,8 +267,15 @@ namespace oscairn::worker
         // its signal handler marks every shared block: the engine then names a crash, not a hang.
         constexpr size_t maxNodes = 256;
         std::atomic<Shared*> mapped[maxNodes];
+        // It also says which node the crashing thread was in (Doorbell::faulted): the audio thread's or the
+        // control thread's, by the thread; none for a thread of a plugin's own, which could be any plugin's.
+        enum class Role : uint8_t { Other, Audio, Control };
+        thread_local Role role = Role::Other;
+        std::atomic<Doorbell*> faultBell{nullptr};
         extern "C" void crashed(int signal)
         {
+            if(auto* b = faultBell.load())
+                b->faulted.store(role == Role::Audio ? b->rendering.load(std::memory_order_relaxed) : role == Role::Control ? b->serving.load(std::memory_order_relaxed) : UINT32_MAX);
             for(auto& m : mapped) if(auto* s = m.load()) s->crashed.store(uint32_t(signal));
             std::signal(signal, SIG_DFL);
             std::raise(signal);
@@ -428,6 +435,7 @@ namespace oscairn::worker
         void audio(Audio& a)
         {
             auto& bell = *a.bell;
+            role = Role::Audio;
             makeRealtime(1e6 * a.frames / a.rate); // the block period, not the larger shared buffer
             std::chrono::steady_clock::time_point periodStart{};
             std::chrono::nanoseconds period{};
@@ -493,6 +501,7 @@ namespace oscairn::worker
     int run(int socket)
     {
         setPlacementPolicy({}); // the worker hosts the plugin itself
+        role = Role::Control;
         for(const int signal : {SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE}) std::signal(signal, crashed);
         std::vector<std::unique_ptr<Node>> nodes; // by index; null once destroyed, and the index then given to the next node
         Audio sound; std::thread audioThread;
@@ -598,7 +607,7 @@ namespace oscairn::worker
                     if(audioThread.joinable()) { munmap(memory, sizeof(Doorbell)); throw std::runtime_error("Worker already started"); }
                     rate = r.f64(); frames = r.u32(); mode = r.u8() ? ProcessingMode::Offline : ProcessingMode::Realtime;
                     sound.bell = static_cast<Doorbell*>(memory); sound.rate = rate; sound.frames = frames;
-                    served.bell = sound.bell;
+                    served.bell = sound.bell; faultBell.store(sound.bell);
                     audioThread = std::thread(audio, std::ref(sound));
                     reply(socket, Writer{});
                     continue;

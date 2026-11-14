@@ -35,8 +35,9 @@ Checked when built and tested; the sections below say how.
       dependency, asset libraries that plugin packages name and repositories bring, collected once
       their last root goes (RFC 0009 step 4); side-by-side versions in the store; offline import from
       a folder package. Missing, so the gate is not met: one explicit shared runtime package; a
-      Setlist exported and played on a clean second machine (Setlists are not exported, and a second
-      machine is not available here; tests use a second data folder on one machine); tests of
+      Setlist exported and played on a clean second machine (setlists export with their Performances
+      since 2026-11-13, but a second machine is not available here; tests use a second data folder
+      on one machine); tests of
       removing the repository cache without losing pinned installs and of two projects sharing a
       release while another pins an older one; grouped cleanup prompts and per-device retention
       settings; dependency-only repair from a bundle and the missing-content request fulfilled from

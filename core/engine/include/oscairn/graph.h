@@ -229,6 +229,7 @@ namespace oscairn
         /// it, notes are choked at once (counted), and a block that measured past it chokes more from the
         /// next block's start. Any thread.
         void setVoiceBudget( double microseconds ) noexcept { voiceBudget_.store( float( std::isfinite( microseconds ) ? microseconds : 0.0 ), std::memory_order_relaxed ); }
+        double voiceBudget() const noexcept { return voiceBudget_.load( std::memory_order_relaxed ); } // as last set; any thread
         /// A node's cost at rest and per note (microseconds a block), from RFC 0025's measurements,
         /// until the audio thread has measured its own. Main thread.
         void seedNoteCost( NodeId node, double rest, double perNote );

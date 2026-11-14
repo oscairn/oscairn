@@ -115,9 +115,19 @@ namespace
 
     // Compare the new session against the existing Graph + Transport path using real
     // plugins, uneven blocks, parameter locks, tempo changes and sample-offset pressure.
+    // With the load guard off: this tests rendering, and the reference Graph has no guard, so a
+    // machine too slow for real time (a sanitizer build) would otherwise have notes given up.
     void referenceRender( const char* seq, const char* synth, const char* delay )
     {
+        {
+            oscairn::Session usual( rate, block ); usual.service();
+            check( usual.loadGuard(), "a Session's load guard is on by default" );
+        }
+        setenv( "OSCAIRN_LOAD_GUARD", "off", 1 );
         oscairn::Session session( rate, block );
+        unsetenv( "OSCAIRN_LOAD_GUARD" );
+        session.service();
+        check( !session.loadGuard(), "OSCAIRN_LOAD_GUARD=off switches it off" );
         oscairn::Graph reference( rate, block );
         oscairn::Transport transport( rate );
         const auto a = session.add( "sequencer", seq );

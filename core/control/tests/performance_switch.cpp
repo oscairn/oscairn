@@ -276,6 +276,9 @@ int main(int argc, char** argv)
     {
         state_files::TemporaryDirectory home; // a budget's measurements, not the user's
         ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1);
+        // Every Session here with the load guard off: switched and fresh are compared sample for sample, which tests
+        // rendering, not load; on a machine too slow for real time (a sanitizer build) the guard gives notes up unevenly.
+        ::setenv("OSCAIRN_LOAD_GUARD", "off", 1);
         std::printf("plugins in %s\n", placementPolicy().worker.empty() ? "the engine" : "workers");
         state_files::TemporaryDirectory temp;
         const auto samples = temp.path / "samples"; fs::create_directories(samples);

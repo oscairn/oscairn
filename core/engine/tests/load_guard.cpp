@@ -13,6 +13,8 @@
 // worker's block takes 2.5 ms more once, or in two blocks in a row (blocks held up from outside, as
 // interrupt work on the device does), a sixth note coming right after: nothing is given up; the same
 // part with 0.4 ms more in every block from then on (a real overload): notes give way within eight blocks.
+// And a lane is never charged for another: the lanes' total past one core's budget, a costly lane within its
+// own limit and a cheap one: the costly lane's notes fade for the total, the cheap lane loses nothing, none is choked.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
 #include <chrono>
@@ -72,6 +74,33 @@ uint32_t firstGiveUp(const char* plugin,const char* spike){
     }
     return first;
 }
+// The lanes' total past the device's while no lane is past its own limit (OSCAIRN_AUDIO_CORES=1, a 75% budget:
+// 2,000 us for all lanes together): A, a block late (a period for its lane), five notes of three voices each
+// (1,500 us); B, on time, six notes of one voice (600 us). A frees the most time per note, so A's notes fade;
+// B, far within its own limit, loses nothing; nothing is choked, no block being about to be missed.
+struct Shared { uint64_t aFaded=0,aForDevice=0,aChoked=0,bLost=0; double bLimit=0; };
+Shared device(const char* plugin){
+    setenv("OSCAIRN_AUDIO_CORES","1",1);setenv("OSCAIRN_FIXTURE_LAYERS","3",1);setenv("OSCAIRN_WORKER_EXTRA_BLOCK","org.oscairn.test.voices",1);
+    Graph g(48000,frames);
+    const auto a=g.add(plugin);
+    unsetenv("OSCAIRN_FIXTURE_LAYERS");unsetenv("OSCAIRN_WORKER_EXTRA_BLOCK");
+    const auto b=g.add(plugin);
+    unsetenv("OSCAIRN_AUDIO_CORES");
+    for(uint32_t p=0;p<2;++p){NoteZone z;z.channels=uint16_t(1u<<p);z.part=p+1;g.connectNotes(graphInput,p?b:a,{z});g.connectAudio(p?b:a,graphOutput);}
+    g.commit();g.setVoiceBudget(.75*frames/48000.0*1e6);
+    std::vector<float> left(frames),right(frames);float* out[]{left.data(),right.data()};
+    const auto period=std::chrono::microseconds(frames*1'000'000/48000);
+    auto next=std::chrono::steady_clock::now();
+    for(uint32_t block=0;block<400;++block){
+        std::vector<Event> events;
+        if(block>=20 && block<30 && block%2==0)events.push_back(Event::note(true,40+int(block),1,0,0)); // A: five
+        if(block>=21 && block<33 && block%2==1)events.push_back(Event::note(true,60+int(block),1,0,1)); // B: six
+        g.process(out,frames,nullptr,events.data(),uint32_t(events.size()));
+        next+=period;std::this_thread::sleep_until(next);
+    }
+    const auto ca=g.noteCost(a),cb=g.noteCost(b);
+    return {ca.stolen,ca.stolenForDevice,ca.hardChokes,cb.stolen+cb.stolenForDevice+cb.hardChokes,cb.laneLimit};
+}
 }
 
 int main(int argc,char** argv){try{
@@ -101,6 +130,16 @@ int main(int argc,char** argv){try{
     check(twice==UINT32_MAX,"two blocks held up in a row give no note up: "+when(twice));
     if(timing)check(sustained>=spikeBlock && sustained<=spikeBlock+8,"a sustained overload gives notes up within eight blocks: "+when(sustained));
     else check(sustained!=UINT32_MAX,"a sustained overload gives notes up: "+when(sustained));
+    {
+        Shared r;std::exception_ptr error;
+        std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{r=device(argv[1]);}catch(...){error=std::current_exception();}}).join();
+        if(error)std::rethrow_exception(error);
+        std::printf("lanes past the device's total: A faded %llu for its lane and %llu for the total, choked %llu; B, its lane's limit %.0f us, lost %llu\n",
+            (unsigned long long)r.aFaded,(unsigned long long)r.aForDevice,(unsigned long long)r.aChoked,r.bLimit,(unsigned long long)r.bLost);
+        check(r.bLost==0,"the cheap lane loses nothing for the lanes' total");
+        check(r.aForDevice>0,"the lane where a note frees the most time gives notes up for the total");
+        if(timing)check(r.aChoked==0,"fades, not chokes, when no block is about to be missed");
+    }
     for(const auto* r:{&guarded,&budgeted}){
         const std::string with=r==&guarded?"with the guard":"with a 75% budget";
         check(r->stolen+r->chokes>0,with+" A's notes give way");

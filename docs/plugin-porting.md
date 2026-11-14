@@ -191,7 +191,9 @@ A lane may take the budget set, but never more than 80% of the time its blocks h
 are missed (a worker's allowance, the callback's time in the engine's process; RFC 0045's load
 guard), budget or none, and the lanes together no more than the budget (with none, 80% of a
 block) on each audio core, so notes give way before a block is ever missed and a worker is not
-restarted for load (RFC 0018). For a
+restarted for load (RFC 0018). A lane's notes give way only for its own limit; past the lanes'
+total, they give way on the lane where a note costs most. Notes fade (a few milliseconds); a note
+is choked at once only when its lane's block would otherwise be missed. For a
 plugin without `oscairn.voice-budget` it fades out and chokes whole notes, released and quiet ones
 first ([Behaving well](#behaving-well)). A plugin with it gives up its own voices within a limit
 the host sets between blocks; an instance one part plays alone gets one entry, for the selected

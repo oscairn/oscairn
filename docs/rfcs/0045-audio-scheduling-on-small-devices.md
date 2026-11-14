@@ -920,6 +920,24 @@ CPU, plugins with few parameters and no voices); it is the next thing to profile
   more in one block, or in two in a row, with a note right after, gives no note up (two in a row gave
   notes up before); 0.4 ms more in every block from then on gives notes up in the third block (the
   first before).
+  Corrected 2026-11-14, from two 41 s takes of ST Final on the unit at the instrument budget: the
+  guard gave up 0 to 1 notes faded and 0 to 3 choked, all on the arpeggio part, whose worker took 128
+  to 256 us a block against its 1,333 us allowance, while the lanes near their limits were the
+  Sampler worker serving five parts and a delay. The cause was the lanes' total: each lane's limit was
+  cut to the total less what the other lanes took in the last block, so with the Sampler's lane and
+  the others near the total the arpeggio's limit fell below what its few voices cost, and its note-ons,
+  the most frequent, choked at once (a note-on past the limit choked, as a lane measured past it twice
+  did). Now a lane's notes give way only for its own limit; the lanes' total is checked after each
+  block, and past it twice in a row notes fade on the lane where giving one up frees the most time
+  (the highest cost per note), until the excess less the notes already fading is covered; and every
+  give-up is a fade (1 to 3 ms), a choke only where the lane's estimate passes the time its block has
+  before it is missed (its allowance, the deadline or a period, not 80 % of it). The guard's figures
+  are in `engine.timing` per worker (`guard`: the lane's limit, what it took in the last block, and the
+  notes faded for the lane, faded for the total and choked), printed by `oscairn-engine-timing`.
+  `load-guard`: a lane a block late with five notes of three voices each (1,500 us) and one on time with
+  six notes of one voice (600 us), the total held to one core's 2,000 us (`OSCAIRN_AUDIO_CORES=1`, which
+  sets the audio cores' count for the total on a desktop): the cheap lane loses nothing, the costly
+  one fades notes for the total and none is choked.
 
 Expected (an estimate, not measured) for ST Final on the unit with A+B: three host processes in
 place of nine; at most three hand-overs a wave and two waves (instruments with their inserts, then

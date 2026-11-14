@@ -248,6 +248,7 @@ namespace oscairn
         if(const char* us=std::getenv("OSCAIRN_WORKER_BUDGET_US");us && *us)workerBudgetUs_=float(std::chrono::duration<double,std::micro>(worker::workerAllowance(1,1e6,us)).count()); // 1 frame at 1 MHz: 0.5 us when not a valid override
         if(workerBudgetUs_<1)workerBudgetUs_=0;
         audioCores_=float(std::max(1u,worker::usableCores()-1));
+        if(const char* n=std::getenv("OSCAIRN_AUDIO_CORES");n && std::atoi(n)>0)audioCores_=float(std::atoi(n)); // a small device's lanes' total on a desktop, for tests and diagnosis
         helpers_=&AudioHelpers::shared(1e6*maxFrames/sampleRate);
     }
 
@@ -627,7 +628,8 @@ namespace oscairn
         const auto it=nodes_.find(node);
         if(it==nodes_.end() || !it->second.activity)return {};
         const auto& a=*it->second.activity;
-        return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed)};
+        return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed),
+                a.stolenForDevice.load(std::memory_order_relaxed),a.laneLimit.load(std::memory_order_relaxed),a.laneTook.load(std::memory_order_relaxed)};
     }
     Graph::OutputGuard Graph::outputGuard( NodeId node ) const
     {
@@ -1349,22 +1351,26 @@ namespace oscairn
         // A lane may take the budget set (RFC 0025's share of an audio core) but never more than
         // loadMargin of the time its blocks have before they are missed (RFC 0045's load guard): a
         // worker's allowance, the deadline under step 6, a period for a lane whose plugins all render a block late, the
-        // callback's time in the engine's process. The lanes together share the budget (with none,
-        // loadMargin of a block) on each audio core: a lane's limit leaves the others what they took
-        // in the last block.
+        // callback's time in the engine's process. A lane's notes give way for its own limit only; the lanes
+        // together are held to the budget (with none, loadMargin of a block) on each audio core after the
+        // block (VoiceBudget::device), never by charging one lane for what another took.
         // shortcut: the engine's process is one lane, its plugins' times summed, though the audio helpers render a wave's side by side; give each its own lane once those are measured to need it.
         const float budget=voiceBudget_.load(std::memory_order_relaxed);
         const bool budgeting=budget!=0;
+        float total=0;
         if(budgeting)
         {
-            constexpr float loadMargin=.8f; // the hard limit's share of a lane's time, for the wake-ups, copies and the machine's own around its blocks
+            constexpr float loadMargin=.8f; // the limit's share of a lane's time, for the wake-ups, copies and the machine's own around its blocks
             const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);
             const float allowance=deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2;
-            const float total=(budget>0?budget:loadMargin*period)*audioCores_;
-            float took=0;for(const auto& lane:plan->budget.lanes)took+=lane.took; // the last block's
-            for(auto& lane:plan->budget.lanes)lane.limit=budget>0?budget:INFINITY;
-            for(const auto& step:plan->steps){auto& limit=plan->budget.lanes[step.lane].limit;limit=std::min(limit,loadMargin*(step.lateLane?period:step.inProcess?deadline:allowance));}
-            for(auto& lane:plan->budget.lanes){lane.limit=std::max(1.f,std::min(lane.limit,total-(took-lane.took)));lane.took=lane.othersTook=0;} // 1 us: a lane left no room gives up its notes, as 0 would mean no limit
+            total=(budget>0?budget:loadMargin*period)*audioCores_;
+            for(auto& lane:plan->budget.lanes){lane.limit=budget>0?budget:INFINITY;lane.miss=INFINITY;lane.took=lane.othersTook=0;}
+            for(const auto& step:plan->steps)
+            {
+                auto& lane=plan->budget.lanes[step.lane];
+                const float time=step.lateLane?period:step.inProcess?deadline:allowance;
+                lane.miss=std::min(lane.miss,time);lane.limit=std::min(lane.limit,loadMargin*time);
+            }
         }
         // What a lane's limit is held against: each step's usual block, the median of its last five. A block held up
         // from outside (on the FANTOM-07, interrupt work for the app's drawing billed to the audio threads: 700 us
@@ -1649,7 +1655,16 @@ namespace oscairn
                     tap.route->route(list[i],nextNoteId_,emit,&tap.zones,tap.step<0 && sources?sources[i]:untaggedSource);
         }
         for(const auto& r:plan->outputRoutes)mix(r,outputs[r.to]);
-        if(budgeting)for(uint32_t i=0;i<plan->budget.lanes.size();++i){auto& lane=plan->budget.lanes[i];lane.others=lane.othersTook;plan->budget.measured(i,lane.took);}
+        if(budgeting)
+        {
+            for(uint32_t i=0;i<plan->budget.lanes.size();++i){auto& lane=plan->budget.lanes[i];lane.others=lane.othersTook;plan->budget.measured(i,lane.took);}
+            plan->budget.device(total);
+            for(const auto& step:plan->steps)if(step.activity) // for the timing report
+            {
+                const auto& lane=plan->budget.lanes[step.lane];
+                step.activity->laneLimit.store(lane.limit,std::memory_order_relaxed);step.activity->laneTook.store(lane.took,std::memory_order_relaxed);
+            }
+        }
         return ok;
     }
 

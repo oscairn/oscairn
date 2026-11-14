@@ -1110,7 +1110,7 @@ namespace oscairn
         {
             out.push_back({part, channels.empty() ? 0.0 : *std::max_element(channels.begin(), channels.end()), channels});
             const auto p = std::find_if(parts_.begin(), parts_.end(), [&](const Part& q) { return q.id == part; });
-            if(p != parts_.end()) for(const auto n : nodesOf(*p)) { const auto c = graph_.noteCost(n); out.back().stolen += c.stolen; out.back().hardChokes += c.hardChokes; }
+            if(p != parts_.end()) for(const auto n : nodesOf(*p)) { const auto c = graph_.noteCost(n); out.back().stolen += c.stolen + c.stolenForDevice; out.back().hardChokes += c.hardChokes; }
         }
         return out;
     }

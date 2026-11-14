@@ -471,6 +471,13 @@ namespace oscairn
                                  since(st.minorFaults, base.minorFaults), since(st.majorFaults, base.majorFaults), r->cpu.read(), since(st.involuntarySwitches, base.involuntarySwitches), {}});
             for(const auto& p : parts_)
                 if(const auto in = nodesOf(p); std::any_of(served.begin(), served.end(), [&](NodeId n) { return in.count(n); })) t.workers.back().parts.push_back(p.name);
+            auto& guard = t.workers.back().guard;
+            for(const auto n : served)
+            {
+                const auto c = graph_.noteCost(n);
+                guard.limit = std::max(guard.limit, c.laneLimit); guard.took = std::max(guard.took, c.laneTook);
+                guard.faded += c.stolen; guard.fadedForTotal += c.stolenForDevice; guard.choked += c.hardChokes;
+            }
             if(reset) { r->reset(); timingBase_[host] = st; }
         }
         // A worker gone may leave its address to a new one: its counts go with it.

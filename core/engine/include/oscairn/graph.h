@@ -220,21 +220,25 @@ namespace oscairn
         /// RFC 0018's shared budget (option B): the microseconds a block the plugins rendering on one
         /// thread (a lane: a worker's or plugin host's audio thread, or the engine's process) may take
         /// in all; 0, the default, for none; below 0, RFC 0045's load guard alone. Either way each lane's
-        /// hard limit is the smaller of the budget and loadMargin of the time its blocks have before they
+        /// limit is the smaller of the budget and loadMargin of the time its blocks have before they
         /// are missed (a worker's allowance, the deadline under step 6, a period for a lane whose plugins are all a block late,
-        /// the callback's time for the engine's process), and every lane's together are held to the
-        /// budget (with none, loadMargin of a block) on each audio core (RFC 0025's: all but one), less
-        /// what the other lanes took in the last block. Stealing starts at 85% of it: before a note passes
-        /// on, the least audible notes of the lane fade out, by each node's measured cost per note; past
-        /// it, notes are choked at once (counted), and a block that measured past it chokes more from the
-        /// next block's start. Any thread.
+        /// the callback's time for the engine's process); a lane's notes give way only for its own limit.
+        /// Fading starts at 85% of it: before a note passes on, the least audible notes of the lane fade out,
+        /// by each node's measured cost per note, and a lane measured past its limit twice in a row fades
+        /// more from the next block's start. Every lane's together are held to the budget (with none,
+        /// loadMargin of a block) on each audio core (RFC 0025's: all but one): past it twice in a row, notes
+        /// fade on the lane where one frees the most time. Notes are choked at once (counted) only when the
+        /// lane's estimate passes the time before its block is missed. Any thread.
         void setVoiceBudget( double microseconds ) noexcept { voiceBudget_.store( float( std::isfinite( microseconds ) ? microseconds : 0.0 ), std::memory_order_relaxed ); }
         double voiceBudget() const noexcept { return voiceBudget_.load( std::memory_order_relaxed ); } // as last set; any thread
         /// A node's cost at rest and per note (microseconds a block), from RFC 0025's measurements,
         /// until the audio thread has measured its own. Main thread.
         void seedNoteCost( NodeId node, double rest, double perNote );
-        /// A node's cost as the budget sees it, and the notes it gave up so far (-1: not measured).
-        struct NoteCost { double rest = -1, perNote = -1; uint64_t stolen = 0, hardChokes = 0; };
+        /// A node's cost as the budget sees it (-1: not measured), and the notes it gave up so far: faded for
+        /// its lane's limit (stolen), faded for the lanes' total (stolenForDevice), and choked for a block that
+        /// would be missed; and its lane's limit and what the lane took in the last block, in microseconds
+        /// (0 with no budget).
+        struct NoteCost { double rest = -1, perNote = -1; uint64_t stolen = 0, hardChokes = 0, stolenForDevice = 0; double laneLimit = 0, laneTook = 0; };
         NoteCost noteCost( NodeId node ) const;
         /// The output guard: a node's blocks not heard for a sample not finite or past outputBound (+120 dBFS), in
         /// all and in a row up to its last block; each faded out over 1 ms, the plugin playing on. Any thread.
@@ -483,7 +487,8 @@ namespace oscairn
             // note, smoothed by the audio thread (-1 until measured; RFC 0025's measurements, seeded,
             // stand in until then), and the notes it gave up: faded out, and choked at the hard limit.
             std::atomic<float> rest{-1}, perNote{-1}, seedRest{-1}, seedNote{-1};
-            std::atomic<uint64_t> stolen{0}, hardChokes{0};
+            std::atomic<uint64_t> stolen{0}, hardChokes{0}, stolenForDevice{0};
+            std::atomic<float> laneLimit{0}, laneTook{0}; // its lane's, at its last block (NoteCost)
             std::atomic<uint64_t> badOutput{0}; std::atomic<uint32_t> badRun{0}; // see outputGuard
             // Its plugin left the plan holding notes no release reached; audio thread (Graph::beginBlock).
             std::atomic<bool> stranded{false};

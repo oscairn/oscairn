@@ -28,21 +28,31 @@ struct VoiceBudget
     // node's cost at rest; lane: its node's lane.
     struct Entry { NoteRoute* route; const NoteZones* zones; Graph::Activity* cost; uint32_t group; bool rest,draining; uint32_t lane=0; };
     struct Group { uint32_t held=0; int16_t low=INT16_MAX,high=-1; float cost=0; }; // cost: of its held notes
-    // Each lane's hard limit for this block in microseconds (0 for none), and the last block's cost of
-    // its plugins taking no CLAP notes (effects), which give way to nothing but count.
-    // over: the last block measured past the limit; took, othersTook: this block's so far (the graph's).
-    struct Lane { float limit=0,others=0; bool over=false; float took=0,othersTook=0; };
+    // Each lane's limit for this block in microseconds (0 for none); miss, the time its blocks have before
+    // they are missed; and the last block's cost of its plugins taking no CLAP notes (effects), which give
+    // way to nothing but count. over: the last block measured past the limit; took, othersTook: this
+    // block's so far (the graph's).
+    struct Lane { float limit=0,miss=0,others=0; bool over=false; float took=0,othersTook=0; };
     std::vector<Entry> entries;
     std::vector<Group> groups; // scratch, one per entry
     std::vector<Lane> lanes;   // one per lane any step of the plan runs on
+    bool deviceOver=false;     // the last block's lanes together past the device's total
+    // After notes fade for the total, the blocks it waits before judging it again: their fade, and the lanes'
+    // totals (each plugin's median of five blocks) catching up, so one excess does not take more notes than it needs.
+    static constexpr uint32_t deviceHoldBlocks=8;
+    uint32_t deviceHold=0;
     static constexpr float soft=.85f; // stealing starts here, so fades have time
     // Before a note into `self` at `time` passes on: under its lane's soft limit, notes fade to make
-    // room for it; past the hard limit, they are choked.
+    // room for it; only what would miss the lane's block is choked.
     void admit(NoteRoute& self,uint32_t time) noexcept;
-    // After a block whose plugins took `measured` microseconds on `lane`: past the hard limit in this
-    // block and the one before, the lane's notes are choked from the next block's start until the
-    // estimate, scaled to the measurement, fits.
+    // After a block whose plugins took `measured` microseconds on `lane`: past the limit in this block
+    // and the one before, the lane's notes fade from the next block's start until the estimate, scaled
+    // to the measurement, fits the soft limit; only what would still miss the lane's block is choked.
     void measured(uint32_t lane,float measured) noexcept;
+    // After a block whose lanes together took more than `total` microseconds (the budget on each audio
+    // core), in it and the one before: notes fade, each from the lane where giving one up frees the most
+    // time, until the excess (less the notes already fading) is covered. No lane is charged for another.
+    void device(float total) noexcept;
     // oscairn.voice-budget (step 4): the voices a node on `lane` that gives up its own may keep from the
     // next block, `voices` sounding now: those and what the soft limit leaves at its cost per voice, at
     // most a quarter fewer; 0 for no limit (no budget, or no cost measured).
@@ -399,12 +409,13 @@ inline VoiceBudget::Victim VoiceBudget::fadingNote(uint32_t lane) const noexcept
     }
     return best;
 }
-// Past the hard limit: notes choked without a fade, fading ones first; a note not yet fading counted.
-// At note-on a reserve goes only when reserves alone pass the limit; after a block (measured),
-// never a reserve.
+// Past the time the lane's blocks have before they are missed: notes choked without a fade (a click,
+// the last resort), fading ones first; a note not yet fading counted. At note-on a reserve goes only
+// when reserves alone pass it; after a block (measured), never a reserve.
 inline void VoiceBudget::choke(uint32_t lane,float scale,float extra,const NoteRoute* self,uint32_t time,bool atNoteOn) noexcept
 {
-    const float limit=lanes[lane].limit;
+    const float limit=lanes[lane].miss;
+    if(limit<=0)return;
     while(estimate(lane,Fading)*scale+extra>limit)
     {
         auto v=fadingNote(lane);
@@ -453,6 +464,34 @@ inline void VoiceBudget::measured(uint32_t lane,float total) noexcept
     // The measurement covers every note still ending; what is left once they end must fit. At most
     // a quarter over the estimate a block, and never a reserve: a block's time also has the
     // machine's in it, and the estimate follows the measurement within blocks anyway.
-    if(const float e=estimate(lane,Ending);e>0)choke(lane,std::min(total/e,1.25f),0,nullptr,0,false);
+    const float e=estimate(lane,Ending);
+    if(e<=0)return;
+    const float scale=std::min(total/e,1.25f);
+    while(estimate(lane,Kept)*scale>soft*l.limit)
+    {
+        const auto v=choose(lane,false);
+        if(!v.entry)break;
+        v.entry->route->steal(v.entry->route->notes[v.slot],0);
+        v.entry->cost->stolen.fetch_add(1,std::memory_order_relaxed);
+    }
+    choke(lane,scale,0,nullptr,0,false);
+}
+inline void VoiceBudget::device(float total) noexcept
+{
+    float took=0;for(const auto& l:lanes)took+=l.took;
+    const bool again=std::exchange(deviceOver,took>total);
+    if(deviceHold){--deviceHold;return;}
+    if(took<=total || !again)return;
+    float excess=took-total;
+    for(uint32_t i=0;i<lanes.size();++i)excess-=estimate(i,Ending)-estimate(i,Kept); // given up already, until they end
+    while(excess>0)
+    {
+        Victim best;float most=0;
+        for(uint32_t i=0;i<lanes.size();++i)if(const auto v=choose(i,false);v.entry && v.entry->cost->noteNow()>most){best=v;most=v.entry->cost->noteNow();}
+        if(!best.entry)return;
+        best.entry->route->steal(best.entry->route->notes[best.slot],0);
+        best.entry->cost->stolenForDevice.fetch_add(1,std::memory_order_relaxed);
+        excess-=most;deviceHold=deviceHoldBlocks;
+    }
 }
 }

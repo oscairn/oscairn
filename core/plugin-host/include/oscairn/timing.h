@@ -124,7 +124,8 @@ namespace oscairn
     struct WorkerTiming
     {
         BlockTiming roundTrip, collect, wake, run, cpu;
+        std::atomic<uint32_t> starts{0}; // warmUp()s: its node's blocks late from here are its start's, not "too slow" (WorkerHost)
         void reset() noexcept { roundTrip.reset(); collect.reset(); wake.reset(); run.reset(); cpu.reset(); }
-        void warmUp() noexcept { roundTrip.warmUp(); collect.warmUp(); wake.warmUp(); run.warmUp(); cpu.warmUp(); }
+        void warmUp() noexcept { roundTrip.warmUp(); collect.warmUp(); wake.warmUp(); run.warmUp(); cpu.warmUp(); starts.fetch_add(1, std::memory_order_relaxed); }
     };
 }

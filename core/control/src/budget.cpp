@@ -518,7 +518,10 @@ namespace oscairn
             auto& m = measured_[pluginKey(node)];
             auto& L = learning_[node];
             const double was = m.cpu, wasRest = m.rest, wasVoice = m.voice;
-            if(st.blocks < L.blocks || st.cpuMicroseconds < L.cpu) L.blocks = 0; // restarted, or its instances changed: measured from here
+            // Restarted, or its instances changed: measured from here, its first blocks again its start's.
+            if(st.blocks < L.blocks || st.cpuMicroseconds < L.cpu || st.restarts != L.restarts) { L.blocks = 0; L.seen = 0; L.restarts = st.restarts; }
+            // Blocks missed in its first two seconds are its load's (a failure storm while it starts): that tick is not recorded.
+            const bool starting = st.deadlineMisses != std::exchange(L.misses, st.deadlineMisses) && double(L.seen) * frames < 2 * sampleRate_;
             const uint64_t blocks = L.blocks ? st.blocks - L.blocks : 0;
             const double each = blocks ? (st.cpuMicroseconds - L.cpu) / double(blocks) : 0;
             L.blocks = st.blocks; L.cpu = st.cpuMicroseconds;
@@ -542,7 +545,7 @@ namespace oscairn
             }
             // A node's first blocks are its load's. shortcut: a prepared instrument whose instances change mid-tick gives one sample
             // of their sum's jump (at most the period, as any); keep a base per instance if that is seen to move a figure.
-            if(blocks && L.seen >= warmupBlocks + blocks)
+            if(blocks && L.seen >= warmupBlocks + blocks && !starting)
             {
                 const double share = std::min(1.0, each / blockMicroseconds) / sounds; // a sound's
                 auto weight = [&](uint32_t& n) { return std::max(1.0 / (n++ + 1), std::min(1.0, blocks / restBlocks)); };

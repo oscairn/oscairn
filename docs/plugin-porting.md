@@ -733,7 +733,9 @@ What changes for the plugin:
   ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#one-block-late-for-one-part)). Plugins that do not feed each other render at
   the same time, each in its worker ([RFC 0034](rfcs/0034-parallel-graph-rendering.md)); effect
   contexts of one instance never do. Missing a quarter second of blocks in a row (at least 8), or leaving one
-  unanswered for 250 ms, is a failure. Offline rendering waits instead.
+  unanswered for 250 ms, is a failure; late blocks in the first two seconds after a load, a restart or a
+  Performance opened are silenced but not counted (the load's own), and not measured as the plugin's cost.
+  Offline rendering waits instead.
 - **Output range:** a block with a sample past +120 dBFS (a million) is not heard, in a worker or in the
   engine: it fades out over 1 ms from the last good samples, the plugin playing on unrestarted,
   counted in `session.status`'s `badOutputBlocks`; a quarter second of such blocks in a row lists

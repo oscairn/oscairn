@@ -1167,6 +1167,11 @@ namespace oscairn
                 if(process()->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0; return silence(); }
                 process()->follow(frames);
                 if(const auto g = process()->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process()->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
+                // Loaded, restarted, or taken over by a Performance being opened (each a warmUp): its first two seconds' late
+                // blocks are its start's (samples read, pages touched), silenced as any, but none counts toward "too slow",
+                // so lateness while loading never restarts it. A hang is still a hang.
+                if(const auto n = timing_.starts.load(std::memory_order_relaxed); n != startsSeen_) { startsSeen_ = n; graceLeft_ = uint32_t(2 * process()->rate / std::max(1u, frames)); consecutiveMisses_ = 0; }
+                else if(graceLeft_) --graceLeft_;
                 // A block the worker has not finished yet: stay silent rather than queue another, its events carried
                 // to the next block handed (RFC 0045); only a release lost on the way is reset for.
                 if(s.done.load(std::memory_order_acquire) != sequence_)
@@ -1559,7 +1564,7 @@ namespace oscairn
             void missed(std::atomic<uint64_t>& count) noexcept
             {
                 count.fetch_add(1, std::memory_order_relaxed);
-                if(++consecutiveMisses_ >= process()->missLimit) tooSlow_.store(true, std::memory_order_release);
+                if(!graceLeft_ && ++consecutiveMisses_ >= process()->missLimit) tooSlow_.store(true, std::memory_order_release);
             }
 
             // The worker this node is in: owner_ keeps it, proc_ is what the audio thread and the others read. Both
@@ -1628,6 +1633,7 @@ namespace oscairn
             std::vector<float> last_;
             bool reset_ = false; // audio thread: wasReset, from the worker's blocks in the last call
             uint32_t sequence_ = 0, timed_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
+            uint32_t startsSeen_ = UINT32_MAX, graceLeft_ = 0; // timing_'s starts last seen, and the blocks left of the start's grace (start)
             // The block start handed over, for finish.
             float* const* startedOutputs_ = nullptr; uint32_t startedChannels_ = 0, startedFrames_ = 0, startedOffset_ = 0; bool started_ = false;
             std::chrono::steady_clock::time_point sent_{};

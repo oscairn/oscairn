@@ -370,6 +370,11 @@ target_link_libraries(oscairn-measured-costs-test PRIVATE oscairn_control)
 add_dependencies(oscairn-measured-costs-test oscairn-voice-fixture oscairn-plugin-worker)
 add_test(NAME control-measured-costs COMMAND oscairn-measured-costs-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(control-measured-costs PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+# A reload while playing whose new instances are slow at first restarts nothing, and the engine opens Performances after.
+add_executable(oscairn-reload-recovery-test tests/reload_recovery.cpp)
+target_link_libraries(oscairn-reload-recovery-test PRIVATE oscairn_control)
+add_test(NAME control-reload-recovery COMMAND oscairn-reload-recovery-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(control-reload-recovery PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 
 add_executable(oscairn-sound-presets-test tests/sound_presets.cpp)
 target_link_libraries(oscairn-sound-presets-test PRIVATE oscairn_control_json)

@@ -436,6 +436,7 @@ namespace oscairn
         {
             uint64_t blocks = 0, seen = 0; // the plugin's blocks at the last tick (0: none yet); blocks since it joined
             double cpu = 0;                 // its statistics().cpuMicroseconds at the last tick
+            uint64_t misses = 0, restarts = 0; // its statistics()' deadlineMisses and restarts at the last tick
             uint32_t restN = 0, voiceN = 0;
             double fast = 0;
         };

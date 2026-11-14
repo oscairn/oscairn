@@ -623,11 +623,20 @@ namespace oscairn
         auto& a=*nodes_.at(node).activity;
         a.seedRest.store(float(rest),std::memory_order_relaxed);a.seedNote.store(float(perNote),std::memory_order_relaxed);
     }
-    Graph::NoteCost Graph::noteCost( NodeId node ) const
+    const Graph::Activity* Graph::instanceActivity( NodeId node ) const
     {
         const auto it=nodes_.find(node);
-        if(it==nodes_.end() || !it->second.activity)return {};
-        const auto& a=*it->second.activity;
+        if(it==nodes_.end())return nullptr;
+        if(const auto* sound=dynamic_cast<const SoundContext*>(it->second.host.get()))
+            if(const auto e=engineCosts_.find(sound->engine()->host.get());e!=engineCosts_.end())return e->second.get();
+        return it->second.activity.get();
+    }
+    Graph::NoteCost Graph::noteCost( NodeId node, bool instance ) const
+    {
+        const auto it=nodes_.find(node);
+        const auto* found=it==nodes_.end()?nullptr:instance?instanceActivity(node):it->second.activity.get();
+        if(!found)return {};
+        const auto& a=*found;
         return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed),
                 a.stolenForDevice.load(std::memory_order_relaxed),a.laneLimit.load(std::memory_order_relaxed),a.laneTook.load(std::memory_order_relaxed)};
     }

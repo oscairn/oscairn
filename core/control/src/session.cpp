@@ -472,9 +472,13 @@ namespace oscairn
             for(const auto& p : parts_)
                 if(const auto in = nodesOf(p); std::any_of(served.begin(), served.end(), [&](NodeId n) { return in.count(n); })) t.workers.back().parts.push_back(p.name);
             auto& guard = t.workers.back().guard;
+            // A shared instance's guard is the instance's, for all its parts: counted once, not per sound.
+            std::set<const PluginHost*> instances;
             for(const auto n : served)
             {
-                const auto c = graph_.noteCost(n);
+                const auto* sound = dynamic_cast<const SoundContext*>(&graph_.host(n));
+                if(sound && !instances.insert(sound->engine()->host.get()).second) continue;
+                const auto c = graph_.noteCost(n, true);
                 guard.limit = std::max(guard.limit, c.laneLimit); guard.took = std::max(guard.took, c.laneTook);
                 guard.faded += c.stolen; guard.fadedForTotal += c.stolenForDevice; guard.choked += c.hardChokes;
             }

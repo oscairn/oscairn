@@ -9,7 +9,8 @@
 // panics after a miss and the audio thread's page faults, counted from the last reset. The audio thread's
 // own CPU time per block (cpu) answers whether a long run was computing or not scheduled: far below the run
 // for a stall that sleeps, close to it for one that spins (a second worker, KICK_FIXTURE_STALL's fourth field).
-// An instrument two parts share (sound contexts, RFC 0021) is in it too, once, naming both parts.
+// An instrument two parts share (sound contexts, RFC 0021) is in it too, once, naming both parts, with
+// its instance's load guard.
 //   oscairn-worker-timing-test WORKER FIXTURE.clap BASIC-SYNTH.clap
 #include <oscairn/json_rpc.h>
 #include <oscairn/session.h>
@@ -107,6 +108,7 @@ int main(int argc, char** argv)
     setenv("KICK_FIXTURE_STALL", "", 1);
     {
         oscairn::Session shared(rate, frames);
+        shared.setBudget({.9, 0}); // the shared budget's lanes, which the load guard line gives
         const auto lead = shared.add("Lead", argv[3]);
         const auto alpha = shared.addPart("Alpha"); shared.insertIntoPart(alpha, 0, lead); shared.commit();
         const auto pad = shared.shareInstrument("Pad", lead);
@@ -119,6 +121,7 @@ int main(int argc, char** argv)
             const auto& x = st.workers[0];
             check(x.node == lead && x.parts == std::vector<std::string>{"Alpha", "Beta"}, "under its first node, naming both parts it plays for");
             check(count(x.roundTrip) > 0 && count(x.wake) > 0 && count(x.cpu) > 0 && x.allowance > 0, "with its round trips and their parts");
+            check(x.guard.limit > 0 && x.guard.took > 0, "and its load guard, the instance's lane: limit " + std::to_string(x.guard.limit) + " us, took " + std::to_string(x.guard.took) + " us");
         }
         const auto json = oscairn::JsonRpc(shared).dispatch(R"({"jsonrpc":"2.0","id":1,"method":"engine.timing"})").value_or("");
         check(json.find(R"("parts":["Alpha","Beta"])") != std::string::npos, "engine.timing gives the parts: " + json.substr(0, 200));

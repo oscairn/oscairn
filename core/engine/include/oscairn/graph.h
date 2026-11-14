@@ -237,9 +237,11 @@ namespace oscairn
         /// A node's cost as the budget sees it (-1: not measured), and the notes it gave up so far: faded for
         /// its lane's limit (stolen), faded for the lanes' total (stolenForDevice), and choked for a block that
         /// would be missed; and its lane's limit and what the lane took in the last block, in microseconds
-        /// (0 with no budget).
+        /// (0 with no budget). instance: for a node playing a sound of a shared instance, the instance's, which
+        /// the budget keeps for all its parts together (its notes, its lane); else the node's own (none for such
+        /// a node). Main thread.
         struct NoteCost { double rest = -1, perNote = -1; uint64_t stolen = 0, hardChokes = 0, stolenForDevice = 0; double laneLimit = 0, laneTook = 0; };
-        NoteCost noteCost( NodeId node ) const;
+        NoteCost noteCost( NodeId node, bool instance = false ) const;
         /// The output guard: a node's blocks not heard for a sample not finite or past outputBound (+120 dBFS), in
         /// all and in a row up to its last block; each faded out over 1 ms, the plugin playing on. Any thread.
         /// +120 dBFS, not less: audio ports also carry data (the harmony follower fixture's chords and keys, to about
@@ -575,6 +577,7 @@ namespace oscairn
         std::map<NodeId, Node>                nodes_;
         // RFC 0021 slice 3: each shared engine's cost as the budget measures it, kept across plans.
         mutable std::map<const PluginHost*, std::shared_ptr<Activity>> engineCosts_;
+        const Activity* instanceActivity( NodeId node ) const; // a sound context's shared instance's, else the node's own; null for none
         std::map<std::pair<NodeId, NodeId>,std::shared_ptr<NoteRoute>> noteEdges_;
         std::map<std::pair<NodeId, NodeId>,std::vector<NoteZone>> noteZones_;
         std::set<std::pair<NodeId, NodeId>> draining_;

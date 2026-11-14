@@ -263,8 +263,13 @@ Built 2026-11-14. Samples in [Oscairn Sample Packs](https://github.com/oscairn/s
 [item types](rfcs/0023-item-types.md) kept by handlers: code in Oscairn, built on the samplepack
 library, that verifies such an item, stores it and finds it. A type names its handler in its
 manifest; the package `org.oscairn.sample-types` declares both (its manifests are in
-`core/control/types/org.oscairn.sample-types/`), and a device that has not installed it, or an
-archive declaring them, knows neither:
+`core/control/types/org.oscairn.sample-types/`, packed with `oscairn-sign library-package`), a
+package of those two manifests and no code. The Sampler, any other plugin that plays these
+samples and every sample content package name it in `dependencies.packages`
+([below](#package-dependencies)); a device that has installed neither it nor an archive declaring
+the types knows neither, and refuses their files naming the package. It is a few hundred bytes and
+lets a fresh device accept sample content, so it is to be preinstalled once published
+(`tools/preinstalled.txt` lists only published packages, so it is not there yet):
 
 ```json
 {"format": "oscairn.type", "version": 1, "id": "org.oscairn.sample-types.sample", "name": "Sample", "plural": "Samples",
@@ -394,12 +399,15 @@ A converter writing libraries that use published, signed packages:
 
 Specified 2026-11-11 ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#the-starter-library)),
 for the starter library of Performances that comes with Oscairn and any library whose items use FM,
-Analog or another published plugin. **Not built:** no reader or writer takes it yet. Today's reader
-reads only `assets` in `dependencies` (`core/control/src/package.cpp`), so an archive carrying it
-installs, and nothing reads it. No format version change: an older reader passes over it.
+Analog or another published plugin; widened 2026-11-14 to every kind, so that a plugin package can
+need a types package (the Sampler needs `org.oscairn.sample-types`), a sample package the types package,
+and a Performance pack a sample package. **Built 2026-11-14:** reading, installing from a
+repository, recording and removal, below; `repository` is read and not used yet (a dependency comes
+from the repository the install is from), and an export does not write it yet. No format version
+change: an older reader passes over it.
 
-A library, an exported Performance or an exported Sound names the packages its items need,
-plugin packages and asset libraries alike, each by package ID and the least version:
+Any package, of any kind, names the packages it needs, plugin packages, asset libraries, libraries
+and types packages alike, each by package ID and the least version:
 
 ```json
 "dependencies": {
@@ -414,15 +422,46 @@ plugin packages and asset libraries alike, each by package ID and the least vers
 
 | Field | Meaning |
 | --- | --- |
-| `packages` | Absent, or a list of at most 256 entries, one per `id`; only in kinds `library`, `performance` and `sound` (a plugin package keeps naming its asset libraries in `assets`) |
+| `packages` | Absent, or a list of at most 256 entries, one per `id`, not the package's own; any kind (a plugin package's asset libraries may stay in `assets`, which a device treats the same way) |
 | `id` | The package's ID in its repository, as plain as a library's ID |
 | `version` | The least version that works, as plain as an asset library's version. The items' own plugin versions stay in their documents; this says which package brings them |
 | `repository` | Optional: where the package is published, with the shape and rules of `pluginRepositories`' `repository` (an `https://` address and the root key). Absent: the repositories the device knows, in `packages.repositories`' order |
 
-Once built, a reader refuses the archive, as for any malformed field, when an entry is not this
-shape, an ID is named twice, or there are more than 256.
+A reader refuses the archive, as for any malformed field, when an entry is not this shape, an ID is
+named twice or is the package's own, or there are more than 256.
 
-**Writing it.** `library.export` writes one entry for each package recorded in `packages.json`
+**Installing from a repository** (`packages.install`): before anything is installed, the device
+finds every package the chosen one needs that it lacks (or has older than named), and what those
+need in turn, depth first, in the same repository, each at its newest stable version this device
+can install that is at least the one named. One the repository does not have, a cycle (named:
+`a -> b -> a`) or a chain deeper than 16 refuses the install with nothing installed. Then each is
+installed after the ones it needs, the chosen one last, and each recorded at its own version. A
+package recorded without a version (a library installed from a file, whose manifest has none)
+counts as any version.
+
+**Installed from a file**, a package whose dependencies are missing installs as before and its
+notes name each missing one. An entry in a folder of no item type this device knows is refused as
+before, the refusal naming the packages the archive needs, which may declare that type.
+
+**Removing one.** `packages.json` records what each installed package needs. A package another
+installed package needs is not removed: `library.uninstall`, `assets.uninstall` and removing this
+device's build of a plugin package's plugin (`plugins.remove`) refuse, naming the dependents, as an
+asset library in use is refused today. Remove the dependents first.
+
+**Packing it.** `oscairn-sign plugin-package`, `asset-package` and `library-package` take
+`--package-dependency <id> <least-version>`. `library-package` packs a tree into a library with no
+items: the item types it declares and the files of types a handler keeps, with `--type` naming a
+type manifest of the package it needs, for packing and checking only:
+
+```sh
+oscairn-sign library-package --key author.key --license MIT org.oscairn.sample-types.olib \
+    org.oscairn.sample-types "Sample types" types-tree/   # Types/org.oscairn.sample-types/{sample,waveform}.json
+oscairn-sign library-package --key author.key --license CC-BY-4.0 \
+    --type core/control/types/org.oscairn.sample-types/sample.json \
+    --package-dependency org.oscairn.sample-types 1.0.0 Piano.olib com.example.piano "Piano" piano/   # piano/Samples/<id>.osp
+```
+
+**Writing it** (not built). `library.export` writes one entry for each package recorded in `packages.json`
 that holds a plugin the items use (by format, ID and version) or the asset library their documents
 reference, at the version installed, with the repository it was recorded from when that is an
 `https://` address. A plugin or library not installed from a package gets no entry; its plugin is

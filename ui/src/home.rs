@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Home (RFC 0030): a tile for each app the profile offers, in the JUCE Launcher's order, each
-//! with its icon, name and a line about its state; a border cursor that the navigation actions
-//! move, and nothing opens until it is confirmed (or tapped).
+//! with its icon, name and a line about its state; tiles in reading order under a border cursor
+//! that the navigation actions move, nothing opened until it is confirmed (or tapped).
 
 use crate::nav::{Action, Cursor};
 
@@ -37,24 +37,23 @@ impl Home {
         Home { cursor: Cursor::new(tiles.len(), tiles.len().max(1)), tiles, columns: columns.max(1) }
     }
 
-    /// Moves the cursor; the app to open on a confirm.
+    /// Moves or drops the cursor; the app to open on a confirm.
     pub fn act(&mut self, action: Action) -> Option<&'static App> {
-        match action {
-            Action::Move { by, .. } => self.cursor = self.cursor.moved(by as i64),
-            Action::Arrow { dx, dy } => self.cursor = self.cursor.moved(dx as i64 + dy as i64 * self.columns as i64),
-            Action::Confirm => return self.tiles.get(self.cursor.at).map(|&i| &APPS[i]),
-            _ => {}
-        }
+        let c = self.cursor;
+        self.cursor = match action {
+            Action::Move { by, .. } => c.moved(by as i64),
+            Action::Arrow { dx, dy } => c.moved(dx as i64 + dy as i64 * self.columns as i64),
+            Action::Page(by) | Action::End(by) => c.moved(by as i64 * c.count as i64),
+            Action::Cancel(_) => c.clear(),
+            Action::Confirm(_) => return c.at.and_then(|at| self.tiles.get(at)).map(|&i| &APPS[i]),
+        };
         None
     }
 
-    /// A tap: the cursor there, and that app opened.
+    /// A tap opens that app; the cursor goes, as a tap drops it in the JUCE lists.
     pub fn tap(&mut self, tile: usize) -> Option<&'static App> {
-        if tile >= self.tiles.len() {
-            return None;
-        }
-        self.cursor = self.cursor.to(tile);
-        self.act(Action::Confirm)
+        self.cursor = self.cursor.clear();
+        self.tiles.get(tile).map(|&i| &APPS[i])
     }
 }
 
@@ -72,13 +71,14 @@ mod tests {
     #[test]
     fn the_cursor_moves_and_only_confirm_opens() {
         let mut h = Home::new(&[], 3);
-        assert!(h.act(Action::Move { pane: 0, by: 1 }).is_none());
-        assert!(h.act(Action::Arrow { dx: 0, dy: 1 }).is_none()); // a row down: 1 + 3
-        assert_eq!(h.cursor.at, 4);
+        assert!(h.act(Action::Confirm(None)).is_none(), "no cursor: nothing to confirm");
+        assert!(h.act(Action::Move { pane: None, by: 1 }).is_none()); // shown on the first tile
+        assert!(h.act(Action::Arrow { dx: 1, dy: 1 }).is_none()); // across and a row down: 0 + 1 + 3
+        assert_eq!(h.cursor.at, Some(4));
         assert!(h.act(Action::Arrow { dx: 0, dy: 1 }).is_none()); // past the end: stays at the last
-        assert_eq!(h.act(Action::Confirm).unwrap().name, "Settings");
+        assert_eq!(h.act(Action::Confirm(None)).unwrap().name, "Settings");
+        assert!(h.act(Action::Cancel(None)).is_none() && h.cursor.at.is_none());
         assert_eq!(h.tap(2).unwrap().name, "Setlist");
         assert!(h.tap(9).is_none());
-        assert!(Home::new(&["x".into()], 3).act(Action::Confirm).is_none());
     }
 }

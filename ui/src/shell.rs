@@ -32,6 +32,8 @@ pub enum Request {
     Memory,
     /// library.query's total of Performances (false) or Sounds (true), for Home's Library line.
     Library(bool),
+    /// controllers.view: whether lists are on screen, so the panel's navigate controls navigate.
+    View,
 }
 
 impl Request {
@@ -79,6 +81,8 @@ pub struct App {
     tiles: Rc<VecModel<TileData>>,
     /// The JUCE app's name for the screen asked for (its --app), once one is.
     handover: Option<&'static str>,
+    /// The panel's navigation totals as last read.
+    totals: nav::Totals,
 }
 
 thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
@@ -117,8 +121,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, post: impl Fn(Event
     let tiles = Rc::new(VecModel::<TileData>::default());
     ui.global::<HomeState>().set_tiles(tiles.clone().into());
     ui.global::<HomeState>().on_tapped(|i| with_app(|a| a.tap(i)));
-    ui.global::<Bar>().on_home(|| act(Action::Home));
-    ui.on_key(|text, shift| nav::from_key(&text, shift).map(act).is_some());
+    ui.global::<Bar>().on_home(|| with_app(|a| a.go(Screen::Home)));
+    ui.on_key(|text| nav::from_key(&text).map(act).is_some());
     APP.with(|a| {
         let mut app = App {
             ui: ui.as_weak(),
@@ -132,6 +136,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, post: impl Fn(Event
             home,
             tiles,
             handover: None,
+            totals: nav::Totals::default(),
         };
         app.show_home();
         *a.borrow_mut() = Some(app);
@@ -196,7 +201,9 @@ impl App {
                     ui.set_engine(SharedString::new());
                 }
                 self.last_meters = None;
-                self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed"]}));
+                self.totals.forget();
+                self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed", "controllers"]}));
+                self.send_view();
                 self.send(Request::Reopen, "performance.reopen", json!({}));
                 self.ask_performance();
                 self.send(Request::Library(false), "library.query", json!({"kind": "performance", "limit": 1}));
@@ -210,6 +217,13 @@ impl App {
             Event::Notification { method, params } => match method.as_str() {
                 "status" => self.status(&params),
                 "graph.changed" => self.ask_performance(),
+                // Read always, so the totals stay current; acted on only by the screen shown, and
+                // by none while the display goes to the JUCE app (act drops them then).
+                "controllers" => {
+                    for action in self.totals.read(&params["navigation"]) {
+                        self.act(action);
+                    }
+                }
                 _ => {}
             },
             Event::Reply { request, result } => self.reply(request, result),
@@ -271,7 +285,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe => {}
+            Request::Subscribe | Request::View => {}
         }
     }
 
@@ -328,7 +342,7 @@ impl App {
     fn show_home(&mut self) {
         for (n, &i) in self.home.tiles.iter().enumerate() {
             let app = &home::APPS[i];
-            let tile = TileData { name: app.name.into(), line: self.line(app).into(), icon: app.icon, cursor: n == self.home.cursor.at };
+            let tile = TileData { name: app.name.into(), line: self.line(app).into(), icon: app.icon, cursor: self.home.cursor.at == Some(n) };
             match self.tiles.row_data(n) {
                 Some(was) if was == tile => {}
                 Some(_) => self.tiles.set_row_data(n, tile),
@@ -340,7 +354,6 @@ impl App {
     fn act(&mut self, action: Action) {
         match (self.screen, action) {
             (Screen::Opening, _) => {} // the display is going to the JUCE app
-            (_, Action::Home) => self.go(Screen::Home),
             (Screen::Home, _) => {
                 if let Some(ui) = self.ui() {
                     self.home.columns = ui.get_home_columns().max(1) as usize;
@@ -351,7 +364,7 @@ impl App {
                     self.open(app);
                 }
             }
-            (Screen::Setlist, Action::Cancel) => self.go(Screen::Home),
+            (Screen::Setlist, Action::Cancel(_)) => self.go(Screen::Home),
             (Screen::Setlist, _) => {}
         }
     }
@@ -367,8 +380,24 @@ impl App {
         }
     }
 
+    /// Tells the engine whether the screen shows lists: Home's tiles and the Setlist are; a JUCE
+    /// screen opening says its own once it runs.
+    fn send_view(&mut self) {
+        let lists = self.screen != Screen::Opening;
+        self.send(Request::View, "controllers.view", json!({"lists": lists}));
+    }
+
     fn go(&mut self, screen: Screen) {
+        if self.screen != screen {
+            // A cursor drops when its screen goes, as on focus loss in the JUCE lists.
+            self.home.cursor = self.home.cursor.clear();
+            self.show_home();
+        }
+        let was = self.screen;
         self.screen = screen;
+        if (was == Screen::Opening) != (screen == Screen::Opening) {
+            self.send_view();
+        }
         if let Some(ui) = self.ui() {
             ui.set_screen(screen as i32);
             let bar = ui.global::<Bar>();

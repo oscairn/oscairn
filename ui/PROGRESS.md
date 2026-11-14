@@ -44,4 +44,12 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   accepts them). Tests: all built-in themes and an odd one (extreme colors, font scale 1.4,
   missing and bad keys) render top bar and Home, a switch repaints once, fixed width holds at
   1.4. 25 passed. The JUCE Theme.cpp change not yet compiled (build running).
+- Settings' Top bar page committed (81200ba4 before the rebase). Rebased onto main (encoder-scroll
+  in); clean.
+- Navigation reconciled with main's: no `navigation` section of my own (never committed to the
+  schema), no panel-holder reader; the shell subscribes to `controllers`, reads `navigation`
+  totals (first read a baseline, fresh on each connection), hands the difference to the screen
+  shown only, none while handing over; `controllers.view {lists}` on connect and around a
+  handover. Keys and cursor semantics as ListCursor (no cursor until the first move, Cancel
+  drops it then goes back, tap drops it, 2 px accent border). 25 passed.
 </content>

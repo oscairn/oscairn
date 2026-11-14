@@ -18,7 +18,7 @@ export component Shell inherits Window {
     // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening (`opening` names it).
     in property <int> screen;
     in property <string> opening;
-    callback key(string, bool) -> bool; // a key's text and Shift; true when it was taken
+    callback key(string) -> bool; // a key's text; true when it was taken
     out property <length> resources-x: bar.resources-x;
     out property <length> resources-width: bar.resources-width;
     out property <length> tempo-x: bar.tempo-x;
@@ -27,7 +27,7 @@ export component Shell inherits Window {
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(event) => {
-            if (root.key(event.text, event.modifiers.shift)) { return accept; }
+            if (root.key(event.text)) { return accept; }
             return reject;
         }
     }

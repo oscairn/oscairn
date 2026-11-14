@@ -8,7 +8,7 @@ use crate::client::Event;
 use crate::shell::{self, Request};
 use crate::theme;
 use crate::topbar::{MeterSettings, Show};
-use crate::nav::{Action, Roles};
+use crate::nav::Action;
 use crate::{Bar, HomeState, Shell};
 use serde_json::json;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
@@ -211,7 +211,8 @@ fn the_top_bar_follows_the_engine() {
     let mut f = Fixture::new("topbar");
     f.engine.answer(); // session.hello
     f.pump();
-    assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed"]));
+    assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed", "controllers"]));
+    assert_eq!(f.engine.request()["params"], json!({"lists": true}));
     f.answer("performance.reopen", json!({"notice": ""}));
     f.answer("performance.info", json!({"name": "Grand Piano", "unsaved": false}));
     f.answer("graph.get", json!({"scene": 1, "scenes": [{"id": 1, "name": "Verse"}]}));
@@ -232,7 +233,8 @@ fn the_top_bar_follows_the_engine() {
     f.screen.frame();
     f.screen.save("topbar-engine");
     f.engine.writer.shutdown(std::net::Shutdown::Both).unwrap();
-    f.pump(); // the subscribe still out, failed
+    f.pump(); // the subscribe and controllers.view still out, failed
+    f.pump();
     f.pump();
     assert!(f.screen.ui.get_engine().starts_with("lost"));
 }
@@ -258,26 +260,38 @@ fn home_moves_by_keys_panel_and_touch() {
     s.frame();
     s.save("home");
     assert_eq!(s.frame(), None, "at rest");
-    let key = |s: &Screen, k: slint::platform::Key| s.ui.invoke_key(slint::SharedString::from(k), false);
+    let key = |s: &Screen, k: slint::platform::Key| s.ui.invoke_key(slint::SharedString::from(k));
+    let cursor = |s: &Screen| s.ui.global::<HomeState>().get_tiles().iter().position(|t| t.cursor);
+    assert!(key(s, slint::platform::Key::RightArrow));
+    assert_eq!(cursor(s), Some(0), "the first move shows the cursor on the first tile");
+    s.frame();
     assert!(key(s, slint::platform::Key::RightArrow));
     let repainted = s.frame().unwrap();
     let (a, b) = (tile(s, 0), tile(s, 1));
     assert!(within(repainted, (a.0, a.1, b.0 + b.2 - a.0, a.3)), "a move repainted {repainted:?}: tiles 0 and 1 are {a:?} {b:?}");
-    let cursor = |s: &Screen| s.ui.global::<HomeState>().get_tiles().iter().position(|t| t.cursor);
     assert_eq!((cursor(s), s.ui.get_screen()), (Some(1), 0), "moved, nothing opened");
-    // The panel: the data dial two steps on, as a FANTOM-07's map would have it.
-    let roles = Roles::parse(&json!({"navigation": {"cursor": ["data"], "confirm": ["enter"]}}));
-    shell::act(roles.action("data", 2).unwrap());
-    assert_eq!(cursor(s), Some(3));
-    shell::act(Action::Move { pane: 0, by: -1 });
-    shell::act(roles.action("enter", 1).unwrap());
+    // The panel, through the engine's navigation totals: the first a baseline, then the VALUE
+    // dial two steps on (the pane last touched), then one back and ENTER.
+    let s = &mut f.screen;
+    let _ = s;
+    let navigation = |f: &mut Fixture, n: serde_json::Value| {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        f.pump();
+    };
+    navigation(&mut f, json!({"move": 10, "confirm": 5}));
+    navigation(&mut f, json!({"move": 12, "confirm": 5}));
+    assert_eq!(cursor(&f.screen), Some(3));
+    navigation(&mut f, json!({"move": 11, "confirm": 6}));
+    let s = &mut f.screen;
     assert_eq!((s.ui.get_screen(), s.ui.global::<Bar>().get_where().as_str(), s.ui.global::<Bar>().get_home_button()), (1, "Setlist", true));
     assert!(key(s, slint::platform::Key::Escape), "Cancel goes Home");
-    assert_eq!(s.ui.get_screen(), 0);
+    assert_eq!((s.ui.get_screen(), cursor(s)), (0, None), "the cursor dropped with its screen");
     s.ui.global::<HomeState>().invoke_tapped(4); // Settings: a JUCE screen
     assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Settings", Some("settings")));
     s.frame();
     s.save("home-opening-settings");
+    shell::act(Action::Move { pane: None, by: 1 });
+    assert_eq!(f.screen.ui.get_screen(), 2, "while the display goes to the JUCE app, nothing is taken");
 }
 
 /// A theme of extreme colors at the largest font scale, with keys missing (the default's then).
@@ -296,6 +310,9 @@ fn themes_switch_live_and_repaint_once() {
     let mut f = Fixture::new("themes");
     f.engine.answer(); // session.hello
     f.pump();
+    f.answer("subscribe", json!({"accepted": true}));
+    f.answer("controllers.view", json!({"accepted": true}));
+    f.answer("performance.reopen", json!({"notice": ""})); // no busy line counting up meanwhile
     let s = &mut f.screen;
     meters(&s.ui, 42, 77);
     s.frame();

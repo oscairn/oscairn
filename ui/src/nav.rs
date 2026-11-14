@@ -1,31 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Navigation: what the musician asks of a screen, the same whatever asked it. Three sources make
-//! these actions: touch (a tap moves the cursor there and confirms), a computer keyboard
-//! (`from_key`), and a device's panel controls through the roles its panel map names
-//! (`Roles`, the map's `navigation`). Every action is reachable without touch. The abilities
-//! are universal; which control plays which role is the device's map.
+//! Navigation: what the musician asks of the lists on a screen, the same whatever asked it, as
+//! the JUCE app's ListCursor and ListAction have it (hosts/standalone/Theme.h, ListAction.h).
+//! Three sources make these actions: touch (a tap does what confirming does), a computer keyboard
+//! (`from_key`), and a device's panel: its map says which control does what in a list
+//! (`navigate`, docs/panel-map.schema.json), the engine counts what they did, and the shell reads
+//! the totals from `controllers` (`Totals`). The abilities are universal; the map is the device's.
 
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// A cursor moves by steps: pane 0 is the focused list, 1 and 2 a two-pane screen's left
-    /// and right (an encoder's turn). Nothing opens until Confirm.
-    Move { pane: u8, by: i32 },
-    /// Cursor keys: across and down, a grid's columns and rows, a list's rows.
+    /// A list's cursor moves by steps: in pane N from the left (None: the pane last touched).
+    /// Nothing opens until Confirm.
+    Move { pane: Option<u8>, by: i32 },
+    /// Cursor keys: across and down, a grid's columns and rows.
     Arrow { dx: i32, dy: i32 },
-    /// A page back or forward.
+    /// A page towards the start (-1) or the end (1).
     Page(i32),
-    /// Previous or Next, where the screen has them (Setlist: open the slot before or after).
-    Step(i32),
-    Confirm,
-    Cancel,
-    Home,
+    /// The first (-1) or last (1) item.
+    End(i32),
+    /// What a tap on the cursor's item does.
+    Confirm(Option<u8>),
+    /// Drops the cursor; with none, goes back.
+    Cancel(Option<u8>),
 }
 
-/// A computer keyboard's key (Slint's key text): arrows move the cursor, Enter confirms, Escape
-/// cancels, Tab pages, Page Up and Page Down step (page turners and foot switches send them).
-pub fn from_key(text: &str, shift: bool) -> Option<Action> {
+/// A computer keyboard's key (Slint's key text): arrows, Page Up and Down, Home and End, Return
+/// and Escape, as the JUCE lists take them.
+pub fn from_key(text: &str) -> Option<Action> {
     use slint::platform::Key;
     let is = |k: Key| text == slint::SharedString::from(k).as_str();
     Some(if is(Key::UpArrow) {
@@ -36,102 +39,104 @@ pub fn from_key(text: &str, shift: bool) -> Option<Action> {
         Action::Arrow { dx: -1, dy: 0 }
     } else if is(Key::RightArrow) {
         Action::Arrow { dx: 1, dy: 0 }
-    } else if is(Key::Return) || text == "\n" || text == "\r" {
-        Action::Confirm
-    } else if is(Key::Escape) {
-        Action::Cancel
-    } else if is(Key::Home) {
-        Action::Home
-    } else if is(Key::Backtab) || (is(Key::Tab) && shift) {
-        Action::Page(-1)
-    } else if is(Key::Tab) {
-        Action::Page(1)
     } else if is(Key::PageUp) {
-        Action::Step(-1)
+        Action::Page(-1)
     } else if is(Key::PageDown) {
-        Action::Step(1)
+        Action::Page(1)
+    } else if is(Key::Home) {
+        Action::End(-1)
+    } else if is(Key::End) {
+        Action::End(1)
+    } else if is(Key::Return) || text == "\n" || text == "\r" {
+        Action::Confirm(None)
+    } else if is(Key::Escape) {
+        Action::Cancel(None)
     } else {
         return None;
     })
 }
 
-/// The panel map's `navigation` (docs/panel-map.schema.json): each role and the controls (by
-/// their identity in the map, `screen:1`, `data`, `enter`) that play it.
-#[derive(Default, Debug)]
-pub struct Roles(Vec<(String, String)>);
+/// The panel's navigation as the engine counts it (`controllers.get`'s `navigation`): totals since
+/// the engine started, by key (`move`, `move:N`, `confirm[:N]`, `cancel[:N]`). The first read sets
+/// the baseline; each later one gives the actions since the last.
+#[derive(Default)]
+pub struct Totals(Option<HashMap<String, i64>>);
 
-impl Roles {
-    pub fn parse(map: &Value) -> Roles {
-        let mut roles = Vec::new();
-        if let Some(nav) = map["navigation"].as_object() {
-            for (role, controls) in nav {
-                for c in controls.as_array().into_iter().flatten().filter_map(Value::as_str) {
-                    roles.push((c.to_string(), role.clone()));
-                }
+impl Totals {
+    pub fn read(&mut self, navigation: &Value) -> Vec<Action> {
+        let Some(now) = navigation.as_object() else { return Vec::new() };
+        let now: HashMap<String, i64> = now.iter().filter_map(|(k, v)| Some((k.clone(), v.as_i64()?))).collect();
+        let Some(last) = self.0.replace(now.clone()) else { return Vec::new() };
+        let mut actions = Vec::new();
+        for (key, total) in now {
+            let delta = total - last.get(&key).copied().unwrap_or(0);
+            if delta == 0 {
+                continue;
+            }
+            let (what, pane) = key.split_once(':').map_or((key.as_str(), None), |(w, n)| (w, n.parse::<u8>().ok()));
+            match what {
+                "move" => actions.push(Action::Move { pane, by: delta.clamp(-1000, 1000) as i32 }),
+                // A count gone back (an engine started again) is nothing to press.
+                "confirm" if delta > 0 => actions.extend((0..delta.min(4)).map(|_| Action::Confirm(pane))),
+                "cancel" if delta > 0 => actions.extend((0..delta.min(4)).map(|_| Action::Cancel(pane))),
+                _ => {}
             }
         }
-        Roles(roles)
+        actions
     }
 
-    /// A control moved: an encoder by `steps`, a switch pressed (`steps` 1; a release, 0, does
-    /// nothing). None for a control that plays no role.
-    pub fn action(&self, control: &str, steps: i32) -> Option<Action> {
-        let role = &self.0.iter().find(|(c, _)| c == control)?.1;
-        if steps == 0 {
-            return None;
-        }
-        Some(match role.as_str() {
-            "cursor" => Action::Move { pane: 0, by: steps },
-            "pane1" => Action::Move { pane: 1, by: steps },
-            "pane2" => Action::Move { pane: 2, by: steps },
-            "up" => Action::Arrow { dx: 0, dy: -1 },
-            "down" => Action::Arrow { dx: 0, dy: 1 },
-            "left" => Action::Arrow { dx: -1, dy: 0 },
-            "right" => Action::Arrow { dx: 1, dy: 0 },
-            "pageBack" => Action::Page(-1),
-            "pageForward" => Action::Page(1),
-            "previous" => Action::Step(-1),
-            "next" => Action::Step(1),
-            "confirm" => Action::Confirm,
-            "cancel" => Action::Cancel,
-            "home" => Action::Home,
-            _ => return None,
-        })
+    /// A new connection's first read is a baseline again (the engine may have started again).
+    pub fn forget(&mut self) {
+        self.0 = None;
     }
 }
 
-/// A cursor over `count` items shown `per_page` at a time: it moves and wraps nowhere (it stops
-/// at either end), and the page shown follows it by whole pages, never scrolling, so a move
-/// redraws the two items it leaves and reaches, or one page.
+/// A list's cursor, apart from any selection: none until the first move, which shows it on the
+/// first item shown; it stops at either end; the page shown follows it by whole pages, never
+/// scrolling, so a move redraws the two items it leaves and reaches, or one page.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cursor {
-    pub at: usize,
+    pub at: Option<usize>,
     pub count: usize,
     pub per_page: usize,
+    /// The first item of the page shown.
+    pub first: usize,
 }
 
 impl Cursor {
     pub fn new(count: usize, per_page: usize) -> Cursor {
-        Cursor { at: 0, count, per_page: per_page.max(1) }
+        Cursor { at: None, count, per_page: per_page.max(1), first: 0 }
     }
     pub fn moved(self, by: i64) -> Cursor {
         if self.count == 0 {
             return self;
         }
-        Cursor { at: (self.at as i64 + by).clamp(0, self.count as i64 - 1) as usize, ..self }
+        let at = match self.at {
+            None => self.first.min(self.count - 1), // the first move shows it
+            Some(at) => (at as i64 + by).clamp(0, self.count as i64 - 1) as usize,
+        };
+        self.to(at)
     }
+    /// The cursor on `at` (a tap's item), the page following it.
     pub fn to(self, at: usize) -> Cursor {
         if self.count == 0 {
             return self;
         }
-        Cursor { at: at.min(self.count - 1), ..self }
+        let at = at.min(self.count - 1);
+        Cursor { at: Some(at), first: at / self.per_page * self.per_page, ..self }
     }
-    /// The first item of the page the cursor is on.
-    pub fn first(self) -> usize {
-        self.at / self.per_page * self.per_page
+    pub fn clear(self) -> Cursor {
+        Cursor { at: None, ..self }
     }
-    pub fn pages(self) -> usize {
-        self.count.div_ceil(self.per_page).max(1)
+    /// A page back or on, with the cursor (if any) on the same place in it.
+    pub fn paged(self, by: i64) -> Cursor {
+        let pages = self.count.div_ceil(self.per_page).max(1) as i64;
+        let page = (self.first / self.per_page) as i64;
+        let first = ((page + by).clamp(0, pages - 1) as usize) * self.per_page;
+        match self.at {
+            Some(at) => self.to(first + at % self.per_page),
+            None => Cursor { first, ..self },
+        }
     }
 }
 
@@ -144,31 +149,41 @@ mod tests {
     fn keys() {
         use slint::platform::Key;
         let k = |key: Key| slint::SharedString::from(key).to_string();
-        assert_eq!(from_key(&k(Key::DownArrow), false), Some(Action::Arrow { dx: 0, dy: 1 }));
-        assert_eq!(from_key(&k(Key::Return), false), Some(Action::Confirm));
-        assert_eq!(from_key(&k(Key::Tab), true), Some(Action::Page(-1)));
-        assert_eq!(from_key(&k(Key::PageDown), false), Some(Action::Step(1)));
-        assert_eq!(from_key("a", false), None);
+        assert_eq!(from_key(&k(Key::DownArrow)), Some(Action::Arrow { dx: 0, dy: 1 }));
+        assert_eq!(from_key(&k(Key::Return)), Some(Action::Confirm(None)));
+        assert_eq!(from_key(&k(Key::PageUp)), Some(Action::Page(-1)));
+        assert_eq!(from_key(&k(Key::End)), Some(Action::End(1)));
+        assert_eq!(from_key("a"), None);
     }
 
     #[test]
-    fn panel_roles_from_the_map() {
-        let map = json!({"navigation": {"cursor": ["data"], "pane1": ["screen:1", "screen:2"], "pane2": ["screen:6"], "confirm": ["enter"], "odd": ["x"], "cancel": "exit"}});
-        let r = Roles::parse(&map);
-        assert_eq!(r.action("data", -3), Some(Action::Move { pane: 0, by: -3 }));
-        assert_eq!(r.action("screen:2", 1), Some(Action::Move { pane: 1, by: 1 }));
-        assert_eq!(r.action("screen:6", 2), Some(Action::Move { pane: 2, by: 2 }));
-        assert_eq!((r.action("enter", 1), r.action("enter", 0)), (Some(Action::Confirm), None)); // pressed, released
-        assert_eq!((r.action("x", 1), r.action("exit", 1), r.action("knob:1", 5)), (None, None, None)); // an unknown role, not a list, no role
-        assert!(Roles::parse(&json!({})).action("data", 1).is_none());
+    fn panel_totals_become_actions_once() {
+        let mut t = Totals::default();
+        assert!(t.read(&json!({"move": 40, "confirm": 3})).is_empty(), "the first read: a baseline");
+        let mut a = t.read(&json!({"move": 42, "move:1": -3, "confirm": 4, "cancel:0": 1}));
+        a.sort_by_key(|x| format!("{x:?}"));
+        assert_eq!(a, [Action::Cancel(Some(0)), Action::Confirm(None), Action::Move { pane: None, by: 2 }, Action::Move { pane: Some(1), by: -3 }]);
+        assert!(t.read(&json!({"move": 42, "move:1": -3, "confirm": 4, "cancel:0": 1})).is_empty(), "nothing new");
+        assert!(t.read(&json!({"move": 1, "confirm": 0, "odd": "x"})).iter().all(|x| matches!(x, Action::Move { .. })), "an engine started again: no presses");
+        t.forget();
+        assert!(t.read(&json!({"move": 99})).is_empty());
+        assert!(t.read(&json!(null)).is_empty());
     }
 
     #[test]
-    fn cursor_pages_and_stops_at_the_ends() {
+    fn cursor_shows_on_the_first_move_pages_and_stops_at_the_ends() {
         let c = Cursor::new(25, 10);
-        assert_eq!((c.moved(-1).at, c.moved(9).first(), c.moved(10).first(), c.moved(99).at, c.pages()), (0, 0, 10, 24, 3));
-        assert_eq!(c.to(99).at, 24);
+        assert_eq!(c.moved(5).at, Some(0), "the first move shows it where the page starts");
+        let c = c.moved(1).moved(9);
+        assert_eq!((c.at, c.first), (Some(9), 0));
+        let c = c.moved(1);
+        assert_eq!((c.at, c.first), (Some(10), 10), "past the page: the next page");
+        assert_eq!(c.moved(99).at, Some(24));
+        assert_eq!(c.paged(1).at, Some(20));
+        assert_eq!(c.paged(9).first, 20);
+        assert_eq!(Cursor::new(25, 10).paged(1), Cursor { at: None, count: 25, per_page: 10, first: 10 });
+        assert_eq!(c.clear().at, None);
         let empty = Cursor::new(0, 10);
-        assert_eq!((empty.moved(3).at, empty.to(5).at, empty.pages()), (0, 0, 1));
+        assert_eq!((empty.moved(3).at, empty.to(5).at), (None, None));
     }
 }

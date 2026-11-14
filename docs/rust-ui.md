@@ -85,11 +85,24 @@ How (a) works:
   renderer repaints the bounding box of what changed; the models set a property only when its
   shown value changes (a percent, a bar's pixel width), and a list sets only the rows that
   changed. Lists move by pages, never smooth scrolling.
-- **A navigation layer of abstract actions**: move a pane's cursor (or the focused list's) by
-  some steps, page, step (Previous/Next), confirm, cancel, home. Three sources produce them: touch
-  (a tap moves the cursor there and confirms), a computer keyboard, and a device's panel through
-  roles its panel map names (`navigation`, below). The abilities are the same on every device;
-  only the map is the device's.
+- **A navigation layer of abstract actions**, the JUCE lists' (`ListCursor`, `ListAction`):
+  move a pane's cursor (pane N from the left, or the pane last touched) by some steps, confirm,
+  cancel; and from keys also a page and the first or last item. Three sources produce them: touch
+  (a tap does what confirming does, and drops the cursor), a computer keyboard (arrows, Page Up
+  and Down, Home and End, Return, Escape), and a device's panel: its panel map's `navigate`
+  entries say which control does what in a list, the engine counts what they did, and the shell
+  reads the totals from the `controllers` push (`navigation`) and acts on the difference. The
+  abilities are the same on every device; only the map is the device's.
+- **Only the screen shown takes the panel's navigation.** The shell is one process: it reads
+  every `controllers` push so its totals stay current, and hands the difference to the screen
+  shown alone; while the display goes to the JUCE app it takes nothing, and a new connection
+  (the shell started again after a JUCE screen) begins with a fresh baseline, so presses made in
+  the JUCE app are never played again in the shell. It tells the engine that lists are on screen
+  (`controllers.view` `lists`) on connecting and when it hands the display over.
+- **The cursor** is apart from any selection: none until the first move, which shows it on the
+  first item shown; a 2 px `focus` border, as the JUCE lists draw it; moving opens nothing; Cancel drops it, and with none
+  goes back; it drops on a tap and when its screen goes; past the visible items the list turns a
+  page.
 - **Themes are the JUCE app's** (below): the same folders and the same choice.
 
 ## Themes

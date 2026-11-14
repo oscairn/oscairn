@@ -127,7 +127,6 @@ typedef struct
 #define OSCAIRN_CORE_API(p) \
     oscairn_route* p##route_new(uint32_t ports, uint16_t clap_ports, uint32_t fade_frames); \
     void p##route_free(oscairn_route* route); \
-    bool p##route_clap(const oscairn_route* route); \
     uint32_t p##route_live(const oscairn_route* route); \
     void p##route_pedals(const oscairn_route* route, uint8_t pedals[256]); \
     void p##route_held_keys(const oscairn_route* route, uint64_t keys[2]); \
@@ -146,7 +145,6 @@ typedef struct
 
 /* route_new: a ledger for a destination with `ports` note ports, bit p of clap_ports set where port p
  *   takes CLAP notes (else MIDI), and a stolen note's fade of fade_frames (0: choked at once).
- * route_clap: some port takes CLAP notes (the budget counts its notes).
  * route_pedals, route_held_keys: its sustain pedals [port][channel], and the keys its notes hold.
  * route_retire: the connection leaves the plan: its CLAP notes choked, its MIDI channels silenced,
  *   its pedals set to `remaining` (the routes staying), then emptied. False if a release found no room.

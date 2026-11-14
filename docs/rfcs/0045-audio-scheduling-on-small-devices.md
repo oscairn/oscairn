@@ -47,6 +47,8 @@ Checked when built and tested; the sections below say how.
       ([first-use stalls](#start-up-and-first-use-stalls))
 - [ ] 11. The timing report: each part's latency state, misses by cause, panics caused by misses
       ([what the tools report](#what-the-timing-tools-must-report))
+- [ ] 12. The no-glitch guard, in the engine core in Rust ([the guard](#the-no-glitch-guard-2026-11-14)):
+  - [x] 12a. Every plugin's notes can be given up, however it takes notes or reports its voices
 
 ## Problem
 
@@ -794,6 +796,31 @@ three single-part cases again with the extra block; the carry overflowing with c
 the note off and drops the oldest of the rest, and overflowing with releases reports the block's
 events lost. Each check fails with the old panic, without the carry or with a cut instead of the fade, whichever it is about (checked by putting each back). `control-worker-timing`
 now expects no panic after the stall's blocks.
+
+## The no-glitch guard (2026-11-14)
+
+The owner's requirement: notes never glitch, and anything that would push the CPU hard enough to
+glitch notes is given up before that happens; voices may be given up for load from outside the
+audio too (the app, the engine's other threads), which separate UI work keeps rare. The guard is in
+the engine core (`core/engine/rust`, behind `core/engine/src/engine_core.h`; the C++ core is kept
+selectable with `OSCAIRN_ENGINE_CORE=cpp`, as the reference the differential test holds the Rust
+to, with the same rules). Its rules, as built:
+
+- Which note goes, for every rule: released notes before held ones, held notes beyond their part's
+  reserve next, a part's highest and lowest held keys last; within each, the part of lower priority,
+  then the quietest (the plugin's report of a note's loudness, else its velocity), then the oldest.
+  A held note is the last thing to go. Notes fade (5 ms, eight volume steps, then a choke); one is
+  choked at once only where its lane's block would otherwise be missed.
+- 12a. Every note connection is in the budget, a MIDI-dialect plugin's too: a MIDI note given up is
+  sent its note-off (no volume reaches it), so its release plays out and frees its time only as it
+  ends; the guard may give up more such notes than it needed while releases sound. A plugin that
+  reports no voices while notes sound, or whose block was not rendered, is counted by its notes;
+  one that gives up its own voices is exempt only while the voices it reports (else its notes) stay
+  within the limit it was given, so a zero report never exempts it. Found on the FANTOM-07: an FM
+  plugin reporting cost 0 overloaded its lane for 10 s, 1,497 blocks lost, nothing given up.
+  Tested by `load-guard`: 20 notes, twice the allowance, into the fixture taking MIDI notes only,
+  then into one reporting no voices and no cost: before, nothing given up (299 blocks missed after
+  block 300, single run); after, notes give way and the worker is not restarted.
 
 ## Core placement
 

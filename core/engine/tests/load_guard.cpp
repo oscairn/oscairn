@@ -15,6 +15,9 @@
 // part with 0.4 ms more in every block from then on (a real overload): notes give way within eight blocks.
 // And a lane is never charged for another: the lanes' total past one core's budget, a costly lane within its
 // own limit and a cheap one: the costly lane's notes fade for the total, the cheap lane loses nothing, none is choked.
+// And a plugin is sheddable however it takes notes or reports its voices: one part of 20 notes, twice its worker's
+// allowance, into the fixture taking MIDI notes only, then into one reporting no voices and no cost (oscairn.voice-budget)
+// and keeping to no limit: its notes give way and its worker is not restarted.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
 #include <chrono>
@@ -101,6 +104,29 @@ Shared device(const char* plugin){
     const auto ca=g.noteCost(a),cb=g.noteCost(b);
     return {ca.stolen,ca.stolenForDevice,ca.hardChokes,cb.stolen+cb.stolenForDevice+cb.hardChokes,cb.laneLimit};
 }
+
+// One part of 20 notes into a plugin made as `env` says (OSCAIRN_FIXTURE_* variables, set while it loads).
+Result shed(const char* plugin,const std::vector<const char*>& env){
+    for(const auto* v:env)setenv(v,"1",1);
+    Graph g(48000,frames);
+    const auto a=g.add(loadPlugin(plugin,{},48000,frames)); // as it is: a prepared instrument would take CLAP notes for it, as a shared engine does not
+    for(const auto* v:env)unsetenv(v);
+    g.connectNotes(graphInput,a);g.connectAudio(a,graphOutput);
+    g.commit();g.setVoiceBudget(-1);
+    std::vector<float> left(frames),right(frames);float* out[]{left.data(),right.data()};
+    const auto period=std::chrono::microseconds(frames*1'000'000/48000);
+    auto next=std::chrono::steady_clock::now();uint64_t before=0;
+    for(uint32_t block=0;block<blocks;++block){
+        std::vector<Event> events;
+        if(block>=20 && block<60 && block%2==0)events.push_back(Event::note(true,40+int(block/2),1,0,0));
+        g.process(out,frames,nullptr,events.data(),uint32_t(events.size()));
+        if(block==settle)before=g.host(a).statistics().deadlineMisses;
+        next+=period;std::this_thread::sleep_until(next);
+    }
+    Result r;r.misses=g.host(a).statistics().deadlineMisses-before;r.restarts=g.host(a).statistics().restarts;r.last=g.host(a).statistics().lastMicroseconds;
+    const auto c=g.noteCost(a);r.stolen=c.stolen+c.stolenForDevice;r.chokes=c.hardChokes;
+    return r;
+}
 }
 
 int main(int argc,char** argv){try{
@@ -139,6 +165,16 @@ int main(int argc,char** argv){try{
         check(r.bLost==0,"the cheap lane loses nothing for the lanes' total");
         check(r.aForDevice>0,"the lane where a note frees the most time gives notes up for the total");
         if(timing)check(r.aChoked==0,"fades, not chokes, when no block is about to be missed");
+    }
+    for(const auto& [env,what]:{std::pair{std::vector<const char*>{"OSCAIRN_FIXTURE_MIDI"},"a plugin taking MIDI notes"},
+                                std::pair{std::vector<const char*>{"OSCAIRN_FIXTURE_VOICE_BUDGET","OSCAIRN_FIXTURE_REPORT_ZERO"},"a plugin reporting no voices and no cost"}}){
+        Result r;std::exception_ptr error;
+        std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{r=shed(argv[1],env);}catch(...){error=std::current_exception();}}).join();
+        if(error)std::rethrow_exception(error);
+        std::printf("%s: missed %llu blocks after block %u, restarted %llu times; gave up %llu notes (%llu choked)\n",what,(unsigned long long)r.misses,settle,
+            (unsigned long long)r.restarts,(unsigned long long)r.stolen,(unsigned long long)r.chokes);
+        check(r.stolen+r.chokes>0,std::string(what)+": its notes give way");
+        if(timing)check(r.restarts==0,std::string(what)+": its worker is never restarted: "+std::to_string(r.restarts)+" restarts");
     }
     for(const auto* r:{&guarded,&budgeted}){
         const std::string with=r==&guarded?"with the guard":"with a 75% budget";

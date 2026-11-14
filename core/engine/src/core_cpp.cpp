@@ -74,7 +74,6 @@ oscairn_route* cpp_core_route_new(uint32_t ports,uint16_t clapPorts,uint32_t fad
     r->fadeFrames=fadeFrames;return r;
 }
 void cpp_core_route_free(oscairn_route* route) { delete route; }
-bool cpp_core_route_clap(const oscairn_route* route) { return std::any_of(route->clap.begin(),route->clap.end(),[](bool c){return c;}); }
 uint32_t cpp_core_route_live(const oscairn_route* route) { return route->live(); }
 void cpp_core_route_pedals(const oscairn_route* route,uint8_t pedals[256]) { std::memcpy(pedals,route->pedal.data(),256); }
 void cpp_core_route_held_keys(const oscairn_route* route,uint64_t keys[2]) { keys[0]=route->heldKeys[0];keys[1]=route->heldKeys[1]; }
@@ -117,10 +116,9 @@ oscairn_notes* cpp_core_notes_new(const oscairn_step* steps,uint32_t count,uint3
         for(uint32_t i=0;i<d.context_count;++i)step.contexts.push_back({d.contexts[i].channel,activity(d.contexts[i].activity)});
         notes->steps.push_back(std::move(step));
     }
-    // The shared budget: every connection into a plugin taking CLAP notes, grouped by part.
+    // The shared budget: every note connection, grouped by part (a MIDI-dialect plugin's too, which a note-off ends).
     auto& entries=notes->budget.entries;
     for(auto& step:notes->steps)if(step.activity)for(auto& source:step.sources)
-        if(std::any_of(source.route->clap.begin(),source.route->clap.end(),[](bool c){return c;}))
         {
             const uint32_t part=source.zones.count?source.zones.zones[0].part:0;
             uint32_t group=uint32_t(entries.size());bool rest=true;
@@ -221,26 +219,32 @@ void cpp_core_notes_finish(oscairn_notes* notes,uint32_t s,const oscairn_finish*
         auto& lane=notes->budget.lanes[step.lane];
         lane.took+=usual;
         if(!step.budgeted)lane.othersTook+=usual;
-        else if(f->processed)
+        else
         {
             uint32_t live=0;for(const auto& source:step.sources)live+=source.route->live();
+            // A plugin reporting no voices while notes live, or whose block was not rendered, is counted by its notes; one
+            // giving up its own voices is judged against its limit so even when its blocks are lost.
+            const uint32_t voices=f->voices && f->processed?f->voices:live;
             auto& a=*step.activity;
-            a.ownVoices=f->own_voices;a.honorsVolume=f->honors_volume;
-            // A block past twice both the usual and what its notes are estimated to cost now is held up from outside
-            // (new notes raise the estimate with them, a real overload the usual within three blocks): the larger taken.
-            const float expected=std::max(usual,a.restNow()+a.noteNow()/a.perNoteScale*float(a.ownVoices?f->voices:live));
-            const float took=a.perNote.load(std::memory_order_relaxed)>=0 && raw>2*expected?expected:raw;
-            if(!a.ownVoices)a.observe(took,live);
-            else
+            a.overLimit=a.voiceLimit && voices>a.voiceLimit?a.overLimit+1:0;
+            if(f->processed)
             {
-                // Its voices, each costed alike, a note at its share of them, and each note's
-                // loudness in place of its velocity (by its ID, else its channel and key).
-                if(f->voice_cost>0 && a.perNote.load(std::memory_order_relaxed)<0)a.seedNote.store(float(f->voice_cost),std::memory_order_relaxed);
-                a.observe(took,f->voices);a.perNoteScale=live?std::max(1.f,float(f->voices)/float(live)):1.f;
-                a.overLimit=a.voiceLimit && f->voices>a.voiceLimit?a.overLimit+1:0;
-                for(uint32_t i=0;i<f->note_count;++i)for(auto& source:step.sources)for(auto& slot:source.route->active())
-                    if(slot.used && (f->notes[i].note_id>=0?slot.id==f->notes[i].note_id:(source.channel<0?slot.address.channel:source.channel)==f->notes[i].channel && slot.key==f->notes[i].key))
-                        slot.velocity=f->notes[i].loudness;
+                a.ownVoices=f->own_voices;a.honorsVolume=f->honors_volume;
+                // A block past twice both the usual and what its notes are estimated to cost now is held up from outside
+                // (new notes raise the estimate with them, a real overload the usual within three blocks): the larger taken.
+                const float expected=std::max(usual,a.restNow()+a.noteNow()/a.perNoteScale*float(a.ownVoices?voices:live));
+                const float took=a.perNote.load(std::memory_order_relaxed)>=0 && raw>2*expected?expected:raw;
+                if(!a.ownVoices)a.observe(took,live);
+                else
+                {
+                    // Its voices, each costed alike, a note at its share of them, and each note's
+                    // loudness in place of its velocity (by its ID, else its channel and key).
+                    if(f->voice_cost>0 && a.perNote.load(std::memory_order_relaxed)<0)a.seedNote.store(float(f->voice_cost),std::memory_order_relaxed);
+                    a.observe(took,voices);a.perNoteScale=live?std::max(1.f,float(voices)/float(live)):1.f;
+                    for(uint32_t i=0;i<f->note_count;++i)for(auto& source:step.sources)for(auto& slot:source.route->active())
+                        if(slot.used && (f->notes[i].note_id>=0?slot.id==f->notes[i].note_id:(source.channel<0?slot.address.channel:source.channel)==f->notes[i].channel && slot.key==f->notes[i].key))
+                            slot.velocity=f->notes[i].loudness;
+                }
             }
         }
     }

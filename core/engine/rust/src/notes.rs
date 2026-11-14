@@ -133,13 +133,13 @@ impl Merged<'_> {
 }
 
 impl Notes {
-    /// The plan's note state; the budget's entries: every connection into a plugin taking CLAP notes,
-    /// grouped by part (Graph::compile).
-    pub fn new(rs: &Routes, mut steps: Vec<Step>, lanes: usize) -> Notes {
+    /// The plan's note state; the budget's entries: every note connection, grouped by part (Graph::compile):
+    /// a MIDI-dialect plugin's notes too, which a note-off ends.
+    pub fn new(mut steps: Vec<Step>, lanes: usize) -> Notes {
         let mut entries: Vec<Entry> = Vec::new();
         for step in &mut steps {
             let Some(activity) = step.activity else { continue };
-            for source in step.sources.iter().filter(|s| rs[s.route].any_clap()) {
+            for source in &step.sources {
                 let zone = source.zones.first();
                 let part = zone.map_or(0, |z| z.part);
                 let group = entries.iter().find(|e| part != 0 && e.part == part && e.draining == source.draining).map_or(entries.len(), |e| e.group);
@@ -283,29 +283,34 @@ impl Notes {
                     lane.others_took += usual;
                 }
             }
-            if let (true, true, Some(a)) = (step.budgeted, r.processed, &step.activity) {
+            if let (true, Some(a)) = (step.budgeted, &step.activity) {
                 let live: u32 = step.sources.iter().map(|s| rs[s.route].live()).sum();
-                a.own_voices.store(r.own_voices, Relaxed);
-                a.honors_volume.store(r.honors_volume, Relaxed);
-                // A block past twice both the usual and what its notes are estimated to cost now is held
-                // up from outside (new notes raise the estimate with them): the larger is taken.
-                let expected = usual.max(a.rest_now() + a.note_now() / a.per_note_scale.get() * (if r.own_voices { r.voices } else { live }) as f32);
-                let took = if a.per_note.get() >= 0.0 && r.took > 2.0 * expected { expected } else { r.took };
-                if !r.own_voices {
-                    a.observe(took, live);
-                } else {
-                    // Its voices, each costed alike, a note at its share of them, and each note's loudness
-                    // in place of its velocity.
-                    if r.voice_cost > 0.0 && a.per_note.get() < 0.0 {
-                        a.seed_note.set(r.voice_cost as f32);
-                    }
-                    a.observe(took, r.voices);
-                    a.per_note_scale.set(if live != 0 { 1f32.max(r.voices as f32 / live as f32) } else { 1.0 });
-                    let limit = a.voice_limit.load(Relaxed);
-                    a.over_limit.store(if limit != 0 && r.voices > limit { a.over_limit.load(Relaxed) + 1 } else { 0 }, Relaxed);
-                    for n in r.notes {
-                        for source in &step.sources {
-                            rs[source.route].set_loudness(n.note_id, n.channel, n.key, n.loudness, source.channel);
+                // A plugin that reports no voices while notes live, or whose block was not rendered, is counted by
+                // its notes; one giving up its own voices is judged against its limit so even when its blocks are lost.
+                let voices = if r.voices == 0 || !r.processed { live } else { r.voices };
+                let limit = a.voice_limit.load(Relaxed);
+                a.over_limit.store(if limit != 0 && voices > limit { a.over_limit.load(Relaxed) + 1 } else { 0 }, Relaxed);
+                if r.processed {
+                    a.own_voices.store(r.own_voices, Relaxed);
+                    a.honors_volume.store(r.honors_volume, Relaxed);
+                    // A block past twice both the usual and what its notes are estimated to cost now is held
+                    // up from outside (new notes raise the estimate with them): the larger is taken.
+                    let expected = usual.max(a.rest_now() + a.note_now() / a.per_note_scale.get() * (if r.own_voices { voices } else { live }) as f32);
+                    let took = if a.per_note.get() >= 0.0 && r.took > 2.0 * expected { expected } else { r.took };
+                    if !r.own_voices {
+                        a.observe(took, live);
+                    } else {
+                        // Its voices, each costed alike, a note at its share of them, and each note's loudness
+                        // in place of its velocity.
+                        if r.voice_cost > 0.0 && a.per_note.get() < 0.0 {
+                            a.seed_note.set(r.voice_cost as f32);
+                        }
+                        a.observe(took, voices);
+                        a.per_note_scale.set(if live != 0 { 1f32.max(voices as f32 / live as f32) } else { 1.0 });
+                        for n in r.notes {
+                            for source in &step.sources {
+                                rs[source.route].set_loudness(n.note_id, n.channel, n.key, n.loudness, source.channel);
+                            }
                         }
                     }
                 }

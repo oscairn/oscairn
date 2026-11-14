@@ -147,14 +147,6 @@ pub unsafe extern "C" fn rust_core_route_free(route: *mut NoteRoute) {
 /// # Safety
 /// `route` is a live route.
 #[no_mangle]
-pub unsafe extern "C" fn rust_core_route_clap(route: *const NoteRoute) -> bool {
-    // SAFETY: a live route (engine_core.h's contract).
-    unsafe { &*route }.any_clap()
-}
-
-/// # Safety
-/// `route` is a live route.
-#[no_mangle]
 pub unsafe extern "C" fn rust_core_route_live(route: *const NoteRoute) -> u32 {
     // SAFETY: a live route (engine_core.h's contract).
     unsafe { &*route }.live()
@@ -249,7 +241,7 @@ pub unsafe extern "C" fn rust_core_notes_new(steps: *const CStep, count: u32, la
             steps_out.push(Step::new(NonNull::new(s.activity).map(Shared), sources, contexts.collect(), s.lane as usize, s.in_process, s.late_lane));
         }
     }
-    let notes = Notes::new(&Routes(()), steps_out, lanes as usize);
+    let notes = Notes::new(steps_out, lanes as usize);
     // SAFETY: `count` writable bools (the caller's contract).
     for (out, step) in unsafe { slice_mut(budgeted, count) }.iter_mut().zip(&notes.steps) {
         *out = step.budgeted;

@@ -139,7 +139,13 @@ struct NoteRoute
             for(auto& n:active())if(n.used && n.fadeAt>=0){++fading;if(!next || n.fadeAt<next->fadeAt)next=&n;}
             if(!next || uint32_t(next->fadeAt)>=until)break;
             const auto at=uint32_t(next->fadeAt);
-            if(next->faded==fadeSteps){next->fadeAt=-1;ok=emit(release(*next,at,true)) && ok;continue;}
+            if(next->faded==fadeSteps)
+            {
+                next->fadeAt=-1;ok=emit(release(*next,at,true)) && ok;
+                // A MIDI note's choke goes out as its note-off, its end here unless the pedal holds it.
+                if(!clap[next->address.port_index] && pedal[next->address.port_index&15][next->address.channel&15]<64)drop(*next);
+                continue;
+            }
             clap_event_note_expression_t v{};v.header={sizeof(v),at,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_EXPRESSION,0};
             v.expression_id=CLAP_NOTE_EXPRESSION_VOLUME;v.note_id=next->id;v.port_index=next->address.port_index;
             v.channel=next->address.channel;v.key=next->key;v.value=next->volume*(fadeSteps-1-next->faded)/fadeSteps;
@@ -163,9 +169,10 @@ struct NoteRoute
         else {n.stolen=true;lift(n);n.fadeAt=int32_t(at);++fading;}
         n.faded=fadeSteps;
     }
-    // Gives a note up from elsewhere (a peer's note limit): it fades from `at`, or is choked there.
+    // Gives a note up from elsewhere (a peer's note limit, the budget): it fades from `at`, or is choked there;
+    // a MIDI note, which no volume reaches, is released there.
     void steal(Note& n,uint32_t at) noexcept
-    {n.stolen=true;lift(n);n.fadeAt=int32_t(at);n.faded=fadeFrames?0:fadeSteps;++fading;}
+    {n.stolen=true;lift(n);n.fadeAt=int32_t(at);n.faded=fadeFrames && clap[n.address.port_index]?0:fadeSteps;++fading;}
     // A block of `frames` done: fades carry on from the next block's start.
     void advance(uint32_t frames) noexcept
     {if(fading)for(auto& n:active())if(n.used && n.fadeAt>=0)n.fadeAt=std::max(0,n.fadeAt-int32_t(frames));}
@@ -362,8 +369,8 @@ inline float VoiceBudget::estimate(uint32_t lane,Counting counting) const noexce
 // first, a plugin's that says it honors the volume expression the fade lowers before one's that
 // does not, then the quietest (by the plugin's report of each note's loudness where it gives one,
 // else velocity), then the oldest. reserved: held notes within a reserve may go too. A plugin
-// that gives up its own voices (step 4) is left to its voice limit while it keeps within it.
-// Only notes the plugin takes as CLAP notes, which a choke can address, of nodes whose notes cost.
+// that gives up its own voices (step 4) is left to the voice limit it was given while it keeps within
+// it. Notes of nodes whose notes cost: a MIDI-dialect plugin's too, ended by a note-off.
 inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved) noexcept
 {
     for(auto& g:groups)g={};
@@ -374,7 +381,7 @@ inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved) noex
     {
         if(e.lane!=lane)continue; // another lane's notes free none of this one's time
         if(e.cost->noteNow()<=0)continue; // giving its notes up frees nothing measured
-        if(e.cost->ownVoices && e.cost->overLimit<=Graph::Activity::overLimitBlocks)continue;
+        if(e.cost->ownVoices && e.cost->voiceLimit && e.cost->overLimit<=Graph::Activity::overLimitBlocks)continue;
         const bool honors=e.cost->honorsVolume;
         const auto& g=groups[e.group];
         const NoteZone* z=e.zones && e.zones->count?&e.zones->zones[0]:nullptr;
@@ -382,7 +389,7 @@ inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved) noex
         for(size_t i=0;i<e.route->top;++i)
         {
             const auto& slot=e.route->notes[i];
-            if(!slot.used || slot.stolen || !e.route->clap[slot.address.port_index&15])continue;
+            if(!slot.used || slot.stolen)continue;
             int rank=0;
             if(slot.held)
             {

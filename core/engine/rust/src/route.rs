@@ -192,9 +192,6 @@ impl NoteRoute {
     pub fn takes_clap(&self, s: &Slot) -> bool {
         self.clap[usize::from(s.port & 15)]
     }
-    pub fn any_clap(&self) -> bool {
-        self.clap.contains(&true)
-    }
 
     pub fn clear(&mut self) {
         self.used = Bits::default();
@@ -294,6 +291,10 @@ impl NoteRoute {
             if s.faded == FADE_STEPS {
                 self.set_fade(i, -1);
                 ok = emit(&self.release(i, at, true)) && ok;
+                // A MIDI note's choke goes out as its note-off, its end here unless the pedal holds it.
+                if !self.takes_clap(&s) && self.pedal_of(&s) < 64 {
+                    self.drop_slot(i);
+                }
                 continue;
             }
             let mut v = Event::header(NOTE_SIZE, at, CORE_SPACE, NOTE_EXPRESSION, 0);
@@ -329,12 +330,13 @@ impl NoteRoute {
         }
         self.slots[i % SLOTS].faded = FADE_STEPS;
     }
-    /// Gives a note up from elsewhere (a peer's note limit, the budget): it fades from `at`, or is choked there.
+    /// Gives a note up from elsewhere (a peer's note limit, the budget): it fades from `at`, or is choked
+    /// there; a MIDI note, which no volume reaches, is released there.
     pub fn steal(&mut self, i: usize, at: u32) {
         self.stolen.set(i);
         self.lift(i);
         self.set_fade(i, at as i32);
-        self.slots[i % SLOTS].faded = if self.fade_frames != 0 { 0 } else { FADE_STEPS };
+        self.slots[i % SLOTS].faded = if self.fade_frames != 0 && self.takes_clap(self.slot(i)) { 0 } else { FADE_STEPS };
     }
     /// A block of `frames` done: fades carry on from the next block's start.
     pub fn advance(&mut self, frames: u32) {

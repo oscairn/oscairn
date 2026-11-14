@@ -217,7 +217,13 @@ restarted for load (RFC 0018). A lane's notes give way only for its own limit; p
 total, they give way on the lane where a note costs most. Notes fade (a few milliseconds); a note
 is choked at once only when its lane's block would otherwise be missed. For a
 plugin without `oscairn.voice-budget` it fades out and chokes whole notes, released and quiet ones
-first ([Behaving well](#behaving-well)). A plugin with it gives up its own voices within a limit
+first ([Behaving well](#behaving-well)). A plugin taking notes as MIDI is in the budget too: a note
+it gives up is sent its note-off, which no volume reaches, so its release plays out, and the time
+it frees comes only as the release ends: keep releases short, or take CLAP notes. The host measures
+each plugin's cost per note from its blocks; one whose report says no voices while notes sound (or
+no cost) is costed by its notes as one without the report, and is held to its limit as one that
+keeps within it only while the voices it reports, or else its notes, stay within it: a report of
+zero never exempts a plugin from giving notes up. A plugin with it gives up its own voices within a limit
 the host sets between blocks; an instance one part plays alone gets one entry, for the selected
 contexts (a plugin without sound contexts reads that entry), and parts sharing an instance get one
 each with the part's reserve and priority. The host supports it in the engine's process and in a

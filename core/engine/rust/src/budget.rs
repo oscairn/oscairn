@@ -185,20 +185,21 @@ impl Budget {
     /// part's reserve, its highest and lowest held keys last; within each, the part of lower priority
     /// first, a plugin's that honors the volume expression before one's that does not, then the
     /// quietest, then the oldest. reserved: held notes within a reserve may go too. A plugin that gives
-    /// up its own voices is left to its voice limit while it keeps within it. Only notes a choke can
-    /// address, of nodes whose notes cost.
+    /// up its own voices is left to the voice limit it was given while it keeps within it. Notes of nodes
+    /// whose notes cost: a MIDI-dialect plugin's too, ended by a note-off.
     fn choose(&mut self, rs: &Routes, lane: usize, reserved: bool) -> Victim {
         self.count_held(rs, None);
         let mut best: Victim = None;
         let (mut best_rank, mut best_priority, mut best_honors, mut best_velocity, mut best_id) = (0, 0u8, false, 0f32, 0i32);
         for (k, e) in self.entries.iter().enumerate() {
             let a = &e.cost;
-            if e.lane != lane || a.note_now() <= 0.0 || (a.own_voices.load(Relaxed) && a.over_limit.load(Relaxed) <= OVER_LIMIT_BLOCKS) {
+            let within = a.voice_limit.load(Relaxed) != 0 && a.over_limit.load(Relaxed) <= OVER_LIMIT_BLOCKS;
+            if e.lane != lane || a.note_now() <= 0.0 || (a.own_voices.load(Relaxed) && within) {
                 continue;
             }
             let honors = a.honors_volume.load(Relaxed);
             let (r, g) = (&rs[e.route], self.groups.get(e.group).copied().unwrap_or(NO_GROUP));
-            for i in r.playing() {
+            for i in r.used.and_not(r.stolen).iter() {
                 let s = r.slot(i);
                 let rank = if r.held.has(i) {
                     if !reserved && g.held <= u32::from(e.reserve) {

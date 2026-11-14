@@ -13,7 +13,9 @@
 // middle frame, as a plugin gone wrong (or legitimately loud). OSCAIRN_FIXTURE_BLOCK_US: the microseconds
 // every block spends per 128 frames, sounding or not (default 0). OSCAIRN_FIXTURE_CPU_CLOCK=1: the time
 // spent is the thread's CPU time, not the clock's, so the cost is exact however the thread is scheduled.
-// OSCAIRN_FIXTURE_NO_END=1: it sends no NOTE_END, as a plugin that loses them.
+// OSCAIRN_FIXTURE_NO_END=1: it sends no NOTE_END, as a plugin that loses them. OSCAIRN_FIXTURE_MIDI=1: it takes
+// notes as MIDI only (its note port's one dialect), as a plugin of the MIDI world. OSCAIRN_FIXTURE_REPORT_ZERO=1 (with
+// OSCAIRN_FIXTURE_VOICE_BUDGET): it reports no voices and no cost, and keeps to no limit, as a plugin whose report is wrong.
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -35,6 +37,7 @@ struct Plugin {
     std::array<Voice,128> voices{};uint64_t started=0,calls=0;
     long spikeAt=0,spikeCalls=0;double spikeUs=0; // OSCAIRN_FIXTURE_SPIKE
     bool noEnd=false; // OSCAIRN_FIXTURE_NO_END
+    bool reportZero=false; // OSCAIRN_FIXTURE_REPORT_ZERO
     struct Bad { long at=0,calls=1; float value=0; }; std::array<Bad,8> bad{}; size_t badCount=0; // OSCAIRN_FIXTURE_OUTPUT
     oscairn::voices::Limits limits; // oscairn.voice-budget's, audio thread
     double loudness(const Voice& v) const {return v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
@@ -60,6 +63,16 @@ struct Plugin {
     void event(const clap_event_header_t* h,uint32_t at,const clap_output_events_t* out)
     {
         if(h->space_id!=CLAP_CORE_EVENT_SPACE_ID)return;
+        if(h->type==CLAP_EVENT_MIDI) // OSCAIRN_FIXTURE_MIDI: its notes as CLAP's
+        {
+            const auto& m=*reinterpret_cast<const clap_event_midi_t*>(h);const int kind=m.data[0]&0xf0;
+            clap_event_note_t n{};n.header={sizeof(n),h->time,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_OFF,0};
+            n.note_id=-1;n.channel=int16_t(m.data[0]&15);n.key=int16_t(m.data[1]);n.velocity=m.data[2]/127.0;
+            if(kind==0x90 && m.data[2])n.header.type=CLAP_EVENT_NOTE_ON;
+            else if(kind==0xb0 && (m.data[1]==120 || m.data[1]==123))n.key=-1;
+            else if(kind!=0x80 && kind!=0x90)return;
+            event(&n.header,at,out);return;
+        }
         if(h->type==CLAP_EVENT_NOTE_ON || h->type==CLAP_EVENT_NOTE_OFF || h->type==CLAP_EVENT_NOTE_CHOKE)
         {
             const auto& n=*reinterpret_cast<const clap_event_note_t*>(h);
@@ -108,6 +121,7 @@ struct Plugin {
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_BLOCK_US"))blockMicroseconds=std::atof(us);
         cpuClock=std::getenv("OSCAIRN_FIXTURE_CPU_CLOCK")!=nullptr;
         noEnd=std::getenv("OSCAIRN_FIXTURE_NO_END")!=nullptr;
+        reportZero=std::getenv("OSCAIRN_FIXTURE_REPORT_ZERO")!=nullptr;
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LAYERS"))layers=std::clamp(std::atoi(l),1,16);
         if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
         for(const char* v=std::getenv("OSCAIRN_FIXTURE_OUTPUT");v && *v && badCount<bad.size();){
@@ -155,14 +169,17 @@ struct Plugin {
                 [](const clap_plugin_t*,uint32_t i,bool input,clap_audio_port_info_t* p){if(input || i)return false;*p={};p->id=0;p->channel_count=2;p->flags=CLAP_AUDIO_PORT_IS_MAIN;p->port_type=CLAP_PORT_STEREO;p->in_place_pair=CLAP_INVALID_ID;std::strcpy(p->name,"Main");return true;}};
             static const clap_plugin_note_ports_t notes{
                 [](const clap_plugin_t*,bool input)->uint32_t{return input?1:0;},
-                [](const clap_plugin_t*,uint32_t i,bool input,clap_note_port_info_t* p){if(!input || i)return false;*p={};p->id=0;p->supported_dialects=CLAP_NOTE_DIALECT_CLAP;p->preferred_dialect=CLAP_NOTE_DIALECT_CLAP;std::strcpy(p->name,"Notes");return true;}};
+                [](const clap_plugin_t*,uint32_t i,bool input,clap_note_port_info_t* p){
+                    if(!input || i)return false;
+                    const auto dialect=std::getenv("OSCAIRN_FIXTURE_MIDI")?CLAP_NOTE_DIALECT_MIDI:CLAP_NOTE_DIALECT_CLAP;
+                    *p={};p->id=0;p->supported_dialects=p->preferred_dialect=dialect;std::strcpy(p->name,"Notes");return true;}};
             if(!std::strcmp(id,CLAP_EXT_AUDIO_PORTS))return &audio;
             static const oscairn_plugin_voice_budget_t budget{
                 [](const clap_plugin_t*){return true;},
-                [](const clap_plugin_t* p,uint32_t limit,const oscairn_voice_budget_context_t* c,uint32_t n){self(p).limits.set(limit,c,n);},
-                [](const clap_plugin_t* p,double* cost)->uint32_t{auto& s=self(p);if(cost)*cost=s.microseconds*s.frames/128.0;uint32_t n=0;for(const auto& v:s.voices)n+=v.active;return n;},
+                [](const clap_plugin_t* p,uint32_t limit,const oscairn_voice_budget_context_t* c,uint32_t n){if(!self(p).reportZero)self(p).limits.set(limit,c,n);},
+                [](const clap_plugin_t* p,double* cost)->uint32_t{auto& s=self(p);if(cost)*cost=s.reportZero?0:s.microseconds*s.frames/128.0;uint32_t n=0;for(const auto& v:s.voices)n+=v.active && !s.reportZero;return n;},
                 [](const clap_plugin_t* p,oscairn_voice_budget_note_t* out,uint32_t capacity)->uint32_t{
-                    auto& s=self(p);oscairn::voices::Report<128> report;
+                    auto& s=self(p);oscairn::voices::Report<128> report;if(s.reportZero)return 0;
                     for(const auto& v:s.voices)if(v.active)report.add(v.id,0,v.channel,v.key,s.loudness(v));
                     return report.write(out,capacity);}};
             if(!std::strcmp(id,CLAP_EXT_NOTE_PORTS))return &notes;

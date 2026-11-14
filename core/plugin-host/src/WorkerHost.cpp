@@ -156,6 +156,7 @@ namespace oscairn
             bool stopping = false;
             bool restarting = false; // under control: the nodes' worker indexes are the old worker's
             std::vector<std::chrono::steady_clock::time_point> restarts;
+            std::atomic<bool> restartGrace{true}; // the restart under way is the first within a minute: its start has the grace (Node::start)
             std::filesystem::path records; // recovery records of this worker's nodes
             uint32_t saves = 0;
             ServiceThread supervisor; // off the audio path: costs the stack it touches (RFC 0025)
@@ -1166,11 +1167,12 @@ namespace oscairn
                 auto& s = *shared_;
                 if(process()->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0; return silence(); }
                 process()->follow(frames);
-                if(const auto g = process()->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process()->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
+                if(const auto g = process()->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process()->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); noGrace_ = !process()->restartGrace.load(); } // restarted: the shared block holds the old worker's stamps
                 // Loaded, restarted, or taken over by a Performance being opened (each a warmUp): its first two seconds' late
                 // blocks are its start's (samples read, pages touched), silenced as any, but none counts toward "too slow",
-                // so lateness while loading never restarts it. A hang is still a hang.
-                if(const auto n = timing_.starts.load(std::memory_order_relaxed); n != startsSeen_) { startsSeen_ = n; graceLeft_ = uint32_t(2 * process()->rate / std::max(1u, frames)); consecutiveMisses_ = 0; }
+                // so lateness while loading never restarts it. A hang is still a hang. Not every restart within a minute:
+                // only the first has it, so a plugin too slow in itself is given up in about 5 s.
+                if(const auto n = timing_.starts.load(std::memory_order_relaxed); n != startsSeen_) { startsSeen_ = n; graceLeft_ = noGrace_ ? 0 : uint32_t(2 * process()->rate / std::max(1u, frames)); noGrace_ = false; consecutiveMisses_ = 0; }
                 else if(graceLeft_) --graceLeft_;
                 // A block the worker has not finished yet: stay silent rather than queue another, its events carried
                 // to the next block handed (RFC 0045); only a release lost on the way is reset for.
@@ -1633,7 +1635,7 @@ namespace oscairn
             std::vector<float> last_;
             bool reset_ = false; // audio thread: wasReset, from the worker's blocks in the last call
             uint32_t sequence_ = 0, timed_ = 0, outputCount_ = 0, consecutiveMisses_ = 0, generation_ = 0, faded_ = 0, fadeFrames_ = 0;
-            uint32_t startsSeen_ = UINT32_MAX, graceLeft_ = 0; // timing_'s starts last seen, and the blocks left of the start's grace (start)
+            uint32_t startsSeen_ = UINT32_MAX, graceLeft_ = 0; bool noGrace_ = false; // timing_'s starts last seen, and the blocks left of the start's grace (start)
             // The block start handed over, for finish.
             float* const* startedOutputs_ = nullptr; uint32_t startedChannels_ = 0, startedFrames_ = 0, startedOffset_ = 0; bool started_ = false;
             std::chrono::steady_clock::time_point sent_{};
@@ -1820,6 +1822,7 @@ namespace oscairn
                 return;
             }
             if(split) restarts.clear();
+            restartGrace.store(restarts.empty());
             restarts.push_back(now);
             std::lock_guard controlLock(control); // the nodes stay as they are while restarting
             auto list = [&] { std::lock_guard l(nodesMutex); return nodes; }();

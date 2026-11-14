@@ -64,9 +64,9 @@ namespace
         const auto start = std::chrono::steady_clock::now();
         auto next = start;
         // Real time until the failing plugin has failed through its restarts (each failure takes up
-        // to the 250 ms hang and slowness limits), at most 3 s; too slow, each start's first 2 s of late blocks
-        // are its load's, so at most 12 s; the baseline plays for a second.
-        const auto length = std::chrono::seconds(!expected ? 1 : std::string(expected) == "too slow" ? 12 : 3);
+        // to the 250 ms hang and slowness limits), at most 3 s; too slow, the load's and the first restart's
+        // first 2 s of late blocks are their start's, later restarts have no such grace: about 5 s, at most 8 s; the baseline plays for a second.
+        const auto length = std::chrono::seconds(!expected ? 1 : std::string(expected) == "too slow" ? 8 : 3);
         bool givenUp = false;
         for(; !givenUp && std::chrono::steady_clock::now() - start < length; ++block)
         {

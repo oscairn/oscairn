@@ -117,9 +117,8 @@ same arithmetic sat in `Process::setRate`, `core/plugin-host/src/WorkerHost.cpp`
   profile's `compute.workerAllowance`, replaces it. The tests use 50 ms. Nothing else changes it.
 - **Too slow.** `missLimit` is a quarter second of blocks in a row, at least 8: 94 at 128 frames.
   A block counts toward it when it is late or silent (below), except in the first two seconds after
-  the worker's timing is warmed up (a load, a restart, a Performance opened): those blocks are its
-  start's (samples read, pages touched), silenced as any but never "too slow", and a measure tick with
-  misses then is not recorded as the plugin's cost (`Session::measure`). The supervisor (every 10 ms) then
+  the worker's timing is warmed up (a load, a Performance opened, the first restart within a minute): those blocks are its start's (samples read, pages touched),
+  silenced as any but never "too slow", and a measure tick with misses then is not recorded as the plugin's cost (`Session::measure`). The supervisor (every 10 ms) then
   fails the worker and restarts it, at most 3 times a minute. A block left unanswered for 250 ms
   is a hang. Both verified in `WorkerHost.cpp` (`setRate`, `missed`, `trouble`, `supervise`).
 

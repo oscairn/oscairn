@@ -6,6 +6,7 @@
 use crate::client::tests::{FakeEngine, WAIT};
 use crate::client::Event;
 use crate::shell::{self, Request};
+use crate::theme;
 use crate::topbar::{MeterSettings, Show};
 use crate::nav::{Action, Roles};
 use crate::{Bar, HomeState, Shell};
@@ -107,7 +108,18 @@ fn meters(ui: &Shell, cpu: i32, ram: i32) {
 // beside it moves, for every one of the sixteen settings.
 #[test]
 fn resource_section_has_a_fixed_width() {
-    let mut s = Screen::new();
+    fixed_width(Screen::new(), "topbar");
+}
+
+// The same with a theme of extreme colors and the largest font scale.
+#[test]
+fn resource_section_has_a_fixed_width_with_a_larger_font() {
+    let s = Screen::new();
+    theme::apply(&s.ui, &odd_theme());
+    fixed_width(s, "topbar-odd");
+}
+
+fn fixed_width(mut s: Screen, pictures: &str) {
     let all = [Show::None, Show::Bar, Show::Percent, Show::Both];
     for cpu in all {
         for ram in all {
@@ -123,12 +135,9 @@ fn resource_section_has_a_fixed_width() {
                 seen.push((s.ui.get_resources_x(), s.ui.get_resources_width(), s.ui.get_tempo_x()));
             }
             assert!(seen.windows(2).all(|w| w[0] == w[1]), "{cpu:?}/{ram:?}: {seen:?}");
-            // Its width: the names' column, then a bar column and a percent column when either meter shows one.
-            let (bars, percents) = (cpu.bar() || ram.bar(), cpu.percent() || ram.percent());
-            let want = if !bars && !percents { 0. } else { 32. + if bars { 72. } else { 0. } + if percents { 36. } else { 0. } };
-            assert_eq!(seen[0].1, want, "{cpu:?}/{ram:?}");
+            assert_eq!(seen[0].1 == 0., cpu == Show::None && ram == Show::None, "{cpu:?}/{ram:?}: no room only when it shows nothing");
             assert_eq!(seen[0].0 + seen[0].1 + 10., W as f32, "{cpu:?}/{ram:?}: at the right edge");
-            s.save(&format!("topbar-{cpu:?}-{ram:?}").to_lowercase());
+            s.save(&format!("{pictures}-{cpu:?}-{ram:?}").to_lowercase());
         }
     }
 }
@@ -269,4 +278,37 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Settings", Some("settings")));
     s.frame();
     s.save("home-opening-settings");
+}
+
+/// A theme of extreme colors at the largest font scale, with keys missing (the default's then).
+fn odd_theme() -> theme::Loaded {
+    let doc = json!({"version": 7, "id": "odd", "fontScale": 1.4, "radius": 16,
+        "colors": {"background": "#000000", "surface": "#FF00FF", "text": "#FFFFFF", "muted": "#00FFFF", "accent": "#FFFF00", "border": "nonsense"}});
+    let places = theme::Places::default();
+    let base = theme::chosen(&places, "", "");
+    theme::Loaded { id: "odd".into(), doc: theme::merged(&base.doc, &doc), folder: None }
+}
+
+// Every built-in theme and the odd one show the top bar and Home; a switch repaints once, then
+// nothing; a key a theme lacks is the default's.
+#[test]
+fn themes_switch_live_and_repaint_once() {
+    let mut f = Fixture::new("themes");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let s = &mut f.screen;
+    meters(&s.ui, 42, 77);
+    s.frame();
+    let mut loaded: Vec<theme::Loaded> = crate::profile::THEMES.iter().map(|(id, _)| theme::chosen(&theme::Places::default(), id, "")).collect();
+    loaded.push(odd_theme());
+    for t in &loaded {
+        theme::apply(&s.ui, t);
+        assert!(s.frame().is_some(), "{}: repainted", t.id);
+        assert_eq!(s.frame(), None, "{}: once", t.id);
+        s.save(&format!("theme-{}", t.id));
+    }
+    let g = s.ui.global::<crate::Theme>();
+    assert_eq!((g.get_font_scale(), g.get_radius()), (1.4, 16.));
+    assert_eq!(g.get_border(), slint::Color::from_rgb_u8(0x3a, 0x41, 0x4b), "an unusable color: the default theme's");
+    assert_eq!(g.get_focus(), slint::Color::from_rgb_u8(0xff, 0xff, 0x00), "focus: the accent when the theme has none");
 }

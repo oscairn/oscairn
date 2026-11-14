@@ -90,9 +90,21 @@ How (a) works:
   (a tap moves the cursor there and confirms), a computer keyboard, and a device's panel through
   roles its panel map names (`navigation`, below). The abilities are the same on every device;
   only the map is the device's.
-- **The theme is the JUCE app's**: the built-in themes' `theme.json` files are read at build time
-  and the one the JUCE app would show is chosen the same way (the user's choice in
-  `appearance.txt`, else the screen's theme in the profile, else `themes/default`).
+- **Themes are the JUCE app's** (below): the same folders and the same choice.
+
+## Themes
+
+`theme.rs` reads themes as the JUCE app does ([design-language.md](design-language.md#one-format-for-both-uis)):
+built-in folders beside the program (`share/oscairn/themes`, or `themes/` beside it), installed
+ones in the configuration folder's `themes/<id>/`, the choice in `appearance.txt`, else the
+profile's screen theme, else `themes/default`, else Oscairn Dark. A theme chosen in either UI
+shows in both; the shell reads the choice once a second (a small file; nothing is drawn unless it
+changed) and a switch repaints the window once. Every color, the radius, the type scale and the
+font family on the Rust screens come from the `Theme` global `theme.rs` fills (`slint/theme.slint`
+holds only what shows before that); a key a theme lacks or cannot use is the default theme's.
+The resource bars fill with `accent`, then `warning` and `danger`; cursors are a `focus` border.
+Without a theme folder on disk (a development build) the themes this program was built with are
+used, with the built-in Inter font.
 
 ## The top bar
 

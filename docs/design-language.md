@@ -66,6 +66,25 @@ temporary file. A different theme cannot overwrite an installed theme ID; give a
 theme a new ID. If the selected theme is missing or unusable, Oscairn shows an error and
 uses the default built-in theme.
 
+### One format for both UIs
+
+The theme format is the toolkit's business nowhere: named color roles, a radius, a font
+scale, font files, a few drawing choices (`style`), the routing views' wire colors and the
+splash. While the UI moves from JUCE to Rust ([rust-ui.md](rust-ui.md)) both read the same
+folders and the same `appearance.txt`, so a theme chosen in either shows in both. What each reads:
+
+| Field | JUCE app | Rust UI |
+| --- | --- | --- |
+| `colors` (the nine roles) | all | all |
+| `colors.warning`, `colors.focus` (optional, added 2026-11-14) | accepted, not used | a meter past 75% (absent: `#E8C547`, the JUCE meters' yellow); the cursor's border (absent: `accent`) |
+| `radius`, `fontScale` | all | all |
+| `font.regular`, `font.bold` | all | all (registered at run time) |
+| `style`, `wires`, `splash` | all | not yet: no Rust screen draws them |
+
+Nothing in the format was JUCE-specific, so no field was renamed or converted. The Rust UI
+takes any key a theme lacks, or cannot use, from the default theme, key by key; the JUCE app
+refuses such a theme and shows the default one.
+
 ### Built-in themes and instrument builders
 
 Built-in themes live beside the app: `Oscairn.app/Contents/MacOS/themes/` on macOS and

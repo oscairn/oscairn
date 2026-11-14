@@ -215,7 +215,8 @@ ThemeData ThemeData::parse(const juce::String& json) {
     };
     t.fontScale=number("fontScale",1,.8f,1.4f);t.radius=number("radius",6,0,16);
     const auto* colors=value["colors"].getDynamicObject();require(colors,"Theme needs semantic colors");
-    juce::StringArray allowed;for(const auto& name:names)allowed.add(name);fields(*colors,allowed);
+    juce::StringArray allowed;for(const auto& name:names)allowed.add(name);allowed.add("warning");allowed.add("focus");fields(*colors,allowed); // the last two: optional, the Rust UI's
+    for(const char* key:{"warning","focus"})if(colors->hasProperty(key)){const auto v=colors->getProperty(key).toString();require(v.length()==7 && v[0]=='#' && v.substring(1).containsOnly("0123456789abcdefABCDEF"),"Theme colors must be #RRGGBB");}
     auto hex=[](const juce::var& color){const auto text=color.toString();
         require(color.isString() && text.length()==7 && text[0]=='#' && text.substring(1).containsOnly("0123456789abcdefABCDEF"),"Theme colors must be #RRGGBB");
         return juce::Colour(0xff000000u|static_cast<juce::uint32>(text.substring(1).getHexValue32()));};

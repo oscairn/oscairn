@@ -6,13 +6,23 @@
 
 import { Theme } from "theme.slint";
 
+// The section's columns, from the theme's small type: whole pixels, fixed for a theme.
+global Columns {
+    out property <length> cell: round(Theme.small * 0.62 / 1px) * 1px; // a digit
+    out property <length> sign: round(Theme.small * 0.95 / 1px) * 1px; // "%"
+    out property <length> label: round(Theme.small * 2.5 / 1px) * 1px; // "CPU", "RAM"
+    out property <length> bar: round(Theme.small * 5 / 1px) * 1px;
+    out property <length> percent: 3 * cell + sign;
+    out property <length> row: round(Theme.small * 1.25 / 1px) * 1px;
+}
+
 // A whole percent in fixed cells, a digit each ("  7%", " 42%", "100%"): tabular, whatever the font.
 component Percent inherits Rectangle {
     in property <int> value;
     in property <bool> known;
     in property <color> ink;
-    property <length> cell: 8px;
-    width: 3 * cell + 12px;
+    property <length> cell: Columns.cell;
+    width: Columns.percent;
     for i in 3: Text {
         x: i * root.cell;
         width: root.cell;
@@ -24,7 +34,7 @@ component Percent inherits Rectangle {
     }
     Text {
         x: 3 * root.cell;
-        width: 12px;
+        width: Columns.sign;
         horizontal-alignment: right;
         vertical-alignment: center;
         font-size: Theme.small;
@@ -43,25 +53,26 @@ component Meter inherits Rectangle {
     in property <bool> percent;
     in property <length> percent-x;
     property <color> ink: level == 2 ? Theme.danger : level == 1 ? Theme.warning : Theme.muted;
-    height: 16px;
+    property <color> fill: level == 2 ? Theme.danger : level == 1 ? Theme.warning : Theme.accent;
+    height: Columns.row;
     Text {
         x: 0;
-        width: 32px;
+        width: Columns.label;
         vertical-alignment: center;
         font-size: Theme.small;
         color: Theme.muted;
         text: root.label;
     }
     if root.bar: Rectangle {
-        x: 34px;
+        x: Columns.label;
         y: (parent.height - self.height) / 2;
-        width: 64px;
+        width: Columns.bar;
         height: 6px;
         background: Theme.raised;
         Rectangle {
             x: 0;
             width: root.known ? parent.width * root.value / 100 : 0;
-            background: root.ink;
+            background: root.fill;
         }
     }
     if root.percent: Percent {
@@ -149,7 +160,7 @@ export component TopBar inherits Rectangle {
             }
         }
         tempo := Text {
-            width: 84px;
+            width: round(Theme.small * 6.5 / 1px) * 1px;
             horizontal-alignment: right;
             vertical-alignment: center;
             font-size: Theme.small;
@@ -157,7 +168,7 @@ export component TopBar inherits Rectangle {
             text: Bar.tempo;
         }
         resources := Rectangle {
-            width: !root.any ? 0 : 32px + (root.any-bar ? 72px : 0) + (root.any-percent ? 36px : 0);
+            width: !root.any ? 0 : Columns.label + (root.any-bar ? Columns.bar + 8px : 0) + (root.any-percent ? Columns.percent : 0);
             VerticalLayout {
                 alignment: center;
                 spacing: 4px;
@@ -168,7 +179,7 @@ export component TopBar inherits Rectangle {
                     level: Bar.cpu-level;
                     bar: Bar.cpu-bar;
                     percent: Bar.cpu-percent;
-                    percent-x: root.any-bar ? 104px : 32px;
+                    percent-x: Columns.label + (root.any-bar ? Columns.bar + 8px : 0);
                 }
                 if Bar.ram-bar || Bar.ram-percent: Meter {
                     label: "RAM";
@@ -177,7 +188,7 @@ export component TopBar inherits Rectangle {
                     level: Bar.ram-level;
                     bar: Bar.ram-bar;
                     percent: Bar.ram-percent;
-                    percent-x: root.any-bar ? 104px : 32px;
+                    percent-x: Columns.label + (root.any-bar ? Columns.bar + 8px : 0);
                 }
             }
         }

@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The theme the screens draw with: colors and radius from the JUCE app's theme.json, set by
-// theme.rs at start; the type scale and sizes are the JUCE app's on a device's screen
-// (hosts/standalone/Theme.cpp's textSize for touch, Launcher.h's top bar height), kept in step by hand.
+// The theme the screens draw with, set by theme.rs from the chosen theme.json (docs/rust-ui.md,
+// "Themes"); the values here are only what shows before that, the JUCE app's default built-in
+// theme's. Sizes follow the theme's font scale; the type scale and the sizes are the JUCE app's on
+// a device's screen (hosts/standalone/Theme.cpp's textSize for touch, Launcher.h's top bar), kept
+// in step by hand.
 
-// Every built-in theme's font (Inter, SIL OFL 1.1: hosts/standalone/themes/*/fonts/OFL.txt).
+// The built-in themes' font (Inter, SIL OFL 1.1: hosts/standalone/themes/*/fonts/OFL.txt), for
+// when the theme's own font files cannot be read.
 import "../../hosts/standalone/themes/oscairn-dark/fonts/Inter-Regular.ttf";
 import "../../hosts/standalone/themes/oscairn-dark/fonts/Inter-Bold.ttf";
 
@@ -17,12 +20,13 @@ export global Theme {
     in property <color> accent: #FF9A45;
     in property <color> positive: #5AD9A4;
     in property <color> danger: #FF6B63;
-    // The cursor's border: the accent unless the theme says otherwise.
+    // A meter past three quarters (the JUCE meters' yellow unless the theme says).
+    in property <color> warning: #e8c547;
+    // The cursor's border (the accent unless the theme says).
     in property <color> focus: accent;
     in property <length> radius: 6px;
     in property <float> font-scale: 1;
-    // The meters' yellow (hosts/standalone/Icons.h, meterYellow).
-    out property <color> warning: #e8c547;
+    in property <string> font-family: "Inter";
     out property <length> small: 13px * font-scale;
     out property <length> body: 16px * font-scale;
     out property <length> button: 15px * font-scale;

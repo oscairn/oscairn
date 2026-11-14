@@ -33,4 +33,15 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   `focus`, the accent by default), Confirm/tap opens: Setlist a Rust screen, the rest a JUCE
   handover (asked for, not yet carried out: step 5). Tests: keys, panel roles and taps; a cursor
   move repaints within the two tiles; nothing at rest. 22 passed on the Mac.
+- Coordinator: `encoder-scroll` is merged to main with `navigate` on panel-map controls and the
+  engine's navigation totals in `controllers`; take theirs, drop my `navigation` section and the
+  panel-holder plan, rebase onto main.
+- Step 3b, themes: `theme.rs` reads built-in and installed theme folders and `appearance.txt`
+  as the JUCE app does, follows the choice once a second, applies a switch (one repaint), merges
+  missing keys from the default, registers the theme's fonts at run time (fontique); top bar
+  columns scale with the theme's type; bars `accent`/`warning`/`danger`, cursor `focus`. Format:
+  nothing JUCE-specific found; optional `colors.warning` and `colors.focus` added (schema; JUCE
+  accepts them). Tests: all built-in themes and an odd one (extreme colors, font scale 1.4,
+  missing and bad keys) render top bar and Home, a switch repaints once, fixed width holds at
+  1.4. 25 passed. The JUCE Theme.cpp change not yet compiled (build running).
 </content>

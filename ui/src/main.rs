@@ -34,8 +34,10 @@ fn main() -> Result<(), slint::PlatformError> {
         std::env::set_var("SLINT_KMS_MAX_FPS", profile.frame_rate().to_string());
     }
     let ui = Shell::new()?;
-    let chosen = settings::chosen_theme();
-    theme::apply(&ui, &theme::chosen([chosen.as_str(), profile.theme.as_str()]));
+    let places = theme::Places::found();
+    theme::apply(&ui, &theme::chosen(&places, &settings::chosen_theme(), &profile.theme));
+    let watch = slint::Timer::default();
+    theme::follow(&ui, places, profile.theme.clone(), &watch);
     shell::show_settings(&ui, settings::top_bar(profile.top_bar));
     let weak = ui.as_weak();
     let post = move |event| {

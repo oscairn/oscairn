@@ -418,7 +418,7 @@ namespace oscairn
             if(h.input) h.zones = inputZones(part.input, hostStatus_.midiInputs);
             auto add = [&](const std::vector<NodeId>& chain) { for(const auto n : chain) if(!isSplit(n)) h.nodes.push_back(n); };
             add(part.chain);
-            for(const auto& s : part.splits) for(const auto& l : s.lanes) add(l.chain);
+            for(const auto& s : part.splits) { if(s.kind == Split::Kind::Ports) add({s.splitter}); for(const auto& l : s.lanes) add(l.chain); }
             out.push_back(std::move(h));
         }
         return out;
@@ -596,6 +596,7 @@ namespace oscairn
                 const auto entry = rest[i];
                 if(!isSplit(entry)) { if(takesAudio(graph_, layout, entry)) return {{entry, mainPort(graph_, layout, entry, true)}}; continue; }
                 const auto& split = *std::find_if(bus.splits.begin(), bus.splits.end(), [&](const Split& s) { return s.id == (entry & ~splitMark); });
+                if(split.kind == Split::Kind::Ports) { if(takesAudio(graph_, layout, split.splitter)) return {{split.splitter, mainPort(graph_, layout, split.splitter, true)}}; continue; }
                 if(split.splitter) return {{split.splitter, mainPort(graph_, layout, split.splitter, true)}};
                 const bool solo = std::any_of(split.lanes.begin(), split.lanes.end(), [](const Lane& l) { return l.solo; });
                 std::vector<BusEntry> out;
@@ -702,25 +703,34 @@ namespace oscairn
                 if(!isSplit(entry)) { ends = into(ends, entry); continue; }
                 const auto& split = *std::find_if(part.splits.begin(), part.splits.end(), [&](const Split& s) { return s.id == (entry & ~splitMark); });
                 const bool solo = std::any_of(split.lanes.begin(), split.lanes.end(), [](const Lane& l) { return l.solo; });
+                // A ports split's plugin takes the notes and sound as a box in the chain; each lane
+                // starts at its port. What passes the plugin switched off goes on in the first lane.
+                const auto played = split.kind == Split::Kind::Ports ? into(ends, split.splitter) : std::vector<End>{};
                 // Kinds with a Split node: the sound goes into it, and each lane's sound starts at
                 // one of its outputs and ends at the same input of the Join node, if any.
-                if(split.splitter) { auto sound = ends; for(auto& e : sound) e.notes = false; into(sound, split.splitter); }
+                if(split.splitter && split.kind != Split::Kind::Ports) { auto sound = ends; for(auto& e : sound) e.notes = false; into(sound, split.splitter); }
                 std::vector<End> joined;
                 for(uint32_t i = 0; i < split.lanes.size(); ++i)
                 {
                     const auto& lane = split.lanes[i];
-                    auto in = ends;
+                    auto in = split.kind == Split::Kind::Ports ? std::vector<End>{} : ends;
+                    for(auto e : played)
+                    {
+                        if(e.node == split.splitter) { e.port = lane.port; e.audio = e.audio && hasOutput(split.splitter, lane.port); } // a port the plugin no longer has: silent
+                        else if(i) continue;
+                        in.push_back(e);
+                    }
                     for(auto& e : in)
                     {
                         e.zoned = true;
-                        if(split.splitter) e.audio = false;
+                        if(split.splitter && split.kind != Split::Kind::Ports) e.audio = false;
                         if(e.notes && !lane.zones.empty())
                         {
                             e.zones = e.zones.empty() ? lane.zones : intersectZones(e.zones, lane.zones);
                             if(e.zones.empty()) e.notes = false; // no note gets through both
                         }
                     }
-                    if(split.splitter)
+                    if(split.splitter && split.kind != Split::Kind::Ports)
                     {
                         End from; from.node = split.splitter; from.audio = true; from.port = graph_.host(split.splitter).outputPorts().at(i).id;
                         std::erase_if(in, [](const End& e) { return !e.notes; });
@@ -1678,7 +1688,7 @@ namespace oscairn
     // except a split's own nodes, which follow its kind and lanes.
     bool Session::touched(NodeId node, const ParamInfo& p) const
     {
-        return (p.flags & CLAP_PARAM_IS_AUTOMATABLE) && !(p.flags & CLAP_PARAM_IS_READONLY) && !splitNode(node) &&
+        return (p.flags & CLAP_PARAM_IS_AUTOMATABLE) && !(p.flags & CLAP_PARAM_IS_READONLY) && !splitNode(node, true) &&
                std::find(untouched_.begin(), untouched_.end(), SceneParameter{node, p.id}) == untouched_.end();
     }
 
@@ -2102,14 +2112,21 @@ namespace oscairn
         }
     }
 
-    bool Session::splitNode(NodeId node) const
+    bool Session::splitNode(NodeId node, bool modes) const
     {
-        for(const auto& p : parts_) for(const auto& s : p.splits) if(node && (s.splitter == node || s.joiner == node)) return true;
+        for(const auto& p : parts_) for(const auto& s : p.splits) if(node && (s.splitter == node || s.joiner == node) && !(modes && s.kind == Split::Kind::Ports)) return true;
         return false;
+    }
+
+    bool Session::hasOutput(NodeId node, uint32_t port) const
+    {
+        const auto& ports = graph_.host(node).outputPorts();
+        return std::any_of(ports.begin(), ports.end(), [&](const kick::clap::Port& p) { return p.id == port; });
     }
 
     void Session::dropSplitNodes(const Split& split)
     {
+        if(split.kind == Split::Kind::Ports) return; // its plugin is the part's, not the split's: it stays in the graph, as a lane's plugins do
         for(const auto node : {split.splitter, split.joiner})
             if(node) { std::erase_if(wires_, [&](const Wire& w) { return w.from == node || w.to == node; }); dropNode(node); }
     }
@@ -2157,7 +2174,17 @@ namespace oscairn
         };
         auto free = [&](NodeId node) { return !splitNode(node) && std::none_of(parts_.begin(), parts_.end(), [&](Part& p) { return holds(p, node); }); };
         const bool joins = kind == Split::Kind::LeftRight || kind == Split::Kind::MidSide;
-        if(kind == Split::Kind::Copy ? (splitter || joiner) :
+        // A ports split: its plugin, in no part, with more than one audio output, and a lane for each.
+        std::vector<Lane> lanes{Lane{}, Lane{}};
+        if(kind == Split::Kind::Ports)
+        {
+            if(!splitter || joiner || !graph_.contains(splitter) || splitter == graphInput || splitter == graphOutput || !free(splitter) || graph_.host(splitter).outputPorts().size() < 2)
+                throw std::invalid_argument("a ports split needs a plugin in no part with several audio outputs, and no Join node");
+            lanes.clear();
+            for(const auto& port : graph_.host(splitter).outputPorts()) { Lane l; l.port = port.id; lanes.push_back(l); }
+            if(lanes.size() > 16) lanes.resize(16);
+        }
+        else if(kind == Split::Kind::Copy ? (splitter || joiner) :
            (pluginOf(splitter) != splitPlugin || !free(splitter) || (joins ? pluginOf(joiner) != joinPlugin || !free(joiner) || joiner == splitter : joiner != 0)))
             throw std::invalid_argument("this kind of split needs its own Split node, and a Join node for left/right and mid/side");
         uint32_t split = 1;
@@ -2167,11 +2194,11 @@ namespace oscairn
             auto& p = findPart(id);
             auto& c = chainAt(p, place);
             c.insert(c.begin() + std::ptrdiff_t(index), splitMark | split);
-            p.splits.push_back({split, kind, {Lane{}, Lane{}}, splitter, joiner});
+            p.splits.push_back({split, kind, lanes, splitter, joiner});
             buildParts();
         });
         // The nodes' modes (plugins/splitters): Split 0 left/right, 1 mid/side, 2 bands, with the band count; Join likewise, 2 a sum.
-        if(splitter) { applyParameter(splitter, 1, kind == Split::Kind::LeftRight ? 0 : kind == Split::Kind::MidSide ? 1 : 2); applyParameter(splitter, 2, 2); }
+        if(splitter && kind != Split::Kind::Ports) { applyParameter(splitter, 1, kind == Split::Kind::LeftRight ? 0 : kind == Split::Kind::MidSide ? 1 : 2); applyParameter(splitter, 2, 2); }
         if(joiner) applyParameter(joiner, 1, kind == Split::Kind::LeftRight ? 0 : 1);
         return split;
     }
@@ -2186,9 +2213,11 @@ namespace oscairn
             for(size_t i = 1; i < lanes.size(); ++i) for(const auto& gone : forgetSplits(p, lanes[i].chain)) dropSplitNodes(gone);
             dropSplitNodes(removed);
             std::erase_if(p.splits, [&](const Split& s) { return s.id == split; });
+            auto kept = lanes[0].chain;
+            if(removed.kind == Split::Kind::Ports) kept.insert(kept.begin(), removed.splitter); // its plugin stays in the part
             eachChain(p, [&](std::vector<NodeId>& c) {
                 if(const auto at = std::find(c.begin(), c.end(), splitMark | split); at != c.end())
-                    c.insert(c.erase(at), lanes[0].chain.begin(), lanes[0].chain.end());
+                    c.insert(c.erase(at), kept.begin(), kept.end());
             });
             buildParts();
         });
@@ -2200,7 +2229,15 @@ namespace oscairn
         const auto& s = splitOf(findPart(id), split);
         if(s.kind == Split::Kind::LeftRight || s.kind == Split::Kind::MidSide) throw std::invalid_argument("left/right and mid/side splits have two lanes");
         if(s.lanes.size() >= (s.kind == Split::Kind::Bands ? 4u : 16u)) throw std::invalid_argument(s.kind == Split::Kind::Bands ? "at most 4 bands" : "at most 16 lanes");
-        editWires([&] { auto& lanes = splitOf(findPart(id), split).lanes; lane = uint32_t(lanes.size()); lanes.emplace_back(); buildParts(); });
+        Lane added;
+        if(s.kind == Split::Kind::Ports) // the first port without a lane
+        {
+            const auto& ports = graph_.host(s.splitter).outputPorts();
+            const auto free = std::find_if(ports.begin(), ports.end(), [&](const kick::clap::Port& p) { return std::none_of(s.lanes.begin(), s.lanes.end(), [&](const Lane& l) { return l.port == p.id; }); });
+            if(free == ports.end()) throw std::invalid_argument("every output port has its lane");
+            added.port = free->id;
+        }
+        editWires([&] { auto& lanes = splitOf(findPart(id), split).lanes; lane = uint32_t(lanes.size()); lanes.push_back(added); buildParts(); });
         if(s.kind == Split::Kind::Bands) applyParameter(s.splitter, 2, double(lane + 1));
         return lane;
     }
@@ -2209,7 +2246,8 @@ namespace oscairn
     {
         const auto& s = splitOf(findPart(id), split);
         if(lane >= s.lanes.size()) throw std::invalid_argument("unknown lane");
-        if(s.kind != Split::Kind::Copy && s.lanes.size() <= 2) throw std::invalid_argument("this split keeps at least two lanes; remove the split instead");
+        if(s.kind == Split::Kind::Ports ? s.lanes.size() <= 1 : s.kind != Split::Kind::Copy && s.lanes.size() <= 2)
+            throw std::invalid_argument(s.kind == Split::Kind::Ports ? "a ports split keeps a lane; remove the split instead" : "this split keeps at least two lanes; remove the split instead");
         const auto kind = s.kind; const auto splitter = s.splitter;
         editWires([&] {
             auto& p = findPart(id);

@@ -147,6 +147,7 @@ namespace oscairn
         std::vector<NoteZone> zones;        // the notes this lane takes; none: all
         double level = 1, pan = 0;          // its row in the join's Mix
         bool mute = false, solo = false;    // solo silences the split's other lanes
+        uint32_t port = 0;                  // a ports split's: the splitter's audio output port (its stable ID) the lane starts at
         bool operator==(const Lane&) const = default;
     };
     struct Split
@@ -156,12 +157,16 @@ namespace oscairn
         // divide the sound with an Oscairn Split node (plugins/splitters), lane k taking its output
         // k: left/right and mid/side (two lanes, joined again by an Oscairn Join node), and bands
         // (two to four lanes, joining by summing into what follows). Every lane gets the notes.
-        enum class Kind { Copy, LeftRight, MidSide, Bands } kind = Kind::Copy;
+        // Ports (RFC 0011's "one lane per output port"): the splitter is a plugin with several audio
+        // outputs (an instrument whose elements go to insert A, insert B or past both), which takes
+        // the notes and sound as a chain's box would; each lane starts at one of its output ports
+        // (Lane::port), at most one lane a port, and the lanes join by summing into what follows.
+        enum class Kind { Copy, LeftRight, MidSide, Bands, Ports } kind = Kind::Copy;
         std::vector<Lane> lanes;
-        NodeId splitter = 0, joiner = 0; // the Split and Join nodes, for the kinds that have them
+        NodeId splitter = 0, joiner = 0; // the Split and Join nodes, for the kinds that have them; a ports split's plugin
         bool operator==(const Split&) const = default;
     };
-    inline constexpr std::array<const char*, 4> splitKinds{"copy", "leftRight", "midSide", "bands"};
+    inline constexpr std::array<const char*, 5> splitKinds{"copy", "leftRight", "midSide", "bands", "ports"};
     inline constexpr const char* splitPlugin = "org.oscairn.split";
     inline constexpr const char* joinPlugin = "org.oscairn.join";
     // Where a chain edit applies: the part's own chain (split 0), or one lane of a split.

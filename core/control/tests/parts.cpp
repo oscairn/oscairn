@@ -2309,6 +2309,69 @@ namespace
         check(near(x.l[frames - 1], 7), "the wire gone: back in main: " + std::to_string(x.l[frames - 1]));
     }
 
+    // A ports split (RFC 0011's lane per output port): an instrument's elements to insertion A,
+    // insertion B and past both (the element-ports fixture: 1 to A, 2 to B, 4 thru, each into main
+    // while its port is not active), joined before the fader; the plugin told which ports are taken
+    // (CLAP audio-ports-activation); solo, meters, refusals, saving and removing the split.
+    void portSplits(const char* fixture, const char* audio, const fs::path& root)
+    {
+        Session s(48000, frames);
+        const auto inst = s.add("Elements", audio, "org.oscairn.test.element-ports");
+        const auto a = s.add("Insertion A", fixture, "org.kick.test.effect"), b = s.add("Insertion B", fixture, "org.kick.test.effect");
+        s.setParameter(a, 7, .5); s.setParameter(b, 7, .25);
+        const auto part = s.addPart("Sampler", {PartInput::Kind::None});
+        s.insertIntoPart(part, 0, inst); s.commit();
+        Audio x; x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 7) && near(x.r[frames - 1], 7), "only its main port taken: every element in main: " + std::to_string(x.l[frames - 1]));
+        // A ports split needs its plugin out of any part, with several outputs.
+        bool refused = false; try { s.addSplit(part, 1, {}, Split::Kind::Ports, inst); } catch(const std::invalid_argument&) { refused = true; }
+        check(refused, "a plugin in a part's chain is refused");
+        const auto mono = s.add("Mono", fixture, "org.kick.test.synth");
+        refused = false; try { s.addSplit(part, 1, {}, Split::Kind::Ports, mono); } catch(const std::invalid_argument&) { refused = true; }
+        check(refused, "a plugin with one output is refused");
+        s.remove(mono);
+        s.removeFromPart(part, inst);
+        const auto split = s.addSplit(part, 0, {}, Split::Kind::Ports, inst);
+        const auto lanes = [&] { return s.parts()[0].splits[0].lanes; };
+        check(lanes().size() == 3 && lanes()[0].port == 300 && lanes()[1].port == 301 && lanes()[2].port == 302, "a lane for each output port, by its ID");
+        s.insertIntoPart(part, 0, a, {split, 1}); s.insertIntoPart(part, 0, b, {split, 2}); s.commit();
+        x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 4 + 1 * .5 + 2 * .25) && near(x.r[frames - 1], 5), "A's element through insertion A, B's through B, the rest dry, joined: " + std::to_string(x.l[frames - 1]));
+        for(int i = 0; i < 100; ++i) x.run(s); // past the held peak of main alone, falling
+        s.service();
+        double peak = 0; for(const auto& m : s.partMeters()) if(m.part == part) peak = m.peak;
+        check(near(peak, 4), "the part's meter: its loudest lane, as for any split: " + std::to_string(peak));
+        refused = false; try { s.addLane(part, split); } catch(const std::invalid_argument&) { refused = true; }
+        check(refused, "every port has its lane: no more");
+        // The part's own control reaches a parameter of an insertion in one of its lanes.
+        const auto assign = s.addMacro("Assign 1", part);
+        s.setMacroTargets(assign, {MacroTarget{.node = a, .param = 7}}); s.setMacro(assign, .25); s.commit(); x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 4 + .25 + .5), "a part's control on insertion A's gain: " + std::to_string(x.l[frames - 1]));
+        s.removeMacro(assign); s.setParameter(a, 7, .5); s.commit();
+        Lane solo = lanes()[1]; solo.solo = true; s.setLane(part, split, 1, solo); s.commit(); x.run(s); x.run(s);
+        check(near(x.l[frames - 1], .5), "insertion A's lane soloed: " + std::to_string(x.l[frames - 1]));
+        solo.solo = false; s.setLane(part, split, 1, solo); Lane muted = lanes()[2]; muted.mute = true; s.setLane(part, split, 2, muted); s.commit(); x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 4.5), "insertion B's lane muted: " + std::to_string(x.l[frames - 1]));
+        muted.mute = false; s.setLane(part, split, 2, muted); s.commit();
+        // Its lane removed, the port is not taken: the plugin plays that element into main again.
+        s.removeLane(part, split, 2); s.commit(); x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 4 + 2 + .5), "insertion B's lane removed: its element back in main: " + std::to_string(x.l[frames - 1]));
+        check(s.addLane(part, split) == 2 && lanes()[2].port == 302, "added again, a lane for the port without one");
+        s.insertIntoPart(part, 0, b, {split, 2}); s.commit(); x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 5), "and B's element through insertion B again: " + std::to_string(x.l[frames - 1]));
+        s.savePerformance((root / "ports").string());
+        Session t(48000, frames);
+        t.loadPerformance((root / "ports").string());
+        const auto& loaded = t.parts()[0];
+        check(loaded.splits.size() == 1 && loaded.splits[0].kind == Split::Kind::Ports && loaded.splits[0].splitter == t.nodeId("Elements") && loaded.splits[0].lanes.size() == 3 &&
+              loaded.splits[0].lanes[2].port == 302 && loaded.splits[0].lanes[1].chain == std::vector<NodeId>{t.nodeId("Insertion A")}, "the routing round-trips with the Performance");
+        Audio y; y.run(t); y.run(t);
+        check(near(y.l[frames - 1], 5), "and plays the same: " + std::to_string(y.l[frames - 1]));
+        // Removed, the split leaves its plugin in the chain, then the first lane's.
+        s.removeSplit(part, split); s.commit(); x.run(s); x.run(s);
+        check(s.parts()[0].chain == std::vector<NodeId>{inst} && near(x.l[frames - 1], 7), "the split removed: the plugin plays alone, into main: " + std::to_string(x.l[frames - 1]));
+    }
+
     // A solo undone, committed and saved: the same file as before it, playing the same. Each part
     // soloed and heard (a muted one unmuted), then put back as it was: a copy of the parts, since
     // parts() is the live model and the edits change it.
@@ -2485,6 +2548,7 @@ int main(int argc, char** argv)
         liveGains(argv[1], argv[2], temp.path);
         sendTargets(argv[1], argv[2], temp.path);
         activeOutputs(argv[2]);
+        portSplits(argv[1], argv[2], temp.path);
         soloRoundTrip(argv[1], argv[3], temp.path);
         persistence(argv[1], argv[2], argv[3], temp.path);
     }

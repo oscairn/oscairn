@@ -1866,6 +1866,12 @@
         "solo": {
           "type": "boolean",
           "description": "Silences the split's other lanes"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "A ports split's lanes only, each its own: the stable ID of the splitter's audio output port the lane starts at"
         }
       },
       "required": [
@@ -1892,9 +1898,10 @@
             "copy",
             "leftRight",
             "midSide",
-            "bands"
+            "bands",
+            "ports"
           ],
-          "description": "copy: every lane gets the notes, through its zones, and a copy of the sound. leftRight and midSide (two lanes) and bands (two to four) divide the sound with an Oscairn Split node, lane k taking its output k; leftRight and midSide join through an Oscairn Join node"
+          "description": "copy: every lane gets the notes, through its zones, and a copy of the sound. leftRight and midSide (two lanes) and bands (two to four) divide the sound with an Oscairn Split node, lane k taking its output k; leftRight and midSide join through an Oscairn Join node. ports: the splitter is a plugin with several audio outputs (an instrument whose elements go to insertion A, insertion B or past both), playing as a box in the chain would; each lane starts at the output port its port names, and the lanes join by summing into what follows"
         },
         "splitter": {
           "oneOf": [
@@ -1905,7 +1912,7 @@
               "type": "null"
             }
           ],
-          "description": "Its Split node (plugins/splitters), or none for copy"
+          "description": "Its Split node (plugins/splitters), or none for copy; for ports, the plugin whose output ports feed the lanes"
         },
         "joiner": {
           "oneOf": [

@@ -410,7 +410,7 @@ namespace oscairn
         void buildParts();
         struct BusEntry { NodeId node = 0; uint32_t port = 0; double level = 1, pan = 0; bool mute = false; uint32_t split = 0, lane = 0; bool fader = false; std::vector<WireVia> via{}; double fixed = 1; bool fixedMute = false; std::vector<uint32_t> faders{}; }; // fader: passes an empty bus's fader; via: the empty buses on the way; fixed, fixedMute, faders: as Wire's
         std::vector<BusEntry> busEntries(uint32_t bus);
-        bool splitNode(NodeId node) const;       // a split's Split or Join node
+        bool splitNode(NodeId node, bool modes = false) const; // a split's Split or Join node, or a ports split's plugin; modes: only those its kind sets the modes of
         bool heard(const Part& part);            // not silenced by another part's solo
         void meter();                            // service(): updates the meters from the graph's peaks
         // Resource budgets (budget.cpp, RFC 0025): this device's measurements of each plugin build,
@@ -796,6 +796,7 @@ namespace oscairn
         std::unique_ptr<Prepared> prepared_; // the next one, prepared ahead; after graph_, so it goes first
         std::set<NodeId> nodesOf(const Part& part) const;
         void dropSendTargets(); // the control targets on sends that no longer exist
+        bool hasOutput(NodeId node, uint32_t port) const; // an audio output port by its ID
         void tellActiveOutputs(); // after compiling the wires: each plugin's ports the graph takes sound from
         std::map<NodeId, std::pair<std::weak_ptr<PluginHost>, uint64_t>> activeOutputs_; // as last told, by instance
         static std::vector<assets::Ref> assetsOf(const std::filesystem::path& manifest);

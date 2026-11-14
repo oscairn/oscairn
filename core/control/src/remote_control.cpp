@@ -280,7 +280,7 @@ namespace oscairn
                 for(auto s:array(field(p,"splits"))){
                     Split split;split.id=static_cast<uint32_t>(integer(field(s,"id")));split.kind=Split::Kind(named(splitKinds,string(field(s,"kind"))));
                     split.splitter=static_cast<NodeId>(integer(field(s,"splitter")));split.joiner=static_cast<NodeId>(integer(field(s,"joiner")));
-                    for(auto l:array(field(s,"lanes")))split.lanes.push_back({chain(field(l,"chain")),zones(field(l,"zones")),number(field(l,"level")),number(field(l,"pan")),boolean(field(l,"mute")),boolean(field(l,"solo"))});
+                    for(auto l:array(field(s,"lanes")))split.lanes.push_back({chain(field(l,"chain")),zones(field(l,"zones")),number(field(l,"level")),number(field(l,"pan")),boolean(field(l,"mute")),boolean(field(l,"solo")),static_cast<uint32_t>(integer(field(l,"port")))});
                     part.splits.push_back(std::move(split));
                 }
                 part.bus=static_cast<uint32_t>(integer(field(p,"bus")));

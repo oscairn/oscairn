@@ -155,7 +155,8 @@ vertically.
 
 - **Mix** has a level, pan, mute and solo for each lane, shown on the chain itself.
 - **Plugins with several outputs** are drawn the same way: a crossover or a multi-out drum
-  sampler is a plugin box followed by one lane per output port. The graph already supports
+  sampler is a plugin box followed by one lane per output port. Built as the `ports` split
+  (2026-11-14, [step 3 status](#step-3-status)); the views do not draw it yet. The graph already supports
   plugins with several ports and one output feeding several inputs, so the built-in Bands
   mode and crossover plugins coexist.
 
@@ -1178,6 +1179,27 @@ and each bus meter those. Two ways from a part to one place (an empty bus's outp
 to another empty bus that plays there too) are one wire at their summed level.
 `control-parts` covers solo through sends and buses, the meters and persistence; the socket
 test and `desktop-pad-editor` the rest.
+
+**Ports splits** (2026-11-14): RFC 0011's lane per output port, for a converted sound whose
+elements go to insertion A, insertion B or past both. A split of kind `ports` has as its
+splitter a plugin with several audio outputs (the instrument), which takes the part's notes and
+sound as a box in the chain would; it gets a lane for each output port, each lane remembering
+its port by its stable ID (`Lane::port`), and the lanes sum into what follows, as bands do. The
+two inserts in series for one signal stay an ordinary chain on one lane. Unlike a Split node,
+the plugin is the part's: scenes touch its parameters, it harmonizes, and removing the split
+puts it back in the chain before the first lane's plugins; a lane may be removed (down to one)
+and added again for a port without one. Saved (`port` on each of its lanes), in the control
+protocol (`parts.addSplit` with `kind` `ports`) and the remote client. After every compile the
+Session tells each plugin with several outputs which it takes sound from, through CLAP's
+`clap.audio-ports-activation` (main ports always; any port a wire leaves): at the start of a
+block where the plugin can switch while processing, else at a restart; a worker forwards it and
+tells a restarted plugin again ([plugin porting](../plugin-porting.md#several-output-ports)).
+`control-parts` checks it with a fixture instrument whose elements play into main while their
+ports are inactive: only main taken (all in main), the split with an effect on each of the other
+two ports and main dry, solo and mute of a lane, the meter (the loudest lane), a lane removed
+(its element back in main) and added again, refusals, the round trip, and the split removed.
+Not tested: a plugin that cannot switch while processing (the restart), and the call through a
+worker. The Part page does not draw a ports split or offer it yet.
 
 Not yet:
 - **Mixer details:** meters that sum a part's lanes.

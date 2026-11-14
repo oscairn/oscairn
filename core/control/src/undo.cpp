@@ -349,6 +349,7 @@ namespace oscairn
             for(const auto& p : parts_)
                 for(const auto& s : p.splits)
                 {
+                    if(s.kind == Split::Kind::Ports) continue; // its plugin has no mode
                     const double mode = s.kind == Split::Kind::LeftRight ? 0 : s.kind == Split::Kind::MidSide ? 1 : 2;
                     if(s.splitter && graph_.contains(s.splitter)) { applyParameter(s.splitter, 1, mode); applyParameter(s.splitter, 2, double(std::clamp<size_t>(s.lanes.size(), 2, 4))); }
                     if(s.joiner && graph_.contains(s.joiner)) applyParameter(s.joiner, 1, mode);

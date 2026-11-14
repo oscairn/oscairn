@@ -135,9 +135,9 @@ request members.
 | `parts.insert` | `part`, `index`, `node`; optional `split` and `lane` for a lane's chain | `{"accepted":true}` |
 | `parts.removeNode` | `part`, `node`, wherever it is in the part | `{"accepted":true}` |
 | `parts.move` | `part`, `from`, `to` (chain positions); optional `split` and `lane` | `{"accepted":true}` |
-| `parts.addSplit` | `part`, `index`; optional `split` and `lane` to split inside a lane; optional `kind` (`copy`, `leftRight`, `midSide`, `bands`) with its `splitter` and `joiner` nodes | numeric `split` |
-| `parts.removeSplit` | `part`, `split`: its first lane's chain takes its place; other lanes' nodes leave the part | `{"accepted":true}` |
-| `parts.addLane` | `part`, `split` | numeric `lane` |
+| `parts.addSplit` | `part`, `index`; optional `split` and `lane` to split inside a lane; optional `kind` (`copy`, `leftRight`, `midSide`, `bands`, `ports`) with its `splitter` and `joiner` nodes | numeric `split` |
+| `parts.removeSplit` | `part`, `split`: its first lane's chain takes its place (after a `ports` split's plugin); other lanes' nodes leave the part | `{"accepted":true}` |
+| `parts.addLane` | `part`, `split`; a `ports` split's new lane takes the first output port without one | numeric `lane` |
 | `parts.removeLane` | `part`, `split`, `lane`: its nodes leave the part; the last lane removes the split | `{"accepted":true}` |
 | `parts.lane` | `part`, `split`, `lane`; any of `zones`, `level`, `pan`, `mute`, `solo` (others keep their values) | `{"accepted":true}` |
 | `parts.input` | `part`, `input` (as for `parts.add`, with optional `zones`, `devices`, `maxNotes`, notes at once from 0 (no limit) to 128, `reserve`, the notes the shared budget leaves the part (0 to 128, within `maxNotes`), and `priority`, 0 to 10, lower giving way first) | `{"accepted":true}` |
@@ -310,8 +310,15 @@ report the compiled per-channel routes.
   divide a part's notes and sound into lanes that join again. A part's `chain` lists node
   IDs and `{"split":id}` entries; its `splits` give each split's `id`, `kind`, `splitter`
   and `joiner` nodes (0 for none) and `lanes`, each with its own `chain`, `zones`, `level`,
-  `pan`, `mute` and `solo`. Every lane gets the notes, through its zones (after the part's
-  own). With `copy`, every lane gets a copy of the sound; the others divide it with an
+  `pan`, `mute` and `solo`, and `port` (0 but for a `ports` split's lanes). Every lane gets the notes, through its zones (after the part's
+  own). A `ports` split ([RFC 0011](rfcs/0011-performance-ui-and-editors.md#split-and-join)'s
+  lane per output port) has as its `splitter` a plugin with several audio outputs, given in no
+  part (an instrument whose elements go to insertion A, insertion B or past both): it takes the
+  part's notes and sound as a box in the chain would, `parts.addSplit` gives it a lane for each
+  output port, each lane starting at the port its `port` names (a port's stable ID), and the
+  lanes sum into what follows; removing a lane leaves its port untaken (the plugin is told:
+  [plugin porting](plugin-porting.md#several-output-ports)), it keeps at least one lane, and
+  `parts.removeSplit` puts the plugin back in the chain. With `copy`, every lane gets a copy of the sound; the others divide it with an
   Oscairn Split node (`org.oscairn.split`, added first and given as `splitter`), lane k
   taking its output k: `leftRight` and `midSide` have two lanes, joined again by an Oscairn
   Join node (`org.oscairn.join`, the `joiner`), and `bands` two to four, the band count

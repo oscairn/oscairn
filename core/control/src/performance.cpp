@@ -40,6 +40,13 @@ uint32_t integer(V v,uint32_t max=UINT32_MAX){const auto n=number(v);if(n<0 || n
 std::string quote(std::string_view s){if(s.size()>4096 || s.find('\0')!=std::string_view::npos)bad("invalid string");return detail::quote(s);}
 std::string numeric(double value){if(!std::isfinite(value))bad("nonfinite value");char buffer[64];const auto result=std::to_chars(buffer,buffer+sizeof(buffer),value);if(result.ec!=std::errc{})bad("number encoding failed");return {buffer,result.ptr};}
 std::string join(const std::vector<std::string>& values){std::string out="[";for(const auto& v:values){if(out.size()>1)out+=',';out+=v;}return out+']';}
+// A lane's port: a ports split's lanes, and only they, each name a different audio output port of its plugin.
+uint32_t lanePort(V l,Split::Kind kind){const V p=member(l,"port");if(!p!=(kind!=Split::Kind::Ports))bad("a ports split's lanes, and only they, name a port");return p?integer(p):0;}
+void checkPorts(const Split& split,const std::vector<kick::clap::Port>& outputs){
+    if(split.kind!=Split::Kind::Ports)return;
+    std::set<uint32_t> used;
+    for(const auto& l:split.lanes)if(!used.insert(l.port).second || std::none_of(outputs.begin(),outputs.end(),[&](const kick::clap::Port& o){return o.id==l.port;}))bad("a ports split's lane on an unknown or repeated port");
+}
 // RFC 0011 note zones, as the control protocol writes them.
 std::string zonesText(const std::vector<NoteZone>& zones){
     std::vector<std::string> out;
@@ -618,7 +625,8 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
         std::vector<std::string> splits;
         for(const auto& sp:p.splits){
             std::vector<std::string> lanes;
-            for(const auto& l:sp.lanes)lanes.push_back("{\"chain\":"+chainText(l.chain)+",\"zones\":"+zonesText(l.zones)+",\"level\":"+numeric(l.level)+",\"pan\":"+numeric(l.pan)+",\"mute\":"+(l.mute?"true":"false")+",\"solo\":"+(l.solo?"true":"false")+'}');
+            for(const auto& l:sp.lanes)lanes.push_back("{\"chain\":"+chainText(l.chain)+",\"zones\":"+zonesText(l.zones)+",\"level\":"+numeric(l.level)+",\"pan\":"+numeric(l.pan)+",\"mute\":"+(l.mute?"true":"false")+",\"solo\":"+(l.solo?"true":"false")+
+                (sp.kind==Split::Kind::Ports?",\"port\":"+std::to_string(l.port):std::string())+'}');
             auto key=[&](NodeId n){return n?quote(keys.at(n)):std::string("null");};
             splits.push_back("{\"id\":"+std::to_string(sp.id)+",\"kind\":\""+splitKinds[size_t(sp.kind)]+"\",\"splitter\":"+key(sp.splitter)+",\"joiner\":"+key(sp.joiner)+",\"lanes\":"+join(lanes)+'}');
         }
@@ -1243,16 +1251,19 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 // Its own Split and Join nodes, by key, for the kinds that have them.
                 auto own=[&](const char* name,const char* plugin,bool needed){
                     const auto v=field(sp,name);if(v->type==json_type_null){if(needed)bad("a split is missing its nodes");return NodeId(0);}
-                    const auto id=node(v);if(!needed || id==graphInput || id==graphOutput || !seen.insert(id).second || !partNodes.insert(id).second || next->describe().nodes.end()==std::find_if(next->describe().nodes.begin(),next->describe().nodes.end(),[&](const auto& n){return n.id==id && n.plugin.id==plugin;}))bad("invalid split node");
+                    // A ports split's: any plugin with several audio outputs.
+                    const auto id=node(v);if(!needed || id==graphInput || id==graphOutput || !seen.insert(id).second || !partNodes.insert(id).second ||
+                        (plugin ? next->describe().nodes.end()==std::find_if(next->describe().nodes.begin(),next->describe().nodes.end(),[&](const auto& n){return n.id==id && n.plugin.id==plugin;}) : next->host(id).outputPorts().size()<2))bad("invalid split node");
                     return id;};
                 const bool joins=split.kind==Split::Kind::LeftRight || split.kind==Split::Kind::MidSide;
-                split.splitter=own("splitter",splitPlugin,split.kind!=Split::Kind::Copy);split.joiner=own("joiner",joinPlugin,joins);
+                split.splitter=own("splitter",split.kind==Split::Kind::Ports?nullptr:splitPlugin,split.kind!=Split::Kind::Copy);split.joiner=own("joiner",joinPlugin,joins);
                 for(auto l:array(field(sp,"lanes"),16)){
-                    fields(l,{"chain","zones","level","pan","mute","solo"});Lane lane;lane.chain=chain(field(l,"chain"));lane.zones=zonesFrom(field(l,"zones"));
+                    fields(l,{"chain","zones","level","pan","mute","solo","port"});Lane lane;lane.chain=chain(field(l,"chain"));lane.zones=zonesFrom(field(l,"zones"));lane.port=lanePort(l,split.kind);
                     lane.level=number(field(l,"level"));lane.pan=number(field(l,"pan"));lane.mute=boolean(field(l,"mute"));lane.solo=boolean(field(l,"solo"));
                     if(lane.level<0 || lane.pan<-1 || lane.pan>1)bad("invalid lane level or pan");split.lanes.push_back(std::move(lane));}
                 if(split.lanes.empty() || std::any_of(part.splits.begin(),part.splits.end(),[&](const Split& x){return x.id==split.id;}))bad("invalid or duplicate split");
                 if((joins && split.lanes.size()!=2) || (split.kind==Split::Kind::Bands && (split.lanes.size()<2 || split.lanes.size()>4)))bad("wrong number of lanes for the split's kind");
+                if(split.kind==Split::Kind::Ports)checkPorts(split,next->host(split.splitter).outputPorts());
                 part.splits.push_back(std::move(split));
             }
             std::set<uint32_t> reached;
@@ -1663,9 +1674,10 @@ std::vector<std::string> Session::loadSoundInto(uint32_t partId,const fs::path& 
             split.kind=Split::Kind(named(splitKinds,text(field(x,"kind")),"invalid split kind"));
             for(auto [name,at]:{std::pair{"splitter",&split.splitter},std::pair{"joiner",&split.joiner}}){const auto v=field(x,name);*at=v->type==json_type_null?0:node(v);}
             for(auto l:array(field(x,"lanes"),16)){
-                fields(l,{"chain","zones","level","pan","mute","solo"});Lane lane;lane.chain=chain(field(l,"chain"));lane.zones=zonesFrom(field(l,"zones"));
+                fields(l,{"chain","zones","level","pan","mute","solo","port"});Lane lane;lane.chain=chain(field(l,"chain"));lane.zones=zonesFrom(field(l,"zones"));lane.port=lanePort(l,split.kind);
                 lane.level=number(field(l,"level"));lane.pan=number(field(l,"pan"));lane.mute=boolean(field(l,"mute"));lane.solo=boolean(field(l,"solo"));
                 if(lane.level<0 || lane.pan<-1 || lane.pan>1)bad("invalid lane level or pan");split.lanes.push_back(std::move(lane));}
+            if(split.kind==Split::Kind::Ports){if(!split.splitter)bad("a split is missing its nodes");checkPorts(split,graph_.host(split.splitter).outputPorts());}
             sound.splits.push_back(std::move(split));
         }
         if(nodesOf(sound).size()!=added.size())bad("every node of a Sound is in its part, once");
@@ -1922,9 +1934,10 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
                 split.kind=Split::Kind(named(splitKinds,text(field(x,"kind")),"invalid split kind"));
                 for(auto [name,at]:{std::pair{"splitter",&split.splitter},std::pair{"joiner",&split.joiner}}){const auto v=field(x,name);*at=v->type==json_type_null?0:node(v);}
                 for(auto l:array(field(x,"lanes"),16)){
-                    fields(l,{"chain","zones","level","pan","mute","solo"});Lane lane;lane.chain=chain(field(l,"chain"));lane.zones=zonesFrom(field(l,"zones"));
+                    fields(l,{"chain","zones","level","pan","mute","solo","port"});Lane lane;lane.chain=chain(field(l,"chain"));lane.zones=zonesFrom(field(l,"zones"));lane.port=lanePort(l,split.kind);
                     lane.level=number(field(l,"level"));lane.pan=number(field(l,"pan"));lane.mute=boolean(field(l,"mute"));lane.solo=boolean(field(l,"solo"));
                     if(lane.level<0 || lane.pan<-1 || lane.pan>1)bad("invalid lane level or pan");split.lanes.push_back(std::move(lane));}
+                if(split.kind==Split::Kind::Ports){if(!split.splitter)bad("a split is missing its nodes");checkPorts(split,graph_.host(split.splitter).outputPorts());}
                 part.splits.push_back(std::move(split));
             }
             if(const auto bus=integer(field(p,"bus")))part.bus=partIds.at(bus);

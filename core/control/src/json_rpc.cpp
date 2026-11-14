@@ -458,7 +458,7 @@ namespace oscairn
                 std::vector<std::string> lanes;
                 for( const auto& l : s.lanes )
                     lanes.push_back("{\"chain\":" + chainJson(l.chain) + ",\"zones\":" + zonesJson(l.zones) + ",\"level\":" + encode(l.level) + ",\"pan\":" + encode(l.pan) +
-                        ",\"mute\":" + (l.mute ? "true" : "false") + ",\"solo\":" + (l.solo ? "true" : "false") + '}');
+                        ",\"mute\":" + (l.mute ? "true" : "false") + ",\"solo\":" + (l.solo ? "true" : "false") + ",\"port\":" + std::to_string(l.port) + '}');
                 out.push_back("{\"id\":" + std::to_string(s.id) + ",\"kind\":\"" + splitKinds[size_t(s.kind)] + "\",\"splitter\":" + std::to_string(s.splitter) +
                     ",\"joiner\":" + std::to_string(s.joiner) + ",\"lanes\":" + join(lanes) + '}');
             }
@@ -1616,7 +1616,7 @@ namespace oscairn
                         {
                             const auto name = string(member(p,"kind"));
                             const auto at = std::find_if(splitKinds.begin(), splitKinds.end(), [&](const char* k) { return name == k; });
-                            if( at == splitKinds.end() ) invalid("kind is copy, leftRight, midSide or bands");
+                            if( at == splitKinds.end() ) invalid("kind is copy, leftRight, midSide, bands or ports");
                             kind = Split::Kind(at - splitKinds.begin());
                         }
                         const NodeId splitter = member(p,"splitter") ? node(c,member(p,"splitter")) : 0, joiner = member(p,"joiner") ? node(c,member(p,"joiner")) : 0;

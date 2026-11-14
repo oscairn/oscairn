@@ -1349,7 +1349,12 @@ on the display; `--engine-only` the engine alone.
    `post-build.sh` appends after the profile's): `OSCAIRN_SAMPLER_MAX_VOICES=28` (the Sampler
    costs about 45 us a voice on this CPU against a 1.33 ms allowance) and
    `OSCAIRN_WORKER_EXTRA_BLOCK=org.oscairn.analog` (arpeggiated Analog patches overlap about 8
-   voices at about 2 ms per block, until its faster oscillator ships).
+   voices at about 2 ms per block, until its faster oscillator ships). To switch that extra block
+   off, start with `OSCAIRN_WORKER_EXTRA_BLOCK=none ./oscairn-fantom-start` (any value naming no
+   plugin works; an empty one does not, since an empty value counts as unset and the file's is
+   used). Seen on the unit (bundle 90c5d6b5, engine only, 2026-11-13): the engine's environment
+   then held `OSCAIRN_WORKER_EXTRA_BLOCK=none`, and ST Final's arpeggiated Analog part, with no
+   extra block, silenced 1,705 of 15,376 blocks in 41 s and was silent in the recorded take.
 
    Oscairn's engine and workers turn transparent huge pages off for themselves at their start
    (`prctl(PR_SET_THP_DISABLE)`; khugepaged's scan, every 10.24 s, stalled a worker's audio thread

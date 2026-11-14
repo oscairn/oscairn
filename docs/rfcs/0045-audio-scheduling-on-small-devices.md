@@ -725,7 +725,8 @@ CPU, plugins with few parameters and no voices); it is the next thing to profile
   (the profile's 60, 75 or 90 %), so on the app and the unit each lane got 75 % of a block, more
   than a worker's allowance, and the plugins' total was no longer held to anything. Now each lane's
   limit is the smaller of the budget and 80 % of the time its blocks have before a miss (a worker's
-  allowance, the deadline under step 6, a period for a lane a block late, the callback's time, less
+  allowance, the deadline under step 6, a period for a lane whose plugins are all a block late (one on
+  time beside them in a plugin host keeps the allowance), the callback's time, less
   the mixing reserve, for the engine's process, whose plugins share one lane, their times summed),
   budget or none; and every lane's together are held to the budget (with none, 80 % of a block) on
   each of RFC 0025's audio cores (`usableCores() - 1`), a lane's limit leaving the others what they

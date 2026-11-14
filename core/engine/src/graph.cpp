@@ -90,7 +90,7 @@ namespace oscairn
             uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
             bool inProcess = false; // it renders in the engine's process (no PluginHost::lane): within the callback's time
             std::array<float,5> recent{}; uint8_t recentAt = 0, recentN = 0; // audio thread: its last blocks' times, for the budget (typical)
-            bool lateLane = false; // its lane renders a block late (RFC 0045's extra block): a period to render in
+            bool lateLane = false; // every plugin on its lane renders a block late (RFC 0045's extra block): a period to render in
             // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
             std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
             // RFC 0021 slice 3: a shared engine's step renders its instance for every node playing one
@@ -863,7 +863,8 @@ namespace oscairn
             std::map<const void*,uint32_t> lanes;
             for(auto& step:plan->steps)if(step.host){step.inProcess=!step.host->lane();step.lane=lanes.emplace(step.host->lane(),uint32_t(lanes.size())).first->second;}
             plan->budget.lanes.resize(std::max<size_t>(1,lanes.size()));
-            for(auto& step:plan->steps)if(step.host && step.host->oneBlockLate())for(auto& other:plan->steps)if(other.lane==step.lane)other.lateLane=true;
+            // A period only for a lane every plugin of which is a block late: one on time beside them (a plugin host's) must be done within the allowance.
+            for(auto& step:plan->steps)if(step.host)step.lateLane=std::all_of(plan->steps.begin(),plan->steps.end(),[&](const Plan::Step& o){return !o.host || o.lane!=step.lane || o.host->oneBlockLate();});
         }
         // The shared budget: every connection into a plugin taking CLAP notes, grouped by part.
         for(auto& step:plan->steps)if(step.activity)for(auto& source:step.noteSources)
@@ -1339,7 +1340,7 @@ namespace oscairn
         // The shared budget (RFC 0018): each lane's limit for this block, and what its plugins took.
         // A lane may take the budget set (RFC 0025's share of an audio core) but never more than
         // loadMargin of the time its blocks have before they are missed (RFC 0045's load guard): a
-        // worker's allowance, the deadline under step 6, a period for a lane rendering a block late, the
+        // worker's allowance, the deadline under step 6, a period for a lane whose plugins all render a block late, the
         // callback's time in the engine's process. The lanes together share the budget (with none,
         // loadMargin of a block) on each audio core: a lane's limit leaves the others what they took
         // in the last block.

@@ -221,7 +221,7 @@ namespace oscairn
         /// thread (a lane: a worker's or plugin host's audio thread, or the engine's process) may take
         /// in all; 0, the default, for none; below 0, RFC 0045's load guard alone. Either way each lane's
         /// hard limit is the smaller of the budget and loadMargin of the time its blocks have before they
-        /// are missed (a worker's allowance, the deadline under step 6, a period for a lane a block late,
+        /// are missed (a worker's allowance, the deadline under step 6, a period for a lane whose plugins are all a block late,
         /// the callback's time for the engine's process), and every lane's together are held to the
         /// budget (with none, loadMargin of a block) on each audio core (RFC 0025's: all but one), less
         /// what the other lanes took in the last block. Stealing starts at 85% of it: before a note passes

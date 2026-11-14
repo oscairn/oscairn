@@ -9,6 +9,7 @@
 #include "Frame.h"
 #include "../../Apps.h"
 #include "../../DeviceScreen.h"
+#include "../../PaintCounter.h"
 #include "../../TextKeyboard.h"
 #include <cstdlib>
 #include <unistd.h>
@@ -41,6 +42,7 @@ namespace oscairn::standalone
             auto value = [&](const char* name) { const int at = args.indexOf(name); return at >= 0 && at + 1 < args.size() ? args[at + 1].unquoted() : juce::String(); };
             const auto themes = juce::SystemStats::getEnvironmentVariable("OSCAIRN_THEMES", {});
             theme_ = std::make_unique<Theme>(juce::File(), themes.isEmpty() ? juce::File() : juce::File(themes));
+            paints_ = PaintCounter::fromEnvironment(); // OSCAIRN_UI_PAINT_LOG=1: what its window draws, a line a second
             const auto named = args.contains("--profile") ? value("--profile") : juce::SystemStats::getEnvironmentVariable("OSCAIRN_PROFILE", {});
             try { profile_ = loadProfile(named.toStdString()); }
             catch(const std::exception& e) { std::fprintf(stderr, "oscairn-settings: the profile %s: %s; this computer's instead\n", named.toRawUTF8(), e.what()); profile_ = Profile::desktop(); }
@@ -78,7 +80,7 @@ namespace oscairn::standalone
             }
         }
 
-        void shutdown() override { window_.reset(); frame_.reset(); engine_.reset(); theme_.reset(); }
+        void shutdown() override { window_.reset(); frame_.reset(); engine_.reset(); paints_.reset(); theme_.reset(); }
         void systemRequestedQuit() override { quit(); }
 
     private:
@@ -94,6 +96,7 @@ namespace oscairn::standalone
         }
 
         std::unique_ptr<Theme> theme_;
+        std::unique_ptr<PaintCounter> paints_;
         Profile profile_;
         std::unique_ptr<Engine> engine_;
         std::unique_ptr<settings::Frame> frame_;

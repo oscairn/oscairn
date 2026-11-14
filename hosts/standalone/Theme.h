@@ -90,6 +90,9 @@ void setDeviceScale(float pixelsPerUnit,double platformScale=0);
 void keepInScreen(juce::Component& dialog);
 juce::DialogWindow* launchDialog(juce::DialogWindow::LaunchOptions& options);
 float textSize(TextRole, int mode);              // in pixels, with the theme's font scale
+// While a PaintCounter counts: the pixels of each frame a window paints, added here
+// (Theme::createGraphicsContext, which JUCE's software renderer asks for each frame).
+inline juce::int64* paintedPixels=nullptr;
 // Per-user Oscairn appearance, shared across layouts, windows and UI processes. A theme is a
 // folder holding theme.json and its fonts. Built-in themes are the same folders, shipped beside
 // the app; instrument builders can replace them and name the default in themes/default.
@@ -132,6 +135,7 @@ public:
     juce::Font getAlertWindowTitleFont() override;
     juce::Font getAlertWindowMessageFont() override;
     juce::Font getAlertWindowFont() override;
+    std::unique_ptr<juce::LowLevelGraphicsContext> createGraphicsContext(const juce::Image&,juce::Point<int>,const juce::RectangleList<int>&) override;
 private:
     struct Loaded { ThemeData data; juce::Typeface::Ptr regular,bold; std::shared_ptr<juce::Drawable> splash; };
     Loaded load(const juce::File& folder) const;

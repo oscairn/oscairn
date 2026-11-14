@@ -40,6 +40,7 @@
 #include "Splash.h"
 #include "TextKeyboard.h"
 #include "Executable.h"
+#include "PaintCounter.h"
 
 #include <BinaryData.h>
 #include <oscairn/plugin_host.h>
@@ -907,6 +908,7 @@ namespace oscairn::standalone
             try
             {
                 theme_=std::make_unique<Theme>();
+                paints_=PaintCounter::fromEnvironment(); // OSCAIRN_UI_PAINT_LOG=1: what the windows draw, a line a second
                 host::AudioConfiguration audio;
                 bool audioOptions=false;
                 const juce::StringArray valued{"--plugins","--connect","--profile","--controller","--layout","--snapshot","--size","--view","--input-mode","--app"};
@@ -1157,6 +1159,7 @@ namespace oscairn::standalone
             window_.reset(); // the panel uses the engine
             engine_.reset();
             splash_.reset();
+            paints_.reset();
             theme_.reset();
         }
 
@@ -1224,6 +1227,7 @@ namespace oscairn::standalone
         }
 
         std::unique_ptr<Theme> theme_;
+        std::unique_ptr<PaintCounter> paints_;
         std::unique_ptr<Engine> engine_;
         std::unique_ptr<Window> window_;
         std::unique_ptr<Controllers> controllers_;

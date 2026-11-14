@@ -7,6 +7,7 @@
 // data folder (OSCAIRN_APP_DATA), so started again after a crash it comes back where it was.
 //   Oscairn Setlist [--snapshot out.png --size WxH [--mode 1|2]]
 #include "../../DeviceScreen.h"
+#include "../../PaintCounter.h"
 #include "../../TextKeyboard.h"
 #include "../../Setlist.h"
 #include "../../Engine.h"
@@ -42,6 +43,7 @@ namespace oscairn::standalone
             if(!given || !*given) { std::fprintf(stderr, "oscairn-setlist: Oscairn starts this app; it has no connection to the engine\n"); setApplicationReturnValue(2); quit(); return; }
             const auto themes = juce::SystemStats::getEnvironmentVariable("OSCAIRN_THEMES", {});
             theme_ = std::make_unique<Theme>(juce::File(), themes.isEmpty() ? juce::File() : juce::File(themes));
+            paints_ = PaintCounter::fromEnvironment(); // OSCAIRN_UI_PAINT_LOG=1: what its window draws, a line a second
             engine_ = std::make_unique<Engine>(std::atoi(given));
             engine_->onLost = [this] { std::fprintf(stderr, "oscairn-setlist: the engine's connection closed\n"); setApplicationReturnValue(1); quit(); };
             // The actions the shell answers, asked of it; it decides who answers.
@@ -99,7 +101,7 @@ namespace oscairn::standalone
             }
         }
 
-        void shutdown() override { window_.reset(); pane_.reset(); engine_.reset(); theme_.reset(); }
+        void shutdown() override { window_.reset(); pane_.reset(); engine_.reset(); paints_.reset(); theme_.reset(); }
         void systemRequestedQuit() override { quit(); }
 
     private:
@@ -149,6 +151,7 @@ namespace oscairn::standalone
 
         Profile profile_;
         std::unique_ptr<Theme> theme_;
+        std::unique_ptr<PaintCounter> paints_;
         std::unique_ptr<Engine> engine_;
         Actions actions_;
         std::unique_ptr<SetlistPane> pane_;

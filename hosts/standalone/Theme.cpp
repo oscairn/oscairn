@@ -281,6 +281,10 @@ void Theme::reload() {
     try{set(load(find(defaultId())));}catch(const std::exception&){set(Loaded{});}
 }
 void Theme::timerCallback(){reload();}
+std::unique_ptr<juce::LowLevelGraphicsContext> Theme::createGraphicsContext(const juce::Image& image,juce::Point<int> origin,const juce::RectangleList<int>& clip) {
+    if(paintedPixels)for(const auto& r:clip)*paintedPixels+=juce::int64(r.getWidth())*r.getHeight();
+    return LookAndFeel_V4::createGraphicsContext(image,origin,clip);
+}
 void Theme::setScreenTheme(const juce::String& id){if(id==screenTheme_)return;screenTheme_=id;lastSelection_.reset();reload();}
 juce::Typeface::Ptr Theme::getTypefaceForFont(const juce::Font& font) {
     if(regular_ && font.getTypefaceName()==juce::Font::getDefaultSansSerifFontName())return font.isBold() && bold_?bold_:regular_;

@@ -63,7 +63,7 @@ juce_add_gui_app(oscairn_setlist_app
     BUNDLE_ID org.oscairn.setlist
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
-target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp DeviceScreen.cpp TextKeyboard.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
+target_sources(oscairn_setlist_app PRIVATE apps/setlist/SetlistApp.cpp DeviceScreen.cpp PaintCounter.cpp TextKeyboard.cpp Setlist.cpp Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
 target_compile_definitions(oscairn_setlist_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}")
 target_link_libraries(oscairn_setlist_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
     juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
@@ -89,7 +89,7 @@ juce_add_gui_app(oscairn_settings_app
     BUNDLE_ID org.oscairn.settings
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../branding/app-icon-1024.png")
-target_sources(oscairn_settings_app PRIVATE apps/settings/SettingsApp.cpp DeviceScreen.cpp TextKeyboard.cpp ${settings_sources} Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
+target_sources(oscairn_settings_app PRIVATE apps/settings/SettingsApp.cpp DeviceScreen.cpp PaintCounter.cpp TextKeyboard.cpp ${settings_sources} Engine.cpp Theme.cpp Splash.cpp SoundPickerModel.cpp DesktopProfile.cpp)
 target_compile_definitions(oscairn_settings_app PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")
 target_link_libraries(oscairn_settings_app PRIVATE oscairn_audio_host oscairn_host_process oscairn_control_socket oscairn_standalone_icons
     juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
@@ -107,7 +107,7 @@ if(NOT APPLE)
     install(DIRECTORY "${oscairn_apps}/" DESTINATION share/oscairn/apps USE_SOURCE_PERMISSIONS)
 endif()
 
-target_sources(oscairn_standalone PRIVATE Main.cpp DeviceScreen.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp TextKeyboard.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
+target_sources(oscairn_standalone PRIVATE Main.cpp DeviceScreen.cpp PaintCounter.cpp DesktopShell.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Engine.cpp Layout.cpp Panel.cpp Screen.cpp SoundPickerModel.cpp Theme.cpp PluginBrowser.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp LibraryPane.cpp Catalog.cpp Setlist.cpp DesktopProfile.cpp Launcher.cpp PlayView.cpp KeyboardWindow.cpp Controllers.cpp Splash.cpp Recording.cpp AppProcesses.cpp TextKeyboard.cpp $<$<PLATFORM_ID:Darwin>:AppProcesses_mac.mm>)
 target_compile_definitions(oscairn_standalone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:oscairn_standalone,JUCE_PRODUCT_NAME>"

@@ -553,8 +553,8 @@ namespace oscairn
         Sum contributions(const MacroTarget& t, uint32_t macro, double value) const;
         void setBase(const MacroTarget& t, double base);
         void noteBases(); // after controls arrive (a load, a Sound, an import): one base per destination, as it plays now
-        using Destination = std::tuple<int, NodeId, uint32_t, uint32_t>;
-        static Destination destination(const MacroTarget& t) { return {int(t.kind), t.node, t.param, t.part}; }
+        using Destination = std::tuple<int, NodeId, uint32_t, uint32_t, uint32_t>;
+        static Destination destination(const MacroTarget& t) { return {int(t.kind), t.node, t.param, t.part, t.bus}; }
         std::map<Destination, double> written_; // what the controls last set each destination to; anything else moving it since rebases it
         void driveMacro(uint32_t id, double value, bool& faders); // sets it and its targets
         // The controls driven by plugin lanes, flattened for the graph: each lane's final parameters,
@@ -795,6 +795,7 @@ namespace oscairn
         void open(Prepared& prepared, bool seamless);
         std::unique_ptr<Prepared> prepared_; // the next one, prepared ahead; after graph_, so it goes first
         std::set<NodeId> nodesOf(const Part& part) const;
+        void dropSendTargets(); // the control targets on sends that no longer exist
         static std::vector<assets::Ref> assetsOf(const std::filesystem::path& manifest);
         std::vector<std::string> exportArchive(const std::string& file, const std::string& kind, const std::function<std::vector<PartSource>(const std::filesystem::path&, Package&)>& write, bool editedSounds, const ExportSigning& sign);
         void stageItem(const LibraryItem& item, const std::filesystem::path& stage, Package& package, std::vector<PartSource>& from, std::vector<std::string>& notes);

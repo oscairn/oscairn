@@ -1001,6 +1001,11 @@ namespace oscairn::standalone
         case MacroTarget::Kind::PartLevel: case MacroTarget::Kind::PartMute:
             for(const auto* list : {&state_.parts, &state_.buses}) for(const auto& p : *list) if(p.id == t.part) return p.name + (t.kind == MacroTarget::Kind::PartLevel ? " level" : " mute");
             return "a part";
+        case MacroTarget::Kind::SendLevel:
+        {
+            auto name = [&](uint32_t id) { for(const auto* list : {&state_.parts, &state_.buses}) for(const auto& p : *list) if(p.id == id) return p.name; return std::string("a part"); };
+            return name(t.part) + " send to " + name(t.bus);
+        }
         case MacroTarget::Kind::Macro:
             for(const auto& m : macros_) if(m.id == t.macro) return "→ " + m.name;
             return "a control";
@@ -1031,17 +1036,23 @@ namespace oscairn::standalone
             }
     }
 
-    // What a control can drive: a part's level or mute, another control, or any node's parameter.
+    // What a control can drive: a part's level, mute or send, another control, or any node's parameter.
     void PartsView::targetMenu(uint32_t macro, juce::Component& at)
     {
         std::vector<MacroTarget> choices;
-        juce::PopupMenu menu, levels, mutes, others, parameters;
+        juce::PopupMenu menu, levels, mutes, sends, others, parameters;
         auto add = [&](juce::PopupMenu& to, const std::string& label, MacroTarget t) { choices.push_back(t); to.addItem(int(choices.size()), text(label)); };
         for(const auto* list : {&state_.parts, &state_.buses})
             for(const auto& p : *list)
             {
                 MacroTarget level; level.kind = MacroTarget::Kind::PartLevel; level.part = p.id; add(levels, p.name, level);
                 MacroTarget mute; mute.kind = MacroTarget::Kind::PartMute; mute.part = p.id; add(mutes, p.name, mute);
+                for(const auto& [bus, level] : p.sends)
+                {
+                    MacroTarget send; send.kind = MacroTarget::Kind::SendLevel; send.part = p.id; send.bus = bus;
+                    std::string to = "a bus"; for(const auto& b : state_.buses) if(b.id == bus) to = b.name;
+                    add(sends, p.name + " to " + to, send);
+                }
             }
         for(const auto& m : macros_) if(m.id != macro) { MacroTarget t; t.kind = MacroTarget::Kind::Macro; t.macro = m.id; add(others, m.name, t); }
         for(const auto& n : graph_.topology.nodes)
@@ -1058,6 +1069,7 @@ namespace oscairn::standalone
         menu.addSubMenu("Plugin parameter", parameters);
         menu.addSubMenu("Part level", levels);
         menu.addSubMenu("Part mute", mutes);
+        menu.addSubMenu("Part send", sends, sends.getNumItems() > 0);
         menu.addSubMenu("Another control", others);
         // A morph: from one scene (at 0) to another (at 1).
         juce::PopupMenu morphs;

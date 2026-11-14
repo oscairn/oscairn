@@ -88,7 +88,7 @@ namespace oscairn
         std::map<Key, double> values_;          // each target's value, 0 to 1
         std::set<Key> unapplied_;               // targets a MIDI thread set since the control thread last took the moves: newer than the model
         std::vector<Macro> macros_;             // the controls, with their values and bases
-        std::map<std::tuple<int, NodeId, uint32_t, uint32_t>, double> written_; // as Session::written_
+        std::map<std::tuple<int, NodeId, uint32_t, uint32_t, uint32_t>, double> written_; // as Session::written_
         uint32_t mappingScene_ = 0, scene_ = 0;
         std::map<uint32_t, uint8_t> slots_;     // each live part's gain slot
         std::map<uint32_t, std::array<uint8_t, 2>> pans_;           // each live pan's slots

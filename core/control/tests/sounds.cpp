@@ -91,6 +91,9 @@ int main(int argc, char** argv)
         // Its mod wheel assigned to the low layer's parameter, its own (RFC 0011).
         Assignment lowGain; lowGain.kind = Assignment::Kind::Parameter; lowGain.node = s.nodeId("Low"); lowGain.param = 7;
         s.assign("wheel:2", lowGain, part);
+        // A control of its own on its send to a bus: a Sound has no sends, so the target stays out.
+        const auto room = s.addPart("Room", {PartInput::Kind::Bus}); s.setSend(part, room, .5); s.commit();
+        s.setMacroTargets(s.addMacro("Verb", part), {MacroTarget{.kind = MacroTarget::Kind::SendLevel, .part = part, .bus = room}});
         const auto saved = s.savePartAsSound(part, "Split Keys");
         check(saved.left.size() == 1 && saved.left[0] == "High to Drums Echo", "the crossing wire is listed: " + (saved.left.empty() ? std::string() : saved.left[0]));
         const auto sound = std::filesystem::path(home.path) / "Sounds/Split Keys.osound/sound.json";
@@ -101,6 +104,7 @@ int main(int argc, char** argv)
               "nothing of the other part, and not the part's fader");
         check(json.find("\"version\":8") != std::string::npos && json.find("\"assignments\":[{\"control\":\"wheel:2\",\"kind\":\"parameter\"") != std::string::npos,
               "its mod wheel assignment is saved with it");
+        check(json.find("\"Verb\"") != std::string::npos && json.find("sendLevel") == std::string::npos, "its control on its send is saved without that target");
 
         // Into another Performance's part, which held something else and had controls on it.
         Session t(48000, frames);
@@ -123,7 +127,7 @@ int main(int argc, char** argv)
         auto macro = [&](const std::string& name) { for(const auto& m : g.macros) if(m.name == name) return m; throw std::runtime_error("no control " + name); };
         check(macro("Super").targets.size() == 1 && macro("Super").targets[0].macro == macro("Tone").id && macro("Tone").id != toneOld && macro("Tone").targets[0].node == t.nodeId("Low"),
               "Super now drives the Sound's Tone");
-        check(macro("Other").targets.size() == 1 && g.macros.size() == 4, "Other keeps its part level target; the old Tone went, the Sound's two came");
+        check(macro("Other").targets.size() == 1 && g.macros.size() == 5, "Other keeps its part level target; the old Tone went, the Sound's three came");
         const auto now = t.parts();
         check(now.size() == 1 && now[0].id == seat && now[0].name == "Split Keys" && now[0].level == .7 && now[0].splits.size() == 1 && now[0].chain.size() == 2,
               "the part keeps its seat and fader, with the Sound's chain");

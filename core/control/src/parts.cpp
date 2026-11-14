@@ -893,7 +893,7 @@ namespace oscairn
         editWires([&] {
             auto& sends = findPart(id).sends;
             const auto it = std::find_if(sends.begin(), sends.end(), [&](const Send& s) { return s.bus == bus; });
-            if(!level) { if(it != sends.end()) sends.erase(it); }
+            if(!level) { if(it != sends.end()) sends.erase(it); dropSendTargets(); }
             else if(it != sends.end()) it->level = *level;
             else sends.push_back({bus, *level});
             buildParts();
@@ -1185,6 +1185,7 @@ namespace oscairn
             break;
         case MacroTarget::Kind::PartLevel: for(const auto& p : state.parts) if(p.id == t.part) now = p.level; break;
         case MacroTarget::Kind::PartMute: for(const auto& p : state.parts) if(p.id == t.part) now = p.mute ? 1 : 0; break;
+        case MacroTarget::Kind::SendLevel: for(const auto& p : state.parts) if(p.id == t.part) for(const auto& s : p.sends) if(s.bus == t.bus) now = s.level; break;
         case MacroTarget::Kind::Macro: for(const auto& x : state.macros) if(x.id == t.macro) now = x.value; break;
         case MacroTarget::Kind::Morph: throw std::invalid_argument("a morph's ends are its scenes");
         }
@@ -1233,6 +1234,9 @@ namespace oscairn
         }
         case MacroTarget::Kind::PartLevel: for(const auto& p : parts_) if(p.id == t.part) return std::clamp(p.level, 0.0, 1.0); return 1;
         case MacroTarget::Kind::PartMute: for(const auto& p : parts_) if(p.id == t.part) return p.mute ? 1 : 0; return 0;
+        case MacroTarget::Kind::SendLevel:
+            for(const auto& p : parts_) if(p.id == t.part) for(const auto& s : p.sends) if(s.bus == t.bus) return std::clamp(s.level, 0.0, 1.0);
+            throw std::invalid_argument("no such send");
         case MacroTarget::Kind::Macro: for(const auto& m : macros_) if(m.id == t.macro) return m.value; return 0;
         case MacroTarget::Kind::Morph: return 0;
         }
@@ -1276,10 +1280,17 @@ namespace oscairn
                 if(t.relative && (parameterInfo(t.node, t.param).flags & CLAP_PARAM_IS_MODULATABLE)) t.delivery = MacroTarget::Delivery::Modulation;
                 break;
             case MacroTarget::Kind::PartLevel: case MacroTarget::Kind::PartMute:
-                if(owner) throw std::invalid_argument("a part's control targets only the part's plugins and controls");
+                if(owner) throw std::invalid_argument("a part's control targets only the part's plugins, sends and controls");
                 findPart(t.part); break;
+            case MacroTarget::Kind::SendLevel:
+            {
+                if(owner && t.part != owner) throw std::invalid_argument("a part's control targets only the part's own sends");
+                const auto& sends = findPart(t.part).sends;
+                if(std::none_of(sends.begin(), sends.end(), [&](const Send& s) { return s.bus == t.bus; })) throw std::invalid_argument("no such send");
+                break;
+            }
             case MacroTarget::Kind::Morph:
-                if(owner) throw std::invalid_argument("a part's control targets only the part's plugins and controls");
+                if(owner) throw std::invalid_argument("a part's control targets only the part's plugins, sends and controls");
                 if(t.sceneFrom == t.sceneTo) throw std::invalid_argument("a morph moves between two scenes");
                 findScene(t.sceneFrom); findScene(t.sceneTo); break;
             case MacroTarget::Kind::Macro:
@@ -1553,6 +1564,7 @@ namespace oscairn
                 break;
             case MacroTarget::Kind::PartLevel: for(auto& p : parts_) if(p.id == t.part) { p.level = v; faders = true; } break;
             case MacroTarget::Kind::PartMute: for(auto& p : parts_) if(p.id == t.part) { p.mute = v >= .5; faders = true; } break;
+            case MacroTarget::Kind::SendLevel: for(auto& p : parts_) if(p.id == t.part) for(auto& s : p.sends) if(s.bus == t.bus) { s.level = v; faders = true; } break;
             case MacroTarget::Kind::Morph: morphScenes(t.sceneFrom, t.sceneTo, v); break;
             case MacroTarget::Kind::Macro: break; // drive's own
             }
@@ -1610,6 +1622,7 @@ namespace oscairn
         Quiet playing(*this); // moving a control is playing, not editing
         bool faders = false;
         const auto before = faderLevels();
+        const auto sendsBefore = parts_; // for the send levels its targets move
         driveMacro(id, value, faders);
         // The lanes' controls start from the values the controls have now (nothing else waiting to commit).
         if(!staged_ && stageControls()) graph_.commit();
@@ -1618,6 +1631,9 @@ namespace oscairn
         const auto after = faderLevels();
         bool live = true;
         for(size_t i = 0; i < parts_.size() && i < before.size(); ++i) if(before[i] != after[i] && !liveFader(parts_[i].id)) live = false;
+        for(size_t i = 0; i < parts_.size() && i < sendsBefore.size(); ++i)
+            for(size_t k = 0; k < parts_[i].sends.size() && k < sendsBefore[i].sends.size(); ++k)
+                if(parts_[i].sends[k] != sendsBefore[i].sends[k] && !liveSend(parts_[i].id, parts_[i].sends[k].bus)) live = false;
         bool muted = false;
         for(size_t i = 0; i < before.size() && i < after.size(); ++i) muted = muted || before[i].second != after[i].second;
         if(live) { buildParts(); if(liveGains) writeLiveGains(); if(muted) { ++revision_; publish(ChangeKind::Graph); } } // levels go out as values
@@ -1998,8 +2014,19 @@ namespace oscairn
                 if(p.bus == id) { p.bus = 0; p.output = main; }
                 std::erase_if(p.sends, [&](const Send& s) { return s.bus == id; });
             }
+            dropSendTargets(); // its own sends' and those into it
             buildParts();
         });
+    }
+
+    void Session::dropSendTargets()
+    {
+        auto gone = [&](const MacroTarget& t) {
+            if(t.kind != MacroTarget::Kind::SendLevel) return false;
+            const auto p = std::find_if(parts_.begin(), parts_.end(), [&](const Part& x) { return x.id == t.part; });
+            return p == parts_.end() || std::none_of(p->sends.begin(), p->sends.end(), [&](const Send& s) { return s.bus == t.bus; });
+        };
+        for(auto& m : macros_) std::erase_if(m.targets, gone);
     }
 
     namespace

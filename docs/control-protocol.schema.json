@@ -7388,6 +7388,7 @@
                           "parameter",
                           "partLevel",
                           "partMute",
+                          "sendLevel",
                           "control"
                         ]
                       },
@@ -7403,6 +7404,12 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 4294967295
+                      },
+                      "bus": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4294967295,
+                        "description": "sendLevel: the bus the part sends to"
                       },
                       "control": {
                         "type": "integer",
@@ -10413,6 +10420,7 @@
             "parameter",
             "partLevel",
             "partMute",
+            "sendLevel",
             "control",
             "morph"
           ]
@@ -10431,6 +10439,12 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4294967295
+        },
+        "bus": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "sendLevel: the bus the part sends to; 0 for other kinds"
         },
         "control": {
           "type": "integer",
@@ -10584,6 +10598,7 @@
             "parameter",
             "partLevel",
             "partMute",
+            "sendLevel",
             "control",
             "morph"
           ]
@@ -10602,6 +10617,12 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4294967295
+        },
+        "bus": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "sendLevel: the bus the part sends to; 0 for other kinds"
         },
         "control": {
           "type": "integer",
@@ -10709,6 +10730,7 @@
         "node",
         "param",
         "part",
+        "bus",
         "control",
         "start",
         "end",

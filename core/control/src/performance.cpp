@@ -639,10 +639,12 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
         std::vector<std::string> targets;
         for(const auto& t:m.targets){
             if(t.kind==MacroTarget::Kind::Parameter && !keys.count(t.node))continue; // a plugin moved out of the part since
-            const char* kind=t.kind==MacroTarget::Kind::Parameter?"parameter":t.kind==MacroTarget::Kind::PartLevel?"partLevel":t.kind==MacroTarget::Kind::PartMute?"partMute":t.kind==MacroTarget::Kind::Morph?"morph":"control";
+            if(sound && t.kind==MacroTarget::Kind::SendLevel)continue; // a Sound has no sends
+            const char* kind=t.kind==MacroTarget::Kind::Parameter?"parameter":t.kind==MacroTarget::Kind::PartLevel?"partLevel":t.kind==MacroTarget::Kind::PartMute?"partMute":t.kind==MacroTarget::Kind::Morph?"morph":t.kind==MacroTarget::Kind::SendLevel?"sendLevel":"control";
             const auto curve=detail::curveJson(t,numeric);
             std::string at=t.kind==MacroTarget::Kind::Parameter?",\"node\":"+quote(keys.at(t.node))+",\"param\":"+std::to_string(t.param):t.kind==MacroTarget::Kind::Macro?",\"control\":"+std::to_string(t.macro):
-                t.kind==MacroTarget::Kind::Morph?",\"from\":"+std::to_string(t.sceneFrom)+",\"to\":"+std::to_string(t.sceneTo):",\"part\":"+std::to_string(t.part);
+                t.kind==MacroTarget::Kind::Morph?",\"from\":"+std::to_string(t.sceneFrom)+",\"to\":"+std::to_string(t.sceneTo):",\"part\":"+std::to_string(t.part)+
+                (t.kind==MacroTarget::Kind::SendLevel?",\"bus\":"+std::to_string(t.bus):std::string());
             targets.push_back(std::string("{\"kind\":\"")+kind+"\""+at+",\"start\":"+numeric(t.start)+",\"end\":"+numeric(t.end)+",\"curve\":"+curve+",\"relative\":"+(t.relative?"true":"false")+",\"base\":"+numeric(t.base)+",\"offIn\":"+offIn(t)+'}');
         }
         const std::string source=m.sourceNode && keys.count(m.sourceNode)?",\"source\":{\"node\":"+quote(keys.at(m.sourceNode))+",\"lane\":"+std::to_string(m.sourceLane)+'}':""; // a plugin's lane drives it
@@ -1341,6 +1343,10 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                     if(std::none_of(all.begin(),all.end(),[&](const auto& p){return p.id==target.param;}))bad("unknown control target parameter");}
                 else if(kind=="partLevel" || kind=="partMute"){fields(t,{"kind","part","start","end","curve","relative","base","offIn"});target.kind=kind=="partLevel"?MacroTarget::Kind::PartLevel:MacroTarget::Kind::PartMute;target.part=integer(field(t,"part"));
                     if(std::none_of(parts.begin(),parts.end(),[&](const Part& p){return p.id==target.part;}))bad("control target of an unknown part");}
+                else if(kind=="sendLevel"){fields(t,{"kind","part","bus","start","end","curve","relative","base","offIn"});target.kind=MacroTarget::Kind::SendLevel;target.part=integer(field(t,"part"));target.bus=integer(field(t,"bus"));
+                    const auto p=std::find_if(parts.begin(),parts.end(),[&](const Part& x){return x.id==target.part;});
+                    if(p==parts.end() || std::none_of(p->sends.begin(),p->sends.end(),[&](const Send& s){return s.bus==target.bus;}))bad("control target of an unknown send");
+                    if(macro.part && macro.part!=target.part)bad("a part's control targets only its own sends");}
                 else if(kind=="control"){fields(t,{"kind","control","start","end","curve","relative","base","offIn"});target.kind=MacroTarget::Kind::Macro;target.macro=integer(field(t,"control"));
                     if(!macroIds.count(target.macro))bad("control target of an unknown control");}
                 else if(kind=="morph"){fields(t,{"kind","from","to","start","end","curve","relative","base","offIn"});target.kind=MacroTarget::Kind::Morph;target.sceneFrom=integer(field(t,"from"));target.sceneTo=integer(field(t,"to"));
@@ -1961,7 +1967,7 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
                     for(auto t:array(field(m,"targets"),256)){
                         const auto kind=text(field(t,"kind"));
                         if(kind=="parameter")comes=comes && has(field(t,"node"));
-                        else if(kind=="partLevel" || kind=="partMute")comes=comes && taking.count(integer(field(t,"part")));
+                        else if(kind=="partLevel" || kind=="partMute" || kind=="sendLevel")comes=comes && taking.count(integer(field(t,"part")));
                         else comes=comes && coming.count(integer(field(t,"control")));}
                 }
                 if(comes){coming.insert(id);grew=true;}
@@ -1981,6 +1987,7 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
                 MacroTarget target;const auto kind=text(field(t,"kind"));
                 if(kind=="parameter"){target.kind=MacroTarget::Kind::Parameter;target.node=node(field(t,"node"));target.param=integer(field(t,"param"));parameterOf(target.node,target.param);}
                 else if(kind=="partLevel" || kind=="partMute"){target.kind=kind=="partLevel"?MacroTarget::Kind::PartLevel:MacroTarget::Kind::PartMute;target.part=partIds.at(integer(field(t,"part")));}
+                else if(kind=="sendLevel"){target.kind=MacroTarget::Kind::SendLevel;target.part=partIds.at(integer(field(t,"part")));target.bus=partIds.at(integer(field(t,"bus")));} // a part brings the buses it sends to
                 else if(kind=="control"){target.kind=MacroTarget::Kind::Macro;target.macro=controlIds.at(integer(field(t,"control")));}
                 else if(kind=="morph"){
                     // Between scenes that come too; one that does not loses the target.

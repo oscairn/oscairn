@@ -240,6 +240,40 @@ namespace
         check(s.plansCompiled() == plans, "no plan compiled for any of it: " + std::to_string(s.plansCompiled() - plans));
     }
 
+    // A control whose target is a part's send to a bus (a reverb send, as a converted sound's mod
+    // wheel has it), played by a controller: heard at the next block with the control thread not
+    // run, no plan compiled; then in the model.
+    void sends(const char* fixture)
+    {
+        Session s(48000, frames);
+        const auto a = s.add("a", fixture, "org.kick.test.synth"), wet = s.add("wet", fixture, "org.kick.test.effect");
+        s.setParameter(a, 7, .5); s.setParameter(wet, 7, .5);
+        const auto pa = s.addPart("A"), room = s.addPart("Room", {PartInput::Kind::Bus});
+        s.insertIntoPart(pa, 0, a); s.insertIntoPart(room, 0, wet); s.setSend(pa, room, .25); s.commit();
+        const auto control = s.addMacro("Reverb");
+        MacroTarget t; t.kind = MacroTarget::Kind::SendLevel; t.part = pa; t.bus = room;
+        s.setMacroTargets(control, {t});
+        s.assign("wheel:1", {Assignment::Kind::Control, 0, 0, control});
+        auto mod = group(Role::Assign, "wheels", 1, {1}); mod.functions = {"modulation"};
+        s.setControllers({mod}, {{"SMK-37 Elite -Master", "smk", 1}});
+        Control::SessionStatus status; status.midiInputs = {{MidiEndpoint::Kind::Usb, smk, "SMK-37 Elite -Master"}};
+        s.setHostStatus(status);
+        s.service();
+        s.note(true, 60, 1); render(s); render(s);
+        cc(s, 1, 0); render(s); s.service(); render(s);
+        const double dry = render(s);
+        check(near(dry, .5), "the wheel at 0: no send, A alone: " + std::to_string(dry));
+        const auto plans = s.plansCompiled();
+        cc(s, 1, 127); render(s);
+        const double full = render(s) - dry;
+        check(full > .01 && s.parts()[0].sends[0].level == 0, "the wheel at the top: the send heard within one block, the model not yet moved: " + std::to_string(full));
+        cc(s, 1, 64); render(s);
+        check(near(render(s) - dry, full * 64 / 127.0), "halfway: half the send: " + std::to_string(render(s) - dry));
+        s.service();
+        check(near(s.parts()[0].sends[0].level, 64 / 127.0) && near(render(s) - dry, full * 64 / 127.0), "then the model's, the same");
+        check(s.plansCompiled() == plans, "no plan compiled for any of it: " + std::to_string(s.plansCompiled() - plans));
+    }
+
     // A device's transport buttons, by their function's name as its panel reader gives them (the
     // FANTOM-07's PLAY and STOP): the transport is stopped at start, PLAY pressed starts it, STOP
     // pressed stops it, and a release does nothing; with the control thread not run.
@@ -661,7 +695,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 2) { std::fprintf(stderr, "usage: %s FIXTURE\n", argv[0]); return 2; }
-    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); transportButtons(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
+    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
     catch(const std::exception& e) { forbidAllocation = false; std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(!failures) std::puts("ok: a controller's MIDI into the engine moves its controls' targets within one block");
     return failures ? 1 : 0;

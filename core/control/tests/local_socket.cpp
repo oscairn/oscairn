@@ -876,6 +876,14 @@ void partsClient(const char* plugin,const char* delay)
         remote.setSend(part,room,.25);remote.setPartOutput(part,room);
         auto withBus=remote.graphState().parts;
         check(withBus.size()==2 && withBus[0].bus==room && withBus[0].sends.size()==1 && withBus[0].sends[0].level==.25 && withBus[1].input.kind==PartInput::Kind::Bus,"a bus, a send and an output through it over the socket");
+        {
+            const auto verb=remote.addMacro("Verb");MacroTarget send;send.kind=MacroTarget::Kind::SendLevel;send.part=part;send.bus=room;
+            remote.setMacroTargets(verb,{send});remote.setMacro(verb,.75);
+            const auto sent=remote.graphState();
+            check(sent.macros.size()==1 && sent.macros[0].targets[0].kind==MacroTarget::Kind::SendLevel && sent.macros[0].targets[0].part==part && sent.macros[0].targets[0].bus==room &&
+                  std::abs(sent.parts[0].sends[0].level-.75)<1e-9,"a control over the socket drives a part's send");
+            remote.removeMacro(verb);
+        }
         remote.setSend(part,room,std::nullopt);remote.setPartOutput(part,0);remote.removePart(room);
         const auto verse=remote.addScene("Verse");remote.setPartLevel(part,.5,true);const auto chorus=remote.addScene("Chorus");
         remote.selectScene(verse);

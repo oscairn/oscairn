@@ -347,7 +347,7 @@ namespace oscairn
             if( !map.valid() ) invalid("Invalid pad map");
             return map;
         }
-        const char* kindName( MacroTarget::Kind k ) { return k == MacroTarget::Kind::Parameter ? "parameter" : k == MacroTarget::Kind::PartLevel ? "partLevel" : k == MacroTarget::Kind::PartMute ? "partMute" : k == MacroTarget::Kind::Morph ? "morph" : "control"; }
+        const char* kindName( MacroTarget::Kind k ) { return k == MacroTarget::Kind::Parameter ? "parameter" : k == MacroTarget::Kind::PartLevel ? "partLevel" : k == MacroTarget::Kind::PartMute ? "partMute" : k == MacroTarget::Kind::Morph ? "morph" : k == MacroTarget::Kind::SendLevel ? "sendLevel" : "control"; }
         std::string macrosJson( const std::vector<Macro>& macros )
         {
             std::vector<std::string> out;
@@ -356,7 +356,7 @@ namespace oscairn
                 std::vector<std::string> targets;
                 for( const auto& t : m.targets )
                     targets.push_back(std::string("{\"kind\":\"") + kindName(t.kind) + "\",\"node\":" + std::to_string(t.node) + ",\"param\":" + std::to_string(t.param) +
-                        ",\"part\":" + std::to_string(t.part) + ",\"control\":" + std::to_string(t.macro) + ",\"from\":" + std::to_string(t.sceneFrom) + ",\"to\":" + std::to_string(t.sceneTo) + ",\"start\":" + encode(t.start) + ",\"end\":" + encode(t.end) +
+                        ",\"part\":" + std::to_string(t.part) + ",\"bus\":" + std::to_string(t.bus) + ",\"control\":" + std::to_string(t.macro) + ",\"from\":" + std::to_string(t.sceneFrom) + ",\"to\":" + std::to_string(t.sceneTo) + ",\"start\":" + encode(t.start) + ",\"end\":" + encode(t.end) +
                         ",\"curve\":" + detail::curveJson(t, encode) + ",\"relative\":" + (t.relative ? "true" : "false") + ",\"base\":" + encode(t.base) + ",\"offIn\":" + [&] {
                             std::vector<std::string> ids; for( const auto id : t.offIn ) ids.push_back(std::to_string(id)); return join(ids); }() + '}');
                 const std::string source = m.sourceNode ? "{\"node\":" + std::to_string(m.sourceNode) + ",\"lane\":" + std::to_string(m.sourceLane) + '}' : "null";
@@ -370,12 +370,13 @@ namespace oscairn
             std::vector<MacroTarget> targets;
             for( auto* e = static_cast<const json_array_s*>(list->payload)->start; e; e = e->next )
             {
-                fields(e->value,{"kind","node","param","part","control","from","to","start","end","curve","relative","base","offIn"});
+                fields(e->value,{"kind","node","param","part","bus","control","from","to","start","end","curve","relative","base","offIn"});
                 MacroTarget t;
                 const auto kind = string(member(e->value,"kind"));
-                t.kind = kind == "parameter" ? MacroTarget::Kind::Parameter : kind == "partLevel" ? MacroTarget::Kind::PartLevel : kind == "partMute" ? MacroTarget::Kind::PartMute : kind == "control" ? MacroTarget::Kind::Macro : kind == "morph" ? MacroTarget::Kind::Morph : (invalid("kind is parameter, partLevel, partMute, control or morph"), MacroTarget::Kind::Parameter);
+                t.kind = kind == "parameter" ? MacroTarget::Kind::Parameter : kind == "partLevel" ? MacroTarget::Kind::PartLevel : kind == "partMute" ? MacroTarget::Kind::PartMute : kind == "control" ? MacroTarget::Kind::Macro : kind == "morph" ? MacroTarget::Kind::Morph : kind == "sendLevel" ? MacroTarget::Kind::SendLevel : (invalid("kind is parameter, partLevel, partMute, sendLevel, control or morph"), MacroTarget::Kind::Parameter);
                 if( t.kind == MacroTarget::Kind::Parameter ) { t.node = node(c,member(e->value,"node")); t.param = integer(member(e->value,"param")); }
-                if( t.kind == MacroTarget::Kind::PartLevel || t.kind == MacroTarget::Kind::PartMute ) t.part = integer(member(e->value,"part"));
+                if( t.kind == MacroTarget::Kind::PartLevel || t.kind == MacroTarget::Kind::PartMute || t.kind == MacroTarget::Kind::SendLevel ) t.part = integer(member(e->value,"part"));
+                if( t.kind == MacroTarget::Kind::SendLevel ) t.bus = integer(member(e->value,"bus"));
                 if( t.kind == MacroTarget::Kind::Macro ) t.macro = integer(member(e->value,"control"));
                 if( t.kind == MacroTarget::Kind::Morph ) { t.sceneFrom = integer(member(e->value,"from")); t.sceneTo = integer(member(e->value,"to")); }
                 if( member(e->value,"start") ) t.start = number(member(e->value,"start"));

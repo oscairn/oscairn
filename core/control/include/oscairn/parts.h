@@ -214,19 +214,21 @@ namespace oscairn
     // control. Physical knobs, MIDI CC and scenes set controls.
     struct MacroTarget
     {
-        enum class Kind { Parameter, PartLevel, PartMute, Macro, Morph } kind = Kind::Parameter;
+        // SendLevel: a part's send to a bus (Part::sends), a gain as PartLevel's.
+        enum class Kind { Parameter, PartLevel, PartMute, Macro, Morph, SendLevel } kind = Kind::Parameter;
         // Db: evenly in decibels from `low` at 0 to `high` at 1, as a gain, and 0 at 0 (a fader's
         // taper); Power: the value to the power `exponent`.
         enum class Curve { Linear, Exponential, Logarithmic, SCurve, Db, Power } curve = Curve::Linear;
         NodeId node = 0; uint32_t param = 0; // Parameter
-        uint32_t part = 0;                   // PartLevel, PartMute
+        uint32_t part = 0;                   // PartLevel, PartMute, SendLevel
+        uint32_t bus = 0;                    // SendLevel: the bus the part sends to
         uint32_t macro = 0;                  // Macro
         uint32_t sceneFrom = 0, sceneTo = 0; // Morph: the scenes the control moves between, from at 0 to at 1
         // The range the control's 0..1 covers, as fractions of the target's range; end below
         // start reverses it. Relative targets move around `base` by half the range either way.
         double start = 0, end = 1;
         bool relative = false;
-        // Parameters, part levels and mutes: the destination's value with no control moving it,
+        // Parameters, part levels, mutes and send levels: the destination's value with no control moving it,
         // the same on every target of that destination (RFC 0011's summing rule). Each target
         // adds its offset around it, and the sum is clamped to the range.
         double base = 0;
@@ -246,13 +248,14 @@ namespace oscairn
         // What a control value does here alone, as a fraction of the target's range.
         double map(double value) const;
         // Whether several controls' targets sum into this one's destination, and whether two share it.
-        bool sums() const { return kind == Kind::Parameter || kind == Kind::PartLevel || kind == Kind::PartMute; }
-        bool sameDestination(const MacroTarget& o) const { return sums() && o.kind == kind && o.node == node && o.param == param && o.part == part; }
+        bool sums() const { return kind == Kind::Parameter || kind == Kind::PartLevel || kind == Kind::PartMute || kind == Kind::SendLevel; }
+        bool sameDestination(const MacroTarget& o) const { return sums() && o.kind == kind && o.node == node && o.param == param && o.part == part && o.bus == bus; }
         bool operator==(const MacroTarget&) const = default;
     };
     inline constexpr std::array<const char*, 6> curveKinds{"linear", "exponential", "logarithmic", "s-curve", "db", "power"}; // as files and the control protocol name them
     // A control belongs to the Performance, or to a part (RFC 0021): a part's controls target only
-    // its plugins and its other controls, and go with it into a Sound.
+    // its plugins, its own sends and its other controls, and go with it into a Sound (which has no
+    // sends, so its send targets stay out of one).
     // A control may also be driven by a plugin's param-target lane (RFC 0002), its `source`: node 0
     // for none. The tree under it is flattened into the graph (Graph::setControlTargets), so the
     // lane's events reach every parameter below it at their sample, in the audio thread.

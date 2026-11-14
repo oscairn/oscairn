@@ -1574,7 +1574,8 @@
             "partLevel",
             "partMute",
             "control",
-            "morph"
+            "morph",
+            "sendLevel"
           ]
         },
         "node": {
@@ -1588,7 +1589,14 @@
         "part": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 4294967295
+          "maximum": 4294967295,
+          "description": "partLevel, partMute, sendLevel: the part"
+        },
+        "bus": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295,
+          "description": "sendLevel: the bus the part sends to, one of its sends; a part's own control targets only its own part's sends"
         },
         "control": {
           "type": "integer",
@@ -1666,7 +1674,7 @@
         },
         "base": {
           "type": "number",
-          "description": "Parameters, part levels and mutes: the destination's base, the same on every target of it (RFC 0011's summing rule); outside 0..1 when a direct edit put the value where the offsets reach past the range"
+          "description": "Parameters, part levels, mutes and send levels: the destination's base, the same on every target of it (RFC 0011's summing rule); outside 0..1 when a direct edit put the value where the offsets reach past the range"
         },
         "offIn": {
           "type": "array",

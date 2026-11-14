@@ -10,6 +10,10 @@
 
 namespace oscairn
 {
+    namespace
+    {
+        constexpr int sendKey = 100; // a send's level among the values, beside the assignments' kinds: {sendKey, 0, bus, part}
+    }
 
     void ControllerInput::set(std::vector<ControlGroup> groups, std::vector<Control::ControllerPort> ports)
     {
@@ -131,7 +135,7 @@ namespace oscairn
     }
 
     // A control and its targets by the summing rule, as the Session drives them: part levels,
-    // mutes, parameters and morphs now.
+    // mutes, send levels, parameters and morphs now.
     void ControllerInput::drive(uint32_t control, double value)
     {
         auto current = [&](const MacroTarget& m) -> std::optional<double> {
@@ -140,6 +144,7 @@ namespace oscairn
             case MacroTarget::Kind::Parameter: { const auto it = values_.find({int(Assignment::Kind::Parameter), m.node, m.param, 0}); if(it == values_.end()) return {}; return it->second; }
             case MacroTarget::Kind::PartLevel: { const auto it = values_.find({int(Assignment::Kind::PartLevel), 0, 0, m.part}); return it == values_.end() ? 1.0 : std::clamp(it->second, 0.0, 1.0); }
             case MacroTarget::Kind::PartMute: { const auto it = values_.find({int(Assignment::Kind::PartMute), 0, 0, m.part}); return it == values_.end() ? 0.0 : it->second; }
+            case MacroTarget::Kind::SendLevel: { const auto it = values_.find({sendKey, 0, m.bus, m.part}); if(it == values_.end()) return {}; return std::clamp(it->second, 0.0, 1.0); }
             case MacroTarget::Kind::Macro: for(const auto& x : macros_) if(x.id == m.macro) return x.value; return 0.0;
             case MacroTarget::Kind::Morph: return 0.0;
             }
@@ -151,6 +156,14 @@ namespace oscairn
             case MacroTarget::Kind::Parameter: { const Key k{int(Assignment::Kind::Parameter), m.node, m.param, 0}; if(values_.count(k)) { values_[k] = x; unapplied_.insert(k); send(k); } break; }
             case MacroTarget::Kind::PartLevel: setFader(m.part, x, {}); break;
             case MacroTarget::Kind::PartMute: setFader(m.part, {}, x >= .5); break;
+            case MacroTarget::Kind::SendLevel:
+            {
+                const Key k{sendKey, 0, m.bus, m.part};
+                if(!values_.count(k)) break;
+                values_[k] = x; unapplied_.insert(k);
+                if(const auto slot = sends_.find({m.part, m.bus}); slot != sends_.end()) write(slot->second, x); // a live send is heard at the next block
+                break;
+            }
             case MacroTarget::Kind::Morph: morph(m.sceneFrom, m.sceneTo, x); break;
             case MacroTarget::Kind::Macro: break;
             }
@@ -360,7 +373,8 @@ namespace oscairn
             for(const auto& m : x.macros_)
                 if(m.id == id)
                     return std::all_of(m.targets.begin(), m.targets.end(), [&](const MacroTarget& t) {
-                        return t.kind == MacroTarget::Kind::Parameter || t.kind == MacroTarget::Kind::Morph || (t.kind == MacroTarget::Kind::Macro ? live(t.macro) : x.liveFader(t.part));
+                        return t.kind == MacroTarget::Kind::Parameter || t.kind == MacroTarget::Kind::Morph ||
+                               (t.kind == MacroTarget::Kind::Macro ? live(t.macro) : t.kind == MacroTarget::Kind::SendLevel ? x.liveSend(t.part, t.bus) : x.liveFader(t.part));
                     });
             return true;
         };
@@ -388,6 +402,7 @@ namespace oscairn
         {
             values[{int(Assignment::Kind::PartLevel), 0, 0, p.id}] = p.level;
             values[{int(Assignment::Kind::PartMute), 0, 0, p.id}] = p.mute ? 1 : 0;
+            for(const auto& x : p.sends) values[{sendKey, 0, x.bus, p.id}] = x.level;
         }
         std::map<Key, Range> ranges;
         for(const auto& [id, node] : source.nodes)

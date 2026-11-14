@@ -169,7 +169,7 @@ request members.
 | `scenes.untouched` | `parameters`: the `{node, param}` scenes never touch (they touch every other automatable, writable parameter); one taken back gets its current value in every scene | `{"accepted":true}` |
 | `controls.add` | optional `name` and `part`, the part that owns it (RFC 0021; 0 or absent: the Performance). A part's control targets only its part's plugins and its other controls, and goes with it into a Sound and when it is removed | numeric `control` |
 | `controls.remove`, `controls.name` | `control` (and `name`) | `{"accepted":true}` |
-| `controls.targets` | `control`, `targets`: each `kind` (`parameter` with `node`, `param`; `partLevel` or `partMute` with `part`; `control` with `control`; `morph` with `from` and `to`, two scenes: the control moves between them, as below), optional `start`, `end` (0..1, end below start reverses), `curve` (`linear`, `exponential`, `logarithmic`, `s-curve`, `{"kind":"db","min":M,"max":X}` with −144 ≤ M < X ≤ 0, or `{"kind":"power","exponent":E}` with 0.1 ≤ E ≤ 10, as [RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree) defines them; `graph.get` gives them the same way), `relative`, and `offIn` (the scenes it is off in) | `{"accepted":true}` |
+| `controls.targets` | `control`, `targets`: each `kind` (`parameter` with `node`, `param`; `partLevel` or `partMute` with `part`; `sendLevel` with `part` and `bus`, one of the part's sends, a gain as a part level is (a part's own control may target only its own part's sends); `control` with `control`; `morph` with `from` and `to`, two scenes: the control moves between them, as below), optional `start`, `end` (0..1, end below start reverses), `curve` (`linear`, `exponential`, `logarithmic`, `s-curve`, `{"kind":"db","min":M,"max":X}` with −144 ≤ M < X ≤ 0, or `{"kind":"power","exponent":E}` with 0.1 ≤ E ≤ 10, as [RFC 0011](rfcs/0011-performance-ui-and-editors.md#the-control-tree) defines them; `graph.get` gives them the same way), `relative`, and `offIn` (the scenes it is off in) | `{"accepted":true}` |
 | `controls.source` | `control`, optional `node` and `lane`: the plugin's param-target lane that drives the control (below); without `node`, nothing does. Refused for a node outside the control's part, or a lane that would reach its own plugin through the controls and the graph. Takes effect at `graph.commit`, saved and undone as any edit | `{"accepted":true}` |
 | `controls.set` | `control`, `value` (0..1): sets its targets, and theirs | `{"accepted":true}` |
 | `pads.get` | omitted or `{}` | the pad map: `bank` and eight `banks` of 16 pads, each `note`, `channel` (-1 follows the player), `velocity` (0 as played), `pressure` (`none`, `poly`, `channel`) |
@@ -375,7 +375,7 @@ report the compiled per-channel routes.
 All of these stage edits like the other graph methods; `graph.commit` publishes them.
 
 **Controls** form RFC 0011's control tree: `graph.get` lists them (`controls`, each with
-its `value`, `targets` and `source`: `{node, lane}`, or `null`). Several controls on one parameter, part level or mute add up
+its `value`, `targets` and `source`: `{node, lane}`, or `null`). Several controls on one parameter, part level, mute or send level add up
 ([RFC 0011's summing rule](rfcs/0011-performance-ui-and-editors.md#the-control-tree)): each
 target adds an offset to the destination's `base`, the same on all its targets (a relative
 target its point in its range less a half, an absolute one its point less the base), clamped
@@ -384,12 +384,12 @@ end of a target to its destination's present value with no call of its own: from
 and `params.get` it works out the point that gives that value with the other targets where
 they are (RFC 0011's "either end to the present value"), and sends it in `controls.targets`, as
 the C++ `setRangeToPresent` does over any `Control`. Setting a control sets its
-targets as parameter events or part faders; a control target is set in turn, the one moved last
+targets as parameter events, part faders or send levels (a send's live gain, ramped as a fader's, where it has one); a control target is set in turn, the one moved last
 setting it. A control with a `source` is also driven by that plugin lane ([RFC 0002](rfcs/0002-param-target.md)),
 in the audio thread at the lane's samples: a SET event's value becomes the control's, a
 MODULATE event's amount is added to its value. Its absolute parameter targets are set; its
 relative ones get CLAP parameter modulation on top of the parameter's value, which stays as it
-is. A lane reaches the parameters under the control (part levels, mutes and morphs follow only
+is. A lane reaches the parameters under the control (part levels, mutes, send levels and morphs follow only
 its knob). Whatever drives a control, a relative target on a parameter that takes modulation
 (`CLAP_PARAM_IS_MODULATABLE`) is CLAP parameter modulation, never the parameter's value: left
 out of the summing rule's stored value, the value `params.get` reads and the saved Performance.

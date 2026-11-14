@@ -343,10 +343,10 @@ namespace oscairn
                 for(auto t:array(field(m,"targets")))
                 {
                     MacroTarget target;const auto kind=string(field(t,"kind"));
-                    target.kind=kind=="parameter"?MacroTarget::Kind::Parameter:kind=="partLevel"?MacroTarget::Kind::PartLevel:kind=="partMute"?MacroTarget::Kind::PartMute:kind=="morph"?MacroTarget::Kind::Morph:MacroTarget::Kind::Macro;
+                    target.kind=kind=="parameter"?MacroTarget::Kind::Parameter:kind=="partLevel"?MacroTarget::Kind::PartLevel:kind=="partMute"?MacroTarget::Kind::PartMute:kind=="morph"?MacroTarget::Kind::Morph:kind=="sendLevel"?MacroTarget::Kind::SendLevel:MacroTarget::Kind::Macro;
                     if(!detail::curveFrom(field(t,"curve"),target))throw std::runtime_error("Invalid RPC curve");
                     target.node=static_cast<NodeId>(integer(field(t,"node")));target.param=static_cast<uint32_t>(integer(field(t,"param")));
-                    target.part=static_cast<uint32_t>(integer(field(t,"part")));target.macro=static_cast<uint32_t>(integer(field(t,"control")));
+                    target.part=static_cast<uint32_t>(integer(field(t,"part")));target.bus=static_cast<uint32_t>(integer(field(t,"bus")));target.macro=static_cast<uint32_t>(integer(field(t,"control")));
                     target.start=number(field(t,"start"));target.end=number(field(t,"end"));target.relative=boolean(field(t,"relative"));target.base=number(field(t,"base"));
                     for(auto id:array(field(t,"offIn")))target.offIn.push_back(static_cast<uint32_t>(integer(id)));
                     target.sceneFrom=static_cast<uint32_t>(integer(field(t,"from")));target.sceneTo=static_cast<uint32_t>(integer(field(t,"to")));
@@ -1175,8 +1175,8 @@ namespace oscairn
         std::string list="[";
         for(const auto& t:targets){
             if(list.size()>1)list+=',';
-            const char* kind=t.kind==MacroTarget::Kind::Parameter?"parameter":t.kind==MacroTarget::Kind::PartLevel?"partLevel":t.kind==MacroTarget::Kind::PartMute?"partMute":t.kind==MacroTarget::Kind::Morph?"morph":"control";
-            list+=std::string("{\"kind\":\"")+kind+"\",\"node\":"+std::to_string(t.node)+",\"param\":"+std::to_string(t.param)+",\"part\":"+std::to_string(t.part)+",\"control\":"+std::to_string(t.macro)+",\"from\":"+std::to_string(t.sceneFrom)+",\"to\":"+std::to_string(t.sceneTo)+
+            const char* kind=t.kind==MacroTarget::Kind::Parameter?"parameter":t.kind==MacroTarget::Kind::PartLevel?"partLevel":t.kind==MacroTarget::Kind::PartMute?"partMute":t.kind==MacroTarget::Kind::Morph?"morph":t.kind==MacroTarget::Kind::SendLevel?"sendLevel":"control";
+            list+=std::string("{\"kind\":\"")+kind+"\",\"node\":"+std::to_string(t.node)+",\"param\":"+std::to_string(t.param)+",\"part\":"+std::to_string(t.part)+",\"bus\":"+std::to_string(t.bus)+",\"control\":"+std::to_string(t.macro)+",\"from\":"+std::to_string(t.sceneFrom)+",\"to\":"+std::to_string(t.sceneTo)+
                 ",\"start\":"+encode(t.start)+",\"end\":"+encode(t.end)+",\"curve\":"+detail::curveJson(t,encode)+",\"relative\":"+(t.relative?"true":"false")+",\"offIn\":[";
             for(size_t i=0;i<t.offIn.size();++i)list+=(i?",":"")+std::to_string(t.offIn[i]);
             list+="]}";

@@ -2239,6 +2239,57 @@ namespace
         check(near(y.l[frames - 1], .125) && u.plansCompiled() == loaded, "and its faders move without a plan: " + std::to_string(y.l[frames - 1]));
     }
 
+    // A control's target on a part's send to a bus (RFC 0011): summed with another control's around
+    // one base, a live gain ramped across the next block with no plan compiled, refused where it is
+    // not the part's own for a part's control, saved and loaded, and gone with its send.
+    void sendTargets(const char* fixture, const char* audio, const fs::path& root)
+    {
+        Session s(48000, frames);
+        const auto a = s.add("a", fixture, "org.kick.test.synth"); s.setParameter(a, 7, .5);
+        const auto part = s.addPart("A"), room = s.addPart("Room", {PartInput::Kind::Bus}), other = s.addPart("B");
+        const auto thru = s.add("thru", audio, "org.oscairn.test.audio-ports");
+        s.insertIntoPart(part, 0, a); s.insertIntoPart(room, 0, thru); s.setSend(part, room, .5); s.setSend(other, room, .5); s.commit();
+        Audio x; s.note(true, 60, 1); x.run(s); x.run(s);
+        check(near(x.l[frames - 1], .75), "A and its send at .5: " + std::to_string(x.l[frames - 1]));
+        const auto reverb = s.addMacro("Reverb"), wheel = s.addMacro("Wheel");
+        MacroTarget send; send.kind = MacroTarget::Kind::SendLevel; send.part = part; send.bus = room; // absolute, 0 to 1
+        MacroTarget more = send; more.relative = true; more.start = .5; more.end = .9; // +.4 at its top
+        s.setMacroTargets(reverb, {send}); s.setMacroTargets(wheel, {more});
+        check(s.graphState().macros[0].targets[0].base == .5, "a new destination's base is the send's level now");
+        auto level = [&] { return s.parts()[0].sends[0].level; };
+        auto close = [](double v, double e) { return std::abs(v - e) < 1e-9; };
+        const auto plans = s.plansCompiled();
+        s.setMacro(reverb, .25); x.run(s);
+        const bool ramped = x.l[0] > .5 + .5 * .25 + 1e-4;
+        check(close(level(), .25) && near(x.l[frames - 1], .5 + .5 * .25) && ramped, "the control sets the send, ramped across the next block: " + std::to_string(x.l[0]) + " to " + std::to_string(x.l[frames - 1]));
+        s.setMacro(wheel, 1); x.run(s);
+        check(close(level(), .65) && near(x.l[frames - 1], .5 + .5 * .65), "a second control adds its offset: .25 + .4: " + std::to_string(level()));
+        s.setMacro(reverb, 1); x.run(s);
+        check(close(level(), 1), "the sum is clamped to the range: " + std::to_string(level()));
+        check(s.plansCompiled() == plans, "and no plan compiled: " + std::to_string(s.plansCompiled() - plans));
+        check(s.parts()[2].sends[0].level == .5, "B's send to the same bus is its own");
+        // A part's own control reaches its own sends only.
+        const auto own = s.addMacro("Assign 1", part);
+        s.setMacroTargets(own, {send});
+        bool refused = false; try { MacroTarget theirs = send; theirs.part = other; s.setMacroTargets(own, {theirs}); } catch(const std::invalid_argument&) { refused = true; }
+        check(refused, "a part's control may not target another part's send");
+        refused = false; try { MacroTarget none = send; none.bus = other; s.setMacroTargets(reverb, {none}); } catch(const std::invalid_argument&) { refused = true; }
+        check(refused, "a send the part does not have is refused");
+        s.setMacro(reverb, .5); s.setMacro(wheel, .5); x.run(s);
+        s.savePerformance((root / "sends").string());
+        Session t(48000, frames);
+        t.loadPerformance((root / "sends").string());
+        const auto loaded = t.graphState().macros;
+        auto partNamed = [&](const char* name) { for(const auto& p : t.graphState().parts) if(p.name == name) return p.id; return 0u; };
+        check(loaded.size() == 3 && loaded[0].targets.size() == 1 && loaded[0].targets[0].kind == MacroTarget::Kind::SendLevel && loaded[0].targets[0].part == partNamed("A") &&
+              loaded[0].targets[0].bus == partNamed("Room") && loaded[2].part == partNamed("A") && loaded[2].targets.size() == 1, "send targets round-trip with the Performance");
+        t.setMacro(loaded[0].id, 0); t.note(true, 60, 1); Audio y; y.run(t); y.run(t);
+        check(near(y.l[frames - 1], .5), "the loaded control still drives the send: " + std::to_string(y.l[frames - 1]));
+        // Gone with its send.
+        s.setSend(part, room, {}); s.commit();
+        check(s.graphState().macros[0].targets.empty() && s.graphState().macros[1].targets.empty(), "removing the send drops the targets on it");
+    }
+
     // A solo undone, committed and saved: the same file as before it, playing the same. Each part
     // soloed and heard (a muted one unmuted), then put back as it was: a copy of the parts, since
     // parts() is the live model and the edits change it.
@@ -2413,6 +2464,7 @@ int main(int argc, char** argv)
         optionalAssets(argv[1], temp.path);
         levelCurves(argv[1], temp.path);
         liveGains(argv[1], argv[2], temp.path);
+        sendTargets(argv[1], argv[2], temp.path);
         soloRoundTrip(argv[1], argv[3], temp.path);
         persistence(argv[1], argv[2], argv[3], temp.path);
     }

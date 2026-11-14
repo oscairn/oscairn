@@ -26,6 +26,7 @@ Checked when built and tested; the sections below say how.
   - [x] the latency measured in a test, against one block ([status](#latency-status))
   - [x] values pushed to clients (`controls.changed`), so the UI and devices follow without reading the graph ([status](#latency-status))
   - [x] faders and mutes edited on screen shown at once and sent without waiting ([status](#screen-edits-status))
+  - [x] control targets on a part's send levels, as on its level ([status](#step-6-status)); bypass and the transport remain
 - [ ] 7. Groups, pedal view, move, copy and share
 - [x] Play: the Performance app's view for the stage ([design](#play-the-performance-apps-first-view), [status](#play-status))
 - [x] The full scene model (blocks and wires enabled per scene, what each scene saves),
@@ -743,7 +744,7 @@ Performance. A sound's Assign 1–8, a MODX-style Super Knob, a macro and a grou
 controls; physical knobs, faders, buttons, MIDI CC and sequencer lanes drive them.
 
 - A control has **targets**. A target is a destination (a node's parameter, or a part's
-  level or mute) or **another control**, which makes a tree: a Super Knob drives Assign
+  level, mute or send level) or **another control**, which makes a tree: a Super Knob drives Assign
   1–8, which drive whatever each is set to.
 - Each target has its own **start** and **end** (end below start reverses it, like the
   MODX's negative ratio) and **curve**: linear, exponential, logarithmic, S-shaped, a fader's
@@ -1432,10 +1433,24 @@ Panic button ending a stuck voice ringing out after a change, on each press. `de
 checks the bar's Panic: shown, focusable, calling the engine's panic, and hidden while a
 controller's button plays Panic; and a device screen's All notes off hidden the same way.
 
+**Send targets** (2026-11-14): a control's target may be a part's send to a bus (`sendLevel`,
+with `part` and `bus`), a gain as a part level is, with the same range, curve, relative mode
+and summing around one base. A send with a live gain moves without a plan, ramped across the
+next block as a fader is; one without compiles one, as a fader does. A Performance's control
+may target any part's send, a part's own control only its own part's (a Sound has no sends, so
+saving one leaves those targets out); removing the send or its bus removes the targets on it.
+Saved, in the control protocol (`controls.targets`, `graph.get`), the remote client, an import,
+the controller input on its MIDI threads (heard at the next block) and the desktop's target
+menu ("Part send") and names. `control-parts` checks the summing, the ramp, no plan compiled,
+refusals, the round trip and removal; `control-controller-input` a controller's wheel moving a
+send within one block; `control-sounds` a Sound saved without the target; `control-local-stream`
+the protocol. A converter writes, for "controller X to the reverb send", a control with a
+`sendLevel` target on the part's send to its reverb bus, assigned to the controller.
+
 Not yet: name matching beyond exact names (per-oscillator levels, other spellings); the
 Legacy Sampler's roles; no panel layout binds faders, buttons or a row-switching group, so
 those resolve but are not yet played, and row buttons have no layout binding; targets for
-sends, bypass and the transport; overrides in a Performance import; MIDI CC learn; reporting
+bypass and the transport; overrides in a Performance import; MIDI CC learn; reporting
 overrides a device could not apply.
 
 ## Play status

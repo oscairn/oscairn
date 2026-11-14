@@ -21,6 +21,7 @@ namespace oscairn::standalone
                 case MacroTarget::Kind::Parameter: { const auto n = graph.names.find(t.node); name = n == graph.names.end() ? "Plugin" : n->second; break; }
                 case MacroTarget::Kind::PartLevel: name = partName(t.part) + " level"; break;
                 case MacroTarget::Kind::PartMute: name = partName(t.part) + " mute"; break;
+                case MacroTarget::Kind::SendLevel: name = partName(t.part) + " send"; break;
                 case MacroTarget::Kind::Macro: for(const auto& other : graph.macros) if(other.id == t.macro) name = other.name; break;
                 case MacroTarget::Kind::Morph: name = "Scene morph"; break;
                 }

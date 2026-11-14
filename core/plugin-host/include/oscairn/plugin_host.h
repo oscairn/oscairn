@@ -145,6 +145,9 @@ namespace oscairn
         // keeps a lane for: its worker's (a plugin host's, shared by every plugin in it); null, one lane
         // for them all, for plugins rendering in the engine's process. Main thread.
         virtual const void* lane() const noexcept { return nullptr; }
+        // Audio thread, after process(): statistics().lastMicroseconds, for a host whose statistics()
+        // reads main-thread state (the graph's voice budget asks for it every block).
+        virtual double blockMicroseconds() const noexcept { return statistics().lastMicroseconds; }
         // Audio thread, after process(): the plugin said it makes no more sound until it gets
         // input (CLAP_PROCESS_SLEEP). False where a host cannot tell.
         virtual bool asleep() const noexcept { return false; }

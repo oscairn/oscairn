@@ -330,6 +330,8 @@ public:
     }
     // Asleep when every instance that ran this block said so (audio thread, after process).
     bool asleep() const noexcept override {return asleep_;}
+    // statistics()'s sum, over the instances process() plays rather than the main thread's plan.
+    double blockMicroseconds() const noexcept override {double n=0;for(const auto& s:current_->instances)if(s)n+=s->host->blockMicroseconds();return n;}
     // Every instance that ran this block was reset (audio thread, after process): every note ended.
     bool wasReset() const noexcept override {return reset_;}
     // oscairn.voice-budget (RFC 0018), audio thread: the instance channel 1 plays, as process() last had it.

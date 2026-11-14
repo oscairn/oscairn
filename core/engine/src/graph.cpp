@@ -1458,7 +1458,7 @@ namespace oscairn
             }
             if(budgeting)
             {
-                const float raw=float(step.host->statistics().lastMicroseconds),usual=typical(step,raw);
+                const float raw=float(step.host->blockMicroseconds()),usual=typical(step,raw);
                 auto& lane=plan->budget.lanes[step.lane];
                 lane.took+=usual;
                 if(!step.budgeted)lane.othersTook+=usual;

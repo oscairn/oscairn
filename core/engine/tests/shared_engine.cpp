@@ -102,6 +102,7 @@ int main(int argc,char** argv){try{
         const auto bus=SoundContext::busParameter(*plugin);
         check(bus==8,"the Basic Synth can share: its Output bus is parameter 8");
         auto engine=std::make_shared<SoundContext::Engine>();engine->host=plugin;engine->busParameter=bus;
+        plugin->p->setActiveOutputs(0b111); // main and the two buses, as a Session tells a shared instance
         check(SoundContext::room(*engine)==7,"seven more sounds beside its Default");
         const auto sa=plugin->prepareSound("A",first,{},{},{},{},{}),sb=plugin->prepareSound("B",second,{},{},{},{},{});
         auto ca=std::make_shared<SoundContext>(engine,0,1,sa),cb=std::make_shared<SoundContext>(engine,1,2,sb);

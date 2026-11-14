@@ -14,6 +14,7 @@
 // prepared as sound contexts (oscairn.sound-contexts draft 5). Sounds no channel selects any more
 // ring out into the host's ring-out buffer when it gives one (oscairn.sound-snapshots draft 3). Draft 4 saves one
 // sound on its own and reads a sound's values, so several parts may share one instance (RFC 0021).
+// A sound on a bus the host has not activated (clap.audio-ports-activation) plays into main.
 // Within the voices the host gives it (oscairn.voice-budget draft 1) it gives voices up itself,
 // released and quiet ones first, and reports each note's level from its envelope.
 
@@ -120,6 +121,8 @@ namespace
 
         // Values are atomic: the main thread reads them (get_value) while audio runs.
         std::array<std::atomic<double>,parameters.size()> values{};
+        // clap.audio-ports-activation as the host told it; a bus never named plays into main (docs/plugin-porting.md).
+        std::array<std::atomic<bool>,9> activePorts{};
         static constexpr const char* stateVersion="oscairn-synth-2";
         static constexpr size_t maxStateBytes=16384;
         Synth(){for(size_t i=0;i<values.size();++i)values[i]=defaults[i];}
@@ -211,6 +214,8 @@ namespace
         std::array<double,Synth::contextCapacity> detune{},attackStep{},decayCoefficient{},sustain{},releaseCoefficient{};
         std::array<bool,Synth::contextCapacity> copied{};
         std::array<float* const*,Synth::contextCapacity> ring{}; // the ring-out channels its main output goes to, or null
+        std::array<uint32_t,9> busTo{}; // each bus, or main where the host has not activated it
+        for(uint32_t bus=1;bus<busTo.size();++bus)busTo[bus]=s.activePorts[bus].load(std::memory_order_relaxed)?bus:0;
         for(const auto& v:s.voices)if(v.active && !copied[v.context])
         {
             copied[v.context]=true;ring[v.context]=s.retiring(v.context);const auto& c=s.contexts[v.context].patch;
@@ -292,7 +297,7 @@ namespace
                 v.low1 += g * ( oscillator - v.low1 );
                 v.low2 += g * ( v.low1 - v.low2 );
 
-                mix[v.context][v.outputBus] += v.low2 * v.level * v.velocity * 0.35 * amplitude(v, i - from); // volume expression and choke fade
+                mix[v.context][busTo[v.outputBus]] +=v.low2 * v.level * v.velocity * 0.35 * amplitude(v, i - from); // volume expression and choke fade
             }
             for(uint32_t bus=0;bus<std::min(9u,process->audio_outputs_count);++bus) {
                 double sum=0;
@@ -401,6 +406,13 @@ namespace
         return true;
     }, nullptr };
     const clap_plugin_audio_ports_t audioPorts = { audioPortsCount, audioPortsGet };
+    const clap_plugin_audio_ports_activation_t portsActivation = {
+        []( const clap_plugin_t* ) { return true; },
+        []( const clap_plugin_t* p, bool isInput, uint32_t index, bool active, uint32_t ) {
+            if( isInput || index > 8 ) return false;
+            self( p ).activePorts[index].store( active, std::memory_order_relaxed );
+            return true;
+        } };
     const clap_plugin_note_ports_t  notePorts  = { notePortsCount, notePortsGet };
 
     uint32_t Synth::prepare(const clap_plugin_t* p,const char* name,const oscairn_sound_parameter_t* supplied,uint32_t count,const char* text,const oscairn_asset_ref_t* base,char*,uint32_t)
@@ -449,6 +461,8 @@ namespace
             if(std::strcmp(id,OSCAIRN_EXT_VOICE_BUDGET)==0)return &voiceBudget;
             if( std::strcmp( id, CLAP_EXT_AUDIO_PORTS ) == 0 )
                 return &audioPorts;
+            if( std::strcmp( id, CLAP_EXT_AUDIO_PORTS_ACTIVATION ) == 0 )
+                return &portsActivation;
             if( std::strcmp( id, CLAP_EXT_NOTE_PORTS ) == 0 )
                 return &notePorts;
             if( std::strcmp( id, CLAP_EXT_PARAMS ) == 0 )

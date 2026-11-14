@@ -151,6 +151,7 @@ namespace
         auto plugin = oscairn::loadPluginInWorker(stalling, synth, "", rate, frames);
         unsetenv("OSCAIRN_TEST_WORKER_STALL");
         auto engine = std::make_shared<oscairn::SoundContext::Engine>(); engine->host = plugin; engine->busParameter = oscairn::SoundContext::busParameter(*plugin);
+        plugin->setActiveOutputs(0b111); // main and the two buses, as a Session tells a shared instance
         const auto sa = plugin->prepareSound("A", {}, {}, {}, {}, {}, {}), sb = plugin->prepareSound("B", {}, {}, {}, {}, {}, {});
         auto ca = std::make_shared<oscairn::SoundContext>(engine, 0, 1, sa), cb = std::make_shared<oscairn::SoundContext>(engine, 1, 2, sb);
         oscairn::Graph g(rate, frames);

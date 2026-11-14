@@ -82,6 +82,7 @@ int main(int argc,char** argv) {
     }
     // Two sound patches use separate buses; a later selection/parameter edit cannot move held voices.
     auto synth=loadPlugin(argv[2],"",48000,127);
+    synth->setActiveOutputs(0b111); // main and both buses taken: the Basic Synth plays a bus never activated into main
     auto first=synth->prepareSound("saws",{{4,1},{8,1}}),second=synth->prepareSound("square",{{4,2},{6,18},{7,70},{8,2}});
     check(synth->selectSound(first),"select first bus");auto note=Event::note(true,60,.8,0,0,0,1);process(*synth,a,nullptr,127,&note,1);
     check(synth->selectSound(second),"select second bus");note=Event::note(true,67,.8,0,0,0,2);process(*synth,a,nullptr,127,&note,1);
@@ -100,6 +101,7 @@ int main(int argc,char** argv) {
     Graph combined(48000,127),leftChain(48000,127),rightChain(48000,127);
     const auto instrument=combined.add(argv[2]),fx=combined.add(argv[1]),fx2=combined.addEffectContext(fx);
     const auto li=leftChain.add(argv[2]),lf=leftChain.add(argv[1]),ri=rightChain.add(argv[2]),rf=rightChain.add(argv[1]);
+    combined.host(instrument).setActiveOutputs(0b111); // its wires take buses 1 and 2
     auto warm=combined.host(instrument).prepareSound("Warm",{{4,1},{8,1}});
     auto bright=combined.host(instrument).prepareSound("Bright",{{4,2},{6,18},{7,70},{8,2}});
     combined.host(instrument).selectSound(warm);

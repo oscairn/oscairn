@@ -67,6 +67,7 @@ if(NOT rust_result EQUAL 0 OR NOT rust_found MATCHES "^cargo ${OSCAIRN_RUST_VERS
 endif()
 list(APPEND CMAKE_MODULE_PATH "${samplepack_SOURCE_DIR}/cmake")
 include(SamplePack) # samplepack::samplepack
+set_property(TARGET samplepack::samplepack APPEND PROPERTY INTERFACE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/core/plugin-host/src/rust_eh_personality.c")
 
 add_subdirectory(core)
 add_subdirectory(devices/roland-fantom0)

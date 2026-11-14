@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The engine core (engine_core.h) in C++, around NoteRoute.h: the code graph.cpp ran itself until now.
+// The engine core (engine_core.h) in C++, around NoteRoute.h: the reference the Rust implementation
+// is held to by the differential test, and the one OSCAIRN_ENGINE_CORE=cpp builds the engine with.
 #include "engine_core.h"
 #include "NoteRoute.h"
 #include "event_channel.h"
@@ -14,7 +15,7 @@ using Event = kick::clap::Event;
 
 struct oscairn_route : NoteRoute { using NoteRoute::NoteRoute; };
 
-// The layouts the interface shares with graph.h and note_zone.h.
+// The layouts both implementations share with graph.h and note_zone.h.
 static_assert(sizeof(oscairn_event)==sizeof(Event) && alignof(oscairn_event)==alignof(Event));
 static_assert(sizeof(oscairn_zones)==sizeof(NoteZones) && offsetof(oscairn_zones,count)==offsetof(NoteZones,count));
 #define OSCAIRN_SAME(a,b) static_assert(offsetof(oscairn::NoteZone,a)==offsetof(oscairn_zone,b));

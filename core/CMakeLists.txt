@@ -1,6 +1,3 @@
-if(OSCAIRN_AUDIO_O3)
-    add_compile_options(-O3)
-endif()
 add_subdirectory(clap-host)
 
 find_package(Threads REQUIRED)
@@ -60,6 +57,48 @@ add_test(NAME hardware-plugin COMMAND oscairn-hardware-plugin-test $<TARGET_FILE
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware/tests/simulated-profile.json")
 set_tests_properties(hardware-plugin PROPERTIES TIMEOUT 30)
 
+# The engine thread's core (engine/src/engine_core.h): note routing and the voice budget, in Rust
+# (engine/rust), built as samplepack is: cargo, offline, for the Rust targets samplepack's module
+# chose, at OSCAIRN_RUST_VERSION. Its C++ reference (engine/src/core_cpp.cpp) is always built too, for
+# the differential test; OSCAIRN_ENGINE_CORE picks the one the engine uses.
+set(OSCAIRN_ENGINE_CORE cpp CACHE STRING "The engine core the engine uses: rust, or cpp (its C++ reference)")
+set_property(CACHE OSCAIRN_ENGINE_CORE PROPERTY STRINGS rust cpp)
+set(engine_core_crate "${CMAKE_CURRENT_SOURCE_DIR}/engine/rust")
+file(STRINGS "${engine_core_crate}/rust-toolchain.toml" engine_core_toolchain REGEX "^channel = \"${OSCAIRN_RUST_VERSION}\"$")
+if(NOT engine_core_toolchain)
+    message(FATAL_ERROR "engine/rust/rust-toolchain.toml must pin Rust ${OSCAIRN_RUST_VERSION}, as CMakeLists.txt does")
+endif()
+if(WIN32)
+    set(engine_core_name oscairn_engine_core.lib)
+else()
+    set(engine_core_name liboscairn_engine_core.a)
+endif()
+string(ASCII 31 engine_core_us) # CARGO_ENCODED_RUSTFLAGS separates flags with 0x1f, so paths may hold spaces
+set(engine_core_flags "--remap-path-prefix${engine_core_us}${engine_core_crate}=/engine-core")
+foreach(flag IN LISTS SAMPLEPACK_RUSTFLAGS) # the target's CPU flags, as samplepack takes them
+    string(APPEND engine_core_flags "${engine_core_us}${flag}")
+endforeach()
+set(engine_core_env CARGO_ENCODED_RUSTFLAGS=${engine_core_flags} RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION})
+set(engine_core_cmds)
+set(engine_core_libs)
+foreach(triple IN LISTS _sp_triples)
+    list(APPEND engine_core_cmds COMMAND ${CMAKE_COMMAND} -E env ${engine_core_env} ${SAMPLEPACK_CARGO} build --release --locked --offline
+        --target ${triple} --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo")
+    list(APPEND engine_core_libs "${CMAKE_BINARY_DIR}/engine-core-cargo/${triple}/release/${engine_core_name}")
+endforeach()
+list(GET engine_core_libs 0 engine_core_lib)
+if(NOT engine_core_libs STREQUAL engine_core_lib) # several macOS architectures: one universal library
+    set(engine_core_lib "${CMAKE_BINARY_DIR}/engine-core-cargo/liboscairn_engine_core.a")
+    list(APPEND engine_core_cmds COMMAND lipo -create ${engine_core_libs} -output "${engine_core_lib}")
+endif()
+list(APPEND engine_core_libs "${engine_core_lib}")
+list(REMOVE_DUPLICATES engine_core_libs)
+add_custom_target(oscairn_engine_core_build ${engine_core_cmds} BYPRODUCTS ${engine_core_libs}
+    WORKING_DIRECTORY "${engine_core_crate}" COMMENT "cargo build engine core (${_sp_triples})" VERBATIM)
+add_library(oscairn_engine_core STATIC IMPORTED GLOBAL)
+set_target_properties(oscairn_engine_core PROPERTIES IMPORTED_LOCATION "${engine_core_lib}")
+add_dependencies(oscairn_engine_core oscairn_engine_core_build)
+
 add_library(oscairn_engine STATIC
     engine/src/chain.cpp
     engine/src/core_cpp.cpp
@@ -73,8 +112,15 @@ add_library(oscairn_engine STATIC
     engine/src/wav_file.cpp
     engine/src/recorder.cpp)
 target_include_directories(oscairn_engine PUBLIC engine/include)
-target_link_libraries(oscairn_engine PUBLIC oscairn_plugin_host)
+target_link_libraries(oscairn_engine PUBLIC oscairn_plugin_host oscairn_engine_core)
 target_compile_options(oscairn_engine PRIVATE -Wall -Wextra)
+# Rust never fuses a multiply and an add; nor does the C++ core, so the two agree bit for bit.
+set_source_files_properties(engine/src/core_cpp.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
+if(OSCAIRN_ENGINE_CORE STREQUAL "rust")
+    target_compile_definitions(oscairn_engine PRIVATE OSCAIRN_ENGINE_CORE_RUST=1)
+elseif(NOT OSCAIRN_ENGINE_CORE STREQUAL "cpp")
+    message(FATAL_ERROR "OSCAIRN_ENGINE_CORE is rust or cpp, not ${OSCAIRN_ENGINE_CORE}")
+endif()
 
 # Sanitizers slow rendering several times over; there the paced tests check containment, not timing.
 # CI's virtual machines cannot keep real time either (GitHub sets CI).
@@ -262,6 +308,14 @@ target_link_libraries(oscairn-note-routing-test PRIVATE oscairn_engine)
 target_include_directories(oscairn-note-routing-test PRIVATE clap-host/tests)
 add_test(NAME note-routing COMMAND oscairn-note-routing-test $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-lifecycle-fixture> $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(note-routing PROPERTIES TIMEOUT 30)
+# The engine core: the Rust implementation bit for bit against its C++ reference; and the crate's own tests.
+add_executable(oscairn-core-diff-test engine/tests/core_diff.cpp)
+target_link_libraries(oscairn-core-diff-test PRIVATE oscairn_engine)
+add_test(NAME engine-core-diff COMMAND oscairn-core-diff-test)
+set_tests_properties(engine-core-diff PROPERTIES TIMEOUT 300)
+add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
+    ${SAMPLEPACK_CARGO} test --release --locked --offline --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
+set_tests_properties(engine-core-cargo PROPERTIES TIMEOUT 300)
 
 add_executable(oscairn-write-failure-test engine/tests/write_failure.cpp)
 target_link_libraries(oscairn-write-failure-test PRIVATE oscairn_engine)

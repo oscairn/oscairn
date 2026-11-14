@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* The engine thread's core: note routing (NoteRoute), the voice budget (VoiceBudget, RFC 0018 and
- * 0045) and the budget's per-block bookkeeping, behind one C interface, so another implementation can
- * stand beside the C++ one (core_cpp.cpp around NoteRoute.h, names cpp_core_*). graph.cpp calls it
- * through OSCAIRN_CORE(name).
+ * 0045) and the budget's per-block bookkeeping, behind one C interface with two implementations:
+ * Rust (core/engine/rust, names rust_core_*) and C++ (core_cpp.cpp around NoteRoute.h, cpp_core_*).
+ * graph.cpp calls the one OSCAIRN_ENGINE_CORE selects through OSCAIRN_CORE(name); the differential
+ * test (core/engine/tests/core_diff.cpp) runs both on the same streams and compares every result.
  *
  * Threads: *_new and *_free on the control thread; everything else on the audio thread, one call at
  * a time. The caller keeps every route and activity a plan names alive until that plan's notes are
@@ -163,6 +164,7 @@ typedef struct
  * notes_finish: after the step's plugin rendered: its notes counted and costed, its NOTE_ENDs taken.
  * notes_voice_limit: oscairn.voice-budget: the voices a step that gives up its own may keep.
  * notes_end: the block is done: the lanes judged against their limits, the timing report kept. */
+OSCAIRN_CORE_API(rust_core_)
 OSCAIRN_CORE_API(cpp_core_)
 
 #ifdef __cplusplus

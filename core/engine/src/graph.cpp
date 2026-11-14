@@ -19,7 +19,7 @@
 #include <stdexcept>
 #include <utility>
 
-// The engine core (engine_core.h): its C++ reference, or with OSCAIRN_ENGINE_CORE=rust the Rust one.
+// The engine core (engine_core.h): the Rust one, or with OSCAIRN_ENGINE_CORE=cpp its C++ reference.
 #if OSCAIRN_ENGINE_CORE_RUST
 #define OSCAIRN_CORE(name) rust_core_##name
 #else

@@ -61,7 +61,7 @@ set_tests_properties(hardware-plugin PROPERTIES TIMEOUT 30)
 # (engine/rust), built as samplepack is: cargo, offline, for the Rust targets samplepack's module
 # chose, at OSCAIRN_RUST_VERSION. Its C++ reference (engine/src/core_cpp.cpp) is always built too, for
 # the differential test; OSCAIRN_ENGINE_CORE picks the one the engine uses.
-set(OSCAIRN_ENGINE_CORE cpp CACHE STRING "The engine core the engine uses: rust, or cpp (its C++ reference)")
+set(OSCAIRN_ENGINE_CORE rust CACHE STRING "The engine core the engine uses: rust, or cpp (its C++ reference)")
 set_property(CACHE OSCAIRN_ENGINE_CORE PROPERTY STRINGS rust cpp)
 set(engine_core_crate "${CMAKE_CURRENT_SOURCE_DIR}/engine/rust")
 file(STRINGS "${engine_core_crate}/rust-toolchain.toml" engine_core_toolchain REGEX "^channel = \"${OSCAIRN_RUST_VERSION}\"$")

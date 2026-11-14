@@ -70,10 +70,10 @@ fn emitter(emit: Emit, context: *mut c_void) -> impl FnMut(&Event) -> bool {
 /// # Safety
 /// `p` is null or points to `n` valid `T`s that outlive `'a`.
 unsafe fn slice<'a, T>(p: *const T, n: u32) -> &'a [T] {
-    // SAFETY: the caller's contract.
     if p.is_null() || n == 0 {
         &[]
     } else {
+        // SAFETY: the caller's contract.
         unsafe { std::slice::from_raw_parts(p, n as usize) }
     }
 }
@@ -81,10 +81,10 @@ unsafe fn slice<'a, T>(p: *const T, n: u32) -> &'a [T] {
 /// # Safety
 /// `p` is null or points to `n` writable `T`s that outlive `'a`, aliased by nothing else.
 unsafe fn slice_mut<'a, T>(p: *mut T, n: u32) -> &'a mut [T] {
-    // SAFETY: the caller's contract.
     if p.is_null() || n == 0 {
         &mut []
     } else {
+        // SAFETY: the caller's contract.
         unsafe { std::slice::from_raw_parts_mut(p, n as usize) }
     }
 }

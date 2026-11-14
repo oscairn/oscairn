@@ -7,6 +7,7 @@
 #include "MidiControllersPage.h"
 #include "RepositoriesPage.h"
 #include "SigningKeysPage.h"
+#include "TopBarPage.h"
 
 namespace oscairn::standalone::settings
 {
@@ -27,6 +28,7 @@ namespace oscairn::standalone::settings
             {"repositories", "Package repositories", everywhere, made<RepositoriesPage>()},   // RFC 0031
             {"keys", "Signing keys", everywhere, made<SigningKeysPage>()},                   // RFC 0006
             {"controllers", "MIDI controllers", everywhere, made<MidiControllersPage>()},  // RFC 0024
+            {"topbar", "Top bar", everywhere, made<TopBarPage>()},                         // the Rust UI's (docs/rust-ui.md)
             // Named by RFCs, not built yet.
             {"appearance", "Appearance", everywhere, notBuilt},                             // themes (design-language.md)
             {"content", "Installed content", everywhere, notBuilt},                         // RFC 0006

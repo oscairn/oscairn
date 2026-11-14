@@ -25,6 +25,7 @@
 #include "../Launcher.h"
 #include "../SigningKeys.h"
 #include "../apps/settings/AboutPage.h"
+#include "../apps/settings/TopBarPage.h"
 #include "../apps/settings/AudioPage.h"
 #include "../apps/settings/MidiControllersPage.h"
 #include "../apps/settings/RepositoriesPage.h"
@@ -78,8 +79,8 @@ int main(int argc, char** argv)
         const auto& all = standalone::settings::pages();
         const auto network = std::find_if(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "network"; });
         check(network != all.end() && network->applies(standalone::loadProfile("kick")) && !network->applies(standalone::Profile::desktop()), "Network applies on the KICK (Wi-Fi), not on this computer");
-        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "repositories", "keys", "controllers", "about"}, "built so far: Audio, Package repositories, Signing keys, MIDI controllers and About");
-        check(ids(standalone::settings::shownPages(all, standalone::loadProfile("kick"))) == std::vector<std::string>{"audio", "repositories", "keys", "controllers", "about"}, "all of them on a device too");
+        check(ids(standalone::settings::shownPages(all, standalone::Profile::desktop())) == std::vector<std::string>{"audio", "repositories", "keys", "controllers", "topbar", "about"}, "built so far: Audio, Package repositories, Signing keys, MIDI controllers, Top bar and About");
+        check(ids(standalone::settings::shownPages(all, standalone::loadProfile("kick"))) == std::vector<std::string>{"audio", "repositories", "keys", "controllers", "topbar", "about"}, "all of them on a device too");
 #if !OSCAIRN_BLUETOOTH
         check(std::none_of(all.begin(), all.end(), [](const PageInfo& p) { return p.id == "bluetooth"; }), "Bluetooth is left out of a build without it");
 #endif
@@ -250,6 +251,28 @@ int main(int argc, char** argv)
                       "Oscairn's and the engine's version, the release: " + about->version.getText().toStdString() + ", " + about->engineVersion.getText().toStdString());
                 check(about->source.getText() == (juce::String(OSCAIRN_SOURCE_COMMIT).isEmpty() ? juce::String("Development build") : juce::String(OSCAIRN_SOURCE_COMMIT).substring(0, 12)), "the source: " + about->source.getText().toStdString());
                 check(about->license.getText() == "AGPL-3.0-or-later", "the license");
+            }
+
+            // Top bar: the Rust UI's meters, chosen here and kept in the configuration folder's
+            // top-bar.json (the theme's folder, OSCAIRN_CONFIG_HOME here), a meter left as the device has it left out.
+            {
+                standalone::Engine app(engine.appConnection("oscairn.settings", manifest->permissions), false);
+                standalone::settings::Frame frame(app, standalone::Profile::desktop());
+                frame.setSize(1000, 640);
+                check(frame.open("topbar"), "the list opens Top bar");
+                auto* bar = dynamic_cast<standalone::settings::TopBarPage*>(frame.page());
+                if(!bar) return;
+                check(bar->cpu.getSelectedId() == 1 && bar->ram.getSelectedId() == 1 && !bar->file().exists(), "both as the device has them, nothing written");
+                check(bar->file() == configuration.getChildFile("top-bar.json"), "in the configuration folder");
+                bar->cpu.setSelectedId(3); // Bar
+                bar->ram.setSelectedId(5); // Hidden
+                auto saved = juce::JSON::parse(bar->file());
+                check(saved["cpu"] == "bar" && saved["ram"] == "none", "written: " + bar->file().loadFileAsString().toStdString());
+                bar->cpu.setSelectedId(1);
+                saved = juce::JSON::parse(bar->file());
+                check(!saved.hasProperty("cpu") && saved["ram"] == "none", "the CPU as the device has it: left out");
+                standalone::settings::TopBarPage again(app);
+                check(again.cpu.getSelectedId() == 1 && again.ram.getSelectedId() == 5, "read back when the page opens again");
             }
 
             // The Signing keys page on an app's connection granted `system` alone: keys.list and

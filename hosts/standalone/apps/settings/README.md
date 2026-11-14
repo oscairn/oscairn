@@ -14,6 +14,7 @@ Settings is an app of its own ([RFC 0022](../../../../docs/rfcs/0022-apps-and-re
 | `SigningKeysPage.h`, `SigningKeysPage.cpp` | The Signing keys page: the keys and Make, asked with `askToMakeKey` (`../../SigningKeys.h`) |
 | `MidiControllersPage.h`, `MidiControllersPage.cpp` | The MIDI controllers page: each MIDI input's controller profile and Ignore switch, kept by the engine |
 | `RepositoriesPage.h`, `RepositoriesPage.cpp` | The Package repositories page (RFC 0031): each by name, address and root key fingerprint, its switch and Remove, and Add by https:// address alone, trusted by fingerprint |
+| `TopBarPage.h`, `TopBarPage.cpp` | The Top bar page: the Rust UI's CPU and RAM meters (bar, percent, both or hidden), kept in the configuration folder's `top-bar.json` ([docs/rust-ui.md](../../../../docs/rust-ui.md)) |
 
 ## Adding a page
 

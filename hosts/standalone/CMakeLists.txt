@@ -82,7 +82,7 @@ add_custom_command(TARGET oscairn_setlist_app POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E ${setlist_copy}
     VERBATIM)
 # The Settings app (RFC 0022's built-in apps), the same way; its pages are in apps/settings/.
-set(settings_sources apps/settings/Frame.cpp apps/settings/Pages.cpp apps/settings/AboutPage.cpp apps/settings/AudioPage.cpp apps/settings/SigningKeysPage.cpp apps/settings/MidiControllersPage.cpp apps/settings/RepositoriesPage.cpp)
+set(settings_sources apps/settings/Frame.cpp apps/settings/Pages.cpp apps/settings/AboutPage.cpp apps/settings/AudioPage.cpp apps/settings/SigningKeysPage.cpp apps/settings/MidiControllersPage.cpp apps/settings/RepositoriesPage.cpp apps/settings/TopBarPage.cpp)
 juce_add_gui_app(oscairn_settings_app
     PRODUCT_NAME "Oscairn Settings"
     COMPANY_NAME "Oscairn"

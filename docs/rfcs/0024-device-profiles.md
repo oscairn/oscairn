@@ -175,7 +175,9 @@ An illustrative profile (the values are an example, not a real product's):
   where text fields bring up the app's own keyboard ([RFC 0019](0019-adaptive-ui.md#text-entry));
   the FANTOM-07's, the KICK's, the Ignite's and the MODX M's say `onScreen`, the EVK's and QEMU's
   (no touch) do not. The Ignite's screen now shows `kick-screen`, as the KICK's does: its panel's own
-  layout, scaled into 1024 x 600, put its screen at a third of its size.
+  layout, scaled into 1024 x 600, put its screen at a third of its size. For the Rust UI
+  ([docs/rust-ui.md](../rust-ui.md), added 2026-11-14): `frameRate`, the most frames a second it
+  draws (0: no cap; absent: 30 on a device, none on a computer).
 - **`midi`, `cv`, `network`:** what it can connect to; CV outputs mean the CV service of RFC 0004.
 - **`hardware`** (optional, added 2026-11-09 with [RFC 0004](0004-hardware-services.md#step-1-status)):
   its accelerators (a DSP, an FPGA region, a dedicated sound chip, a real-time core) and the

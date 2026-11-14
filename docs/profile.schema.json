@@ -627,6 +627,12 @@
               "keyboard",
               "onScreen"
             ]
+          },
+          "frameRate": {
+            "description": "The most frames a second the Rust UI draws on this screen (docs/rust-ui.md): a cap, as drawing shares the CPU with the audio; 0: no cap. Absent: 30 on a device, none on a computer",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 240
           }
         },
         "required": [

@@ -1,0 +1,36 @@
+# Oscairn's UI in Rust (docs/rust-ui.md): the shell, its top bar and the screens ported from the
+# JUCE app so far, one program.
+[package]
+name = "oscairn-ui"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[features]
+default = ["desktop"]
+# A window on a computer (winit), as the JUCE app's.
+desktop = ["slint/backend-winit"]
+# Straight to a device's display (DRM dumb buffers, else /dev/fb), touch and keys through libinput: no X server.
+kms = ["slint/backend-linuxkms-noseat"]
+# The FANTOM-0's panel, read from its panel holder (devices/roland-fantom0): optional hardware, compiled out elsewhere.
+roland-fantom0 = []
+
+[dependencies]
+# Slint under the GPLv3 (it offers GPL-3.0-only, which an AGPL-3.0-or-later program may combine with).
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software"] }
+serde_json = "1"
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+# The KMS backend with a frame cap and frame statistics (vendor/README.md).
+[patch.crates-io]
+i-slint-backend-linuxkms = { path = "vendor/i-slint-backend-linuxkms-1.18.1" }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

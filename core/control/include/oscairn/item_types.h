@@ -29,6 +29,10 @@ namespace oscairn
         // Which of Oscairn's extractors (step 4) reads its files' fields and payload identity, out of
         // process ("audio"); empty for none.
         std::string extractor = {};
+        // Which of Oscairn's handlers keeps its items, for a type stored by content whose items
+        // need code to verify, store and find ("sample": sample packs; "waveform"); empty for none.
+        // The handler gives its items' identity and their references' form, "<handler>:<id>".
+        std::string handler = {};
         // What library items, archive manifests and actions (oscairn.pick.<kind>) call it: its ID,
         // without "oscairn." for Oscairn's own ("performance").
         std::string kind() const;
@@ -47,6 +51,8 @@ namespace oscairn
     std::optional<ItemType> itemType(std::string_view idOrKind);
     // Adds a type; refuses (std::invalid_argument) one whose ID, kind or folder another type has.
     void addItemType(const ItemType& type);
+    // The type whose items a handler keeps; none while no known type names it.
+    std::optional<ItemType> handlerType(std::string_view handler);
     // Forgets a type a package declared; Oscairn's own stay.
     void removeItemType(std::string_view id);
     // A package's type (step 3): its manifest as an archive carries it, under Types/<owner>/,

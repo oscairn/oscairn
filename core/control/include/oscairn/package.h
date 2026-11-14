@@ -52,6 +52,10 @@ namespace oscairn
         // A plugin package's asset libraries, each by ID and the least version it needs.
         struct Dependency { std::string id, version; };
         std::vector<Dependency> assetDependencies;
+        // The files of the types a handler keeps (samples and waveforms, RFC 0023), each
+        // <type folder>/<id><extension>, in the archive's order: writePackage packs them last, in
+        // this order (one sound's samples together); readPackage lists them as the archive has them.
+        std::vector<std::string> contents = {};
         std::map<std::string, std::string> files; // each file's SHA-256 by its path; filled by writePackage
         signing::Signature signature;              // library.sig, the whole archive's over the manifest; an empty key for none
         std::string manifestSha256;                // the manifest's, as read: a package's identity (RFC 0006)

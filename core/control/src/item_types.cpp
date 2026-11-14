@@ -118,6 +118,15 @@ namespace oscairn
             if(t.extractor != "audio") bad("its extractor is not one Oscairn has: " + t.extractor);
             if(t.storage != "in-place") bad("only an in-place type's files are read by an extractor, so far");
         }
+        // A handler of Oscairn's keeps the items: their files' form, identity and store (samples.h).
+        if(const V handler = detail::member(d, "handler"))
+        {
+            t.handler = text(handler, "handler");
+            const char* extension = t.handler == "sample" ? ".osp" : t.handler == "waveform" ? ".owf" : nullptr;
+            if(!extension) bad("its handler is not one Oscairn has: " + t.handler);
+            if(t.storage != "content" || t.identity != "content" || t.extensions != std::vector<std::string>{extension})
+                bad("a type kept by the " + t.handler + " handler is stored and identified by content, its files " + extension);
+        }
         if(const V fields = detail::member(d, "fields"))
         {
             if(fields->type != json_type_array) bad("its fields are not a list");
@@ -151,7 +160,15 @@ namespace oscairn
         std::lock_guard lock(typesMutex);
         for(const auto& t : types())
             if(t.id == type.id || t.kind() == type.kind() || lower(t.folder) == lower(type.folder)) bad("another type has its ID or folder: " + t.id);
+            else if(!type.handler.empty() && t.handler == type.handler) bad("another type is kept by its handler, " + type.handler + ": " + t.id);
         types().push_back(type);
+    }
+
+    std::optional<ItemType> handlerType(std::string_view handler)
+    {
+        std::lock_guard lock(typesMutex);
+        for(const auto& t : types()) if(!handler.empty() && t.handler == handler) return t;
+        return std::nullopt;
     }
 
     void removeItemType(std::string_view id)

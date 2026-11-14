@@ -58,7 +58,8 @@ namespace oscairn::assets
     public:
         explicit Waveforms(std::filesystem::path folder);
         // Each file must pass sp_waveform_check and have its name's id; one that does not refuses
-        // them all. Those not held are copied in. Returns how many were added.
+        // them all (check throws, naming it). Those not held are copied in. Returns how many were added.
+        void check(const std::vector<std::filesystem::path>& files) const;
         size_t install(const std::vector<std::filesystem::path>& files);
         // The file of a held waveform, checked again; throws when it is not held or not valid.
         std::filesystem::path path(const std::string& id) const;

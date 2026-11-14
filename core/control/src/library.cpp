@@ -804,9 +804,17 @@ namespace oscairn
     void Library::forgetOrphans()
     {
         // Not at every rescan: an install rescans after placing its types and before its items.
+        // A handler's items are in its store, not the index: the asset store's samples/ or
+        // waveforms/ (oscairn/samples.h), held while anything but its lock is there.
+        auto stored = [&](const ItemType& t) {
+            std::error_code e;
+            if(!t.handler.empty())
+                for(const auto& f : fs::directory_iterator(home_ / "assets" / (t.handler + "s"), e)) if(!f.path().filename().string().starts_with(".")) return true;
+            return false;
+        };
         for(const auto& t : itemTypes())
             if(!t.owner.empty() && std::none_of(installed_.begin(), installed_.end(), [&](const auto& l) { return l.id == t.owner; }) &&
-               std::none_of(items_.begin(), items_.end(), [&](const auto& i) { return i.kind == t.kind(); }))
+               std::none_of(items_.begin(), items_.end(), [&](const auto& i) { return i.kind == t.kind(); }) && !stored(t))
             {
                 std::error_code ignored;
                 fs::remove(home_ / "Types" / t.owner / (t.id + ".json"), ignored);

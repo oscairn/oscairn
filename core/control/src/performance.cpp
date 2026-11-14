@@ -508,7 +508,26 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
         // Every sample they use, each once, by its hash, whatever library it came from (RFC 0009),
         // and the license texts of each library whose files go in go with them.
         std::set<std::string> copied;std::set<std::string> licensed;
+        // A sample or waveform by its id, into its type's folder as <id><extension> (a sample as a
+        // one-record pack, a waveform with every sample it names), its type with it as for an
+        // item of a package's type; in the order the sounds use them, so they install together.
+        std::function<void(const std::string&,const std::string&)> stageContent=[&](const std::string& handler,const std::string& id){
+            const auto type=handlerType(handler);
+            if(!type)bad("no type here keeps "+handler+"s, so "+handler+" "+id+" cannot go");
+            const auto name=type->folder+"/"+id+type->extensions.at(0);
+            if(!copied.insert(name).second)return;
+            if(!type->owner.empty() && !fs::exists(stage/"Types"/type->owner/(type->id+".json"))){
+                fs::create_directories(stage/"Types"/type->owner);
+                fs::copy_file(dataHome()/"Types"/type->owner/(type->id+".json"),stage/"Types"/type->owner/(type->id+".json"));
+            }
+            fs::create_directories(stage/type->folder);
+            if(handler=="sample")assets_.samples().exportSample(id,stage/name);
+            else fs::copy_file(assets_.waveforms().path(id),stage/name);
+            package.contents.push_back(name);
+            if(handler=="waveform")for(const auto& sample:assets_.waveforms().samples(id))stageContent("sample",sample);
+        };
         for(const auto& m:manifests)for(auto ref:assetsOf(m)){
+            if(std::string handler,id;assets::contentRef(ref.path,handler,id)){stageContent(handler,id);continue;}
             const auto source=assets_.resolve(ref);
             std::string holder,relative;
             if(assets_.libraryVersion(ref.library).empty() && assets_.locate(source.parent_path(),holder,relative) && !assets_.libraryVersion(holder).empty())ref.library=holder; // found in another library by its bytes
@@ -2253,6 +2272,16 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
         if(!unknown.empty() && !acceptUnsignedCode)
             throw CodeRefused("it runs code from an unknown source: "+unknown+"; install it accepting unsigned code to go ahead",out.code); // said to the user as it is: no "Performance: "
         if(checkOnly)return out; // `into` stays for the install
+        // Its samples and waveforms (the types the sample and waveform handlers keep), before anything
+        // else: every one verified by the library and named by its id, or none is kept; the samples
+        // appended to the device's packs in the archive's order, one already here skipped.
+        {
+            auto filesOf=[&](const char* handler){std::vector<fs::path> files;if(const auto t=handlerType(handler))for(const auto& c:p.contents)if(c.starts_with(t->folder+"/"))files.push_back(into/c);return files;};
+            const auto samples=filesOf("sample"),waveforms=filesOf("waveform");
+            if(!waveforms.empty())assets_.waveforms().check(waveforms);
+            if(!samples.empty())assets_.samples().install(samples);
+            if(!waveforms.empty())assets_.waveforms().install(waveforms);
+        }
         // The item types it declares (RFC 0023 step 3), before its items, which may be of them.
         for(const auto& type:p.types){
             std::error_code e;

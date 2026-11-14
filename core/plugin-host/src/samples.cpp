@@ -386,7 +386,7 @@ namespace oscairn::assets
         }
     }
 
-    size_t Waveforms::install(const std::vector<fs::path>& files)
+    void Waveforms::check(const std::vector<fs::path>& files) const
     {
         for(const auto& file : files)
         {
@@ -396,6 +396,11 @@ namespace oscairn::assets
             else readWaveform(file, name.substr(0, 64), why);
             if(!why.empty()) fail("the waveform " + name + " is refused: " + why);
         }
+    }
+
+    size_t Waveforms::install(const std::vector<fs::path>& files)
+    {
+        check(files);
         size_t added = 0;
         fs::create_directories(folder_);
         for(const auto& file : files)

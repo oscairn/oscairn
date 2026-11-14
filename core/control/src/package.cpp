@@ -234,6 +234,11 @@ namespace oscairn
                     if(e.is_regular_file() && !hidden(fs::relative(e.path(), root))) files.push_back(e.path());
                 }
         std::sort(files.begin(), files.end());
+        // A handler's files last, in the order given, so an install appends them in that order.
+        std::map<fs::path, size_t> order;
+        for(size_t i = 0; i < package.contents.size(); ++i) order.emplace(root / package.contents[i], i);
+        const auto content = std::stable_partition(files.begin(), files.end(), [&](const fs::path& f) { return !order.count(f); });
+        std::sort(content, files.end(), [&](const fs::path& a, const fs::path& b) { return order.at(a) < order.at(b); });
         auto listed = package;
         for(const auto& f : files) listed.files[fs::relative(f, root).generic_string()] = assets::sha256File(f);
         const auto manifest = manifestJson(listed);
@@ -359,6 +364,11 @@ namespace oscairn
             for(const auto& t : declared) folders.insert(t.folder);
             uint64_t total = 0, nameBytes = 0, largest = 0;
             std::string manifest, archiveSignature;
+            // The folders of the types a handler keeps, each holding <id><extension> files and nothing else.
+            std::map<std::string, std::string> kept;
+            for(const auto& t : itemTypes()) if(!t.handler.empty()) kept[t.folder] = t.extensions.at(0);
+            for(const auto& t : declared) if(!t.handler.empty()) kept[t.folder] = t.extensions.at(0);
+            std::vector<std::string> contents;
             for(const auto& e : entries)
             {
                 const auto& name = e.name;
@@ -369,6 +379,12 @@ namespace oscairn
                 if((nameBytes += name.size()) > maxNameBytes) bad("its names are too long");
                 if(!names.insert(name).second) bad("an entry twice: " + name);
                 if(e.directory) continue;
+                if(const auto k = kept.find(top); k != kept.end())
+                {
+                    const auto file = name.substr(top.size() + 1);
+                    if(file.size() != 64 + k->second.size() || !file.ends_with(k->second) || file.find_first_not_of("0123456789abcdef") != 64) bad("a file in " + top + "/ that is not <id>" + k->second + ": " + name);
+                    contents.push_back(name);
+                }
                 if(e.size > maxEntry || (total += e.size) > maxTotal) bad("it is too large");
                 largest = std::max(largest, e.size);
                 if(name == "library.json")
@@ -405,6 +421,7 @@ namespace oscairn
                 bad("its version is not 3");
             Package p;
             p.manifestSha256 = assets::sha256(manifest);
+            p.contents = std::move(contents);
             // Signatures, each checked against what it signs; one that does not verify is refused like a wrong hash.
             auto signatures = [](V list) { try { return signing::signatures(list); } catch(const std::runtime_error& e) { bad(e.what()); } };
             if(!archiveSignature.empty())

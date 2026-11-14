@@ -23,11 +23,11 @@ namespace oscairn::assets
     bool older(const std::string& a, const std::string& b);
 
     // What an asset library's package says of it, kept beside its tree (AssetLibraries/<id>/.terms,
-    // and its license texts in .licenses/): its license, whether others may pass it on in exports,
-    // and whether it was installed only because a plugin package needed it (a cleanup candidate
-    // once nothing uses it; RFC 0006). Installed again by hand, a library is no longer a dependency
-    // only; installed again as a dependency, a library installed by hand stays so.
-    struct LibraryTerms { std::string license; bool redistribute = true, dependency = false; std::filesystem::path licenses; };
+    // and its license texts in .licenses/): its license, and whether it was installed only because
+    // a plugin package needed it (a cleanup candidate once nothing uses it; RFC 0006). Installed
+    // again by hand, a library is no longer a dependency only; installed again as a dependency, a
+    // library installed by hand stays so.
+    struct LibraryTerms { std::string license; bool dependency = false; std::filesystem::path licenses; };
 
     class Store final : public kick::clap::AssetResolver
     {

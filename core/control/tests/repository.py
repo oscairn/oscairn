@@ -734,7 +734,7 @@ with tempfile.TemporaryDirectory(prefix='oscairn-repository-') as temporary:
         # the newest version of the library that is at least the one it needs (RFC 0009).
         state = job('packages.install', {'source': str(good), 'id': 'org.kick.analog'})
         library = home / 'AssetLibraries' / 'org.kick.factory'
-        check(state['state'] == 'done' and state['installed']['notes'] == [] and sorted(e.name for e in library.iterdir() if not e.name.startswith('.')) == ['1.1.0'] and (library / '.terms').read_text() == 'MIT\t1\t1\n' and
+        check(state['state'] == 'done' and state['installed']['notes'] == [] and sorted(e.name for e in library.iterdir() if not e.name.startswith('.')) == ['1.1.0'] and (library / '.terms').read_text() == 'MIT\t1\n' and
               (library / '1.1.0' / 'patches' / 'Pad.fxp').read_bytes() == b'another patch' and any(p['id'] == 'org.kick.analog' for p in store()) and leftovers() == [],
               'a plugin package installs with the asset library it needs: ' + json.dumps(state)[:400])
         check(next(r for r in records() if r['id'] == 'org.kick.factory')['dependency'] and not next(r for r in records() if r['id'] == 'org.kick.analog')['dependency'],

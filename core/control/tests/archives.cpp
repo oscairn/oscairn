@@ -13,7 +13,7 @@
 // Signatures (RFC 0006): oscairn-sign signs a build and an archive, an export carries the build's
 // signature and signs its items and the whole archive when asked.
 // A plugin package carries one bundle holding several plugins (Oscairn's Splitters) once.
-// Asset libraries (RFC 0009 step 4): redistribution checks on export, and garbage collection
+// Asset libraries (RFC 0009 step 4): exports carry them whole, and garbage collection
 // from explicit roots (with the Legacy Sampler playing one).
 //   oscairn-archives-test FIXTURE.clap OSCAIRN-SIGN [SPLITTERS.clap [SAMPLER.clap]]
 #include "oscairn/session.h"
@@ -759,10 +759,11 @@ int main(int argc, char** argv)
             for(const auto& p : l.presets(node)) listed += p.name + ";";
             check(listed == "Quiet;Bright;Warm;", "a node's presets come from the installed library too: " + listed);
         }
-        // Device R (RFC 0009 step 4): redistribution. An asset library under an SPDX license goes into
-        // an export made from it, its license texts with it; one under the publisher's own terms
-        // (LicenseRef-, whose text it must carry, RFC 0031) stays out unless its package says it may
-        // be passed on, and the export says so; the destination then needs it installed.
+        // Device R (RFC 0009 step 4): no restriction on export. An export carries every asset file
+        // it uses, whatever library it came from, with each library's license texts: one under an
+        // SPDX license and one under the publisher's own terms (LicenseRef-, whose text it must
+        // carry, RFC 0031) alike. An asset package written with the old `assets.redistribute`
+        // mark still installs, the mark ignored, as does a library's .terms in its old form.
         {
             device(temp.path / "r");
             const auto freeFiles = temp.path / "r-free", vendorFiles = temp.path / "r-vendor";
@@ -770,23 +771,37 @@ int main(int argc, char** argv)
             std::ofstream(freeFiles / "free.wav", std::ios::binary) << "free sample bytes";
             std::ofstream(vendorFiles / "piano.wav", std::ios::binary) << "vendor piano bytes";
             const auto terms = temp.path / "VENDOR-LICENSE", attribution = temp.path / "ATTRIBUTION";
-            std::ofstream(terms) << "Not to be passed on"; std::ofstream(attribution) << "Free sample by its recordist";
+            std::ofstream(terms) << "The vendor's own terms"; std::ofstream(attribution) << "Free sample by its recordist";
             const auto refused = run(tool + " asset-package --license LicenseRef-Vendor " + shell(temp.path / "NoText.olib") + " org.test.vendor 2 Vendor " + shell(vendorFiles) + " 2>&1");
             check(refused.first != 0 && refused.second.find("carries no license text") != std::string::npos && !fs::exists(temp.path / "NoText.olib"),
                   "a LicenseRef- asset package without its license text is refused: " + refused.second);
             check(run(tool + " asset-package --license CC-BY-4.0 --license-file " + shell(attribution) + " " + shell(temp.path / "Free.olib") + " org.test.free 1 Free " + shell(freeFiles)).first == 0 &&
-                  run(tool + " asset-package --license LicenseRef-Vendor --license-file " + shell(terms) + " " + shell(temp.path / "Vendor.olib") + " org.test.vendor 2 'Vendor piano' " + shell(vendorFiles)).first == 0 &&
-                  run(tool + " asset-package --license LicenseRef-Vendor --license-file " + shell(terms) + " --redistribute yes " + shell(temp.path / "Shared.olib") + " org.test.shared 1 Shared " + shell(vendorFiles)).first == 0,
+                  run(tool + " asset-package --license LicenseRef-Vendor --license-file " + shell(terms) + " " + shell(temp.path / "Vendor.olib") + " org.test.vendor 2 'Vendor piano' " + shell(vendorFiles)).first == 0,
                   "oscairn-sign packs them");
-            check(!readPackage(temp.path / "Free.olib", {}).redistribute && !readPackage(temp.path / "Vendor.olib", {}).redistribute && readPackage(temp.path / "Shared.olib", {}).redistribute == std::optional<bool>(true),
-                  "only a package that says so declares redistribute");
-            check(redistributable("CC-BY-4.0", {}) && redistributable("MIT OR Apache-2.0", {}) && !redistributable("LicenseRef-Vendor", {}) && redistributable("LicenseRef-Vendor", true) && !redistributable("MIT", false),
-                  "an SPDX license lets it be passed on, the publisher's own terms do not, and a package's word decides");
+            // The vendor's package as older tools wrote it, marked not to be passed on.
+            bool marked = false, unmarked = false;
+            rewriteArchive(temp.path / "Vendor.olib", temp.path / "Marked.olib", [&](std::string m) {
+                unmarked = m.find("redistribute") == std::string::npos;
+                const auto at = m.find("\"assets\":{");
+                if(at != std::string::npos) { m.insert(at + 10, "\"redistribute\":false,"); marked = true; }
+                return m;
+            });
+            check(unmarked, "a new asset package carries no redistribute mark");
+            check(marked && readPackage(temp.path / "Marked.olib", {}).assets.size() == 1, "an asset package with the old redistribute mark reads");
             Session m(48000, 64);
-            m.installArchive((temp.path / "Free.olib").string(), false); m.installArchive((temp.path / "Vendor.olib").string(), false);
+            m.installArchive((temp.path / "Free.olib").string(), false);
+            check(m.installArchive((temp.path / "Marked.olib").string(), false).added == 1, "an asset package with the old redistribute mark installs");
             const auto freeTerms = m.assets().libraryTerms("org.test.free"), vendorTerms = m.assets().libraryTerms("org.test.vendor");
-            check(freeTerms.redistribute && freeTerms.license == "CC-BY-4.0" && read(freeTerms.licenses / "ATTRIBUTION") == "Free sample by its recordist" && !vendorTerms.redistribute && !freeTerms.dependency,
+            check(freeTerms.license == "CC-BY-4.0" && read(freeTerms.licenses / "ATTRIBUTION") == "Free sample by its recordist" && !freeTerms.dependency &&
+                  vendorTerms.license == "LicenseRef-Vendor" && read(vendorTerms.licenses / "VENDOR-LICENSE") == "The vendor's own terms" && !vendorTerms.dependency,
                   "the device keeps each library's terms and license texts");
+            const auto termsFile = vendorTerms.licenses.parent_path() / ".terms";
+            check(read(termsFile) == "LicenseRef-Vendor\t0\n", "a library's terms are its license and whether it is a dependency only: " + read(termsFile));
+            // .terms as older installs wrote it, with a redistribute field before the dependency flag.
+            std::ofstream(termsFile, std::ios::trunc) << "LicenseRef-Vendor\t0\t1\n";
+            const auto older = m.assets().libraryTerms("org.test.vendor");
+            std::ofstream(termsFile, std::ios::trunc) << "LicenseRef-Vendor\t0\t0\n";
+            check(older.license == "LicenseRef-Vendor" && older.dependency && !m.assets().libraryTerms("org.test.vendor").dependency, "a library's terms in their old form read, the redistribute field ignored");
             const auto synth = m.add("synth", fixture, "org.kick.test.synth");
             const auto part = m.addPart("Keys"); m.insertIntoPart(part, 0, synth); m.commit();
             const auto keysId = m.savePartAsSound(part, "Keys").id;
@@ -799,17 +814,26 @@ int main(int argc, char** argv)
             m.libraryRescan();
             const auto notes = m.exportLibraryItem(keysId, (temp.path / "Keys.olib").string());
             const auto keys = readPackage(temp.path / "Keys.olib", {});
-            check(notes.size() == 1 && notes[0].find("1 file of the asset library org.test.vendor 2 was left out: its license (LicenseRef-Vendor) does not let it be passed on") != std::string::npos,
-                  "the export says what it left out: " + (notes.empty() ? std::string() : notes[0]));
-            check(keys.files.count("Assets/" + freeHash.substr(0, 16) + "/free.wav") && !keys.files.count("Assets/" + vendorHash.substr(0, 16) + "/piano.wav") &&
-                  keys.files.count("Licenses/org.test.free/ATTRIBUTION"), "the free file goes in with its attribution, the vendor's does not");
+            check(notes.empty(), "nothing left out of the Sound's export: " + (notes.empty() ? std::string() : notes[0]));
+            check(keys.files.count("Assets/" + freeHash.substr(0, 16) + "/free.wav") && keys.files.count("Assets/" + vendorHash.substr(0, 16) + "/piano.wav") &&
+                  keys.files.count("Licenses/org.test.free/ATTRIBUTION") && keys.files.count("Licenses/org.test.vendor/VENDOR-LICENSE"),
+                  "both files go in, each with its library's license texts, the marked library's too");
             device(temp.path / "r2");
             Session m2(48000, 64);
             const auto bare = m2.installArchive((temp.path / "Keys.olib").string(), false, {}, true);
-            check(bare.notes.size() == 1 && bare.notes[0].find("not in the archive or on this device: piano.wav") != std::string::npos, "a device without the vendor library is told");
-            m2.installArchive((temp.path / "Vendor.olib").string(), false);
+            check(bare.notes.empty(), "a device without either library installs it whole: " + (bare.notes.empty() ? std::string() : bare.notes[0]));
             kick::clap::AssetReference piano{"org.test.vendor", "piano.wav", vendorHash}, free{"org.test.free", "free.wav", freeHash};
-            check(!m2.assets().resolve(piano).empty() && !m2.assets().resolve(free).empty(), "with it installed both references resolve, the free one by its bytes");
+            check(!m2.assets().resolve(piano).empty() && !m2.assets().resolve(free).empty(), "both references resolve from the archive's files");
+            // An archive missing a sample (made by hand) still installs, and says which.
+            const auto pianoEntry = "\"Assets/" + vendorHash.substr(0, 16) + "/piano.wav\":\"" + keys.files.at("Assets/" + vendorHash.substr(0, 16) + "/piano.wav") + "\"";
+            rewriteArchive(temp.path / "Keys.olib", temp.path / "Thin.olib", [&](std::string m) {
+                if(const auto at = m.find(pianoEntry); at != std::string::npos) m.erase(m[at + pianoEntry.size()] == ',' ? at : at - 1, pianoEntry.size() + 1);
+                return m;
+            }, [&](const std::string& name) { return name.find("/piano.wav") == std::string::npos; });
+            device(temp.path / "r3");
+            Session m3(48000, 64);
+            const auto thin = m3.installArchive((temp.path / "Thin.olib").string(), false, {}, true);
+            check(thin.notes.size() == 1 && thin.notes[0].find("not in the archive or on this device: piano.wav") != std::string::npos, "a sample missing from the archive and the device is told");
         }
         // Device Q (RFC 0009 step 4): garbage collection from explicit roots. Collection removes the
         // asset libraries a plugin package brought that nothing uses, and stored files no library
@@ -828,7 +852,7 @@ int main(int argc, char** argv)
                 std::ofstream(from / "notes.txt") << id;
                 std::vector<assets::Store::LibraryFile> files;
                 for(const auto* f : {"tone.wav", "notes.txt"}) files.push_back({f, assets::sha256File(from / f), from / f});
-                store.installLibrary(id, "1", id, files, {"MIT", true, dependency, {}}); // as a plugin package's install (dependency) or one by hand leaves it
+                store.installLibrary(id, "1", id, files, {"MIT", dependency, {}}); // as a plugin package's install (dependency) or one by hand leaves it
             };
             for(const auto* id : {"org.test.unused", "org.test.item", "org.test.gig", "org.test.needed"}) install(id, true);
             install("org.test.chosen", false);

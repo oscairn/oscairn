@@ -53,12 +53,10 @@ namespace
                    "      block's share of the block's time and the bytes it holds; a device that has not\n"
                    "      measured the plugin itself counts it at this\n"
                    "  oscairn-sign asset-package [--key <key-file>] --license <spdx> [--license-file <file>]...\n"
-                   "                            [--source <url> <commit-or-tag>] [--redistribute yes|no]\n"
+                   "                            [--source <url> <commit-or-tag>]\n"
                    "                            <archive.olib> <library-id> <version> <name> <folder>\n"
                    "      pack every file in <folder> (hidden ones aside) as an asset library, each by its\n"
-                   "      path, SHA-256 and size, into an asset package; with --key, signed whole.\n"
-                   "      --redistribute says whether others may pass it on in their exports; without it,\n"
-                   "      an SPDX license allows that and a LicenseRef- one does not\n"
+                   "      path, SHA-256 and size, into an asset package; with --key, signed whole\n"
                    "  oscairn-sign verify [--into <folder>] [--platform <platform>] <archive.olib>\n"
                    "      check every signature and hash in an archive and say who signed what, and each\n"
                    "      build's libraries from outside the system and its bundle (lines \"outside ...\");\n"
@@ -240,7 +238,6 @@ int main(int argc, char** argv)
                 else if(rest[0] == "--license" && rest.size() > 1) { p.license = rest[1]; rest.erase(rest.begin(), rest.begin() + 2); }
                 else if(rest[0] == "--license-file" && rest.size() > 1) { licenseFiles.push_back(rest[1]); rest.erase(rest.begin(), rest.begin() + 2); }
                 else if(rest[0] == "--source" && rest.size() > 2) { p.sourceUrl = rest[1]; p.sourceRevision = rest[2]; rest.erase(rest.begin(), rest.begin() + 3); }
-                else if(rest[0] == "--redistribute" && rest.size() > 1 && (rest[1] == "yes" || rest[1] == "no")) { p.redistribute = rest[1] == "yes"; rest.erase(rest.begin(), rest.begin() + 2); }
                 else return usage();
             }
             if(rest.size() != 5) return usage();

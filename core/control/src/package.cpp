@@ -146,8 +146,6 @@ namespace oscairn
         return assets::sha256(lines);
     }
 
-    bool redistributable(const std::string& license, std::optional<bool> declared) { return declared ? *declared : !licenseRef(license); }
-
     bool safeArchivePath(const std::string& name) { return safe(name); }
 
     void unpackPiece(const fs::path& zip, const fs::path& into, const std::string& under, uint64_t most)
@@ -203,8 +201,7 @@ namespace oscairn
             std::string list;
             for(const auto& a : package.assets)
                 list += std::string(list.empty() ? "" : ",") + "{\"path\":" + detail::quote(a.path) + ",\"sha256\":" + detail::quote(a.sha256) + ",\"size\":" + std::to_string(a.size) + '}';
-            assets = "{\"version\":" + detail::quote(package.assetVersion) + ",\"files\":[" + list + "]" +
-                     (package.redistribute ? std::string(",\"redistribute\":") + (*package.redistribute ? "true" : "false") : std::string()) + "}";
+            assets = "{\"version\":" + detail::quote(package.assetVersion) + ",\"files\":[" + list + "]}";
         }
         for(const auto& d : package.assetDependencies) dependencies += std::string(dependencies.empty() ? "" : ",") + "{\"id\":" + detail::quote(d.id) + ",\"version\":" + detail::quote(d.version) + '}';
         return "{\"format\":\"oscairn.library\",\"version\":3,\"id\":" + detail::quote(package.id) + ",\"name\":" + detail::quote(package.name) +
@@ -510,11 +507,6 @@ namespace oscairn
                 if(!p.items.empty() || !p.plugins.empty()) bad("an asset package holds assets and no items or plugins");
                 p.assetVersion = text(detail::member(assets, "version"));
                 if(!plainId(p.assetVersion)) bad("an asset package's version is not plain");
-                if(const V r = detail::member(assets, "redistribute"); r && r->type != json_type_null)
-                {
-                    if(r->type != json_type_true && r->type != json_type_false) bad("an asset package's redistribute is not true or false");
-                    p.redistribute = r->type == json_type_true;
-                }
                 const V list = detail::member(assets, "files");
                 if(!list || list->type != json_type_array) bad("an asset package lists no files");
                 std::set<std::string> listed;

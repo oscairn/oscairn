@@ -310,20 +310,20 @@ namespace oscairn::assets
         }
         registerFolder(folder / version, id);
         if(!name.empty()) { std::lock_guard lock(mutex_); RegistryLock registry(root()); loaded_ = false; load(); libraries_[id].name = name; save(); }
-        // Its terms ("license<TAB>redistribute<TAB>dependency") and license texts.
+        // Its terms ("license<TAB>dependency") and license texts.
         auto terms = given;
         if(terms.dependency && fs::exists(folder / ".terms", e) && !libraryTerms(id).dependency) terms.dependency = false;
         if(!plain(terms.license)) fail("license contains tabs or line breaks");
-        writeAtomically(folder / ".terms", terms.license + '\t' + (terms.redistribute ? "1" : "0") + '\t' + (terms.dependency ? "1" : "0") + '\n');
+        writeAtomically(folder / ".terms", terms.license + '\t' + (terms.dependency ? "1" : "0") + '\n');
         fs::remove_all(folder / ".licenses", e);
         if(!terms.licenses.empty() && fs::is_directory(terms.licenses, e)) fs::copy(terms.licenses, folder / ".licenses", fs::copy_options::recursive);
     }
     Store::Terms Store::libraryTerms(const std::string& id) const
     {
-        Terms t; std::string line, redistribute, dependency;
+        Terms t; std::string line, field;
         std::ifstream in(root().parent_path() / "AssetLibraries" / id / ".terms");
-        if(std::getline(in, line)) { std::istringstream fields(line); std::getline(fields, t.license, '\t'); std::getline(fields, redistribute, '\t'); std::getline(fields, dependency); }
-        t.redistribute = redistribute != "0"; t.dependency = dependency == "1";
+        // The dependency flag is the last field: older installs wrote a redistribute field before it, now ignored.
+        if(std::getline(in, line)) { std::istringstream fields(line); std::getline(fields, t.license, '\t'); while(std::getline(fields, field, '\t')) t.dependency = field == "1"; }
         if(fs::exists(root().parent_path() / "AssetLibraries" / id / ".licenses")) t.licenses = root().parent_path() / "AssetLibraries" / id / ".licenses";
         return t;
     }

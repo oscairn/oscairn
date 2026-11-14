@@ -498,25 +498,17 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
             package.items.push_back({"sound",item->id,item->name,to.generic_string()});
             manifests.push_back(stage/to/"sound.json");
         }
-        // Every sample they use, each once, by its hash; but a file of an asset library whose
-        // package does not let it be passed on is left out (RFC 0009), as a reference the destination
-        // must have, and the license texts of each library whose files go in go with them.
-        std::set<std::string> copied;std::map<std::string,std::set<std::string>> withheld;std::set<std::string> licensed;
+        // Every sample they use, each once, by its hash, whatever library it came from (RFC 0009),
+        // and the license texts of each library whose files go in go with them.
+        std::set<std::string> copied;std::set<std::string> licensed;
         for(const auto& m:manifests)for(auto ref:assetsOf(m)){
             const auto source=assets_.resolve(ref);
             std::string holder,relative;
             if(assets_.libraryVersion(ref.library).empty() && assets_.locate(source.parent_path(),holder,relative) && !assets_.libraryVersion(holder).empty())ref.library=holder; // found in another library by its bytes
-            if(!assets_.libraryVersion(ref.library).empty()){
-                if(!assets_.libraryTerms(ref.library).redistribute){withheld[ref.library].insert(ref.sha256);continue;}
-                licensed.insert(ref.library);
-            }
+            if(!assets_.libraryVersion(ref.library).empty())licensed.insert(ref.library);
             if(!copied.insert(ref.sha256).second)continue;
             const auto to=stage/"Assets"/ref.sha256.substr(0,16)/source.filename();
             fs::create_directories(to.parent_path());fs::copy_file(source,to);
-        }
-        for(const auto& [library,files]:withheld){
-            const auto terms=assets_.libraryTerms(library);
-            notes.push_back(std::to_string(files.size())+(files.size()==1?" file":" files")+" of the asset library "+library+" "+assets_.libraryVersion(library)+(files.size()==1?" was":" were")+" left out: its license ("+terms.license+") does not let it be passed on, so the destination needs it installed");
         }
         for(const auto& library:licensed)if(const auto from=assets_.libraryTerms(library).licenses;!from.empty())
             {fs::create_directories(stage/"Licenses");fs::copy(from,stage/"Licenses"/library,fs::copy_options::recursive);}
@@ -2105,7 +2097,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             std::vector<assets::Store::LibraryFile> files;
             for(const auto& a:p.assets)files.push_back({a.path,a.sha256,into/"Assets"/a.path});
             std::error_code e; // a package job staged its tree (packages.cpp); anything else is staged here
-            assets_.installLibrary(p.id,p.assetVersion,p.name,files,{p.license,redistributable(p.license,p.redistribute),dependency,into/"Licenses"},fs::is_directory(into/"Staged",e)?into/"Staged":fs::path());
+            assets_.installLibrary(p.id,p.assetVersion,p.name,files,{p.license,dependency,into/"Licenses"},fs::is_directory(into/"Staged",e)?into/"Staged":fs::path());
             out.added=uint32_t(files.size());
         }
         // A plugin package's asset libraries: each one missing, or older than it needs, is said.

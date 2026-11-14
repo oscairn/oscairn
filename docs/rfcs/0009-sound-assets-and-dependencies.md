@@ -12,9 +12,10 @@ Checked when built and tested; the sections below say how.
 - [x] 3. LV2 path mapping onto the store; `create` for user-library files
       ([status](#implementation-status): `lv2-state-contract`, `prepared-instances`; the "first
       use" named in the build order, Yamaha user waveform conversion, is RFC 0008's and not built)
-- [x] 4. Libraries as RFC 0006 packages, with redistribution checks and garbage collection
-      (redistribution checks and garbage collection 2026-11-09: `control-archives` devices R and
-      Q, `control-repository`; see [status](#implementation-status))
+- [x] 4. Libraries as RFC 0006 packages, with export and garbage collection
+      (export and garbage collection 2026-11-09, export restriction removed 2026-11-13:
+      `control-archives` devices R and Q, `control-repository`; see
+      [status](#implementation-status))
       (built 2026-11-07: asset packages, kind `asset`, packed by `oscairn-sign asset-package`,
       each file by path, SHA-256 and size; installed into the asset store by hash with a
       read-only tree of hard links at `AssetLibraries/<id>/<version>/`, registered under the
@@ -36,7 +37,7 @@ library used by many sounds or many plugins is stored once.
 | Term | Meaning |
 | --- | --- |
 | **Asset** | One immutable file, identified by the SHA-256 of its bytes. Never edited in place. |
-| **Library** | A named, versioned collection of assets with a manifest: ID, version, title, authors, license/attribution, redistribution terms, and each file's path, size and hash. A library is a kind of RFC 0006 package. |
+| **Library** | A named, versioned collection of assets with a manifest: ID, version, title, authors, license/attribution, and each file's path, size and hash. A library is a kind of RFC 0006 package. |
 | **Asset reference** | `{library, version, path, sha256}`. The path is relative to the library root. Stored in plugin state and in the Performance manifest. Never an absolute path. |
 | **Sound** | A plugin identity plus its state plus the asset references that state uses. |
 | **Dependencies of a Performance** | Its plugins plus the union of its sounds' asset references. |
@@ -59,10 +60,9 @@ the host, not by any plugin:
    wavetables, converted Yamaha user waveforms) or single files imported on their own.
    Edits create a new asset; the old one remains while anything references it.
 
-Export writes a package containing each required library once, subject to its
-redistribution terms (RFC 0006). A library that may not be redistributed, such as
-Yamaha factory content or a commercial pack, is exported as a reference the destination
-must already satisfy, and the export reports it.
+Export writes a package containing each required library's files once, whatever its license
+(RFC 0006): there is no restriction on export, so a musician can move their sounds to another
+instrument or share them. Each library's license and attribution files travel with its files.
 
 ## Files used by several plugins
 
@@ -176,8 +176,8 @@ library root, and the binding to a library lives in the sound's asset references
    manifest dependency list; transactional preflight with a precise missing-asset report.
 3. LV2 path mapping onto the store; `create` for user-library files (first use: Yamaha
    user waveform conversion).
-4. Export and import of libraries as RFC 0006 packages, with redistribution checks and
-   garbage collection from explicit roots.
+4. Export and import of libraries as RFC 0006 packages, and garbage collection from explicit
+   roots.
 
 ## Decisions on identity, overlap and memory
 
@@ -261,16 +261,17 @@ Step 3 (2026-11-09):
 
 Step 4 (finished 2026-11-09), beyond the asset packages built 2026-11-07:
 
-- **Redistribution:** an asset package's `assets.redistribute` says whether others may pass the
-  library on; without it, RFC 0031's license rules decide: an SPDX license allows it, a
-  `LicenseRef-` one (the publisher's own terms, whose text the package must now carry) does not
-  (`redistributable()`, `oscairn-sign asset-package --redistribute`). The device keeps each
-  installed library's terms and license texts beside its tree. An export leaves out the files of
-  a library that may not be passed on, saying how many of which library, and carries the license
-  texts of those whose files go in. `control-archives` device R: a `LicenseRef-` package without
-  its text is refused, a Sound using a CC-BY and a vendor library exports with the first's file
-  and attribution and without the second's, a device without the vendor library is told, and
-  with it installed both references resolve.
+- **Export:** no restriction. An export carries every asset file it uses, whatever library it
+  came from and whatever that library's license, and the license and attribution texts of each
+  library whose files go in (a `LicenseRef-` package, the publisher's own terms, must carry its
+  text). The device keeps each installed library's license and license texts beside its tree.
+  An earlier `assets.redistribute` mark that kept a library's files out of exports was removed
+  on 2026-11-13; a package that still carries it installs, the mark ignored. `control-archives`
+  device R: a `LicenseRef-` package without its text is refused, a vendor package with the old
+  mark installs, a library's `.terms` in its old form (with a redistribute field) reads, a Sound
+  using a CC-BY and that vendor library exports with both files and both libraries' license
+  texts, a device with neither library installs it and resolves both references, and an archive
+  missing a sample installs saying which.
 - **Garbage collection from explicit roots:** library items, the open Performance, Performances
   saved outside the library (`performance.save` records each folder with its references, so a
   drive that is away keeps its pins until the folder is gone from a folder that is there) and

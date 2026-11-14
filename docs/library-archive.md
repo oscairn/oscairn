@@ -36,9 +36,8 @@ The manifest:
 An export holds the Performance, the library Sound of each part that is still that Sound (the
 part unedited since it was loaded or saved, and the library holding that revision), and with
 **edited Sounds**, the Sound of each part edited since, as the library has it. Every sample their
-plugins list goes in once, by its hash, except a file of an installed [asset library](#asset-packages)
-that may not be passed on: that one stays out, the export's notes say how many files of which
-library, and the destination needs the library installed. The license texts of each asset
+plugins list goes in once, by its hash, whatever [asset library](#asset-packages) it came from: no
+library's files are kept out. The license texts of each asset
 library whose files go in go with them, under `Licenses/<library ID>/`. Each plugin they use goes in with every build there is:
 this device's from its `pathHint` while that build still has the document's locked digest, else
 from the plugin store, and the store's builds for other platforms (installed from archives, or
@@ -205,14 +204,11 @@ file under `Assets/` by its `path` there, `sha256` and `size`:
 "assets": {"version": "1.9.0", "files": [{"path": "wavetables/basic.wt", "sha256": "<64 hex digits>", "size": 16384}]}
 ```
 
-**Redistribution** ([RFC 0009](rfcs/0009-sound-assets-and-dependencies.md#where-files-live)): whether
-an export made on a device may carry the library's files. `assets.redistribute`, `true` or
-`false`, says so when present; without it the license decides, as
-[RFC 0031](rfcs/0031-package-repository-and-distribution.md)'s license rules do: an SPDX license
-grants redistribution, while a `LicenseRef-` license is the publisher's own terms, which Oscairn
-cannot read, so such a library stays out of exports unless its package says `true`. A package
-(plugin or asset) whose license names a `LicenseRef-` must carry its text under `Licenses/`.
-`oscairn-sign asset-package --redistribute yes|no` writes the field.
+**Exports** ([RFC 0009](rfcs/0009-sound-assets-and-dependencies.md#where-files-live)): an export
+made on a device carries the library's files it uses, whatever the library's license, with its
+license texts. A package (plugin or asset) whose license names a `LicenseRef-` must carry its
+text under `Licenses/`. An `assets.redistribute` member, which older tools wrote, is read and
+ignored.
 
 Every other kind has `"assets": null`. `oscairn-sign asset-package` packs every file in a
 folder, hidden ones aside:
@@ -226,8 +222,9 @@ Installing one keeps each file once, by its SHA-256, in the asset store (`assets
 in the data folder), and builds a real folder of the library from it,
 `AssetLibraries/<id>/<version>/<path>`: hard links to the stored files (a copy where a link
 cannot be made), read-only, registered as the library `<id>` so references resolve by its ID and
-path. Beside the version folder, `.terms` keeps its license, whether it may be passed on and
-whether a plugin package brought it (a line `license<TAB>1|0<TAB>1|0`), and `.licenses/` its
+path. Beside the version folder, `.terms` keeps its license and whether a plugin package brought
+it (a line `license<TAB>1|0`; the flag is the line's last field, as older installs wrote a field
+before it that is now ignored), and `.licenses/` its
 license texts. Preset discovery crawls folders, so a library needs that tree. One version of a library is
 installed at a time: a new one is built beside the old one, moved into place, and the old one
 removed. A plugin finds the folder through `oscairn.assets`' `library_root`, from its preset
@@ -401,7 +398,7 @@ nothing behind:
 - a plugin package naming no license, or under the GPL, LGPL or AGPL without its `source` or a
   file under `Licenses/`, and a `source` that is not an `https://` address and a revision;
 - a plugin or asset package whose license names a `LicenseRef-` without a file under
-  `Licenses/`, and an asset package whose `redistribute` is not `true` or `false`;
+  `Licenses/`;
 - an asset package naming no license, with items or plugins, whose version is not plain, that
   lists no file, a file twice, one whose path is not safe or that is not under `Assets/`, or
   holds a file under `Assets/` it does not list; a file whose SHA-256 or size is not the one it

@@ -49,9 +49,6 @@ namespace oscairn
         struct AssetFile { std::string path, sha256; uint64_t size = 0; };
         std::string assetVersion;
         std::vector<AssetFile> assets;
-        // Whether others may pass the library on in their exports, as the manifest's
-        // `assets.redistribute` declares it; unset when it does not (redistributable() decides).
-        std::optional<bool> redistribute;
         // A plugin package's asset libraries, each by ID and the least version it needs.
         struct Dependency { std::string id, version; };
         std::vector<Dependency> assetDependencies;
@@ -93,12 +90,6 @@ namespace oscairn
     // problem; other files (resources, Windows DLLs) are not checked. Untrusted input: every read
     // is bounds-checked.
     std::vector<std::string> outsideLibraries(const std::filesystem::path& build);
-
-    // Whether an asset library may go into an export made from it (RFC 0009, RFC 0031's license
-    // rules): as its package declares, else when its license names no `LicenseRef-`: an SPDX
-    // license grants redistribution, while a `LicenseRef-` one is the publisher's own terms, in its
-    // license file, which Oscairn cannot read.
-    bool redistributable(const std::string& license, std::optional<bool> declared);
 
     // A path an archive may hold: relative, plain components, none hidden, `..`, with a backslash,
     // drive or control character, at most 1024 bytes (docs/library-archive.md's reading rules).

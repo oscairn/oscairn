@@ -19,6 +19,7 @@ export component Shell inherits Window {
     // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening (`opening` names it).
     in property <int> screen;
     in property <string> opening;
+    in property <bool> hands-over; // false: this shell cannot hand the display over (a computer)
     callback key(string) -> bool; // a key's text; true when it was taken
     out property <length> resources-x: bar.resources-x;
     out property <length> resources-width: bar.resources-width;
@@ -55,7 +56,7 @@ export component Shell inherits Window {
         vertical-alignment: center;
         font-size: Theme.title;
         color: Theme.muted;
-        text: "Opening " + root.opening + "...";
+        text: root.hands-over ? "Opening " + root.opening + "..." : root.opening + " is not in this UI yet: open it in the Oscairn app. Escape goes back.";
     }
     if root.engine != "": Rectangle {
         x: Theme.margin;

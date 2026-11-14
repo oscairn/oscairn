@@ -191,7 +191,7 @@ impl Fixture {
         let _ = std::fs::remove_file(&path);
         let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         let (tx, events) = mpsc::channel();
-        shell::start(&screen.ui, path, &crate::profile::Profile::load(Some("fantom-07")).unwrap(), move |e| {
+        shell::start(&screen.ui, path, &crate::profile::Profile::load(Some("fantom-07")).unwrap(), true, move |e| {
             let _ = tx.send(e);
         })
         .unwrap();

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Oscairn's UI in Rust (docs/rust-ui.md):
-//!   oscairn-ui [--profile ID|FILE] [--socket PATH]
+//!   oscairn-ui [--profile ID|FILE] [--socket PATH] [--handover FILE]
 //! The profile: a built-in's id or a file (else OSCAIRN_PROFILE; else this computer's). The
 //! engine's control socket: PATH, else /run/oscairn/engine.sock (a device's engine-only start).
+//! With --handover, a screen not yet ported ends the program with status 3 and its name (the
+//! JUCE app's --app) in FILE, for the start script to give the display to the JUCE app.
 //! It never ends because the engine is slow or gone: it says so and waits.
 
 mod client;
@@ -44,6 +46,15 @@ fn main() -> Result<(), slint::PlatformError> {
     let post = move |event| {
         let _ = weak.upgrade_in_event_loop(move |_| shell::dispatch(event));
     };
-    shell::start(&ui, socket.into(), &profile, post).map_err(|e| slint::PlatformError::Other(e.to_string()))?;
-    ui.run()
+    let handover = arg("--handover");
+    shell::start(&ui, socket.into(), &profile, handover.is_some(), post).map_err(|e| slint::PlatformError::Other(e.to_string()))?;
+    ui.run()?;
+    if let (Some(file), Some(app)) = (handover, shell::handover()) {
+        if let Err(e) = std::fs::write(&file, app) {
+            eprintln!("oscairn-ui: cannot write the handover file {file}: {e}");
+            std::process::exit(1);
+        }
+        std::process::exit(3);
+    }
+    Ok(())
 }

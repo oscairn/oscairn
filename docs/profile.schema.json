@@ -634,6 +634,14 @@
             "minimum": 0,
             "maximum": 240
           },
+          "ui": {
+            "description": "Which program draws this screen on a device (docs/rust-ui.md): juce, the JUCE app under X (absent: this); rust, the Rust UI straight to the display, handing it to X and the JUCE app for a screen not yet ported. The device's start script reads it",
+            "enum": ["juce", "rust"]
+          },
+          "rotation": {
+            "description": "Degrees the picture is turned for the panel, clockwise, where the panel is mounted turned (the FANTOM-07's 90). The start script turns the Rust UI's picture by it (SLINT_KMS_ROTATION) and its touch (a libinput calibration matrix); the X server's own configuration turns it for the JUCE app. Absent: 0",
+            "enum": [0, 90, 180, 270]
+          },
           "topBar": {
             "description": "What the Rust UI's top bar shows in its resource section (docs/rust-ui.md): cpu, how full the CPU is (session.status's cpuLoad, the audio callback's share of each block's time), and ram, the device's memory in use (compute.memory less what the system has available), each as a bar and a percent (both), a bar, a percent or not at all (none). Absent: both for each. The user's choice in Settings, Top bar, goes over it",
             "type": "object",

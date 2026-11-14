@@ -61,6 +61,20 @@ if [ -n "$app" ]; then
 	[ -n "$dry" ] || engine=$(named oscairn-engine)
 fi
 rm -f "$state/run/app.pid" 2>/dev/null
+# The Rust UI (docs/rust-ui.md), its keeper having seen the mark above, and its touch rule.
+ui=$(named oscairn-ui)
+if [ -n "$ui" ]; then
+	say "stopping the Rust UI (pid $(echo $ui))"
+	end 50 $ui
+fi
+rules=${OSCAIRN_UDEV_RULES:-/run/udev/rules.d}
+if [ -e "$rules/99-oscairn-touch.rules" ]; then
+	if [ -n "$dry" ]; then say "would remove $rules/99-oscairn-touch.rules and run udevadm trigger"
+	else
+		rm -f "$rules/99-oscairn-touch.rules" && say "the touch rule removed"
+		command -v udevadm > /dev/null 2>&1 && udevadm control --reload && udevadm trigger --subsystem-match=input --action=change
+	fi
+fi
 if [ -n "$engine" ]; then
 	say "stopping the engine (pid $(echo $engine))"
 	end 100 $engine

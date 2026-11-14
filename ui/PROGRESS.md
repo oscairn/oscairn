@@ -63,4 +63,15 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   The tests now set OSCAIRN_DATA_HOME and OSCAIRN_CONFIG_HOME to a temporary folder first;
   checked: a later run left the file's time unchanged. Nav totals now ordered moves, confirms,
   cancels within one read.
+- JUCE build (build-ui, Release, app + engine, BUILD_TESTING=OFF): desktop-settings passed after
+  counting six pages and sending the page's changes at once (commit 610fd975); desktop-theme passed.
+- Steps 5 and 6, handover and start script: `--handover FILE` (status 3 and the app's name),
+  "Opening X..." for one frame; a computer's shell says where the screen is instead.
+  JUCE Main.cpp: OSCAIRN_HOME_QUITS=1 makes Home and Back quit (systemRequestedQuit). Start
+  script: OSCAIRN_UI (profile screens[0].ui via engine-args.py), engine alone then keep_ui
+  (Rust UI, handover to Xorg + `Oscairn --connect --app`, back), touch rule in
+  /run/udev/rules.d from OSCAIRN_UI_ROTATION (screens[0].rotation; FANTOM-07 90). Stop script
+  ends oscairn-ui and removes the rule. fantom_start.sh: new dry-run checks; in a Linux
+  container 91 ok, none failing (main's script there: none failing either); on macOS 4 checks
+  fail on main and branch alike (/proc). engine-args test passed.
 </content>

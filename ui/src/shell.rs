@@ -87,6 +87,10 @@ pub struct App {
     tiles: Rc<VecModel<TileData>>,
     /// The JUCE app's name for the screen asked for (its --app), once one is.
     handover: Option<&'static str>,
+    /// Whether this shell can hand the display over (it was started with a handover file); a
+    /// computer's cannot, and says where that screen is instead.
+    hands_over: bool,
+    leave: slint::Timer,
     /// The panel's navigation totals as last read.
     totals: nav::Totals,
     setlist: setlist::Screen,
@@ -121,7 +125,7 @@ pub fn show_settings(ui: &Shell, settings: MeterSettings) {
 
 /// Starts the shell on `ui`, a client of the engine's socket at `socket`. `post` takes each of the
 /// client's events, on its reader thread, to the UI thread, which hands it to `dispatch`.
-pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, post: impl Fn(Event<Request>) + Send + 'static) -> std::io::Result<()> {
+pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, post: impl Fn(Event<Request>) + Send + 'static) -> std::io::Result<()> {
     let client = Client::start(socket, post)?;
     ui.set_engine("connecting".into());
     let home = Home::new(&profile.apps, ui.get_home_columns().max(1) as usize);
@@ -149,6 +153,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, post: impl Fn(Event
             home,
             tiles,
             handover: None,
+            hands_over,
+            leave: slint::Timer::default(),
             totals: nav::Totals::default(),
             setlist: setlist::Screen::new(ui, state),
         };
@@ -372,6 +378,7 @@ impl App {
 
     fn act(&mut self, action: Action) {
         match (self.screen, action) {
+            (Screen::Opening, Action::Cancel(_)) if !self.hands_over => self.go(Screen::Home),
             (Screen::Opening, _) => {} // the display is going to the JUCE app
             (Screen::Home, _) => {
                 if let Some(ui) = self.ui() {
@@ -455,9 +462,17 @@ impl App {
             id => {
                 if let Some(ui) = self.ui() {
                     ui.set_opening(app.name.into());
+                    ui.set_hands_over(self.hands_over);
                 }
-                self.handover = id.strip_prefix("oscairn.");
                 self.go(Screen::Opening);
+                if self.hands_over {
+                    self.handover = id.strip_prefix("oscairn.");
+                    // After the frame that says so: the program ends and the start script gives the
+                    // display to X and the JUCE app (docs/rust-ui.md).
+                    self.leave.start(slint::TimerMode::SingleShot, Duration::from_millis(100), || {
+                        let _ = slint::quit_event_loop();
+                    });
+                }
             }
         }
     }

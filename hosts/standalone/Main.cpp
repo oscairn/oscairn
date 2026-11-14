@@ -159,9 +159,9 @@ namespace oscairn::standalone
             engine_.openBrowser=[this]{showLibrary();};
             engine_.openPads=[this]{showPads();};
             engine_.openParts=[this]{showParts();};
-            engine_.goHome=[this]{showHome();};
+            engine_.goHome=[this]{leave();};
             engine_.onList=ListCursor::act; engine_.listsShowing=ListCursor::anyShowing; // the panel's list navigation (a device's map) reaches the lists shown
-            engine_.goBack=[this]{showHome();}; // shortcut: every app's top screen is one level down; deeper levels go back inside their apps
+            engine_.goBack=[this]{leave();}; // shortcut: every app's top screen is one level down; deeper levels go back inside their apps
             // The on-screen keyboards, where the profile offers them: windows on the desktop, a sheet over a device's screen.
             if( profile_.onScreenKeyboard )
             {
@@ -291,6 +291,14 @@ namespace oscairn::standalone
         // What --snapshot renders: an app's own window when --app opened one, else this window.
         juce::Component* snapshotView() const { return snapshotView_ ? snapshotView_ : getContentComponent(); }
 
+        // Home and Back: Home; or, when the Rust UI handed the display over for one screen
+        // (OSCAIRN_HOME_QUITS=1, docs/rust-ui.md), the end of this app, which gives it back.
+        const bool homeQuits_ = juce::SystemStats::getEnvironmentVariable( "OSCAIRN_HOME_QUITS", {} ) == "1";
+        void leave()
+        {
+            if( homeQuits_ ) juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            else showHome();
+        }
         // Home (RFC 0030): the launcher, as the window's content on the desktop, over the screen
         // on a panel. What it replaces goes after it is in place: a panel points at its overlay.
         void showHome()
@@ -499,8 +507,8 @@ namespace oscairn::standalone
         TopBar::Shell barShell()
         {
             TopBar::Shell shell;
-            if( !layoutBinds( "home" ) ) shell.home = [this] { showHome(); };
-            if( !layoutBinds( "back" ) ) shell.back = [this] { showHome(); };
+            if( !layoutBinds( "home" ) ) shell.home = [this] { leave(); };
+            if( !layoutBinds( "back" ) ) shell.back = [this] { leave(); };
             if( panel() ) shell.apps = [this] { showSwitcher(); };
             if( !layoutBinds( "panic" ) ) shell.notesOff = [this] { engine_.allNotesOff(); };
             shell.save = [this]( bool asNew ) { saveToLibrary( asNew ); };

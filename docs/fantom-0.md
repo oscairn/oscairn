@@ -1011,6 +1011,34 @@ patched (`hosts/juce-patches`) to mark the segment for removal once the X server
 `oscairn-fantom-start` also removes segments ended processes left (key 0, attached nowhere, its
 user's, creator gone) with `ipcrm`, so a crash loop cannot fill memory that way again.
 
+### The Rust UI on the display without X (not yet run on a unit)
+
+The UI moves to Rust screen by screen ([rust-ui.md](rust-ui.md)). A profile whose screen says
+`"ui": "rust"` (the FANTOM-07's does not yet: the JUCE app stays the default until the owner
+switches it; `OSCAIRN_UI=rust` in the start script's environment tries it once) makes
+`oscairn-fantom-start` start the engine alone (as `--engine-only`), then:
+
+- `systemctl stop weston.service`, and no X server: `/usr/bin/oscairn-ui` draws through Slint's
+  KMS backend (`SLINT_BACKEND=linuxkms-software`), its picture turned by the screen's `rotation`
+  (90 on the FANTOM-07, `SLINT_KMS_ROTATION`), at most `frameRate` frames a second (30 by
+  default on a device), as a trusted client of `/run/oscairn/engine.sock`; logged to
+  `var/oscairn/log/oscairn-ui.log`. The Setlist prototype drawn this way missed 0 audio blocks in
+  a 10 s scroll where the same scroll under X missed about 650 (November 14).
+- **Touch** turned with the picture: libinput reads `LIBINPUT_CALIBRATION_MATRIX` from udev, so
+  the start script writes `/run/udev/rules.d/99-oscairn-touch.rules` (the matrix `0 1 0 -1 0 1` for
+  90 degrees, the one the bundle's `xorg.conf` gives the X server) and runs `udevadm trigger`. It is
+  in `/run`, gone at the next power-on; `oscairn-fantom-stop` removes it. Not checked: that
+  Roland's udev reads `/run/udev/rules.d` and that a tap lands where it is drawn.
+- **A screen not yet ported** (Performance, Library, Groovebox, Recordings, Settings): the Rust
+  UI ends with status 3 and the app's name in the bundle's `tmp/oscairn-handover`; the UI keeper
+  starts the bundle's Xorg and `Oscairn --connect /run/oscairn/engine.sock --app NAME` with
+  `OSCAIRN_HOME_QUITS=1` (its Home and Back end it), stops Xorg when it ends and starts the Rust
+  UI again. The engine plays on throughout. The keeper's lines in `oscairn-fantom.log` time it.
+- The panel moves the Rust UI's cursors as it does the JUCE app's ([the panel in lists](#the-panel-in-lists)):
+  the engine counts the map's `navigate` controls and the shell reads the totals.
+
+`oscairn-fantom-stop` ends the Rust UI and its keeper with the rest.
+
 ## Starting at power-on (not done)
 
 What the owner means to do once Oscairn is stable enough: Roland's start script

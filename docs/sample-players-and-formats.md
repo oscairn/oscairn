@@ -141,8 +141,10 @@ Preparation must happen before a performance-time selection, regardless of playe
 | Oscairn Performance JSON + owned assets | Graph, sound assignments, native contexts, plugin state and portability metadata across different kinds of engines. | Keep the [existing container](performance-format.md); SFZ/SF2 describe instruments, not the entire Performance, MIDI graph or setlist. |
 
 An importer must preserve the source and give a clear unsupported-feature result. Sample
-content rights are separate from format specifications and engine licenses. Do not export
-Yamaha factory samples or infer redistribution permission from an installed library.
+content rights are separate from format specifications and engine licenses. An export carries
+the samples its sounds use, from whatever library they came from, with each library's license
+and attribution files ([RFC 0009](rfcs/0009-sound-assets-and-dependencies.md)); what the Oscairn
+project itself publishes in its package repository is a separate policy.
 
 ## First native sample slice
 

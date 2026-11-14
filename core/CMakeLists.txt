@@ -216,6 +216,16 @@ add_test(NAME sample-store COMMAND oscairn-sample-store-test "${SAMPLEPACK_CLI}"
 add_library(oscairn-sample-fixture MODULE engine/tests/sample_fixture.cpp)
 target_link_libraries(oscairn-sample-fixture PRIVATE oscairn_clap_headers samplepack::samplepack)
 set_target_properties(oscairn-sample-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
+# Samples and waveforms installed, resolved, decoded and exported across devices, the plugin in the
+# engine's process and in a worker.
+add_executable(oscairn-sample-packs-test control/tests/sample_packs.cpp)
+target_link_libraries(oscairn-sample-packs-test PRIVATE oscairn_control)
+add_dependencies(oscairn-sample-packs-test samplepack_cli oscairn-sample-fixture)
+foreach(placement IN ITEMS engine worker)
+    add_test(NAME control-sample-packs-${placement} COMMAND oscairn-sample-packs-test $<TARGET_FILE:oscairn-sample-fixture> "${SAMPLEPACK_CLI}" "${CMAKE_CURRENT_SOURCE_DIR}/control/types/org.oscairn.samplepack")
+    set_tests_properties(control-sample-packs-${placement} PROPERTIES TIMEOUT 120)
+endforeach()
+set_tests_properties(control-sample-packs-worker PROPERTIES ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
 
 if(BUILD_TESTING) # the Legacy Sampler
     add_executable(oscairn-sampler-test engine/tests/sampler.cpp)

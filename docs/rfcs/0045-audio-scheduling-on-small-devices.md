@@ -50,6 +50,7 @@ Checked when built and tested; the sections below say how.
 - [ ] 12. The no-glitch guard, in the engine core in Rust ([the guard](#the-no-glitch-guard-2026-11-14)):
   - [x] 12a. Every plugin's notes can be given up, however it takes notes or reports its voices
   - [x] 12b. Lost blocks a trigger, on the lane and every instrument lane before it
+  - [x] 12c. An instrument's lane limit leaves room for the chain after it
 
 ## Problem
 
@@ -833,6 +834,14 @@ to, which has rule 12a and none after it). Its rules, as built:
   its own lane, into an effect in its own worker whose block grows with its input past its
   allowance: before, nothing given up and the effect lost 254 blocks between blocks 500 and 800;
   after, 7 notes faded and none lost from block 500 on (single runs).
+- 12c. Chain-aware limits. An instrument's lane limit is also at most LOAD_MARGIN (80%) of the
+  callback's deadline less the costliest way after it to the output: the steps its audio goes to
+  (its inserts, the buses it sends to at any level, and theirs), each at its last blocks' usual time,
+  summed along the way; never below a quarter of its own limit (effects alone past the deadline are
+  not helped by losing every note: 12b answers their losses). A lane rendering a block late is left
+  out. Tested by `guard` (chain): an instrument of ten notes at 90 us into an effect of 700 us into
+  a bus effect of 600 us, each in its own worker, waiting to the deadline (step 6): before, the
+  instrument's limit 1,813 us and nothing given up; after, 772 us and 4 notes faded (single runs).
 
 ## Core placement
 

@@ -39,6 +39,7 @@ pub struct Step {
     recent: [f32; 5], // its last blocks' times, for the median the lane's limit is held against
     recent_at: usize,
     recent_n: usize,
+    cost: f32, // its last block's usual time
 }
 
 impl Step {
@@ -51,7 +52,21 @@ impl Step {
         late_lane: bool,
         next: Vec<(usize, f32)>,
     ) -> Step {
-        Step { activity, sources, contexts, lane, in_process, late_lane, budgeted: false, next, prev: Vec::new(), recent: [0.0; 5], recent_at: 0, recent_n: 0 }
+        Step {
+            activity,
+            sources,
+            contexts,
+            lane,
+            in_process,
+            late_lane,
+            budgeted: false,
+            next,
+            prev: Vec::new(),
+            recent: [0.0; 5],
+            recent_at: 0,
+            recent_n: 0,
+            cost: 0.0,
+        }
     }
     /// Its usual block, the median of its last five: a block held up from outside moves nothing, two in
     /// a row neither, while three of a real overload do.
@@ -123,6 +138,7 @@ pub struct Notes {
     budgeting: bool,
     total: f32,
     reach: Vec<f32>, // scratch, per step: the gain from it to a step whose block was lost (mark_lost)
+    after: Vec<f32>, // scratch, per step: the costliest way from it to the output (begin)
 }
 
 /// Where a step's merged events go, with the channel the current connection's events take.
@@ -179,12 +195,14 @@ impl Notes {
             }
         }
         let n = steps.len();
-        Notes { budget: Budget::new(entries, lanes), steps, timing: Timing::default(), budgeting: false, total: 0.0, reach: vec![0.0; n] }
+        Notes { budget: Budget::new(entries, lanes), steps, timing: Timing::default(), budgeting: false, total: 0.0, reach: vec![0.0; n], after: vec![0.0; n] }
     }
 
     /// A block starts: each lane's limit, the smaller of the budget and LOAD_MARGIN of the time its
     /// blocks have before they are missed (a period for a lane whose plugins all render a block late,
-    /// the callback's for the engine's process, else a worker's allowance).
+    /// the callback's for the engine's process, else a worker's allowance); an instrument's also leaves
+    /// room before the callback's deadline for the costliest way after it to the output (its inserts,
+    /// the buses it sends to and theirs, at their last blocks' times), though never less than a quarter.
     pub fn begin(&mut self, t: Timing) {
         self.timing = t;
         self.budgeting = t.budget != 0.0;
@@ -195,7 +213,14 @@ impl Notes {
         for lane in &mut self.budget.lanes {
             (lane.limit, lane.miss, lane.took, lane.others_took) = (if t.budget > 0.0 { t.budget } else { f32::INFINITY }, f32::INFINITY, 0.0, 0.0);
         }
-        for step in &self.steps {
+        for s in (0..self.steps.len()).rev() {
+            let Some(step) = self.steps.get(s) else { continue };
+            let way = step.next.iter().map(|&(n, _)| self.steps.get(n).map_or(0.0, |x| x.cost) + self.after.get(n).copied().unwrap_or(0.0)).fold(0.0, f32::max);
+            if let Some(after) = self.after.get_mut(s) {
+                *after = way;
+            }
+        }
+        for (step, after) in self.steps.iter().zip(&self.after) {
             let Some(lane) = self.budget.lanes.get_mut(step.lane) else { continue };
             let time = if step.late_lane {
                 t.period
@@ -204,8 +229,10 @@ impl Notes {
             } else {
                 t.allowance
             };
+            let own = LOAD_MARGIN * time;
+            let chained = if step.budgeted && !step.late_lane { (LOAD_MARGIN * (t.deadline - after)).max(own / 4.0) } else { own };
             lane.miss = lane.miss.min(time);
-            lane.limit = lane.limit.min(LOAD_MARGIN * time);
+            lane.limit = lane.limit.min(own.min(chained));
         }
     }
 
@@ -302,6 +329,7 @@ impl Notes {
         }
         if *budgeting {
             let usual = step.typical(r.took);
+            step.cost = usual;
             if let Some(lane) = budget.lanes.get_mut(step.lane) {
                 lane.took += usual;
                 if !step.budgeted {

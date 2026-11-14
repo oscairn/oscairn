@@ -1556,11 +1556,12 @@ namespace oscairn
         worker::workerDeadline=callbackEnds;
         const bool deadlines=callbackEnds.time_since_epoch().count() && deadlines_;
         worker::workerDeadlineOnly=deadlines;
-        // The reserves also bound the wait for a block a call late (RFC 0045's extra block), always.
+        // The reserves also bound the wait for a block a call late (RFC 0045's extra block), always. At most half a
+        // period: one long block in a later wave (a preemption) must not take every earlier wave's wait away.
         if(float later=0;callbackEnds.time_since_epoch().count())
             for(size_t w=plan->waves.size();w-->0;)
             {
-                plan->after[w]=later;
+                plan->after[w]=std::min(later,float(frames/sampleRate_*1e6)/2);
                 float most=0;
                 for(uint32_t i=w?plan->waves[w-1]:0;i<plan->waves[w];++i)most=std::max(most,plan->steps[i].cost);
                 later+=most;
@@ -1598,8 +1599,10 @@ namespace oscairn
             {
                 if(late && callbackEnds.time_since_epoch().count())worker::workerDeadline=callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave]));
                 step.processed=step.host->finishProcess();
-                // A block given up on took the time it was allowed, not what the worker needs: the last kept.
-                if(step.processed)step.cost=std::chrono::duration<float,std::micro>(std::chrono::steady_clock::now()-step.handed).count();
+                // A block given up on took the time it was allowed, not what the worker needs: the last kept. A block a call
+                // late costs the waves before it nothing: its wait for the block in flight is what their reserve bounds, and
+                // counted, a slow one would take the earlier waves' waits away, their blocks then missed (and so on).
+                if(step.processed)step.cost=late?0.f:std::chrono::duration<float,std::micro>(std::chrono::steady_clock::now()-step.handed).count();
             }
             if(callbackEnds.time_since_epoch().count())worker::workerDeadline=deadlines?callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave])):callbackEnds;
             for(uint32_t i=first;i<end;++i)finish(plan->steps[i]);

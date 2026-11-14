@@ -172,6 +172,10 @@ int main(int argc, char** argv)
             const auto item = c.libraryQuery(one).items;
             check(installed.added == 3 && item.size() == 1 && item[0].library == fridayId && s.pages[0].slots[0].id == bass && s.pages[0].slots[2].id == strings,
                   "as a library: locked, IDs kept, slots as they were");
+            // Into the user's own storage as well: all three are here already, the setlist too
+            // once its slots point at the Performances here, so nothing is copied.
+            const auto own = c.installArchive(friday.string(), false, {}, true);
+            check(own.added == 0 && own.skipped == 3, "items already here as a library are not added twice: " + std::to_string(own.added) + " added");
             // A locked setlist saved is a new one of the user's own.
             const auto mine = c.saveSetlist(s);
             check(mine != fridayId && c.setlist(fridayId).pages.size() == 2, "saving a locked setlist makes the user's own copy");

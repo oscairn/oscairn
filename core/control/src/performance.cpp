@@ -2307,8 +2307,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                     const auto bytes=state_files::read(doc,1024*1024);
                     auto setlist=readSetlist({reinterpret_cast<const char*>(bytes.data()),bytes.size()});
                     for(auto& page:setlist.pages)for(auto& slot:page.slots)if(const auto copy=ids.find(slot.id);!slot.empty && copy!=ids.end())slot.id=copy->second;
-                    const auto text=setlistJson(setlist);
-                    state_files::write(doc,text.data(),text.size());
+                    writeSetlist(doc.parent_path(),setlist); // as the library writes it, so its content hash matches a copy's
                 }
                 // The item already here, from any library or archive (a library export carries what
                 // its items use, wherever it was installed from): by its ID, or as a copy imported

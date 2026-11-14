@@ -865,14 +865,16 @@ Weston back first ([Starting at power-on](#starting-at-power-on-not-done)). What
 that the configuration now does:
 
 - **The screen:** `modesetting` on `/dev/dri/card0`, no acceleration (`AccelMethod none`), a
-  shadow frame buffer, `Rotate left`: the 720 × 1280 panel as 1280 × 720, as Weston's
-  `transform=90`. No blanking (`BlankTime` and the DPMS times 0; Weston's idle time was 0 too).
-  The backlight is untouched (Roland's app set it, not Weston).
+  shadow frame buffer, `Rotate right`: the 720 × 1280 panel as 1280 × 720, as Weston's
+  `transform=90` (a quarter turn clockwise; `Rotate left` showed the picture upside down). No
+  blanking (`BlankTime` and the DPMS times 0; Weston's idle time was 0 too). The backlight is
+  untouched (Roland's app set it, not Weston).
 - **The touch screen:** the X server takes input devices from the system's udev
   (`start-chroot.sh` binds `/run/udev`), ignores every device but the Goodix touch screen
   (WRITE, MENU and TEMPO are the engine's, and the app uses no key), and turns its axes (0 to
   719 across, 0 to 1279 down, read from the device's ranges) with the screen: the matrix
-  `0 -1 1 1 0 0 0 0 1`, a touch at the panel's (x, y) landing at (1 − y, x) of the screen.
+  `0 1 0 -1 0 1 0 0 1`, a touch at the panel's (x, y) landing at (y, 1 − x) of the screen
+  (touches "seem to be correct" to the owner at the unit; not measured).
   `Xorg.log` shows the device added as a touch screen with that matrix. Under Weston the app
   also got the gpio keys and power keys as X key events, which it does not use.
 - **No pointer shown** (`-nocursor`): Weston showed none for a touch-only seat; the panel has no
@@ -943,9 +945,10 @@ system on Linux, so the app would still reach Weston through Xwayland. Roland's 
 (`mi078`) is an X11 client too: it links `libX11`, `libXext`, `libXinerama` and `libGL` and
 carries JUCE 5.3.2's strings, which is why Roland's Weston runs with `--xwayland`.
 
-Not checked by anyone at the instrument yet: that a finger's touch lands where it should, and
-that the picture is the right way round on the panel (XTest input goes in after the touch
-matrix, and screenshots read the X server's picture before it is turned).
+Checked by the owner at the instrument: the picture is upright with `Rotate right` (it was upside
+down with `Rotate left`), and a finger's touch "seems to be correct"; where touches land has not
+been measured (XTest input goes in after the touch matrix, and screenshots read the X server's
+picture before it is turned).
 
 ## Starting at power-on (not done)
 

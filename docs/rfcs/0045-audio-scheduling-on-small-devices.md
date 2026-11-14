@@ -491,6 +491,25 @@ with notes): the app's own process is the cause, and what in it is not yet known
   second) and letting the app run a quarter of the time left the misses where they were (93
   and 70 against about 90). On the Library screen, untouched, the app took 3 % and caused 0
   misses; scrolling it, 137 (659 with a build that kept text layouts, since taken out).
+- **Memory ruled out** (read-only counters over each 11 s window, the app running against
+  stopped): the engine's and workers' audio threads took 0 minor and 0 major page faults either
+  way; `/proc/vmstat` showed no swap in or out, no page scanning or stealing, no allocation stalls
+  and no compaction; 323 MB stays locked (`Mlocked`). Swap is full, but nothing moves.
+- **What changes with the app running:** the GPU's 2D interrupts (`galcore:2d`, all on CPU 0) 55
+  against 0, the display's (`imx-lcdif`) about 595 against 240, and function-call IPIs 384 to 446
+  against 48 (most on CPU 1); the engine's audio thread, on CPU 0, gained 87 to 95 ticks of system
+  time (0 stopped), and lost them when moved off CPU 0 (9), while the misses stayed (160): that
+  time is interrupt work charged to whatever runs on CPU 0, and the function-call IPIs followed
+  the audio threads to CPUs 1 and 2 (4,728 and 4,179 in 11 s), about one a block. With the app's
+  window unmapped the GPU still interrupted (21) and the misses stayed (59). The wake-up rates of
+  the engine's and workers' threads are the same with the app running or stopped, so nothing of
+  Oscairn's fires per block only while the app runs.
+- **The compositor is Roland's:** Weston runs from Roland's `weston.service` as `/usr/bin/weston
+  --xwayland --use-g2d=1` (the GPU's 2D renderer), outside Oscairn's bundle, and starts the
+  Xwayland the app draws through; only Weston, its helpers and Xwayland hold `/dev/galcore`.
+  Trying Weston's pixman renderer or Xwayland without the GPU means changing or replacing that
+  service, which is the owner's decision.
+- **The Library screen left untouched:** the app at 3 % of a core and 0 misses in 11 s.
 - **Not built:** a fix. The figures fit something in the kernel that the app's activity sets off
   and that runs on the audio cores billed to whatever thread is there (an interrupt or
   inter-processor call, or a lock), not a share of CPU or memory bandwidth; that is unverified,

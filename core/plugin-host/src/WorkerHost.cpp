@@ -1843,25 +1843,27 @@ namespace oscairn
         // (pluginHosts). Main thread, but for own(), which a restart calls.
         struct Pool
         {
-            std::mutex mutex;
+            std::mutex mutex; // hosts, costs; held while a new host's control is taken
             std::vector<std::shared_ptr<Process>> hosts;
+            std::map<std::string, double> costs;
+            // all, crashed: a restart, under its control, records here, so this lock is taken last and alone.
+            std::mutex listed;
             std::vector<std::weak_ptr<Process>> all;
             std::set<std::string> crashed;
-            std::map<std::string, double> costs;
             static constexpr double unmeasured = .1; // a plugin not measured yet, a tenth of the block
 
             void track(const std::shared_ptr<Process>& p)
             {
-                std::lock_guard lock(mutex);
+                std::lock_guard lock(listed);
                 std::erase_if(all, [](const auto& w) { return w.expired(); });
                 all.push_back(p);
             }
             bool own(const std::string& id, const PlacementPolicy& policy)
             {
-                std::lock_guard lock(mutex);
+                std::lock_guard lock(listed);
                 return policy.ownHost.count(id) || crashed.count(id);
             }
-            void crashedIn(const std::string& id) { std::lock_guard lock(mutex); crashed.insert(id); }
+            void crashedIn(const std::string& id) { std::lock_guard lock(listed); crashed.insert(id); }
             double cost(Process& p) // under mutex
             {
                 std::lock_guard nodes(p.nodesMutex);
@@ -2004,7 +2006,7 @@ namespace oscairn
     {
         std::vector<std::shared_ptr<Process>> all;
         {
-            std::lock_guard lock(pool().mutex);
+            std::lock_guard lock(pool().listed);
             for(const auto& w : pool().all) if(auto p = w.lock()) all.push_back(std::move(p));
         }
         std::vector<PluginHostInfo> result;

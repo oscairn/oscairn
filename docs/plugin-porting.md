@@ -185,11 +185,13 @@ timing and the 512-event limits are on the
 
 ### Voice budget
 
-With a CPU budget set, the host shares it by measured cost among the plugins that render on one
-thread (a worker's or plugin host's audio thread, or the engine's for plugins in its process: a
-lane each); with none set, each lane gets the time its blocks have before they are missed (a
-worker's allowance; RFC 0045's load guard), so notes give way before a block is ever missed and
-a worker is not restarted for load (RFC 0018). For a
+The host shares a CPU budget by measured cost among the plugins that render on one thread (a
+worker's or plugin host's audio thread, or the engine's process for plugins in it: a lane each).
+A lane may take the budget set, but never more than 80% of the time its blocks have before they
+are missed (a worker's allowance, the callback's time in the engine's process; RFC 0045's load
+guard), budget or none, and the lanes together no more than the budget (with none, 80% of a
+block) on each audio core, so notes give way before a block is ever missed and a worker is not
+restarted for load (RFC 0018). For a
 plugin without `oscairn.voice-budget` it fades out and chokes whole notes, released and quiet ones
 first ([Behaving well](#behaving-well)). A plugin with it gives up its own voices within a limit
 the host sets between blocks; an instance one part plays alone gets one entry, for the selected

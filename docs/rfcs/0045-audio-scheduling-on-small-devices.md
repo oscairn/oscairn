@@ -721,6 +721,15 @@ CPU, plugins with few parameters and no voices); it is the next thing to profile
   out): 0 deadline misses with the guard, 1 with it off (`budget.set {"cpu":64}`), the arpeggio
   part's level the same in both takes. How many notes the guard gave up there was not read, and
   whether it sheds before a miss under real overload on the unit is unmeasured.
+  Corrected after review: the guard applied only with no CPU budget set, which the app always sets
+  (the profile's 60, 75 or 90 %), so on the app and the unit each lane got 75 % of a block, more
+  than a worker's allowance, and the plugins' total was no longer held to anything. Now each lane's
+  limit is the smaller of the budget and 80 % of the time its blocks have before a miss (a worker's
+  allowance, the deadline under step 6, a period for a lane a block late, the callback's time, less
+  the mixing reserve, for the engine's process, whose plugins share one lane, their times summed),
+  budget or none; and every lane's together are held to the budget (with none, 80 % of a block) on
+  each of RFC 0025's audio cores (`usableCores() - 1`), a lane's limit leaving the others what they
+  took in the last block. `budget.set {"cpu":64}` therefore no longer turns the guard off.
 
 Expected (an estimate, not measured) for ST Final on the unit with A+B: three host processes in
 place of nine; at most three hand-overs a wave and two waves (instruments with their inserts, then

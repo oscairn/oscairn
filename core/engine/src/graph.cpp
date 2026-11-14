@@ -88,6 +88,7 @@ namespace oscairn
             std::chrono::steady_clock::time_point handed{}; // audio thread: when its worker was handed the block (cost)
             bool budgeted = false; // its notes are in the shared budget (VoiceBudget), which measures its cost per note
             uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
+            bool inProcess = false; // it renders in the engine's process (no PluginHost::lane): within the callback's time
             bool lateLane = false; // its lane renders a block late (RFC 0045's extra block): a period to render in
             // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
             std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
@@ -244,6 +245,7 @@ namespace oscairn
         deadlines_=worker::deadlineAllowance();
         if(const char* us=std::getenv("OSCAIRN_WORKER_BUDGET_US");us && *us)workerBudgetUs_=float(std::chrono::duration<double,std::micro>(worker::workerAllowance(1,1e6,us)).count()); // 1 frame at 1 MHz: 0.5 us when not a valid override
         if(workerBudgetUs_<1)workerBudgetUs_=0;
+        audioCores_=float(std::max(1u,worker::usableCores()-1));
         helpers_=&AudioHelpers::shared(1e6*maxFrames/sampleRate);
     }
 
@@ -858,7 +860,7 @@ namespace oscairn
         // The budget's lanes (RFC 0045): the steps rendering on one thread share one.
         {
             std::map<const void*,uint32_t> lanes;
-            for(auto& step:plan->steps)if(step.host)step.lane=lanes.emplace(step.host->lane(),uint32_t(lanes.size())).first->second;
+            for(auto& step:plan->steps)if(step.host){step.inProcess=!step.host->lane();step.lane=lanes.emplace(step.host->lane(),uint32_t(lanes.size())).first->second;}
             plan->budget.lanes.resize(std::max<size_t>(1,lanes.size()));
             for(auto& step:plan->steps)if(step.host && step.host->oneBlockLate())for(auto& other:plan->steps)if(other.lane==step.lane)other.lateLane=true;
         }
@@ -1334,17 +1336,25 @@ namespace oscairn
         auto start=[&](Plan::Step& step){step.handed=std::chrono::steady_clock::now();return step.host->startProcess(step.in.data(),step.audioInputs,step.out.data(),step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
         auto render=[&](Plan::Step& step){step.processed=step.host->process(step.in.data(),step.audioInputs,step.out.data(),step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
         // The shared budget (RFC 0018): each lane's limit for this block, and what its plugins took.
-        // A budget set holds on every lane (RFC 0025's share of each audio core); the load guard
-        // (RFC 0045) gives a lane the time its blocks have before they are missed: a worker's
-        // allowance, the deadline under step 6, a period for a lane rendering a block late.
+        // A lane may take the budget set (RFC 0025's share of an audio core) but never more than
+        // loadMargin of the time its blocks have before they are missed (RFC 0045's load guard): a
+        // worker's allowance, the deadline under step 6, a period for a lane rendering a block late, the
+        // callback's time in the engine's process. The lanes together share the budget (with none,
+        // loadMargin of a block) on each audio core: a lane's limit leaves the others what they took
+        // in the last block.
+        // shortcut: the engine's process is one lane, its plugins' times summed, though the audio helpers render a wave's side by side; give each its own lane once those are measured to need it.
         const float budget=voiceBudget_.load(std::memory_order_relaxed);
         const bool budgeting=budget!=0;
         if(budgeting)
         {
-            const float period=float(frames/sampleRate_*1e6);
-            const float allowance=deadlines_?period*float(1-worker::mixingReserve):workerBudgetUs_>0?workerBudgetUs_:period/2;
-            for(auto& lane:plan->budget.lanes){lane.limit=budget;lane.took=lane.othersTook=0;}
-            if(budget<0)for(const auto& step:plan->steps)plan->budget.lanes[step.lane].limit=step.lateLane?period:allowance;
+            constexpr float loadMargin=.8f; // the hard limit's share of a lane's time, for the wake-ups, copies and the machine's own around its blocks
+            const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);
+            const float allowance=deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2;
+            const float total=(budget>0?budget:loadMargin*period)*audioCores_;
+            float took=0;for(const auto& lane:plan->budget.lanes)took+=lane.took; // the last block's
+            for(auto& lane:plan->budget.lanes)lane.limit=budget>0?budget:INFINITY;
+            for(const auto& step:plan->steps){auto& limit=plan->budget.lanes[step.lane].limit;limit=std::min(limit,loadMargin*(step.lateLane?period:step.inProcess?deadline:allowance));}
+            for(auto& lane:plan->budget.lanes){lane.limit=std::max(1.f,std::min(lane.limit,total-(took-lane.took)));lane.took=lane.othersTook=0;} // 1 us: a lane left no room gives up its notes, as 0 would mean no limit
         }
         auto finish=[&](Plan::Step& step)
         {

@@ -10,7 +10,6 @@
 #include "oscairn/package.h"
 #include "oscairn/unavailable_plugin.h"
 #include "oscairn/sound_context.h"
-#include "oscairn/local_socket.h"
 #include <algorithm>
 #include <charconv>
 #include <cmath>

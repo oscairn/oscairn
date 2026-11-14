@@ -244,12 +244,7 @@ namespace oscairn
         // Not controls.set: a parameter of a plugin in a worker is a round trip under that worker's lock,
         // which a load into the same plugin host holds for as long as the plugin's state takes.
         const std::set<std::string> duringLoad{"session.status","parts.meters","wires.meters","notes.send","notes.panic","subscribe","unsubscribe"};
-        thread_local std::timed_mutex* openGate=nullptr; // the gate a request on this thread holds, while it runs
-        thread_local int windows=0;
     }
-
-    LoadWindow::LoadWindow(){if(openGate && !windows++)openGate->unlock();}
-    LoadWindow::~LoadWindow(){if(openGate && !--windows)openGate->lock();}
 
     struct LocalServer::Impl
     {
@@ -440,8 +435,8 @@ namespace oscairn
             struct Relock{Impl& s;std::unique_lock<std::recursive_mutex>& lock;~Relock(){s.running=false;lock.lock();s.runner=nullptr;s.runLine=nullptr;}};
             std::optional<std::string> reply;
             {Relock relock{*this,lock};
-                std::unique_lock held(gate);openGate=&gate;
-                struct Close{~Close(){openGate=nullptr;}} close;
+                std::unique_lock held(gate);LoadWindow::gate=&gate;
+                struct Close{~Close(){LoadWindow::gate=nullptr;}} close;
                 reply=peer.rpc.dispatch(line);}
             if(served)
             {

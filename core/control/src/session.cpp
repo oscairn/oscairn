@@ -21,6 +21,11 @@
 
 namespace oscairn
 {
+    thread_local std::timed_mutex* LoadWindow::gate=nullptr;
+    thread_local int LoadWindow::open_=0;
+    LoadWindow::LoadWindow(){if(gate && !open_++)gate->unlock();}
+    LoadWindow::~LoadWindow(){if(gate && !--open_)gate->lock();}
+
     Session::Session( double sampleRate, uint32_t maxFrames, Lv2BufferLimits lv2Buffers, AudioLayout audio )
         : sampleRate_( sampleRate ), maxFrames_( maxFrames ), graph_( sampleRate, maxFrames, ProcessingMode::Realtime, lv2Buffers, std::move(audio) ), transport_( sampleRate ), recorder_( sampleRate, maxFrames )
     {

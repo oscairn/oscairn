@@ -16,15 +16,6 @@ namespace oscairn
     /// requests safe during a load (reads, meters, notes) run while the load is in a
     /// LoadWindow, any other request is refused as busy (-32009, it did not run) and its client
     /// hears engine.busy once the engine is free (docs/control-protocol.md).
-    /// Inside a LocalServer request, the control thread lets Control go to the server's helper for
-    /// its scope: work touching only objects Control does not know yet (a new plugin instance, its
-    /// state, files), so the helper may serve the requests safe during a load meanwhile. A plugin
-    /// stays created on the control thread (CLAP's main thread). Elsewhere it does nothing.
-    struct LoadWindow
-    {
-        LoadWindow();~LoadWindow();
-        LoadWindow(const LoadWindow&)=delete;LoadWindow& operator=(const LoadWindow&)=delete;
-    };
     class LocalServer
     {
     public:

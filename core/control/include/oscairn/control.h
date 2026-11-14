@@ -12,11 +12,24 @@
 #include <array>
 #include <string>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <vector>
 
 namespace oscairn
 {
+    /// Inside a LocalServer request, the control thread lets Control go to the server's helper for
+    /// its scope: work touching only objects Control does not know yet (a new plugin instance, its
+    /// state, files), so the helper may serve the requests safe during a load meanwhile. A plugin
+    /// stays created on the control thread (CLAP's main thread). Elsewhere it does nothing.
+    struct LoadWindow
+    {
+        LoadWindow();~LoadWindow();
+        LoadWindow(const LoadWindow&)=delete;LoadWindow& operator=(const LoadWindow&)=delete;
+        static thread_local std::timed_mutex* gate; // set by LocalServer while a request on this thread holds it
+    private:
+        static thread_local int open_;
+    };
     // oscairn.ui's widgets by name, as the control protocol writes them ("knob"); unknown: auto.
     inline const char* widgetName(uint32_t widget)
     {

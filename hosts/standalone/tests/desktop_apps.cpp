@@ -319,8 +319,8 @@ int main(int argc, char** argv)
                 if(auto* o = state.getDynamicObject()) { o->setProperty("current", slots - 4); stateFile.replaceWithText(juce::JSON::toString(state)); }
                 const auto marker = data.getChildFile("slow-once");
                 ::setenv("KICK_FIXTURE_SLOW_LOAD_ONCE", marker.getFullPathName().toRawUTF8(), 1);
-                LocalClient probe; probe.connect(socket.string());
-                auto busy = [&] { try { return probe.call("session.status", "{}", 1000).find("-32009") != std::string::npos; } catch(const std::exception&) { return false; } };
+                LocalClient probe; probe.connect(socket.string()); // transport.get: session.status is answered during a load
+                auto busy = [&] { try { return probe.call("transport.get", "{}", 1000).find("-32009") != std::string::npos; } catch(const std::exception&) { return false; } };
                 std::string answer = "?";
                 auto step = [&](const char* by) { answer = "?"; actions.request(standalone::stepSetlist, by, [&](const std::string& a) { answer = a; }); return wait([&] { return answer != "?"; }) ? answer : std::string("?"); };
                 auto said = [&](const juce::String& text) { return std::any_of(notices.begin(), notices.end(), [&](const auto& n) { return n.text.contains(text); }); };

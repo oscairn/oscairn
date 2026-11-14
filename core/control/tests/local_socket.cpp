@@ -699,6 +699,7 @@ namespace
         clientWhileRendering(f,[&]{
             LocalClient loader,watcher,shell;loader.adopt(job[1]);watcher.adopt(ui[1]);shell.adopt(host[1]);
             check(watcher.call("subscribe",R"({"topics":["graph.changed","params.changed"]})").find("accepted")!=std::string::npos,"subscribed before the load");
+            check(watcher.call("parts.meters").find("\"meters\"")!=std::string::npos,"the meters read while it plays");
             std::atomic<bool> loaded=false;std::string reply;double seconds=0;
             std::thread loading([&]{const auto began=Clock::now();try{reply=loader.call("performance.load","{\"directory\":\""+saved+"\"}",30000);}catch(const std::exception& e){reply=e.what();}
                 seconds=std::chrono::duration<double>(Clock::now()-began).count();loaded=true;});
@@ -708,13 +709,14 @@ namespace
                 // A client connecting meanwhile, many times over (more than the server's clients), says hello and leaves.
                 try{LocalClient late;late.connect(socket);joined+=late.call("session.hello","{}",1000).find("protocolVersion")!=std::string::npos;}
                 catch(const std::exception& e){if(!cutOff++)std::cerr<<"a client connecting during the load: "<<e.what()<<'\n';}
-                for(const char* method:{"session.status","controls.set","notes.send"})
+                for(const char* method:{"session.status","controls.set","notes.send","parts.meters"})
                 {
                     const auto params=std::string_view(method)=="controls.set"?R"({"control":1,"value":0.5})":std::string_view(method)=="notes.send"?R"({"on":false,"key":60})":"{}";
                     const auto began=Clock::now();std::string answer;
                     try{answer=watcher.call(method,params,1000);}catch(const std::exception& e){check(false,std::string("a call during the load failed: ")+e.what());}
                     slowest=std::max(slowest,std::chrono::duration<double>(Clock::now()-began).count());++calls;
                     busy+=answer.find("-32009")!=std::string::npos;
+                    if(answer.find("\"result\"")==std::string::npos && answer.find("-32009")==std::string::npos)check(false,std::string(method)+" during the load answered neither data nor busy: "+answer);
                 }
                 // An app started again meanwhile gets its connection; a second long request is refused.
                 if(busy && !connected){shell.call("apps.connect",R"({"app":"com.example.setlist"})",1000);const int fd=shell.takeDescriptor();connected=fd>=0;if(fd>=0)::close(fd);}

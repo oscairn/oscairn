@@ -31,6 +31,8 @@ check "a dry run with the panel free succeeds" "[ $status = 0 ]"
 check "it would start the holder on the device" "echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh /usr/bin/oscairn-panel-holder $bundle/panel'"
 check "and the engine with the profile's options, in its own session" "echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid env oscairn-engine-run --output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'"
 check "and changes nothing" "[ ! -e '$bundle/ran' ] && [ ! -e '$bundle/var' ]"
+n() { echo "$out" | grep -n "$1" | head -n 1 | cut -d: -f1; }
+check "the tickgen pids reset after Roland's application has gone and the holder started, before the engine" "[ -n \"\$(n 'oscairn-tickgen-reset')\" ] && [ \$(n 'is not running') -lt \$(n 'oscairn-tickgen-reset') ] && [ \$(n 'oscairn-panel-holder') -lt \$(n 'oscairn-tickgen-reset') ] && [ \$(n 'oscairn-tickgen-reset') -lt \$(n 'oscairn-engine-run') ]"
 check "the panel there: nothing about it missing" "! echo \"\$out\" | grep -q 'is not here'"
 if [ -e /sys/devices/system/cpu/cpufreq/policy0/scaling_governor ]; then
 	check "a governor here: nothing about one missing" "! echo \"\$out\" | grep -q 'no CPU frequency governor'"
@@ -242,6 +244,10 @@ cat > "$bundle/start-chroot.sh" <<'EOF'
 root=$(dirname "$0")
 case "$*" in
 *oscairn-control-request*) echo '{"jsonrpc":"2.0","id":1,"result":{}}' ;;
+*oscairn-tickgen-reset*)
+	echo tickgen-reset >> "$root/ran"
+	[ ! -e "$root/reset-fails" ] || { echo "tickgen stand-in: refused" >&2; exit 1; }
+	echo "tickgen stand-in: reset" ;;
 */usr/bin/Oscairn*)
 	echo app started >> "$root/ran"
 	mkdir -p "$root/tmp/oscairn-0"
@@ -257,6 +263,7 @@ log=$bundle/var/oscairn/log/oscairn-fantom.log
 wait_for() { i=0; until grep -q "$1" "$log" 2>/dev/null || [ $i -ge $2 ]; do sleep 0.5; i=$((i + 1)); done; }
 out=$(OSCAIRN_PROC=$live OSCAIRN_SYS=$bundle/nosys "$bundle/oscairn-fantom-start" 2>&1); status=$?
 check "a start for real: the app runs and its engine answers" "[ $status = 0 ] && echo \"\$out\" | grep -q 'the app runs (pid'"
+check "the tickgen pids reset before the app started, its output logged" "[ \"\$(grep -e tickgen-reset -e 'app started' '$bundle/ran' | head -n 2 | tr '\\n' ' ')\" = 'tickgen-reset app started ' ] && grep -q 'tickgen stand-in: reset' '$log'"
 check "the kernel's console quiet while it runs, the level it had recorded" "[ \"\$(cat '$live/sys/kernel/printk')\" = '4 4 1 7' ] && grep -q '^7.4.1.7$' '$bundle/var/oscairn/run/printk'"
 mkdir -p "$live/4242" && echo oscairn-engine > "$live/4242/comm"
 : > "$bundle/crash"
@@ -267,7 +274,9 @@ rm -r "${live:?}/4242"
 out=$(OSCAIRN_PROC=$live OSCAIRN_SYS=$bundle/nosys "$bundle/oscairn-fantom-stop" 2>&1)
 check "the stop puts the kernel's console level back" "grep -q '^7.4.1.7$' '$live/sys/kernel/printk' && [ ! -e '$bundle/var/oscairn/run/printk' ]"
 rm -f "$bundle/crash" "$bundle/ran"
+: > "$bundle/reset-fails"
 out=$(OSCAIRN_PROC=$live OSCAIRN_SYS=$bundle/nosys "$bundle/oscairn-fantom-start" 2>&1); status=$?
+check "a failing tickgen reset is logged and the start goes on" "[ $status = 0 ] && grep -q 'oscairn-tickgen-reset failed (status 1); continuing' '$log' && echo \"\$out\" | grep -q 'the app runs (pid'"
 : > "$bundle/crash"
 wait_for 'its engine is not running' 20
 check "the app ended with its engine: not started again" "[ $status = 0 ] && grep -q 'the app ended (status 3) and its engine is not running: not started again' '$log' && [ \$(grep -c 'app started' '$bundle/ran') = 1 ]"

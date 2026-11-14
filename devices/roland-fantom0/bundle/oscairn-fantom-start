@@ -13,7 +13,9 @@
 #      oscairn-panel-holder, which holds it until the system goes down. The panel only keeps
 #      reporting while something holds the device: left unheld for about a minute it went
 #      silent until the next power-on, so the gap between Roland's application letting go and
-#      the holder taking over must stay under about a second. A holder already running is kept;
+#      the holder taking over must stay under about a second. A holder already running is kept.
+#      Then it clears the stale pids Roland's tickgen module sends signal 42 to
+#      (oscairn-tickgen-reset), logging a failure and going on;
 #   5. holds every CPU at its top frequency (the performance governor) and keeps the kernel's
 #      console quiet (log level 4) while Oscairn runs, recording what each had for
 #      oscairn-fantom-stop;
@@ -163,6 +165,18 @@ else
 	else
 		say "would run: $root/start-chroot.sh /usr/bin/oscairn-panel-holder $panel"
 	fi
+fi
+
+# Roland's tickgen module still holds Roland's application's pid and sends it signal 42 every
+# millisecond (docs/fantom-0.md, "Signal 42"): set back to -1, as at power-on, now that the
+# application has gone. After the panel, which must not wait; the holder ignores the signal, as
+# everything Oscairn starts does, so a failure here only leaves other processes exposed.
+if [ -n "$dry" ]; then
+	say "would run: $root/start-chroot.sh /usr/bin/oscairn-tickgen-reset"
+else
+	reset=$("$root/start-chroot.sh" /usr/bin/oscairn-tickgen-reset 2>&1); status=$?
+	[ -z "$reset" ] || say "$reset"
+	[ $status = 0 ] || say "oscairn-tickgen-reset failed (status $status); continuing"
 fi
 
 # The start word, on a boot on which Roland's application never ran: when Roland's application

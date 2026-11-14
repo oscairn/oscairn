@@ -265,12 +265,30 @@ the sending was not watched). Nothing clears them when that application ends, an
 after it has run, so the signal goes on to a pid number nothing of Roland's holds. Once the pid
 space wraps, whatever process or thread gets that number is killed within a millisecond unless it
 ignores, blocks or handles signal 42. The app once ended with status 170 (128 + 42), which fits.
-Oscairn changes only its own processes' signal disposition: `oscairn-fantom-start` runs
-`trap '' 42` before it starts anything (an ignored signal stays ignored across fork and exec), and
-the engine, the plugin workers, the app and the panel holder each call `ignoreTickSignal()`
-first thing. Nothing of Roland's is modified. Residual risk: a process Oscairn does not start (an
-SSH session's shell, a system daemon) that gets the stale pid number can still be killed. The
-complete fix is to reset the pids tickgen holds, which writes to Roland's module and is not done.
+
+**Stock:** the module loads with both pids at -1, which it skips. Roland's application, as it
+opens `/proc/tickgen`, registers its own pid with ioctl `0x80044B0E` (`u_pid`); nothing in it
+uses `0x80044B0F` (`u_dbg`). The module never clears either: not when the application closes the
+file or ends. So after Roland's application has run, `u_pid` holds a pid nothing has.
+
+**What Oscairn changes, at each start:** `oscairn-fantom-start`, once Roland's application has
+gone and the panel holder holds the panel, runs `oscairn-tickgen-reset`, which opens
+`/proc/tickgen` read-only and sets both pids back to -1: ioctl `0x80044B0E` (`u_pid`) and ioctl
+`0x80044B0F` (`u_dbg`), each given a pointer to an int -1. From the module's disassembly, each
+of the two only copies that int and stores it, nothing else, and -1 is the value the module
+loads with. A failure is logged and the start goes on. It is a runtime change to the module's
+memory, nothing on disk: **a reboot undoes it**, and so does Roland's application registering
+itself again the next time it starts. The tool exits 0, doing nothing, where `/proc/tickgen` is
+not there. It is not run at stop, nor by `oscairn-fantom-boot` when it starts Roland's
+application. Run once by hand on the unit on November 14, 2026, with Oscairn playing: both ioctls
+returned 0, the kernel logged nothing, and the app, engine, X server and panel holder ran on
+with no new deadline misses or failures a minute later. Whether the signal stopped cannot be
+watched (no kernel tracing).
+
+Oscairn's own processes also ignore the signal, in case the reset fails or another program
+registers a pid: `oscairn-fantom-start` runs `trap '' 42` before it starts anything (an ignored
+signal stays ignored across fork and exec), and the engine, the plugin workers, the app and the
+panel holder each call `ignoreTickSignal()` first thing.
 
 ### With Roland's app stopped
 
@@ -816,7 +834,9 @@ its `/tmp`, which `stop-chroot.sh` unmounts):
    `oscairn-panel-holder`, and waits for its log (`var/oscairn/log/oscairn-panel-holder.log`) to
    say it holds the device. The holder checks again before each open and retries only a
    refused open, for two seconds ([The panel holder](#the-panel-holder)). A holder already
-   running is kept.
+   running is kept. Then it runs `oscairn-tickgen-reset` in the chroot, which clears the stale
+   pids Roland's `tickgen` module sends signal 42 to ([Signal 42](#signal-42)); a failure is
+   logged and the start goes on.
 5. It sets every CPU's `scaling_governor` to `performance`, recording what each had in
    `var/oscairn/run/governors` ([the engine's load](#with-rolands-app-stopped)).
 6. It starts **the app** on the display, as the instrument's normal start. The display is
@@ -1628,7 +1648,7 @@ Older, still open:
 
 `-DOSCAIRN_ROLAND_FANTOM0=ON` links the readers from `devices/roland-fantom0/` into the engine
 (and the app's panel handling) and installs `oscairn-panel-holder`, `oscairn-panel-dump`,
-`oscairn-key-held`, `oscairn-control-request` and the map in `share/oscairn/panels/`; Buildroot
+`oscairn-key-held`, `oscairn-control-request`, `oscairn-tickgen-reset` and the map in `share/oscairn/panels/`; Buildroot
 also puts `oscairn-fantom-start`, `oscairn-fantom-stop` and `oscairn-fantom-boot` in the
 bundle's top folder. Buildroot passes it
 when a defconfig sets `BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0`, as the chroot bundle's does.

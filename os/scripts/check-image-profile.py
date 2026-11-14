@@ -82,7 +82,7 @@ FEATURES = [
             or (p.get("keyboard") or {}).get("protocol") == "roland-bmc-stock",
             options=["BR2_PACKAGE_OSCAIRN_ROLAND_FANTOM0"],
             files=["usr/bin/oscairn-panel-dump", "usr/bin/oscairn-panel-holder", "usr/share/oscairn/panels",
-                   "usr/bin/oscairn-key-held", "usr/bin/oscairn-control-request",
+                   "usr/bin/oscairn-key-held", "usr/bin/oscairn-control-request", "usr/bin/oscairn-tickgen-reset",
                    "oscairn-fantom-start", "oscairn-fantom-stop", "oscairn-fantom-boot"]),
     Feature("camera", lambda p: bool(p.get("camera")),
             kernel_on=["CONFIG_MEDIA_SUPPORT"], kernel_off=["CONFIG_MEDIA_SUPPORT"],

@@ -195,7 +195,7 @@ done
 # and OSCAIRN_PLUGIN_HOSTS (the profile's compute.pluginHosts; 0: a worker per plugin instance, RFC 0045)
 # and OSCAIRN_OWN_HOST (plugin IDs given workers of their own),
 # and OSCAIRN_UI_PAINT_LOG (1: the app and its apps log what their windows draw each second),
-# and so is every OSCAIRN_SAMPLER_*, OSCAIRN_ANALOG_*, OSCAIRN_FM_*,
+# and so is every OSCAIRN_VA_*, OSCAIRN_PCM_*, OSCAIRN_SAMPLER_*, OSCAIRN_ANALOG_*, OSCAIRN_FM_*,
 # OSCAIRN_ARPEGGIATOR_* and OSCAIRN_EFFECTS_* (the first-party plugins' device settings, which
 # they read when an instance is created): refused, with a failure, when a value holds anything
 # but letters, digits and . , : / = @ % + _ - (no quoting is attempted). start-chroot.sh passes
@@ -204,7 +204,7 @@ cores=${OSCAIRN_AUDIO_THREAD_CORES:-} budget=${OSCAIRN_WORKER_BUDGET_US:-} extra
 # The plugin settings: the caller's, taken before the file is sourced (it would overwrite an
 # exported one), then the file's, the first of a name winning (a shortcut: a value holding a
 # newline is not handled).
-plugvars='^OSCAIRN_(SAMPLER|ANALOG|FM|ARPEGGIATOR|EFFECTS)_[A-Za-z0-9_]+=.'
+plugvars='^OSCAIRN_(SAMPLER|ANALOG|FM|ARPEGGIATOR|EFFECTS|VA|PCM)_[A-Za-z0-9_]+=.'
 callers=$(env | grep -E "$plugvars")
 [ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"
 merged=$( { printf '%s\n' "$callers"; ( set -a; [ -f "$root/etc/default/oscairn-engine" ] && . "$root/etc/default/oscairn-engine"; env | grep -E "$plugvars" ); } | awk -F= 'NF && !seen[$1]++' | sort )

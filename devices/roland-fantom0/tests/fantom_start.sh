@@ -98,6 +98,8 @@ echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard
 out=$(OSCAIRN_SAMPLER_MAX_VOICES=28 OSCAIRN_FM_POLYPHONY=16 FOO=1 OSCAIRN_SECRET=x "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "a plugin variable from the environment reaches the engine line" "echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid env OSCAIRN_FM_POLYPHONY=16 OSCAIRN_SAMPLER_MAX_VOICES=28 oscairn-engine-run --output-device'"
 check "an unrelated variable does not" "! echo \"\$out\" | grep -q -e FOO -e OSCAIRN_SECRET"
+out=$(OSCAIRN_VA_MAX_VOICES=24 OSCAIRN_PCM_MAX_VOICES=32 "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "the first-party engines' settings too, OSCAIRN_VA_* and OSCAIRN_PCM_*" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_PCM_MAX_VOICES=32 OSCAIRN_VA_MAX_VOICES=24 oscairn-engine-run'"
 printf "OSCAIRN_SAMPLER_MAX_VOICES=40\nOSCAIRN_ANALOG_FAST_OSC=1\n" >> "$bundle/etc/default/oscairn-engine"
 out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "a plugin variable from the defaults file reaches the engine line" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_ANALOG_FAST_OSC=1 OSCAIRN_SAMPLER_MAX_VOICES=40 oscairn-engine-run'"

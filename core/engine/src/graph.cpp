@@ -89,6 +89,7 @@ namespace oscairn
             bool budgeted = false; // its notes are in the shared budget (VoiceBudget), which measures its cost per note
             uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
             bool inProcess = false; // it renders in the engine's process (no PluginHost::lane): within the callback's time
+            std::array<float,5> recent{}; uint8_t recentAt = 0, recentN = 0; // audio thread: its last blocks' times, for the budget (typical)
             bool lateLane = false; // its lane renders a block late (RFC 0045's extra block): a period to render in
             // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
             std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
@@ -1356,6 +1357,18 @@ namespace oscairn
             for(const auto& step:plan->steps){auto& limit=plan->budget.lanes[step.lane].limit;limit=std::min(limit,loadMargin*(step.lateLane?period:step.inProcess?deadline:allowance));}
             for(auto& lane:plan->budget.lanes){lane.limit=std::max(1.f,std::min(lane.limit,total-(took-lane.took)));lane.took=lane.othersTook=0;} // 1 us: a lane left no room gives up its notes, as 0 would mean no limit
         }
+        // What a lane's limit is held against: each step's usual block, the median of its last five. A block held up
+        // from outside (on the FANTOM-07, interrupt work for the app's drawing billed to the audio threads: 700 us
+        // blocks measured at 3,000) moves nothing, two in a row neither, while three blocks of a real overload do; the
+        // shared budget's chokes then wait for two medians past the limit in a row, so notes give way within about
+        // five blocks. Its cost per note follows each block as it comes, so new notes count at once, but for a block
+        // held up from outside (see below).
+        auto typical=[](Plan::Step& step,float took){
+            step.recent[step.recentAt]=took;step.recentAt=uint8_t((step.recentAt+1)%step.recent.size());
+            step.recentN=uint8_t(std::min<size_t>(step.recentN+1u,step.recent.size()));
+            auto v=step.recent;std::nth_element(v.begin(),v.begin()+step.recentN/2,v.begin()+step.recentN);
+            return v[step.recentN/2];
+        };
         auto finish=[&](Plan::Step& step)
         {
             if(listener && step.contexts.empty())listener->events(step.id,step.merged.data(),step.mergedCount,false);
@@ -1419,10 +1432,10 @@ namespace oscairn
             }
             if(budgeting)
             {
-                const float took=float(step.host->statistics().lastMicroseconds);
+                const float raw=float(step.host->statistics().lastMicroseconds),usual=typical(step,raw);
                 auto& lane=plan->budget.lanes[step.lane];
-                lane.took+=took;
-                if(!step.budgeted)lane.othersTook+=took;
+                lane.took+=usual;
+                if(!step.budgeted)lane.othersTook+=usual;
                 else if(processed)
                 {
                     uint32_t live=0;for(const auto& source:step.noteSources)live+=source.route->live();
@@ -1430,6 +1443,10 @@ namespace oscairn
                     double each;const oscairn_voice_budget_note_t* notes;uint32_t count;
                     const uint32_t voices=step.host->voiceReport(each,notes,count);
                     a.ownVoices=step.host->voiceBudget();a.honorsVolume=step.host->honorsVolume();
+                    // A block past twice both the usual and what its notes are estimated to cost now is held up from outside
+                    // (new notes raise the estimate with them, a real overload the usual within three blocks): the larger taken.
+                    const float expected=std::max(usual,a.restNow()+a.noteNow()/a.perNoteScale*float(a.ownVoices?voices:live));
+                    const float took=a.perNote.load(std::memory_order_relaxed)>=0 && raw>2*expected?expected:raw;
                     if(!a.ownVoices)a.observe(took,live);
                     else
                     {

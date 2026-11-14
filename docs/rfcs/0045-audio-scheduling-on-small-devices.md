@@ -733,6 +733,16 @@ CPU, plugins with few parameters and no voices); it is the next thing to profile
   `load-guard` also plays with the instrument profile's 75 % budget (before the correction its
   overloaded worker was restarted as too slow), runs alone (`RUN_SERIAL`), and checks only that
   notes give way where they should under `--no-timing` (sanitizers, CI), as the other paced tests.
+  Spikes: on the unit a worker's block measured 700 us went past 3,000 us for single blocks while the
+  app drew, its plugin doing no more (interrupt work billed to the audio threads, so a thread's CPU
+  time is inflated as much as its wall time and would not tell them apart). So a lane's total is now
+  each plugin's median of its last five blocks, which one or two blocks held up do not move and three
+  blocks of a real overload do, the chokes still waiting for two totals past the limit in a row; and a
+  plugin's cost per note skips a block past twice both its median and what its notes are estimated to
+  cost (new notes raise the estimate with them, so they still count at once). `load-guard`: 2.5 ms
+  more in one block, or in two in a row, with a note right after, gives no note up (two in a row gave
+  notes up before); 0.4 ms more in every block from then on gives notes up in the third block (the
+  first before).
 
 Expected (an estimate, not measured) for ST Final on the unit with A+B: three host processes in
 place of nine; at most three hand-overs a wave and two waves (instruments with their inserts, then

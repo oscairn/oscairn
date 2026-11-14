@@ -9,10 +9,15 @@
 // block, more than the allowance): the allowance still bounds the lane. Usage: voice-fixture
 // [--no-timing] (OSCAIRN_PLUGIN_WORKER set, OSCAIRN_FIXTURE_VOICE_US the cost of a voice,
 // OSCAIRN_WORKER_BUDGET_US the allowance). --no-timing checks only that notes give way where they should.
+// And the guard's decision is robust to spikes: one part of five notes, well within its lane, whose
+// worker's block takes 2.5 ms more once, or in two blocks in a row (blocks held up from outside, as
+// interrupt work on the device does), a sixth note coming right after: nothing is given up; the same
+// part with 0.4 ms more in every block from then on (a real overload): notes give way within eight blocks.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -24,6 +29,7 @@ static void check(bool ok,const std::string& why){if(!ok)throw std::runtime_erro
 
 namespace {
 constexpr uint32_t frames=128,blocks=600,settle=300; // misses counted from block `settle` on
+constexpr uint32_t spikeBlock=200; // firstGiveUp's
 struct Result { uint64_t misses=0,stolen=0,chokes=0,bStolen=0,restarts=0; double last=0; };
 Result play(const char* plugin,double budget){
     Graph g(48000,frames);
@@ -45,6 +51,27 @@ Result play(const char* plugin,double budget){
     const auto c=g.noteCost(a);r.stolen=c.stolen;r.chokes=c.hardChokes;r.bStolen=g.noteCost(b).stolen+g.noteCost(b).hardChokes;
     return r;
 }
+// The block in which part A first gave a note up (UINT32_MAX: none), its worker's process calls numbered
+// from 1 so block b is call b+1; `spike` as OSCAIRN_FIXTURE_SPIKE takes it.
+uint32_t firstGiveUp(const char* plugin,const char* spike){
+    setenv("OSCAIRN_FIXTURE_SPIKE",spike,1);
+    Graph g(48000,frames);
+    const auto a=g.add(plugin);
+    unsetenv("OSCAIRN_FIXTURE_SPIKE");
+    g.connectNotes(graphInput,a);g.connectAudio(a,graphOutput);
+    g.commit();g.setVoiceBudget(-1);
+    std::vector<float> left(frames),right(frames);float* out[]{left.data(),right.data()};
+    const auto period=std::chrono::microseconds(frames*1'000'000/48000);
+    auto next=std::chrono::steady_clock::now();uint32_t first=UINT32_MAX;
+    for(uint32_t block=0;block<300;++block){
+        std::vector<Event> events;
+        if((block>=20 && block<30 && block%2==0) || block==spikeBlock+1)events.push_back(Event::note(true,40+int(block%100),1,0,0)); // five notes, a sixth after the spike
+        g.process(out,frames,nullptr,events.data(),uint32_t(events.size()));
+        if(const auto c=g.noteCost(a);first==UINT32_MAX && c.stolen+c.hardChokes)first=block;
+        next+=period;std::this_thread::sleep_until(next);
+    }
+    return first;
+}
 }
 
 int main(int argc,char** argv){try{
@@ -61,6 +88,19 @@ int main(int argc,char** argv){try{
         std::printf("%s: A missed %llu blocks after block %u, restarted %llu times, last block %.0f us; A gave up %llu notes (%llu choked), B %llu\n",r==&open?"no guard":r==&guarded?"guard":"guard, 75% budget",(unsigned long long)r->misses,settle,(unsigned long long)r->restarts,r->last,
             (unsigned long long)r->stolen,(unsigned long long)r->chokes,(unsigned long long)r->bStolen);
     if(timing)check(open.misses>50 || open.restarts>0,"without the guard A's worker misses blocks, or is restarted as too slow and its notes are lost");
+    auto spiked=[&](const char* spike){
+        uint32_t r=0;std::exception_ptr error;
+        std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{r=firstGiveUp(argv[1],spike);}catch(...){error=std::current_exception();}}).join();
+        if(error)std::rethrow_exception(error);
+        return r;
+    };
+    const auto once=spiked("201:1:2500"),twice=spiked("201:2:2500"),sustained=spiked("201:1000:400"); // block 200's call, it and the next, and from it on
+    auto when=[](uint32_t b){return b==UINT32_MAX?std::string("none"):"block "+std::to_string(b);};
+    std::printf("2.5 ms more in block %u: first note given up %s; in it and the next: %s; 0.4 ms more from it on: %s\n",spikeBlock,when(once).c_str(),when(twice).c_str(),when(sustained).c_str());
+    check(once==UINT32_MAX,"one block held up gives no note up: "+when(once));
+    check(twice==UINT32_MAX,"two blocks held up in a row give no note up: "+when(twice));
+    if(timing)check(sustained>=spikeBlock && sustained<=spikeBlock+8,"a sustained overload gives notes up within eight blocks: "+when(sustained));
+    else check(sustained!=UINT32_MAX,"a sustained overload gives notes up: "+when(sustained));
     for(const auto* r:{&guarded,&budgeted}){
         const std::string with=r==&guarded?"with the guard":"with a 75% budget";
         check(r->stolen+r->chokes>0,with+" A's notes give way");

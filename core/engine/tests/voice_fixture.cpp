@@ -6,13 +6,16 @@
 // voices each note plays, as an AWM2-class sound's elements, each half as loud as the one before
 // (default 1). OSCAIRN_FIXTURE_VOICE_BUDGET=1: it offers oscairn.voice-budget, giving up its own
 // voices within the host's limit through the SDK's voice-budget-plugin.hpp, as an engine outside
-// the sound-contexts helper (a sampler playing regions) would.
+// the sound-contexts helper (a sampler playing regions) would. OSCAIRN_FIXTURE_SPIKE=CALL:CALLS:US: from
+// its process call numbered CALL (from 1, in this instance) for CALLS calls, each spends US microseconds
+// more, as a block held up from outside or a sustained load beside the voices.
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -23,7 +26,8 @@ struct Voice { bool active=false,held=false; int32_t id=-1; int16_t channel=0,ke
 struct Plugin {
     clap_plugin_t api{};const clap_host_t* host;
     double rate=48000,microseconds=0;uint32_t chokeFrames=144,layers=1,frames=128;
-    std::array<Voice,128> voices{};uint64_t started=0;
+    std::array<Voice,128> voices{};uint64_t started=0,calls=0;
+    long spikeAt=0,spikeCalls=0;double spikeUs=0; // OSCAIRN_FIXTURE_SPIKE
     oscairn::voices::Limits limits; // oscairn.voice-budget's, audio thread
     double loudness(const Voice& v) const {return v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
     uint32_t sounding() const {uint32_t n=0;for(const auto& v:voices)n+=v.active && !v.choking;return n;}
@@ -94,6 +98,7 @@ struct Plugin {
     explicit Plugin(const clap_host_t* h):host(h){
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_VOICE_US"))microseconds=std::atof(us);
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LAYERS"))layers=std::clamp(std::atoi(l),1,16);
+        if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
         api.desc=&descriptor;api.plugin_data=this;
         api.init=[](const clap_plugin_t*){return true;};
         api.destroy=[](const clap_plugin_t* p){delete &self(p);};
@@ -117,7 +122,9 @@ struct Plugin {
             }
             s.render(left,right,done,b->frames_count,b->out_events);
             // The voices' cost: busy, as DSP is, for their time.
-            const auto spend=std::chrono::duration<double,std::micro>(s.microseconds*sounding*b->frames_count/128.0);
+            const long call=long(++s.calls);
+            const double extra=s.spikeCalls && call>=s.spikeAt && call<s.spikeAt+s.spikeCalls?s.spikeUs:0;
+            const auto spend=std::chrono::duration<double,std::micro>(s.microseconds*sounding*b->frames_count/128.0+extra);
             while(std::chrono::steady_clock::now()-began<spend){}
             return CLAP_PROCESS_CONTINUE;
         };

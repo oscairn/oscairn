@@ -51,7 +51,7 @@ Checked when built and tested; the sections below say how.
   - [x] 12a. Every plugin's notes can be given up, however it takes notes or reports its voices
   - [x] 12b. Lost blocks a trigger, on the lane and every instrument lane before it
   - [x] 12c. An instrument's lane limit leaves room for the chain after it
-  - [x] 12d. The callback's own slack a trigger, across every lane
+  - [x] 12d. The callback reaching its deadline a trigger, across every lane (a margin by profile)
   - [x] 12e. Effects at their cost awake, and a part's buses on its chain at admission
   - [ ] 12f. Bursts at note-on: a note's start cost counted when it starts (not done)
   - [ ] 12g. Step 5 above: "too slow" never restarts a worker making progress (not done)
@@ -848,15 +848,23 @@ to, which has rule 12a and none after it). Its rules, as built:
   instrument's limit 1,813 us and nothing given up; after, 772 us and 4 notes faded (single runs).
 - 12d. The callback's slack. After each block the engine measures the time left before the
   callback's deadline once every step was collected (`callbackDeadline` less now; none in a host
-  without one). Under 10% of a period in two of the last four blocks, this one among them, one note
-  fades across every lane, quietest released first (whatever its cost: load from outside the audio,
-  the app or the engine's other threads, leaves notes as the only thing to give). Counted as
-  `fadedForDeadline`. Tested by `guard` (deadline): two parts in the engine's process, each well
-  within its lane, with 100 us left before the deadline after each block: before, nothing given up;
-  after, 12 notes faded; with the callback's whole time, none (single runs). To be measured on the
-  unit: a Performance whose callback runs near the deadline at rest (ST Final's take, callback up to
-  about 2,000 us of 2,266) should give up few notes for it; if it gives up many, the threshold is
-  too high for that device.
+  without one). That deadline is the one collection enforces: the callback start plus the period
+  less the mixing reserve (2,266 us of 2,667 at 48 kHz and 128 frames), and every wait for a worker
+  ends at it (or at its wave's share under step 6). So the callback's duration includes those waits:
+  a heavy but healthy block, its workers done just before the deadline, leaves little slack (ST
+  Final's take reached about 2,000 us of 2,266 with no block lost), and a threshold set in a share of
+  the period would shed there while nothing is wrong. The threshold is the profile's
+  `compute.deadlineSlack` (microseconds; `OSCAIRN_DEADLINE_SLACK_US`), default 0: at or under it in
+  two of the last four blocks, this one among them, one note fades across every lane, quietest
+  released first (whatever its cost: load from outside the audio, the app or the engine's other
+  threads, leaves notes as the only thing to give). With 0 it fires only where the callback reached
+  its deadline, a wait given up, so never on a healthy callback; it is then the global answer to
+  lost blocks beside 12b's per-lane one. A device whose measurements show the edge comes earlier
+  sets a margin. Counted as `fadedForDeadline`. Tested by `guard` (deadline): two parts in the
+  engine's process, each well within its lane: with the deadline reached after each block, 12 notes
+  faded (before the rule, none); with 1,000 us of 2,266 left, none at the default; with the whole time,
+  none; with 1,000 us left and a threshold of 900 us, 10 faded (single runs). To be measured on the
+  unit: `fadedForDeadline` at rest and in the take on ST Final and Sick tines (expected 0 at rest).
 - 12e. Effects at their real cost. In the guard an effect asleep on silence counts, on its lane and
   on the chains before it (12c), at its time when it last ran awake, and one never awake at its
   learned cost with signal (the Session seeds it from the measurements, as `rest`); so the first note

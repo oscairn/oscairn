@@ -88,6 +88,12 @@
           "items": { "type": "string", "minLength": 1, "maxLength": 128 },
           "maxItems": 64
         },
+        "deadlineSlack": {
+          "type": "integer",
+          "description": "the audio callback's time left before its deadline, in microseconds, once a block's plugins are collected, at or under which (in two of four blocks) the load guard gives a note up across every lane, quietest released first; omitted or 0: only a callback that reached its deadline, where a wait for a worker was given up (RFC 0045's guard, 12d)",
+          "minimum": 0,
+          "maximum": 1000000
+        },
         "workerSpin": {
           "type": "integer",
           "description": "how long, in microseconds, an audio thread waiting on a plugin worker spins before it sleeps: the engine for a block's result and a worker around its next block, both only when every worker's audio thread has a core; held to half the allowance; omitted or 0: it sleeps at once (RFC 0045)",

@@ -94,12 +94,14 @@ typedef struct
 } oscairn_step;
 
 /* One block's timing, microseconds: budget as Graph::setVoiceBudget (0 none, below 0 the load
- * guard alone); a period, the callback's deadline and a worker's allowance; the audio cores; and
- * the frames a node stays silent before its released notes are let go (the note-end watchdog). */
+ * guard alone); a period, the callback's deadline and a worker's allowance; the audio cores; the
+ * frames a node stays silent before its released notes are let go (the note-end watchdog); and the
+ * callback's slack at or under which its time is running out (notes_end; the Rust core). */
 typedef struct
 {
     float budget, period, deadline, allowance, cores;
     uint64_t quiet_after;
+    float low_slack;
 } oscairn_block;
 
 /* An event for a step: from the note source `source` (its zones, peers, the budget; on its channel)

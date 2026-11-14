@@ -414,7 +414,7 @@ mod tests {
         let mut budgeted = false;
         // SAFETY: one step whose arrays and pointers outlive the notes.
         let notes = unsafe { rust_core_notes_new(&step, 1, 1, &mut budgeted) };
-        let timing = Timing { budget: 300.0, period: 2666.0, deadline: 2266.0, allowance: 1333.0, cores: 1.0, quiet_after: 256 };
+        let timing = Timing { budget: 300.0, period: 2666.0, deadline: 2266.0, allowance: 1333.0, cores: 1.0, quiet_after: 256, low_slack: 0.0 };
         let (mut merged, mut next_id) = ([Event::default(); 1057], 0u32);
         let mut events = [Event::default(); 64];
         let mut end = Event::note(false, -1, 0.0, 0, -1, -1);
@@ -452,7 +452,7 @@ mod tests {
                 rust_core_notes_begin(notes, &timing);
                 rust_core_notes_route(notes, 0, keys.as_mut_ptr(), 64, 128, &mut next_id, merged.as_mut_ptr(), 1057, std::ptr::null_mut(), &mut overflow);
                 rust_core_notes_finish(notes, 0, &finish);
-                rust_core_notes_end(notes, if b % 2 == 0 { 10.0 } else { f32::NAN });
+                rust_core_notes_end(notes, if b % 2 == 0 { -10.0 } else { f32::NAN });
             }
         }
         COUNTING.with(|c| c.set(false));

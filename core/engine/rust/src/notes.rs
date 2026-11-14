@@ -10,7 +10,6 @@ use crate::{Route, Routes, Shared};
 use std::sync::atomic::Ordering::Relaxed;
 
 const LOAD_MARGIN: f32 = 0.8; // the limit's share of a lane's time, for the wake-ups, copies and the machine's own
-const LOW_SLACK: f32 = 0.1; // the callback's slack, as a share of a period, under which its time is running out
 
 /// A note connection into a step.
 pub struct Source {
@@ -106,6 +105,7 @@ pub struct Timing {
     pub allowance: f32,
     pub cores: f32,
     pub quiet_after: u64,
+    pub low_slack: f32,
 }
 
 /// oscairn_voice_budget_note_t (oscairn-clap/voice-budget.h).
@@ -434,8 +434,10 @@ impl Notes {
 
     /// The block is done: each lane judged against its limit, the lanes together against the total; then
     /// lost blocks, and the callback's slack (microseconds left before its deadline once the block was
-    /// collected; NaN unknown) under LOW_SLACK of a period in two of the last four blocks, this one among
-    /// them, each give a note up; each node's lane's limit and time kept for the timing report.
+    /// collected; NaN unknown) at or under the timing's low_slack in two of the last four blocks, this one
+    /// among them, each give a note up; each node's lane's limit and time kept for the timing report.
+    /// low_slack is 0 unless a profile says otherwise: the callback waits for its workers up to the deadline,
+    /// so a heavy but healthy block leaves little slack, and none is left only where a wait was given up.
     pub fn end(&mut self, rs: &mut Routes, slack: f32) {
         if !self.budgeting {
             return;
@@ -455,7 +457,7 @@ impl Notes {
             }
         }
         if slack.is_finite() {
-            self.slack = (self.slack << 1 | u8::from(slack < LOW_SLACK * self.timing.period)) & 0xf;
+            self.slack = (self.slack << 1 | u8::from(slack <= self.timing.low_slack)) & 0xf;
             if self.slack.count_ones() >= 2 && self.slack & 1 != 0 {
                 self.budget.deadline(rs);
             }

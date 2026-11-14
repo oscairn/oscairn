@@ -1010,6 +1010,8 @@ namespace oscairn::standalone
                 if( profile.compute.workerSpin ) setenv( "OSCAIRN_WORKER_SPIN_US", std::to_string( profile.compute.workerSpin ).c_str(), 0 );
                 // Each worker waits to its wave's deadline in place of its allowance (RFC 0045 step 6); likewise.
                 if( profile.compute.workerDeadline ) setenv( "OSCAIRN_WORKER_DEADLINE", "1", 0 );
+                // The callback's slack at or under which the load guard gives notes up (RFC 0045's guard); likewise.
+                if( profile.compute.deadlineSlack ) setenv( "OSCAIRN_DEADLINE_SLACK_US", std::to_string( profile.compute.deadlineSlack ).c_str(), 0 );
                 // The plugin hosts the plugins in workers share, and the plugins given workers of their own (RFC 0045); likewise.
                 if( profile.compute.pluginHosts ) setenv( "OSCAIRN_PLUGIN_HOSTS", std::to_string( profile.compute.pluginHosts ).c_str(), 0 );
                 if( std::string own; !profile.compute.ownHost.empty() )

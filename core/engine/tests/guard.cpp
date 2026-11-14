@@ -8,8 +8,10 @@
 //     it, so its notes give way though each lane is within its own time.
 //   asleep: the chain's effects asleep on silence after the notes end: the instrument's lane still leaves room for
 //     them at their cost awake, so the first notes into it are costed before they wake.
-//   deadline: instruments in the engine's process, each well within its lane, while the callback has almost no time
-//     left after its block (load from outside the audio): notes give way across the lanes; with time to spare, none.
+//   deadline: instruments in the engine's process, each well within its lane, while the callback reaches its deadline
+//     after each block (load from outside the audio): notes give way across the lanes; with a heavy but healthy block
+//     (little left, the default threshold 0) or the whole time to spare, none; with a profile's threshold of 900 us
+//     (OSCAIRN_DEADLINE_SLACK_US), that little left is too little and notes give way.
 // Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
 // notes give way; a name runs that case alone.
 #include "oscairn/graph.h"
@@ -110,20 +112,22 @@ double asleep(const char* plugin){
     return g.noteCost(instrument).laneLimit;
 }
 
-struct Deadline { uint64_t tight=0,ample=0; };
+struct Deadline { uint64_t past=0,heavy=0,ample=0,raised=0; };
 Deadline late(const char* plugin){
     const std::string worker=std::getenv("OSCAIRN_PLUGIN_WORKER")?std::getenv("OSCAIRN_PLUGIN_WORKER"):"";
     unsetenv("OSCAIRN_PLUGIN_WORKER"); // in the engine's process: one lane, within its time
     setenv("OSCAIRN_FIXTURE_VOICE_US","20",1);
     Deadline r;
-    for(const bool tight:{true,false}){
+    for(int run=0;run<4;++run){
+        if(run==3)setenv("OSCAIRN_DEADLINE_SLACK_US","900",1);
         Graph g(48000,frames);
+        unsetenv("OSCAIRN_DEADLINE_SLACK_US");
         const auto a=g.add(plugin),b=g.add(plugin);
         for(uint32_t p=0;p<2;++p){NoteZone z;z.channels=uint16_t(1u<<p);z.part=p+1;g.connectNotes(graphInput,p?b:a,{z});g.connectAudio(p?b:a,graphOutput);}
         g.commit();g.setVoiceBudget(-1);
         play(g,400,[&](uint32_t block){auto e=held(block,6,0);for(auto& x:held(block,6,1))e.push_back(x);return e;},
-             tight?std::chrono::microseconds(100):std::chrono::duration_cast<std::chrono::microseconds>(deadline));
-        (tight?r.tight:r.ample)=gaveUp(g,a)+gaveUp(g,b);
+             run==0?std::chrono::microseconds(0):run==2?std::chrono::duration_cast<std::chrono::microseconds>(deadline):std::chrono::microseconds(1000));
+        (run==0?r.past:run==1?r.heavy:run==2?r.ample:r.raised)=gaveUp(g,a)+gaveUp(g,b);
     }
     if(!worker.empty())setenv("OSCAIRN_PLUGIN_WORKER",worker.c_str(),1);
     return r;
@@ -154,9 +158,11 @@ int main(int argc,char** argv){try{
     }
     if(only.empty() || only=="deadline"){
     const auto d=late(argv[1]);
-    std::printf("deadline: notes given up with 100 us left after each block %llu, with the callback's whole time %llu\n",(unsigned long long)d.tight,(unsigned long long)d.ample);
-    check(d.tight>0,"notes give way when the callback's time runs out");
-    check(d.ample==0,"none while it has time to spare");
+    std::printf("deadline: notes given up with the deadline reached %llu, with little left %llu, with the whole time %llu, with little left and a 900 us threshold %llu\n",
+        (unsigned long long)d.past,(unsigned long long)d.heavy,(unsigned long long)d.ample,(unsigned long long)d.raised);
+    check(d.past>0,"notes give way when the callback reaches its deadline");
+    check(d.heavy==0 && d.ample==0,"none while it keeps within it, however little is left");
+    check(d.raised>0,"a profile's threshold gives notes up with that little left");
     }
     return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"guard: %s\n",e.what());return 1;}}

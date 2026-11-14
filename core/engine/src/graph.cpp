@@ -222,6 +222,7 @@ namespace oscairn
         liveFrom_.fill(1.f);liveTo_.fill(1.f);
         if(const char* serial=std::getenv("OSCAIRN_GRAPH_SERIAL");serial && *serial && *serial!='0')parallel_.store(false); // RFC 0034, for measuring
         deadlines_=worker::deadlineAllowance();
+        if(const char* us=std::getenv("OSCAIRN_DEADLINE_SLACK_US");us && *us)lowSlack_=std::clamp(float(std::atof(us)),0.f,1e6f); // the profile's compute.deadlineSlack
         if(const char* us=std::getenv("OSCAIRN_WORKER_BUDGET_US");us && *us)workerBudgetUs_=float(std::chrono::duration<double,std::micro>(worker::workerAllowance(1,1e6,us)).count()); // 1 frame at 1 MHz: 0.5 us when not a valid override
         if(workerBudgetUs_<1)workerBudgetUs_=0;
         audioCores_=float(std::max(1u,worker::usableCores()-1));
@@ -1336,7 +1337,7 @@ namespace oscairn
         const bool budgeting=budget!=0;
         {
             const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);
-            const oscairn_block timing{budget,period,deadline,deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2,audioCores_,uint64_t(noteEndQuiet*sampleRate_)};
+            const oscairn_block timing{budget,period,deadline,deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2,audioCores_,uint64_t(noteEndQuiet*sampleRate_),lowSlack_};
             OSCAIRN_CORE(notes_begin)(plan->notes.get(),&timing);
         }
         // The output guard: a block with a sample not finite or past outputBound (+120 dBFS: no plugin's legitimate

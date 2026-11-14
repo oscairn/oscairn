@@ -605,6 +605,7 @@ namespace oscairn
         std::atomic<bool> parallel_{ true }; // see setParallel
         bool deadlines_ = false; // RFC 0045 step 6 (OSCAIRN_WORKER_DEADLINE): each wave's workers wait to its deadline, not their allowance
         float workerBudgetUs_ = 0; // OSCAIRN_WORKER_BUDGET_US as workerAllowance reads it; 0: half the period
+        float lowSlack_ = 0;       // RFC 0045's guard (OSCAIRN_DEADLINE_SLACK_US): the callback's slack at or under which notes give way
         float audioCores_ = 1;     // RFC 0025's audio cores (usableCores() - 1, at least one), for the lanes' total (setVoiceBudget)
         std::atomic<float> voiceBudget_{ 0 }; // see setVoiceBudget
         AudioHelpers* helpers_ = nullptr; // RFC 0034: renders a wave's plugins in this process

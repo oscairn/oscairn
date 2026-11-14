@@ -366,6 +366,7 @@ namespace oscairn
                 return itemType(kind);
             };
             std::set<std::string> names;
+            std::map<std::string, uint64_t> sizes; // each entry's, for the asset sizes the manifest lists
             auto folders = tops();
             for(const auto& t : declared) folders.insert(t.folder);
             uint64_t total = 0, nameBytes = 0, largest = 0;
@@ -385,6 +386,7 @@ namespace oscairn
                 if(e.link) bad("a link: " + name);
                 if((nameBytes += name.size()) > maxNameBytes) bad("its names are too long");
                 if(!names.insert(name).second) bad("an entry twice: " + name);
+                sizes[name] = e.size;
                 if(e.directory) continue;
                 if(const auto k = kept.find(top); k != kept.end())
                 {
@@ -554,6 +556,7 @@ namespace oscairn
                     try { a.size = std::stoull(std::string(static_cast<const json_number_s*>(size->payload)->number, static_cast<const json_number_s*>(size->payload)->number_size)); }
                     catch(const std::exception&) { bad("an asset's size is wrong: " + a.path); }
                     if(!safe(a.path) || a.sha256.size() != 64 || !listed.insert(a.path).second || !names.count("Assets/" + a.path)) bad("an asset that is not in the archive, or listed twice: " + a.path);
+                    if(sizes.at("Assets/" + a.path) != a.size) bad("an asset that is not the size the manifest says: " + a.path);
                     p.assets.push_back(std::move(a));
                 }
                 if(p.assets.empty()) bad("an asset package lists no files");

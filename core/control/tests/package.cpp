@@ -224,6 +224,20 @@ int main()
             refuse("an app package, not built yet", {{"library.json", std::string(manifest).replace(manifest.find("\"kind\":\"library\""), 16, "\"kind\":\"app\"")}, sound});
         }
 
+        // An asset package lists each file's size (docs/library-archive.md): one that is not the entry's is refused on reading.
+        {
+            const auto lib = root / "assets";
+            write(lib / "Assets/patches/Saw.fxp", "CcnK patch bytes"); write(lib / "Assets/basic.wt", "vawt table bytes");
+            Package a; a.kind = "asset"; a.id = "org.example.assets"; a.name = "Assets"; a.license = "MIT"; a.assetVersion = "1.0";
+            a.assets = {{"patches/Saw.fxp", assets::sha256("CcnK patch bytes"), 16}, {"basic.wt", assets::sha256("vawt table bytes"), 16}};
+            writePackage(root / "Assets.olib", a, lib);
+            check(readPackage(root / "Assets.olib", {}).assets.size() == 2, "an asset package is read");
+            a.assets[1].size = 17;
+            writePackage(root / "WrongSize.olib", a, lib);
+            bool wrong = false; try { readPackage(root / "WrongSize.olib", {}); } catch(const std::runtime_error&) { wrong = true; }
+            check(wrong, "an asset package listing a wrong size is refused on reading");
+        }
+
         // Signatures (RFC 0006): an item, a build and the whole archive, each verified on reading.
         const auto mine = signing::makeKey(root / "mine.key"), other = signing::makeKey(root / "other.key");
         const auto signedRoot = root / "signed";

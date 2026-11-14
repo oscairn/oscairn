@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <chrono>
+#include <cfloat>
 #include <cmath>
 #include <set>
 #include <thread>
@@ -1453,11 +1454,10 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
             for (uint32_t c = 0; c < no; ++c) if (output[c]) {
                 auto* destination = output[c] + done;
                 if (c < s.outputPointers.size()) {
-                    for (uint32_t i = 0; i < n; ++i) {
-                        const auto value = s.outputPointers[c][i];
-                        if (!std::isfinite(value)) { s.failed.store(true); s.errors.fetch_add(1); silence(); return false; }
-                        destination[i] = value;
-                    }
+                    // One pass without a branch a sample: copied, then a block with any sample not finite silenced.
+                    const float* from = s.outputPointers[c]; uint32_t bad = 0;
+                    for (uint32_t i = 0; i < n; ++i) { destination[i] = from[i]; bad |= uint32_t(!(std::fabs(from[i]) <= FLT_MAX)); }
+                    if (bad) { s.failed.store(true); s.errors.fetch_add(1); silence(); return false; }
                 } else std::fill_n(destination, n, 0.f);
             }
             s.sleeping = status == CLAP_PROCESS_SLEEP;

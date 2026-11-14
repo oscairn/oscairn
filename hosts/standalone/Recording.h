@@ -85,7 +85,7 @@ namespace oscairn::standalone
         juce::String message_;
         juce::Label keepLabel_{{}, "Capture keeps the last"};
         juce::ComboBox keep_;
-        juce::ListBox list_{"Recordings", this};
+        CursorList list_{"Recordings", this};
         juce::TextButton play_{"Play"}, rename_{"Rename..."}, delete_{"Delete..."}, reveal_;
         std::unique_ptr<juce::AlertWindow> dialog_;
     };

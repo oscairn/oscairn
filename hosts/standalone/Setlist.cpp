@@ -101,6 +101,7 @@ namespace oscairn::standalone
         addChildComponent(*grid_);
         list_.setColour(juce::ListBox::backgroundColourId, ink(Ink::Surface));
         list_.setOutlineThickness(0);
+        list_.onConfirm = [this](int row) { go(first() + row); }; // a tap in the list
         status_.setColour(juce::Label::textColourId, ink(Ink::Muted));
         for(auto* c : std::initializer_list<juce::Component*>{&chooser_, &pages_, &pageButton_, &export_, &view_, &columns_, &rows_, &new_, &previous_, &next_, &add_, &gap_, &remove_, &up_, &down_, &list_, &status_}) addAndMakeVisible(c);
         setWantsKeyboardFocus(true);
@@ -181,7 +182,7 @@ namespace oscairn::standalone
         Control::Setlist s;
         if(const auto error = engine_.setlist(id, s); !error.empty()) { say(text(error)); return; }
         setlist_ = std::move(s);
-        current_ = -1; page_ = 0;
+        current_ = -1; page_ = 0; list_.cursor.clear();
         refreshShown();
         list_.updateContent(); list_.deselectAllRows();
         refreshChooser();
@@ -196,7 +197,7 @@ namespace oscairn::standalone
         setlist_ = {};
         setlist_.info.name = name;
         setlist_.pages.push_back({"Page 1", {}});
-        shown_.clear(); current_ = -1; page_ = 0;
+        shown_.clear(); current_ = -1; page_ = 0; list_.cursor.clear();
         save();
         list_.updateContent();
         refreshChooser(); showDisplay(); updateButtons(); repaint();
@@ -322,7 +323,7 @@ namespace oscairn::standalone
     void SetlistPane::showPage(int page)
     {
         if(page < 0 || page >= int(setlist_.pages.size())) return;
-        page_ = page;
+        page_ = page; list_.cursor.clear(); // the page changed: the cursor goes
         pages_.setSelectedItemIndex(page, juce::dontSendNotification);
         list_.updateContent(); list_.deselectAllRows();
         if(current_ >= first() && current_ < first() + getNumRows()) list_.selectRow(current_ - first());
@@ -407,6 +408,7 @@ namespace oscairn::standalone
         g.setColour(opens(index) ? ink(Ink::Text) : ink(Ink::Muted)); g.setFont(juce::FontOptions(title, playing ? juce::Font::bold : juce::Font::plain));
         const juce::String note = slot->empty ? "(empty)" : slot->id.empty() ? "  (placeholder)" : !opens(index) ? "  (not in the library)" : "";
         g.drawText(slot->empty ? note : nameAt(index) + note, area, juce::Justification::centredLeft, true);
+        list_.cursor.drawRow(g, row, {0, 0, width, height});
     }
 
     juce::Colour SetlistPane::colorAt(int index) const

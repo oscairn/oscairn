@@ -200,6 +200,7 @@ namespace oscairn::standalone
         int getNumRows() override { return int(result_.items.size()); }
         void paintListBoxItem(int row, juce::Graphics&, int width, int height, bool selected) override;
         void listBoxItemClicked(int row, const juce::MouseEvent&) override;
+        void activate(int row); // what a tap on an item does: open it, or while auditioning try it
         void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
         void returnKeyPressed(int row) override { choose(row); }
         void selectedRowsChanged(int row) override;
@@ -225,7 +226,7 @@ namespace oscairn::standalone
         JoinedButtons kind_{{&performances_, &sounds_, &setlists_}, true}, filters_{{&favorites_, &recent_}, false};
         Sidebar sidebar_{*this};
         juce::Viewport sideView_;
-        juce::ListBox list_{"Performances", this};
+        CursorList list_{"Performances", this};
         juce::TextButton send_{"Add to setlist"}, part_{"New part"}, cancel_{"Cancel"}, pick_{"Choose"}, libraries_{"Libraries..."}, install_{juce::String::fromUTF8("Install…")}, audition_{"Audition"}, keep_{"Keep"};
         IconButton options_{IconButton::Glyph::More, "Options"};
         std::unique_ptr<juce::FileChooser> chooser_;

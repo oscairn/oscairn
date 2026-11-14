@@ -240,6 +240,33 @@ int main(int argc, char** argv)
                     check(view->getViewPositionY() == 0, "nor back past the top");
                     check(box->getSelectedRows() == selected, "and the selection stays");
                 }
+                // The cursor, as a panel's dial moves it (a ListAction, as the engine's navigation arrives): a move within the rows shown
+                // draws the row it left and the one it entered, so ten moves are ten times two rows, not ten lists; and nothing at rest.
+                if(box)
+                {
+                    box->getViewport()->setViewPosition(0, 0);
+                    standalone::ListAction one; one.steps = 1;
+                    standalone::ListCursor::act(one); // the cursor appears at the first row
+                    pump(200);
+                    const double row = box->getRowHeight() * double(box->getVisibleRowWidth()) * screen.scale() * screen.scale();
+                    const auto view = box->getViewport()->getScreenBounds();
+                    const double list = view.getWidth() * double(view.getHeight()) * screen.scale() * screen.scale();
+                    const int inView = int(box->getViewport()->getViewHeight() / box->getRowHeight()), moves = std::max(1, inView - 2); // ten, where the screen shows as many rows
+                    start();
+                    for(int i = 0; i < moves; ++i) { standalone::ListCursor::act(one); pump(60); }
+                    auto c = counter.counts(window);
+                    std::printf("%-26s %6d frames %10lld pixels for %d moves: a row is %.0f, the list's view %.0f\n", "Library, cursor moves", c.frames, (long long) c.pixels, moves, row, list);
+                    check(c.frames >= 1 && double(c.pixels) <= moves * 2 * row * 1.2, "cursor moves in sight draw two rows each, not the list");
+                    // Past the last row shown the view turns a page: once, the view drawn once, not a row at a time.
+                    start();
+                    standalone::ListCursor::act(one); standalone::ListCursor::act(one); standalone::ListCursor::act(one); pump(200);
+                    c = counter.counts(window);
+                    std::printf("%-26s %6d frames %10lld pixels for moves over a page's end\n", "Library, cursor pages", c.frames, (long long) c.pixels);
+                    check(box->getViewport()->getViewPositionY() > 0 && double(c.pixels) <= list * 1.1 + 2 * 3 * row, "a move past the rows shown turns a page: the view drawn again once");
+                    atRest("Library, cursor shown", window);
+                    standalone::ListCursor::act(standalone::ListAction{standalone::ListAction::Kind::Cancel, -1, 0});
+                    box->getViewport()->setViewPosition(0, 0);
+                }
                 panel.overlay(nullptr);
             }
 

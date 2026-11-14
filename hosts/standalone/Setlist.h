@@ -100,7 +100,7 @@ namespace oscairn::standalone
         std::unique_ptr<Grid> grid_;
         std::unique_ptr<juce::FileChooser> fileChooser_;
         juce::TextButton new_{"New"}, pageButton_{"Page..."}, export_{"Export..."}, previous_{"Previous"}, next_{"Next"}, add_{"Add"}, gap_{"Add empty"}, remove_{"Remove"}, up_{"Up"}, down_{"Down"};
-        juce::ListBox list_{"Setlist", this};
+        CursorList list_{"Setlist", this};
         juce::Label status_;
         std::vector<Control::LibraryItem> setlists_; // the chooser's
     };

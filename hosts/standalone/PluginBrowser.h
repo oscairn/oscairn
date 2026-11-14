@@ -35,7 +35,7 @@ private:
     juce::ComboBox target_,appearance_,presets_;
     juce::TextEditor search_,parameterSearch_,messages_;
     juce::TextButton scanButton_{"Scan plugins"},folderButton_{"Add folder..."},loadButton_{"Replace instrument"},presetButton_{"Reload with preset"},themeButton_{"Install theme..."};
-    juce::ListBox list_{"Available plugins",this};
+    CursorList list_{"Available plugins",this};
     juce::Viewport viewport_;
     juce::Component parameters_;
     std::vector<Row> rows_;

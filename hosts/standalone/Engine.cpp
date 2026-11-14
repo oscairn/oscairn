@@ -191,9 +191,10 @@ namespace oscairn::standalone
         sendView(false,false,{{group,position}});
     }
     void Engine::setKnobPart(uint32_t part){if(part==knobPart_)return;knobPart_=part;sendView(true,false,{});}
-    void Engine::sendView(bool part,bool screen,std::vector<std::pair<uint32_t,uint32_t>> positions)
+    void Engine::sendView(bool part,bool screen,std::vector<std::pair<uint32_t,uint32_t>> positions,std::optional<bool> lists)
     {
         Control::ControlView view;
+        view.lists=lists;
         if(part)view.part=knobPart_;
         if(screen)view.screen=screenPage_;
         view.positions=std::move(positions);
@@ -208,8 +209,28 @@ namespace oscairn::standalone
             if(state.positions.size()==groups_.size())positions_=state.positions;
             // A control the engine heard moved, for learn: each move shows, as the screen's own do.
             if(state.touches!=engineTouches_){if(state.touches>engineTouches_ && !state.touched.empty())touched(state.touched);engineTouches_=state.touches;}
+            navigated(state.navigation);
+            if(const bool lists=listsShowing && listsShowing();lists!=listsSent_){listsSent_=lists;sendView(false,false,{},lists);}
         }
         catch(const std::exception&){}
+    }
+    void Engine::navigated(const std::map<std::string,int64_t>& totals)
+    {
+        const bool baseline=navigationBaseline_;
+        navigationBaseline_=true;
+        for(const auto& [key,total]:totals)
+        {
+            const auto was=navigationSeen_[key];
+            navigationSeen_[key]=total;
+            const auto parsed=parseNavigationKey(key);
+            if(!baseline || !parsed || total==was)continue;
+            const auto [action,pane]=*parsed;
+            ListAction list;list.pane=pane;
+            list.kind=action==Navigation::Action::Move?ListAction::Kind::Move:action==Navigation::Action::Confirm?ListAction::Kind::Confirm:ListAction::Kind::Cancel;
+            list.steps=int(std::clamp<int64_t>(total-was,-1000,1000));
+            const bool taken=onList && onList(list);
+            if(!taken && list.kind==ListAction::Kind::Cancel && goBack)goBack();
+        }
     }
     bool Engine::hasParam(const std::string& n,uint32_t p)const
     {try{return control_->hasParameter(control_->nodeId(n),p);}catch(const std::invalid_argument&){return false;}}

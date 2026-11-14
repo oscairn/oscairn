@@ -45,6 +45,7 @@ namespace oscairn::standalone
             theme_ = std::make_unique<Theme>(juce::File(), themes.isEmpty() ? juce::File() : juce::File(themes));
             paints_ = PaintCounter::fromEnvironment(); // OSCAIRN_UI_PAINT_LOG=1: what its window draws, a line a second
             engine_ = std::make_unique<Engine>(std::atoi(given));
+            engine_->onList = ListCursor::act; engine_->listsShowing = ListCursor::anyShowing; // the panel's list navigation (a device's map) reaches this window's lists
             engine_->onLost = [this] { std::fprintf(stderr, "oscairn-setlist: the engine's connection closed\n"); setApplicationReturnValue(1); quit(); };
             // The actions the shell answers, asked of it; it decides who answers.
             for(const auto& action : juce::StringArray::fromTokens(juce::SystemStats::getEnvironmentVariable("OSCAIRN_ACTIONS", {}), ",", ""))

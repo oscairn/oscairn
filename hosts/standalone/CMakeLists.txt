@@ -241,6 +241,14 @@ set_tests_properties(text-keyboard PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_
 # (KeyboardWindow.cpp), as it must; another test's window coming to the front in a parallel run
 # can do that to the key the test holds.
 set_tests_properties(keyboard-window PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}" RUN_SERIAL TRUE)
+# The list cursor (a panel's dial and knobs, or the arrow keys, over a list's rows): moves without opening, confirms, panes,
+# pages, the paint it costs, and the engine's navigation from a device's map reaching it, against a socket session.
+juce_add_console_app(oscairn_list_cursor_test PRODUCT_NAME "Oscairn List Cursor Test")
+target_sources(oscairn_list_cursor_test PRIVATE tests/list_cursor.cpp PaintCounter.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_link_libraries(oscairn_list_cursor_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_list_cursor_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_test(NAME desktop-list-cursor COMMAND oscairn_list_cursor_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" "${CMAKE_CURRENT_SOURCE_DIR}/themes")
+set_tests_properties(desktop-list-cursor PROPERTIES TIMEOUT 120 ENVIRONMENT "${worker_environment}" RUN_SERIAL TRUE) # counts frames against the clock: alone
 # Unsaved changes asked about before quitting and before the Library opens another, against a socket session.
 juce_add_console_app(oscairn_desktop_quit_test PRODUCT_NAME "Oscairn Desktop Quit Test")
 target_sources(oscairn_desktop_quit_test PRIVATE tests/desktop_quit.cpp DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)

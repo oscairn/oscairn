@@ -302,6 +302,7 @@ namespace oscairn::standalone
         compactButton_.setTooltip("Compact: one line a row, to see more at once");
         compactButton_.onClick = [this] { setCompact(compactButton_.getToggleState()); };
         list_.setOutlineThickness(0);
+        list_.onConfirm = [this](int row) { activate(row); };
         list_.setRowSelectedOnMouseDown(false); // clicks come on release, so a long press can open the menu
         sideView_.setViewedComponent(&sidebar_, false);
         sideView_.setScrollBarsShown(true, false);
@@ -714,6 +715,7 @@ namespace oscairn::standalone
             g.drawText(detail, area, juce::Justification::topLeft, true);
         }
         drawStar(g, starArea(width, height).toFloat().withSizeKeepingCentre(float(height), float(height)).reduced(float(height) * (oneLine ? .2f : .28f)), item->favorite);
+        list_.cursor.drawRow(g, row, {0, 0, width, height});
     }
 
     void LibraryPane::listBoxItemClicked(int row, const juce::MouseEvent& e)
@@ -729,6 +731,14 @@ namespace oscairn::standalone
         }
         if(!auditioning_.id.empty()) { if(item->id != auditioning_.id) startAudition(row); return; } // browsing while auditioning
         if(mode_ == Mode::Play) choose(row); // played from the list: one click opens it
+    }
+
+    void LibraryPane::activate(int row)
+    {
+        const auto* item = at(row);
+        if(!item) return;
+        if(!auditioning_.id.empty() && mode_ == Mode::Play) { if(item->id != auditioning_.id) startAudition(row); return; }
+        choose(row); // as a click in Play, and a double click in Pick, as Return in the list
     }
 
     void LibraryPane::listBoxItemDoubleClicked(int row, const juce::MouseEvent&) { if(mode_ == Mode::Pick) choose(row); }

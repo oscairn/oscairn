@@ -182,10 +182,15 @@ namespace oscairn::standalone
                  juce::Font(juce::FontOptions(textSize(dense(*this) ? TextRole::Body : TextRole::Small, mode))), juce::Justification::centredLeft);
     }
 
-    Launcher::Launcher(Engine& engine, std::vector<App> apps, TopBar::Shell shell) : engine_(engine), apps_(std::move(apps)), states_(apps_.size()), recovery_(engine), bar_(engine, "Home", [&] {
+    Launcher::Launcher(Engine& engine, std::vector<App> apps, TopBar::Shell shell) : engine_(engine), apps_(std::move(apps)), states_(apps_.size()), cursor_(*this, {
+        [this] { return int(tiles_.size()); },
+        [this](int tile) { return tiles_[size_t(tile)]; },
+        {}, {}, {}, {},
+        [this](int tile) { open(tile); }, 1}), recovery_(engine), bar_(engine, "Home", [&] {
         shell.home = {}; shell.back = {}; return shell; }()) // Home is here; nothing to go back to
     {
         setTitle("Home");
+        setWantsKeyboardFocus(true);
         setOpaque(true); // paint() fills it: the screen under it is not drawn with it
         bar_.showMark();
         addAndMakeVisible(bar_);
@@ -218,6 +223,7 @@ namespace oscairn::standalone
         const int gap = tight ? denseGap : touch ? 14 : 12, tileHeight = tight ? 120 : touch ? 150 : 132;
         auto area = getLocalBounds().withTrimmedTop(TopBar::heightFor(*this)).reduced(tight ? denseMargin : gap * 2);
         const int columns = std::clamp(area.getWidth() / (tight ? 200 : 240), 1, std::max(1, int(apps_.size())));
+        cursor_.setColumns(columns);
         const int width = (area.getWidth() - gap * (columns - 1)) / columns;
         tiles_.clear();
         for(size_t i = 0; i < apps_.size(); ++i)
@@ -250,13 +256,14 @@ namespace oscairn::standalone
             const auto state = stateArea(i); inside.removeFromBottom(state.getHeight());
             g.setColour(ink(Ink::Text)); drawInked(g, apps_[i].name, inside.removeFromBottom(int(title) + 6), juce::Font(juce::FontOptions(title, juce::Font::bold)));
             g.setColour(ink(Ink::Muted)); drawInked(g, states_[i], state, juce::Font(juce::FontOptions(small)));
+            cursor_.drawRow(g, int(i), r.expanded(1));
         }
     }
 
     void Launcher::mouseUp(const juce::MouseEvent& e)
     {
         if(e.mouseWasDraggedSinceMouseDown()) return;
-        for(size_t i = 0; i < tiles_.size(); ++i) if(tiles_[i].contains(e.getPosition())) { open(int(i)); return; }
+        for(size_t i = 0; i < tiles_.size(); ++i) if(tiles_[i].contains(e.getPosition())) { cursor_.clear(); open(int(i)); return; }
     }
 
     AppFrame::AppFrame(Engine& engine, const juce::String& name, juce::Component& app, TopBar::Shell shell) : app_(app), bar_(engine, name, std::move(shell))

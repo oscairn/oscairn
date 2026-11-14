@@ -126,6 +126,7 @@ namespace oscairn::standalone
         keep_.setTooltip("How much of what was just played Capture can save. Kept in memory, never written unless captured.");
         addAndMakeVisible(keep_);
         addAndMakeVisible(list_);
+        list_.onConfirm = [this](int row) { select(row); }; // a tap selects
         list_.setColour(juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
 #if JUCE_MAC
         reveal_.setButtonText("Show in Finder");
@@ -290,6 +291,7 @@ namespace oscairn::standalone
         auto top = area.removeFromTop(area.getHeight() / 2);
         g.setColour(ink(Ink::Text)); drawInked(g, nameOf(*t), top, bold);
         g.setColour(t->state == "failed" ? ink(Ink::Danger) : ink(Ink::Muted)); drawInked(g, detail, area, small);
+        list_.cursor.drawRow(g, row, {0, 0, width, height});
     }
 
     void RecordingsPane::resized()

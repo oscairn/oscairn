@@ -25,8 +25,21 @@ namespace oscairn::standalone
         }
     }
 
-    PartsView::PartsView(Engine& engine, const std::string& scanner) : engine_(engine)
+    PartsView::PartsView(Engine& engine, const std::string& scanner) : engine_(engine), cursor_(*this, {
+        [this] { return page_ == 0 ? int(rows()) : 0; },
+        [this](int row) { return rowBounds(size_t(row)); },
+        {},
+        [this](int row) { auto* v = findParentComponentOfClass<juce::Viewport>(); return !v || (rowBounds(size_t(row)).getY() >= v->getViewPositionY() && rowBounds(size_t(row)).getBottom() <= v->getViewPositionY() + v->getViewHeight()); },
+        [this](int row) { // a page at a time: the view's own height, so a move repaints once
+            if(auto* v = findParentComponentOfClass<juce::Viewport>()) {
+                const auto r = rowBounds(size_t(row)); const int page = std::max(1, v->getViewHeight());
+                int y = r.getY() / page * page; if(r.getBottom() > y + page) y = r.getY();
+                v->setViewPosition(v->getViewPositionX(), y);
+            } },
+        [this] { return 1; },
+        [this](int row) { openRow(size_t(row)); }})
     {
+        setWantsKeyboardFocus(true);
         for(auto* c : std::initializer_list<juce::Component*>{&title_, &message_, &done_, &addPart_, &addBus_, &back_, &removePart_, &name_, &controlsButton_, &mixerButton_, &routingButton_, &addControl_, &undo_, &redo_}) addChildComponent(c);
         routingButton_.setTooltip("Every plugin and wire: draw wires the parts cannot, and set each source's level");
         routingButton_.onClick = [this] { showRouting(0); };
@@ -185,6 +198,7 @@ namespace oscairn::standalone
     void PartsView::rebuild()
     {
         controls_.clear(); boxes_.clear(); splitAreas_.clear(); strips_.clear(); updaters_.clear(); tiles_.clear();
+        if(page_ != 0) cursor_.clear(); // the page changed
         auto grid = std::move(grid_); // kept below if the same plugin is still selected, so its page survives
         const bool list = page_ == 0, controlsShown = page_ == controlsPage, mixerShown = page_ == mixerPage, routingShown = page_ == routingPage;
         for(auto* c : std::initializer_list<juce::Component*>{&addPart_, &addBus_, &controlsButton_, &mixerButton_, &routingButton_}) c->setVisible(list);
@@ -1609,6 +1623,7 @@ namespace oscairn::standalone
                 for(const auto& p : *rows)
                 {
                     auto r = rowBounds(row++);
+                    struct Mark { ListCursor& c; juce::Graphics& g; size_t at; juce::Rectangle<int> r; ~Mark() { c.drawRow(g, int(at), r); } } mark{cursor_, g, row - 1, r}; // the border last
                     g.setColour(p.mute || p.silenced ? ink(Ink::Surface).withAlpha(.5f) : ink(Ink::Surface));
                     g.fillRoundedRectangle(r.toFloat(), themeData().radius);
                     // Draining (being switched out) or muted: the row takes the accent's or the mute's tint.
@@ -1650,6 +1665,7 @@ namespace oscairn::standalone
             for(const auto& shared : state_.shared)
             {
                 auto r = rowBounds(row++);
+                struct Mark { ListCursor& c; juce::Graphics& g; size_t at; juce::Rectangle<int> r; ~Mark() { c.drawRow(g, int(at), r); } } mark{cursor_, g, row - 1, r}; // the border last
                 g.setColour(ink(Ink::Surface).withAlpha(.7f)); g.fillRoundedRectangle(r.toFloat(), themeData().radius);
                 auto rr = r.reduced(28, 6);
                 g.setColour(ink(Ink::Text)); g.setFont(juce::FontOptions(16.0f * scale, juce::Font::bold));
@@ -1723,6 +1739,14 @@ namespace oscairn::standalone
 
     void PartsView::resized() { shape_.clear(); refresh(); }
 
+    void PartsView::openRow(size_t row)
+    {
+        const size_t parts = state_.parts.size(), buses = state_.buses.size();
+        if(row >= parts + buses + state_.shared.size()) return;
+        if(row >= parts + buses) return showRouting(state_.shared[row - parts - buses].node);
+        showPart(row < parts ? state_.parts[row].id : state_.buses[row - parts].id);
+    }
+
     void PartsView::mouseUp(const juce::MouseEvent& e)
     {
         if(page_ == controlsPage || page_ == mixerPage) return;
@@ -1753,13 +1777,8 @@ namespace oscairn::standalone
         }
         if(page_ == 0)
         {
-            const size_t parts = state_.parts.size(), buses = state_.buses.size();
-            for(size_t row = 0; row < parts + buses + state_.shared.size(); ++row)
-                if(rowBounds(row).contains(e.getPosition()))
-                {
-                    if(row >= parts + buses) return showRouting(state_.shared[row - parts - buses].node);
-                    return showPart(row < parts ? state_.parts[row].id : state_.buses[row - parts].id);
-                }
+            for(size_t row = 0; row < rows(); ++row)
+                if(rowBounds(row).contains(e.getPosition())) { cursor_.clear(); return openRow(row); }
             return;
         }
         for(const auto& box : boxes_)

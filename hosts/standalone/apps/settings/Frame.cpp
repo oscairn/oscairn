@@ -117,6 +117,7 @@ namespace oscairn::standalone::settings
         setTitle("Settings");
         list_.setColour(juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
         list_.setTitle("Pages");
+        list_.onConfirm = [this](int row) { if(row >= 0 && size_t(row) < shown_.size()) open(shown_[size_t(row)]->id); };
         back_.setTooltip("Back to the list of settings");
         back_.onClick = [this] { back(); };
         scroll_.setScrollBarsShown(true, false);
@@ -138,6 +139,7 @@ namespace oscairn::standalone::settings
             current_ = at;
         }
         list_.selectRow(at, true, true);
+        list_.cursor.clear(); // the page changed: the cursor goes
         resized(); repaint();
         return true;
     }
@@ -146,7 +148,7 @@ namespace oscairn::standalone::settings
     {
         scroll_.setViewedComponent(nullptr, false);
         page_.reset(); current_ = -1;
-        list_.deselectAllRows();
+        list_.deselectAllRows(); list_.cursor.clear();
         resized(); repaint();
     }
 
@@ -211,5 +213,6 @@ namespace oscairn::standalone::settings
         if(!sideBySide()) drawIcon(g, "chevron-right", text.removeFromRight(height / 2).toFloat().withSizeKeepingCentre(float(height) / 3, float(height) / 3), ink(Ink::Muted));
         g.setColour(selected ? ink(Ink::Accent) : ink(Ink::Text));
         drawInked(g, shown_[size_t(row)]->title, text, font(TextRole::Body, m, selected));
+        list_.cursor.drawRow(g, row, r);
     }
 }

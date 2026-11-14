@@ -3,6 +3,7 @@
 #include "Engine.h"
 #include "Icons.h"
 #include "Recording.h"
+#include "Theme.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace oscairn::standalone
@@ -109,6 +110,7 @@ namespace oscairn::standalone
         void paint(juce::Graphics&) override;
         void resized() override;
         void mouseUp(const juce::MouseEvent&) override;
+        bool keyPressed(const juce::KeyPress& key) override { return cursor_.key(key); } // arrows and Return, as a panel's dial and push
 
     private:
         void timerCallback() override;
@@ -119,6 +121,7 @@ namespace oscairn::standalone
         std::vector<App> apps_;
         std::vector<juce::Rectangle<int>> tiles_;
         std::vector<juce::String> states_;
+        ListCursor cursor_; // the tiles, in reading order for a panel's dial; Home's apps
         EngineRecovery recovery_;
         TopBar bar_;
     };

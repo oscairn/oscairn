@@ -98,6 +98,81 @@ void pageList(juce::ListBox& list,int by) {
     const int rows=std::max(1,view->getViewHeight()/list.getRowHeight()-1);
     view->setViewPosition(view->getViewPositionX(),view->getViewPositionY()+by*rows*list.getRowHeight());
 }
+namespace {
+std::vector<ListCursor*>& cursors(){static std::vector<ListCursor*> all;return all;}
+ListCursor* lastTouched=nullptr; // the pane a dial turns
+}
+ListCursor::ListCursor(juce::Component& c,View v):component_(c),view_(std::move(v)){cursors().push_back(this);component_.addComponentListener(this);}
+ListCursor::~ListCursor(){component_.removeComponentListener(this);auto& all=cursors();all.erase(std::remove(all.begin(),all.end(),this),all.end());if(lastTouched==this)lastTouched=nullptr;}
+void ListCursor::clear(){const int was=row_;row_=-1;if(was>=0)component_.repaint(view_.bounds(was));}
+bool ListCursor::move(int steps){
+    const int n=view_.count();
+    if(n<=0){clear();return false;}
+    lastTouched=this;
+    const int was=row_<n?row_:-1;
+    row_=was<0?std::clamp(view_.first?view_.first():0,0,n-1):std::clamp(was+steps,0,n-1);
+    if(row_==was)return false;
+    if(view_.reveal&&view_.shown&&!view_.shown(row_))view_.reveal(row_); // a page at a time: the view repaints once
+    else{if(was>=0)component_.repaint(view_.bounds(was));component_.repaint(view_.bounds(row_));}
+    return true;
+}
+bool ListCursor::confirm(){
+    if(row_<0||row_>=view_.count()||!view_.confirm)return false;
+    lastTouched=this;
+    view_.confirm(row_);
+    return true;
+}
+void ListCursor::drawRow(juce::Graphics& g,int row,juce::Rectangle<int> r) const {
+    if(row!=row_)return;
+    g.setColour(ink(Ink::Accent));g.drawRect(r,2);
+}
+bool ListCursor::key(const juce::KeyPress& k){
+    const int page=view_.pageRows?std::max(1,view_.pageRows()):1;
+    if(k==juce::KeyPress::upKey){move(-view_.columns);return true;}
+    if(k==juce::KeyPress::downKey){move(view_.columns);return true;}
+    if(view_.columns>1&&(k==juce::KeyPress::leftKey||k==juce::KeyPress::rightKey)){move(k==juce::KeyPress::leftKey?-1:1);return true;}
+    if(k==juce::KeyPress::pageUpKey){move(-page);return true;}
+    if(k==juce::KeyPress::pageDownKey){move(page);return true;}
+    if(k==juce::KeyPress::homeKey||k==juce::KeyPress::endKey){if(!active())move(0);move(k==juce::KeyPress::homeKey?-view_.count():view_.count());return true;}
+    if(k==juce::KeyPress::returnKey&&active())return confirm();
+    if(k==juce::KeyPress::escapeKey&&active()){clear();return true;}
+    return false;
+}
+bool ListCursor::anyShowing(){for(auto* c:cursors())if(c->component_.isShowing())return true;return false;}
+bool ListCursor::act(const ListAction& n){
+    std::vector<ListCursor*> lists;
+    for(auto* c:cursors()){if(c->component_.isShowing())lists.push_back(c);else c->clear();}
+    if(lists.empty())return false;
+    std::stable_sort(lists.begin(),lists.end(),[](auto* a,auto* b){return a->component_.getScreenX()<b->component_.getScreenX();});
+    auto* current=std::find(lists.begin(),lists.end(),lastTouched)!=lists.end()?lastTouched:lists.front();
+    auto* target=n.pane<0?current:lists[size_t(std::min(n.pane,int(lists.size())-1))];
+    switch(n.kind){
+    case ListAction::Kind::Move:target->move(n.steps);return true;
+    case ListAction::Kind::Confirm:{
+        if(n.pane<0&&!target->active())for(auto* c:lists)if(c->active()){target=c;break;}
+        return target->confirm();}
+    case ListAction::Kind::Cancel:{bool any=false;for(auto* c:lists)if(c->active()){c->clear();any=true;}return any;}
+    }
+    return false;
+}
+CursorList::CursorList(const juce::String& name,juce::ListBoxModel* model):juce::ListBox(name,model),cursor(*this,{
+    [this]{return getModel()?getModel()->getNumRows():0;},
+    [this](int row){return getRowPosition(row,true);},
+    [this]{return getRowHeight()>0&&getViewport()?getViewport()->getViewPositionY()/getRowHeight():0;},
+    [this](int row){const auto r=getRowPosition(row,true);return r.getY()>=0&&r.getBottom()<=getViewport()->getMaximumVisibleHeight();},
+    [this](int row){
+        for(int guard=0;guard<10000;++guard){
+            const auto r=getRowPosition(row,true);
+            if(r.getY()>=0&&r.getBottom()<=getViewport()->getMaximumVisibleHeight())break;
+            const int before=getViewport()->getViewPositionY();
+            pageList(*this,r.getY()<0?-1:1);
+            if(getViewport()->getViewPositionY()==before)break; // held at an end
+        }},
+    [this]{return getRowHeight()>0&&getViewport()?std::max(1,getViewport()->getViewHeight()/getRowHeight()-1):1;},
+    [this](int row){if(onConfirm)onConfirm(row);}}){
+    addMouseListener(&clicks_,true);
+}
+bool CursorList::keyPressed(const juce::KeyPress& k){return cursor.key(k)||juce::ListBox::keyPressed(k);}
 void drawInked(juce::Graphics& g,const juce::String& s,juce::Rectangle<int> r,const juce::Font& font,juce::Justification h) {
     // Outside what is being painted (a part of the window drawn again): nothing to shape or trace. Its ink may reach past r by a line.
     if(s.isEmpty() || !g.clipRegionIntersects(r.expanded(0,int(std::ceil(font.getHeight())))))return;

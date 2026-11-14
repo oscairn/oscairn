@@ -3,6 +3,7 @@
 #include "oscairn/physical_controls.h"
 #include "oscairn/remote_control.h"
 #include "../audio/AudioConfiguration.h"
+#include "ListAction.h"
 #include "SoundPickerModel.h"
 #include <juce_events/juce_events.h>
 #include <memory>
@@ -100,6 +101,13 @@ namespace oscairn::standalone
         void touched(const std::string& control){touched_=control;++touches_;}
         const std::string& lastTouched() const {return touched_;}
         uint32_t touches() const {return touches_;}
+        // What the device's panel did to lists (its map's `navigate`, whatever the device), as the engine counts it
+        // (ControllerState::navigation): the lists on screen take it through `onList`, a cancel nothing took goes back
+        // as the shell's Back does. `listsShowing` says whether any list is on screen, sent to the engine so a knob
+        // that is a list's navigation there plays no parameter. Both are the app's (ListCursor); none: no lists.
+        std::function<bool(const ListAction&)> onList;
+        std::function<bool()> listsShowing;
+        void navigated(const std::map<std::string,int64_t>& totals); // the totals as read now; the first only sets the baseline
         // The device's control groups, from its profile (RFC 0024), and any MIDI inputs bound to
         // them: the engine plays them (RFC 0011's instant controls), sent again after a restart.
         // `joined`: the connected controllers' groups, which the engine joins after them itself
@@ -299,7 +307,7 @@ namespace oscairn::standalone
             else std::fprintf(stderr,"oscairn: control command: %s\n",message.c_str());
         }
         static bool answers(LocalClient& client){try{client.call("session.hello","{}",1000);return true;}catch(const std::exception&){return false;}}
-        void sendView(bool part, bool screen, std::vector<std::pair<uint32_t, uint32_t>> positions); // to the engine
+        void sendView(bool part, bool screen, std::vector<std::pair<uint32_t, uint32_t>> positions, std::optional<bool> lists = std::nullopt); // to the engine
         void readControllers(); // timer: positions and the control moved last, from the engine
         void refreshSounds(SoundAction action = {});
         void finishSounds();
@@ -327,6 +335,8 @@ namespace oscairn::standalone
         ScreenPage screenPage_;
         std::string touched_;
         uint32_t touches_=0;
+        std::map<std::string,int64_t> navigationSeen_;
+        bool navigationBaseline_=false, listsSent_=false;
         std::vector<ControlGroup> groups_, sent_; // all, for the views; the device's, sent
         std::vector<Control::ControllerPort> ports_;
         GroupPositions positions_;

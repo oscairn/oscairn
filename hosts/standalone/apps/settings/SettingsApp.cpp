@@ -47,6 +47,7 @@ namespace oscairn::standalone
             try { profile_ = loadProfile(named.toStdString()); }
             catch(const std::exception& e) { std::fprintf(stderr, "oscairn-settings: the profile %s: %s; this computer's instead\n", named.toRawUTF8(), e.what()); profile_ = Profile::desktop(); }
             engine_ = std::make_unique<Engine>(std::atoi(given), false); // system only: no graph to read
+            engine_->onList = ListCursor::act; engine_->listsShowing = ListCursor::anyShowing; // the panel's list navigation (a device's map) reaches this window's lists
             engine_->onLost = [this] { std::fprintf(stderr, "oscairn-settings: the engine's connection closed\n"); setApplicationReturnValue(1); quit(); };
             frame_ = std::make_unique<settings::Frame>(*engine_, profile_);
             setDesktopMode(*frame_, profile_.screen() && profile_.screen()->touch ? 2 : 1); // until the shell says how it is shown

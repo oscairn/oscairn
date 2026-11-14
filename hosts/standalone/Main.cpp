@@ -160,6 +160,7 @@ namespace oscairn::standalone
             engine_.openPads=[this]{showPads();};
             engine_.openParts=[this]{showParts();};
             engine_.goHome=[this]{showHome();};
+            engine_.onList=ListCursor::act; engine_.listsShowing=ListCursor::anyShowing; // the panel's list navigation (a device's map) reaches the lists shown
             engine_.goBack=[this]{showHome();}; // shortcut: every app's top screen is one level down; deeper levels go back inside their apps
             // The on-screen keyboards, where the profile offers them: windows on the desktop, a sheet over a device's screen.
             if( profile_.onScreenKeyboard )

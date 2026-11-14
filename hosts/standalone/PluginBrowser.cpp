@@ -19,7 +19,7 @@ PluginBrowser::PluginBrowser(Engine& engine,Theme& theme,const juce::File& plugi
     messages_.setMultiLine(true);messages_.setReadOnly(true);messages_.setName("Scan and load status");
     hint_.setText("Replacement stops this slot's notes/tails and removes its prepared sounds. Failed loads keep the current plugin.",juce::dontSendNotification);
     hint_.setTooltip(hint_.getText());
-    viewport_.setViewedComponent(&parameters_,false);list_.setRowHeight(54);
+    viewport_.setViewedComponent(&parameters_,false);list_.setRowHeight(54);list_.onConfirm=[this](int row){list_.selectRow(row);}; // a tap selects
     sources_=theme.directory().getParentDirectory().getChildFile("plugin-folders.txt");
     roots_=pluginSearchPaths();roots_.emplace_back(plugins.getFullPathName().toStdString());
     for(const auto& path:juce::StringArray::fromLines(sources_.loadFileAsString()))if(path.isNotEmpty())roots_.emplace_back(path.toStdString());
@@ -49,6 +49,7 @@ void PluginBrowser::paintListBoxItem(int row,juce::Graphics& g,int w,int h,bool 
     g.fillAll(ink(selected?Ink::Raised:Ink::Surface));if(selected){g.setColour(ink(Ink::Accent));g.fillRect(0,0,3,h);}
     g.setColour(ink(Ink::Text));g.setFont(juce::FontOptions(16*themeData().fontScale,juce::Font::bold));g.drawText(p.name,12,3,w-24,25,juce::Justification::centredLeft);
     g.setColour(ink(Ink::Muted));g.setFont(juce::FontOptions(13*themeData().fontScale));g.drawText(format(p)+" | "+p.vendor,12,28,w-24,21,juce::Justification::centredLeft);
+    list_.cursor.drawRow(g,row,{0,0,w,h});
 }
 juce::String PluginBrowser::getNameForRow(int row){return row>=0 && size_t(row)<visible_.size()?juce::String(catalog_.plugins[visible_[size_t(row)]].name):juce::String();}
 void PluginBrowser::lookAndFeelChanged(){search_.setTextToShowWhenEmpty("Search name, maker or format",ink(Ink::Muted));parameterSearch_.setTextToShowWhenEmpty("Search parameters",ink(Ink::Muted));}

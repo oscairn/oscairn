@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
+#include "Theme.h"
 
 #include "Engine.h"
 #include "PartsModel.h"
@@ -29,6 +30,7 @@ namespace oscairn::standalone
         void paint(juce::Graphics&) override;
         void resized() override;
         void mouseUp(const juce::MouseEvent&) override;
+        bool keyPressed(const juce::KeyPress& key) override { return page_ == 0 && cursor_.key(key); } // the list: arrows and Return, as a panel's dial and push
         void refresh(); // reads the engine's graph state
         void showPart(uint32_t id); // 0: the list
         void showLane(uint32_t split, int lane); // selects a split (lane -1) or one of its lanes on the part shown
@@ -46,6 +48,8 @@ namespace oscairn::standalone
         void rebuild();           // the controls for the current page and state
         const PartRow* part(uint32_t id) const;
         juce::Rectangle<int> rowBounds(size_t row) const;
+        size_t rows() const { return state_.parts.size() + state_.buses.size() + state_.shared.size(); }
+        void openRow(size_t row); // what a tap on a row of the parts list does
         void insertMenu(size_t index, juce::Component& at, ChainPlace place = {});
         void devicesMenu(uint32_t part, juce::Component& at);
         // A keyboard button opening the on-screen keyboard of an input these rules choose (a menu
@@ -80,6 +84,7 @@ namespace oscairn::standalone
         uint32_t selectedSplit_ = 0; int selectedLane_ = -1; // a split (lane -1) or one of its lanes
         int chainHeight_ = 96;     // the Part page's chain row: taller for a split's lanes
 
+        ListCursor cursor_; // the parts list's, for a panel's dial and knobs
         juce::Label title_, message_;
         juce::TextButton done_{"Done"}, addPart_{"+ Add part"}, addBus_{"+ Add bus"}, back_{"‹ Parts"}, removePart_{"Remove part"}, controlsButton_{"Controls"}, mixerButton_{"Mixer"}, routingButton_{"Routing"}, addControl_{"+ Control"}, undo_{"Undo"}, redo_{"Redo"}, save_{"Save"};
         juce::String performance_; // the open Performance's name, the parts list's title

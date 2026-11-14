@@ -98,7 +98,7 @@ namespace oscairn::standalone::settings
         std::vector<const PageInfo*> shown_;
         int current_ = -1;
         std::unique_ptr<Page> page_;
-        juce::ListBox list_{"Settings", this};
+        CursorList list_{"Settings", this};
         juce::Viewport scroll_;
         IconButton back_{IconButton::Glyph::Back, "Back"};
         juce::Rectangle<int> title_;

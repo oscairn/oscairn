@@ -103,7 +103,7 @@ namespace oscairn::standalone
         std::function<void(const Offer&)> onInstall;
         juce::TextEditor search;
         juce::TextButton performances{"Performances"}, sounds{"Sounds"}, plugins{"Plugins"}, content{"Content"}, close{"Close"}, backButton{"Back"}, install{"Install"};
-        juce::ListBox list{"Catalog", this};
+        CursorList list{"Catalog", this};
         std::vector<std::unique_ptr<juce::HyperlinkButton>> downloadLinks; // the opened package's downloads(), each opening its address
         std::vector<std::pair<juce::String, juce::String>> facts() const; // the opened package's details, each named
         void paint(juce::Graphics&) override;

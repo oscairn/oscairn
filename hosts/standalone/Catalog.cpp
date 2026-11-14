@@ -187,6 +187,7 @@ namespace oscairn::standalone
         backButton.onClick = [this] { back(); };
         install.onClick = [this] { if(opened_ && opened_->offered() && onInstall) onInstall(*opened_); };
         list.setOutlineThickness(0);
+        list.onConfirm = [this](int row) { open(row); };
         for(auto* c : std::initializer_list<juce::Component*>{&performances, &sounds, &plugins, &content, &search, &list, &close}) addAndMakeVisible(c);
         addChildComponent(backButton); addChildComponent(install);
         showKind(kind);
@@ -385,6 +386,7 @@ namespace oscairn::standalone
         g.drawText(title, top, dense(*this) ? juce::Justification::centredLeft : juce::Justification::bottomLeft, true);
         g.setColour(ink(Ink::Muted)); g.setFont(juce::FontOptions(textSize(TextRole::Small, m)));
         g.drawText(describe(o), area, dense(*this) ? juce::Justification::centredLeft : juce::Justification::topLeft, true);
+        list.cursor.drawRow(g, row, {0, 0, width, height});
     }
 
     void Catalog::resized()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <juce_gui_extra/juce_gui_extra.h>
+#include "ListAction.h"
 #include <optional>
 namespace oscairn::standalone {
 enum class Ink { Background, Surface, Raised, Border, Text, Muted, Accent, Positive, Danger, Count };
@@ -30,6 +31,60 @@ void drawListRow(juce::Graphics&, juce::Rectangle<int> row, int index, juce::Col
 // view moved by the whole rows it shows less one, so a row stays in sight; `by` pages down, or up
 // when negative, held at the ends. The selection stays where it is.
 void pageList(juce::ListBox&, int by);
+// A cursor over a list's rows, apart from its selection and what it has open: moving it opens and
+// loads nothing, and repaints only the row it left and the one it entered. It is drawn as a
+// border round the row (drawRow, last), the row's own look unchanged. A panel's dial and knobs
+// under the screen, or the arrow keys, move it (input, key); confirming does what a tap does (the
+// owner's `confirm`); a tap, the page changing or the list leaving the screen drops it. Any view
+// with rows can have one: a ListBox through CursorList, a grid or strips with their own `bounds`.
+// Message thread only.
+class ListCursor : private juce::ComponentListener {
+public:
+    struct View {
+        std::function<int()> count;                        // the rows
+        std::function<juce::Rectangle<int>(int)> bounds;   // a row's area in the component's coordinates
+        std::function<int()> first;                        // the first row shown, where a cursor begins (none: 0)
+        std::function<bool(int)> shown;                    // whether the row is wholly in sight (none: always)
+        std::function<void(int)> reveal;                   // pages the view till the row shows (none: the view does not scroll)
+        std::function<int()> pageRows;                     // the rows a page moves (none: 1)
+        std::function<void(int)> confirm;                  // what a tap on the row does
+        int columns=1;                                     // a grid's: up and down move by a row
+    };
+    ListCursor(juce::Component&,View);
+    ~ListCursor() override;
+    int row() const {return row_;}                         // -1: none
+    bool active() const {return row_>=0;}
+    bool move(int steps);                                  // the first move shows it at the first row shown; false where it did not move
+    bool confirm();                                        // false: none
+    void setColumns(int columns) {view_.columns=std::max(1,columns);}
+    void clear();
+    void drawRow(juce::Graphics&,int row,juce::Rectangle<int> r) const; // the border, when the cursor is on this row
+    bool key(const juce::KeyPress&);                       // arrows, page up and down, home, end, return, escape
+    // A ListAction: move the cursor of a pane (pane N from the left, the last
+    // for a number past it; -1 the pane last touched) by steps, confirm there, or cancel, which drops
+    // every cursor. Panes are the lists showing. False: no list took it (cancel with no cursor).
+    static bool act(const ListAction&);
+    static bool anyShowing();                              // a list is on screen: the engine is told the screen shows lists
+private:
+    void componentParentHierarchyChanged(juce::Component&) override {clear();}
+    void componentVisibilityChanged(juce::Component&) override {if(!component_.isVisible())clear();}
+    juce::Component& component_;
+    View view_;
+    int row_=-1;
+};
+// A list box with a cursor: its arrow, page, home, end, return and escape keys move, confirm and
+// drop it (the selection stays the tap's); a click, or the list losing the keyboard, drops it.
+// `onConfirm` is what a tap on the row does.
+class CursorList : public juce::ListBox {
+public:
+    CursorList(const juce::String& name,juce::ListBoxModel* model);
+    ListCursor cursor;
+    std::function<void(int)> onConfirm;
+    bool keyPressed(const juce::KeyPress&) override;
+    void focusLost(FocusChangeType) override {cursor.clear();}
+private:
+    struct Clicks : juce::MouseListener {CursorList& list;explicit Clicks(CursorList& l):list(l){} void mouseDown(const juce::MouseEvent&) override {list.cursor.clear();}} clicks_{*this};
+};
 // Wires in the routing views (theme format 4): enabled audio and note wires, disabled ones,
 // draining ones (seamless changes, RFC 0021) and ones that no longer fit their plugin's ports; and
 // control lines, a plugin's lanes to controls and parameters (RFC 0011).

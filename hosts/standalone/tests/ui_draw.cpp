@@ -7,6 +7,7 @@
 // session over the control socket without an audio device. Each screen is left untouched, when
 // it draws nothing; then the Library's list scrolls. Prints a line for each.
 //   oscairn_ui_draw_test PLUGIN_DIR SCANNER THEMES LAYOUT PROFILE
+#include "../DeviceScreen.h"
 #include "../Launcher.h"
 #include "../LibraryPane.h"
 #include "../PaintCounter.h"
@@ -74,6 +75,7 @@ int main(int argc, char** argv)
             const auto& screen = *profile.screen();
             theme.setScreenTheme(screen.theme);
             standalone::setDeviceScale(screen.scale());
+            standalone::capFrameRate(); // as the app's window on a device's screen
             auto pump = [](int ms) { const auto end = juce::Time::getMillisecondCounter() + juce::uint32(ms); while(juce::Time::getMillisecondCounter() < end) juce::MessageManager::getInstance()->runDispatchLoopUntil(5); };
             auto wait = [](auto done) { for(int i = 0; i < 1000 && !done(); ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); return done(); };
 
@@ -203,7 +205,11 @@ int main(int argc, char** argv)
                     }
                     const auto seconds = (juce::Time::getMillisecondCounterHiRes() - began) / 1000.0;
                     const auto c = counter.counts(window);
-                    report("Library, scrolling", rate(c, seconds));
+                    const auto scrolling = rate(c, seconds);
+                    report("Library, scrolling", scrolling);
+#if JUCE_LINUX
+                    check(scrolling.frames <= standalone::deviceFrameRate + 1, "scrolling draws at most the device's frame rate"); // elsewhere the system paces painting
+#endif
                     const auto view = box->getViewport()->getScreenBounds();
                     const auto area = view.getWidth() * double(view.getHeight()) * screen.scale() * screen.scale();
                     std::printf("%-26s %6.0f pixels a frame; the list's view is %.0f\n", "", c.frames ? double(c.pixels) / c.frames : 0.0, area);

@@ -17,4 +17,12 @@ namespace oscairn::standalone
     // placed where the shell's frame is, with no title bar, at the shell's scale (on X11 inside
     // the shell's window, a child of it, which no window manager moves); else its own window.
     void placeAppWindow(juce::DocumentWindow& window, const juce::var& how);
+    // A device's screen draws at most `hz` frames a second (RFC 0045: on the FANTOM-07 each frame
+    // the app draws slows the audio in other processes): a list scrolling, or anything moving,
+    // comes at that rate. JUCE's X11 windows paint on a timer at their display's refresh rate
+    // (100 Hz when the display gives none), which this holds to `hz` until JUCE reads the
+    // displays again (a scale change: called after one); a window takes it when it is made, moved
+    // or resized. Nothing elsewhere, where the system paces painting.
+    inline constexpr double deviceFrameRate = 30;
+    void capFrameRate(double hz = deviceFrameRate);
 }

@@ -319,7 +319,7 @@ add_test(NAME desktop-plugin-crash COMMAND oscairn_plugin_crash_test "$<TARGET_F
 set_tests_properties(desktop-pad-editor desktop-plugin-crash PROPERTIES TIMEOUT 60 ENVIRONMENT "${worker_environment}")
 # What the device's screens draw (RFC 0045), counted: none at rest; scrolling the Library, its list.
 juce_add_console_app(oscairn_ui_draw_test PRODUCT_NAME "Oscairn UI Draw Test")
-target_sources(oscairn_ui_draw_test PRIVATE tests/ui_draw.cpp PaintCounter.cpp ${settings_sources} DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_sources(oscairn_ui_draw_test PRIVATE tests/ui_draw.cpp PaintCounter.cpp DeviceScreen.cpp ${settings_sources} DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
 target_include_directories(oscairn_ui_draw_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/core/control/third_party)
 target_link_libraries(oscairn_ui_draw_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
 target_compile_definitions(oscairn_ui_draw_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")

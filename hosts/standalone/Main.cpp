@@ -143,6 +143,7 @@ namespace oscairn::standalone
                 // A dense screen scales everything, dialogs and menus too, so a touch target keeps
                 // its physical size, on whatever display (RFC 0019).
                 setDeviceScale( profile_.screen()->scale() );
+                capFrameRate(); // after the scale, which reads the displays again; the window takes it when it fills the screen
                 // Nothing else opens as a window of its own: dialogs, alerts and menus open inside this one.
                 setDeviceScreen( this, Profile::Screen::touchTarget );
                 setDense( *this ); // and dense by design: touch-size controls, the least space between them
@@ -1173,6 +1174,7 @@ namespace oscairn::standalone
             if( display == nullptr )
                 return;
             const bool panel = profile.screen() && profile.screen()->surface != "desktop";
+            if( panel ) capFrameRate(); // before its window is made, which reads it then
             splash_->setBounds( panel ? display->logicalBounds.toNearestInt() : display->userBounds.toNearestInt().withSizeKeepingCentre( 420, 300 ) );
             splash_->addToDesktop( panel ? 0 : juce::ComponentPeer::windowHasDropShadow );
             if( panel ) { fillScreen( *splash_ ); setDeviceScreen( splash_.get(), Profile::Screen::touchTarget ); } // a failure's alert opens inside it

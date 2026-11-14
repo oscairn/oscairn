@@ -82,8 +82,16 @@ namespace oscairn::standalone
                 setDeviceScreen(&window, 44); // its dialogs and menus inside it too, at the touch target (Profile::Screen::touchTarget)
             }
 #endif
+            capFrameRate(); // as the shell's: JUCE read the displays again for the scale
             window.setBounds(int((*b)[0]), int((*b)[1]), int((*b)[2]), int((*b)[3]));
         }
         window.setVisible(true); window.toFront(true);
+    }
+
+    void capFrameRate(double hz)
+    {
+        // Desktop's own list, which it owns (not const): its windows' paint timers read it.
+        auto& displays = const_cast<juce::Displays&>(juce::Desktop::getInstance().getDisplays());
+        for(auto& d : displays.displays) d.verticalFrequencyHz = std::min(d.verticalFrequencyHz.value_or(hz), hz);
     }
 }

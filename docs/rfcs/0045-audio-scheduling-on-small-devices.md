@@ -638,6 +638,44 @@ with notes): the app's own process is the cause, and what in it is not yet known
   softirq counts at a finer grain around the stalls, the GPU driver's (`galcore`) interrupts and
   cache maintenance, and the app's rendering with the same drawing done offscreen.
 
+### Drawing less (2026-11-13)
+
+Built, off the unit (the Mac and a Linux container; nothing measured on the FANTOM-07 yet):
+
+- **A paint counter** (`PaintCounter`): with `OSCAIRN_UI_PAINT_LOG=1` the app, the Setlist and
+  Settings write a line a second for each window that drew: its frames, the pixels painted (each
+  frame's clip region) and the milliseconds painting took. `oscairn-fantom-start` passes it on.
+- **Nothing drawn at rest.** The top bar drew itself four times a second and, not being opaque,
+  Home's tiles under it each time; Home drew everything once a second; Record and Capture four
+  times a second. Each now draws only a change, in the smallest area (the tempo and load alone, a
+  tile's line alone), and the top bar, Home and an app's frame are opaque, so the panel's hidden
+  screen and the board under them are not drawn with them. Text outside what is being painted is
+  no longer shaped and traced (`drawInked`).
+- **30 frames a second at most on a device's screen** (`capFrameRate`): JUCE's X11 windows paint
+  on a timer at the display's refresh rate, which this holds to 30.
+- **Paging lists without touch** (`pageList`, each list's `scrollPage`), for a panel's buttons.
+
+The `ui-draw` test's screens, at the FANTOM-07's scale on its panel's layout (pixels of its
+1280 × 720 screen a second; Linux: Xvfb in a container, two runs each; Mac: one to three runs,
+its test window painting at one pixel a point; the machine loaded throughout, so the milliseconds
+vary between runs):
+
+| Screen | Before | After |
+|---|---|---|
+| Home, at rest | 4 to 5 frames, 1.2 to 1.3 million pixels, 8 to 16 ms | nothing |
+| Library, Performance, at rest | 4 frames, 384,000 to 389,000 pixels, 2 to 8 ms | nothing |
+| Setlist, Settings, at rest | nothing | nothing |
+| Library scrolling (Linux) | 60 to 62 frames, 28.2 million pixels, 205 to 301 ms | 29.5 frames, 13.7 million pixels, 101 to 102 ms |
+
+After, a value changing draws only itself: the tempo 11,552 pixels (the bar is 95,211), a tile's
+line 7,672, a chord playing on the Performance screen about 5,000 a frame (its meter). A scroll
+frame draws the list's view (466,000 pixels) before and after: JUCE has no copy-scroll, so the
+rows are all drawn again each frame, and fewer frames is what is left. In a scroll frame on the
+Mac the rows' favorite stars took about a fifth of the time (left out, 1.7 to 1.9 ms against 2.2
+to 2.6) and the names' widths nothing measurable; neither was changed. Not measured: what any of
+this does to the unit's misses, and the X server's share there (Xvfb's was 1 % throughout, which
+says nothing about a shadow frame buffer turned on a Cortex-A53).
+
 ### Spinning before sleeping
 
 How a block crosses to a worker and back (`WorkerHost::start` and `finish`, `Worker.cpp`'s

@@ -14,8 +14,9 @@
 #      reporting while something holds the device: left unheld for about a minute it went
 #      silent until the next power-on, so the gap between Roland's application letting go and
 #      the holder taking over must stay under about a second. A holder already running is kept;
-#   5. holds every CPU at its top frequency (the performance governor) while Oscairn runs,
-#      recording what each had for oscairn-fantom-stop;
+#   5. holds every CPU at its top frequency (the performance governor) and keeps the kernel's
+#      console quiet (log level 4) while Oscairn runs, recording what each had for
+#      oscairn-fantom-stop;
 #   6. starts the app on the display (/usr/bin/Oscairn --profile with the profile's id, on :0),
 #      which starts its own engine with the profile's audio device, keys, panel and input keys,
 #      when the profile has a screen. The display is Oscairn's own first: Roland's Weston is
@@ -183,6 +184,19 @@ for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
 	echo performance > "$g" && say "$g: performance" || say "cannot set $g; continuing"
 done
 [ -e "$g" ] || say "no CPU frequency governor here: nothing to set"
+
+# The kernel's console quiet while Oscairn runs: a message to the serial console blocks for 5 to
+# 10 ms with interrupts off, longer than a block, and once a burst of them froze the audio
+# device. Warnings and worse still reach the console. A runtime setting, back at power-on;
+# oscairn-fantom-stop puts back what is recorded here. Left alone where it cannot be written.
+printk=$proc/sys/kernel/printk
+if [ -w "$printk" ]; then
+	if [ -n "$dry" ]; then say "would set the kernel's console log level to 4 4 1 7 (now $(cat "$printk"))"
+	else
+		[ -f "$state/run/printk" ] || cat "$printk" > "$state/run/printk"
+		echo "4 4 1 7" > "$printk" && say "the kernel's console log level: 4 4 1 7"
+	fi
+fi
 
 # 6. The app, or the engine alone, with the profile's options. The cores its audio threads keep to: this script's
 # environment's OSCAIRN_AUDIO_THREAD_CORES ("1-3"), else the file's (the profile's

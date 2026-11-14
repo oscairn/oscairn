@@ -131,6 +131,13 @@ check "another process holding the device: refused" "[ $status = 1 ] && echo \"\
 check "before the holder would start" "! echo \"\$out\" | grep -q oscairn-panel-holder"
 kill $holder
 
+quiet=$bundle/quietproc
+mkdir -p "$quiet/sys/kernel" && printf '7\t4\t1\t7\n' > "$quiet/sys/kernel/printk"
+out=$(OSCAIRN_PROC=$quiet "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
+check "the kernel's console would be quietened, and nothing changed" "[ $status = 0 ] && echo \"\$out\" | grep -q \"would set the kernel's console log level to 4 4 1 7 (now 7.4.1.7)\" && grep -q '^7.4.1.7$' '$quiet/sys/kernel/printk'"
+chmod a-w "$quiet/sys/kernel/printk"
+[ -w "$quiet/sys/kernel/printk" ] || check "a console level that cannot be written: nothing said about it" "! OSCAIRN_PROC=$quiet '$bundle/oscairn-fantom-start' --dry-run 2>&1 | grep -q 'console log level'"
+
 out=$("$bundle/oscairn-fantom-stop" --dry-run 2>&1); status=$?
 check "the stop's dry run" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: $bundle/stop-chroot.sh' && echo \"\$out\" | grep -q 'program version error'"
 check "and Roland's display server started again" "echo \"\$out\" | grep -q 'would run: systemctl start weston.service'"

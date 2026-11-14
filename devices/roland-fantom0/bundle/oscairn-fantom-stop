@@ -1,8 +1,8 @@
 #!/bin/sh
 # Stops what oscairn-fantom-start started (docs/fantom-0.md, "Starting Oscairn on the unit"):
-# the app and its engine, or the engine alone, the CPUs' governors as they were, the bundle's X
-# server, Roland's display server (weston.service) started again, then the chroot's mounts. Run
-# by hand, as root, from outside the chroot.
+# the app and its engine, or the engine alone, the CPUs' governors and the kernel's console log
+# level as they were, the bundle's X server, Roland's display server (weston.service) started
+# again, then the chroot's mounts. Run by hand, as root, from outside the chroot.
 #
 # The panel holder is left running unless --panel is given: the panel only keeps reporting while
 # something holds its device, and left unheld it went silent until the next power-on, so stopping
@@ -75,6 +75,11 @@ if [ -f "$saved" ]; then
 		if [ -n "$dry" ]; then say "would set $g back to $was"; else echo "$was" > "$g" && say "$g: $was again"; fi
 	done < "$saved"
 	[ -n "$dry" ] || rm -f "$saved"
+fi
+# The kernel's console log level oscairn-fantom-start recorded before it quietened the console.
+if [ -f "$state/run/printk" ]; then
+	if [ -n "$dry" ]; then say "would set the kernel's console log level back to $(cat "$state/run/printk")"
+	else cat "$state/run/printk" > "$proc/sys/kernel/printk" && say "the kernel's console log level: $(cat "$state/run/printk") again"; rm -f "$state/run/printk"; fi
 fi
 
 # The display back to Roland's: the bundle's X server ended (oscairn-fantom-start's keeper, finding

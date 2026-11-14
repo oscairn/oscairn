@@ -699,12 +699,14 @@ namespace oscairn
                     ",\"collect\":"+snapshot(w.collect)+",\"wake\":"+snapshot(w.wake)+",\"run\":"+snapshot(w.run)+",\"busy\":"+std::to_string(w.busy)+",\"missPanics\":"+std::to_string(w.missPanics)+
                     ",\"minorFaults\":"+std::to_string(w.minorFaults)+",\"majorFaults\":"+std::to_string(w.majorFaults)+",\"cpu\":"+snapshot(w.cpu)+",\"involuntarySwitches\":"+std::to_string(w.involuntarySwitches)+",\"parts\":"+[&]{std::vector<std::string> q;for(const auto& x:w.parts)q.push_back(quote(x));return join(q);}()+'}';
                 std::vector<std::string> instances;
-                for(const auto& i:t.instances)instances.push_back("{\"plugin\":"+quote(i.plugin)+",\"memory\":"+std::to_string(i.memory)+",\"inUse\":"+(i.inUse?"true":"false")+",\"idle\":"+encode(i.idle)+'}');
+                auto texts=[&](const std::vector<std::string>& v){std::vector<std::string> q;for(const auto& x:v)q.push_back(quote(x));return join(q);};
+                for(const auto& i:t.instances)instances.push_back("{\"plugin\":"+quote(i.plugin)+",\"memory\":"+std::to_string(i.memory)+",\"inUse\":"+(i.inUse?"true":"false")+",\"idle\":"+encode(i.idle)+
+                    ",\"nodes\":"+texts(i.nodes)+",\"parts\":"+texts(i.parts)+",\"worker\":"+quote(i.worker)+'}');
                 const auto& o=t.open;
                 const auto open="{\"name\":"+quote(o.name)+",\"reused\":"+std::to_string(o.reused)+",\"loaded\":"+std::to_string(o.loaded)+",\"kept\":"+std::to_string(o.kept)+",\"total\":"+encode(o.total)+",\"read\":"+encode(o.read)+
                     ",\"load\":"+encode(o.load)+",\"restore\":"+encode(o.restore)+",\"reset\":"+encode(o.reset)+",\"save\":"+encode(o.save)+",\"publish\":"+encode(o.publish)+'}';
                 return "{\"warmupBlocks\":"+std::to_string(BlockTiming::warmupBlocks)+",\"bucketBounds\":["+bounds+"],\"callback\":"+snapshot(t.callback)+
-                    ",\"lateness\":"+snapshot(t.lateness)+",\"workers\":["+workers+"],\"instances\":"+join(instances)+",\"open\":"+open+"}";
+                    ",\"lateness\":"+snapshot(t.lateness)+",\"workers\":["+workers+"],\"instances\":"+join(instances)+",\"cores\":"+quote(t.cores)+",\"open\":"+open+"}";
             }
             if(method=="memory.state") {
                 fields(p,{});const auto m=c.memoryState();

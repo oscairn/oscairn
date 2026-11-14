@@ -170,12 +170,20 @@ int main(int argc, char** argv)
             std::printf("last open, %s: %.0f ms (read %.0f: loads %.0f, state loads %.0f, resets %.0f, state saves %.0f; publish %.0f), %.0f instances reused (%.0f holding their state), %.0f loaded\n",
                         text(field(o, "name")).c_str(), number(field(o, "total")), number(field(o, "read")), number(field(o, "load")), number(field(o, "restore")), number(field(o, "reset")),
                         number(field(o, "save")), number(field(o, "publish")), number(field(o, "reused")), number(field(o, "kept")), number(field(o, "loaded")));
-        // The instances loaded: each in use or idle (kept warm) with its memory.
+        // The instances loaded: each in use or idle (kept warm) with its memory, its worker, and the layout's nodes on it
+        // with their parts (RFC 0045), in an order the same Performance keeps from one load to the next.
+        const auto cores = text(field(r, "cores"));
+        std::printf("audio threads on %s (no worker has a core of its own)\n", cores.empty() ? "any core" : ("cores " + cores).c_str());
         for(V i : array(field(r, "instances")))
         {
             const bool inUse = field(i, "inUse")->type == json_type_true;
-            std::printf("instance %s: %.1f MiB, %s\n", text(field(i, "plugin")).c_str(), number(field(i, "memory")) / (1 << 20),
-                        inUse ? "in use" : ("idle " + std::to_string(int(number(field(i, "idle")))) + " s").c_str());
+            std::string nodes;
+            for(V n : array(field(i, "nodes"))) nodes += (nodes.empty() ? ": " : ", ") + text(n);
+            std::string parts;
+            for(V p : array(field(i, "parts"))) parts += (parts.empty() ? " (" : ", ") + text(p);
+            if(!parts.empty()) parts += ")";
+            std::printf("instance %s on %s: %.1f MiB, %s%s%s\n", text(field(i, "plugin")).c_str(), text(field(i, "worker")).c_str(), number(field(i, "memory")) / (1 << 20),
+                        inUse ? "in use" : ("idle " + std::to_string(int(number(field(i, "idle")))) + " s").c_str(), nodes.c_str(), parts.c_str());
         }
         // Each worker's blocks past its allowance in the window: played late, or silenced (heard as a dropout),
         // of those not handed over because the worker was busy; the panics that followed a block it did not

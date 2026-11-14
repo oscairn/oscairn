@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <optional>
@@ -474,19 +475,41 @@ namespace oscairn
         // A worker gone may leave its address to a new one: its counts go with it.
         std::erase_if(timingBase_, [&](const auto& b) { return std::none_of(workers.begin(), workers.end(), [&](const auto& w) { return w.first == b.first; }); });
         if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); }
-        // Each instance once: a node's workers (its own, its prepared instances, its shared engine's), else the node's host.
-        std::set<const PluginHost*> seen;
-        auto instance = [&](PluginHost& h, bool inUse, double idle) { if(seen.insert(&h).second) t.instances.push_back({h.descriptor().id, h.residentBytes(), inUse, idle}); };
+        // Each instance once: a node's workers (its own, its prepared instances, its shared engine's), else the node's
+        // host (a shared engine's in the engine's process), with the layout's nodes, parts and worker (control.h).
+        std::map<const PluginHost*, size_t> seen;
+        std::map<const void*, std::string> lanes;
+        auto instance = [&](PluginHost& h, bool inUse, double idle) -> Timing::Instance& {
+            const auto [at, fresh] = seen.emplace(&h, t.instances.size());
+            if(fresh)
+            {
+                std::string worker = "engine";
+                if(h.inWorker()) { auto& w = lanes[h.lane()]; if(w.empty()) w = "w" + std::to_string(lanes.size()); worker = w; }
+                t.instances.push_back({h.descriptor().id, h.residentBytes(), inUse, idle, {}, {}, worker});
+            }
+            return t.instances[at->second];
+        };
         std::set<NodeId> playing(leaving_); for(const auto& [node, name] : nodes_) playing.insert(node);
         for(const auto node : playing)
             if(graph_.contains(node))
             {
-                auto& h = graph_.host(node);
-                const auto w = h.workers();
-                if(w.empty()) instance(h, true, 0); else for(auto* x : w) instance(*x, true, 0);
+                auto* h = &graph_.host(node);
+                if(const auto* c = dynamic_cast<const SoundContext*>(h)) h = c->engine()->host.get();
+                auto w = h->workers();
+                if(w.empty()) w = {h};
+                for(auto* x : w)
+                {
+                    auto& i = instance(*x, true, 0);
+                    const auto name = nodes_.find(node);
+                    if(name == nodes_.end()) continue; // ringing out: not the open Performance's
+                    i.nodes.push_back(name->second.empty() ? h->descriptor().name : name->second);
+                    for(const auto& p : parts_)
+                        if(nodesOf(p).count(node) && std::find(i.parts.begin(), i.parts.end(), p.name) == i.parts.end()) i.parts.push_back(p.name);
+                }
             }
         const auto now = std::chrono::steady_clock::now();
         for(const auto& w : warm_) instance(*w.host, false, std::chrono::duration<double>(now - w.idle).count());
+        if(const char* cores = std::getenv("OSCAIRN_AUDIO_THREAD_CORES")) t.cores = cores;
         t.open = lastOpen_;
         return t;
     }

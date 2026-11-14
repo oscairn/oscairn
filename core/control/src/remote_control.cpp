@@ -535,7 +535,10 @@ namespace oscairn
         for(auto w:array(field(r,"workers"))){t.workers.push_back({static_cast<NodeId>(integer(field(w,"node"))),string(field(w,"name")),snapshot(field(w,"roundTrip")),number(field(w,"allowance")),uint64_t(integer(field(w,"late"))),uint64_t(integer(field(w,"silent"))),
             snapshot(field(w,"collect")),snapshot(field(w,"wake")),snapshot(field(w,"run")),uint64_t(integer(field(w,"busy"))),uint64_t(integer(field(w,"missPanics"))),uint64_t(integer(field(w,"minorFaults"))),uint64_t(integer(field(w,"majorFaults"))),snapshot(field(w,"cpu")),uint64_t(integer(field(w,"involuntarySwitches"))),{}});
             for(auto p:array(field(w,"parts")))t.workers.back().parts.push_back(string(p));}
-        for(auto i:array(field(r,"instances")))t.instances.push_back({string(field(i,"plugin")),uint64_t(integer(field(i,"memory"))),boolean(field(i,"inUse")),number(field(i,"idle"))});
+        for(auto i:array(field(r,"instances"))){t.instances.push_back({string(field(i,"plugin")),uint64_t(integer(field(i,"memory"))),boolean(field(i,"inUse")),number(field(i,"idle")),{},{},string(field(i,"worker"))});
+            for(auto n:array(field(i,"nodes")))t.instances.back().nodes.push_back(string(n));
+            for(auto p:array(field(i,"parts")))t.instances.back().parts.push_back(string(p));}
+        t.cores=string(field(r,"cores"));
         const auto o=field(r,"open");t.open.name=string(field(o,"name"));
         for(auto [key,to]:{std::pair{"reused",&t.open.reused},{"loaded",&t.open.loaded},{"kept",&t.open.kept}})*to=uint64_t(integer(field(o,key)));
         for(auto [key,to]:{std::pair{"total",&t.open.total},{"read",&t.open.read},{"load",&t.open.load},{"restore",&t.open.restore},{"reset",&t.open.reset},{"save",&t.open.save},{"publish",&t.open.publish}})*to=number(field(o,key));

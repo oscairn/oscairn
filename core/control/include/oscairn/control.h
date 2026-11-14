@@ -252,9 +252,16 @@ namespace oscairn
             // Each plugin instance loaded (RFC 0045's resident instances), once however many nodes
             // play it: its plugin, memory in bytes (residentBytes, 0 in the engine's process),
             // whether a Performance uses it (playing or ringing out) or it is idle (kept warm), and the
-            // seconds since it went idle (0 in use).
-            struct Instance { std::string plugin; uint64_t memory = 0; bool inUse = false; double idle = 0; };
+            // seconds since it went idle (0 in use). The layout (RFC 0045): those in use first, in the
+            // order of their first node (the open Performance's in its read order, so a Performance lists
+            // the same way every time it opens), each with the open Performance's nodes on it and their
+            // parts, and its worker: "engine" in the engine's process, else w1, w2 and so on, numbered
+            // as they first appear, the instances in one worker process (a plugin host) alike.
+            struct Instance { std::string plugin; uint64_t memory = 0; bool inUse = false; double idle = 0; std::vector<std::string> nodes, parts; std::string worker; };
             std::vector<Instance> instances;
+            // The cores the audio threads, the engine's and every worker's, keep to (OSCAIRN_AUDIO_THREAD_CORES,
+            // Linux); empty: any. No worker is given a core of its own.
+            std::string cores;
             // The last Performance opened (loadPerformance; its read may have been prepared ahead):
             // instances reused (taken over, contexts and sounds in loaded instances) and loaded
             // (loadPlugin calls: a process each for a plugin in a worker), of those reused the ones

@@ -1111,7 +1111,11 @@ Steps 2 and 11; built marked as such.
   were lost: a control silence in the worker, or a carry that had to drop a release).
 - Each part's latency state: normal or one block late, since when, and how often it entered and
   left (step 8).
-- Each instance's parts and its share of their voice time, for sharing (step 9).
+- Each instance's parts and its share of their voice time, for sharing (step 9). Built, the
+  layout only: `engine.timing`'s `instances` give each instance in use the open Performance's
+  nodes and parts on it and its worker, in an order the same Performance keeps from one load to
+  the next, and `cores`, the cores the audio threads keep to; `oscairn-engine-timing` prints
+  them. The voice time share is not built.
 - The wake-up cost of each worker: its round trip less its block time inside the worker, which
   shows a worker waiting for a core (step 7's measurement). Built: the round trip taken apart,
   `collect` (until the engine's thread came for the block), `wake` (until the worker's audio

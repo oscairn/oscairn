@@ -221,4 +221,46 @@ check "and ends once the holder has gone too" "until_done $watcher && grep -q 'n
 rm -f "$bundle/var/oscairn/run/stopped"
 out=$("$bundle/oscairn-fantom-stop" --dry-run 2>&1)
 check "the stop marks itself on purpose (dry: says so)" "echo \"\$out\" | grep -q 'would mark the stop as on purpose' && [ ! -e '$bundle/var/oscairn/run/stopped' ]"
+
+# A start for real, in the stand-in bundle on a stand-in /proc (the panel holder and a display
+# already there) and an empty /sys: start-chroot.sh plays the app, which makes its engine's socket
+# and ends with status 3 once $bundle/crash exists, and the control request.
+live=$bundle/liveproc
+mkdir -p "$live/sys/kernel" "$live/net"
+printf '7\t4\t1\t7\n' > "$live/sys/kernel/printk"
+printf '0: 00000002 0 0 0001 01 1 @oscairn-panel\n0: 00000002 0 0 0001 01 2 @/tmp/.X11-unix/X0\n' > "$live/net/unix"
+cat > "$bundle/start-chroot.sh" <<'EOF'
+#!/bin/sh
+root=$(dirname "$0")
+case "$*" in
+*oscairn-control-request*) echo '{"jsonrpc":"2.0","id":1,"result":{}}' ;;
+*/usr/bin/Oscairn*)
+	echo app started >> "$root/ran"
+	mkdir -p "$root/tmp/oscairn-0"
+	[ -S "$root/tmp/oscairn-0/engine-1.sock" ] || python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$root/tmp/oscairn-0/engine-1.sock"
+	until [ -e "$root/crash" ]; do sleep 0.1; done
+	exit 3 ;;
+*) echo start-chroot ran >> "$root/ran" ;;
+esac
+EOF
+printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
+rm -rf "${bundle:?}/var" "${bundle:?}/ran"
+log=$bundle/var/oscairn/log/oscairn-fantom.log
+wait_for() { i=0; until grep -q "$1" "$log" 2>/dev/null || [ $i -ge $2 ]; do sleep 0.5; i=$((i + 1)); done; }
+out=$(OSCAIRN_PROC=$live OSCAIRN_SYS=$bundle/nosys "$bundle/oscairn-fantom-start" 2>&1); status=$?
+check "a start for real: the app runs and its engine answers" "[ $status = 0 ] && echo \"\$out\" | grep -q 'the app runs (pid'"
+check "the kernel's console quiet while it runs, the level it had recorded" "[ \"\$(cat '$live/sys/kernel/printk')\" = '4 4 1 7' ] && grep -q '^7.4.1.7$' '$bundle/var/oscairn/run/printk'"
+mkdir -p "$live/4242" && echo oscairn-engine > "$live/4242/comm"
+: > "$bundle/crash"
+wait_for 'a fourth time within a minute' 120
+check "the app ended alone, its engine playing: started again, its exit status logged" "grep -q 'the app ended (status 3) while its engine plays on: starting it again' '$log'"
+check "a crash loop: started three times more, then left ended" "[ \$(grep -c 'app started' '$bundle/ran') = 4 ] && grep -q 'the app ended (status 3) a fourth time within a minute of starting: not started again' '$log'"
+rm -r "${live:?}/4242"
+out=$(OSCAIRN_PROC=$live OSCAIRN_SYS=$bundle/nosys "$bundle/oscairn-fantom-stop" 2>&1)
+check "the stop puts the kernel's console level back" "grep -q '^7.4.1.7$' '$live/sys/kernel/printk' && [ ! -e '$bundle/var/oscairn/run/printk' ]"
+rm -f "$bundle/crash" "$bundle/ran"
+out=$(OSCAIRN_PROC=$live OSCAIRN_SYS=$bundle/nosys "$bundle/oscairn-fantom-start" 2>&1); status=$?
+: > "$bundle/crash"
+wait_for 'its engine is not running' 20
+check "the app ended with its engine: not started again" "[ $status = 0 ] && grep -q 'the app ended (status 3) and its engine is not running: not started again' '$log' && [ \$(grep -c 'app started' '$bundle/ran') = 1 ]"
 exit $fail

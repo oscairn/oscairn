@@ -23,6 +23,7 @@
 #      stopped (systemctl stop weston.service; oscairn-fantom-stop starts it again) and the
 #      bundle's X server serves :0 with the bundle's /etc/X11/xorg.conf, started again with the
 #      app if it ends; if it does not come up, Weston is started again and the app goes on it.
+#      The app is started again too when it ends alone while its engine plays on (keep_app).
 #      With --engine-only, or for a profile without one, the
 #      engine alone (oscairn-engine-run) with the profile's options instead
 #      (etc/default/oscairn-engine, written from the profile when the bundle was built), its
@@ -62,6 +63,7 @@ done
 # Stand-ins for a test, off the unit; on the unit these are left unset.
 panel=${OSCAIRN_PANEL_DEVICE:-/dev/i2c-slave-2}
 proc=${OSCAIRN_PROC:-/proc}
+sys=${OSCAIRN_SYS:-/sys}
 ipcrm=${OSCAIRN_IPCRM:-ipcrm}
 state=$root/var/oscairn
 log=$state/log/oscairn-fantom.log
@@ -177,7 +179,7 @@ fi
 # 0.23 of a block at rest, with performance 0.20 (docs/fantom-0.md). A sysfs setting: it is back
 # at power-on, and oscairn-fantom-stop puts back what is recorded here.
 saved=$state/run/governors
-for g in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
+for g in "$sys"/devices/system/cpu/cpufreq/policy*/scaling_governor; do
 	[ -w "$g" ] || continue
 	if [ -n "$dry" ]; then say "would set $g to performance (now $(cat "$g"))"; continue; fi
 	grep -q "^$g " "$saved" 2>/dev/null || echo "$g $(cat "$g")" >> "$saved"
@@ -256,12 +258,48 @@ weston_back() {
 }
 # The app, by its full path, which it finds its engine and plugins beside; its locked memory
 # unlimited for the engine it starts, as oscairn-engine-run does for one alone. Started again
-# after the X server ended, it reconnects to the engine that went on playing.
+# after the X server ended, it reconnects to the engine that went on playing. Its exit status goes
+# to run/app.status for the app keeper's log.
 app_start() {
-	"$root/start-chroot.sh" setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} $tuning$plug\
+	rm -f "$state/run/app.status"
+	# The waiting shell holds no terminal and outlives the session that started it, as the app does.
+	( trap '' HUP
+	  "$root/start-chroot.sh" setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} $tuning$plug\
 		sh -c 'ulimit -l unlimited || echo "oscairn-fantom-start: cannot raise the locked-memory limit; continuing" >&2; exec "$@"' sh \
-		/usr/bin/Oscairn --profile "$OSCAIRN_PROFILE" --plugins /usr/lib/clap >> "$state/log/oscairn-app.log" 2>&1 &
+		/usr/bin/Oscairn --profile "$OSCAIRN_PROFILE" --plugins /usr/lib/clap
+	  echo $? > "$state/run/app.status" ) < /dev/null >> "$state/log/oscairn-app.log" 2>&1 &
 	echo $! > "$state/run/app.pid"
+	date +%s > "$state/run/app.started"
+}
+# Starts the app again when it ends on its own while its engine plays on (the app alone once
+# crashed and was not started again for hours), 1, 2 then 4 seconds after; ended a fourth time
+# within a minute of starting, it is left ended and the engine plays on. One that ended with the
+# X server is started with the new server (keep_display), one that ended with its engine (a quit)
+# is not started again. Checks each second without starting a process while the app runs.
+keep_app() {
+	fails=0
+	token=$(cat "$proc/sys/kernel/random/uuid" 2>/dev/null || date +%s)
+	echo "$token" > "$state/run/app.keeper"
+	ours() { [ ! -e "$state/run/stopped" ] && read -r t < "$state/run/app.keeper" && [ "$t" = "$token" ]; }
+	while sleep 1 && ours; do
+		read -r pid < "$state/run/app.pid" && kill -0 "$pid" 2>/dev/null && continue
+		[ -z "$(named Oscairn)" ] || continue # started again by keep_display meanwhile
+		status=unknown; read -r status 2>/dev/null < "$state/run/app.status"
+		read -r t0 < "$state/run/app.started" || t0=0
+		[ $(($(date +%s) - t0)) -lt 60 ] || fails=0
+		fails=$((fails + 1))
+		if [ $fails -gt 3 ]; then
+			say "the app ended (status $status) a fourth time within a minute of starting: not started again; the engine plays on (oscairn-fantom-stop, then start, to try again)"
+			exit 1
+		fi
+		sleep $((1 << (fails - 1)))
+		ours && [ -z "$(named Oscairn)" ] || continue
+		[ -n "$(named oscairn-engine)" ] || { say "the app ended (status $status) and its engine is not running: not started again"; exit 0; }
+		display_up && mkdir "$state/run/app-restart.lock" 2>/dev/null || { fails=$((fails - 1)); continue; } # the X server's keeper starts it
+		say "the app ended (status $status) while its engine plays on: starting it again"
+		( app_start ) # not this shell's child, so it is reaped when it ends
+		sleep 5; rmdir "$state/run/app-restart.lock"
+	done
 }
 # Runs the X server, and runs it again whenever it ends without oscairn-fantom-stop (whose mark
 # it then finds), the app too once the new server is up if the app ended with the old one (an X
@@ -349,6 +387,7 @@ if [ -z "$alone" ] && [ "${OSCAIRN_HEADLESS:-1}" = 0 ] && [ -n "${OSCAIRN_PROFIL
 	fi
 	rm -rf "$root/tmp/oscairn-0"
 	app_start
+	( trap '' HUP; keep_app ) < /dev/null >> "$state/log/app-keeper.out" 2>&1 &
 	# Its engine's control socket, in the app's runtime folder (the bundle's /tmp/oscairn-0).
 	i=0
 	until sock=$(ls "$root"/tmp/oscairn-0/engine-*.sock 2>/dev/null | head -n 1) && [ -S "$sock" ]; do

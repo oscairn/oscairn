@@ -368,6 +368,7 @@ namespace oscairn
                 return itemType(kind);
             };
             std::set<std::string> names;
+            std::set<std::string> directories; // the entries that are folders
             std::map<std::string, uint64_t> sizes; // each entry's, for the asset sizes the manifest lists
             auto folders = tops();
             for(const auto& t : declared) folders.insert(t.folder);
@@ -389,7 +390,7 @@ namespace oscairn
                 if((nameBytes += name.size()) > maxNameBytes) bad("its names are too long");
                 if(!names.insert(name).second) bad("an entry twice: " + name);
                 sizes[name] = e.size;
-                if(e.directory) continue;
+                if(e.directory) { directories.insert(name); continue; }
                 if(const auto k = kept.find(top); k != kept.end())
                 {
                     const auto file = name.size() > top.size() ? name.substr(top.size() + 1) : std::string();
@@ -470,7 +471,7 @@ namespace oscairn
                 const auto type = typeOf(item.kind);
                 if(!type || type->kind() != item.kind || !type->indexed() || !plainId(item.id) || !ids.insert(item.id).second) bad("an item's kind or ID is wrong");
                 if(!safe(item.path) || item.path.substr(0, item.path.find('/')) != type->folder || item.path.find('/', item.path.find('/') + 1) != std::string::npos ||
-                   !names.count(item.path + "/" + type->document))
+                   !names.count(item.path + "/" + type->document) || directories.count(item.path + "/" + type->document))
                     bad("an item is not in the archive: " + item.path);
                 item.signatures = signatures(detail::member(e->value, "signatures"));
                 p.items.push_back(std::move(item));

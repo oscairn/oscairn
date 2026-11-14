@@ -246,6 +246,13 @@ int main()
             check(why.empty(), "a 610-byte path is extracted: " + why);
         }
 
+        // An item's document is a file: a folder entry of its name is not it.
+        {
+            craft(root / "FolderDocument.olib", {{"library.json", listing("")}}, [](mz_zip_archive& z) { mz_zip_writer_add_mem(&z, "Sounds/Bass.osound/sound.json/", "", 0, 0); });
+            bool folder = false; try { readPackage(root / "FolderDocument.olib", {}); } catch(const std::runtime_error&) { folder = true; }
+            check(folder, "an item whose document is a folder entry is refused on reading");
+        }
+
         // Signatures (RFC 0006): an item, a build and the whole archive, each verified on reading.
         const auto mine = signing::makeKey(root / "mine.key"), other = signing::makeKey(root / "other.key");
         const auto signedRoot = root / "signed";

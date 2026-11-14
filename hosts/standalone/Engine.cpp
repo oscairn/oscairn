@@ -62,7 +62,7 @@ namespace oscairn::standalone
             {
                 LocalClient client;
                 if(given>=0)client.adopt(given);else if(!socket.empty())client.connect(socket);else return std::string("No connection for the engine's job");
-                RemoteControl control(client,{},false);
+                RemoteControl control(client,{},false,true); // off the message thread: waits its turn behind another's long request
                 work(control);
                 return std::string();
             }
@@ -430,7 +430,7 @@ namespace oscairn::standalone
             try
             {
                 if(given>=0)client.adopt(given);else if(!socket.empty())client.connect(socket);else throw std::runtime_error("No connection for the engine's job");
-                RemoteControl control(client,known);
+                RemoteControl control(client,known,true,true); // off the message thread: waits its turn behind another's long request
                 try{result.message=applySoundAction(control,request);}catch(const std::exception& e){result.error=e.what();}
                 result.state=readSoundPicker(control);
                 result.editors=readEditors(control);

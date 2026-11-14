@@ -21,7 +21,11 @@ namespace oscairn
         /// reads false: the status alone is subscribed to and read, for a connection granted neither
         /// play nor edit (the Settings app's, RFC 0022) or a short job's; the graph, the transport
         /// and the controllers stay empty.
-        explicit RemoteControl(LocalClient& client, const KnownParameters& known = {}, bool reads = true);
+        /// While the engine is busy with another client's long request it refuses what needs its
+        /// control thread (-32009: it did not run). Construction waits for its turn; so does every
+        /// call with `waits`, for a job's connection off the UI thread. Without it a refused call
+        /// throws, and a graph read refused is made again once the engine says it is free.
+        explicit RemoteControl(LocalClient& client, const KnownParameters& known = {}, bool reads = true, bool waits = false);
         KnownParameters knownParameters() const;
         ~RemoteControl() override;
         /// Takes what the engine sent. A graph it changed is read again without waiting (the

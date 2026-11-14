@@ -17,6 +17,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 namespace oscairn
 {
@@ -80,6 +81,19 @@ namespace oscairn
         }
         std::string address(NodeId node,uint32_t param){return "\"node\":"+std::to_string(node)+",\"param\":"+std::to_string(param);}
         struct RpcError:std::runtime_error{int code;RpcError(int c,const std::string& message):std::runtime_error(message),code(c){}};
+        constexpr int busyCode=-32009; // the engine busy with another client's long request: this did not run
+        // f again while the engine refuses it as busy (refused, it did not run, so asking again is
+        // safe), off the UI thread. shortcut: 2 minutes at most, polled every 25 ms; the engine.busy notice could end the wait instead.
+        template<class F> auto patiently(F&& f)
+        {
+            const auto until=std::chrono::steady_clock::now()+std::chrono::minutes(2);
+            for(;;)
+            {
+                try{return f();}
+                catch(const RpcError& e){if(e.code!=busyCode || std::chrono::steady_clock::now()>until)throw;}
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+        }
         Doc parse(const std::string& message)
         {
             // Responses were depth/size checked by LocalClient. Notification frames
@@ -155,7 +169,13 @@ namespace oscairn
             }
             field(doc.get(),"result");
         }
-        Doc call(std::string_view method,std::string_view params="{}",unsigned timeout=1000){return reply(client.send(method,params,timeout),timeout);}
+        bool waits=false;     // a job's connection: what the engine refuses as busy is asked again
+        bool afterBusy=false; // a graph read refused as busy: read again once the engine is free
+        Doc call(std::string_view method,std::string_view params="{}",unsigned timeout=1000)
+        {
+            if(waits)return patiently([&]{return reply(client.send(method,params,timeout),timeout);});
+            return reply(client.send(method,params,timeout),timeout);
+        }
         Doc reply(uint64_t id,unsigned timeout=1000){auto doc=parse(client.wait(id,timeout));answered(id);check(doc);return doc;}
         void publish(Change change)
         {
@@ -417,7 +437,8 @@ namespace oscairn
         }
         void drop(){if(reading)for(const auto& s:reading->sent)dropped.insert(s.first);reading.reset();again=false;confirmed.clear();}
         // Waits for the whole read: an edit's caller reads the state it made on return.
-        void refresh()
+        void refresh(){if(waits)patiently([&]{read();});else read();}
+        void read()
         {
             drop(); // older than this one
             GraphRead r;
@@ -455,6 +476,9 @@ namespace oscairn
                 // A node removed between the graph and its parameters ("Unknown node", which can
                 // come ahead of the graph.changed behind it): the read is stale, read again.
                 // Anything else is said, as before, unless a newer change is to be read anyway.
+                // Refused as busy: read again when engine.busy says the engine is free.
+                const auto* refused=dynamic_cast<const RpcError*>(&e);
+                if(refused && refused->code==busyCode){drop();afterBusy=true;return false;}
                 const bool stale=again || dynamic_cast<const std::invalid_argument*>(&e);drop();if(!stale)throw;refreshLater();return false;
             }
             if(!reading->done())return false;
@@ -472,29 +496,39 @@ namespace oscairn
         void edge(std::string_view method,const char* kind,NodeId from,NodeId to)
         {call(method,"{\"kind\":"+quote(kind)+",\"from\":"+std::to_string(from)+",\"to\":"+std::to_string(to)+'}');refresh();}
     };
-    RemoteControl::RemoteControl(LocalClient& client,const KnownParameters& known,bool reads):impl_(std::make_unique<Impl>(client))
+    RemoteControl::RemoteControl(LocalClient& client,const KnownParameters& known,bool reads,bool waits):impl_(std::make_unique<Impl>(client))
     {
+        impl_->waits=waits;
         for(const auto& [node,k]:known){impl_->graph.parameterRevisions[node]=k.first;impl_->info[node]=k.second;}
         auto hello=impl_->call("session.hello");if(integer(field(field(hello.get(),"result"),"protocolVersion"))!=1)throw std::runtime_error("Unsupported control protocol version");
-        if(!reads)
-        {
-            const auto subscribed=impl_->client.send("subscribe",R"({"topics":["status"]})"),status=impl_->client.send("session.status");
-            impl_->reply(subscribed);
-            {auto state=impl_->reply(status);impl_->readStatus(field(state.get(),"result"));}
-            return;
-        }
-        // The rest at once, the graph read behind them: the server answers in order, so the
-        // snapshots are read after subscribing, and the reads take a few ticks, not one each.
-        auto& c=impl_->client;
-        const auto subscribed=c.send("subscribe",R"({"topics":["params.changed","transport","graph.changed","status","controllers","controls.changed"],"allChanges":true})");
-        const auto controllers=c.send("controllers.get"),transport=c.send("transport.get"),status=c.send("session.status");
-        impl_->refresh();
-        impl_->reply(subscribed);
-        {auto state=impl_->reply(controllers);impl_->readControllers(field(state.get(),"result"));}
-        {auto state=impl_->reply(transport);impl_->readTransport(field(state.get(),"result"));}
-        {auto state=impl_->reply(status);impl_->readStatus(field(state.get(),"result"));}
-        // Keep interleaved notifications: another client may have changed a value
-        // after its snapshot was read. service() drains them in server order.
+        // Started while the engine is busy with another client's long request (an app started again
+        // during a load), it waits for its turn: nothing it asks here changes anything.
+        patiently([&]{
+            auto& c=impl_->client;std::deque<uint64_t> out;
+            auto next=[&]{const auto id=out.front();out.pop_front();return impl_->reply(id);};
+            try
+            {
+                if(!reads)
+                {
+                    out={c.send("subscribe",R"({"topics":["status"]})"),c.send("session.status")};
+                    next();
+                    {auto state=next();impl_->readStatus(field(state.get(),"result"));}
+                    return;
+                }
+                // The rest at once, the graph read behind them: the server answers in order, so the
+                // snapshots are read after subscribing, and the reads take a few ticks, not one each.
+                out={c.send("subscribe",R"({"topics":["params.changed","transport","graph.changed","status","controllers","controls.changed"],"allChanges":true})"),
+                     c.send("controllers.get"),c.send("transport.get"),c.send("session.status")};
+                impl_->read();
+                next();
+                {auto state=next();impl_->readControllers(field(state.get(),"result"));}
+                {auto state=next();impl_->readTransport(field(state.get(),"result"));}
+                {auto state=next();impl_->readStatus(field(state.get(),"result"));}
+            }
+            catch(...){for(const auto id:out)impl_->dropped.insert(id);throw;} // asked again: these replies nobody takes
+            // Keep interleaved notifications: another client may have changed a value
+            // after its snapshot was read. service() drains them in server order.
+        });
     }
     RemoteControl::~RemoteControl()=default;
     RemoteControl::KnownParameters RemoteControl::knownParameters()const
@@ -1381,6 +1415,7 @@ namespace oscairn
             }
             else if(method=="graph.changed"){refresh=true;impl_->publish({0,ChangeKind::Graph});}
             else if(method=="session.resync"){refresh=resync=true;impl_->publish({0,ChangeKind::Resync});}
+            else if(method=="engine.busy" && std::exchange(impl_->afterBusy,false))refresh=true;
             else if(method.rfind("apps.",0)==0 && impl_->appMessages.size()<1024)impl_->appMessages.push_back(message);
             else if(method=="params.changed")for(auto c:array(field(params,"changes")))
             {

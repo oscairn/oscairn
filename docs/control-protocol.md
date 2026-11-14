@@ -636,6 +636,17 @@ So a second long request during one is refused as busy, not queued: it is the cl
 again, and for a setlist stepped twice during a load, only the slot chosen last is asked for
 (the Setlist app's jobs wait their turn, and the newest replaces one waiting).
 
+What a client should do: treat `-32009` as "not now", never as a lost connection. A job's
+connection (off any UI thread) asks again until the request runs; `RemoteControl` with
+`waits` does so every 25 ms, and its construction always does. A UI's connection keeps showing
+what it last read, says the engine is busy where a user asked for something, and reads again
+on `engine.busy`. A timeout is different: the request may have run, so the client reads the
+state again rather than repeating it. `LocalClient` keeps its connection through a timeout
+(slow is not gone) and drops the late reply when it comes. Since the engine answers
+`session.hello` even during a long request, a timeout followed by an unanswered
+`session.hello` means it answers nothing at all: only then do the desktop and its apps give
+the connection up (the desktop reconnects; an app quits and its shell starts it again).
+
 Notes, `controls.set`, `params.set` and the like are refused during a long request too: they
 need the control thread. The keys and panel of a device reach the audio thread without it and
 play on, as the open Performance does until the new one is published.

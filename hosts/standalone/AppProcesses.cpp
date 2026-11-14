@@ -174,7 +174,17 @@ namespace oscairn::standalone
             return false;
         }
         const int connection = engine_.appConnection(id, m->permissions);
-        if(connection < 0) { engine_.appClosed(id); say(id, juce::String(m->name) + " did not start: the engine gave it no connection."); return false; }
+        r.retry = 0;
+        if(connection < 0)
+        {
+            engine_.appClosed(id);
+            // The engine slow to answer is not the app failing: asked again, 0.25 s later and doubling, five times.
+            if(r.tries < 5) { r.retry = seconds() + 0.25 * (1 << r.tries++); std::fprintf(stderr, "oscairn: %s waits for its connection to the engine\n", m->name.c_str()); return false; }
+            r.tries = 0;
+            say(id, juce::String(m->name) + " did not start: the engine gave it no connection.");
+            return false;
+        }
+        r.tries = 0;
         // Its log: appended, and started afresh past 1 MB.
         const auto file = logFile(id);
         file.getParentDirectory().createDirectory();
@@ -279,7 +289,7 @@ namespace oscairn::standalone
     void AppProcesses::stop(const std::string& id)
     {
         auto& r = running_[id];
-        r.shown = false;
+        r.shown = false; r.retry = 0;
         if(front_ == id) front_.clear();
         if(r.pid <= 0) return;
         r.stopping = true;
@@ -354,6 +364,7 @@ namespace oscairn::standalone
     {
         for(auto& [id, r] : running_)
         {
+            if(r.pid <= 0 && r.retry > 0 && seconds() >= r.retry) start(id);
             if(r.pid <= 0) continue;
             int status = 0;
             const auto reaped = ::waitpid(r.pid, &status, WNOHANG);

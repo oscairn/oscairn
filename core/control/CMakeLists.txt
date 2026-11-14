@@ -341,7 +341,7 @@ set_tests_properties(control-hostile-notes PROPERTIES TIMEOUT ${switch_timeout})
 add_executable(oscairn-shared-parts-test tests/shared_parts.cpp)
 target_include_directories(oscairn-shared-parts-test PRIVATE ../clap-host/tests)
 target_link_libraries(oscairn-shared-parts-test PRIVATE oscairn_control_json)
-add_test(NAME control-shared-parts COMMAND oscairn-shared-parts-test $<TARGET_FILE:oscairn_basic_synth>)
+add_test(NAME control-shared-parts COMMAND oscairn-shared-parts-test $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(control-shared-parts PROPERTIES TIMEOUT ${switch_timeout})
 
 add_executable(oscairn-sound-presets-test tests/sound_presets.cpp)
@@ -355,7 +355,7 @@ target_compile_options(oscairn-installed-play PRIVATE -Wall -Wextra)
 # Sessions, native sounds and effects and Performances again with every CLAP plugin in a worker (RFC 0010 step 5).
 set(control_worker_tests
     "control-sound-presets|oscairn-sound-presets-test|$<TARGET_FILE:oscairn_basic_synth>"
-    "control-shared-parts|oscairn-shared-parts-test|$<TARGET_FILE:oscairn_basic_synth>"
+    "control-shared-parts|oscairn-shared-parts-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:kick-clap-fixture-normal>"
     "control-json-audio|oscairn-json-rpc-test|$<TARGET_FILE:oscairn_basic_synth>"
     "control-hostile-notes|oscairn-hostile-notes-test|$<TARGET_FILE:oscairn-hostile-notes-fixture>|$<TARGET_FILE:kick-clap-fixture-normal>|$<TARGET_FILE:oscairn_basic_synth>"
     "control-performance-switch-stress|oscairn-performance-switch-stress-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:kick-clap-fixture-normal>"

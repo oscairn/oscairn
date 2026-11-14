@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// RFC 0021 slice 3: parts sharing one engine, through the Session. Usage: shared-parts basic-synth.
+// RFC 0021 slice 3: parts sharing one engine, through the Session. Usage: shared-parts basic-synth [fixture].
 //
 // Parts whose instruments are Basic Synths share one instance on their own. Three parts saved with
 // an instance each open on one instance and sound as the three instances did; saved again they keep
@@ -9,7 +9,9 @@
 // redoing it, and removing a sharing part, sound as before. A sharing part saves as a Sound of its
 // own, which joins an instance where it is loaded. Changes between the layouts put the incoming
 // sounds into the playing instance and sound as each opened fresh. Asked for, a share spills the
-// same way, and the protocol shares and lists the shares.
+// same way, and the protocol shares and lists the shares. With the fixture (RFC 0045): five parts and
+// an effect open in the same layout fresh, after a Performance whose playing instance has room for
+// only some of them, while they play, and in a new Session, sharing or (OSCAIRN_SHARING=cpu) not.
 #include "oscairn/session.h"
 #include "oscairn/json_rpc.h"
 #include "oscairn/plugin_host.h"
@@ -119,12 +121,29 @@ namespace
     }
     std::string slurp(const fs::path& file) { std::ifstream in(file); std::stringstream b; b << in.rdbuf(); return b.str(); }
     size_t count(const std::string& text, const std::string& what) { size_t n = 0; for(auto at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) ++n; return n; }
+    // The open Performance's layout as engine.timing lists it (RFC 0045): each instance in use, its plugin, worker,
+    // nodes and parts. Plugin hosts place by measured cost and what is loaded already, so there the worker is left out.
+    std::string layout(Session& s)
+    {
+        std::string out;
+        for(const auto& i : s.engineTiming(false).instances)
+        {
+            if(!i.inUse) continue;
+            out += i.plugin + " on " + (placementPolicy().hosts ? std::string("a host") : i.worker) + ":";
+            for(const auto& n : i.nodes) out += " " + n;
+            out += " |";
+            for(const auto& p : i.parts) out += " " + p;
+            out += "\n";
+        }
+        return out;
+    }
 }
 
 int main(int argc, char** argv)
 {
-    if(argc != 2) return 2;
+    if(argc != 2 && argc != 3) return 2;
     synth = argv[1];
+    const char* fixture = argc == 3 ? argv[2] : nullptr;
     state_files::TemporaryDirectory temp, home;
     ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1); // a library of its own, for the Sounds
     const auto separate = temp.path / "separate", shared = temp.path / "shared", again = temp.path / "again", nine = temp.path / "nine";
@@ -310,6 +329,42 @@ int main(int argc, char** argv)
         const auto listed = rpc.dispatch(R"({"jsonrpc":"2.0","id":5,"method":"graph.get"})");
         check(added && added->find("\"node\":") != std::string::npos && listed && count(*listed, "\"shared\":{\"engine\":" + std::to_string(first)) == 3, "graph.add of a Basic Synth joins the instance");
     }
+
+    // RFC 0045: the same layout on every load, whatever played before and whatever is loaded already.
+    if(fixture)
+        for(const bool cpu : {false, true})
+        {
+            if(cpu) ::setenv("OSCAIRN_SHARING", "cpu", 1);
+            const auto five = temp.path / (cpu ? "five-cpu" : "five");
+            {
+                Session s(48000, frames); separately(s, 5);
+                const auto part = s.addPart("Effect"); s.insertIntoPart(part, 0, s.add("effect", fixture, "org.kick.test.effect")); s.commit();
+                s.savePerformance(five.string());
+            }
+            const std::string bias = cpu ? "OSCAIRN_SHARING=cpu: " : "";
+            std::string fresh;
+            {
+                Session s(48000, frames);
+                s.loadPerformance(five.string()); block(s);
+                fresh = layout(s);
+                std::printf("%sthe layout opened fresh:\n%s", bias.c_str(), fresh.c_str());
+                check(cpu ? s.graphState().shared.empty() : engines(s) == 1 && s.graphState().shared.size() == 5, bias + "five parts on " + (cpu ? "an instance each" : "one instance"));
+                // Three parts playing on one instance (sharing), whose room is four: four of five used to join it, the fifth on an instance of its own.
+                s.loadPerformance(separate.string()); gone(s); quiet(s);
+                s.loadPerformance(five.string()); gone(s);
+                check(layout(s) == fresh, bias + "the same layout after a Performance with room for some of it:\n" + layout(s));
+                // Reopened while it plays, its instance with room for two: two used to join it, the other three on a new one.
+                quiet(s);
+                s.loadPerformance(five.string()); gone(s);
+                check(layout(s) == fresh, bias + "the same layout reopened while it plays:\n" + layout(s));
+            }
+            {
+                Session s(48000, frames);
+                s.loadPerformance(five.string()); block(s);
+                check(layout(s) == fresh, bias + "the same layout in a new Session:\n" + layout(s));
+            }
+            ::unsetenv("OSCAIRN_SHARING");
+        }
 
 #ifndef _WIN32
     // A shared engine's worker that fails and is given up (crashed past its restarts; on the unit,

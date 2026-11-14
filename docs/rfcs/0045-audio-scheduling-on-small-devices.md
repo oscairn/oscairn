@@ -40,6 +40,9 @@ Checked when built and tested; the sections below say how.
 - [ ] 9a. Fair voices between the parts of a shared instance: a share per context even without a
       CPU budget ([fair voices](#fair-voices-between-the-parts-of-one-instance))
 - [ ] 9. Share by default, split under load ([sharing](#share-by-default-split-under-load))
+- [x] 9b. The same layout on every load: which parts share an instance is the Performance's
+      alone, whatever played before or is loaded already
+      ([status](#the-same-layout-on-every-load-2026-11-13))
 - [ ] 10. Readiness: a Sound not playable until prepared and warmed up, shown as loading
       ([first-use stalls](#start-up-and-first-use-stalls))
 - [ ] 11. The timing report: each part's latency state, misses by cause, panics caused by misses
@@ -463,6 +466,88 @@ engine on its own (`SoundContext::sharesOnItsOwn`, in `Session::read` and `Sessi
 part's instrument gets its own instance and worker. A Performance saved with parts sharing still
 opens shared, and a Sound loaded into a part can still join a playing instance. Cost: a process
 per part (about 34 MB a Sampler worker before samples on the unit). Not a profile field yet.
+Why the two opens differed is fixed since: [the same layout on every load](#the-same-layout-on-every-load-2026-11-13).
+
+### The same layout on every load (2026-11-13)
+
+Seen on the unit with ST Final (an arpeggiator, Analog, the Sampler parts, a piano with EQ, delay
+and reverb): 6 worker processes on one open, 10 on another, 6 after a reopen that reused
+instances, 10 after a restart, 13 once with instances kept warm. Each layout has its own load,
+misses and memory (a Sampler worker about 90 MB), and admission's figures were measured on
+whichever layout played ([below](#a-sounds-cost-not-an-instances)).
+
+**The rule before**, read in `Session::read` (`core/control/src/performance.cpp`): a node that can
+share (alone on its saved engine, a plugin offering sound contexts and an output bus, wired from
+its main output only, and the bias not `cpu`) joined the first of this Performance's engines of its
+plugin with room; failing that, any engine of the playing Performance with room (its sound
+prepared beside and selected at the cue); failing that, with more such nodes of its plugin to
+come, it started an engine of its own, its instance a free one taken over (playing or kept warm),
+a playing one prepared beside (`claim`), or a fresh one. What made the same Performance open
+differently, each found in the code and the first reproduced by the test below:
+
+1. **Joining the playing Performance's engines wherever they had room** (`playingEngines`): with
+   a Performance playing the plugin on an instance with room for some of the incoming parts, those
+   joined it and the rest started an instance of their own; on the next load the room was
+   different again. With the Basic Synth: five parts opened fresh on one instance, then on 4 + 1
+   after a Performance of three parts, then on 3 + 2 reopened while playing.
+2. **The first node of a group taking over a playing instance** (`claim`, or `take` of a playing
+   one): its sounds there are selected only at the cue, so it led no group, and the rest formed
+   one without it.
+3. **A playing engine with effect contexts taking every group it had room for**, so two effects
+   that open on an instance each could open as contexts of one.
+4. **The room the group's next nodes found** included the sounds the first node's saved state held
+   and did not play, discarded only after the read.
+5. **A saved engine claimed into a playing one** was not among this Performance's engines, which
+   nodes of its plugin formed on their own would have joined opened fresh.
+6. **The measured cost** fed admission per instance, whatever shared it
+   ([below](#a-sounds-cost-not-an-instances)).
+
+Looked for and not found: no unordered container decides any of it (`nodes_` and `measured_` are
+ordered maps, and node IDs grow in read order); a Performance's plugins load one after another on
+the control thread, so no parallel opens race; a worker's restart restores its instance as it was.
+
+**The rule now**, for the same Performance (its document), device profile and settings:
+
+- A saved engine opens as one instance, as saved (a Performance saved while its parts shared an
+  instance keeps that, whatever the bias, as before: its layout is that document's).
+- With the bias `memory`, `balanced` or unset (sharing), the nodes that can share, of one plugin
+  (ID, version and path), in document order, fill instances: each joins the first of this
+  Performance's instances of the plugin with room, else starts the next. The first node's unplayed
+  sounds go as it starts the group, so the room is the plugin's (its free sounds, output buses and
+  channels), not the saved state's.
+- With `cpu`, each node an instance of its own. Every other node (effects, plugins that cannot
+  share) as saved: an instance, or an effect context of its saved engine.
+- Instances already loaded only serve the layout, so they make a load faster without changing it:
+  a node alone takes one kept warm or a free one of the playing Performance (taken over, or its
+  sounds prepared beside) as before; a playing engine stands in for a group only whole (it has room
+  for every remaining node of the group's plugin, which a fresh instance would then hold too) and
+  for one group only; the first node of a group takes no playing instance of a plugin that can
+  share (its sounds there are selected only at the cue, so it could lead no group): one kept warm,
+  else a fresh one.
+  So a change between Performances sharing one plugin may load an instance that a partial join
+  used to spare: a process start and the plugin's load per group (not measured on the unit).
+- Each instance in a worker of its own (`OSCAIRN_PLUGIN_HOSTS` 0, the FANTOM-07's setting): the
+  workers follow the instances. No worker is given a core; the scheduler places the audio threads
+  on any core, or within `OSCAIRN_AUDIO_THREAD_CORES`.
+
+Not deterministic still: **plugin hosts** (`OSCAIRN_PLUGIN_HOSTS` above 0, off on the FANTOM-07 and
+by default) place an instance in the host whose nodes cost least as it loads, which counts what the
+playing Performance and the instances kept warm hold there and the measured costs; which parts share
+an instance is the same there, the process each lands in is not. And a part added, or a Sound loaded
+into one, joins a playing instance with room as before (`Session::add`, `addNodes`): an edit, saved
+as it plays.
+
+Visible in `engine.timing` (`instances`: each instance in use with the open Performance's nodes and
+parts on it and its worker, in the order of its first node; `cores`) and `oscairn-engine-timing`,
+which prints a line an instance: its plugin, worker, memory, in use or idle, nodes and parts.
+
+Tested by `control-shared-parts` (and its `-workers` and `-hosts` runs, the hosts' without the
+worker): five Basic Synth parts saved with an instance each, so they share as they open, and the
+fixture's effect, opened fresh, again after a Performance of three parts sharing an instance (room
+for four), again while they play (room for two), and in a new Session, list the same layout, workers
+included, each time; so do they with `OSCAIRN_SHARING=cpu`, an instance each. On the code before the
+change the same test listed 5, then 4 + 1, then 3 + 2. Its earlier checks, that a change between
+the separate and the shared layouts loads no instance, still hold.
 
 ### The app's process and the audio (2026-11-14)
 
@@ -984,7 +1069,8 @@ no callback longer than the period from a worker's wait.
   an instance when none has. Room (`SoundContext::room`, `core/engine/src/sound_context.cpp`) is
   the smallest of free output buses, free MIDI channels and free sound contexts. A Performance's
   load forms sharing again (`joinEngine` and `sameKind` in `core/control/src/performance.cpp`),
-  and the next Performance's sounds are prepared in the playing instances when they have room.
+  the same way on every load, and the next Performance's sounds are prepared in a playing instance
+  only where that changes nothing ([the same layout on every load](#the-same-layout-on-every-load-2026-11-13)).
   A plugin can share when it offers native sound contexts, a sound saved on its own, several
   output ports and a stepped output-bus parameter: FM (8 contexts), Analog (16) and the Sampler
   all share in today's builds, as does the Basic Synth (8).

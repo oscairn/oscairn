@@ -229,10 +229,12 @@ with the instance.
 
 Parts whose instruments are the same plugin share one instance, on their own, each with its own
 sound, MIDI channel and output bus ([RFC 0021](rfcs/0021-sounds-performances-and-library.md#parts-sharing-one-engine)):
-adding the plugin where an instance of it has room, opening a Performance, or changing to one
-(whose sounds are then prepared beside the playing ones, as above, and selected at the cue on
-channels of their own) all put a part's sound into an instance that has room; a part alone keeps
-an instance of its own. The host sends a part's notes and its parameter edits on its channel, and
+adding the plugin where an instance of it has room puts the part's sound there; opening a
+Performance fills instances with its parts of the plugin in order, each instance as many as it has
+room for, the same way on every load whatever played before ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#the-same-layout-on-every-load-2026-11-13));
+changing to one prepares its sounds beside a playing instance's, as above, selected at the cue on
+channels of their own, only where all its parts of the plugin fit there. A part alone keeps an
+instance of its own. The host sends a part's notes and its parameter edits on its channel, and
 takes its sound from its output port. A plugin offers this with native sound contexts and their
 snapshot with `save_sound` and `sound_values`, more than one output port, a stepped output-bus
 parameter tagged `OSCAIRN_ROLE_OUTPUT_BUS`, no audio input and no note output; the full list,

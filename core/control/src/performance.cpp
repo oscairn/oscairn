@@ -933,8 +933,9 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     std::map<NodeId,uint32_t> claimed; // contexts taken per playing engine
     auto playing=[&](const std::string& id,const std::string& path,const std::string& version,uint32_t count)->std::optional<NodeId>{
         for(const auto& [n,name]:nodes_){const auto& h=graph_.host(n);const auto& p=h.descriptor();if(p.id!=id || p.path!=path || p.version!=version || !h.failure().empty())continue;
+            // One of its groups to a playing engine: two in one would share an instance they would not share opened fresh (RFC 0045).
             const auto r=h.effectResources();auto& taken=claimed[graph_.effectSource(n)];
-            if(r && r->capacity>=r->prepared+taken+count){taken+=count;return n;}}
+            if(r && !taken && r->capacity>=r->prepared+count){taken=count;return n;}}
         return std::nullopt;};
     auto refs=parameterRefs(d);
     // RFC 0021: a node alone on its engine takes over a free instance of the same plugin, build and
@@ -957,10 +958,11 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         return Want{id,saved,build,wanted,worker};};
     auto same=[&](const Want& w,const PluginHost& h,const Loaded& l){const auto& p=h.descriptor();std::error_code e;
         return p.id==w.id && p.version==w.version && l.build==w.build && h.inWorker()==w.worker && (p.path==w.path.string() || fs::equivalent(p.path,w.path,e));};
-    auto take=[&](V plugin,const std::string& key)->std::optional<size_t>{
+    // leading (RFC 0045): the node may start a group, so no playing instance that could lead one (its state is given last, after the read).
+    auto take=[&](V plugin,const std::string& key,bool leading)->std::optional<size_t>{
         if(free.empty())return std::nullopt;
         const auto w=want(plugin);if(!w)return std::nullopt;
-        auto fits=[&](size_t i){return free[i].host && free[i].host->failure().empty() && same(*w,*free[i].host,free[i].loaded);}; // one kept warm may have failed since
+        auto fits=[&](size_t i){return free[i].host && (!leading || !free[i].node || SoundContext::busParameter(*free[i].host)==CLAP_INVALID_ID) && free[i].host->failure().empty() && same(*w,*free[i].host,free[i].loaded);}; // one kept warm may have failed since
         // One that holds this node's state already first (switching back), then kept warm, least recently
         // used first, then a playing one keeping it warm would not fit (the middle rule), and last, before
         // a new process is started, a playing one it would keep (RFC 0045's resident instances).
@@ -972,13 +974,14 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // ports has the node's sounds prepared beside its own; the node takes it over at the cue. Not in an
     // audition, which takes over nothing set aside.
     std::vector<std::unique_ptr<Beside>> beside;
-    auto claim=[&](V node,V plugin,const std::string& key,uint64_t room)->std::optional<NodeId>{
+    // leading: as take's.
+    auto claim=[&](V node,V plugin,const std::string& key,uint64_t room,bool leading)->std::optional<NodeId>{
         if(keepInstances_)return std::nullopt;
         std::optional<Want> w;
         for(const auto& [n,name]:nodes_){
             const auto loaded=loaded_.find(n);if(loaded==loaded_.end() || std::find(taken.begin(),taken.end(),n)!=taken.end())continue;
             const auto host=graph_.node(n).host;const auto& h=*host;
-            if(!h.preparesSnapshots() || h.effectResources() || !h.failure().empty())continue;
+            if(!h.preparesSnapshots() || h.effectResources() || !h.failure().empty() || (leading && SoundContext::busParameter(h)!=CLAP_INVALID_ID))continue;
             if(!w && !(w=want(plugin)))return std::nullopt;
             if(!same(*w,h,loaded->second) || integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())continue;
             try{checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());}catch(const std::exception&){continue;}
@@ -994,10 +997,17 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         return std::nullopt;};
     // RFC 0021 slice 3, formed on their own: a node alone on its engine whose plugin can share its
     // instance (and whose wires leave its main output only) plays a sound of a shared engine with room:
-    // first this Performance's, then, its sounds prepared beside and selected at the cue, the playing
-    // one's. Failing that, one of several such nodes of a plugin loads an instance of its own that the
-    // next may share. A saved engine goes whole into a playing engine with room, else into its own.
+    // this Performance's, in document order, the first with room. Failing that, one of several such
+    // nodes of a plugin starts a group of its own that the next may join. A saved engine goes whole
+    // into a playing engine with room, else into its own.
+    // RFC 0045: which nodes share an instance is the Performance's alone, the same on every load. A
+    // playing engine (its sounds prepared beside and selected at the cue) only stands in for a whole
+    // group: every remaining node of its kind fits it, as they would fit one instance opened fresh,
+    // and no other group of this Performance has it; the first node of a group takes no playing
+    // instance that can share (one kept warm, else a fresh one).
     std::vector<std::shared_ptr<SoundContext::Engine>> engines; // this Performance's, as they form
+    std::set<const SoundContext::Engine*> engaged; // playing engines a group of this Performance has
+    std::map<std::string,const SoundContext::Engine*> adopted; // the playing engine standing in for a kind's group
     Claimed onPlaying;
     std::map<std::string,std::pair<std::shared_ptr<SoundContext::Engine>,std::array<uint32_t,16>>> claimedEngines; // a saved engine's: the playing engine, the sound each saved channel selects
     std::set<std::string> offMain; // nodes with an audio wire from another of their outputs than the main one
@@ -1008,6 +1018,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     auto kind=[&](V plugin){return text(field(plugin,"id"))+'\n'+text(field(plugin,"version"))+'\n'+text(field(plugin,"pathHint"));};
     auto formable=[&](V node,const std::string& key){return SoundContext::sharesOnItsOwn() && text(field(node,"engine"))==key && group[key]==1 && !soundOf(node) && !offMain.count(key);};
     std::map<std::string,size_t> kinds;for(auto node:nodes)if(formable(node,text(field(node,"key"))))++kinds[kind(field(node,"plugin"))];
+    auto left=kinds; // those not read yet
     // The playing Performance's engines of the plugin, build and placement a node would load; none in an audition.
     auto playingEngines=[&](V plugin){
         std::vector<std::shared_ptr<SoundContext::Engine>> out;if(keepInstances_)return out;
@@ -1026,12 +1037,12 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     // with room for all its nodes, the sounds no node plays discarded once every node is read.
     auto claimEngine=[&](V plugin,const std::string& key,uint64_t room){
         for(const auto& e:playingEngines(plugin)){
-            if(SoundContext::room(*e)<group[key])continue;
+            if(engaged.count(e.get()) || SoundContext::room(*e)<group[key])continue;
             std::set<uint32_t> before;for(const auto& c:e->host->soundContexts())before.insert(c.id);
             std::array<uint32_t,16> selected;
             try{selected=inRoom(*e->host,room,[&]{return e->host->prepareSnapshot((root/"nodes"/key/"engine").string());});}catch(const std::exception&){continue;}
             for(const auto& c:e->host->soundContexts())if(!before.count(c.id))onPlaying.sounds.push_back({e->host,c.id});
-            claimedEngines[key]={e,selected};return true;}
+            claimedEngines[key]={e,selected};engaged.insert(e.get());return true;}
         return false;};
     auto restore=[&](NodeId runtime,V node,uint64_t room){
         auto& h=next->host(runtime);const auto key=text(field(node,"key"));
@@ -1082,9 +1093,12 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             const auto shared=soundOf(node); // RFC 0021 slice 3
             std::shared_ptr<SoundContext> joined;bool first=false; // formed on their own
             if(!siblings && !shared && formable(node,key)){
-                const auto version=text(field(plugin,"version"));
+                const auto version=text(field(plugin,"version"));const auto rest=left[kind(plugin)]--; // this node and those of its kind after it
                 for(const auto& e:engines)if(sameKind(*e,id,path,version) && (joined=joinEngine(e,root/"nodes"/key,false,room)))break;
-                if(!joined)for(const auto& e:playingEngines(plugin))if((joined=joinEngine(e,root/"nodes"/key,true,room))){onPlaying.contexts.push_back(joined);onPlaying.sounds.push_back({e->host,joined->own()});++reused;break;}
+                if(!joined){const auto playingNow=playingEngines(plugin);const auto mine=adopted.find(kind(plugin));
+                    for(const auto& e:playingNow)
+                        if((mine!=adopted.end()?mine->second==e.get():!engaged.count(e.get()) && SoundContext::room(*e)>=rest) && (joined=joinEngine(e,root/"nodes"/key,true,room))){
+                            adopted[kind(plugin)]=e.get();engaged.insert(e.get());onPlaying.contexts.push_back(joined);onPlaying.sounds.push_back({e->host,joined->own()});++reused;break;}}
                 first=!joined && kinds[kind(plugin)]>1;}
             if(siblings){if(!definitions.contains(engine) || text(field(definitions.at(engine),"engine"))!=engine || !ids.contains(engine))bad("missing shared engine root");
                 const auto& source=next->host(ids.at(engine)).descriptor();if(source.id!=id || text(field(field(definitions.at(engine),"plugin"),"pathHint"))!=path)bad("incompatible shared engine identity"); // as saved: the root may have loaded from elsewhere
@@ -1094,7 +1108,8 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 catch(const std::exception& e){
                     if(memoryRefusal(e))throw;
                     runtime=next->add(standIn(node,root/"nodes"/key,refs[key],std::string("its shared engine is not here: ")+e.what()));restored=false;}}
-            else if(shared && claimEngine(plugin,key,room)){runtime=next->add(claimedSound(node,key));restored=true;++reused;}
+            // Not where nodes of its kind form groups on their own: opened fresh, they could join it.
+            else if(shared && !kinds.count(kind(plugin)) && claimEngine(plugin,key,room)){runtime=next->add(claimedSound(node,key));restored=true;++reused;}
             else if(shared){
                 runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                       [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
@@ -1107,9 +1122,10 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                     context->engine()->build=buildDigest(host->descriptor().path);engines.push_back(context->engine());
                     restored=true;}}
             else if(joined){runtime=next->add(joined);restored=true;}
-            else if(const auto b=group[key]==1?claim(node,plugin,key,room):std::nullopt){runtime=*b;++reused;restored=true;first=false;} // one instance, its sounds selected at the cue
+            // The first node of a group takes no playing instance that could lead it: its sounds there until the cue, it would lead none (RFC 0045).
+            else if(const auto b=group[key]==1?claim(node,plugin,key,room,first):std::nullopt){runtime=*b;++reused;restored=true;first=false;} // one instance, its sounds selected at the cue
             else if(const auto engine=playing(id,path,text(field(plugin,"version")),group[key])){runtime=context(graph_.host(*engine),[&]{return next->addEffectContext(graph_,*engine);});++reused;}
-            else if(const auto f=group[key]==1?take(plugin,key):std::nullopt){
+            else if(const auto f=group[key]==1?take(plugin,key,first):std::nullopt){
                 runtime=next->add(free[*f].host);origins[runtime]={free[*f].loaded.build,source(key)};++reused;restored=true;
                 if(free[*f].node){taken.push_back(free[*f].node);later.push_back({runtime,key,*f});first=false;}else{warm.push_back(free[*f].host.get());restoreTaken(runtime,node,room,*f);}
                 free[*f].host.reset();}
@@ -1122,7 +1138,10 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());
                 if(integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())bad("note port layout changed");}
             if(first)if(const auto e=SoundContext::lead(next->node(runtime).host)){ // loaded with its state, now or kept warm; a stand-in stays as saved
-                e->build=buildDigest(next->host(runtime).descriptor().path);next->share(runtime,std::make_shared<SoundContext>(e,0,0,std::nullopt));engines.push_back(e);origins.erase(runtime);}
+                e->build=buildDigest(next->host(runtime).descriptor().path);next->share(runtime,std::make_shared<SoundContext>(e,0,0,std::nullopt));engines.push_back(e);origins.erase(runtime);
+                // The sounds its state holds and it does not play go now, not after the read (below), so the room the
+                // group's next nodes find is the same however many it was saved with (RFC 0045).
+                for(const auto& c:e->host->soundContexts())if(c.id && !c.selected_channels)e->host->discardSound(c.id);}
             ids.emplace(key,runtime);names.emplace(runtime,name);
             if(!boolean(field(node,"enabled")))disabled.insert(runtime);
             if(const auto role=roleFrom(node);!role.empty())roles[runtime]=role;

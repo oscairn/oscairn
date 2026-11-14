@@ -1062,7 +1062,7 @@ a Sound saves its sound on its own, and `parts.saveSound` no longer refuses one 
 
 `performance.save` and `performance.load` take `{"directory":"/path/to/performance"}`;
 returns are `{"saved":true}` and `{"loaded":true}`. Both are advertised by `session.hello`.
-Files use the [Performance version 8 format/schema](performance-format.md). Saving refuses
+Files use the [Performance version 13 format/schema](performance-format.md). Saving refuses
 existing directories and staged graph edits. Loading validates a complete replacement;
 a load failure leaves the playing graph intact. Successful publication emits a graph resync,
 invalidates old node/context references, and starts stopped at beat zero on adoption. The

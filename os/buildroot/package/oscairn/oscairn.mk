@@ -23,6 +23,11 @@ OSCAIRN_CONF_OPTS += -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 # for the target's triple; OSCAIRN_CARGO names another cargo of that release.
 OSCAIRN_CARGO ?= /opt/rust/cargo/bin/cargo
 OSCAIRN_CONF_OPTS += -DFETCHCONTENT_SOURCE_DIR_SAMPLEPACK=$(OSCAIRN_SAMPLEPACK_SRCDIR) -DSAMPLEPACK_CARGO=$(OSCAIRN_CARGO)
+# The Rust crates (samplepack, the engine core in core/engine/rust) for the target's CPU, as the C and C++
+# are built for it; release builds always (their own opt-level, whatever OSCAIRN_AUDIO_O3 says).
+ifneq ($(call qstrip,$(BR2_GCC_TARGET_CPU)),)
+OSCAIRN_CONF_OPTS += -DSAMPLEPACK_RUSTFLAGS="-C;target-cpu=$(call qstrip,$(BR2_GCC_TARGET_CPU))"
+endif
 
 ifeq ($(BR2_PACKAGE_OSCAIRN_LV2),y)
 OSCAIRN_DEPENDENCIES += lilv

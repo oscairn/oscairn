@@ -310,7 +310,7 @@ namespace oscairn
                         send(socket, answer);
                         continue;
                     }
-                    if(reply.empty() || (reply[0] != ResolveAsset && reply[0] != CreateAsset && reply[0] != LibraryRoot)) return expect(std::move(reply));
+                    if(reply.empty() || (reply[0] != ResolveAsset && reply[0] != CreateAsset && reply[0] != LibraryRoot && reply[0] != ResolveSample)) return expect(std::move(reply));
                     const auto kind = reply[0];
                     Reader r; r.data = std::move(reply); r.at = 1;
                     std::string answer;
@@ -323,6 +323,11 @@ namespace oscairn
                         {
                             const auto library = r.str(), minVersion = r.str();
                             answer = std::string(1, Done) + Writer().str(resolver->libraryRoot(library, minVersion)).data;
+                        }
+                        else if(kind == ResolveSample)
+                        {
+                            const auto at = resolver->resolveSample(r.str());
+                            answer = std::string(1, Done) + Writer().str(at.pack).u64(at.offset).u64(at.length).u64(at.preload).data;
                         }
                         else if(kind == CreateAsset)
                         {

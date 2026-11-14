@@ -212,6 +212,10 @@ add_executable(oscairn-sample-store-test engine/tests/sample_store.cpp)
 target_link_libraries(oscairn-sample-store-test PRIVATE oscairn_plugin_host)
 add_dependencies(oscairn-sample-store-test samplepack_cli)
 add_test(NAME sample-store COMMAND oscairn-sample-store-test "${SAMPLEPACK_CLI}")
+# A test instrument that resolves samples with oscairn.assets' resolve_sample and decodes them.
+add_library(oscairn-sample-fixture MODULE engine/tests/sample_fixture.cpp)
+target_link_libraries(oscairn-sample-fixture PRIVATE oscairn_clap_headers samplepack::samplepack)
+set_target_properties(oscairn-sample-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
 
 if(BUILD_TESTING) # the Legacy Sampler
     add_executable(oscairn-sampler-test engine/tests/sampler.cpp)

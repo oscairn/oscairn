@@ -35,15 +35,36 @@ typedef struct oscairn_asset_ref {
  * delete it once create returns. The copy goes into the user library (`user`, `<first 16 hex
  * digits of the SHA-256>/<name>`). The plugin then keeps ref in its state and lists it in oscairn.asset-dependencies. On failure it returns
  * false with a NUL-terminated reason in message. From an indexer, create is NULL. A host answers
- * drafts 1 and 2 with the same table. */
-static const char OSCAIRN_EXT_ASSETS[] = "oscairn.assets/draft-3";
+ * drafts 1 and 2 with the same table.
+ *
+ * Draft 4: items kept by content and named by their id rather than files. A reference whose path
+ * is "sample:<id>" or "waveform:<id>" (64 lowercase hex digits; library empty; sha256 empty or
+ * that id, which is its digest) names a sample in an Oscairn Sample Pack or a waveform
+ * (github.com/oscairn/samplepack). resolve answers a waveform reference with the path of its
+ * .owf file, once every sample it names is installed, and a sample reference with its pack's
+ * path. resolve_sample answers a sample reference with where its record is: the pack's path in
+ * path, read-only, and in location the record's offset, length and preload span, which with
+ * the id make the sp_index_entry the samplepack library's sp_record_* functions take. Both stay
+ * valid while the plugin holds the sound prepared: packs are appended to, never rewritten. An
+ * in-memory lookup, cheap enough for every sample of a sound. On failure it returns false with
+ * a NUL-terminated reason in message. From an indexer, resolve_sample is NULL. A host answers
+ * drafts 1 to 3 with the same table. */
+static const char OSCAIRN_EXT_ASSETS[] = "oscairn.assets/draft-4";
+static const char OSCAIRN_EXT_ASSETS_DRAFT_3[] = "oscairn.assets/draft-3";
 static const char OSCAIRN_EXT_ASSETS_DRAFT_2[] = "oscairn.assets/draft-2";
 static const char OSCAIRN_EXT_ASSETS_DRAFT_1[] = "oscairn.assets/draft-1";
+typedef struct oscairn_sample_location {
+    uint64_t offset;  /* the record's offset in the pack, bytes */
+    uint64_t length;  /* the record's length, bytes */
+    uint64_t preload; /* bytes from the record's start to the end of its preload window: read these first */
+} oscairn_sample_location_t;
 typedef struct oscairn_host_assets {
     bool (CLAP_ABI *resolve)(const clap_host_t*, oscairn_asset_ref_t* ref, char* path, uint32_t path_capacity,
                              char* message, uint32_t message_capacity);
     bool (CLAP_ABI *library_root)(const void* owner, const char* library_id, const char* min_version, char* path, uint32_t path_capacity); /* draft 2 */
     bool (CLAP_ABI *create)(const clap_host_t*, const char* file, oscairn_asset_ref_t* ref, char* message, uint32_t message_capacity); /* draft 3 */
+    bool (CLAP_ABI *resolve_sample)(const clap_host_t*, const oscairn_asset_ref_t* ref, char* path, uint32_t path_capacity,
+                                    oscairn_sample_location_t* location, char* message, uint32_t message_capacity); /* draft 4 */
 } oscairn_host_assets_t;
 
 /* Plugin extension. Main thread. Lists every asset the plugin's current state uses, so a host

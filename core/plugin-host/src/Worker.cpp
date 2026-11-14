@@ -301,6 +301,13 @@ namespace oscairn::worker
                 if(r.data.empty() || r.data[0] != Done) throw std::runtime_error(r.data.empty() ? "No answer from the engine" : r.data.substr(1));
                 r.at = 1; kick::clap::AssetReference ref; ref.library = r.str(); ref.path = r.str(); ref.sha256 = r.str(); return ref;
             }
+            SampleLocation resolveSample(const std::string& id) override
+            {
+                send(socket, std::string(1, ResolveSample) + Writer().str(id).data);
+                Reader r; r.data = receive(socket);
+                if(r.data.empty() || r.data[0] != Done) throw std::runtime_error(r.data.empty() ? "No answer from the engine" : r.data.substr(1));
+                r.at = 1; SampleLocation at; at.pack = r.str(); at.offset = r.u64(); at.length = r.u64(); at.preload = r.u64(); return at;
+            }
             std::string libraryRoot(const std::string& library, const std::string& minVersion) const override
             {
                 send(socket, std::string(1, LibraryRoot) + Writer().str(library).str(minVersion).data);

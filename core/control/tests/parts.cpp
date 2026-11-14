@@ -1447,6 +1447,12 @@ namespace
             s.setBudget({1e-9, 0});
             e = s.estimate();
             check(e.fits && e.uncertain, "a plugin not yet measured never refuses: it opens, said uncertain, where its guess alone would pass the budget");
+            // Its memory guess still counts: past the memory budget it is refused, and the refusal says the figure is a guess.
+            s.setBudget({.9, 1ull << 20});
+            e = s.estimate();
+            check(!e.fits && !e.uncertain, "a plugin not yet measured is refused where its memory guess passes the memory budget");
+            try { s.add("b", fixture, "org.kick.test.synth"); check(false, "adding past the memory budget is refused"); }
+            catch(const std::invalid_argument& x) { check(std::string(x.what()).find("MiB of it a guess for plugins not yet measured") != std::string::npos, std::string("the refusal says the memory is a guess: ") + x.what()); }
             s.setBudget({.9, 0});
             Audio x; s.note(true, 60, 1);
             for(int i = 0; i < 64; ++i) x.run(s);

@@ -594,20 +594,21 @@ namespace oscairn
             }
             e.uncertain = memoryFits && total <= budget_.cpu * e.cores && longest <= budget_.cpu;
         }
-        // A plugin not yet measured and with no estimate of its package's never refuses one (the owner,
-        // 2026-11-13): its default guess counts while the rest fits, but one that fits without the
-        // guessed plugins opens, said, and they are measured as it plays.
+        // A plugin not yet measured and with no estimate of its package's never refuses one for its CPU (the
+        // owner, 2026-11-13): its default guess counts while the rest fits, but one whose CPU fits without the
+        // guessed plugins opens, said, and they are measured as it plays. Their memory guess still counts: what
+        // does not fit in memory ends in killed workers on stage.
         auto guessed = [](const Cost& c) { return !c.measured && !c.certain; };
-        if(!(memoryFits && (cpuFits || e.uncertain)) && std::any_of(plugins.begin(), plugins.end(), guessed))
+        if(memoryFits && !cpuFits && !e.uncertain && std::any_of(plugins.begin(), plugins.end(), guessed))
         {
-            double total = 0, longest = 0; uint64_t bytes = 0; std::map<std::string, double> known;
+            double total = 0, longest = 0; std::map<std::string, double> known;
             for(const auto& c : plugins)
             {
                 if(guessed(c)) continue;
                 const double x = !c.certain ? c.cpu / 4 : c.cpu;
-                total += x; bytes += c.memory; longest = std::max(longest, c.part.empty() ? x : known[c.part] += x);
+                total += x; longest = std::max(longest, c.part.empty() ? x : known[c.part] += x);
             }
-            e.uncertain = (!ceiling || bytes + recording <= ceiling) && total <= budget_.cpu * e.cores && longest <= budget_.cpu;
+            e.uncertain = total <= budget_.cpu * e.cores && longest <= budget_.cpu;
         }
         e.fits = (memoryFits && cpuFits) || e.uncertain;
         // shortcut: a change is seamless only while both Performances' totals fit one block's budget, as before the
@@ -625,11 +626,14 @@ namespace oscairn
         const auto recording = recorder_.committedBytes(); // as estimateOf counts it beside the Performance
         const bool cpuFits = e.cpu <= budget_.cpu * e.cores && e.longest <= budget_.cpu;
         const bool memoryOver = ceiling && e.memory + recording > ceiling;
+        uint64_t guess = 0; // the default memory guess of plugins not yet measured, counted in e.memory
+        for(const auto& c : e.plugins) if(!c.measured && !c.certain) guess += c.memory;
         if(cpuFits && memoryOver) why.clear(); // its CPU fits: only the memory is said
         if(memoryOver)
         {
             why += std::string(why.empty() ? "needs " : ", and ") + std::to_string((e.memory + recording) >> 20) + " MiB of memory where it allows " + std::to_string(ceiling >> 20) +
-                   (recording ? " (" + std::to_string(recording >> 20) + " MiB of it recording's, the capture buffer's among them)" : std::string());
+                   (recording ? " (" + std::to_string(recording >> 20) + " MiB of it recording's, the capture buffer's among them)" : std::string()) +
+                   (guess ? " (" + std::to_string(guess >> 20) + " MiB of it a guess for plugins not yet measured)" : std::string());
             // With memory classes, the running apps (not always available) that hold the difference.
             std::vector<AppMemory> closable;
             if(memoryClasses())

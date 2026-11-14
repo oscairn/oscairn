@@ -442,3 +442,51 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.navigation(nav(2, 2, pv, 1, 2));
     assert_eq!(f.screen.ui.get_screen(), 0);
 }
+
+// The shell against the real engine (OSCAIRN_ENGINE, which ctest gives when the build has one),
+// started with no audio device in a folder of its own: it answers what the shell asks, the top bar
+// and Home fill in from it, and the engine's status reaches the meters. Skipped without one.
+#[test]
+fn against_the_real_engine() {
+    let Some(engine) = std::env::var_os("OSCAIRN_ENGINE").filter(|e| !e.is_empty()) else {
+        eprintln!("against_the_real_engine: skipped, OSCAIRN_ENGINE is not set");
+        return;
+    };
+    let screen = Screen::new();
+    let home = std::env::temp_dir().join(format!("oscairn-ui-engine-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join("run")).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(home.join("run"), std::fs::Permissions::from_mode(0o700)).unwrap(); // the engine's rule for its socket's folder
+    let socket = home.join("run/engine.sock");
+    let log = std::fs::File::create(home.join("engine.log")).unwrap();
+    let mut process = std::process::Command::new(engine)
+        .args(["--socket", socket.to_str().unwrap(), "--audio", "null", "--buffer-frames", "128"])
+        .env("HOME", &home)
+        .env("OSCAIRN_DATA_HOME", home.join("data"))
+        .env("OSCAIRN_CONFIG_HOME", home.join("config"))
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .unwrap();
+    let (tx, events) = mpsc::channel();
+    shell::start(&screen.ui, socket, &crate::profile::Profile::load(Some("fantom-07")).unwrap(), true, move |e| {
+        let _ = tx.send(e);
+    })
+    .unwrap();
+    let bar = || screen.ui.global::<Bar>();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !(bar().get_cpu_known() && !bar().get_tempo().is_empty() && !bar().get_performance().is_empty()) && std::time::Instant::now() < deadline {
+        if let Ok(e) = events.recv_timeout(std::time::Duration::from_millis(200)) {
+            shell::dispatch(e);
+        }
+    }
+    let shown = (bar().get_cpu_known(), bar().get_tempo().to_string(), bar().get_performance().to_string(), screen.ui.get_engine().to_string());
+    let lines: Vec<String> = screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
+    let _ = process.kill();
+    let _ = process.wait();
+    let log = std::fs::read_to_string(home.join("engine.log")).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&home);
+    assert!(shown.0 && !shown.1.is_empty() && !shown.2.is_empty() && shown.3.is_empty(), "shown {shown:?}; the engine's log:\n{log}");
+    assert!(lines.iter().any(|l| l == "No audio device (--audio null)"), "{lines:?}");
+}

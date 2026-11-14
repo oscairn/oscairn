@@ -64,14 +64,18 @@ How (a) works:
   changed.
 - Backends: Slint's ordinary windowed backend (winit) on macOS and Linux desktops, so the same
   screens run on a computer; `linuxkms` (no seat daemon: `backend-linuxkms-noseat`) for a device,
-  the cargo feature `kms`. The cargo feature `roland-fantom0` adds the FANTOM-0 panel reader
-  (optional hardware compiled out elsewhere).
+  the cargo feature `kms`. (The panel needs no code of the device's in the UI: the engine reads
+  it and counts what it does to lists, below.)
 - CMake: `-DOSCAIRN_UI=ON` builds it with cargo and installs `bin/oscairn-ui`; off by default,
   as the JUCE options are, because cargo downloads its crates on the first build. The device
-  build (`OSCAIRN_ROLAND_FANTOM0`) takes the `kms` and `roland-fantom0` features. ctest runs its
-  Rust tests.
-- The device bundle: installed as `/usr/bin/oscairn-ui` by the bundle's Oscairn package, with
-  `libxkbcommon` and `libinput` from the bundle's own libraries; no more `/opt/rust-setlist`.
+  build (`OSCAIRN_ROLAND_FANTOM0`) takes the `kms` feature. ctest's `ui-rust` runs its tests, with
+  the engine this build made when there is one.
+- The device bundle: `/usr/bin/oscairn-ui`, beside the JUCE app, with `libxkbcommon` (which the
+  bundle does not have yet) and `libinput` and `libudev` (which it has); no more
+  `/opt/rust-setlist`. Not done: the bundle's Buildroot package building it (cargo would need its
+  crates vendored for an offline build, and linking against the bundle's own libraries); until
+  then the device binary is built in an Ubuntu 24.04 arm64 container, as the prototype's was, and
+  copied in (the device run recipe below).
 
 ### 3. The shape of the code
 
@@ -153,4 +157,66 @@ The resource section shows two meters, CPU over RAM:
   shows changes (a whole percent, the tempo's text). The tests check that an update repaints a
   rectangle inside the section and that no pixel outside it changes, and that nothing is drawn at
   rest.
-</content>
+
+## The Setlist
+
+`setlist.rs` and `slint/setlist.slint`, from the prototype: the setlists on the left (pane 0, E1 on
+a FANTOM-07), the open setlist's slots on the right (pane 1, E6), the VALUE dial on the pane last
+touched. The slots show a view at a time (the setlist's grid, or as many list rows as fit); the
+cursor leaving the view turns a whole view. Confirm or a tap opens a slot (`library.load`); a slot
+chosen while one opens waits and opens next, the last chosen winning, as the JUCE engine client
+queues library loads; a load refused as busy (`-32009`, another client's long request) is tried
+again as the next; the next slot is prepared (`performance.prepare`). Left, Right, Page Up and
+Page Down are Previous and Next, as in the JUCE Setlist (page turners send them); Up and Down move
+the cursor. The setlist open and the slot playing are kept in the JUCE Setlist app's own state
+file (the data folder's `AppData/oscairn.setlist/state.json`), so either opens where the other
+left off. Not yet: editing, the setlist's own Previous/Next asked from Play (`oscairn.step.setlist`,
+which needs Play in Rust).
+
+## Adding a screen
+
+1. **The view:** `slint/foo.slint` with a global `FooState` holding what it shows (its models,
+   names) and its callbacks (taps), and a component drawing it from `Theme` only. Import and export
+   both in `shell.slint`, place the component under the top bar, shown for its `screen` number.
+2. **The model:** `src/foo.rs`, a `Screen` that keeps what it shows, sets a row or property only
+   when it changed (`update` in `setlist.rs` does it for a model), and puts what it asks the engine
+   in `out` as `(Request, method, params)`. It takes navigation as `act(Action) -> Outcome`, with
+   its own `Cursor` per pane; a tap does what Confirm does.
+3. **The shell:** a `Screen` value and a `Request` variant in `shell.rs`; route its replies, its
+   actions (only while it is shown) and its taps through `on_foo` as `on_setlist` does; a Home tile
+   opens it in `open` instead of handing the display over.
+4. **Tests** in `src/tests.rs`: headless renders (`Screen::new`, `frame` gives what was repainted),
+   against `Fixture`'s fake engine on a socket, and a picture saved to `target/screens`.
+
+## Building, running and testing
+
+- `cd ui && cargo build` (a window, on a computer); `cargo build --release --no-default-features
+  --features kms` for a device. `oscairn-ui --socket PATH` against a running engine; without a
+  `--handover` file a JUCE screen's tile says where that screen is instead.
+- `cargo test` (or ctest's `ui-rust`): every test renders headless through Slint's software
+  renderer into a buffer (no window opens), with data and configuration folders of their own;
+  `OSCAIRN_ENGINE=…/oscairn-engine cargo test` adds the test against the real engine, started with
+  `--audio null`. `cargo clippy --all-targets` is clean.
+
+## On a device: the run recipe (not yet run on a unit)
+
+1. Build the device binary: in an Ubuntu 24.04 arm64 container with Rust 1.95, `libudev-dev
+   libinput-dev libxkbcommon-dev libfontconfig-dev`: `cargo build --release --locked
+   --no-default-features --features kms` in `ui/`.
+2. Into the unpacked bundle: the binary as `usr/bin/oscairn-ui`, and the container's
+   `libxkbcommon.so.0` into `usr/lib/` (the bundle lacks it); this branch's `oscairn-fantom-start`,
+   `oscairn-fantom-stop` and its rebuilt JUCE app (`OSCAIRN_HOME_QUITS`) for the handover.
+3. Start: `OSCAIRN_UI=rust ./oscairn-fantom-start` (the profile still says JUCE); stop with
+   `./oscairn-fantom-stop`. `SLINT_KMS_FRAME_STATS=1` in `etc/default/oscairn-engine` is not passed
+   on; for frame statistics run `oscairn-ui` by hand through `start-chroot.sh` with it set.
+4. Measure, with ST Final playing and keys held, as the prototype's runs: the engine's deadline
+   misses and silenced blocks (`oscairn-engine-timing`) and `oscairn-ui`'s CPU (`/proc/PID/stat`)
+   over 10 s of moving the cursor on Home and through a long Setlist (the dial held turning; a view
+   turns each nine or so slots), and at rest; the top bar at rest and updating (CPU of the shell
+   with nothing touched: the meters move twice a second); resident memory
+   (`/proc/PID/smaps_rollup`).
+5. By hand: a tap lands where it is drawn (the touch rule); the VALUE dial, E1 and E6, ENTER and
+   EXIT move, confirm and cancel on Home and the Setlist; confirming Settings hands the display
+   over and its Home comes back: time both ways from the keeper's lines in `oscairn-fantom.log`
+   (whole seconds) or a stopwatch.
+

@@ -77,6 +77,12 @@ add_subdirectory(core)
 add_subdirectory(devices/roland-fantom0)
 add_subdirectory(plugins)
 add_subdirectory(hosts)
+# The UI in Rust (docs/rust-ui.md), replacing the JUCE app's screens one by one. Off by default:
+# cargo downloads its crates (Slint) on the first build.
+option(OSCAIRN_UI "Build the Rust UI, oscairn-ui (downloads its crates)" OFF)
+if(OSCAIRN_UI)
+    add_subdirectory(ui)
+endif()
 
 # Every test gets a data folder of its own unless it names one, so no test writes into the real
 # one (~/Library/Application Support/Oscairn): the engine keeps counters there.

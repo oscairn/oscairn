@@ -74,4 +74,10 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   ends oscairn-ui and removes the rule. fantom_start.sh: new dry-run checks; in a Linux
   container 91 ok, none failing (main's script there: none failing either); on macOS 4 checks
   fail on main and branch alike (/proc). engine-args test passed.
+- CMake: option OSCAIRN_UI, ui/CMakeLists.txt (cargo with the pinned toolchain through
+  SAMPLEPACK_CARGO, kms when OSCAIRN_ROLAND_FANTOM0, install bin/oscairn-ui, ctest `ui-rust`
+  with OSCAIRN_ENGINE). Test against the real engine (build-ui's, `--audio null`, its own
+  folders): passed once on the Mac. Docs: rust-ui.md (Setlist, adding a screen, building and
+  testing, device run recipe), RFC 0030 section. Buildroot packaging not done (offline crates,
+  cross linking): said in the docs.
 </content>

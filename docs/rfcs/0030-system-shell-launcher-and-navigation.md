@@ -263,6 +263,18 @@ A profile (RFC 0024) adds:
 | 5. Another launcher | A minimal second launcher installed; the chooser; a fixed launcher | Choosing it survives a restart; a fixed profile offers no choice |
 | 6. Compact | The flow with an encoder and two buttons | Library → Load → Back → Home with no touch |
 
+## The shell in Rust (decided 2026-11-14)
+
+The owner decided the UI moves to Rust ("Rust direction: yes on ui and readers"), replacing the
+JUCE app screen by screen as each is ready. The shell this RFC describes (top bar, Home) and the
+Setlist are the first, as `oscairn-ui` ([rust-ui.md](../rust-ui.md)): on a device it draws
+without an X server, which the audio needs (0 misses scrolling against about 650 under X on a
+FANTOM-07), and hands the display to X and the JUCE app for a screen not yet ported, taking it
+back when that screen's Home is pressed. The top bar gains a resource section of fixed width: the
+audio's CPU load and the memory in use, each a bar, a percent, both or neither, as the device's
+profile and the user's Settings say. Lists and Home navigate by the same actions the JUCE app's
+do, from touch, keys and the panel map's `navigate`. Built, tested headless; not yet run on a unit.
+
 ## Open questions
 
 - Whether apps in the background may keep updating their cards while another app is in front,

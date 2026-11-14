@@ -289,6 +289,34 @@ namespace
         check(!s.controllerControl("stop", {Kind::Switch, 0}) && !playing(), "and its release plays nothing");
     }
 
+    // A device's list navigation (its panel map's `navigate`): a control with one that plays nothing is counted
+    // for the apps, a move by its steps; one that plays what it is assigned plays it, unless the screen shows
+    // lists, when it navigates and plays nothing; the totals are what the engine tells a client.
+    void navigation()
+    {
+        Session s(48000, frames);
+        s.addPart("A"); s.commit();
+        s.setControllers({group(Role::Assign, "buttons", 2, {68, 69})}, {});
+        s.service();
+        using Kind = ControlInput::Kind;
+        auto total = [&](const std::string& key) { const auto n = s.controllerState().navigation; const auto at = n.find(key); return at == n.end() ? int64_t(0) : at->second; };
+        Navigation move; move.steps = 3;
+        Navigation pane1; pane1.pane = 1; pane1.steps = -2;
+        Navigation confirm; confirm.action = Navigation::Action::Confirm; confirm.pane = 1;
+        check(!s.controllerControl("dial", {Kind::Relative, .01}, move) && total("move") == 3, "a control that plays nothing navigates: a move by 3");
+        s.controllerControl("dial", {Kind::Relative, .01}, move); s.controllerControl("dial", {Kind::Relative, .01}, pane1);
+        check(total("move") == 6 && total("move:1") == -2, "totals, the pane's kept apart and negative steps summed");
+        s.controllerControl("ok", {Kind::Switch, 1}, confirm); s.controllerControl("ok", {Kind::Switch, 1}, confirm);
+        check(total("confirm:1") == 2 && total("cancel") == 0, "a confirm counts a press");
+        check(s.controllerControl("button:101", {Kind::Switch, 1}, move) && total("move") == 6 && s.controllerState().touched == "button:101", "a control that plays what it is assigned plays it and does not navigate");
+        s.setControlView({std::nullopt, std::nullopt, true, {}});
+        check(!s.controllerControl("button:101", {Kind::Switch, 1}, move) && total("move") == 9 && s.controllerState().touches == 1, "with the screen showing lists it navigates and plays nothing");
+        s.setControlView({std::nullopt, std::nullopt, false, {}});
+        check(s.controllerControl("button:101", {Kind::Switch, 1}, move) && total("move") == 9, "and plays again when it shows none");
+        check(parseNavigationKey("move:12") && parseNavigationKey("move:12")->second == 12 && parseNavigationKey("cancel")->first == Navigation::Action::Cancel
+              && !parseNavigationKey("move:") && !parseNavigationKey("jump") && !parseNavigationKey("move:x"), "keys parse");
+    }
+
     // Scene buttons: a scene that changes only live levels, pans and parameters, at once, heard
     // at the next block with the control thread not run and no plan compiled; one that switches a
     // plugin off, or glides, waits for the control thread.
@@ -695,7 +723,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 2) { std::fprintf(stderr, "usage: %s FIXTURE\n", argv[0]); return 2; }
-    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
+    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); navigation(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
     catch(const std::exception& e) { forbidAllocation = false; std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(!failures) std::puts("ok: a controller's MIDI into the engine moves its controls' targets within one block");
     return failures ? 1 : 0;

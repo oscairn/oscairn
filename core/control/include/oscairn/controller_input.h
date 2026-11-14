@@ -53,6 +53,8 @@ namespace oscairn
         // A device panel's own control, by identity, from its reader's thread (a device's, devices/): as
         // midi(), without MIDI. False when it played nothing.
         bool control(const std::string& control, ControlInput input) noexcept;
+        // The same for a control with a navigation (see Session::controllerControl).
+        bool control(const std::string& control, ControlInput input, const Navigation& navigation) noexcept;
 
     private:
         using Key = std::tuple<int, NodeId, uint32_t, uint32_t>; // an assignment's kind, node, param, id
@@ -104,6 +106,8 @@ namespace oscairn
         std::map<uint8_t, float> gains_;        // each live gain written since then
         uint64_t moves_ = 0;                    // counted, so the control thread knows whether more came
         std::string touched_;
+        bool lists_ = false;
+        std::map<std::string, int64_t> navigation_;
         uint64_t touches_ = 0;
         std::function<void()> wake_;
         // Control thread only: what the snapshot was compiled from.

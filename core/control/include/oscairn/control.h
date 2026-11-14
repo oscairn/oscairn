@@ -844,9 +844,11 @@ namespace oscairn
         // many moves so far (for learn).
         struct ControllerPort { std::string input, device; uint32_t port = 1; bool operator==( const ControllerPort& ) const = default; };
         virtual void setControllers( const std::vector<ControlGroup>& groups, const std::vector<ControllerPort>& ports ) = 0;
-        struct ControlView { std::optional<uint32_t> part; std::optional<ScreenPage> screen; std::vector<std::pair<uint32_t, uint32_t>> positions; };
+        // lists: the screen shows lists, so a control the device's map makes a list's navigation navigates and plays nothing (physical_controls.h's Navigation)
+        struct ControlView { std::optional<uint32_t> part; std::optional<ScreenPage> screen; std::optional<bool> lists; std::vector<std::pair<uint32_t, uint32_t>> positions; };
         virtual void setControlView( const ControlView& view ) = 0;
-        struct ControllerState { GroupPositions positions; std::string touched; uint64_t touches = 0; bool operator==( const ControllerState& ) const = default; };
+        // navigation: each Navigation key's total since the engine started (steps summed for a move, presses counted), so a client that reads now and then takes the difference
+        struct ControllerState { GroupPositions positions; std::string touched; uint64_t touches = 0; std::map<std::string, int64_t> navigation; bool operator==( const ControllerState& ) const = default; };
         virtual ControllerState controllerState() const = 0;
         // The values controls and faders play, as they are now: each control's value, each part's
         // level and mute, the master. Cheap (no graph read), for clients showing them or sending

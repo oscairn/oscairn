@@ -29,6 +29,7 @@ namespace oscairn
         std::lock_guard lock(lock_);
         if(view.part) part_ = *view.part;
         if(view.screen) { screen_ = *view.screen; source_.screen = screen_; }
+        if(view.lists) lists_ = *view.lists;
         for(const auto& [group, position] : view.positions)
         {
             if(group >= groups_.size()) throw std::invalid_argument("no such control group");
@@ -40,7 +41,7 @@ namespace oscairn
     Control::ControllerState ControllerInput::state() const
     {
         std::lock_guard lock(lock_);
-        return {positions_, touched_, touches_};
+        return {positions_, touched_, touches_, navigation_};
     }
 
     void ControllerInput::midi(uint8_t source, const uint8_t* bytes, size_t size) noexcept
@@ -75,6 +76,23 @@ namespace oscairn
         }
         catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
         if(wake) wake();
+        return played;
+    }
+
+    bool ControllerInput::control(const std::string& name, ControlInput input, const Navigation& navigation) noexcept
+    {
+        bool lists = false;
+        { std::lock_guard lock(lock_); lists = lists_; }
+        const bool played = lists ? false : control(name, input);
+        if(!played || lists)
+        {
+            try
+            {
+                std::lock_guard lock(lock_);
+                navigation_[navigationKey(navigation.action, navigation.pane)] += navigation.action == Navigation::Action::Move ? navigation.steps : 1;
+            }
+            catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
+        }
         return played;
     }
 

@@ -205,12 +205,20 @@
         "touches": {
           "type": "integer",
           "minimum": 0
+        },
+        "navigation": {
+          "type": "object",
+          "description": "Totals since the engine started, by key: move, move:N (steps summed), confirm, confirm:N, cancel, cancel:N (presses); N a list pane from the left",
+          "additionalProperties": {
+            "type": "integer"
+          }
         }
       },
       "required": [
         "positions",
         "touched",
-        "touches"
+        "touches",
+        "navigation"
       ],
       "additionalProperties": false
     },
@@ -3659,6 +3667,10 @@
                 "part": {
                   "type": "integer",
                   "minimum": 0
+                },
+                "lists": {
+                  "type": "boolean",
+                  "description": "The screen shows lists: a control the device's panel map makes a list's navigation navigates and plays nothing"
                 },
                 "screen": {
                   "type": "object",

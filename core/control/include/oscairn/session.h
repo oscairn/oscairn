@@ -306,6 +306,11 @@ namespace oscairn
         /// transport's buttons come by their function's name: "play" pressed starts the transport,
         /// "stop" pressed stops it.
         bool controllerControl( const std::string& control, ControlInput input ) noexcept;
+        /// The same, for a control the device's map gives a list navigation: with the screen showing
+        /// lists (ControlView::lists) it navigates and plays nothing; otherwise it plays what it is
+        /// assigned, and navigates only if it plays nothing. The navigation is counted for the apps
+        /// (ControllerState::navigation).
+        bool controllerControl( const std::string& control, ControlInput input, const Navigation& navigation ) noexcept;
         void setControllerWake( std::function<void()> wake );
         void serviceControllers(); // the control thread, woken: the moves to the model and the parameters to their plugins, and no more of service()
         void assign( const std::string& control, const Assignment& target, uint32_t part = 0 ) override;

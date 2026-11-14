@@ -669,6 +669,11 @@ namespace oscairn
         }
         return controllers_->control( control, input );
     }
+    bool Session::controllerControl( const std::string& control, ControlInput input, const Navigation& navigation ) noexcept
+    {
+        if( control == "play" || control == "stop" ) return controllerControl( control, input );
+        return controllers_->control( control, input, navigation );
+    }
     void Session::setControllerWake( std::function<void()> wake ) { controllers_->setWake( std::move( wake ) ); }
     void Session::serviceControllers() { controllers_->service(); sendParameters(); }
 

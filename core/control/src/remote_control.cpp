@@ -201,6 +201,9 @@ namespace oscairn
             controllers.positions.clear();
             for(auto p:array(field(v,"positions")))controllers.positions.push_back(static_cast<uint32_t>(integer(p)));
             controllers.touched=string(field(v,"touched"));controllers.touches=integer(field(v,"touches"));
+            controllers.navigation.clear();
+            if(V n=field(v,"navigation");n->type==json_type_object)
+                for(auto* m=static_cast<const json_object_s*>(n->payload)->start;m;m=m->next)controllers.navigation[std::string(m->name->string,m->name->string_size)]=int64_t(number(m->value));
         }
         void readStatus(V v)
         {
@@ -980,6 +983,7 @@ namespace oscairn
     {
         std::string text;
         if(view.part)text+="\"part\":"+std::to_string(*view.part);
+        if(view.lists)text+=(text.empty()?"":",")+std::string("\"lists\":")+(*view.lists?"true":"false");
         if(view.screen)
         {
             std::string params;

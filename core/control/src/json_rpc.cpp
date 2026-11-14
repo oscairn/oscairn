@@ -194,7 +194,9 @@ namespace oscairn
             const auto s = c.controllerState();
             std::vector<std::string> positions;
             for( const auto p : s.positions ) positions.push_back( std::to_string( p ) );
-            return "{\"positions\":" + join( positions ) + ",\"touched\":" + quote( s.touched ) + ",\"touches\":" + std::to_string( s.touches ) + '}';
+            std::string object;
+            for( const auto& [key, total] : s.navigation ) object += ( object.empty() ? "" : "," ) + quote( key ) + ':' + std::to_string( total );
+            return "{\"positions\":" + join( positions ) + ",\"touched\":" + quote( s.touched ) + ",\"touches\":" + std::to_string( s.touches ) + ",\"navigation\":{" + object + "}}";
         }
         std::string transport( Control& c )
         {
@@ -1858,8 +1860,9 @@ namespace oscairn
             }
             if( method == "controllers.view" )
             {
-                fields(p, {"part","screen","positions"});
+                fields(p, {"part","screen","lists","positions"});
                 Control::ControlView view;
+                if(member(p,"lists"))view.lists = boolean(member(p,"lists"));
                 if(member(p,"part"))view.part = integer(member(p,"part"));
                 if(const auto s = member(p,"screen"))
                 {

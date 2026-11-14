@@ -5,6 +5,7 @@
 
 #include <array>
 #include <functional>
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <string>
@@ -119,6 +120,40 @@ namespace oscairn
     // (Absolute, 0 to 1, picked up), a change (Relative, in the same units) or a switch (1
     // pressed, 0 released; momentary). The MIDI messages above become these too.
     struct ControlInput { enum class Kind { Absolute, Relative, Switch } kind = Kind::Absolute; double value = 0; };
+    // What a device's panel controls do in a list, whatever the device: move a pane's cursor by
+    // `steps` (an encoder's turn, or a pair of buttons' press of 1 and -1), confirm the item under it,
+    // or cancel. `pane` counts the list panes on screen from the left (0); -1: the pane last touched.
+    // Which control produces which is the device's panel map (`navigate`); the app knows only these.
+    struct Navigation
+    {
+        enum class Action { Move, Confirm, Cancel } action = Action::Move;
+        int pane = -1;
+        int steps = 1;
+        bool operator==( const Navigation& ) const = default;
+    };
+    // A navigation's key in ControllerState::navigation: "move", "confirm", "cancel", and with a pane
+    // "move:0", "confirm:1".
+    inline std::string navigationKey( Navigation::Action a, int pane )
+    {
+        const char* name = a == Navigation::Action::Move ? "move" : a == Navigation::Action::Confirm ? "confirm" : "cancel";
+        return pane < 0 ? std::string( name ) : std::string( name ) + ':' + std::to_string( pane );
+    }
+    inline std::optional<std::pair<Navigation::Action, int>> parseNavigationKey( const std::string& key )
+    {
+        const auto colon = key.find( ':' );
+        const auto name = key.substr( 0, colon );
+        int pane = -1;
+        if( colon != std::string::npos )
+        {
+            if( colon + 1 >= key.size() || key.size() - colon > 6 ) return std::nullopt;
+            for( size_t i = colon + 1; i < key.size(); ++i ) if( key[i] < '0' || key[i] > '9' ) return std::nullopt;
+            pane = std::atoi( key.c_str() + colon + 1 );
+        }
+        if( name == "move" ) return std::pair{ Navigation::Action::Move, pane };
+        if( name == "confirm" ) return std::pair{ Navigation::Action::Confirm, pane };
+        if( name == "cancel" ) return std::pair{ Navigation::Action::Cancel, pane };
+        return std::nullopt;
+    }
     class ControllerMapping
     {
     public:

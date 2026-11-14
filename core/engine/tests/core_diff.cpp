@@ -3,7 +3,7 @@
 // reference, driven through the same C interface by the same random plans and event streams, and
 // every result compared bit for bit: the events each step is sent, its overflow, each route's notes,
 // pedals and held keys, every activity counter, the voice limits, what taps and harmonies route,
-// and what a plan change's retired routes send. The plugins' side is modeled here, the same for
+// what a plan change's retired routes send, and the pedals each part takes by its receive setting. The plugins' side is modeled here, the same for
 // both: block times from the notes each holds, NOTE_ENDs after a tail (one in 13 never), lost and
 // reset blocks, silence for the note-end watchdog, a plugin that gives up its own voices. The Rust core's rules the C++
 // reference does not have (RFC 0045's guard past 12a: lost blocks, the chain after a step, the callback's slack) get
@@ -86,7 +86,7 @@ void events(Rng& rng,uint32_t block,std::vector<Event>& out,std::vector<uint8_t>
             case 8: out.push_back(expression(t,id,rng.below(6)?c:-1,rng.below(6)?k:-1,int32_t(rng.below(3)?0:rng.below(7)),rng.unit()*2)); break;
             case 9: case 10: out.push_back(midi(t,uint8_t(0x90|c),uint8_t(k),uint8_t(rng.below(4)?1+rng.below(127):0))); break;
             case 11: out.push_back(midi(t,uint8_t(0x80|c),uint8_t(k),uint8_t(rng.below(128)))); break;
-            case 12: out.push_back(midi(t,uint8_t(0xb0|c),64,(const uint8_t[]){0,63,64,127}[rng.below(4)])); break;
+            case 12: out.push_back(midi(t,uint8_t(0xb0|c),(const uint8_t[]){64,64,66,67}[rng.below(4)],(const uint8_t[]){0,37,63,64,127}[rng.below(5)])); break; // the pedals
             case 13: out.push_back(midi(t,uint8_t(0xb0|c),uint8_t(rng.below(2)?120:123),0)); break;
             case 14: out.push_back(rng.below(2)?note(CLAP_EVENT_NOTE_ON,t,c,k,2.0):note(CLAP_EVENT_NOTE_ON,t,c,k,.5,-1,1)); break; // invalid; another port
             case 15: out.push_back(midi(t,uint8_t(0xd0|c),uint8_t(rng.below(128)),0)); break; // channel pressure
@@ -130,6 +130,7 @@ oscairn_zone zone(Rng& rng)
     oscairn_zone z{};z.low_key=uint8_t(36+rng.below(8));z.high_key=uint8_t(44+rng.below(20));z.low_velocity=rng.below(4)?0:.2;z.high_velocity=1;
     z.channels=uint16_t(rng.below(2)?0xFFFF:1+rng.below(15));z.transpose=int8_t(int(rng.below(5))-2);z.curve=rng.below(3)?1:2;z.fixed_velocity=rng.below(6)?0:.6;
     z.sources=rng.below(8)?~0ull:0;z.max_notes=uint16_t(rng.below(3)?0:1+rng.below(6));z.part=rng.below(3);z.reserve=uint16_t(rng.below(4));z.priority=uint8_t(rng.below(11));
+    z.pedals=uint8_t(rng.below(2)?0:rng.below(64)); // each pedal's receive: all, none or own (3 also reads as all)
     return z;
 }
 

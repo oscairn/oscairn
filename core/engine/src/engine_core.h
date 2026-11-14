@@ -41,7 +41,7 @@ typedef struct
     uint16_t max_notes;
     uint32_t part;
     uint16_t reserve;
-    uint8_t priority;
+    uint8_t priority, pedals;
 } oscairn_zone;
 typedef struct { oscairn_zone zones[8]; size_t count; } oscairn_zones;
 

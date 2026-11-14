@@ -92,13 +92,16 @@ struct NoteRoute
     // held, lifted and let go (hold, lift, drop), so a harmony (RFC 0033) reads them without a scan.
     std::array<uint64_t,2> heldKeys{};
     std::array<uint16_t,128> heldCount{};
+    // Each pedal's (sustain, sostenuto, soft) last value from each source by channel, the untagged last: a
+    // route with zones sends the largest of those its receive takes (NoteZones::takesPedal).
+    std::array<std::array<std::array<uint8_t,maxSources+1>,16>,pedalClasses> pedalsBy{};
     // One past the last slot used (slots are taken lowest first): the scans of used slots stop there.
     uint16_t top=0;
     std::span<Note> active() noexcept {return {notes.data(),top};}
     std::span<const Note> active() const noexcept {return {notes.data(),top};}
     explicit NoteRoute(uint32_t ports):ports(ports) {} // a MIDI destination: MIDI's notes on every port
     explicit NoteRoute(const PluginHost& host,uint32_t fadeFrames=0):ports(host.noteInputPorts()),fadeFrames(fadeFrames) {for(uint32_t p=0;p<clap.size();++p)clap[p]=host.usesClapNotes(p);}
-    void clear() noexcept {for(auto& n:active())n.used=false;for(auto& p:pedal)p.fill(0);fading=0;heldKeys={};heldCount={};top=0;}
+    void clear() noexcept {for(auto& n:active())n.used=false;for(auto& p:pedal)p.fill(0);pedalsBy={};fading=0;heldKeys={};heldCount={};top=0;}
     void hold(Note& n) noexcept {n.held=true;if(n.key>=0 && n.key<128 && !heldCount[n.key]++)heldKeys[n.key/64]|=uint64_t(1)<<(n.key%64);}
     void lift(Note& n) noexcept {if(n.used && n.held && n.key>=0 && n.key<128 && !--heldCount[n.key])heldKeys[n.key/64]&=~(uint64_t(1)<<(n.key%64));n.held=false;}
     void drop(Note& n) noexcept {lift(n);n.used=false;while(top && !notes[top-1].used)--top;}
@@ -207,14 +210,26 @@ struct NoteRoute
         bool midi=false;
         if(h->type==CLAP_EVENT_MIDI && h->size==sizeof(clap_event_midi_t))
         {
-            const auto m=*reinterpret_cast<const clap_event_midi_t*>(h);
+            auto m=*reinterpret_cast<const clap_event_midi_t*>(h);
             if(m.port_index>=ports || m.port_index>=16)return emit(e);
             const auto kind=m.data[0]&0xf0,channel=m.data[0]&15;
             // Releases, chokes and a sustain pedal-up pass any zone: they end only notes this
             // route played, which zones since changed may no longer pass; one for a note never
             // played here matches nothing. A pedal-down still reaches only the zones' channels.
             const bool release=kind==0x80 || (kind==0x90 && !m.data[2]) || (kind==0xb0 && (m.data[1]==120 || m.data[1]==123 || (m.data[1]==64 && m.data[2]<64)));
-            if(zones && zones->count && kind>=0x80 && kind<0xf0 && !release && !zones->passes(channel,source))return true; // another zone's channel or device
+            if(const int p=kind==0xb0?pedalOf(m.data[1]):-1;zones && zones->count && p>=0)
+            {
+                // A pedal reaches a part by its receive setting, whichever device its notes come from (a pedal-down
+                // only on its zones' channels); it goes on as the largest of the sources taken, when that changes.
+                bool channelTaken=false;for(size_t z=0;z<zones->count;++z)channelTaken|=(zones->zones[z].channels>>channel&1)!=0;
+                if(!zones->takesPedal(m.data[1],source) || (!release && !channelTaken))return true;
+                auto& by=pedalsBy[size_t(p)][channel];
+                auto most=[&]{uint8_t v=0;for(size_t s=0;s<by.size();++s)if(zones->takesPedal(m.data[1],uint8_t(s)))v=std::max(v,by[s]);return v;};
+                const uint8_t was=most();by[std::min<size_t>(source,maxSources)]=m.data[2];
+                if(most()==was)return true;
+                m.data[2]=most();reinterpret_cast<clap_event_midi_t*>(e.bytes.data())->data[2]=m.data[2];h=e.header();
+            }
+            else if(zones && zones->count && kind>=0x80 && kind<0xf0 && !release && !zones->passes(channel,source))return true; // another zone's channel or device
             if(kind==0x90 || kind==0x80) {
                 e=Event::note(kind==0x90 && m.data[2],m.data[1],m.data[2]/127.0,h->time,channel,m.port_index);midi=true;h=e.header();
             } else if(kind==0xb0 && m.data[1]==64) {

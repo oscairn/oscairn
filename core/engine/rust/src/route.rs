@@ -97,6 +97,7 @@ pub struct Zone {
     pub part: u32,
     pub reserve: u16,
     pub priority: u8,
+    pedals: u8, // whose pedals the part takes: two bits per class, PedalReceive (All 0, None 1, Own 2)
 }
 
 impl Zone {
@@ -135,6 +136,21 @@ impl Zones {
     pub fn first(&self) -> Option<&Zone> {
         self.all().first()
     }
+    /// NoteZones::takesPedal: the first zone's receive for pedal class `class` (sustain, sostenuto, soft).
+    fn takes_pedal(&self, class: usize, source: u8) -> bool {
+        match self.first().map_or(0, |z| z.pedals >> (2 * class) & 3) {
+            1 => false,
+            2 => self.all().iter().any(|z| z.hears(source)),
+            _ => true,
+        }
+    }
+    /// Whether the receive for pedal class `class` takes each source's (its table slot, the last for untagged).
+    fn pedal_from(&self, class: usize, slot: usize) -> bool {
+        self.takes_pedal(class, u8::try_from(slot).unwrap_or(UNTAGGED))
+    }
+    fn takes_channel(&self, channel: u8) -> bool {
+        self.all().iter().any(|z| u32::from(z.channels) & (1 << channel) != 0)
+    }
     fn passes(&self, channel: u8, source: u8) -> bool {
         self.all().iter().any(|z| u32::from(z.channels) & (1 << channel) != 0 && z.hears(source))
     }
@@ -153,6 +169,7 @@ pub struct NoteRoute {
     fade_frames: u32,
     pub held_keys: [u64; 2],
     held_count: [u16; 128],
+    pedals_by: [[[u8; MAX_SOURCES as usize + 1]; 16]; 3], // each pedal's last value from each source by channel (untagged last)
 }
 
 /// What a routed event may touch besides its route: its zones, where it entered the graph, whether
@@ -181,6 +198,7 @@ impl NoteRoute {
             fade_frames,
             held_keys: [0; 2],
             held_count: [0; 128],
+            pedals_by: [[[0; MAX_SOURCES as usize + 1]; 16]; 3],
         }
     }
     pub fn slot(&self, i: usize) -> &Slot {
@@ -201,6 +219,7 @@ impl NoteRoute {
         self.pedal = [[0; 16]; 16];
         self.held_keys = [0; 2];
         self.held_count = [0; 128];
+        self.pedals_by = [[[0; MAX_SOURCES as usize + 1]; 16]; 3];
     }
     fn hold(&mut self, i: usize) {
         self.held.set(i);
@@ -419,18 +438,40 @@ pub fn route(rs: &mut Routes, me: Route, e: &Event, next_id: &mut u32, emit: &mu
         let (kind, channel, time) = (d[0] & 0xf0, d[0] & 15, e.time());
         // Releases, chokes and a pedal-up pass any zone: they end only notes this route played.
         let release = kind == 0x80 || (kind == 0x90 && d[2] == 0) || (kind == 0xb0 && (d[1] == 120 || d[1] == 123 || (d[1] == 64 && d[2] < 64)));
-        if let Some(z) = cx.zones {
-            if z.count != 0 && (0x80..0xf0).contains(&kind) && !release && !z.passes(channel, cx.source) {
-                return true; // another zone's channel or device
+        let pedal = match (kind, d[1]) {
+            (0xb0, 64) => Some(0),
+            (0xb0, 66) => Some(1),
+            (0xb0, 67) => Some(2),
+            _ => None,
+        };
+        let mut value = d[2];
+        match (cx.zones.filter(|z| z.count != 0), pedal) {
+            // A pedal reaches a part by its receive setting, whichever device its notes come from (a pedal-down
+            // only on its zones' channels); it goes on as the largest of the sources taken, when that changes.
+            (Some(z), Some(p)) => {
+                if !z.takes_pedal(p, cx.source) || (!release && !z.takes_channel(channel)) {
+                    return true;
+                }
+                let by = &mut r.pedals_by[p][usize::from(channel)];
+                let most = |by: &[u8; MAX_SOURCES as usize + 1]| by.iter().enumerate().filter(|&(s, _)| z.pedal_from(p, s)).map(|(_, &v)| v).max().unwrap_or(0);
+                let was = most(by);
+                by[usize::from(cx.source.min(MAX_SOURCES))] = d[2];
+                value = most(by);
+                if value == was {
+                    return true;
+                }
+                e.0[20] = value;
             }
+            (Some(z), None) if (0x80..0xf0).contains(&kind) && !release && !z.passes(channel, cx.source) => return true, // another zone's channel or device
+            _ => {}
         }
         let (port16, channel16) = (port as i16, i16::from(channel));
         if kind == 0x90 || kind == 0x80 {
             e = Event::note(kind == 0x90 && d[2] != 0, i16::from(d[1]), f64::from(d[2]) / 127.0, time, channel16, port16);
             midi = true;
         } else if kind == 0xb0 && d[1] == 64 {
-            r.pedal[usize::from(port)][usize::from(channel)] = d[2];
-            if !r.clap[usize::from(port)] && d[2] < 64 {
+            r.pedal[usize::from(port)][usize::from(channel)] = value;
+            if !r.clap[usize::from(port)] && value < 64 {
                 for i in r.used.and_not(r.held).iter() {
                     let s = r.slot(i);
                     if u16::from(s.port) == port && s.channel == channel16 {

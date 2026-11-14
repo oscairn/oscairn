@@ -503,9 +503,11 @@ namespace oscairn::host
     {
         while( !threadShouldExit() )
         {
+            bool outputs = false;
             {
                 const auto scope = engine.outFifo_.read( engine.outFifo_.getNumReady() );
                 std::lock_guard lock( engine.outputLock_ );
+                outputs = !engine.midiOutputs_.empty();
                 auto send = [&]( int index ) {
                     const auto& o = engine.outgoing_[(size_t)index];
                     juce::MidiBuffer block;
@@ -517,7 +519,9 @@ namespace oscairn::host
                 for( int i = 0; i < scope.blockSize1; ++i ) send( scope.startIndex1 + i );
                 for( int i = 0; i < scope.blockSize2; ++i ) send( scope.startIndex2 + i );
             }
-            wait( 1 ); // well inside the audio output's latency, which every message is due after
+            // Well inside the audio output's latency, which every message is due after. With no MIDI output
+            // open, what comes goes nowhere: drained every 100 ms, not 1,000 wake-ups a second at rest.
+            wait( outputs ? 1 : 100 );
         }
     }
 

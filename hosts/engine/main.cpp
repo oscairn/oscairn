@@ -68,10 +68,20 @@ int main(int argc,char** argv)
         oscairn::host::Pump pump(server,managed,stopping);
         audio.setServiced([&pump]{pump.poll();}); // what changed goes out after each service tick
         std::cout<<"oscairn-engine: listening on "<<socket<<std::endl;
+#if JUCE_LINUX
+        // The message loop sleeps until a message comes (a timer's, a device's), where runDispatchLoopUntil
+        // would wake every millisecond to look (about 1,000 wake-ups a second of the main thread at rest);
+        // a timer ends it once a signal asks.
+        struct Stop final : juce::Timer { void timerCallback() override { if(stopping) juce::MessageManager::getInstance()->stopDispatchLoop(); } } stop;
+        stop.startTimer(50);
+        juce::MessageManager::getInstance()->runDispatchLoop();
+        stop.stopTimer();
+#else
         // On macOS runDispatchLoop() calls [NSApp run], but this console host
         // has no NSApplication. The bounded loop pumps the native run loop too,
         // so JUCE timers and device callbacks stay serviced without a GUI app.
         while(!stopping && juce::MessageManager::getInstance()->runDispatchLoopUntil(50)) {}
+#endif
         audio.setServiced({});
         return pump.result;
     }

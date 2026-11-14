@@ -1742,6 +1742,7 @@ namespace oscairn
         void Process::supervise()
         {
             std::unique_lock lock(superviseMutex);
+            uint32_t tick = 0;
             while(!stopping)
             {
                 wakeSupervisor.wait_for(lock, std::chrono::milliseconds(10));
@@ -1757,7 +1758,10 @@ namespace oscairn
                                              : "Plugin worker exited (status " + std::to_string(WEXITSTATUS(status)) + ")");
                     continue;
                 }
-                if(const auto u = usage(pid); u.memory)
+                // Its memory and CPU time every 100 ms, not each 10 ms tick: reading them (/proc on Linux) was most of
+                // the supervisor's cost, about 1 % of a core a worker at rest in the Linux container. A crash, a hang
+                // and blocks too slow are still seen at the tick.
+                if(const auto u = tick++ % 10 ? Usage{} : usage(pid); u.memory)
                 {
                     memory.store(u.memory); cpu.store(u.cpu);
                     if(memoryLimit && u.memory > memoryLimit)

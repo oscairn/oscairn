@@ -1081,6 +1081,17 @@ from 300 to 172 MB over a session. What was built:
   its own, and says how many and their memory ([control protocol](../control-protocol.md)).
 - `memory.state` gives the floor (`available`) and what the system has available (`systemAvailable`).
 
+The engine at rest, outside its audio thread (2026-11-14; the Linux container, one Performance in
+seven workers, no notes, each thread's CPU over 10 s): the main thread 5.3 to 5.9 % of a core, each
+worker's supervisor 0.6 to 0.7 %, the MIDI-out thread 0.3 to 1.1 % and JUCE's timer thread 1.0 to
+1.5 %. A supervisor read its worker's memory and CPU time (`/proc` on Linux) every 10 ms: now every
+100 ms, crashes, hangs and blocks too slow still seen at the 10 ms tick (0.2 to 0.4 % each). The
+MIDI-out thread woke every millisecond with no MIDI output open: now every 100 ms then (0.0 %).
+The engine's main loop, `runDispatchLoopUntil`, woke every millisecond to look for messages: on
+Linux it now sleeps in JUCE's message loop until one comes, a timer ending it on a signal (4.5 %,
+within the spread). The 5 ms service tick itself and the timer thread that drives it are unchanged.
+Engine CPU outside the audio thread at rest, summed: about 12 % of a core before, about 8 % after.
+
 `control-residents-workers` checks each: five workers kept warm idle while a Performance
 plays; one of them let go when its build is replaced; 1 KiB short of the floor, one more let go and
 none in use; above it, the rest stay; `memory.release` lets go of the rest; and a Performance

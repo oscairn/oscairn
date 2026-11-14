@@ -26,6 +26,10 @@ void drawSection(juce::Graphics&, juce::Rectangle<int>, juce::Colour fill);
 // as primary text still reads on it, with a line between rows so neighbors of one color stay apart.
 // Selection and other highlights are drawn over it.
 void drawListRow(juce::Graphics&, juce::Rectangle<int> row, int index, juce::Colour color);
+// A page of a list, for a device whose screen does not scroll by touch (its panel's buttons): the
+// view moved by the whole rows it shows less one, so a row stays in sight; `by` pages down, or up
+// when negative, held at the ends. The selection stays where it is.
+void pageList(juce::ListBox&, int by);
 // Wires in the routing views (theme format 4): enabled audio and note wires, disabled ones,
 // draining ones (seamless changes, RFC 0021) and ones that no longer fit their plugin's ports; and
 // control lines, a plugin's lanes to controls and parameters (RFC 0011).

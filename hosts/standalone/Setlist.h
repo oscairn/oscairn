@@ -49,6 +49,7 @@ namespace oscairn::standalone
         void renamePage(int page, const std::string& name);
         void removePage(int page);               // and its slots; a setlist keeps at least one page
         void step(int by);                       // to the next or previous slot that opens, across pages
+        void scrollPage(int by) { pageList(list_, by); } // the list (its list display) a page down, or up when negative
         void mark(int index);                    // the slot playing, without opening it (an app started again, RFC 0022)
         void exportSetlist();                    // with its Performances and all they need, as the Library exports it
         std::function<void()> onCurrent;         // the slot playing changed

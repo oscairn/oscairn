@@ -78,6 +78,7 @@ namespace oscairn::standalone::settings
         const std::vector<const PageInfo*>& shown() const { return shown_; }
         bool open(const std::string& id); // false: not shown here
         void back();                       // to the list, where it replaces the page
+        void scrollPage(int by) { pageList(list_, by); } // the list a page down, or up when negative (pageList)
         const PageInfo* current() const { return current_ < 0 ? nullptr : shown_[size_t(current_)]; }
         Page* page() const { return page_.get(); }
         bool listing() const { return list_.isVisible() && !page_; } // only the list shows

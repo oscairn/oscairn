@@ -5,7 +5,8 @@
 // profile's 1280 x 720 panel (its scale, the panel's layout under Home and the apps' frames; the
 // Setlist and Settings in windows of their own, as their processes have), against a real engine
 // session over the control socket without an audio device. Each screen is left untouched, when
-// it draws nothing; then the Library's list scrolls. Prints a line for each.
+// it draws nothing; then the Library's list scrolls, and pages as a panel's buttons would page it.
+// Prints a line for each.
 //   oscairn_ui_draw_test PLUGIN_DIR SCANNER THEMES LAYOUT PROFILE
 #include "../DeviceScreen.h"
 #include "../Launcher.h"
@@ -213,6 +214,23 @@ int main(int argc, char** argv)
                     const auto view = box->getViewport()->getScreenBounds();
                     const auto area = view.getWidth() * double(view.getHeight()) * screen.scale() * screen.scale();
                     std::printf("%-26s %6.0f pixels a frame; the list's view is %.0f\n", "", c.frames ? double(c.pixels) / c.frames : 0.0, area);
+                }
+                // Paging, for a panel without touch scrolling: a page is the rows shown less one, held at the ends.
+                if(box)
+                {
+                    auto* view = box->getViewport();
+                    const int row = box->getRowHeight(), rows = view->getViewHeight() / row - 1, end = view->getViewedComponent()->getHeight() - view->getViewHeight();
+                    view->setViewPosition(0, 0);
+                    const auto selected = box->getSelectedRows();
+                    library.scrollPage(1);
+                    check(view->getViewPositionY() == rows * row, "a page down moves the rows shown less one");
+                    library.scrollPage(2);
+                    check(view->getViewPositionY() == std::min(end, 3 * rows * row), "two more pages");
+                    library.scrollPage(1000);
+                    check(view->getViewPositionY() == end, "and no further than the end");
+                    library.scrollPage(-1000);
+                    check(view->getViewPositionY() == 0, "nor back past the top");
+                    check(box->getSelectedRows() == selected, "and the selection stays");
                 }
                 panel.overlay(nullptr);
             }

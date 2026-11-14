@@ -92,6 +92,12 @@ void drawListRow(juce::Graphics& g,juce::Rectangle<int> r,int index,juce::Colour
         case ThemeStyle::Rows::Fill:break;
     }
 }
+void pageList(juce::ListBox& list,int by) {
+    auto* view=list.getViewport();
+    if(view==nullptr || list.getRowHeight()<=0)return;
+    const int rows=std::max(1,view->getViewHeight()/list.getRowHeight()-1);
+    view->setViewPosition(view->getViewPositionX(),view->getViewPositionY()+by*rows*list.getRowHeight());
+}
 void drawInked(juce::Graphics& g,const juce::String& s,juce::Rectangle<int> r,const juce::Font& font,juce::Justification h) {
     // Outside what is being painted (a part of the window drawn again): nothing to shape or trace. Its ink may reach past r by a line.
     if(s.isEmpty() || !g.clipRegionIntersects(r.expanded(0,int(std::ceil(font.getHeight())))))return;

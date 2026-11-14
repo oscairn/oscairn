@@ -123,6 +123,7 @@ namespace oscairn::standalone
         void setCompact(bool compact);              // one line a row, to see more; kept for the next time
         bool compact() const { return compact_; }
         void setPills(bool pills);                  // the left column's libraries and tags as pills, not rows; kept too
+        void scrollPage(int by) { pageList(list_, by); } // the list a page down, or up when negative (pageList)
         bool pills() const { return pills_; }
         void refresh() { stale_ = true; message_.clear(); timerCallback(); } // query again now, or once the engine is free
         const std::vector<Control::LibraryItem>& items() const { return result_.items; }

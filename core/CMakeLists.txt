@@ -62,6 +62,7 @@ set_tests_properties(hardware-plugin PROPERTIES TIMEOUT 30)
 
 add_library(oscairn_engine STATIC
     engine/src/chain.cpp
+    engine/src/core_cpp.cpp
     engine/src/graph.cpp
     engine/src/sound_context.cpp
     engine/src/AudioHelpers.cpp

@@ -565,7 +565,7 @@ namespace oscairn
                 {"controllers.get",Play|Edit|System},{"controllers",Play|Edit|System},{"controllers.set",System},{"controllers.view",System},{"midi.ignore",System},
                 {"controllers.inputs",System},{"controllers.choose",System},{"controllers.ignore",System},
                 {"engine.attach",System},{"engine.release",System},{"budget.set",System},{"budget.forget",System},{"performance.reopen",System},{"audio.set",System},
-                {"memory.alwaysAvailable",System},{"memory.launch",System},{"memory.closed",System},{"memory.state",System},{"memory.release",System},{"engine.timing",System}};
+                {"memory.alwaysAvailable",System},{"memory.launch",System},{"memory.closed",System},{"memory.shell",System},{"memory.state",System},{"memory.release",System},{"engine.timing",System}};
             return table;
         }
         [[noreturn]] void refuse( std::string_view method, uint32_t needs )
@@ -699,6 +699,11 @@ namespace oscairn
                 if(l.admitted)client.launched(app.app,true);
                 return std::string("{\"admitted\":")+(l.admitted?"true":"false")+",\"offerNext\":"+(l.offerNext?"true":"false")+",\"reason\":"+quote(l.reason)+'}';
             }
+            if(method=="memory.shell") {
+                fields(p,{"bytes"});
+                try{c.setShellMemory(uint64_t(integer(member(p,"bytes"))));}catch(const std::invalid_argument& e){throw Failure{-32005,e.what()};}
+                return R"({"accepted":true})";
+            }
             if(method=="memory.closed") {fields(p,{"app"});const std::string app(string(member(p,"app")));c.appClosed(app);client.launched(app,false);return R"({"closed":true})";}
             if(method=="engine.timing") {
                 fields(p,{"reset"});const auto t=c.engineTiming(member(p,"reset") && boolean(member(p,"reset")));
@@ -725,7 +730,7 @@ namespace oscairn
                 fields(p,{});const auto m=c.memoryState();
                 return "{\"device\":"+std::to_string(m.device)+",\"reserved\":"+std::to_string(m.reserved)+",\"share\":"+std::to_string(m.share)+",\"floor\":"+std::to_string(m.floor)+
                     ",\"margin\":"+std::to_string(m.margin)+",\"committed\":"+std::to_string(m.committed)+",\"opportunistic\":"+std::to_string(m.opportunistic)+
-                    ",\"available\":"+std::to_string(m.available)+",\"systemAvailable\":"+std::to_string(m.systemAvailable)+
+                    ",\"available\":"+std::to_string(m.available)+",\"systemAvailable\":"+std::to_string(m.systemAvailable)+",\"shell\":"+std::to_string(m.shell)+
                     ",\"running\":"+appList(m.running)+",\"alwaysAvailable\":"+appList(m.alwaysAvailable)+",\"nextPrepared\":"+(m.nextPrepared?"true":"false")+",\"nextCommitted\":"+(m.nextCommitted?"true":"false")+'}';
             }
             if(method=="memory.release") {fields(p,{});const auto r=c.releaseResidents();return "{\"instances\":"+std::to_string(r.instances)+",\"bytes\":"+std::to_string(r.bytes)+'}';}

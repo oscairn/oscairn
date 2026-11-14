@@ -223,6 +223,10 @@ namespace oscairn
         // it does not use until its estimate fits above it. 0: not watched.
         struct Budget { double cpu = 0; uint64_t memory = 0; uint64_t device = 0, system = 0, floor = 0, margin = 0, available = 0; };
         virtual void setBudget(const Budget& budget) = 0;
+        // The UI's own resident memory, reserved beside `system` (which holds the OS and the
+        // engine's base): each UI sends its own when it starts, replacing the last; a budget set
+        // later keeps it. std::invalid_argument when it does not fit beside the floor and margin.
+        virtual void setShellMemory(uint64_t bytes) = 0;
         // An app's memory reservation (RFC 0025): what it needs to open and do its job.
         struct AppMemory { std::string app; uint64_t reserve = 0; };
         // The always-available apps, reserved whether they run or not, so they always open.
@@ -243,7 +247,7 @@ namespace oscairn
         // budget's `available` floor and what the system has available now (0: not known here).
         struct MemoryState
         {
-            uint64_t device = 0, reserved = 0, share = 0, floor = 0, margin = 0, committed = 0, opportunistic = 0, available = 0, systemAvailable = 0;
+            uint64_t device = 0, reserved = 0, share = 0, floor = 0, margin = 0, committed = 0, opportunistic = 0, available = 0, systemAvailable = 0, shell = 0;
             std::vector<AppMemory> running, alwaysAvailable;
             bool nextPrepared = false, nextCommitted = false;
         };

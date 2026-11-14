@@ -3,16 +3,11 @@
 #include "Engine.h"
 #include "Icons.h"
 #include "Profile.h"
+#include "SessionSetup.h" // readCaptureSeconds, writeCaptureSeconds
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace oscairn::standalone
 {
-    /// The retroactive buffer's length (RFC 0020): what was saved in the configuration folder, or
-    /// the device's default, its profile's captureSeconds, else 2 minutes with 2 GB or less and 10
-    /// minutes above. 0 is off: no buffer is allocated.
-    double readCaptureSeconds(const juce::File& configuration, const Profile& profile);
-    void writeCaptureSeconds(const juce::File& configuration, double seconds);
-
     /// Record and Capture (RFC 0020), for the top bar and the desktop's toolbar beside the tempo:
     /// Record starts a take of Main and the notes, and stops it; Capture saves the last 30
     /// seconds of the retroactive buffer as a take. While a take records, Record is filled in

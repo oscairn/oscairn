@@ -109,6 +109,37 @@ How (a) works:
   page.
 - **Themes are the JUCE app's** (below): the same folders and the same choice.
 
+## Session setup
+
+What the JUCE app sends the engine when it starts and when it reconnects, what each depends on,
+and where it is applied now. The rule: what must hold whichever UI runs (engine policy, from the
+device profile and the user's settings) is applied by the engine itself when it starts with the
+profile, through one shared function; only what is a UI's own is sent by that UI.
+
+| What (request) | From | Where it lives now |
+| --- | --- | --- |
+| The budget: `budget.set` with `cpu` (the reliability level's share, 0.75 at `instrument`), `memory` (80% of `compute.memory`), `available` (`compute.availableMemory`) and the memory classes (`device`, `system` = `osMemory`, `floor` = `performanceMemory`, `margin` 5%), off when they do not fit | the profile's `reliability` and `compute` | `setUpSession` (hosts/standalone/SessionSetup.cpp:14), applied by the engine at start with `--device-profile` (hosts/audio/AudioEngine.cpp:201) and by the JUCE app to an engine it starts (hosts/standalone/Main.cpp:1058); before, Main.cpp's `started()` alone |
+| The always-available apps: `memory.alwaysAvailable` | the profile's `alwaysAvailable` (default `oscairn.performance`, `oscairn.library`), each at its manifest's `memory.reserve` (the Apps folder, hosts/standalone/AppManifest.cpp) or Oscairn's placeholder (`Profile::appMemory`) | the same |
+| The device's package repositories: `packages.setDeviceRepositories` | the profile's `repositories`, `hideOfficial` | the same |
+| Capture's buffer: `record.retro` | the configuration folder's `capture` (Settings' choice), else `compute.captureSeconds`, else 120 or 600 s by memory (`readCaptureSeconds`, SessionSetup.cpp:49) | the engine at start (AudioEngine.cpp:202); the JUCE app for its own engine (Main.cpp:1061, not for `--snapshot`) |
+| The UI's own memory: `memory.shell` (new) | the UI process's resident memory | each UI, on connecting: the JUCE app with its setup (it was part of `budget.set`'s `system`), the Rust shell (ui/src/shell.rs:263) |
+| The Performance last open: `performance.reopen` | the engine's own record | each UI (Main.cpp:1098 with a separate engine, not `--play`; shell.rs:265) |
+| The device's control groups: `controllers.set` | the profile's controls | the engine with `--device-profile` already took them (AudioEngine.cpp:194); the JUCE app sends them again (Main.cpp:152) and its `Controllers` adds external controllers' and Mackie Control (Controllers.cpp:91), not ported |
+| What the screen shows: `controllers.view` | the UI's lists, part and page | each UI (Engine.cpp:177; the Rust shell's `lists`) |
+| The engine's options and environment: the audio device, panel, keys, keyboard (`Profile::configureAudio`, Main.cpp:947), `OSCAIRN_RELIABILITY`, the audio cores and worker settings (Main.cpp:997-1010) | the profile | the JUCE app for the engine it starts; for the engine alone, os/scripts/engine-args.py and the start script, as before |
+| On reconnecting (`Engine::attach`, Engine.cpp:166): `engine.attach` (a managed engine), `record.retro` when the length differs, `controllers.set`, `controllers.view` | the app's own state | the JUCE app; the budget, classes and repositories were never sent again, which an engine started with the profile now applies itself |
+| Opening an app: `memory.launch`, `memory.closed` (Launcher.cpp:336); a process app's `apps.connect` | Home's tiles, the Apps menu, `--app` | the JUCE app; not at start. The Rust Setlist does not ask a reservation yet. A launch is now let go when the connection that asked it closes without `memory.closed` (a shell killed), as an app's own connections are |
+
+After a Rust-path start (the engine started by the start script with the profile, then the Rust
+shell) the engine reports the same budget, memory classes, capture and repositories as after a
+JUCE-path start; only each UI's own memory differs. `session_setup_matches_the_juce_app`
+(ui/src/tests.rs) checks it with the real engine and the real JUCE app (offscreen: `--connect`
+with `--snapshot`, which leaves capture out, so the test sends the app's `record.retro` itself)
+and the FANTOM-07's figures measured on a unit: `cpu` 0.75, `device` 1,040,187,392 B, `floor`
+300 MiB, `margin` 49.6 MiB, `available` 200 MiB, the two always-available apps, capture 30 s; the
+repositories are compared between the two paths. The engine applies the setup only with `--device-profile`, which engine-args.py
+passes for a profile with a panel (the FANTOM-07 has one).
+
 ## Themes
 
 `theme.rs` reads themes as the JUCE app does ([design-language.md](design-language.md#one-format-for-both-uis)):

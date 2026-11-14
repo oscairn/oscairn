@@ -545,6 +545,7 @@ namespace oscairn
         impl_->call("budget.set","{\"cpu\":"+encode(b.cpu)+",\"memory\":"+std::to_string(b.memory)+",\"device\":"+std::to_string(b.device)+",\"system\":"+std::to_string(b.system)+
                     ",\"floor\":"+std::to_string(b.floor)+",\"margin\":"+std::to_string(b.margin)+",\"available\":"+std::to_string(b.available)+'}');
     }
+    void RemoteControl::setShellMemory(uint64_t bytes) { impl_->call("memory.shell","{\"bytes\":"+std::to_string(bytes)+'}'); }
     void RemoteControl::setAlwaysAvailable(const std::vector<AppMemory>& apps) {
         std::string list;for(const auto& a:apps)list+=(list.empty()?"":",")+std::string("{\"app\":")+quote(a.app)+",\"reserve\":"+std::to_string(a.reserve)+'}';
         impl_->call("memory.alwaysAvailable","{\"apps\":["+list+"]}");
@@ -556,7 +557,7 @@ namespace oscairn
     void RemoteControl::appClosed(const std::string& app) { impl_->call("memory.closed","{\"app\":"+quote(app)+'}'); }
     Control::MemoryState RemoteControl::memoryState() {
         auto d=impl_->call("memory.state","{}");auto r=field(d.get(),"result");MemoryState m;
-        for(auto [key,to]:{std::pair{"device",&m.device},{"reserved",&m.reserved},{"share",&m.share},{"floor",&m.floor},{"margin",&m.margin},{"committed",&m.committed},{"opportunistic",&m.opportunistic},{"available",&m.available},{"systemAvailable",&m.systemAvailable}})
+        for(auto [key,to]:{std::pair{"device",&m.device},{"reserved",&m.reserved},{"share",&m.share},{"floor",&m.floor},{"margin",&m.margin},{"committed",&m.committed},{"opportunistic",&m.opportunistic},{"available",&m.available},{"systemAvailable",&m.systemAvailable},{"shell",&m.shell}})
             *to=uint64_t(integer(field(r,key)));
         auto apps=[](V v){std::vector<AppMemory> out;for(auto a:array(v))out.push_back({string(field(a,"app")),uint64_t(integer(field(a,"reserve")))});return out;};
         m.running=apps(field(r,"running"));m.alwaysAvailable=apps(field(r,"alwaysAvailable"));

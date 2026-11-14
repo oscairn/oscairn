@@ -18,6 +18,7 @@ kms = ["slint/backend-linuxkms-noseat"]
 # Slint under the GPLv3 (it offers GPL-3.0-only, which an AGPL-3.0-or-later program may combine with).
 slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software", "unstable-fontique-011"] }
 serde_json = "1"
+libc = "0.2"
 
 [build-dependencies]
 slint-build = "=1.18.1"

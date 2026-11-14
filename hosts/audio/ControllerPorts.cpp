@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ControllerPorts.h"
+#include "../standalone/SessionSetup.h"
 #include "oscairn/library.h"
 #include <juce_core/juce_core.h>
 #include <algorithm>
@@ -13,19 +14,7 @@ namespace oscairn::host
     {
         std::filesystem::path keptFile() { return dataHome() / "controllers.json"; }
         // Where the app kept the choices before the engine did: its configuration folder, found as Theme finds it.
-        juce::File appChoices()
-        {
-            juce::File root;
-            if(const auto env = juce::SystemStats::getEnvironmentVariable("OSCAIRN_CONFIG_HOME", {}); env.isNotEmpty()) root = juce::File(env);
-#if JUCE_MAC
-            else root = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("Application Support/Oscairn");
-#elif JUCE_LINUX
-            else { const auto xdg = juce::SystemStats::getEnvironmentVariable("XDG_CONFIG_HOME", {}); root = (xdg.isNotEmpty() ? juce::File(xdg) : juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile(".config")).getChildFile("Oscairn"); }
-#else
-            else root = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("Oscairn");
-#endif
-            return root.getChildFile("controller-profiles.json");
-        }
+        juce::File appChoices() { return standalone::configurationFolder().getChildFile("controller-profiles.json"); }
         juce::String text(const std::string& s) { return juce::String::fromUTF8(s.c_str()); }
     }
 

@@ -57,6 +57,7 @@ namespace oscairn
         // staging area available for correction. Empty names address nodes by ID only.
         void savePerformance(const std::string& directory) override;
         void setBudget(const Budget& budget) override;
+        void setShellMemory(uint64_t bytes) override;
         void setAlwaysAvailable(const std::vector<AppMemory>& apps) override;
         Launch launchApp(const AppMemory& app, bool dropNext = false) override;
         void appClosed(const std::string& app) override;
@@ -439,6 +440,7 @@ namespace oscairn
         // time, from blocks that ran undisturbed (budget.cpp, measure).
         struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; }; // samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here
         Budget budget_;
+        uint64_t shell_ = 0; // the UI's own resident memory (setShellMemory), reserved beside budget_.system
         bool loadGuard_ = true; // OSCAIRN_LOAD_GUARD=off: a diagnostic and test setting, not a product mode
         std::map<std::string, Measurement> measured_;          // by plugin ID, version and build digest, and what it declared (pluginKey)
         bool measurementsLoaded_ = false, measurementsChanged_ = false;

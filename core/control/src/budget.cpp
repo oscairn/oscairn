@@ -269,10 +269,18 @@ namespace oscairn
         if(memoryClasses() != (pressureFd_ >= 0 || pressureSource_)) armPressure(memoryClasses());
     }
 
+    void Session::setShellMemory(uint64_t bytes)
+    {
+        if(budget_.device && budget_.system + bytes + budget_.floor + budget_.margin > budget_.device)
+            throw std::invalid_argument("the UI's memory does not fit beside the system's share, the floor and the margin");
+        shell_ = bytes;
+        if(memoryClasses()) evictOpportunistic();
+    }
+
     // Memory classes (RFC 0025, "Admission's arithmetic"). An app counts once, running or always available.
     uint64_t Session::reservedMemory(bool closedAlwaysAvailable) const
     {
-        uint64_t n = budget_.system;
+        uint64_t n = budget_.system + shell_;
         for(const auto& a : running_) n += a.reserve;
         if(closedAlwaysAvailable)
             for(const auto& a : alwaysAvailable_)
@@ -477,7 +485,7 @@ namespace oscairn
         m.committed = committedMemory();
         m.opportunistic = (prepared_ && preparedOpportunistic_ ? preparedMemory() : 0) + warmMemory();
         m.available = budget_.available; m.systemAvailable = systemAvailable();
-        m.running = running_; m.alwaysAvailable = alwaysAvailable_;
+        m.running = running_; m.alwaysAvailable = alwaysAvailable_; m.shell = shell_;
         m.nextPrepared = prepared_ != nullptr; m.nextCommitted = prepared_ && !preparedOpportunistic_;
         return m;
     }

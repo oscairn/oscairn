@@ -56,6 +56,7 @@ namespace oscairn
         void forgetFetches();
         void savePerformance(const std::string& directory) override;
         void setBudget(const Budget& budget) override;
+        void setShellMemory(uint64_t bytes) override;
         void setAlwaysAvailable(const std::vector<AppMemory>& apps) override;
         Launch launchApp(const AppMemory& app, bool dropNext = false) override;
         void appClosed(const std::string& app) override;

@@ -1281,8 +1281,13 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   go as if it had been sent; so has an app launched by a connection that closed without sending it
   (a shell killed with its Settings open), unless another open connection launched it too or it has
   a connection of its own.
+  `memory.shell` takes `{bytes}`: the UI's own resident memory, reserved beside `budget.set`'s
+  `system` (which then holds the OS and the engine's base); each UI sends its own when it connects,
+  replacing the last, and a budget set later keeps it; refused (-32005) when it does not fit beside
+  the system's share, the floor and the margin ([rust-ui.md](rust-ui.md#session-setup)).
   `memory.state` (`{}`) returns `{device,reserved,share,floor,margin,committed,opportunistic,
-  available,systemAvailable,running,alwaysAvailable,nextPrepared,nextCommitted}`: `available` the
+  available,systemAvailable,shell,running,alwaysAvailable,nextPrepared,nextCommitted}` (`shell`:
+  `memory.shell`'s bytes, within `reserved`): `available` the
   budget's floor for the system's available memory (`budget.set`'s optional `available`, in bytes;
   0 not watched) and `systemAvailable` what the system has available now (Linux's MemAvailable; 0
   where it is not known). Below the floor, plugin instances kept warm for the next change are let go,

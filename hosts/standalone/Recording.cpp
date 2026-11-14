@@ -5,7 +5,6 @@ namespace oscairn::standalone
 {
     namespace
     {
-        juce::File captureFile(const juce::File& configuration) { return configuration.getChildFile("capture"); }
         juce::String text(const std::string& s) { return juce::String::fromUTF8(s.c_str()); }
         juce::String clockText(double seconds)
         {
@@ -16,20 +15,6 @@ namespace oscairn::standalone
         // "2026-11-01 21-04-17 Open Road": the time a take's folder is named by, and the rest.
         bool stamped(const juce::String& folder) { return folder.length() >= 19 && folder.substring(0, 19).containsOnly("0123456789- ") && folder[4] == '-' && folder[10] == ' '; }
         constexpr double keepChoices[] = {0, 60, 120, 300, 600};
-    }
-
-    double readCaptureSeconds(const juce::File& configuration, const Profile& profile)
-    {
-        const auto saved = captureFile(configuration).loadFileAsString().trim();
-        if(saved.isNotEmpty() && saved.containsOnly("0123456789.")) return std::clamp(saved.getDoubleValue(), 0.0, 3600.0);
-        if(profile.compute.captureSeconds >= 0) return profile.compute.captureSeconds; // the device's own
-        return profile.compute.memory > 0 && profile.compute.memory <= 2048 ? 120 : 600; // RFC 0020's proposed defaults
-    }
-
-    void writeCaptureSeconds(const juce::File& configuration, double seconds)
-    {
-        configuration.createDirectory();
-        captureFile(configuration).replaceWithText(juce::String(seconds, 0) + "\n");
     }
 
     RecordButtons::RecordButtons(Engine& engine) : engine_(engine)

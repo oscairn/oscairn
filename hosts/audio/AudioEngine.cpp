@@ -3,6 +3,7 @@
 #include "NullDevice.h"
 #include "WebTransport.h"
 #include "../standalone/Profile.h"
+#include "../standalone/SessionSetup.h"
 
 #include "oscairn/midi_input.h"
 #include "oscairn/realtime.h"
@@ -189,8 +190,18 @@ namespace oscairn::host
         // control no group names plays nothing. An app that attaches sends its own in their place.
         if( !config.profile.empty() )
         {
-            session_->setControllers( standalone::controlGroups( standalone::readProfile( config.profile ) ), {} );
+            const auto profile = standalone::readProfile( config.profile );
+            session_->setControllers( standalone::controlGroups( profile ), {} );
             std::fprintf( stderr, "oscairn: control groups from the profile %s, until an app sends its own\n", config.profile.c_str() );
+            // The session's setup that holds whichever UI runs (SessionSetup.h): the budget, memory
+            // classes, repositories and capture, from the profile and the user's settings. A UI
+            // sends only its own memory (memory.shell).
+            try
+            {
+                standalone::setUpSession( *session_, profile );
+                session_->recordRetro( standalone::readCaptureSeconds( standalone::configurationFolder(), profile ) );
+            }
+            catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: session setup from the profile: %s\n", e.what() ); }
         }
         if( !config.panelDevice.empty() )
         {

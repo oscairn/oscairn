@@ -222,6 +222,8 @@ fn the_top_bar_follows_the_engine() {
     f.pump();
     assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed", "controllers"]));
     assert_eq!(f.engine.request()["params"], json!({"lists": true}));
+    let shell = f.engine.request();
+    assert!(shell["method"] == "memory.shell" && shell["params"]["bytes"].as_u64().unwrap() > 1 << 20, "its own memory: {shell}");
     f.answer("performance.reopen", json!({"notice": ""}));
     f.answer("performance.info", json!({"name": "Grand Piano", "unsaved": false}));
     f.answer("graph.get", json!({"scene": 1, "scenes": [{"id": 1, "name": "Verse"}]}));
@@ -244,7 +246,8 @@ fn the_top_bar_follows_the_engine() {
     f.screen.frame();
     f.screen.save("topbar-engine");
     f.engine.writer.shutdown(std::net::Shutdown::Both).unwrap();
-    f.pump(); // the subscribe and controllers.view still out, failed
+    f.pump(); // the subscribe, controllers.view and memory.shell still out, failed
+    f.pump();
     f.pump();
     f.pump();
     assert!(f.screen.ui.get_engine().starts_with("lost"));
@@ -328,6 +331,7 @@ fn themes_switch_live_and_repaint_once() {
     f.pump();
     f.answer("subscribe", json!({"accepted": true}));
     f.answer("controllers.view", json!({"accepted": true}));
+    f.answer("memory.shell", json!({"accepted": true}));
     f.answer("performance.reopen", json!({"notice": ""})); // no busy line counting up meanwhile
     let s = &mut f.screen;
     meters(&s.ui, 42, 77);
@@ -396,8 +400,8 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.engine.answer(); // session.hello
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
-    // Everything asked on connecting answered: the shell's seven, the Setlist's two, then the setlist.
-    f.serve(10, &content);
+    // Everything asked on connecting answered: the shell's eight, the Setlist's two, then the setlist.
+    f.serve(11, &content);
     let rows = |f: &Fixture| f.screen.ui.global::<SetlistState>().get_slots().iter().collect::<Vec<_>>();
     let per_view = f.screen.ui.global::<SetlistState>().get_slots_per_view() as usize;
     assert!(per_view >= 5, "a list view holds {per_view}");
@@ -448,50 +452,178 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     assert_eq!(f.screen.ui.get_screen(), 0);
 }
 
-// The shell against the real engine (OSCAIRN_ENGINE, which ctest gives when the build has one),
-// started with no audio device in a folder of its own: it answers what the shell asks, the top bar
-// and Home fill in from it, and the engine's status reaches the meters. Skipped without one.
-#[test]
-fn against_the_real_engine() {
-    let Some(engine) = std::env::var_os("OSCAIRN_ENGINE").filter(|e| !e.is_empty()) else {
-        eprintln!("against_the_real_engine: skipped, OSCAIRN_ENGINE is not set");
-        return;
-    };
-    let screen = Screen::new();
-    let home = std::env::temp_dir().join(format!("oscairn-ui-engine-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(home.join("run")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(home.join("run"), std::fs::Permissions::from_mode(0o700)).unwrap(); // the engine's rule for its socket's folder
-    let socket = home.join("run/engine.sock");
-    let log = std::fs::File::create(home.join("engine.log")).unwrap();
-    let mut process = std::process::Command::new(engine)
-        .args(["--socket", socket.to_str().unwrap(), "--audio", "null", "--buffer-frames", "128"])
-        .env("HOME", &home)
-        .env("OSCAIRN_DATA_HOME", home.join("data"))
-        .env("OSCAIRN_CONFIG_HOME", home.join("config"))
-        .stdout(log.try_clone().unwrap())
-        .stderr(log)
-        .spawn()
-        .unwrap();
-    let (tx, events) = mpsc::channel();
-    shell::start(&screen.ui, socket, &crate::profile::Profile::load(Some("fantom-07")).unwrap(), true, move |e| {
-        let _ = tx.send(e);
-    })
-    .unwrap();
-    let bar = || screen.ui.global::<Bar>();
+/// The real engine (OSCAIRN_ENGINE, which ctest gives when the build has one) with no audio
+/// device, in folders of its own (never the user's), ended when dropped. None without one.
+struct RealEngine {
+    process: std::process::Child,
+    home: std::path::PathBuf,
+    socket: std::path::PathBuf,
+}
+
+impl RealEngine {
+    fn start(name: &str, options: &[&str]) -> Option<RealEngine> {
+        let engine = std::env::var_os("OSCAIRN_ENGINE").filter(|e| !e.is_empty())?;
+        let home = std::env::temp_dir().join(format!("oscairn-ui-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("run")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(home.join("run"), std::fs::Permissions::from_mode(0o700)).unwrap(); // the engine's rule for its socket's folder
+        let socket = home.join("run/engine.sock");
+        let log = std::fs::File::create(home.join("engine.log")).unwrap();
+        let process = std::process::Command::new(engine)
+            .args(["--socket", socket.to_str().unwrap(), "--audio", "null", "--buffer-frames", "128"])
+            .args(options)
+            .envs(Self::folders(&home))
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .unwrap();
+        Some(RealEngine { process, home, socket })
+    }
+
+    /// HOME and the data and configuration folders, the temporary folder's, for any process the test starts.
+    fn folders(home: &std::path::Path) -> [(&'static str, std::path::PathBuf); 3] {
+        [("HOME", home.to_path_buf()), ("OSCAIRN_DATA_HOME", home.join("data")), ("OSCAIRN_CONFIG_HOME", home.join("config"))]
+    }
+
+    fn log(&self) -> String {
+        std::fs::read_to_string(self.home.join("engine.log")).unwrap_or_default()
+    }
+
+    /// One request on a connection of its own, waiting up to 30 s for the engine to listen; its result.
+    fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        use std::io::{BufRead, Write};
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let stream = loop {
+            match std::os::unix::net::UnixStream::connect(&self.socket) {
+                Ok(s) => break s,
+                Err(e) if std::time::Instant::now() > deadline => panic!("{method}: {e}; the engine's log:\n{}", self.log()),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            }
+        };
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).unwrap();
+        writeln!(&stream, "{}", json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})).unwrap();
+        for line in std::io::BufReader::new(&stream).lines() {
+            let doc: serde_json::Value = serde_json::from_str(&line.unwrap()).unwrap();
+            if doc["id"] == 1 {
+                assert!(doc.get("error").is_none(), "{method}: {doc}");
+                return doc["result"].clone();
+            }
+        }
+        panic!("{method}: no answer; the engine's log:\n{}", self.log())
+    }
+}
+
+impl Drop for RealEngine {
+    fn drop(&mut self) {
+        let _ = self.process.kill();
+        let _ = self.process.wait();
+        let _ = std::fs::remove_dir_all(&self.home);
+    }
+}
+
+/// Hands the shell its events until `done` or 30 s.
+fn run_shell_until(events: &mpsc::Receiver<Event<Request>>, mut done: impl FnMut() -> bool) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while !(bar().get_cpu_known() && !bar().get_tempo().is_empty() && !bar().get_performance().is_empty()) && std::time::Instant::now() < deadline {
+    while !done() && std::time::Instant::now() < deadline {
         if let Ok(e) = events.recv_timeout(std::time::Duration::from_millis(200)) {
             shell::dispatch(e);
         }
     }
+}
+
+// The shell against the real engine: it answers what the shell asks, the top bar and Home fill in
+// from it, and the engine's status reaches the meters. Skipped without one.
+#[test]
+fn against_the_real_engine() {
+    let Some(engine) = RealEngine::start("engine", &[]) else {
+        eprintln!("against_the_real_engine: skipped, OSCAIRN_ENGINE is not set");
+        return;
+    };
+    let screen = Screen::new();
+    let (tx, events) = mpsc::channel();
+    shell::start(&screen.ui, engine.socket.clone(), &crate::profile::Profile::load(Some("fantom-07")).unwrap(), true, move |e| {
+        let _ = tx.send(e);
+    })
+    .unwrap();
+    let bar = || screen.ui.global::<Bar>();
+    run_shell_until(&events, || bar().get_cpu_known() && !bar().get_tempo().is_empty() && !bar().get_performance().is_empty());
     let shown = (bar().get_cpu_known(), bar().get_tempo().to_string(), bar().get_performance().to_string(), screen.ui.get_engine().to_string());
     let lines: Vec<String> = screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
-    let _ = process.kill();
-    let _ = process.wait();
-    let log = std::fs::read_to_string(home.join("engine.log")).unwrap_or_default();
-    let _ = std::fs::remove_dir_all(&home);
-    assert!(shown.0 && !shown.1.is_empty() && !shown.2.is_empty() && shown.3.is_empty(), "shown {shown:?}; the engine's log:\n{log}");
+    assert!(shown.0 && !shown.1.is_empty() && !shown.2.is_empty() && shown.3.is_empty(), "shown {shown:?}; the engine's log:\n{}", engine.log());
     assert!(lines.iter().any(|l| l == "No audio device (--audio null)"), "{lines:?}");
+}
+
+/// What the engine reports of the session's setup: the budget, memory classes, capture,
+/// repositories and audio, the UI's own memory (`shell`) taken out of what it is part of.
+fn session_setup(engine: &RealEngine) -> serde_json::Value {
+    let mut memory = engine.call("memory.state", json!({}));
+    let shell = memory["shell"].as_u64().unwrap();
+    let budget = engine.call("budget.estimate", json!({}))["budget"].clone();
+    let status = engine.call("session.status", json!({}));
+    for (key, to) in [("reserved", -1i64), ("share", 1)] {
+        memory[key] = json!(memory[key].as_i64().unwrap() + to * shell as i64);
+    }
+    for key in ["systemAvailable", "shell", "committed", "opportunistic"] {
+        memory.as_object_mut().unwrap().remove(key); // the machine's and the moment's, not the setup's
+    }
+    json!({
+        "budget": {"cpu": budget["cpu"], "memory": budget["memory"].as_u64().map(|m| m + shell)},
+        "memory": memory,
+        "capture": engine.call("record.get", json!({}))["retro"]["seconds"],
+        "repositories": engine.call("packages.repositories", json!({}))["repositories"],
+        "audio": [&status["audioDevice"], &status["sampleRate"], &status["bufferSize"], &status["refusedLoads"]],
+    })
+}
+
+// The session's setup after a Rust-path start is the JUCE path's (docs/rust-ui.md, "Session
+// setup"). Rust: the engine started with the profile, as the start script's engine-args gives it
+// (--device-profile), then the shell's own start against it. JUCE: an engine with no profile, as
+// the app starts its own, configured by the real JUCE app's start (--connect, offscreen through
+// --snapshot), and the one request a snapshot run leaves out, record.retro with the length the app
+// would read (none saved: the profile's 30 s). Both report the same budget, memory classes,
+// capture and repositories, the FANTOM-07's measured on a unit; each UI's own memory differs and
+// is compared apart. Needs OSCAIRN_ENGINE and OSCAIRN_APP (the JUCE app), which ctest gives.
+#[test]
+fn session_setup_matches_the_juce_app() {
+    let Some(app) = std::env::var_os("OSCAIRN_APP").filter(|a| !a.is_empty()) else {
+        eprintln!("session_setup_matches_the_juce_app: skipped, OSCAIRN_APP is not set");
+        return;
+    };
+    let Some(rust) = RealEngine::start("setup-rust", &["--device-profile", "fantom-07"]) else {
+        eprintln!("session_setup_matches_the_juce_app: skipped, OSCAIRN_ENGINE is not set");
+        return;
+    };
+    let screen = Screen::new();
+    let (tx, events) = mpsc::channel();
+    shell::start(&screen.ui, rust.socket.clone(), &crate::profile::Profile::load(Some("fantom-07")).unwrap(), true, move |e| {
+        let _ = tx.send(e);
+    })
+    .unwrap();
+    let bar = || screen.ui.global::<Bar>();
+    run_shell_until(&events, || !bar().get_performance().is_empty()); // connected, memory.shell and the reopen answered before
+    let shell = rust.call("memory.state", json!({}))["shell"].as_u64().unwrap();
+    assert!(shell > 1 << 20, "the shell sends its own memory: {shell}");
+
+    let juce = RealEngine::start("setup-juce", &[]).unwrap();
+    juce.call("session.status", json!({})); // listening
+    let out = std::process::Command::new(app)
+        .args(["--connect", juce.socket.to_str().unwrap(), "--profile", "fantom-07", "--snapshot", "juce.png", "--size", "1280x720"])
+        .current_dir(&juce.home)
+        .envs(RealEngine::folders(&juce.home))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "the JUCE app: {}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
+    juce.call("record.retro", json!({"seconds": 30}));
+
+    let (r, j) = (session_setup(&rust), session_setup(&juce));
+    assert_eq!(r, j, "the Rust path's setup (left) and the JUCE path's (right)");
+    const MIB: u64 = 1 << 20;
+    let m = &r["memory"];
+    let always = json!([{"app": "oscairn.performance", "reserve": 150 * MIB}, {"app": "oscairn.library", "reserve": 120 * MIB}]);
+    assert_eq!(
+        (&r["budget"]["cpu"], &m["device"], &m["floor"], &m["margin"], &m["available"], &m["alwaysAvailable"], &r["capture"]),
+        (&json!(0.75), &json!(992 * MIB), &json!(300 * MIB), &json!(992 * MIB / 20), &json!(200 * MIB), &always, &json!(30)),
+        "the FANTOM-07's, as measured on a unit after a JUCE-path start"
+    );
 }

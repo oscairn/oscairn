@@ -94,12 +94,6 @@ namespace oscairn::standalone
         // --snapshot: no window goes on the desktop; each renders off screen (setOffscreen).
         bool offscreen = false;
 
-        // The apps that run as processes: Apps/ beside this program, else share/oscairn/apps.
-        juce::File appsFolder()
-        {
-            const auto binary = executableFile().getParentDirectory();
-            return binary.getChildFile( "Apps" ).isDirectory() ? binary.getChildFile( "Apps" ) : binary.getSiblingFile( "share" ).getChildFile( "oscairn/apps" );
-        }
     }
 
     /// An app in a window of its own, apart from the sound editor; closing it hides it.
@@ -1060,36 +1054,10 @@ namespace oscairn::standalone
             try
             {
                 engine_ = starting_.get();
-                // RFC 0025: with the profile's memory classes, the device's memory less what is
-                // reserved; the shell's base (and an in-process engine's) is this process's memory now.
-                Control::Budget budget{ profile.cpuBudget(), profile.memoryBudget() };
-                budget.available = uint64_t( profile.compute.availableMemory ) << 20; // RFC 0045: instances kept warm give it back
-                std::vector<Control::AppMemory> always;
-                if( profile.memoryClasses() )
-                {
-                    constexpr uint64_t MiB = 1ull << 20;
-                    budget.device = uint64_t( profile.compute.memory ) * MiB;
-                    budget.system = uint64_t( profile.compute.osMemory ) * MiB + residentBytes();
-                    budget.floor = uint64_t( profile.compute.performanceMemory ) * MiB;
-                    budget.margin = profile.memoryMargin();
-                    // An app that is a process, at its manifest's reservation; Oscairn's in-process apps at their placeholders.
-                    const auto manifests = findApps( appsFolder() );
-                    for( const auto& a : profile.alwaysAvailable )
-                    {
-                        const auto m = std::find_if( manifests.begin(), manifests.end(), [&]( const AppManifest& x ) { return x.id == a; } );
-                        always.push_back( { a, ( m != manifests.end() ? m->reserve : uint64_t( Profile::appMemory( a ) ) ) * MiB } );
-                    }
-                    if( budget.system + budget.floor + budget.margin > budget.device )
-                    {
-                        std::fprintf( stderr, "oscairn: memory classes off: the OS, this app, the floor and the margin exceed the device's memory\n" );
-                        budget.device = budget.system = budget.floor = budget.margin = 0; always.clear();
-                    }
-                }
-                engine_->edit( [budget, always]( Control& c ) { c.setBudget( budget ); if( !always.empty() ) c.setAlwaysAvailable( always ); } );
-                // RFC 0031: the package repositories its image ships, and whether it hides the official one.
-                std::vector<Control::Repository> shipped;
-                for( const auto& r : profile.repositories ) shipped.push_back( { r.address, r.name, r.key, "device" } );
-                engine_->edit( [shipped, hide = profile.hideOfficial]( Control& c ) { c.setDeviceRepositories( shipped, hide ); } );
+                // The session's setup from the profile (SessionSetup.h): the engine this app starts
+                // is not given the profile. This UI's own memory with it: its process's memory now
+                // (an in-process engine's too).
+                engine_->edit( [profile, shell = residentBytes()]( Control& c ) { setUpSession( c, profile, shell ); } );
                 // RFC 0020: the retroactive buffer Capture saves from, as long as was chosen (not for a snapshot).
                 if( !args.contains( "--snapshot" ) )
                     if( const auto error = engine_->setCapture( readCaptureSeconds( theme_->configuration(), profile ) ); !error.empty() )

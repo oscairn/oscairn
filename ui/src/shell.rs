@@ -3,7 +3,8 @@
 //! UI thread; the client's events reach it through the event loop.
 //!
 //! What it asks the engine and when: on connecting, `subscribe` to `status` and
-//! `graph.changed`, `performance.reopen` (the Performance last open, as the JUCE app asks at its
+//! `graph.changed`, `memory.shell` (its own memory; the rest of the session's setup is the
+//! engine's, docs/rust-ui.md "Session setup"), `performance.reopen` (the Performance last open, as the JUCE app asks at its
 //! start), `performance.info` and `graph.get`. Each `status` (at most 4 a second) moves the
 //! meters at most twice a second and then asks `memory.state` and `transport.get`; each
 //! `graph.changed` asks `performance.info` and `graph.get` again. Nothing else wakes it at rest.
@@ -26,6 +27,8 @@ use std::time::{Duration, Instant};
 /// What each request is for, so its answer goes where it belongs.
 pub enum Request {
     Subscribe,
+    /// memory.shell: this UI's own memory, which the engine reserves for it.
+    Shell,
     Reopen,
     Info,
     Graph,
@@ -179,6 +182,31 @@ pub fn handover() -> Option<&'static str> {
     APP.with(|a| a.borrow().as_ref().and_then(|a| a.handover))
 }
 
+/// This process's resident memory, as the JUCE app reads its own for memory.shell; None where it
+/// cannot be read.
+pub fn resident_bytes() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let pages: u64 = std::fs::read_to_string("/proc/self/statm").ok()?.split_whitespace().nth(1)?.parse().ok()?;
+        // SAFETY: sysconf reads a constant of the system.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        (pages > 0 && page > 0).then_some(pages * page as u64)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::zeroed();
+        let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
+        // SAFETY: proc_pidinfo writes at most `size` bytes into `info`, which is that size.
+        let n = unsafe { libc::proc_pidinfo(libc::getpid(), libc::PROC_PIDTASKINFO, 0, info.as_mut_ptr().cast(), size) };
+        // SAFETY: filled in whole when it returns its size; zeroed (a valid proc_taskinfo) otherwise.
+        (n == size).then(|| unsafe { info.assume_init() }.pti_resident_size).filter(|&b| b > 0)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        None
+    }
+}
+
 /// The handover file: the app's name as a whole line, newline and all, as the start script reads it.
 pub fn write_handover(file: &std::path::Path, app: &str) -> std::io::Result<()> {
     std::fs::write(file, format!("{app}\n"))
@@ -229,6 +257,11 @@ impl App {
                 self.totals.forget();
                 self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed", "controllers"]}));
                 self.send_view();
+                // The session's setup is the engine's, from the profile (docs/rust-ui.md, "Session
+                // setup"); only this UI's own memory is the UI's to send.
+                if let Some(bytes) = resident_bytes() {
+                    self.send(Request::Shell, "memory.shell", json!({ "bytes": bytes }));
+                }
                 self.send(Request::Reopen, "performance.reopen", json!({}));
                 self.ask_performance();
                 self.send(Request::Library(false), "library.query", json!({"kind": "performance", "limit": 1}));
@@ -292,8 +325,10 @@ impl App {
                 if e.code == BUSY && matches!(request, Request::Info | Request::Graph) {
                     self.stale = true;
                 }
-                if matches!(request, Request::Reopen) && e.code != 0 {
-                    eprintln!("oscairn-ui: performance.reopen: {}", e.message);
+                match request {
+                    Request::Reopen if e.code != 0 => eprintln!("oscairn-ui: performance.reopen: {}", e.message),
+                    Request::Shell if e.code != 0 => eprintln!("oscairn-ui: memory.shell: {}", e.message),
+                    _ => {}
                 }
                 return;
             }
@@ -315,7 +350,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::View | Request::Setlist(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) => {}
         }
     }
 

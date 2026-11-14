@@ -244,6 +244,15 @@ snapshot with `save_sound` and `sound_values`, more than one output port, a step
 parameter tagged `OSCAIRN_ROLE_OUTPUT_BUS`, no audio input and no note output; the full list,
 with what the host checks at run time, is in the
 [fallback matrix](https://github.com/oscairn/oscairn-clap/blob/main/docs/fallback-matrix.md#parts-sharing-one-instance).
+The host puts a shared sound on its bus with one `CLAP_EVENT_PARAM_VALUE` for the output-bus
+parameter: the plain port index as `value`, `channel` set to the part's MIDI channel, and
+`note_id`, `key` and `port_index` all -1. It arrives in the first `process()` after the host
+prepares the sound (from `prepare` values, or from the part's saved state through
+`oscairn.sound-snapshots` `prepare`) and selects it on that channel, and again after each later
+selection. Apply queued `select` calls at the start of `process()`, before input events; then
+apply a channel-addressed parameter event to the sound that channel selects, never to a global
+value or to every sound. The bus stored in a sound's saved state (0, as `save_sound` writes it)
+is overwritten by this event: do not reapply saved state after preparing.
 An instance holds as many parts as it has sounds, ports and channels; the host takes another
 instance past that. The Basic Synth (eight sounds, its Default one of them; eight sound buses
 beside its main output) does all of it; the Legacy Sampler has one output, so each Legacy Sampler

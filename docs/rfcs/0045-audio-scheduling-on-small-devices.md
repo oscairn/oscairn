@@ -464,6 +464,40 @@ part's instrument gets its own instance and worker. A Performance saved with par
 opens shared, and a Sound loaded into a part can still join a playing instance. Cost: a process
 per part (about 34 MB a Sampler worker before samples on the unit). Not a profile field yet.
 
+### The app's process and the audio (2026-11-14)
+
+Why the app is worse than the engine alone on the unit, measured with ST Final (bundle 79770480
+and bundles of 168c6bfd; `oscairn-engine-timing` over 11 s at rest, or the recorded 41 s take
+with notes): the app's own process is the cause, and what in it is not yet known.
+
+- **Stopping the app's process** (`SIGSTOP` for the window, the engine and workers untouched):
+  41 s playing, 1,335 deadline misses with it running against 0 stopped, callback max 4,039
+  against 1,560 us; at rest, 83 to 146 misses in 11 s against 0, every time it was tried (six
+  runs over three bundles and settings). With it running, the workers' audio threads use more CPU time for the same
+  block (Analog's at rest: at most 3,351 us against 741 stopped), in every worker shown, and the
+  callback can start late (10.2 ms once).
+- **Not the cause, each tried with the app stopped or apart:** the display (the app's window
+  unmapped, Xwayland and Weston idle: 87 misses, its painting going on; a static window over it:
+  110); the engine's work for the app (its requests replayed from a script at the app's rates,
+  its refresh every half second, its main thread's polls, its subscription's pushes: 0 misses
+  each); which core it runs on (the app on core 0 and the audio processes on 1 to 3: 105); a
+  memory-bandwidth load (a copy at 1.6 GB/s at nice 19: 0 misses, Analog's block CPU up to 1.7
+  times); a CPU load (0). A synthetic X client redrawing the whole screen 60 times a second does
+  cause misses (242), 30 or 10 times do not, and a small area 60 times does not.
+- **What the app does at rest:** about 10 to 15 % of a core on the Home screen, nearly all of it
+  drawing, most of that text (a sampling of its main thread: `drawInked` shaping each label and tracing its
+  outlines on every draw; the Home launcher drawn again behind the top bar four times a second).
+  Drawing less (the top bar opaque and drawn only on a change: 500,000 to 130,000 pixels a
+  second) and letting the app run a quarter of the time left the misses where they were (93
+  and 70 against about 90). On the Library screen, untouched, the app took 3 % and caused 0
+  misses; scrolling it, 137 (659 with a build that kept text layouts, since taken out).
+- **Not built:** a fix. The figures fit something in the kernel that the app's activity sets off
+  and that runs on the audio cores billed to whatever thread is there (an interrupt or
+  inter-processor call, or a lock), not a share of CPU or memory bandwidth; that is unverified,
+  and the unit has no `perf` or tracing to show it. Next: the kernel's per-CPU interrupt and
+  softirq counts at a finer grain around the stalls, the GPU driver's (`galcore`) interrupts and
+  cache maintenance, and the app's rendering with the same drawing done offscreen.
+
 ### Spinning before sleeping
 
 How a block crosses to a worker and back (`WorkerHost::start` and `finish`, `Worker.cpp`'s

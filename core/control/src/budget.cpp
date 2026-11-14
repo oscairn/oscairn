@@ -474,7 +474,7 @@ namespace oscairn
     // shortcut: one sample a tick, and a bucket's top for the CPU bound; read the worker's CPU time per block itself if admission must be exact.
     void Session::measure()
     {
-        if(budget_.cpu <= 0) { graph_.setVoiceBudget(0); return; }
+        if(budget_.cpu <= 0) { graph_.setVoiceBudget(-1); return; } // RFC 0045's load guard: notes give way before a block is missed
         const auto frames = blockFrames_.load(std::memory_order_relaxed);
         if(!frames) return;
         const double blockMicroseconds = frames / sampleRate_ * 1e6;

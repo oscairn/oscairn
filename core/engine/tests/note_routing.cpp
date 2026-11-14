@@ -18,8 +18,8 @@ int main(int argc,char** argv){try{
     {
         // A node whose voices cost next to nothing leaves room for billions: the limit stays a count a
         // uint32_t holds (found by a sanitizer: the float converted out of range).
-        VoiceBudget budget;budget.limit=2000;Graph::Activity cheap;cheap.perNote=1e-7f;
-        check(budget.voiceLimit(cheap,10)==65536,"a voice limit past any count is held at 2^16");
+        VoiceBudget budget;budget.lanes.resize(1);budget.lanes[0].limit=2000;Graph::Activity cheap;cheap.perNote=1e-7f;
+        check(budget.voiceLimit(0,cheap,10)==65536,"a voice limit past any count is held at 2^16");
     }
     Graph graph(48000,512);
     const auto a=graph.add(argv[2]),b=graph.add(argv[2]),synth=graph.add(argv[1]);

@@ -217,12 +217,15 @@ namespace oscairn
         /// sustained by the pedal), for measuring its cost per voice (RFC 0025); 0 for a node that
         /// takes no notes, UINT32_MAX for one just set retiring and not yet counted.
         uint32_t sounding( NodeId node ) const;
-        /// RFC 0018's shared budget (option B): the microseconds a block the plugins may take in
-        /// all, the hard limit; 0, the default, for none. Stealing starts at 85% of it: before a
-        /// note passes on, the least audible notes across every part fade out, by each node's
-        /// measured cost per note; past it, notes are choked at once (counted), and a block that
-        /// measured past it chokes more from the next block's start. Any thread.
-        void setVoiceBudget( double microseconds ) noexcept { voiceBudget_.store( float( std::max( 0.0, microseconds ) ), std::memory_order_relaxed ); }
+        /// RFC 0018's shared budget (option B): the microseconds a block the plugins rendering on one
+        /// thread (a lane: a worker's or plugin host's audio thread) may take in all, the hard limit;
+        /// 0, the default, for none; below 0, RFC 0045's load guard: each lane the time its blocks
+        /// have before they are missed (a worker's allowance, the deadline under step 6, a period for
+        /// a lane a block late). Stealing starts at 85% of it: before a note passes on, the least
+        /// audible notes of the lane fade out, by each node's measured cost per note; past it, notes
+        /// are choked at once (counted), and a block that measured past it chokes more from the next
+        /// block's start. Any thread.
+        void setVoiceBudget( double microseconds ) noexcept { voiceBudget_.store( float( std::isfinite( microseconds ) ? microseconds : 0.0 ), std::memory_order_relaxed ); }
         /// A node's cost at rest and per note (microseconds a block), from RFC 0025's measurements,
         /// until the audio thread has measured its own. Main thread.
         void seedNoteCost( NodeId node, double rest, double perNote );
@@ -574,6 +577,7 @@ namespace oscairn
         bool panicInput_=false,panicNotes_=false;
         std::atomic<bool> parallel_{ true }; // see setParallel
         bool deadlines_ = false; // RFC 0045 step 6 (OSCAIRN_WORKER_DEADLINE): each wave's workers wait to its deadline, not their allowance
+        float workerBudgetUs_ = 0; // OSCAIRN_WORKER_BUDGET_US as workerAllowance reads it; 0: half the period
         std::atomic<float> voiceBudget_{ 0 }; // see setVoiceBudget
         AudioHelpers* helpers_ = nullptr; // RFC 0034: renders a wave's plugins in this process
         double freeBeats_ = 0; // audio thread: oscairn.beat's position at the next block's start

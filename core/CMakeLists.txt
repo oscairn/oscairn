@@ -357,8 +357,13 @@ add_test(NAME voice-budget COMMAND oscairn-voice-budget-test $<TARGET_FILE:oscai
 set_tests_properties(voice-budget PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=60;OSCAIRN_GRAPH_SERIAL=1")
 add_test(NAME voice-budget-parallel COMMAND oscairn-voice-budget-test $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(voice-budget-parallel PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=60;OSCAIRN_AUDIO_HELPERS=3;OSCAIRN_HELPERS_WORTH_US=0")
+add_executable(oscairn-load-guard-test engine/tests/load_guard.cpp)
+target_link_libraries(oscairn-load-guard-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-load-guard-test oscairn-voice-fixture oscairn-plugin-worker)
+add_test(NAME load-guard COMMAND oscairn-load-guard-test $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(load-guard PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=100;OSCAIRN_WORKER_BUDGET_US=1000;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
 add_test(NAME voice-budget-workers COMMAND oscairn-voice-budget-test $<TARGET_FILE:oscairn-voice-fixture>)
-set_tests_properties(voice-budget-workers PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=60;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000")
+set_tests_properties(voice-budget-workers PROPERTIES TIMEOUT 120 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=60;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_PLUGIN_HOSTS=1") # one plugin host: the three parts one lane, as the budget's total takes them
 # RFC 0018 step 4: oscairn.voice-budget, the Basic Synth's one pool across sounds and the
 # fixture's layered elements (it sets its own environment).
 add_executable(oscairn-shared-engine-test engine/tests/shared_engine.cpp)

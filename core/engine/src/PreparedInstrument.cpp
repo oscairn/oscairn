@@ -365,6 +365,7 @@ public:
     double cpuSeconds() const override {double n=0;for(const auto& s:desired_.instances)if(s)n+=s->host->cpuSeconds();return n;}
     // shortcut: a pool reports its first instance's round trips only; merge the instances' if pooled instruments need watching.
     WorkerTiming* workerTiming() noexcept override {return base().workerTiming();}
+    const void* lane() const noexcept override {return base().lane();}
     std::vector<PluginHost*> workers() override {std::vector<PluginHost*> all;for(const auto& s:desired_.instances)if(s)for(auto* w:s->host->workers())all.push_back(w);return all;}
 };
 }

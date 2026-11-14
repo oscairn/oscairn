@@ -141,6 +141,10 @@ namespace oscairn
         // RFC 0045's extra block: the plugin is heard a block late, and finishProcess may wait for the block
         // handed a call earlier; the graph calls it after the other finishes of its wave. Any thread.
         virtual bool oneBlockLate() const noexcept { return false; }
+        // RFC 0045: what identifies the thread its blocks render on, which the graph's voice budget
+        // keeps a lane for: its worker's (a plugin host's, shared by every plugin in it); null, one lane
+        // for them all, for plugins rendering in the engine's process. Main thread.
+        virtual const void* lane() const noexcept { return nullptr; }
         // Audio thread, after process(): the plugin said it makes no more sound until it gets
         // input (CLAP_PROCESS_SLEEP). False where a host cannot tell.
         virtual bool asleep() const noexcept { return false; }

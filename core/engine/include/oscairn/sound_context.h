@@ -130,6 +130,7 @@ namespace oscairn
         double cpuSeconds() const override { return lead() ? engine_->host->cpuSeconds() : 0; }
         bool inWorker() const noexcept override { return engine_->host->inWorker(); }
         std::vector<PluginHost*> workers() override { return engine_->host->workers(); } // the shared instance, under every context's node
+        const void* lane() const noexcept override { return engine_->host->lane(); }
 
     private:
         bool lead() const noexcept { return !(engine_->channels & ((1u << channel_) - 1)); }

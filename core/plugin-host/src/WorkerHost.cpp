@@ -902,6 +902,7 @@ namespace oscairn
             // with its events carried, lost nothing; with the extra block, of the block played.
             bool eventsKept() const noexcept override { return extra_ ? playedKept_ : kept_; }
             bool oneBlockLate() const noexcept override { return extra_; }
+            const void* lane() const noexcept override { return proc_; } // the worker process's audio thread, shared in a plugin host
             double parameterValue(clap_id id) const noexcept override
             {
                 const auto i = index_.find(id);

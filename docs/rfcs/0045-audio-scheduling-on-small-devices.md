@@ -647,6 +647,27 @@ CPU, plugins with few parameters and no voices); it is the next thing to profile
   `oscairn.voice-budget`; the Sampler 0.8.3 reports real counts and honors limits): shed voices
   across parts before a block is missed. Exists per plugin today (`Graph::setVoiceBudget`, the
   Session's measurements); to be fed from the hosts' measured block times.
+  Built 2026-11-14 as the load guard, the smallest form: the shared budget is kept per lane, the
+  thread a plugin renders on (`PluginHost::lane`: its worker process, shared by every plugin in a
+  plugin host; one lane for the plugins in the engine's process), since lanes render side by side.
+  With a CPU budget set each lane gets the budget's share of a block (RFC 0025's per-core model);
+  with none (`budget.set {"cpu":0}`, an engine without the app) the Session sets the guard
+  (`setVoiceBudget(-1)`): each lane gets the time its blocks have before they are missed, a
+  worker's allowance (half the period, `OSCAIRN_WORKER_BUDGET_US`), the deadline under step 6, a
+  period for a lane rendering a block late. From the existing machinery, unchanged: each block's
+  measured time per plugin; stealing from 85 % of the limit, released and quietest notes first
+  (by the plugin's report where it has `oscairn.voice-budget`, else velocity), a part's reserve
+  last; `set_limits` for a plugin that gives up its own voices; chokes after two blocks past the
+  limit. No change to the extension. Test: `load-guard` (two voice fixtures in workers of their
+  own, 100 us a voice against a 1 ms allowance, paced in real time: without the guard the one
+  holding 20 notes is restarted as too slow and its notes are lost; with it its notes give way,
+  it is not restarted, its last block fits the allowance, and the other part, a lane of its own,
+  loses none). `voice-budget-workers` now runs its three parts in one plugin host, one lane, as
+  its total budget takes them. On the unit (168c6bfd with this change and UI experiments since
+  taken out, ST Final played and recorded for 41 s, the app's process stopped so its own effect is
+  out): 0 deadline misses with the guard, 1 with it off (`budget.set {"cpu":64}`), the arpeggio
+  part's level the same in both takes. How many notes the guard gave up there was not read, and
+  whether it sheds before a miss under real overload on the unit is unmeasured.
 
 Expected (an estimate, not measured) for ST Final on the unit with A+B: three host processes in
 place of nine; at most three hand-overs a wave and two waves (instruments with their inserts, then

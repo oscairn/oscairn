@@ -87,6 +87,8 @@ namespace oscairn
             float cost = 0; // the microseconds its last rendering took in this process (whether a wave is worth the helpers), or its worker's round trip
             std::chrono::steady_clock::time_point handed{}; // audio thread: when its worker was handed the block (cost)
             bool budgeted = false; // its notes are in the shared budget (VoiceBudget), which measures its cost per note
+            uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
+            bool lateLane = false; // its lane renders a block late (RFC 0045's extra block): a period to render in
             // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
             std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
             // RFC 0021 slice 3: a shared engine's step renders its instance for every node playing one
@@ -240,6 +242,8 @@ namespace oscairn
         liveFrom_.fill(1.f);liveTo_.fill(1.f);
         if(const char* serial=std::getenv("OSCAIRN_GRAPH_SERIAL");serial && *serial && *serial!='0')parallel_.store(false); // RFC 0034, for measuring
         deadlines_=worker::deadlineAllowance();
+        if(const char* us=std::getenv("OSCAIRN_WORKER_BUDGET_US");us && *us)workerBudgetUs_=float(std::chrono::duration<double,std::micro>(worker::workerAllowance(1,1e6,us)).count()); // 1 frame at 1 MHz: 0.5 us when not a valid override
+        if(workerBudgetUs_<1)workerBudgetUs_=0;
         helpers_=&AudioHelpers::shared(1e6*maxFrames/sampleRate);
     }
 
@@ -851,6 +855,13 @@ namespace oscairn
         for(auto& step:plan->steps)for(auto& source:step.noteSources)if(source.zones.count && source.zones.zones[0].part && !source.draining)
             for(const auto& other:plan->steps)for(const auto& o:other.noteSources)
                 if(o.zones.count && o.zones.zones[0].part==source.zones.zones[0].part && !o.draining)source.peers.push_back(o.route.get());
+        // The budget's lanes (RFC 0045): the steps rendering on one thread share one.
+        {
+            std::map<const void*,uint32_t> lanes;
+            for(auto& step:plan->steps)if(step.host)step.lane=lanes.emplace(step.host->lane(),uint32_t(lanes.size())).first->second;
+            plan->budget.lanes.resize(std::max<size_t>(1,lanes.size()));
+            for(auto& step:plan->steps)if(step.host && step.host->oneBlockLate())for(auto& other:plan->steps)if(other.lane==step.lane)other.lateLane=true;
+        }
         // The shared budget: every connection into a plugin taking CLAP notes, grouped by part.
         for(auto& step:plan->steps)if(step.activity)for(auto& source:step.noteSources)
             if(std::any_of(source.route->clap.begin(),source.route->clap.end(),[](bool c){return c;}))
@@ -864,7 +875,7 @@ namespace oscairn
                     if(part && group==entries.size() && z->count && z->zones[0].part==part && entries[i].draining==source.draining)group=entries[i].group;
                     if(entries[i].cost==step.activity.get())rest=false;
                 }
-                entries.push_back({source.route.get(),&source.zones,step.activity.get(),group,rest,source.draining});
+                entries.push_back({source.route.get(),&source.zones,step.activity.get(),group,rest,source.draining,step.lane});
                 step.budgeted=true;
             }
         plan->budget.groups.resize(plan->budget.entries.size());
@@ -1315,16 +1326,26 @@ namespace oscairn
                 for(const auto& source:step.noteSources)if(source.channel==channel && !source.draining && source.zones.count){p.reserve=source.zones.zones[0].reserve;p.priority=source.zones.zones[0].priority;break;}};
             if(step.contexts.empty())part(-1,OSCAIRN_VOICE_BUDGET_SELECTED);
             else for(const auto& c:step.contexts)if(entries<parts.size())part(c.channel,c.sound->sound());
-            const uint32_t limit=plan->budget.voiceLimit(*step.activity,voices);
+            const uint32_t limit=plan->budget.voiceLimit(step.lane,*step.activity,voices);
             if(limit==step.voiceLimit && entries==step.voiceContexts && !std::memcmp(parts.data(),step.voiceLimits.data(),entries*sizeof parts[0]))return;
             step.voiceLimit=limit;step.voiceLimits=parts;step.voiceContexts=entries;step.activity->voiceLimit=limit;
             step.host->setVoiceLimits(limit,parts.data(),entries);
         };
         auto start=[&](Plan::Step& step){step.handed=std::chrono::steady_clock::now();return step.host->startProcess(step.in.data(),step.audioInputs,step.out.data(),step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
         auto render=[&](Plan::Step& step){step.processed=step.host->process(step.in.data(),step.audioInputs,step.out.data(),step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
-        // The shared budget (RFC 0018): its limit for this block, and what the plugins took.
-        plan->budget.limit=voiceBudget_.load(std::memory_order_relaxed);
-        float budgetTotal=0,budgetOthers=0;
+        // The shared budget (RFC 0018): each lane's limit for this block, and what its plugins took.
+        // A budget set holds on every lane (RFC 0025's share of each audio core); the load guard
+        // (RFC 0045) gives a lane the time its blocks have before they are missed: a worker's
+        // allowance, the deadline under step 6, a period for a lane rendering a block late.
+        const float budget=voiceBudget_.load(std::memory_order_relaxed);
+        const bool budgeting=budget!=0;
+        if(budgeting)
+        {
+            const float period=float(frames/sampleRate_*1e6);
+            const float allowance=deadlines_?period*float(1-worker::mixingReserve):workerBudgetUs_>0?workerBudgetUs_:period/2;
+            for(auto& lane:plan->budget.lanes){lane.limit=budget;lane.took=lane.othersTook=0;}
+            if(budget<0)for(const auto& step:plan->steps)plan->budget.lanes[step.lane].limit=step.lateLane?period:allowance;
+        }
         auto finish=[&](Plan::Step& step)
         {
             if(listener && step.contexts.empty())listener->events(step.id,step.merged.data(),step.mergedCount,false);
@@ -1386,11 +1407,12 @@ namespace oscairn
                 // restart) and notes held or not (a lost release), or such a node is never idle.
                 a.age.store(a.age.load(std::memory_order_relaxed)+frames,std::memory_order_relaxed);
             }
-            if(plan->budget.limit>0)
+            if(budgeting)
             {
                 const float took=float(step.host->statistics().lastMicroseconds);
-                budgetTotal+=took;
-                if(!step.budgeted)budgetOthers+=took;
+                auto& lane=plan->budget.lanes[step.lane];
+                lane.took+=took;
+                if(!step.budgeted)lane.othersTook+=took;
                 else if(processed)
                 {
                     uint32_t live=0;for(const auto& source:step.noteSources)live+=source.route->live();
@@ -1571,7 +1593,7 @@ namespace oscairn
                     tap.route->route(list[i],nextNoteId_,emit,&tap.zones,tap.step<0 && sources?sources[i]:untaggedSource);
         }
         for(const auto& r:plan->outputRoutes)mix(r,outputs[r.to]);
-        if(plan->budget.limit>0){plan->budget.others=budgetOthers;plan->budget.measured(budgetTotal);}
+        if(budgeting)for(uint32_t i=0;i<plan->budget.lanes.size();++i){auto& lane=plan->budget.lanes[i];lane.others=lane.othersTook;plan->budget.measured(i,lane.took);}
         return ok;
     }
 

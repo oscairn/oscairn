@@ -175,6 +175,8 @@ namespace oscairn::worker
         uint32_t u32() { uint32_t v; need(4); std::memcpy(&v, data.data() + at, 4); at += 4; return v; }
         double f64() { double v; need(8); std::memcpy(&v, data.data() + at, 8); at += 8; return v; }
         uint64_t u64() { uint64_t v; need(8); std::memcpy(&v, data.data() + at, 8); at += 8; return v; }
+        // A record count, refused when the rest of the message cannot hold that many records of at least `minimum` bytes.
+        uint32_t count(size_t minimum) { const auto n = u32(); if(n > (data.size() - at) / minimum) throw std::runtime_error("Worker sent an impossible count"); return n; }
         std::string str() { const auto n = u32(); need(n); std::string v = data.substr(at, n); at += n; return v; }
         void bytes(void* p, size_t n) { need(n); std::memcpy(p, data.data() + at, n); at += n; }
     };

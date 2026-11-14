@@ -50,7 +50,7 @@ namespace oscairn
 
         std::vector<kick::clap::Port> readPorts(Reader& r)
         {
-            std::vector<kick::clap::Port> ports(r.u32());
+            std::vector<kick::clap::Port> ports(r.count(16));
             for(auto& p : ports) { p.id = r.u32(); p.name = r.str(); p.channels = r.u32(); p.flags = r.u32(); }
             return ports;
         }
@@ -78,7 +78,7 @@ namespace oscairn
 
         std::vector<kick::clap::Parameter> readParameters(Reader& r)
         {
-            std::vector<kick::clap::Parameter> parameters(r.u32());
+            std::vector<kick::clap::Parameter> parameters(r.count(84));
             for(auto& p : parameters)
             {
                 p.id = r.u32(); p.name = r.str(); p.module = r.str(); p.minimum = r.f64(); p.maximum = r.f64(); p.defaultValue = r.f64(); p.flags = r.u32(); p.widget = r.u32(); p.priority = r.u32(); p.rangeHigh = r.u32(); p.group = r.u32(); p.role = r.u32();
@@ -818,7 +818,7 @@ namespace oscairn
                 const auto i = ids_.find(id);
                 if(!savesSounds_ || i == ids_.end()) return {};
                 Reader r = const_cast<WorkerHost*>(this)->request(Op::SoundValues, Writer().u32(i->second));
-                std::vector<oscairn_sound_parameter_t> values(r.u32());
+                std::vector<oscairn_sound_parameter_t> values(r.count(12));
                 for(auto& v : values) { v.id = r.u32(); v.value = r.f64(); }
                 return values;
             }
@@ -873,7 +873,7 @@ namespace oscairn
             std::vector<kick::clap::AssetReference> assetDependencies() const override
             {
                 Reader r = const_cast<WorkerHost*>(this)->request(Op::AssetDependencies);
-                std::vector<kick::clap::AssetReference> refs(r.u32());
+                std::vector<kick::clap::AssetReference> refs(r.count(13));
                 for(auto& a : refs) { a.library = r.str(); a.path = r.str(); a.sha256 = r.str(); a.optional = r.u8() != 0; }
                 return refs;
             }
@@ -1082,7 +1082,7 @@ namespace oscairn
             std::vector<oscairn_sound_context_info_t> contexts()
             {
                 Reader r = process()->exchange(header(Op::SoundContexts).data);
-                std::vector<oscairn_sound_context_info_t> result(r.u32());
+                std::vector<oscairn_sound_context_info_t> result(r.count(sizeof(oscairn_sound_context_info_t)));
                 for(auto& c : result) r.bytes(&c, sizeof c);
                 return result;
             }

@@ -457,6 +457,10 @@ target_link_libraries(oscairn-worker-miss-test PRIVATE oscairn_engine)
 add_test(NAME worker-miss COMMAND oscairn-worker-miss-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-stalling-worker>
     $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(worker-miss PROPERTIES TIMEOUT 60)
+add_executable(oscairn-worker-reader-test engine/tests/worker_reader.cpp)
+target_include_directories(oscairn-worker-reader-test PRIVATE plugin-host/src)
+target_link_libraries(oscairn-worker-reader-test PRIVATE oscairn_plugin_host)
+add_test(NAME worker-reader COMMAND oscairn-worker-reader-test)
 add_executable(oscairn-worker-failures-test engine/tests/worker_failures.cpp)
 target_link_libraries(oscairn-worker-failures-test PRIVATE oscairn_engine)
 add_test(NAME worker-failures COMMAND oscairn-worker-failures-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>

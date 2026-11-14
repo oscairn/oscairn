@@ -1236,7 +1236,8 @@ use.
 - `library.exportLibrary` takes `{file}` and optional `name`, `setlists` (setlist IDs) and `sign`,
   and returns the same: the library as one archive of kind `library`, holding every item of the
   user's own but setlists, and the setlists named (the caller's choice) with the Performances
-  their slots name, wherever those are; with every Sound, sample and plugin they use. Its ID is
+  their slots name, wherever those are; with every Sound, sample and plugin they use, from any
+  library, installed ones included, and only those. Its ID is
   `name` made plain (other characters `-`; `library` when nothing is left), so exporting it again
   makes the next version of the same library ([format](library-archive.md#setlists)). An ID in
   `setlists` that is not a setlist's is refused.
@@ -1291,7 +1292,9 @@ or a plugin package (`kind` `plugin`: plugin builds and no items).
   swapped in whole, and removes the items the library's last install listed that the archive no
   longer has; the same archive again changes nothing. `added` counts the items put in place, new
   or replaced. The open Performance is not touched, and favorites and the user's copies stay; otherwise they are copied into the
-  user's own storage under new IDs, and installing again skips copies still as imported. The
+  user's own storage under new IDs, and installing again skips copies still as imported; an item
+  the device already has with the same content (by its ID or as a copy of it, from any library or
+  archive) is skipped too, what refers to it pointing at it. The
   samples they use go into the user's sample library, and the builds of the plugins they use,
   every platform's, into the plugin store; `notes` names any sample that is in neither the
   archive nor the device, a plugin with no build for this device, and a different build of one

@@ -503,8 +503,9 @@ none. Each part also keeps where it came from, if it came from a Sound, as a ref
 Built 2026-11-01 (`performance.export`, the [archive format](../library-archive.md)): the export
 is one archive file holding the Performance, every sample, and the Sounds as above. Installing
 it is installing a library (below), into the user's own storage by default; a part's `from`
-then points at its Sound's copy. Not yet: a Sound from a locked library exported as that
-library's item.
+then points at its Sound's copy. A Sound the device already has with that content hash, by its
+ID or as a copy of it, is not added again (built 2026-11-13), and the part points at it. Not yet:
+a Sound from a locked library exported as that library's item.
 
 ### Filtering
 

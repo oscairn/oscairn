@@ -14,7 +14,8 @@
 // signature and signs its items and the whole archive when asked.
 // A plugin package carries one bundle holding several plugins (Oscairn's Splitters) once.
 // Asset libraries (RFC 0009 step 4): exports carry them whole, and garbage collection
-// from explicit roots (with the Legacy Sampler playing one).
+// from explicit roots (with the Legacy Sampler playing one). A whole library exported carries
+// what its items use from installed libraries, and installs without adding twice what is there.
 //   oscairn-archives-test FIXTURE.clap OSCAIRN-SIGN [SPLITTERS.clap [SAMPLER.clap]]
 #include "oscairn/session.h"
 #include "oscairn/package.h"
@@ -210,7 +211,9 @@ int main(int argc, char** argv)
             Session c(48000, 64);
             const auto installed = c.installArchive(archive.string(), false, {soundId}, true);
             check(installed.added == 1 && items(c, "performance").empty() && items(c, "sound").size() == 1, "only the chosen Sound");
-            check(c.installArchive(soundArchive.string(), false).added == 1 && items(c, "sound").size() == 2, "an exported Sound installs as the user's own");
+            // The same Sound exported alone, from another archive: already here, so not added twice.
+            const auto alone = c.installArchive(soundArchive.string(), false);
+            check(alone.added == 0 && alone.skipped == 1 && items(c, "sound").size() == 1, "an exported Sound already here from another archive is not added twice");
             bool refused = false; try { c.installArchive(archive.string(), false, {"nothing"}); } catch(const std::exception&) { refused = true; }
             check(refused, "an item the archive does not have is refused");
             // Unpacking happens in the data folder, never the OS temp folder: on a tmpfs /tmp a
@@ -226,7 +229,7 @@ int main(int argc, char** argv)
                 const auto again = c.installArchive(soundArchive.string(), false); // the same export again: skipped
                 ::chmod(fakeTemp.c_str(), 0700);
                 ::unsetenv("TMPDIR");
-                check(again.skipped == 1 && items(c, "sound").size() == 2, "installing unpacks inside the data folder, not the read-only OS temp folder");
+                check(again.skipped == 1 && items(c, "sound").size() == 1, "installing unpacks inside the data folder, not the read-only OS temp folder");
             }
             else std::puts("skipped: unpacking outside a read-only OS temp folder (root writes there anyway)");
         }
@@ -834,6 +837,72 @@ int main(int argc, char** argv)
             Session m3(48000, 64);
             const auto thin = m3.installArchive((temp.path / "Thin.olib").string(), false, {}, true);
             check(thin.notes.size() == 1 && thin.notes[0].find("not in the archive or on this device: piano.wav") != std::string::npos, "a sample missing from the archive and the device is told");
+        }
+        // Device S: a whole library exported carries what its own items use from installed
+        // libraries: a Performance's part's Sound from a locked library, and the sample that Sound
+        // plays from an installed asset library with that library's license texts. A device without
+        // them installs and resolves everything; one that has them already adds neither again.
+        {
+            const auto freeHash = assets::sha256("free sample bytes");
+            const auto bytesStored = [&](const fs::path& home) { size_t n = 0; std::error_code e; for(const auto& f : fs::recursive_directory_iterator(home / "assets" / "store", e)) n += f.is_regular_file(); return n; };
+            std::string padId, songId;
+            // The library Factory: a Sound playing the free library's sample.
+            device(temp.path / "s1");
+            {
+                Session s(48000, 64);
+                s.installArchive((temp.path / "Free.olib").string(), false);
+                const auto synth = s.add("synth", fixture, "org.kick.test.synth");
+                const auto part = s.addPart("Pad"); s.insertIntoPart(part, 0, synth); s.commit();
+                padId = s.savePartAsSound(part, "Pad").id;
+                const auto doc = fs::path(items(s, "sound").at(0).path) / "sound.json";
+                auto text = read(doc);
+                text.replace(text.find("\"assets\":[]"), 11, "\"assets\":[{\"library\":\"org.test.free\",\"path\":\"free.wav\",\"sha256\":\"" + freeHash + "\"}]");
+                std::ofstream(doc, std::ios::binary | std::ios::trunc) << text;
+                s.libraryRescan();
+                s.exportLibrary((temp.path / "Factory.olib").string(), "Factory", {});
+            }
+            // The user's device: both libraries installed, a Performance of their own from Factory's Sound, exported as the library Mine.
+            device(temp.path / "s2");
+            {
+                Session s(48000, 64);
+                s.installArchive((temp.path / "Free.olib").string(), false);
+                s.installArchive((temp.path / "Factory.olib").string(), true, {}, true);
+                s.partFromSound(padId);
+                songId = s.savePerformanceToLibrary("Song");
+                const auto notes = s.exportLibrary((temp.path / "Mine.olib").string(), "Mine", {});
+                check(notes.empty(), "nothing left out of the library's export: " + (notes.empty() ? std::string() : notes[0]));
+                const auto mine = readPackage(temp.path / "Mine.olib", {});
+                auto has = [&](const std::string& id) { return std::any_of(mine.items.begin(), mine.items.end(), [&](const auto& i) { return i.id == id; }); };
+                check(mine.items.size() == 2 && has(songId) && has(padId), "the library's own Performance and the installed library's Sound it uses go in: " + std::to_string(mine.items.size()));
+                check(mine.files.count("Assets/" + freeHash.substr(0, 16) + "/free.wav") && mine.files.count("Licenses/org.test.free/ATTRIBUTION"),
+                      "with the installed asset library's sample the Sound plays and that library's license texts");
+                const auto again = s.installArchive((temp.path / "Mine.olib").string(), false);
+                check(again.added == 0 && again.skipped == 2 && items(s, "sound").size() == 1 && items(s, "performance").size() == 1, "installed where it came from, it adds nothing");
+            }
+            // A device with none of it: everything resolves from the archive.
+            device(temp.path / "s3");
+            {
+                Session s(48000, 64);
+                const auto installed = s.installArchive((temp.path / "Mine.olib").string(), false, {}, true);
+                check(installed.added == 2 && installed.notes.empty(), "an empty device installs the library and its dependencies: " + std::to_string(installed.added));
+                kick::clap::AssetReference free{"org.test.free", "free.wav", freeHash};
+                check(!s.assets().resolve(free).empty(), "the sample resolves");
+                s.loadPerformanceFromLibrary(items(s, "performance").at(0).id);
+                check(s.graphState().parts.size() == 1 && s.graphState().parts[0].from.sound == items(s, "sound").at(0).id, "the Performance's part points at the Sound's copy");
+            }
+            // A device that has both libraries already: only the Performance is new.
+            device(temp.path / "s4");
+            {
+                Session s(48000, 64);
+                s.installArchive((temp.path / "Free.olib").string(), false);
+                s.installArchive((temp.path / "Factory.olib").string(), true, {}, true);
+                const auto stored = bytesStored(temp.path / "s4");
+                const auto installed = s.installArchive((temp.path / "Mine.olib").string(), false, {}, true);
+                check(installed.added == 1 && installed.skipped == 1 && items(s, "sound").size() == 1 && items(s, "sound").at(0).id == padId && bytesStored(temp.path / "s4") == stored,
+                      "the Sound and the sample it already has are not added again: " + std::to_string(installed.added) + " added, " + std::to_string(installed.skipped) + " skipped");
+                s.loadPerformanceFromLibrary(items(s, "performance").at(0).id);
+                check(s.graphState().parts.size() == 1 && s.graphState().parts[0].from.sound == padId, "the Performance's part points at the Sound already here");
+            }
         }
         // Device Q (RFC 0009 step 4): garbage collection from explicit roots. Collection removes the
         // asset libraries a plugin package brought that nothing uses, and stored files no library

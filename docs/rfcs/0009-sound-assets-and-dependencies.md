@@ -287,7 +287,16 @@ Step 4 (finished 2026-11-09), beyond the asset packages built 2026-11-07:
   install brought is kept while its plugin package is installed and collected once it is removed.
 - **What an export carries:** the library files its items use, each once by its hash, with the
   library's license texts, not the whole library as an asset package; installed elsewhere, they go
-  into the user library and the references resolve by their bytes.
+  into the user library and the references resolve by their bytes. A whole library exported
+  (decided 2026-11-13) carries the same for everything its own items use, from any library,
+  installed ones included: the Sounds its Performances' parts are, the Performances its setlists
+  name, and their files with each library's license texts. Installed where a file or an item is
+  already (from another archive, an asset library or a repository), it is not added twice: files
+  by their hash, items by their ID and content hash ([format](../library-archive.md#installing-one)).
+  `control-archives` device S: a Performance using a Sound from an installed library, which plays
+  a sample from an installed asset library, exports with both and the asset library's license
+  texts; an empty device resolves everything, and one with both libraries adds only the
+  Performance and stores no file again.
 
 Not done: a desktop screen for managing libraries (Used by, the grouped cleanup prompt), roots
 the engine cannot see (a Performance copied by hand, an archive on a drive), and fingerprint matching of whole libraries; files

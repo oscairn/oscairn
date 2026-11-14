@@ -459,7 +459,8 @@ std::vector<std::string> Session::exportLibrary(const std::string& file,const st
     auto notes=exportArchive(file,"library",[&](const fs::path& stage,Package& package){
         package.id=id;package.name=title;
         std::vector<PartSource> from;
-        // The user's own items of every type but setlists, then the setlists chosen, with what they name.
+        // The user's own items of every type but setlists, then the setlists chosen, with what they
+        // name; exportArchive adds the Sounds and samples they use, from any library.
         const auto items=l.items();
         for(const auto& item:items)if(item.library.empty() && !item.inPlace && item.kind!="setlist")stageItem(item,stage,package,from,staged);
         for(const auto& s:setlists)if(const auto* item=l.find(s)){const auto copy=*item;stageItem(copy,stage,package,from,staged);}
@@ -2273,9 +2274,7 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
             for(const auto& i:items){
                 const auto copy=std::find_if(l.items().begin(),l.items().end(),[&](const LibraryItem& x){return x.library.empty() && x.origin.library==p.id && x.origin.item==i.id;});
                 if(copy!=l.items().end() && copy->hash==copy->origin.hash){ids[i.id]=copy->id;++out.skipped;continue;} // still as imported
-                const auto to=l.newFolder(i.name,i.kind);
-                fs::create_directories(to.parent_path());created.push_back(to);placed.push_back(i.name);moveInto(into/i.path,to);
-                const auto doc=to/documentOf(i.kind);
+                auto doc=into/i.path/documentOf(i.kind);
                 if(i.kind=="performance"){
                     // Parts point at the Sounds' copies. The span comes from the needle itself: an
                     // ID with a quote escapes longer than it reads, and a fixed length breaks the JSON.
@@ -2292,6 +2291,17 @@ Control::Installed Session::installUnpacked(const Package& p,const fs::path& int
                     const auto text=setlistJson(setlist);
                     state_files::write(doc,text.data(),text.size());
                 }
+                // The item already here, from any library or archive (a library export carries what
+                // its items use, wherever it was installed from): by its ID, or as a copy imported
+                // from it, with the same content once its references point here. Not added twice.
+                const auto hash=contentHash(doc);
+                const auto here=std::find_if(l.items().begin(),l.items().end(),[&](const LibraryItem& x){
+                    if(x.inPlace || x.kind!=i.kind || (x.id!=i.id && x.origin.item!=i.id))return false;
+                    try{return contentHash(fs::path(x.path)/documentOf(x.kind))==hash;}catch(const std::exception&){return false;}});
+                if(here!=l.items().end()){ids[i.id]=here->id;++out.skipped;continue;}
+                const auto to=l.newFolder(i.name,i.kind);
+                fs::create_directories(to.parent_path());created.push_back(to);placed.push_back(i.name);moveInto(into/i.path,to);
+                doc=to/documentOf(i.kind);
                 auto info=readInfo(doc,formatOf(i.kind));
                 info.id=freshId();info.parent.clear();info.revision=freshId();
                 info.hash=contentHash(doc);info.origin={p.id,i.id,info.hash};

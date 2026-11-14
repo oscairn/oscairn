@@ -65,8 +65,11 @@ setlist's, holding the setlist, each Performance its slots name (once, however m
 each of their parts' Sounds by the rule for an exported Performance, and every sample, plugin build
 and license text they all need, as above. A slot whose Performance is no longer in the library goes
 as a placeholder, and the export's notes say so. **A library exported** (`library.exportLibrary`) is
-of kind `library` and holds the user's own items of every type but setlists, and the setlists the
-exporter chose, with the Performances they name wherever those are.
+of kind `library`. Its own items are the user's own of every type but setlists, and the setlists
+the exporter chose. With them goes everything they use, from any library, installed ones
+included: the Performances the setlists name, each Performance's parts' Sounds by the rule for an
+exported Performance, and every sample, plugin build and license text they all need, as above.
+Only what they use goes, never the rest of the library it came from.
 
 **Installed into the user's own storage**, each slot points at the copy of its Performance, made
 by the same install or, when one is still as imported, the copy already there. **As a library**,
@@ -485,7 +488,9 @@ that. A pulled drive or a bad hash leaves nothing behind.
 ## Installing one
 
 - **As a library:** locked, in `Libraries/<id>/` in the data folder with its manifest. Items
-  keep their IDs. Installing again copies only the items that are missing. Uninstalling removes
+  keep their IDs, every one in the library's folder, one another library has too included, so
+  the library stays whole when that one is uninstalled (listed once, [below](#the-plugin-store)).
+  Installing again copies only the items that are missing. Uninstalling removes
   the folder; deleting an item removes its folder, and installing again brings it back. An ID
   that differs from an installed library's only in letter case names the same folder on a
   case-insensitive file system (macOS's and Windows's by default), so there it is refused: two
@@ -494,9 +499,14 @@ that. A pulled drive or a bad hash leaves nothing behind.
   new ID and a new revision, its info's `origin` recording the archive's ID, the item's ID there
   and the copy's content hash. A Performance's parts that came from a Sound in the archive point
   at that Sound's copy. Installing again skips an item whose copy is still there with that hash;
-  one edited or deleted since is copied again.
+  one edited or deleted since is copied again. An item the device already has, whatever brought
+  it (an installed library, the user's own, a copy from another archive), is not added twice:
+  one with the archive item's ID, or a copy imported from it, whose content hash is the archive
+  item's once its references point at the items here is skipped, and what refers to it points at
+  the one here. One with the same ID but other content is copied in as a new item beside it.
 - **All of it or chosen items.**
-- **Samples** go into the user's sample library (RFC 0009) by their hash either way, so they stay
+- **Samples** go into the user's sample library (RFC 0009) by their hash either way, one the
+  device already has (from another archive, an asset library or a repository) not stored again, so they stay
   when a library is uninstalled. A sample an item needs that is in neither the archive nor the
   device is reported.
 - **Plugins:** every build of each plugin the installed items use, or of each plugin in a

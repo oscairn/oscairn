@@ -253,6 +253,13 @@ int main()
             check(folder, "an item whose document is a folder entry is refused on reading");
         }
 
+        // A name that is a file and also a folder holding others cannot be unpacked: refused on reading.
+        {
+            craft(root / "FileAndFolder.olib", {top, sound, {"Assets/x", "x"}, {"Assets/x/y", "y"}});
+            bool both = false; try { readPackage(root / "FileAndFolder.olib", {}); } catch(const std::runtime_error&) { both = true; }
+            check(both, "an entry that is both a file and a folder is refused on reading");
+        }
+
         // Signatures (RFC 0006): an item, a build and the whole archive, each verified on reading.
         const auto mine = signing::makeKey(root / "mine.key"), other = signing::makeKey(root / "other.key");
         const auto signedRoot = root / "signed";

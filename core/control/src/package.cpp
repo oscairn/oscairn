@@ -368,7 +368,7 @@ namespace oscairn
                 return itemType(kind);
             };
             std::set<std::string> names;
-            std::set<std::string> directories; // the entries that are folders
+            std::set<std::string> directories; // the entries that are folders, and the folders the others are in
             std::map<std::string, uint64_t> sizes; // each entry's, for the asset sizes the manifest lists
             auto folders = tops();
             for(const auto& t : declared) folders.insert(t.folder);
@@ -390,6 +390,7 @@ namespace oscairn
                 if((nameBytes += name.size()) > maxNameBytes) bad("its names are too long");
                 if(!names.insert(name).second) bad("an entry twice: " + name);
                 sizes[name] = e.size;
+                for(auto at = name.find('/'); at != std::string::npos; at = name.find('/', at + 1)) directories.insert(name.substr(0, at));
                 if(e.directory) { directories.insert(name); continue; }
                 if(const auto k = kept.find(top); k != kept.end())
                 {
@@ -410,6 +411,7 @@ namespace oscairn
                     archiveSignature = small(e);
                 }
             }
+            for(const auto& e : entries) if(!e.directory && directories.count(e.name)) bad("an entry that is both a file and a folder: " + e.name);
             if(manifest.empty()) bad("it has no library.json");
             if(!outside.empty())
             {

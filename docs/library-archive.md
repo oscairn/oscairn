@@ -17,6 +17,8 @@ A library, an exported Performance, Sound or setlist, or a plugin package is one
 | `Licenses/<file>` | Its license texts and notices ([license and source](#license-and-source)) |
 | `Types/<package ID>/<file>.json` | A library's: each [item type](rfcs/0023-item-types.md#the-manifest) it declares, its ID under that package ID, or the type of an exported item a package declared; installed with it ([RFC 0023](rfcs/0023-item-types.md) step 3) |
 
+No name in the archive may be both a file and a folder (`Assets/x` and `Assets/x/y`): the archive is refused.
+
 The manifest:
 
 | Field | Meaning |

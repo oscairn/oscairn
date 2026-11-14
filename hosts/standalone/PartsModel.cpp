@@ -74,7 +74,7 @@ namespace oscairn::standalone
             row.level = p.level; row.pan = p.pan; row.mute = p.mute; row.solo = p.solo; row.through = p.bus;
             // Its own mute, or someone else's solo: the wires where it plays are muted either way.
             row.silenced = !p.mute && std::any_of(g.wires.begin(), g.wires.end(), [&](const Wire& w) { return w.owner == WireOwner::Part && w.part == p.id && w.fader && w.mute; });
-            row.notes = p.input.kind == PartInput::Kind::Notes; row.devices = p.input.devices; row.maxNotes = p.input.maxNotes; row.reserve = p.input.reserve; row.priority = p.input.priority; row.midiOut = p.midiOut;
+            row.notes = p.input.kind == PartInput::Kind::Notes; row.devices = p.input.devices; row.maxNotes = p.input.maxNotes; row.reserve = p.input.reserve; row.priority = p.input.priority; row.pedals = p.input.pedals; row.midiOut = p.midiOut;
             for(const auto& s : p.sends) row.sends[s.bus] = s.level;
             if(!p.input.zones.empty())
             {
@@ -850,7 +850,7 @@ namespace oscairn::standalone
         using K = PartField::Kind;
         std::vector<PartField> fields;
         // What plays it and how: only for a part that plays notes.
-        if(p.notes) fields.insert(fields.end(), {{K::Devices, "Plays from"}, {K::Channel, "Channel"}, {K::NoteLimit, "Notes at once"}, {K::Reserve, "Reserved notes"}, {K::Priority, "Priority"}, {K::Zone, "Keys and velocity", 0}, {K::Transpose, "Transpose"}});
+        if(p.notes) fields.insert(fields.end(), {{K::Devices, "Plays from"}, {K::Channel, "Channel"}, {K::NoteLimit, "Notes at once"}, {K::Reserve, "Reserved notes"}, {K::Priority, "Priority"}, {K::Pedals, "Sustain pedal"}, {K::Zone, "Keys and velocity", 0}, {K::Transpose, "Transpose"}});
         fields.push_back({K::Output, "Plays to"});
         if(!p.bus) fields.push_back({K::MidiOut, "MIDI out"}); // a bus has no notes to send
         fields.push_back({K::Level, "Level"});
@@ -1080,6 +1080,11 @@ namespace oscairn::standalone
     void setPriority(Control& c, uint32_t part, int priority)
     {
         editInput(c, part, [&](PartInput& input) { input.priority = uint8_t(std::clamp(priority, 0, 10)); });
+    }
+
+    void setSustainPedal(Control& c, uint32_t part, PedalReceive from)
+    {
+        editInput(c, part, [&](PartInput& input) { input.pedals = withPedalReceive(withPedalReceive(input.pedals, Pedal::Sustain, from), Pedal::Sostenuto, from); });
     }
 
     void setOutput(Control& c, uint32_t part, uint32_t bus) { c.setPartOutput(part, bus); c.commit(); }

@@ -884,6 +884,16 @@
               "minimum": 0,
               "maximum": 10,
               "description": "Under the shared budget (RFC 0018), a part of lower priority gives way first"
+            },
+            "receive": {
+              "type": "object",
+              "properties": {
+                "sustain": { "enum": ["all", "none", "own"] },
+                "sostenuto": { "enum": ["all", "none", "own"] },
+                "soft": { "enum": ["all", "none", "own"] }
+              },
+              "additionalProperties": false,
+              "description": "Whose pedals the part takes, per class (sustain CC 64, sostenuto CC 66, soft CC 67): all, every connected device's whichever device its notes come from (the default, and a class left out); none; or own, only those of the devices it takes notes from"
             }
           },
           "required": [

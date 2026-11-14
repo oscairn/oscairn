@@ -105,8 +105,14 @@ namespace oscairn
         uint16_t maxNotes = 0;                                     // notes at once (RFC 0018), 0..128; 0: no limit
         uint16_t reserve = 0;                                      // notes the shared budget leaves it (RFC 0018), 0..128, within maxNotes
         uint8_t priority = 0;                                      // 0..10: under the shared budget, lower gives way first
+        uint8_t pedals = 0;                                        // notes: whose pedals it takes, per class (note_zone.h); 0: every device's
         bool operator==(const PartInput&) const = default;
     };
+    // A part's `receive`, as files and the protocol write it: an object naming a pedal class
+    // ("sustain", "sostenuto", "soft") with "all", "none" or "own"; a class left out is "all".
+    // pedalsFrom refuses an unknown name or value; pedalsJson leaves out the classes at "all".
+    uint8_t pedalsFrom(const std::vector<std::pair<std::string, std::string>>& classes);
+    std::string pedalsJson(uint8_t pedals);
     // The zones a part's input wire carries: its own, each hearing only its selected devices,
     // with its note limit, counted across the part's (`part`) lanes, and its reserve and priority.
     std::vector<NoteZone> inputZones(const PartInput& input, const std::vector<MidiEndpoint>& endpoints, uint32_t part = 0);

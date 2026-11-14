@@ -123,7 +123,7 @@ int main(int argc, char** argv)
             const auto state = readParts(s.graphState());
             std::vector<std::string> labels;
             for(const auto& f : partFields(state.parts[1], state)) labels.push_back(f.label + (f.span ? "" : " (row)"));
-            const std::vector<std::string> expected{"Plays from", "Channel", "Notes at once", "Reserved notes", "Priority", "Keys and velocity (row)", "Transpose", "Plays to", "MIDI out", "Level", "Send to Room"};
+            const std::vector<std::string> expected{"Plays from", "Channel", "Notes at once", "Reserved notes", "Priority", "Sustain pedal", "Keys and velocity (row)", "Transpose", "Plays to", "MIDI out", "Level", "Send to Room"};
             check(labels == expected, "a part's fields, in order");
             const auto busFields = partFields(state.buses[0], state);
             check(busFields.size() == 2 && busFields[0].kind == PartField::Kind::Output && busFields[1].kind == PartField::Kind::Level, "a bus: where it plays and its level, no send to itself");
@@ -138,6 +138,11 @@ int main(int argc, char** argv)
         setMaxNotes(s, lead, 4);
         check(s.parts()[1].input.reserve == 4, "a lower note limit brings the reserve down to it");
         setMaxNotes(s, lead, 0); setReserve(s, lead, 0); setPriority(s, lead, 0);
+        setSustainPedal(s, lead, PedalReceive::None);
+        check(pedalReceive(s.parts()[1].input.pedals, Pedal::Sustain) == PedalReceive::None && pedalReceive(s.parts()[1].input.pedals, Pedal::Sostenuto) == PedalReceive::None &&
+              readParts(s.graphState()).parts[1].pedals == s.parts()[1].input.pedals, "the sustain pedal set to none from the Part page: sustain and sostenuto both");
+        setSustainPedal(s, lead, PedalReceive::Own); check(pedalReceive(s.parts()[1].input.pedals, Pedal::Sustain) == PedalReceive::Own, "or to its own devices' pedals");
+        setSustainPedal(s, lead, PedalReceive::All); check(s.parts()[1].input.pedals == 0, "and to every pedal again");
         // Solo: the other parts read as silenced, which dims them in the Parts list and Mixer.
         s.setPartSolo(lead, true); s.commit();
         auto soloed = readParts(s.graphState());

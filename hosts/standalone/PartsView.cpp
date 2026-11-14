@@ -942,6 +942,17 @@ namespace oscairn::standalone
                     priority->setBounds(r.removeFromLeft(200).reduced(2)); addAndMakeVisible(*priority); controls_.push_back(std::move(priority));
                     break;
                 }
+                case K::Pedals:
+                {
+                    // Its sustain and sostenuto pedals, one setting: every device's, none, or those of the devices it plays from.
+                    auto pedal = std::make_unique<juce::ComboBox>("Sustain pedal");
+                    pedal->addItem("Every pedal", 1); pedal->addItem("None", 2); pedal->addItem("Its devices' pedals", 3);
+                    pedal->setSelectedId(int(pedalReceive(uint8_t(p->pedals), Pedal::Sustain)) + 1, juce::dontSendNotification);
+                    pedal->setTooltip("Which sustain and sostenuto pedals hold the part's notes: every connected one (the default), none (its notes end at key-up), or only the pedals of the devices it plays from");
+                    pedal->onChange = [this, id, raw = pedal.get()] { const auto from = PedalReceive(raw->getSelectedId() - 1); edit([id, from](Control& c) { setSustainPedal(c, id, from); }); };
+                    pedal->setBounds(r.removeFromLeft(320).reduced(2)); addAndMakeVisible(*pedal); controls_.push_back(std::move(pedal));
+                    break;
+                }
                 case K::Zone:
                     zoneEditor(r, [this, id] {
                         const auto* q = part(id);

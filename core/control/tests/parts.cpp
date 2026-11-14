@@ -23,6 +23,8 @@
 #include <unistd.h>
 #endif
 #include <string>
+#include <fstream>
+#include <iterator>
 
 using namespace oscairn;
 namespace fs = std::filesystem;
@@ -1272,6 +1274,105 @@ namespace
         check(near(x.l[0], 0), "the pedal's release lets it go: " + std::to_string(x.l[0]));
         bool refused = false; try { s.controller(120, 0); } catch(const std::invalid_argument&) { refused = true; }
         check(refused, "channel mode messages are notes.panic's, not a controller's");
+    }
+
+    // A part's pedals by device (PartInput::pedals, `receive`): every device's by default, carried on
+    // its input wire's zone, in the Performance by name, and only the classes not at "all" written.
+    void partPedals(const char* fixture, const fs::path& root)
+    {
+        ::setenv("OSCAIRN_DATA_HOME", (root / "pedals-home").c_str(), 1); // a save reserves revisions there: never the real folder
+        Session s(48000, frames);
+        const auto synth = s.add("synth", fixture, "org.kick.test.synth");
+        const auto keys = s.addPart("Keys");
+        s.insertIntoPart(keys, 0, synth); s.commit();
+        check(s.parts()[0].input.pedals == 0 && wire(s, graphInput, synth, WireKind::Notes).zones.empty(), "a part takes every device's pedals by default");
+        PartInput input; input.pedals = withPedalReceive(withPedalReceive(0, Pedal::Sustain, PedalReceive::None), Pedal::Soft, PedalReceive::Own);
+        s.setPartInput(keys, input); s.commit();
+        const auto zones = wire(s, graphInput, synth, WireKind::Notes).zones;
+        check(zones.size() == 1 && zones[0].pedals == input.pedals && zones[0].lowKey == 0 && zones[0].highKey == 127, "the setting rides on a zone passing every note");
+        NoteZones z; z.count = 1; z.zones[0] = zones[0]; z.zones[0].sources = 1ull << 3;
+        check(!z.takesPedal(64, 3) && z.takesPedal(66, 7) && z.takesPedal(67, 3) && !z.takesPedal(67, 7) && z.takesPedal(1, 7),
+              "sustain from none, sostenuto from every device, soft from its own devices only; other controllers are not pedals");
+        check(pedalsJson(input.pedals) == R"({"sustain":"none","soft":"own"})" && pedalsFrom({{"soft", "own"}, {"sustain", "none"}, {"sostenuto", "all"}}) == input.pedals, "named as files and the protocol write them");
+        for(const auto& bad : std::vector<std::pair<std::string, std::string>>{{"pitchBend", "none"}, {"sustain", "some"}})
+        {
+            bool refused = false; try { pedalsFrom({bad}); } catch(const std::invalid_argument&) { refused = true; }
+            check(refused, "a class not built yet, or a value that is not all, none or own, is refused: " + bad.first + " " + bad.second);
+        }
+        const auto saved = root / "pedals";
+        s.savePerformance(saved.string());
+        std::ifstream in(saved / "performance.json"); const std::string text((std::istreambuf_iterator<char>(in)), {});
+        check(text.find(R"("receive":{"sustain":"none","soft":"own"})") != std::string::npos, "saved in the part's input");
+        Session t(48000, frames); t.loadPerformance(saved.string());
+        check(t.parts()[0].input.pedals == input.pedals && wire(t, graphInput, t.parts()[0].chain[0], WireKind::Notes).zones.at(0).pedals == input.pedals, "and read back onto the wire");
+    }
+
+    // Pending the engine core's pedal delivery (the note router, on its Rust port), each run alone: how
+    // the pedals of two devices reach parts (the MIDI fixture sustains as an instrument does). The
+    // panel (the built-in source) and a second keyboard, "Upper", which the Piano part alone plays from.
+    struct TwoKeyboards
+    {
+        Session s{48000, frames};
+        Audio x;
+        explicit TwoKeyboards(const char* fixture, PedalReceive upperFrom = PedalReceive::All)
+        {
+            Control::SessionStatus status; status.midiInputs = {{MidiEndpoint::Kind::Usb, 2, "Upper"}}; s.setHostStatus(status);
+            const auto a = s.add("a", fixture, "org.kick.test.midi"), b = s.add("b", fixture, "org.kick.test.midi");
+            s.setParameter(a, 7, .5); s.setParameter(b, 7, .25);
+            PartInput fromUpper; fromUpper.devices = {{DeviceRule::Kind::UsbNamed, DeviceRule::Match::Contains, 0, "Upper"}};
+            fromUpper.pedals = withPedalReceive(0, Pedal::Sustain, upperFrom);
+            const auto upper = s.addPart("Piano", fromUpper); s.insertIntoPart(upper, 0, a);
+            PartInput fromPanel; fromPanel.devices = {{DeviceRule::Kind::BuiltIn}};
+            const auto lower = s.addPart("Pad", fromPanel); s.insertIntoPart(lower, 0, b); s.commit();
+        }
+        double play(int key, const std::string& input) { s.note(true, key, 1, 0, input); x.run(s); x.run(s); s.note(false, key, 0, 0, input); x.run(s); x.run(s); return x.l[0]; }
+        double settle() { x.run(s); x.run(s); return x.l[0]; }
+    };
+    void pendingPedals(const char* fixture, const std::string& which)
+    {
+        if(which == "other-device") // the MODX case: the panel's pedal holds what the second keyboard plays
+        {
+            TwoKeyboards k(fixture);
+            k.s.controller(64, 127);
+            check(near(k.play(60, "Upper"), .5), "the panel's pedal holds a part playing only from the second keyboard: " + std::to_string(k.x.l[0]));
+            k.s.controller(64, 0);
+            check(near(k.settle(), 0), "and lets it go: " + std::to_string(k.x.l[0]));
+        }
+        else if(which == "own") // only the pedals of the devices it plays from
+        {
+            TwoKeyboards k(fixture, PedalReceive::Own);
+            k.s.controller(64, 127);
+            check(near(k.play(60, "Upper"), 0), "with its own devices' pedals only, the panel's pedal does not hold it: " + std::to_string(k.x.l[0]));
+            k.s.controller(64, 127, 0, "Upper");
+            check(near(k.play(62, "Upper"), .5), "the second keyboard's own pedal does: " + std::to_string(k.x.l[0]));
+        }
+        else if(which == "two-pedals") // two pedals down together: held until both are up
+        {
+            TwoKeyboards k(fixture);
+            k.s.controller(64, 127); k.s.controller(64, 127, 0, "Upper");
+            check(near(k.play(60, "Upper"), .5), "both pedals down: held: " + std::to_string(k.x.l[0]));
+            k.s.controller(64, 0);
+            check(near(k.settle(), .5), "one pedal up, the other still down: still held: " + std::to_string(k.x.l[0]));
+            k.s.controller(64, 0, 0, "Upper");
+            check(near(k.settle(), 0), "both up: released: " + std::to_string(k.x.l[0]));
+        }
+        else if(which == "none") // the source's receive switch off: its notes end at key-up, the other part holds
+        {
+            Session s(48000, frames);
+            const auto a = s.add("a", fixture, "org.kick.test.midi"), b = s.add("b", fixture, "org.kick.test.midi");
+            s.setParameter(a, 7, .5); s.setParameter(b, 7, .25);
+            PartInput deaf; deaf.pedals = withPedalReceive(0, Pedal::Sustain, PedalReceive::None);
+            const auto bass = s.addPart("Bass", deaf); s.insertIntoPart(bass, 0, a);
+            const auto pad = s.addPart("Pad"); s.insertIntoPart(pad, 0, b); s.commit();
+            Audio x;
+            s.controller(64, 127); s.note(true, 48, 1); x.run(s); x.run(s);
+            check(near(x.l[0], .75), "both parts sound: " + std::to_string(x.l[0]));
+            s.note(false, 48, 0); x.run(s); x.run(s);
+            check(near(x.l[0], .25), "key up with the pedal down: the part taking no sustain lets go, the other holds: " + std::to_string(x.l[0]));
+            s.controller(64, 0); x.run(s); x.run(s);
+            check(near(x.l[0], 0), "pedal up: both silent: " + std::to_string(x.l[0]));
+        }
+        else check(false, "no pending pedal test " + which);
     }
 
     // Audition (RFC 0021): a Sound in a part's place and a Performance in this one's, each put
@@ -2560,6 +2661,14 @@ int main(int argc, char** argv)
     try
     {
 #ifndef _WIN32
+        if(argc > 9 && !std::strcmp(argv[8], "--pending-pedals")) // pending the engine core's pedal delivery: registered disabled
+        {
+            state_files::TemporaryDirectory home; ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1); // never the real data folder
+            pendingPedals(argv[1], argv[9]);
+            if(failures) { std::fprintf(stderr, "%d failures\n", failures); return 1; }
+            std::printf("ok: pedals, %s\n", argv[9]);
+            return 0;
+        }
         if(argc > 8 && !std::strcmp(argv[8], "--ports-workers")) // only this, with OSCAIRN_PLUGIN_WORKER set
         {
             portSplitsInWorker(argv[1], argv[2]);
@@ -2594,6 +2703,7 @@ int main(int argc, char** argv)
         audition(argv[1], temp.path);
         allNotesOff(argv[1], argv[5]);
         pedalFromControl(argv[1]);
+        partPedals(argv[1], temp.path);
         unavailable(argv[1], temp.path);
         sceneTransitions(argv[1], temp.path);
         budgets(argv[1], temp.path);

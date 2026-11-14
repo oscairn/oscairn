@@ -43,6 +43,7 @@ namespace oscairn::standalone
         PartMidiOut midiOut;             // the hardware outputs its MIDI goes to (RFC 0012 step 1); none: off
         int maxNotes = 0;                // notes at once (RFC 0018); 0: no limit
         int reserve = 0, priority = 0;   // the shared budget's (RFC 0018): notes left it, and 0..10, lower giving way first
+        int pedals = 0;                  // whose pedals it takes (PartInput::pedals)
         int lowKey = 0, highKey = 127, transpose = 0; // the input's first zone, or all keys
         int lowVelocity = 0, highVelocity = 127;      // its velocities, as MIDI values
         int channel = 0;                              // the MIDI channel its input zones take: 1..16, 0 any, -1 more than one set
@@ -143,7 +144,7 @@ namespace oscairn::standalone
     // how many grid columns each takes (0: the whole row). Every surface lays out the same list.
     struct PartField
     {
-        enum class Kind { Devices, Channel, NoteLimit, Reserve, Priority, Zone, Transpose, Output, MidiOut, Level, Send };
+        enum class Kind { Devices, Channel, NoteLimit, Reserve, Priority, Pedals, Zone, Transpose, Output, MidiOut, Level, Send };
         Kind kind;
         std::string label;
         int span = 1;
@@ -182,6 +183,7 @@ namespace oscairn::standalone
     void setMaxNotes(Control&, uint32_t part, int maxNotes); // 0: no limit; a reserve past it comes down to it
     void setReserve(Control&, uint32_t part, int reserve);   // within the note limit
     void setPriority(Control&, uint32_t part, int priority); // 0..10
+    void setSustainPedal(Control&, uint32_t part, PedalReceive from); // the sustain and sostenuto pedals together, as one setting
     void setOutput(Control&, uint32_t part, uint32_t bus);                         // 0: Main
     void setSendLevel(Control&, uint32_t part, uint32_t bus, double level);        // 0 removes the send
     // Routing's edits: user wires and nodes outside the parts.

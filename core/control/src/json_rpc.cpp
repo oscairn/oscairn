@@ -298,7 +298,7 @@ namespace oscairn
         }
         PartInput inputFrom( Value in )
         {
-            fields(in,{"kind","port","zones","devices","maxNotes","reserve","priority"});
+            fields(in,{"kind","port","zones","devices","maxNotes","reserve","priority","receive"});
             PartInput input;
             const auto kind = string(member(in,"kind"));
             input.kind = kind == "notes" ? PartInput::Kind::Notes : kind == "audio" ? PartInput::Kind::Audio : kind == "none" ? PartInput::Kind::None : kind == "bus" ? PartInput::Kind::Bus : (invalid("input kind is notes, audio, none or bus"), PartInput::Kind::None);
@@ -308,6 +308,14 @@ namespace oscairn
             if( member(in,"maxNotes") ) input.maxNotes = uint16_t(integer(member(in,"maxNotes"),128));
             if( member(in,"reserve") ) input.reserve = uint16_t(integer(member(in,"reserve"),128));
             if( member(in,"priority") ) input.priority = uint8_t(integer(member(in,"priority"),10));
+            if( const auto receive = member(in,"receive") )
+            {
+                if( receive->type != json_type_object ) invalid("a part's receive is an object");
+                std::vector<std::pair<std::string,std::string>> classes;
+                for( auto* e = static_cast<const json_object_s*>( receive->payload )->start; e; e = e->next )
+                    classes.emplace_back( std::string( e->name->string, e->name->string_size ), std::string( string( e->value ) ) );
+                input.pedals = pedalsFrom( classes );
+            }
             return input;
         }
         const char* pressureName( PadAssignment::Pressure p ) { return p == PadAssignment::Pressure::Poly ? "poly" : p == PadAssignment::Pressure::Channel ? "channel" : "none"; }
@@ -506,7 +514,7 @@ namespace oscairn
         {
             const auto chain = chainJson(p.chain);
             return "{\"id\":" + std::to_string(p.id) + ",\"name\":" + quote(p.name) + ",\"input\":{\"kind\":\"" + inputKind(p.input.kind) +
-                "\",\"port\":" + std::to_string(p.input.port) + ",\"zones\":" + zonesJson(p.input.zones) + ",\"devices\":" + devicesJson(p.input.devices) + ",\"maxNotes\":" + std::to_string(p.input.maxNotes) + ",\"reserve\":" + std::to_string(p.input.reserve) + ",\"priority\":" + std::to_string(p.input.priority) + "},\"chain\":" + chain + ",\"splits\":" + splitsJson(p.splits) + ",\"output\":" + std::to_string(p.output) +
+                "\",\"port\":" + std::to_string(p.input.port) + ",\"zones\":" + zonesJson(p.input.zones) + ",\"devices\":" + devicesJson(p.input.devices) + ",\"maxNotes\":" + std::to_string(p.input.maxNotes) + ",\"reserve\":" + std::to_string(p.input.reserve) + ",\"priority\":" + std::to_string(p.input.priority) + ",\"receive\":" + pedalsJson(p.input.pedals) + "},\"chain\":" + chain + ",\"splits\":" + splitsJson(p.splits) + ",\"output\":" + std::to_string(p.output) +
                 ",\"level\":" + encode(p.level) + ",\"pan\":" + encode(p.pan) + ",\"mute\":" + (p.mute ? "true" : "false") + ",\"solo\":" + (p.solo ? "true" : "false") + ",\"bus\":" + std::to_string(p.bus) + ",\"sends\":" + [&]{ std::vector<std::string> v; for( const auto& s : p.sends ) v.push_back("{\"bus\":" + std::to_string(s.bus) + ",\"level\":" + encode(s.level) + '}'); return join(v); }()
                 + ",\"midiOut\":{\"devices\":" + devicesJson(p.midiOut.devices) + ",\"channel\":" + std::to_string(p.midiOut.channel) + '}'
                 + ",\"key\":" + (p.key ? keyJson(*p.key) : std::string("null"))

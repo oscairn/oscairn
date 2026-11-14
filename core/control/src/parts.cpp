@@ -122,13 +122,40 @@ namespace oscairn
         return mask;
     }
 
+    namespace
+    {
+        constexpr const char* pedalNames[pedalClasses]{"sustain", "sostenuto", "soft"};
+        constexpr const char* receiveNames[]{"all", "none", "own"};
+    }
+    uint8_t pedalsFrom(const std::vector<std::pair<std::string, std::string>>& classes)
+    {
+        uint8_t pedals = 0;
+        for(const auto& [name, value] : classes)
+        {
+            const auto p = std::find(std::begin(pedalNames), std::end(pedalNames), name);
+            const auto r = std::find(std::begin(receiveNames), std::end(receiveNames), value);
+            if(p == std::end(pedalNames)) throw std::invalid_argument("a part receives sustain, sostenuto or soft, not \"" + name + "\"");
+            if(r == std::end(receiveNames)) throw std::invalid_argument("a part receives a pedal from all devices, none or its own, not \"" + value + "\"");
+            pedals = withPedalReceive(pedals, Pedal(p - std::begin(pedalNames)), PedalReceive(r - std::begin(receiveNames)));
+        }
+        return pedals;
+    }
+    std::string pedalsJson(uint8_t pedals)
+    {
+        std::string out = "{";
+        for(size_t p = 0; p < pedalClasses; ++p)
+            if(const auto r = pedalReceive(pedals, Pedal(p)); r != PedalReceive::All)
+                out += std::string(out.size() > 1 ? "," : "") + '"' + pedalNames[p] + "\":\"" + receiveNames[int(r)] + '"';
+        return out + '}';
+    }
+
     std::vector<NoteZone> inputZones(const PartInput& input, const std::vector<MidiEndpoint>& endpoints, uint32_t part)
     {
         auto zones = input.zones;
-        if(input.devices.empty() && !input.maxNotes && !input.reserve && !input.priority) return zones;
-        if(zones.empty()) zones.emplace_back(); // a zone passing every note, to carry the devices, limit, reserve and priority
+        if(input.devices.empty() && !input.maxNotes && !input.reserve && !input.priority && !input.pedals) return zones;
+        if(zones.empty()) zones.emplace_back(); // a zone passing every note, to carry the devices, limit, reserve, priority and pedals
         const auto mask = resolveDevices(input.devices, endpoints);
-        for(auto& z : zones) { z.sources = mask; z.maxNotes = input.maxNotes; z.part = part; z.reserve = input.reserve; z.priority = input.priority; }
+        for(auto& z : zones) { z.sources = mask; z.maxNotes = input.maxNotes; z.part = part; z.reserve = input.reserve; z.priority = input.priority; z.pedals = input.pedals; }
         return zones;
     }
 

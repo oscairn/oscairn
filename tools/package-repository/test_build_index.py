@@ -11,6 +11,7 @@ across versions, and a ready-made archive per platform is assembled from them an
 (RFC 0031). Keys live only in a temporary folder.
 """
 import gzip
+import importlib.util
 import hashlib
 import json
 import shutil
@@ -334,6 +335,22 @@ def main(tool):
         (needy_dir / "1.0.0.json").write_text(json.dumps({k: v for k, v in needy.items() if k != "dependencies"}))
         out = build(temp / "needy-unnamed")
         check(out.returncode != 0 and "`dependencies` is not the archive's" in out.stderr, "a record not naming its archive's dependencies is refused: " + out.stderr.strip())
+
+        # A file in the folder of a type a handler keeps (a sample, a waveform) is a piece of its own, however small.
+        spec = importlib.util.spec_from_file_location("build_index", BUILDER)
+        builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(builder)
+        held = temp / "samples.olib"
+        sample, small = "Samples/" + "a" * 64 + ".osp", "Assets/0123456789abcdef/small.wav"
+        with zipfile.ZipFile(held, "w") as z:
+            z.writestr("library.json", "{}")
+            z.writestr("Types/org.oscairn.samplepack/sample.json", json.dumps({"id": "org.oscairn.samplepack.sample", "folder": "Samples", "handler": "sample"}))
+            z.writestr(sample, b"x" * 4096)
+            z.writestr(small, b"y")
+        (temp / "cache-held").mkdir()
+        listed = {p["path"]: p["type"] for p in builder.pieces(held, {"plugins": [], "items": []}, temp / "cache-held")}
+        check(listed.get(sample) == "file" and listed.get("Assets") == "zip" and small not in listed,
+              "a sample in a handler's folder is a piece of its own at 4 KiB, a small file under Assets/ shares its folder's: " + str(listed))
     finally:
         shutil.rmtree(temp, ignore_errors=True)
     return 1 if failures else 0

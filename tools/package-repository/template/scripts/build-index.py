@@ -242,6 +242,18 @@ def pieces(archive, manifest, cache):
     items = {i["path"] for i in manifest["items"]}
     groups = {}
     with zipfile.ZipFile(archive) as z:
+        # The folders of the types the archive declares that a handler keeps (samples, waveforms;
+        # RFC 0023): each file there is a piece of its own, whatever its size.
+        kept = set()
+        for info in z.infolist():
+            parts = info.filename.split("/")
+            if len(parts) == 3 and parts[0] == "Types" and parts[2].endswith(".json") and info.file_size <= 64 * 1024:
+                try:
+                    declared = json.loads(z.read(info))
+                except ValueError:
+                    continue
+                if isinstance(declared, dict) and declared.get("handler") and isinstance(declared.get("folder"), str):
+                    kept.add(declared["folder"])
         for info in z.infolist():
             if info.is_dir():
                 continue
@@ -253,7 +265,7 @@ def pieces(archive, manifest, cache):
                 key = ("zip", build, builds[build])
             elif "/".join(parts[:2]) in items:
                 key = ("zip", "/".join(parts[:2]), None)
-            elif parts[0] == "Assets" and info.file_size >= MIN_SAMPLE:
+            elif (parts[0] == "Assets" and info.file_size >= MIN_SAMPLE) or (len(parts) == 2 and parts[0] in kept):
                 key = ("file", name, None)
             else:
                 key = ("zip", parts[0], None)

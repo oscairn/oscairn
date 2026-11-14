@@ -324,6 +324,7 @@ publishes, and nothing in a piece is signed anew.
 | Each item folder, `Performances/<folder>` or `Sounds/<folder>` | `zip` | the folder | |
 | Each plugin build the manifest lists, its file or bundle (one piece for a bundle several plugins list) | `zip` | the build's `path` | the build's |
 | Each file under `Assets/` of 1 MiB (1,048,576 bytes) or more: a sample, kept as itself | `file` | the entry | |
+| Each file in the folder of a type the archive declares with a `handler` (`Samples/<id>.osp`, `Waveforms/<id>.owf`; [RFC 0023](0023-item-types.md)), whatever its size, kept as itself (added 2026-11-14) | `file` | the entry | |
 | Every other entry, by its top folder (`Assets`, `Licenses`, `Plugins`, `Performances`, `Sounds`) | `zip` | the top folder | |
 
 A `file` piece is the entry's bytes, unchanged: its SHA-256 is the one the manifest's `files`

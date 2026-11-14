@@ -869,12 +869,16 @@ void Session::tendResidents() {
         residentsTended_=now+std::chrono::seconds(2);} // their workers' memory comes back as they end: not let go of twice
 }
 
+// Linux's MemAvailable. Elsewhere (macOS, whose kernel compresses and pages memory itself, so that no
+// one figure means what MemAvailable does) it is 0, not known: the budget's `available` floor is then
+// not watched, nothing is let go for it, and memory.state's systemAvailable is 0. OSCAIRN_MEMINFO, a file
+// in /proc/meminfo's form, is read on any platform (tests).
 uint64_t Session::systemAvailable() {
     const char* file=std::getenv("OSCAIRN_MEMINFO");
 #ifdef __linux__
     if(!file || !*file)file="/proc/meminfo";
 #endif
-    if(!file || !*file)return 0; // shortcut: Linux's figure only; read the Mach VM statistics if a Mac needs residents let go by memory
+    if(!file || !*file)return 0;
     std::ifstream in(file);std::string key;uint64_t kb=0;
     while(in>>key>>kb){if(key=="MemAvailable:")return kb<<10;in.ignore(256,'\n');}
     return 0;

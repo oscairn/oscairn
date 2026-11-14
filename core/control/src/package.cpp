@@ -381,7 +381,7 @@ namespace oscairn
                 if(e.directory) continue;
                 if(const auto k = kept.find(top); k != kept.end())
                 {
-                    const auto file = name.substr(top.size() + 1);
+                    const auto file = name.size() > top.size() ? name.substr(top.size() + 1) : std::string();
                     if(file.size() != 64 + k->second.size() || !file.ends_with(k->second) || file.find_first_not_of("0123456789abcdef") != 64) bad("a file in " + top + "/ that is not <id>" + k->second + ": " + name);
                     contents.push_back(name);
                 }

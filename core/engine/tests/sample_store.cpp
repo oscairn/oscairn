@@ -10,6 +10,7 @@
 #include "../../plugin-host/src/StateFiles.h"
 #include "sample_source.h"
 #include <cstdio>
+#include <functional>
 #include <iostream>
 #include <sys/wait.h>
 #include <unistd.h>

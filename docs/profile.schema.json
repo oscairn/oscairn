@@ -633,6 +633,15 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 240
+          },
+          "topBar": {
+            "description": "What the Rust UI's top bar shows in its resource section (docs/rust-ui.md): cpu, how full the CPU is (session.status's cpuLoad, the audio callback's share of each block's time), and ram, the device's memory in use (compute.memory less what the system has available), each as a bar and a percent (both), a bar, a percent or not at all (none). Absent: both for each. The user's choice in Settings, Top bar, goes over it",
+            "type": "object",
+            "properties": {
+              "cpu": { "enum": ["both", "bar", "percent", "none"] },
+              "ram": { "enum": ["both", "bar", "percent", "none"] }
+            },
+            "additionalProperties": false
           }
         },
         "required": [

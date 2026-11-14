@@ -93,4 +93,39 @@ How (a) works:
 - **The theme is the JUCE app's**: the built-in themes' `theme.json` files are read at build time
   and the one the JUCE app would show is chosen the same way (the user's choice in
   `appearance.txt`, else the screen's theme in the profile, else `themes/default`).
+
+## The top bar
+
+From the left: Home (not on Home itself), where the musician is, the open Performance and its
+scene (`performance.info`, `graph.get`, asked again on each `graph.changed`), the tempo
+(`transport.get`) and the resource section. Everything right of the Performance has a fixed
+width, so a changing figure never moves anything.
+
+The resource section shows two meters, CPU over RAM:
+
+- **CPU** is how full the CPU is for the audio: `session.status`'s `cpuLoad`, the audio device
+  callback's share of each block's time (JUCE's `getCpuUsage`), the figure the JUCE top bar
+  shows beside the tempo. 100% is a callback that takes the whole block: the next one is late
+  and the audio breaks up. It is not the whole machine's CPU use.
+- **RAM** is the device's memory in use: the profile's `compute.memory` (992 MiB on a FANTOM-07;
+  else the budget's `device`) less what the system has available (`memory.state`'s
+  `systemAvailable`, Linux's MemAvailable), as a share of it. 100% is nothing left available.
+  Shown as "–" where the engine cannot tell (macOS reports 0).
+- Each is yellow from 75% and red from 90%, as the JUCE bar colors the load.
+- **What shows:** for each of `cpu` and `ram`, `both` (a bar and its percent), `bar`, `percent`
+  or `none`. The profile sets it on its screen (`screens[].topBar`, absent: both), and the user
+  over it in Settings' Top bar page, which keeps it in the configuration folder's `top-bar.json`
+  (beside `appearance.txt`; `OSCAIRN_CONFIG_HOME`, else `~/.config/Oscairn` or
+  `~/Library/Application Support/Oscairn`). While Settings is a JUCE screen, the Rust UI reads it
+  when it starts, which it does after every JUCE screen.
+- **Fixed width:** the names' column, a bar column when either meter has a bar, a percent column
+  when either has a percent; the percent is three fixed digit cells and the sign, so "1%" and
+  "100%" take the same room whatever the font. The tests render all sixteen settings with 1%
+  and 100%, tempos of 5 and 999.9 and a very long Performance name and check that the section
+  and the tempo never move.
+- **Cost:** `status` comes at most four times a second; the meters move at most twice a second
+  (`memory.state` and `transport.get` are asked then), and a property is set only when what it
+  shows changes (a whole percent, the tempo's text). The tests check that an update repaints a
+  rectangle inside the section and that no pixel outside it changes, and that nothing is drawn at
+  rest.
 </content>

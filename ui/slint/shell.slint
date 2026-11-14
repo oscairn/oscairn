@@ -1,9 +1,42 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The shell's window: the top bar and the screen shown under it.
+// The shell's window: the top bar, the screen shown under it, and the engine's state when it is
+// busy or gone.
+
+import { Theme } from "theme.slint";
+import { Bar, TopBar } from "topbar.slint";
+export { Theme, Bar }
 
 export component Shell inherits Window {
     title: "Oscairn";
     preferred-width: 1280px;
     preferred-height: 720px;
-    background: #111317;
+    background: Theme.background;
+    default-font-family: "Inter";
+    // Empty while the engine answers; else what is wrong ("busy 3.2 s", "lost: ...").
+    in property <string> engine;
+    out property <length> resources-x: bar.resources-x;
+    out property <length> resources-width: bar.resources-width;
+    out property <length> tempo-x: bar.tempo-x;
+
+    bar := TopBar {
+        y: 0;
+        width: parent.width;
+    }
+    if root.engine != "": Rectangle {
+        x: Theme.margin;
+        y: Theme.bar-height + Theme.gap;
+        width: parent.width - 2 * Theme.margin;
+        height: Theme.touch;
+        background: Theme.danger;
+        border-radius: Theme.radius;
+        Text {
+            x: 12px;
+            width: parent.width - 24px;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Theme.body;
+            color: Theme.background;
+            text: "Engine " + root.engine;
+        }
+    }
 }

@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! Scene tests: the shell's window rendered headless by Slint's software renderer into a buffer
+//! (no window is shown), the area each change repaints taken from the renderer, and the shell
+//! driven through a socket by a fake engine. Pictures for a look by eye go to target/screens/.
+
+use crate::client::tests::{FakeEngine, WAIT};
+use crate::client::Event;
+use crate::shell::{self, Request};
+use crate::topbar::{MeterSettings, Show};
+use crate::{Bar, Shell};
+use serde_json::json;
+use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+use slint::platform::{Platform, WindowAdapter};
+use slint::{ComponentHandle, PhysicalSize, Rgb8Pixel};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::mpsc;
+
+pub const W: usize = 1280;
+pub const H: usize = 720;
+
+/// A platform with no display: each window is a buffer the test renders into.
+struct Headless;
+
+thread_local! { static WINDOW: RefCell<Option<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(None) }; }
+
+impl Platform for Headless {
+    fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        WINDOW.with(|w| *w.borrow_mut() = Some(window.clone()));
+        Ok(window)
+    }
+}
+
+/// A rectangle in the window's pixels: x, y, width, height.
+pub type Rect = (i32, i32, i32, i32);
+
+pub struct Screen {
+    pub ui: Shell,
+    window: Rc<MinimalSoftwareWindow>,
+    pub pixels: Vec<Rgb8Pixel>,
+}
+
+impl Screen {
+    pub fn new() -> Screen {
+        let _ = slint::platform::set_platform(Box::new(Headless)); // once per test thread
+        let ui = Shell::new().unwrap();
+        let window = WINDOW.with(|w| w.borrow_mut().take()).unwrap();
+        window.set_size(PhysicalSize::new(W as u32, H as u32));
+        ui.show().unwrap();
+        Screen { ui, window, pixels: vec![Rgb8Pixel::default(); W * H] }
+    }
+
+    /// Renders what changed since the last frame: the bounding box of what was repainted, None for nothing.
+    pub fn frame(&mut self) -> Option<Rect> {
+        slint::platform::update_timers_and_animations();
+        let mut repainted = None;
+        self.window.draw_if_needed(|renderer| {
+            let region = renderer.render(&mut self.pixels, W);
+            let (o, s) = (region.bounding_box_origin(), region.bounding_box_size());
+            repainted = (s.width > 0 && s.height > 0).then_some((o.x, o.y, s.width as i32, s.height as i32));
+        });
+        repainted
+    }
+
+    /// The window as a PPM picture in target/screens/NAME.ppm.
+    pub fn save(&self, name: &str) {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/screens");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ppm = format!("P6 {W} {H} 255\n").into_bytes();
+        ppm.extend(self.pixels.iter().flat_map(|p| [p.r, p.g, p.b]));
+        std::fs::write(dir.join(format!("{name}.ppm")), ppm).unwrap();
+    }
+
+    /// The resource section's rectangle in the window (the top bar is at the window's top left).
+    pub fn resources(&self) -> Rect {
+        let ui = &self.ui;
+        (ui.get_resources_x() as i32, 0, ui.get_resources_width().ceil() as i32, 48)
+    }
+}
+
+/// True when `inner` lies within `outer`.
+pub fn within(inner: Rect, outer: Rect) -> bool {
+    inner.0 >= outer.0 && inner.1 >= outer.1 && inner.0 + inner.2 <= outer.0 + outer.2 && inner.1 + inner.3 <= outer.1 + outer.3
+}
+
+/// The pixels outside `r` that differ between two frames.
+fn changed_outside(a: &[Rgb8Pixel], b: &[Rgb8Pixel], r: Rect) -> usize {
+    (0..W * H).filter(|&i| !within(((i % W) as i32, (i / W) as i32, 1, 1), r) && a[i] != b[i]).count()
+}
+
+fn settings(ui: &Shell, cpu: Show, ram: Show) {
+    shell::show_settings(ui, MeterSettings { cpu, ram });
+}
+
+fn meters(ui: &Shell, cpu: i32, ram: i32) {
+    let bar = ui.global::<Bar>();
+    bar.set_cpu(cpu);
+    bar.set_cpu_known(true);
+    bar.set_ram(ram);
+    bar.set_ram_known(true);
+}
+
+// The resource section's width depends on what it shows, never on the figures: with "1%" and
+// "100%", tempos from 5 to 999.9 and a very long Performance name, neither it nor the tempo
+// beside it moves, for every one of the sixteen settings.
+#[test]
+fn resource_section_has_a_fixed_width() {
+    let mut s = Screen::new();
+    let all = [Show::None, Show::Bar, Show::Percent, Show::Both];
+    for cpu in all {
+        for ram in all {
+            settings(&s.ui, cpu, ram);
+            let mut seen = Vec::new();
+            for (c, r, tempo, name) in [(1, 100, "5.0 BPM", "A"), (100, 1, "999.9 BPM", &*"Very long Performance name ".repeat(12)), (42, 7, "120.0 BPM", "")] {
+                meters(&s.ui, c, r);
+                let bar = s.ui.global::<Bar>();
+                bar.set_tempo(tempo.into());
+                bar.set_performance(name.into());
+                bar.set_scene("Chorus with a long name".into());
+                s.frame();
+                seen.push((s.ui.get_resources_x(), s.ui.get_resources_width(), s.ui.get_tempo_x()));
+            }
+            assert!(seen.windows(2).all(|w| w[0] == w[1]), "{cpu:?}/{ram:?}: {seen:?}");
+            // Its width: the names' column, then a bar column and a percent column when either meter shows one.
+            let (bars, percents) = (cpu.bar() || ram.bar(), cpu.percent() || ram.percent());
+            let want = if !bars && !percents { 0. } else { 32. + if bars { 72. } else { 0. } + if percents { 36. } else { 0. } };
+            assert_eq!(seen[0].1, want, "{cpu:?}/{ram:?}");
+            assert_eq!(seen[0].0 + seen[0].1 + 10., W as f32, "{cpu:?}/{ram:?}: at the right edge");
+            s.save(&format!("topbar-{cpu:?}-{ram:?}").to_lowercase());
+        }
+    }
+}
+
+// A meter update repaints its own digits and bar, inside the resource section, and no pixel
+// outside it changes. At rest, and for a value set again unchanged, nothing is drawn.
+#[test]
+fn a_meter_update_repaints_only_the_resource_section() {
+    let mut s = Screen::new();
+    settings(&s.ui, Show::Both, Show::Both);
+    s.ui.global::<Bar>().set_performance("Strings".into());
+    s.ui.global::<Bar>().set_tempo("120.0 BPM".into());
+    meters(&s.ui, 1, 30);
+    s.frame();
+    assert_eq!(s.frame(), None, "at rest");
+    let section = s.resources();
+    for (cpu, ram) in [(100, 30), (100, 31), (7, 31), (88, 95)] {
+        let before = s.pixels.clone();
+        meters(&s.ui, cpu, ram);
+        let repainted = s.frame().expect("a change draws");
+        assert!(within(repainted, section), "{cpu}/{ram}: repainted {repainted:?}, the section is {section:?}");
+        assert_eq!(changed_outside(&before, &s.pixels, section), 0);
+        meters(&s.ui, cpu, ram);
+        assert_eq!(s.frame(), None, "{cpu}/{ram} set again");
+    }
+    s.save("topbar-updated");
+}
+
+/// The shell against a fake engine on a socket: the client's events come back to this thread
+/// through a channel, as the event loop brings them in the program.
+struct Fixture {
+    screen: Screen,
+    engine: FakeEngine,
+    events: mpsc::Receiver<Event<Request>>,
+    _listener: std::os::unix::net::UnixListener,
+}
+
+impl Fixture {
+    fn new(name: &str) -> Fixture {
+        let screen = Screen::new();
+        let path = std::env::temp_dir().join(format!("oscairn-ui-shell-{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let (tx, events) = mpsc::channel();
+        shell::start(&screen.ui, path, 992 << 20, move |e| {
+            let _ = tx.send(e);
+        })
+        .unwrap();
+        let engine = FakeEngine::new(listener.accept().unwrap().0);
+        Fixture { screen, engine, events, _listener: listener }
+    }
+
+    /// Hands the shell the client's next event.
+    fn pump(&mut self) {
+        shell::dispatch(self.events.recv_timeout(WAIT).unwrap());
+    }
+
+    /// The next request, answered with `result`.
+    fn answer(&mut self, method: &str, result: serde_json::Value) {
+        let request = self.engine.request();
+        assert_eq!(request["method"], method);
+        self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        self.pump();
+    }
+}
+
+// What the shell asks the engine and how the answers reach the top bar; a status sooner than
+// half a second after the last moves nothing; a lost engine is said.
+#[test]
+fn the_top_bar_follows_the_engine() {
+    let mut f = Fixture::new("topbar");
+    f.engine.answer(); // session.hello
+    f.pump();
+    assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed"]));
+    f.answer("performance.reopen", json!({"notice": ""}));
+    f.answer("performance.info", json!({"name": "Grand Piano", "unsaved": false}));
+    f.answer("graph.get", json!({"scene": 1, "scenes": [{"id": 1, "name": "Verse"}]}));
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42}})));
+    f.pump();
+    f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
+    f.answer("transport.get", json!({"tempo": 96.5, "playing": false}));
+    let bar = f.screen.ui.global::<Bar>();
+    assert_eq!((bar.get_performance().as_str(), bar.get_scene().as_str(), bar.get_tempo().as_str()), ("Grand Piano", "Verse", "96.5 BPM"));
+    assert_eq!((bar.get_cpu(), bar.get_cpu_known(), bar.get_ram(), bar.get_ram_known(), bar.get_ram_level()), (42, true, 50, true, 0));
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.95}})));
+    f.pump();
+    assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 42, "within half a second of the last: not shown");
+    f.screen.frame();
+    f.screen.save("topbar-engine");
+    f.engine.writer.shutdown(std::net::Shutdown::Both).unwrap();
+    f.pump(); // the subscribe still out, failed
+    f.pump();
+    assert!(f.screen.ui.get_engine().starts_with("lost"));
+}

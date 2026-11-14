@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The theme the screens draw with: colors and radius from the JUCE app's theme.json, set by
+// theme.rs at start; the type scale and sizes are the JUCE app's on a device's screen
+// (hosts/standalone/Theme.cpp's textSize for touch, Launcher.h's top bar height), kept in step by hand.
+
+// Every built-in theme's font (Inter, SIL OFL 1.1: hosts/standalone/themes/*/fonts/OFL.txt).
+import "../../hosts/standalone/themes/oscairn-dark/fonts/Inter-Regular.ttf";
+import "../../hosts/standalone/themes/oscairn-dark/fonts/Inter-Bold.ttf";
+
+export global Theme {
+    in property <color> background: #111317;
+    in property <color> surface: #191C21;
+    in property <color> raised: #262B32;
+    in property <color> border: #3A414B;
+    in property <color> text: #F6F8FA;
+    in property <color> muted: #B4BDC8;
+    in property <color> accent: #FF9A45;
+    in property <color> positive: #5AD9A4;
+    in property <color> danger: #FF6B63;
+    in property <length> radius: 6px;
+    in property <float> font-scale: 1;
+    // The meters' yellow (hosts/standalone/Icons.h, meterYellow).
+    out property <color> warning: #e8c547;
+    out property <length> small: 13px * font-scale;
+    out property <length> body: 16px * font-scale;
+    out property <length> button: 15px * font-scale;
+    out property <length> title: 20px * font-scale;
+    out property <length> bar-height: 48px;
+    // The least a touch target is across (RFC 0019).
+    out property <length> touch: 44px;
+    out property <length> gap: 4px; // Theme.h's denseGap
+    out property <length> margin: 6px; // Theme.h's denseMargin
+}

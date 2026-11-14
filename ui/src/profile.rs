@@ -3,6 +3,7 @@
 //! validates profiles in full (hosts/standalone/Profile.cpp); this reads the few fields the UI
 //! needs and takes anything missing or odd as its default.
 
+use crate::topbar::MeterSettings;
 use serde_json::Value;
 
 mod built_in {
@@ -19,6 +20,10 @@ pub struct Profile {
     pub theme: String,
     /// screens[0].frameRate: the most frames a second the UI draws; None: the default.
     frame_rate: Option<u32>,
+    /// screens[0].topBar: what the top bar's resource section shows.
+    pub top_bar: MeterSettings,
+    /// compute.memory in bytes; 0 when the profile does not say.
+    pub memory: u64,
 }
 
 impl Profile {
@@ -43,6 +48,8 @@ impl Profile {
             on_device: doc["platform"]["runtime"].as_str().is_some_and(|r| !r.is_empty()),
             theme: screen["theme"].as_str().unwrap_or_default().into(),
             frame_rate: screen["frameRate"].as_u64().map(|f| f.min(1000) as u32),
+            top_bar: crate::settings::over(MeterSettings::default(), &screen["topBar"]),
+            memory: doc["compute"]["memory"].as_u64().unwrap_or(0).min(1 << 24) << 20,
         })
     }
 
@@ -56,11 +63,13 @@ impl Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::topbar::Show;
 
     #[test]
     fn built_in_profiles_read() {
         let p = Profile::load(Some("fantom-07")).unwrap();
         assert_eq!((p.id.as_str(), p.on_device, p.theme.as_str(), p.frame_rate()), ("fantom-07", true, "oscairn-block", 30));
+        assert_eq!((p.memory, p.top_bar), (992 << 20, MeterSettings { cpu: Show::Both, ram: Show::Both }));
         assert_eq!(Profile::load(None).unwrap().frame_rate(), 0); // a computer: no cap
         assert!(Profile::load(Some("no-such-profile")).is_err());
     }
@@ -72,5 +81,7 @@ mod tests {
         let p = Profile::parse(r#"{"format":"oscairn.profile","screens":[{"frameRate":"fast"}]}"#).unwrap();
         assert_eq!(p.frame_rate(), 0); // odd: the default
         assert!(Profile::parse("[]").is_err() && Profile::parse("{").is_err());
+        let p = Profile::parse(r#"{"format":"oscairn.profile","screens":[{"topBar":{"cpu":"bar","ram":"none"}}]}"#).unwrap();
+        assert_eq!(p.top_bar, MeterSettings { cpu: Show::Bar, ram: Show::None });
     }
 }

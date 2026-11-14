@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The top bar (RFC 0030): Home, where the musician is, the open Performance and its scene, the
+// tempo, and the resource section: CPU over RAM, each a bar, a percent, both or neither. Every
+// part right of the Performance has a fixed width, so a changing figure never moves anything:
+// an update repaints its own digits and bar and nothing else (src/tests.rs proves it).
+
+import { Theme } from "theme.slint";
+
+// A whole percent in fixed cells, a digit each ("  7%", " 42%", "100%"): tabular, whatever the font.
+component Percent inherits Rectangle {
+    in property <int> value;
+    in property <bool> known;
+    in property <color> ink;
+    property <length> cell: 8px;
+    width: 3 * cell + 12px;
+    for i in 3: Text {
+        x: i * root.cell;
+        width: root.cell;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: Theme.small;
+        color: root.ink;
+        text: !root.known ? (i == 2 ? "–" : "") : i == 0 ? (root.value >= 100 ? "1" : "") : i == 1 ? (root.value >= 10 ? "\{mod(floor(root.value / 10), 10)}" : "") : "\{mod(root.value, 10)}";
+    }
+    Text {
+        x: 3 * root.cell;
+        width: 12px;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        font-size: Theme.small;
+        color: root.ink;
+        text: "%";
+    }
+}
+
+// One meter's row: its name, then its bar and its percent in the section's columns.
+component Meter inherits Rectangle {
+    in property <string> label;
+    in property <int> value;
+    in property <bool> known;
+    in property <int> level; // 0, 1 at 75%, 2 at 90%
+    in property <bool> bar;
+    in property <bool> percent;
+    in property <length> percent-x;
+    property <color> ink: level == 2 ? Theme.danger : level == 1 ? Theme.warning : Theme.muted;
+    height: 16px;
+    Text {
+        x: 0;
+        width: 32px;
+        vertical-alignment: center;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: root.label;
+    }
+    if root.bar: Rectangle {
+        x: 34px;
+        y: (parent.height - self.height) / 2;
+        width: 64px;
+        height: 6px;
+        background: Theme.raised;
+        Rectangle {
+            x: 0;
+            width: root.known ? parent.width * root.value / 100 : 0;
+            background: root.ink;
+        }
+    }
+    if root.percent: Percent {
+        x: root.percent-x;
+        value: root.value;
+        known: root.known;
+        ink: root.ink;
+    }
+}
+
+// What the top bar shows, set by shell.rs.
+export global Bar {
+    in property <string> where: "Home";
+    in property <bool> home-button;
+    in property <string> performance;
+    in property <string> scene;
+    in property <string> tempo;
+    in property <int> cpu;
+    in property <bool> cpu-known;
+    in property <int> cpu-level;
+    in property <int> ram;
+    in property <bool> ram-known;
+    in property <int> ram-level;
+    in property <bool> cpu-bar: true;
+    in property <bool> cpu-percent: true;
+    in property <bool> ram-bar: true;
+    in property <bool> ram-percent: true;
+    callback home();
+}
+
+export component TopBar inherits Rectangle {
+    // Where the resource section and the tempo are, for the tests of their fixed widths.
+    out property <length> resources-x: resources.x;
+    out property <length> resources-width: resources.width;
+    out property <length> tempo-x: tempo.x;
+    property <bool> any-bar: Bar.cpu-bar || Bar.ram-bar;
+    property <bool> any-percent: Bar.cpu-percent || Bar.ram-percent;
+    property <bool> any: any-bar || any-percent;
+    height: Theme.bar-height;
+    background: Theme.background;
+    // The JUCE bar's line under it.
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border.with-alpha(0.35);
+    }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 10px;
+        spacing: 8px;
+        if Bar.home-button: TouchArea {
+            width: Theme.touch;
+            clicked => { Bar.home(); }
+            Image {
+                width: 24px;
+                height: 24px;
+                source: @image-url("../../hosts/standalone/icons/house.svg");
+                colorize: Theme.text;
+            }
+        }
+        Text {
+            vertical-alignment: center;
+            font-size: Theme.body;
+            font-weight: 700;
+            color: Theme.text;
+            text: Bar.where;
+        }
+        // The open Performance and its scene: a pill, as wide as what is left.
+        Rectangle {
+            horizontal-stretch: 1;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: 36px;
+                border-radius: min(self.height / 2, Theme.radius);
+                background: Bar.performance == "" ? transparent : Theme.surface;
+                Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    font-size: Theme.small;
+                    color: Theme.text;
+                    text: Bar.scene == "" ? Bar.performance : Bar.performance + "  ·  " + Bar.scene;
+                }
+            }
+        }
+        tempo := Text {
+            width: 84px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            font-size: Theme.small;
+            color: Theme.muted;
+            text: Bar.tempo;
+        }
+        resources := Rectangle {
+            width: !root.any ? 0 : 32px + (root.any-bar ? 72px : 0) + (root.any-percent ? 36px : 0);
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                if Bar.cpu-bar || Bar.cpu-percent: Meter {
+                    label: "CPU";
+                    value: Bar.cpu;
+                    known: Bar.cpu-known;
+                    level: Bar.cpu-level;
+                    bar: Bar.cpu-bar;
+                    percent: Bar.cpu-percent;
+                    percent-x: root.any-bar ? 104px : 32px;
+                }
+                if Bar.ram-bar || Bar.ram-percent: Meter {
+                    label: "RAM";
+                    value: Bar.ram;
+                    known: Bar.ram-known;
+                    level: Bar.ram-level;
+                    bar: Bar.ram-bar;
+                    percent: Bar.ram-percent;
+                    percent-x: root.any-bar ? 104px : 32px;
+                }
+            }
+        }
+    }
+}

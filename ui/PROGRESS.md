@@ -14,4 +14,14 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   (accepts the field) updated. Mac: `cargo test` 2 passed; container (Ubuntu 24.04 arm64,
   Rust 1.95): `cargo build --release --features kms,roland-fantom0` built (8.1 MB). Not run on a
   display.
+- Step 2 (Rust side): the shell (`shell.rs`), the client (prototype's, generic over what a
+  request is for, notifications, error codes), the theme (built-in theme.json, chosen as the
+  JUCE app does), the top bar (`topbar.rs`, `slint/topbar.slint`): Home, where, Performance and
+  scene, tempo, CPU over RAM with fixed-width columns and digit cells; profile `screens[].topBar`
+  and the user's `top-bar.json` over it. Headless scene tests (`src/tests.rs`, Slint's software
+  renderer into a buffer, MinimalSoftwareWindow): fixed width over all 16 settings with 1%/100%,
+  tempo 5/999.9, a long name; a meter update repaints only inside the section, no pixel outside
+  changes, nothing drawn at rest; the shell against a fake engine on a socket. Mac: 16 passed,
+  clippy clean. Pictures in ui/target/screens looked at by eye. The JUCE Settings page for it is
+  written and waits on the JUCE build (build-ui, started 14:2x) to compile and run its test.
 </content>

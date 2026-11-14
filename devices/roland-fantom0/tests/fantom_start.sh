@@ -42,10 +42,12 @@ cp "$bundle/etc/default/oscairn-engine" "$bundle/engine-defaults"
 printf "OSCAIRN_HEADLESS=0\nOSCAIRN_PROFILE=fantom-07\n" >> "$bundle/etc/default/oscairn-engine"
 out=$("$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "a profile with a screen: the app, by its full path, on the display" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh setsid env DISPLAY=:0 sh -c .ulimit -l unlimited; exec' && echo \"\$out\" | grep -q 'sh /usr/bin/Oscairn --profile fantom-07 --plugins /usr/lib/clap' && ! echo \"\$out\" | grep -q oscairn-engine-run"
+check "and the display its own first: Weston stopped, the bundle's X server on :0" "echo \"\$out\" | grep -q 'would run: systemctl stop weston.service' && echo \"\$out\" | grep -q 'would run: $bundle/start-chroot.sh /usr/bin/Xorg :0 vt7'"
 out=$(OSCAIRN_AUDIO_THREAD_CORES=1-3 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
 check "the app with the audio threads' cores" "echo \"\$out\" | grep -q 'setsid env DISPLAY=:0 OSCAIRN_AUDIO_THREAD_CORES=1-3 sh -c'"
 out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1); status=$?
 check "--engine-only: the engine alone" "[ $status = 0 ] && echo \"\$out\" | grep -q 'setsid env oscairn-engine-run --output-device' && ! echo \"\$out\" | grep -q Oscairn"
+check "and the display left as it is" "! echo \"\$out\" | grep -q -e weston.service -e Xorg"
 mv "$bundle/engine-defaults" "$bundle/etc/default/oscairn-engine"
 out=$(OSCAIRN_AUDIO_THREAD_CORES=1-3 "$bundle/oscairn-fantom-start" --dry-run 2>&1)
 check "the audio threads' cores from the environment, handed to the engine" "echo \"\$out\" | grep -q 'setsid env OSCAIRN_AUDIO_THREAD_CORES=1-3 oscairn-engine-run --output-device'"
@@ -129,6 +131,7 @@ kill $holder
 
 out=$("$bundle/oscairn-fantom-stop" --dry-run 2>&1); status=$?
 check "the stop's dry run" "[ $status = 0 ] && echo \"\$out\" | grep -q 'would run: $bundle/stop-chroot.sh' && echo \"\$out\" | grep -q 'program version error'"
+check "and Roland's display server started again" "echo \"\$out\" | grep -q 'would run: systemctl start weston.service'"
 check "and changes nothing" "[ ! -e '$bundle/ran' ]"
 check "a wrong option is refused" "! '$bundle/oscairn-fantom-start' --now > /dev/null 2>&1"
 out=$("$bundle/oscairn-fantom-start" --dry-run --cold 2>&1); status=$?

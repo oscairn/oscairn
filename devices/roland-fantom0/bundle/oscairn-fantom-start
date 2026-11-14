@@ -17,7 +17,11 @@
 #      recording what each had for oscairn-fantom-stop;
 #   6. starts the app on the display (/usr/bin/Oscairn --profile with the profile's id, on :0),
 #      which starts its own engine with the profile's audio device, keys, panel and input keys,
-#      when the profile has a screen; with --engine-only, or for a profile without one, the
+#      when the profile has a screen. The display is Oscairn's own first: Roland's Weston is
+#      stopped (systemctl stop weston.service; oscairn-fantom-stop starts it again) and the
+#      bundle's X server serves :0 with the bundle's /etc/X11/xorg.conf, started again with the
+#      app if it ends; if it does not come up, Weston is started again and the app goes on it.
+#      With --engine-only, or for a profile without one, the
 #      engine alone (oscairn-engine-run) with the profile's options instead
 #      (etc/default/oscairn-engine, written from the profile when the bundle was built), its
 #      startup Performance played by the panel through the profile's control groups. Either way
@@ -195,11 +199,114 @@ budget=${budget:-${OSCAIRN_WORKER_BUDGET_US:-}} extra=${extra:-${OSCAIRN_WORKER_
 tuning="${budget:+OSCAIRN_WORKER_BUDGET_US=$budget }${extra:+OSCAIRN_WORKER_EXTRA_BLOCK=$extra }${thp:+OSCAIRN_THP=$thp }${latency:+OSCAIRN_CPU_LATENCY=$latency }${spin:+OSCAIRN_WORKER_SPIN_US=$spin }${deadline:+OSCAIRN_WORKER_DEADLINE=$deadline }${sharing:+OSCAIRN_SHARING=$sharing }${hosts:+OSCAIRN_PLUGIN_HOSTS=$hosts }${own:+OSCAIRN_OWN_HOST=$own }" # unquoted below: no spaces in a value
 [ -n "${OSCAIRN_ENGINE_ARGS:-}" ] || fail "no OSCAIRN_ENGINE_ARGS in $root/etc/default/oscairn-engine"
 rm -f "$state/run/stopped" # not stopped on purpose (oscairn-fantom-stop's mark)
-# The app, on a profile with a screen (OSCAIRN_HEADLESS=0): Weston and Xwayland keep running
-# when Roland's application stops, and Xwayland's abstract socket for :0 reaches into the
-# chroot. By its full path, which it finds its engine and plugins beside; its locked memory
-# unlimited for the engine it starts, as oscairn-engine-run does for one alone.
+# The display (docs/fantom-0.md, "The display"). Under Roland's Weston, with its GPU 2D renderer,
+# the audio threads stalled while the app drew (ST Final, 41 s: 774 deadline misses against 0 on
+# the bundle's own X server), so Oscairn owns the display: weston.service stopped (nothing of
+# Roland's changed; oscairn-fantom-stop starts it again) and the bundle's Xorg on :0, configured
+# by the bundle's /etc/X11/xorg.conf, logged to var/oscairn/log/Xorg.log.
+xorg_ours() { for p in $(named Xorg); do [ "$(readlink "$proc/$p/root")" = "$root" ] && echo "$p"; done; }
+display_up() { grep -q '@/tmp/.X11-unix/X0$' "$proc/net/unix" 2>/dev/null; }
+# A client served on :0 within 5 seconds: the socket alone is not enough, as the X server opens it
+# before its screen, and one failing on its configuration had it for a moment.
+display_serves() {
+	"$root/start-chroot.sh" xwininfo -display :0 -root > /dev/null 2>&1 &
+	q=$! j=0
+	while kill -0 $q 2>/dev/null; do j=$((j + 1)); [ $j -le 50 ] || { kill $q; return 1; }; nap; done
+	wait $q
+}
+# Roland's Weston back, its Xwayland on :0 (it starts on the first client), as before Oscairn owned the display.
+weston_back() {
+	command -v systemctl > /dev/null 2>&1 && systemctl start weston.service || return 1
+	i=0
+	until display_up && display_serves; do i=$((i + 1)); [ $i -le 150 ] || return 1; nap; done
+}
+# The app, by its full path, which it finds its engine and plugins beside; its locked memory
+# unlimited for the engine it starts, as oscairn-engine-run does for one alone. Started again
+# after the X server ended, it reconnects to the engine that went on playing.
+app_start() {
+	"$root/start-chroot.sh" setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} $tuning$plug\
+		sh -c 'ulimit -l unlimited || echo "oscairn-fantom-start: cannot raise the locked-memory limit; continuing" >&2; exec "$@"' sh \
+		/usr/bin/Oscairn --profile "$OSCAIRN_PROFILE" --plugins /usr/lib/clap >> "$state/log/oscairn-app.log" 2>&1 &
+	echo $! > "$state/run/app.pid"
+}
+# Runs the X server, and runs it again whenever it ends without oscairn-fantom-stop (whose mark
+# it then finds), the app too once the new server is up if the app ended with the old one (an X
+# client ends with its server; the engine plays on meanwhile). Ended three times within a minute
+# of starting, it gives the display back to Weston and puts the app there.
+keep_display() {
+	fails=0
+	# This keeper's mark: a restart left waiting from an earlier one, or after a stop, starts nothing.
+	token=$(cat "$proc/sys/kernel/random/uuid" 2>/dev/null || date +%s)
+	echo "$token" > "$state/run/display.keeper"
+	while :; do
+		t0=$(date +%s)
+		"$root/start-chroot.sh" /usr/bin/Xorg :0 vt7 -novtswitch -nolisten tcp -noreset -nocursor -logfile /var/oscairn/log/Xorg.log < /dev/null
+		status=$?
+		[ ! -e "$state/run/stopped" ] || exit 0
+		ran=$(($(date +%s) - t0))
+		[ $ran -lt 60 ] || fails=0
+		fails=$((fails + 1))
+		if [ $fails -ge 3 ]; then
+			say "the X server ended (status $status) a third time within a minute of starting: Roland's Weston back (systemctl start weston.service), the app on it"
+			weston_back || say "Weston did not come back either: the screen stays dark; the engine plays on, oscairn-fantom-stop and start again"
+			# Not on the first start, before the app was started at all: the start puts it there itself.
+			[ -n "$(named Oscairn)" ] || [ ! -e "$state/run/app.pid" ] || app_start
+			exit 1
+		fi
+		say "the X server ended (status $status) after $ran s without oscairn-fantom-stop: starting it again, and the app if it ended with it"
+		# Once this X server is up, and only for an app that was started (not before the first
+		# start's own) and only one at a time: Weston's display, if it comes to that, gets the app
+		# from the fallback above.
+		(
+			i=0
+			until [ -n "$(xorg_ours)" ] && display_up && display_serves; do i=$((i + 1)); [ $i -le 100 ] || exit 0; nap; done
+			ours() { [ ! -e "$state/run/stopped" ] && [ "$(cat "$state/run/display.keeper" 2>/dev/null)" = "$token" ]; }
+			ours && [ -e "$state/run/app.pid" ] && mkdir "$state/run/app-restart.lock" 2>/dev/null || exit 0
+			i=0
+			while [ -n "$(named Oscairn)" ] && [ $i -lt 30 ]; do i=$((i + 1)); nap; done # the old app ending with its server
+			if [ -n "$(named Oscairn)" ]; then say "the app outlived the X server: left as it is"
+			elif ours; then say "starting the app again"; app_start
+			fi
+			sleep 5; rmdir "$state/run/app-restart.lock"
+		) &
+	done
+}
+# The app, on a profile with a screen (OSCAIRN_HEADLESS=0), on the display above.
 if [ -z "$alone" ] && [ "${OSCAIRN_HEADLESS:-1}" = 0 ] && [ -n "${OSCAIRN_PROFILE:-}" ]; then
+	if [ -n "$dry" ]; then
+		say "would run: systemctl stop weston.service (when it is active)"
+		say "would run: $root/start-chroot.sh /usr/bin/Xorg :0 vt7 -novtswitch -nolisten tcp -noreset -nocursor -logfile /var/oscairn/log/Xorg.log (with the bundle's /etc/X11/xorg.conf), started again if it ends"
+	else
+		if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet weston.service; then
+			say "stopping Roland's display server (systemctl stop weston.service)"
+			systemctl stop weston.service || say "systemctl stop weston.service failed"
+		fi
+		xorg=$(xorg_ours)
+		if [ -n "$xorg" ]; then
+			say "the bundle's X server already runs (pid $(echo $xorg)): kept"
+		elif display_up; then
+			say "something other than the bundle's X server serves :0: the app goes on it"
+		else
+			say "starting the bundle's X server on :0 (var/oscairn/log/Xorg.log)"
+			rm -f "$state/run/app.pid"; rmdir "$state/run/app-restart.lock" 2>/dev/null
+			( trap '' HUP; keep_display ) < /dev/null >> "$state/log/xorg.out" 2>&1 &
+			keeper=$!
+			i=0
+			until display_up && display_serves; do
+				i=$((i + 1))
+				if [ $i -gt 100 ] || ! kill -0 $keeper 2>/dev/null; then
+					kill $keeper 2>/dev/null
+					xorg=$(xorg_ours)
+					[ -z "$xorg" ] || kill -9 $xorg
+					tail -n 5 "$root/var/oscairn/log/Xorg.log" 2>/dev/null
+					say "the bundle's X server did not come up: Roland's Weston back (systemctl start weston.service), the app on it as before"
+					weston_back || fail "Weston did not come back either: no display for the app"
+					break
+				fi
+				nap
+			done
+		fi
+	fi
 	set -- /usr/bin/Oscairn --profile "$OSCAIRN_PROFILE" --plugins /usr/lib/clap
 	say "starting the app: $*${cores:+ (audio threads on cores $cores)}"
 	if [ -n "$dry" ]; then
@@ -207,10 +314,7 @@ if [ -z "$alone" ] && [ "${OSCAIRN_HEADLESS:-1}" = 0 ] && [ -n "${OSCAIRN_PROFIL
 		exit 0
 	fi
 	rm -rf "$root/tmp/oscairn-0"
-	"$root/start-chroot.sh" setsid env DISPLAY=:0 ${cores:+OSCAIRN_AUDIO_THREAD_CORES="$cores"} $tuning$plug\
-		sh -c 'ulimit -l unlimited || echo "oscairn-fantom-start: cannot raise the locked-memory limit; continuing" >&2; exec "$@"' sh "$@" \
-		>> "$state/log/oscairn-app.log" 2>&1 &
-	echo $! > "$state/run/app.pid"
+	app_start
 	# Its engine's control socket, in the app's runtime folder (the bundle's /tmp/oscairn-0).
 	i=0
 	until sock=$(ls "$root"/tmp/oscairn-0/engine-*.sock 2>/dev/null | head -n 1) && [ -S "$sock" ]; do

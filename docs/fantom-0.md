@@ -756,11 +756,13 @@ a FIFO (before the panel holder; it now reads from a holder only). That shows th
 run on the unit yet. Idle there with `--audio null`, the engine held 125 MiB resident (its
 memory locked, at the profile's `instrument` reliability) and its three plugin workers 52 MiB
 together. On 4.19 the engine can have no memory pressure trigger (PSI is Linux 4.20 and later):
-by its code it then logs that it has none and goes on without. The app shows on the FANTOM's
-screen as one more X11 client on `:0`, as Roland's is: Weston and Xwayland keep running when
-Roland's app stops, and though the bundle's own `/tmp` hides Xwayland's socket file, Xwayland
-also listens on the abstract socket of the same name, which a chroot does not hide (seen on the
-unit on November 12: [The screen](#what-oscairn-has)).
+by its code it then logs that it has none and goes on without. Until November 13 the app showed
+on the FANTOM's screen as one more X11 client of Roland's Xwayland on `:0`, whose abstract socket
+a chroot does not hide (seen on the unit on November 12: [The screen](#what-oscairn-has)); since
+then `oscairn-fantom-start` puts it on the bundle's own X server instead ([The display](#the-display)).
+`start-chroot.sh` also binds the system's `/run/udev` on the bundle's, where the X server's
+libinput reads the touch screen's properties (without it libinput refused the device: "udev
+device never initialized").
 
 ## Starting Oscairn on the unit
 
@@ -782,10 +784,13 @@ its `/tmp`, which `stop-chroot.sh` unmounts):
    running is kept.
 5. It sets every CPU's `scaling_governor` to `performance`, recording what each had in
    `var/oscairn/run/governors` ([the engine's load](#with-rolands-app-stopped)).
-6. It starts **the app** on the display, as the instrument's normal start: `/usr/bin/Oscairn
-   --profile fantom-07 --plugins /usr/lib/clap` in the chroot, with `DISPLAY=:0` (Weston and
-   Xwayland keep running when Roland's app stops, and Xwayland's abstract socket reaches into
-   the chroot) and the locked-memory limit raised, its output in
+6. It starts **the app** on the display, as the instrument's normal start. The display is
+   Oscairn's own first ([The display](#the-display)): it stops Roland's Weston (`systemctl stop
+   weston.service`, when it is active) and starts the bundle's X server on `:0`, which a keeper
+   in the background starts again, with the app, if it ends; if it does not come up within 10
+   seconds, Weston is started again and the app goes on its Xwayland as before. Then
+   `/usr/bin/Oscairn --profile fantom-07 --plugins /usr/lib/clap` in the chroot, with
+   `DISPLAY=:0` and the locked-memory limit raised, its output in
    `var/oscairn/log/oscairn-app.log`. The app starts its own engine with the profile's audio
    device, keys, panel and input keys, and sends it the profile's control groups. It does so for
    a profile with a screen (`OSCAIRN_HEADLESS=0` and `OSCAIRN_PROFILE` in
@@ -819,7 +824,8 @@ Roland's app never woke waits for it is not known, and is to be tried on the uni
 step is enabled.
 
 `oscairn-fantom-stop` stops the app (which stops its engine) and any engine left, puts the
-governors back, and unmounts the chroot. Before stopping them it leaves `var/oscairn/run/stopped`, which says the stop was on purpose, for
+governors back, stops the bundle's X server, starts Roland's Weston again (`systemctl start
+weston.service`, when it is not active), and unmounts the chroot. Before stopping them it leaves `var/oscairn/run/stopped`, which says the stop was on purpose, for
 `oscairn-fantom-boot` ([Starting at power-on](#starting-at-power-on-not-done)). It
 does not turn Local Switch back on: a power cycle does. It
 leaves the panel holder running, so the panel goes on reporting; `--panel` stops the holder too,
@@ -836,6 +842,110 @@ cd /home/root/oscairn
 ./oscairn-fantom-stop               # the holder keeps the panel
 ./oscairn-fantom-stop --panel       # the panel silent until power-on
 ```
+
+## The display
+
+Oscairn owns the display while it runs (the owner's decision, November 13). Under Roland's
+`weston.service` (`/usr/bin/weston --xwayland --use-g2d=1`, the GPU's 2D renderer through the
+vendor driver `galcore`) the audio threads stalled whenever the app drew: ST Final's recorded
+41 s take had 774 deadline misses with the app on Weston's Xwayland and 0 on the bundle's own X
+server, and 10 s of scripted Library scrolling 509 against 339 (one run each, November 13).
+
+What `oscairn-fantom-start` runs instead, for the app only (`--engine-only` leaves the display
+alone): `systemctl stop weston.service`, then the bundle's `/usr/bin/Xorg :0 vt7 -novtswitch
+-nolisten tcp -noreset -nocursor` with the bundle's `/etc/X11/xorg.conf`
+([source](../os/buildroot/board/fantom-bundle/overlay/etc/X11/xorg.conf)), logged to
+`var/oscairn/log/Xorg.log`. Nothing of Roland's is changed: `oscairn-fantom-stop` stops this
+X server and runs `systemctl start weston.service`, after which the screen is Weston's again
+(checked on the unit: Weston active and `:0` served again after each stop). `weston-term.service`
+is only ordered after Weston (`After=weston.service`; `systemctl show` lists no `Requires`,
+`BindsTo` or `PartOf` on it), so stopping Weston leaves it, and `go.sh` in it, running: the
+boot script's fallback, which runs `oscairn-fantom-stop --panel` before Roland's app, gets
+Weston back first ([Starting at power-on](#starting-at-power-on-not-done)). What Weston did
+that the configuration now does:
+
+- **The screen:** `modesetting` on `/dev/dri/card0`, no acceleration (`AccelMethod none`), a
+  shadow frame buffer, `Rotate left`: the 720 × 1280 panel as 1280 × 720, as Weston's
+  `transform=90`. No blanking (`BlankTime` and the DPMS times 0; Weston's idle time was 0 too).
+  The backlight is untouched (Roland's app set it, not Weston).
+- **The touch screen:** the X server takes input devices from the system's udev
+  (`start-chroot.sh` binds `/run/udev`), ignores every device but the Goodix touch screen
+  (WRITE, MENU and TEMPO are the engine's, and the app uses no key), and turns its axes (0 to
+  719 across, 0 to 1279 down, read from the device's ranges) with the screen: the matrix
+  `0 -1 1 1 0 0 0 0 1`, a touch at the panel's (x, y) landing at (1 − y, x) of the screen.
+  `Xorg.log` shows the device added as a touch screen with that matrix. Under Weston the app
+  also got the gpio keys and power keys as X key events, which it does not use.
+- **No pointer shown** (`-nocursor`): Weston showed none for a touch-only seat; the panel has no
+  cursor plane, so X would draw one in software over the app.
+- **Windows:** no window manager is needed. The app makes its own windows fill the screen
+  (`fillScreen`) and puts each app's process window inside the shell's window as a child
+  window (`placeAppWindow`), with its menus and dialogs inside its window. Checked by XTest
+  input and screenshots on the unit: Home, the Library, Settings (its own process) and back,
+  each full screen at 1280 × 720 below the top bar; a Library menu, a Settings list and the
+  Export library dialog above their window and taking taps; the on-screen keyboard over the
+  Library with typed text reaching its search field.
+- **Tearing:** the shadow frame buffer is copied to the one scan-out buffer as it is drawn
+  (`Double-buffered shadow updates: off`); whether that tears visibly has not been looked at.
+
+If the X server ends without `oscairn-fantom-stop` (killed with `kill -9` on the unit to try
+it), the app ends with it and the engine plays on; the start script's keeper starts the X server
+again at once and then the app, which reconnects to the running engine (on the unit: X back
+within a second, the app within three, the same engine; tried twice). Three ends each within a
+minute of its start, or an X server that does not serve a client within about 10 seconds of the
+first start, give the display back to Weston (`systemctl start weston.service`) with the app on
+its Xwayland, as before, said in `var/oscairn/log/oscairn-fantom.log` (tried with a
+configuration naming a driver that does not exist: Weston back, one app on it). The start waits
+for the X server to answer a client (`xwininfo`), not only for its socket, which the server
+opens before its screen. A restart left waiting by an earlier keeper, or overtaken by
+`oscairn-fantom-stop`, starts nothing (seen once before that check: a stop followed by an app
+started again). Starting while Oscairn runs is refused, and a second stop finds nothing to stop
+and leaves Weston running.
+
+Measured on November 13 with ST Final (`OSCAIRN_WORKER_SPIN_US=0`, Analog's faster oscillator
+and 6 voices a sound, Analog and the Sampler in the extra block, 40 Sampler voices, CPU budget
+off): deadline misses from `oscairn-engine-timing` over each window; the app and X server's
+CPU in ticks of 10 ms over 10 s.
+
+| Configuration | Rest, 11 s | Take, 41 s | Scrolling, 10 s | App / X CPU scrolling |
+|---|---|---|---|---|
+| Roland's Weston (G2D), earlier | 66 (Library, untouched) | 774 | 509 | 41 % / Weston 21 % |
+| Bundle's Xorg as shipped | 0, 0, 0 (Home) | 86, 120 (Home); 0 (screen not checked); 669 (Library) | 351, 339, 326 | 40 % / 14 % |
+| Same, the app stopped (`SIGSTOP`) | | 34 | | |
+| Audio threads on cores 1–3, app and X on core 0 | 13 (screen not checked) | 2 (screen not checked) | 516, 455 | 39 % / 14 % |
+| No shadow frame buffer | 0 (screen not checked) | | 190, 139 | 25 % / 53 % |
+| App and X at nice 19 | 0 (Home) | 120 (Home) | 330, 328 | 40 % / 15 % |
+
+What the figures say: the takes vary from 0 to several hundred misses between runs of the same
+configuration, and 34 with the app stopped, so ST Final is close to the edge on its own (its
+Analog part's worst block took 2.3 to 3.4 ms of CPU in the takes, against a 2.67 ms period;
+the extra block gives it two) and the take does not separate the display
+well; the scrolling does. Scrolling costs about 340 misses in 10 s on the bundle's X server,
+against 509 on Weston: the worst block of the Analog worker grows from about 0.8 ms to about
+3.0 ms of CPU time, on whatever core it runs, while the app draws (about 40 % of a core) and the
+X server copies (about 15 %). Moving the audio off the app's core made it worse, and lowering
+the app's priority changed nothing, so it is not a share of CPU time or a core; without the
+shadow frame buffer the X server draws slower, the app draws less, and the misses fall with it
+while the X server takes half a core. The function-call interrupts follow the audio threads'
+cores, as under Weston. The cause is the amount the app draws, not the compositor; what
+remains is the app's own: fewer and smaller redraws while a list scrolls (RFC 0045).
+
+Acceleration: none is available on Oscairn's own stack. The bundle has no OpenGL or EGL, so the
+X server's `glamor` cannot run, and Roland's system has no X video driver for the GPU (no
+`/usr/lib/xorg/modules/drivers`); its EGL and G2D libraries serve only Weston. Roland's own
+`/usr/bin/weston` (6.0.1, NXP's build) run by hand with a copy of its `weston.ini` loaded its GL
+renderer (Vivante GC7000NanoUltra) even when given `--use-pixman`; in that run, opening ST Final
+had the kernel's out-of-memory killer end the Analog worker three times (swap full, 990 MB with
+440 MB locked), so it gave no figures; whether Weston's GL memory caused it was not separated.
+Weston is not in the bundle; building it (with wayland, wayland-protocols, pixman, libdrm,
+libinput, seatd or logind) means a bundle rebuild. For one full-screen app it would add a
+compositing copy and nothing the app needs: JUCE (9.0.4, the app's) has only an X11 window
+system on Linux, so the app would still reach Weston through Xwayland. Roland's own app
+(`mi078`) is an X11 client too: it links `libX11`, `libXext`, `libXinerama` and `libGL` and
+carries JUCE 5.3.2's strings, which is why Roland's Weston runs with `--xwayland`.
+
+Not checked by anyone at the instrument yet: that a finger's touch lands where it should, and
+that the picture is the right way round on the panel (XTest input goes in after the touch
+matrix, and screenshots read the X server's picture before it is turned).
 
 ## Starting at power-on (not done)
 

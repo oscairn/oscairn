@@ -8,7 +8,7 @@ set -u
 root=$(cd "$(dirname "$0")" && pwd)
 
 status=0
-for d in /tmp /run /dev/shm /dev/pts /dev /sys /proc; do
+for d in /tmp /run/udev /run /dev/shm /dev/pts /dev /sys /proc; do
 	if grep -q "^[^ ]* $root$d " /proc/mounts; then
 		umount "$root$d" || { echo "stop-chroot.sh: $root$d is still in use" >&2; status=1; }
 	fi

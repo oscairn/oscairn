@@ -1,7 +1,8 @@
 #!/bin/sh
 # Stops what oscairn-fantom-start started (docs/fantom-0.md, "Starting Oscairn on the unit"):
-# the app and its engine, or the engine alone, the CPUs' governors as they were, then the
-# chroot's mounts. Run by hand, as root, from outside the chroot.
+# the app and its engine, or the engine alone, the CPUs' governors as they were, the bundle's X
+# server, Roland's display server (weston.service) started again, then the chroot's mounts. Run
+# by hand, as root, from outside the chroot.
 #
 # The panel holder is left running unless --panel is given: the panel only keeps reporting while
 # something holds its device, and left unheld it went silent until the next power-on, so stopping
@@ -74,6 +75,20 @@ if [ -f "$saved" ]; then
 		if [ -n "$dry" ]; then say "would set $g back to $was"; else echo "$was" > "$g" && say "$g: $was again"; fi
 	done < "$saved"
 	[ -n "$dry" ] || rm -f "$saved"
+fi
+
+# The display back to Roland's: the bundle's X server ended (oscairn-fantom-start's keeper, finding
+# the mark above, does not start it again), then Roland's Weston started, as at power-on.
+xorg=$(for p in $(named Xorg); do [ "$(readlink "$proc/$p/root")" = "$root" ] && echo "$p"; done)
+if [ -n "$xorg" ]; then
+	say "stopping the bundle's X server (pid $(echo $xorg))"
+	end 50 $xorg
+fi
+if [ -n "$dry" ]; then
+	say "would run: systemctl start weston.service (when it is not active)"
+elif command -v systemctl > /dev/null 2>&1 && ! systemctl is-active --quiet weston.service; then
+	say "starting Roland's display server again (systemctl start weston.service)"
+	systemctl start weston.service || say "systemctl start weston.service failed; the display stays dark until it starts or a power cycle"
 fi
 
 holder=$(named oscairn-panel-h) # the kernel keeps 15 characters of a process's name

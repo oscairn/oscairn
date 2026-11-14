@@ -12,7 +12,8 @@
 // same way, and the protocol shares and lists the shares. With the fixture (RFC 0045): five parts and
 // an effect open in the same layout fresh, after a Performance whose playing instance has room for
 // only some of them, reopened while they play several times, and in a new Session, sharing or
-// (OSCAIRN_SHARING=cpu) not, the synth's path hint a bare file name.
+// (OSCAIRN_SHARING=cpu) not, the synth's path hint a bare file name. Each sharing part's own meter
+// is checked as well as the master (the synth plays a bus the host has not activated into main).
 #include "oscairn/session.h"
 #include "oscairn/json_rpc.h"
 #include "oscairn/plugin_host.h"
@@ -25,6 +26,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -56,20 +59,43 @@ namespace
     void quiet(Session& s) { for(int i = 0; i < int(48000 * 3.2 / frames); ++i) block(s); }
     // Until the last Performance's nodes have rung out and gone.
     void gone(Session& s) { for(int i = 0; i < int(48000 * 31 / frames) && s.leaving(); ++i) block(s); block(s); block(s); }
+    using Peaks = std::map<std::string, double>; // each part's own meter, by name, the largest heard
     // A note in each of three parts' keys, held, then released, with a bend on the keyboard's channel.
-    std::vector<float> play(Session& s, int blocks = 300)
+    // With `meters`, each part's own meter as it plays; `at`, called before the block it names.
+    std::vector<float> play(Session& s, int blocks = 300, Peaks* meters = nullptr, int at = -1, const std::function<void()>& then = {})
     {
         std::vector<float> out;
         for(int i = 0; i < blocks; ++i)
         {
+            if(i == at) then();
             std::vector<kick::clap::Event> e;
             if(i == 1) for(int k : {20, 60, 100}) e.push_back(kick::clap::Event::note(true, k, .8));
             if(i == 30) e.push_back(kick::clap::Event::midi(0xe0, 0, 90));
             if(i == 120) for(int k : {20, 60, 100}) e.push_back(kick::clap::Event::note(false, k, 0));
             if(i == 200) e.push_back(kick::clap::Event::midi(0xe0, 0, 64));
             block(s, &out, e);
+            if(meters) for(const auto& m : s.partMeters()) for(const auto& p : s.parts()) if(p.id == m.part) (*meters)[p.name] = std::max((*meters)[p.name], m.peak);
         }
         return out;
+    }
+    Peaks heard(Session& s) { Peaks p; play(s, 300, &p); return p; }
+    // Each part's own meter as in `expected`, each sounding: a shared sound on another part's port
+    // (its bus not activated, so the plugin plays it into main) shows on that part, not its own.
+    void same(const Peaks& expected, const Peaks& got, const std::string& what)
+    {
+        std::string text;
+        for(const auto& [name, peak] : got) text += " " + name + "=" + std::to_string(peak);
+        bool ok = expected.size() == got.size();
+        for(const auto& [name, peak] : expected) ok = ok && peak > 1e-3 && got.count(name) && std::abs(got.at(name) - peak) < 1e-6;
+        check(ok, what + ": each part's own meter as expected:" + text);
+    }
+    // Levels on two parts and an insert halving the third's sound, so a sound on a wrong port is heard.
+    void dress(Session& s, const char* fixture)
+    {
+        const auto parts = s.parts();
+        s.setPartLevel(parts[0].id, .5, false); s.setPartLevel(parts[1].id, .25, false);
+        s.insertIntoPart(parts[2].id, 1, s.add("insert", fixture, "org.kick.test.effect"));
+        s.commit(); block(s); block(s);
     }
     double difference(const std::vector<float>& a, const std::vector<float>& b)
     {
@@ -330,6 +356,110 @@ int main(int argc, char** argv)
         s.commit();
         const auto listed = rpc.dispatch(R"({"jsonrpc":"2.0","id":5,"method":"graph.get"})");
         check(added && added->find("\"node\":") != std::string::npos && listed && count(*listed, "\"shared\":{\"engine\":" + std::to_string(first)) == 3, "graph.add of a Basic Synth joins the instance");
+    }
+
+    // Each part's own meter, not only the master: the Basic Synth plays a sound whose bus the host has
+    // not activated (clap.audio-ports-activation) into main, as the porting guide says, so an instance
+    // parts share must be told every sound's bus, or each joiner plays through the first part, past its
+    // own level and inserts, and its meter reads nothing; at unity levels the master hid it.
+    if(fixture)
+    {
+        const auto dressed = temp.path / "dressed", leftover = temp.path / "leftover";
+        Peaks expected, left;
+        {
+            Session s(48000, frames); separately(s, 3); dress(s, fixture); s.savePerformance(dressed.string());
+            expected = heard(s); quiet(s);
+            const auto parts = s.parts(); // the third part alone
+            for(int i = 0; i < 2; ++i) { s.removePart(parts[i].id); s.remove(parts[i].chain.front()); }
+            s.commit(); block(s); block(s);
+            left = heard(s);
+        }
+        {
+            // Opened: the joiners prepared from their snapshots, each on its own bus.
+            Session s(48000, frames); s.loadPerformance(dressed.string()); block(s);
+            check(engines(s) == 1 && s.graphState().shared.size() == 3, "the dressed parts open on one instance");
+            same(expected, heard(s), "opened sharing");
+            quiet(s);
+            // Opened again as it rings out: the incoming sounds join the playing instance on buses of their
+            // own while the retiring ones ring out on theirs, through their own parts as before the change.
+            const auto rung = play(s);
+            quiet(s);
+            const auto changed = play(s, 300, nullptr, 125, [&] { s.loadPerformance(dressed.string()); });
+            std::printf("rung out across a change: largest difference %.3g\n", difference(rung, changed));
+            check(difference(rung, changed) < 1e-6, "the retiring sounds ring out on their own parts across a change");
+            check(s.leaving() > 0 && engines(s) == 1, "the incoming parts in the playing instance beside the retiring ones");
+            same(expected, heard(s), "the incoming parts beside the retiring ones");
+            gone(s);
+            same(expected, heard(s), "the retiring ones gone");
+            // The first two parts removed: the third alone on the instance, on its bus.
+            quiet(s);
+            const auto parts = s.parts();
+            for(int i = 0; i < 2; ++i) { s.removePart(parts[i].id); s.remove(parts[i].chain.front()); }
+            s.commit(); block(s); block(s);
+            check(s.graphState().shared.size() == 1, "one sound left on the instance");
+            same(left, heard(s), "a shared instance left with one sound");
+            quiet(s); s.savePerformance(leftover.string());
+        }
+        { Session s(48000, frames); s.loadPerformance(leftover.string()); block(s); same(left, heard(s), "the instance left with one sound reopened"); }
+        {
+            // A solo instance joined, then the join undone: an instance of its own again, whose wires
+            // take its main output only, and so main only is active, its sound back in main.
+            Peaks two;
+            ::setenv("OSCAIRN_SHARING", "cpu", 1);
+            {
+                Session s(48000, frames);
+                const auto a = s.addPart("A"); s.insertIntoPart(a, 0, s.add("a", synth)); s.setPartLevel(a, .5, false);
+                const auto b = s.addPart("B"); s.insertIntoPart(b, 0, s.add("b", synth)); s.setPartLevel(b, .25, false); s.commit(); block(s);
+                two = heard(s);
+            }
+            ::unsetenv("OSCAIRN_SHARING");
+            Session s(48000, frames);
+            const auto a = s.addPart("A"); s.insertIntoPart(a, 0, s.add("a", synth)); s.setPartLevel(a, .5, false); s.commit(); block(s);
+            const auto solo = heard(s); quiet(s);
+            const auto b = s.addPart("B"); const auto joined = s.add("b", synth); s.insertIntoPart(b, 0, joined); s.setPartLevel(b, .25, false); s.commit(); block(s);
+            check(s.graphState().shared.size() == 2, "the solo instance joined");
+            same(two, heard(s), "a solo instance joined");
+            quiet(s);
+            while((s.hasNode(joined) || s.parts().size() > 1) && s.undo()) {}
+            block(s);
+            check(s.graphState().shared.empty(), "the join undone: an instance of its own");
+            same(solo, heard(s), "the join undone");
+        }
+        // Added in a running session, on their own and asked for: the first alone (told main only), then joined.
+        Peaks added;
+        ::setenv("OSCAIRN_SHARING", "cpu", 1);
+        { Session s(48000, frames); build(s, false); check(s.graphState().shared.empty(), "cpu: an instance each"); dress(s, fixture); added = heard(s); }
+        ::unsetenv("OSCAIRN_SHARING");
+        for(const bool asked : {false, true})
+        {
+            Session s(48000, frames); build(s, asked); dress(s, fixture);
+            check(engines(s) == 1 && s.graphState().shared.size() == 3, "added on one instance");
+            same(added, heard(s), asked ? "shared on request" : "added sharing");
+#ifndef _WIN32
+            // Its worker killed and restarted: the instance told its sounds' buses again.
+            if(!asked && !placementPolicy().worker.empty())
+            {
+                int killed = 0;
+                if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+                {
+                    char line[32];
+                    while(std::fgets(line, sizeof line, list)) if(::kill(std::atoi(line), SIGKILL) == 0) ++killed;
+                    pclose(list);
+                }
+                check(killed > 0, "a worker to kill");
+                // The crash reported, then the restart over; blocks with the worker down render nothing.
+                auto wait = [&] { std::this_thread::sleep_for(std::chrono::milliseconds(10)); std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()}; s.service(); s.process(out, frames, {}); };
+                for(int i = 0; i < 500 && s.sessionStatus().failures.empty(); ++i) wait();
+                for(int i = 0; i < 1000 && !s.sessionStatus().failures.empty(); ++i) wait();
+                quiet(s);
+                // Each sound on its own part, the first's no more than its own. Not the same levels: a restart
+                // gives the sounds other values today (the instance's last values reapplied), apart from this.
+                auto after = heard(s);
+                check(std::abs(after["Part 0"] - added["Part 0"]) < 1e-6 && after["Part 1"] > 1e-3 && after["Part 2"] > 1e-3,
+                      "added sharing, after its worker restarts: each sound on its own part: " + std::to_string(after["Part 0"]) + " " + std::to_string(after["Part 1"]) + " " + std::to_string(after["Part 2"]));
+            }
+#endif
+        }
     }
 
     // RFC 0045: the same layout on every load, whatever played before and whatever is loaded already.

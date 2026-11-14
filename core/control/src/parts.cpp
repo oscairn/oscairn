@@ -335,26 +335,35 @@ namespace oscairn
     // Each plugin with several audio outputs is told which of them the graph takes sound from
     // (CLAP's audio-ports-activation): its main ports always, any other port with a route from it,
     // as a ports split's lane gives one. A plugin is told once, then at each change.
+    // An instance parts share (RFC 0021) is told the union of its nodes': its main ports and each
+    // sound's bus, the last Performance's ringing out included, worked out from the graph each time
+    // so a join, a leave or a retirement cannot leave it behind. A shared node never has a lane: one
+    // with a wire leaving another port than main is never grouped, so a port means one thing here.
     void Session::tellActiveOutputs()
     {
         const auto routes = graph_.describe().audioRoutes;
-        std::map<NodeId, std::pair<std::weak_ptr<PluginHost>, uint64_t>> told;
-        for(const auto& [id, name] : nodes_)
+        decltype(activeOutputs_) told;
+        std::set<NodeId> ids(leaving_);
+        for(const auto& [id, name] : nodes_) ids.insert(id);
+        for(const auto id : ids)
         {
             if(!graph_.contains(id)) continue;
-            const auto host = graph_.node(id).host;
+            auto host = graph_.node(id).host;
+            const auto* shared = dynamic_cast<const SoundContext*>(host.get());
+            if(shared) host = shared->engine()->host;
+            else if(leaving_.count(id)) continue; // ringing out as last told
             const auto& ports = host->outputPorts();
             if(ports.size() < 2) continue;
             const auto main = host->mainAudioPorts(false);
-            uint64_t mask = 0;
+            auto& mask = told[host];
             for(size_t i = 0; i < ports.size() && i < 64; ++i)
-                if(std::find(main.begin(), main.end(), ports[i].id) != main.end() ||
-                   std::any_of(routes.begin(), routes.end(), [&](const AudioConnection& r) { return r.from.node == id && r.from.port == ports[i].id; }))
+                if(std::find(main.begin(), main.end(), ports[i].id) != main.end() || (shared ? i == shared->bus() :
+                   std::any_of(routes.begin(), routes.end(), [&](const AudioConnection& r) { return r.from.node == id && r.from.port == ports[i].id; })))
                     mask |= uint64_t(1) << i;
-            const auto was = activeOutputs_.find(id);
-            if(was == activeOutputs_.end() || was->second.first.lock() != host || was->second.second != mask) host->setActiveOutputs(mask);
-            told[id] = {host, mask};
         }
+        for(const auto& [host, mask] : told)
+            if(const auto was = activeOutputs_.find(host); was == activeOutputs_.end() || was->second != mask)
+                if(const auto h = host.lock()) h->setActiveOutputs(mask);
         activeOutputs_ = std::move(told);
     }
 

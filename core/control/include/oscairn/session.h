@@ -821,7 +821,7 @@ namespace oscairn
         void dropSendTargets(); // the control targets on sends that no longer exist
         bool hasOutput(NodeId node, uint32_t port) const; // an audio output port by its ID
         void tellActiveOutputs(); // after compiling the wires: each plugin's ports the graph takes sound from
-        std::map<NodeId, std::pair<std::weak_ptr<PluginHost>, uint64_t>> activeOutputs_; // as last told, by instance
+        std::map<std::weak_ptr<PluginHost>, uint64_t, std::owner_less<>> activeOutputs_; // as last told, by instance
         static std::vector<assets::Ref> assetsOf(const std::filesystem::path& manifest);
         std::vector<std::string> exportArchive(const std::string& file, const std::string& kind, const std::function<std::vector<PartSource>(const std::filesystem::path&, Package&)>& write, bool editedSounds, const ExportSigning& sign);
         void stageItem(const LibraryItem& item, const std::filesystem::path& stage, Package& package, std::vector<PartSource>& from, std::vector<std::string>& notes);

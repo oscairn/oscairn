@@ -1,3 +1,6 @@
+if(OSCAIRN_AUDIO_O3)
+    add_compile_options(-O3)
+endif()
 add_subdirectory(clap-host)
 
 find_package(Threads REQUIRED)

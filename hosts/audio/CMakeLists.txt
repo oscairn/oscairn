@@ -1,3 +1,6 @@
+if(OSCAIRN_AUDIO_O3)
+    add_compile_options(-O3)
+endif()
 set(OSCAIRN_AUDIO_BUFFER_FRAMES "128" CACHE STRING "Requested live audio buffer frames (0 uses device default)")
 if(NOT OSCAIRN_AUDIO_BUFFER_FRAMES MATCHES "^(0|[1-9][0-9]*)$" OR OSCAIRN_AUDIO_BUFFER_FRAMES GREATER 1048576)
     message(FATAL_ERROR "OSCAIRN_AUDIO_BUFFER_FRAMES must be an integer from 0 to 1048576")

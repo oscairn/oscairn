@@ -1,3 +1,6 @@
+if(OSCAIRN_AUDIO_O3)
+    add_compile_options(-O3)
+endif()
 juce_add_console_app(oscairn_engine_host PRODUCT_NAME "oscairn-engine" NEEDS_CURL TRUE)
 set_target_properties(oscairn_engine_host PROPERTIES OUTPUT_NAME "oscairn-engine")
 target_sources(oscairn_engine_host PRIVATE main.cpp)

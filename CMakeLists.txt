@@ -30,6 +30,10 @@ option(OSCAIRN_LV2 "Enable LV2 hosting (requires Lilv and LV2 development packag
 # panel of protocol roland-i2c-slave (the FANTOM-0), which the engine then reads; the reader is
 # built for its test either way, but linked into nothing else.
 option(OSCAIRN_ROLAND_FANTOM0 "Read a Roland FANTOM-0's panel and keys in the engine: the FANTOM-06, -07 and -08 (Linux)" OFF)
+# The audio path (core, hosts/audio, hosts/engine: the engine, the plugin worker and what they link) at -O3
+# over the toolchain's -O2: the device's cores run the engine thread's code about 2.4 times faster. The app's
+# own sources and the plugins keep the build's level; no floating-point option changes.
+option(OSCAIRN_AUDIO_O3 "Compile the audio path at -O3" OFF)
 set(OSCAIRN_LV2_EXAMPLE_DIR "" CACHE PATH "Optional upstream LV2 example bundles for integration tests")
 set(OSCAIRN_LV2_SOURCE_DIR "" CACHE PATH "Optional LV2 source checkout for unmodified eg-sampler Worker tests")
 

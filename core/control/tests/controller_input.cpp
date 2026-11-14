@@ -18,6 +18,9 @@
 #include <cmath>
 #include <cstdio>
 #include <fcntl.h>
+#include <filesystem>
+#include <cstdlib>
+#include <unistd.h>
 #include <random>
 #include <string>
 #include <sys/socket.h>
@@ -294,6 +297,10 @@ namespace
     // MIDI fixture sustains with; a CTRL jack with no function plays nothing.
     void panelPedal(const char* fixture)
     {
+        char home[] = "/tmp/oscairn-panel-pedal-XXXXXX"; // the session's revisions there, never the real data folder
+        if(!::mkdtemp(home)) { check(false, "a data folder for the test"); return; }
+        ::setenv("OSCAIRN_DATA_HOME", home, 1);
+        struct Gone { const char* path; ~Gone() { ::unsetenv("OSCAIRN_DATA_HOME"); std::error_code e; std::filesystem::remove_all(path, e); } } gone{home};
         Session s(48000, frames);
         const auto synth = s.add("synth", fixture, "org.kick.test.midi"); s.setParameter(synth, 7, .5);
         const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, synth); s.commit();

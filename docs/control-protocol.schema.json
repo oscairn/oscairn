@@ -1036,6 +1036,57 @@
               "$ref": "#/$defs/Id"
             },
             "method": {
+              "const": "notes.controller"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "controller": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 119,
+                  "description": "The MIDI control change: 64 sustain, 66 sostenuto, 67 soft, 1 modulation, 11 expression and so on; channel mode messages are notes.panic's"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 127
+                },
+                "channel": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 15
+                },
+                "input": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A MIDI input's name in session.status midiInputs: the message enters as that input's; omitted: the built-in source. A name not there is refused"
+                }
+              },
+              "required": [
+                "controller",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "method": {
               "const": "params.gesture"
             },
             "params": {

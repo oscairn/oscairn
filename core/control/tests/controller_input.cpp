@@ -289,6 +289,27 @@ namespace
         check(!s.controllerControl("stop", {Kind::Switch, 0}) && !playing(), "and its release plays nothing");
     }
 
+    // A device panel's pedal jack (the FANTOM-07's HOLD jack, `footswitch:1`, a position) whose group's
+    // function is sustain, with nothing assigned: its position reaches the parts as CC 64, which the
+    // MIDI fixture sustains with; a CTRL jack with no function plays nothing.
+    void panelPedal(const char* fixture)
+    {
+        Session s(48000, frames);
+        const auto synth = s.add("synth", fixture, "org.kick.test.midi"); s.setParameter(synth, 7, .5);
+        const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, synth); s.commit();
+        ControlGroup hold{Role::Assign, "footswitches", 1}; hold.functions = {"sustain"};
+        ControlGroup ctrl{Role::Assign, "expression", 2};
+        s.setControllers({hold, ctrl}, {}); s.service();
+        using Kind = ControlInput::Kind;
+        check(s.controllerControl("footswitch:1", {Kind::Absolute, 1}), "the HOLD jack pressed plays its function");
+        s.note(true, 60, 1); render(s); s.note(false, 60, 0); render(s); render(s);
+        check(near(render(s), .5), "the pedal holds the released key: " + std::to_string(render(s)));
+        check(s.controllerControl("footswitch:1", {Kind::Absolute, 0}), "and its release plays it too");
+        render(s);
+        check(near(render(s), 0), "the pedal up lets the key go: " + std::to_string(render(s)));
+        check(!s.controllerControl("pedal:1", {Kind::Absolute, 1}), "a CTRL jack with no function plays nothing until assigned");
+    }
+
     // A device's list navigation (its panel map's `navigate`): a control with one that plays nothing is counted
     // for the apps, a move by its steps; one that plays what it is assigned plays it, unless the screen shows
     // lists, when it navigates and plays nothing; the totals are what the engine tells a client.
@@ -723,7 +744,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 2) { std::fprintf(stderr, "usage: %s FIXTURE\n", argv[0]); return 2; }
-    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); navigation(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
+    try { mapping(argv[1]); parameters(argv[1]); morphs(argv[1]); sends(argv[1]); transportButtons(); panelPedal(argv[1]); navigation(); sceneButtons(argv[1]); identical(argv[1]); for(int run = 1; run <= 3 && !latency(argv[1], run == 3); ++run) {} panLatency(argv[1]); }
     catch(const std::exception& e) { forbidAllocation = false; std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
     if(!failures) std::puts("ok: a controller's MIDI into the engine moves its controls' targets within one block");
     return failures ? 1 : 0;

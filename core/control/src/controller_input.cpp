@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 
 namespace oscairn
 {
@@ -66,6 +67,7 @@ namespace oscairn
     {
         std::function<void()> wake;
         bool played = false;
+        int controller = -1;
         try
         {
             std::lock_guard lock(lock_);
@@ -73,9 +75,25 @@ namespace oscairn
             for(const auto& action : mapping_.handle(source_, groups_, part_, positions_, control, input, [this](const Assignment& a) { return value(a); }))
                 { play(action); played = true; }
             if(moves_ != moves) wake = wake_;
+            // A panel's pedal or footswitch with a standard controller's function and nothing
+            // assigned (a FANTOM's HOLD jack: sustain) sends that controller to the parts, from the
+            // built-in source, as a MIDI controller's own message reaches them.
+            if(!played && (control.starts_with("pedal:") || control.starts_with("footswitch:")))
+            {
+                static const std::map<std::string, int> numbers{{"modulation", 1}, {"breath", 2}, {"foot", 4}, {"expression", 11}, {"sustain", 64}, {"portamento", 65}, {"sostenuto", 66}, {"soft", 67}};
+                for(const auto& r : resolveControls(source_, groups_, part_, positions_))
+                    if(r.control == control && r.target.kind == Assignment::Kind::None && r.parts.empty())
+                        if(const auto n = numbers.find(r.function); n != numbers.end()) controller = n->second;
+            }
         }
         catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
         if(wake) wake();
+        if(controller >= 0)
+        {
+            const double v = input.kind == ControlInput::Kind::Switch ? (input.value >= .5 ? 1 : 0) : std::clamp(input.value, 0.0, 1.0);
+            try { played = session_.controller(controller, int(std::lround(v * 127))); }
+            catch(const std::exception& e) { std::fprintf(stderr, "oscairn: controller input: %s\n", e.what()); }
+        }
         return played;
     }
 

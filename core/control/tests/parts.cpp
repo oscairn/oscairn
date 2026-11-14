@@ -1258,6 +1258,22 @@ namespace
         s.note(false, 62, 0); x.run(s);
     }
 
+    // A sustain pedal from notes.controller's Session::controller holds a released key; its release lets
+    // it go. The MIDI fixture sustains as an instrument does (the CLAP one ignores the pedal).
+    void pedalFromControl(const char* fixture)
+    {
+        Session s(48000, frames);
+        const auto synth = s.add("synth", fixture, "org.kick.test.midi"); s.setParameter(synth, 7, .5);
+        const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, synth); s.commit();
+        Audio x;
+        s.controller(64, 127); s.note(true, 60, 1); x.run(s); s.note(false, 60, 0); x.run(s); x.run(s);
+        check(near(x.l[0], .5), "the pedal holds the released key: " + std::to_string(x.l[0]));
+        s.controller(64, 0); x.run(s); x.run(s);
+        check(near(x.l[0], 0), "the pedal's release lets it go: " + std::to_string(x.l[0]));
+        bool refused = false; try { s.controller(120, 0); } catch(const std::invalid_argument&) { refused = true; }
+        check(refused, "channel mode messages are notes.panic's, not a controller's");
+    }
+
     // Audition (RFC 0021): a Sound in a part's place and a Performance in this one's, each put
     // back as it was (the same plugins: a note held through it still sounds) or kept.
     void audition(const char* fixture, const fs::path& root)
@@ -2577,6 +2593,7 @@ int main(int argc, char** argv)
         hardwarePanic(argv[1], temp.path);
         audition(argv[1], temp.path);
         allNotesOff(argv[1], argv[5]);
+        pedalFromControl(argv[1]);
         unavailable(argv[1], temp.path);
         sceneTransitions(argv[1], temp.path);
         budgets(argv[1], temp.path);

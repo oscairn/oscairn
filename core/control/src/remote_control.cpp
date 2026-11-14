@@ -1009,6 +1009,8 @@ namespace oscairn
     }
     bool RemoteControl::note(bool on,int key,double velocity,int channel,const std::string& input)
     {try{impl_->call("notes.send",std::string("{\"on\":")+(on?"true":"false")+",\"key\":"+std::to_string(key)+",\"velocity\":"+encode(velocity)+",\"channel\":"+std::to_string(channel)+(input.empty()?std::string():",\"input\":"+quote(input))+'}');return true;}catch(const RpcError& e){if(e.code==-32005)return false;throw;}}
+    bool RemoteControl::controller(int controller,int value,int channel,const std::string& input)
+    {try{impl_->call("notes.controller","{\"controller\":"+std::to_string(controller)+",\"value\":"+std::to_string(value)+",\"channel\":"+std::to_string(channel)+(input.empty()?std::string():",\"input\":"+quote(input))+'}');return true;}catch(const RpcError& e){if(e.code==-32005)return false;throw;}}
     namespace { std::vector<AssignmentOverride> assignmentsFrom(V r)
     {
         std::vector<AssignmentOverride> out;

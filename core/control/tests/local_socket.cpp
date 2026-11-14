@@ -937,6 +937,8 @@ void partsClient(const char* plugin,const char* delay)
         {PartInput limited=remote.graphState().parts[0].input;limited.maxNotes=6;limited.reserve=2;limited.priority=9;remote.setPartInput(part,limited);}
         check(remote.graphState().parts[0].input.maxNotes==6,"a part's note limit set and read back over the socket");
         check(remote.graphState().parts[0].input.reserve==2 && remote.graphState().parts[0].input.priority==9,"its reserve and priority too");
+        check(remote.controller(64,127) && remote.controller(64,0,3),"a sustain pedal sent over the socket (notes.controller)");
+        {bool refused=false;try{remote.controller(123,0);}catch(const std::exception&){refused=true;}check(refused,"all notes off is notes.panic's, not notes.controller's");}
         // Splits over the socket: a split at the end, a lane's Mix and zones, a third lane.
         const auto sp=remote.addSplit(part,2);
         Lane lane;lane.zones={split};lane.level=.5;lane.mute=true;remote.setLane(part,sp,1,lane);

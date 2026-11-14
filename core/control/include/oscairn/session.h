@@ -270,6 +270,7 @@ namespace oscairn
         void recordPlay( uint32_t take ) override;
         Recorder& recorder() noexcept { return recorder_; } // its ring length, disk reserve and test hooks
         bool note( bool on, int key, double velocity, int channel = 0, const std::string& input = {} ) override;
+        bool controller( int controller, int value, int channel = 0, const std::string& input = {} ) override;
         void allNotesOff() override { allOff_.store( true, std::memory_order_relaxed ); panic_.store( true, std::memory_order_release ); endRinging_.store( true, std::memory_order_release ); } // the queue overflow's emergency release, every plugin taking notes reset; ringOut ends the last Performance's
         void ignoreMidiInputs( const std::vector<std::string>& names ) override;
         std::vector<MidiPort> midiPorts() override;
@@ -788,6 +789,7 @@ namespace oscairn
         // file in /proc/meminfo's form, for tests); 0 when it is not known.
         static uint64_t systemAvailable();
         std::mutex releaseMutex_;
+        std::mutex enqueueLock_; // enqueue's producers; the audio thread never takes it
         std::condition_variable releaseWake_;
         std::vector<std::shared_ptr<PluginHost>> releasing_; // under releaseMutex_
         bool releaseStop_ = false;                           // under releaseMutex_

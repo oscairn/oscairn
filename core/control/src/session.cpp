@@ -279,8 +279,24 @@ namespace oscairn
         return enqueue( kick::clap::Event::note( on, key, velocity, 0, channel ), source );
     }
 
+    bool Session::controller( int controller, int value, int channel, const std::string& input )
+    {
+        if( controller < 0 || controller > 119 || value < 0 || value > 127 || channel < 0 || channel > 15 )
+            throw std::invalid_argument( "invalid controller, value or channel" );
+        uint8_t source = builtInSource;
+        if( !input.empty() )
+        {
+            const auto& inputs = hostStatus_.midiInputs;
+            const auto it = std::find_if( inputs.begin(), inputs.end(), [&]( const MidiEndpoint& e ) { return e.name == input; } );
+            if( it == inputs.end() ) throw std::invalid_argument( "no MIDI input named " + input );
+            source = it->source;
+        }
+        return enqueue( kick::clap::Event::midi( uint8_t( 0xb0 | channel ), uint8_t( controller ), uint8_t( value ) ), source );
+    }
+
     bool Session::enqueue( const kick::clap::Event& event, uint8_t source )
     {
+        const std::lock_guard lock( enqueueLock_ ); // one producer at a time: the UI, the protocol, a panel's pedal
         const auto head = noteHead_.load( std::memory_order_relaxed );
         if( head - noteTail_.load( std::memory_order_acquire ) == notes_.size() )
         {

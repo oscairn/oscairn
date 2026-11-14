@@ -82,7 +82,7 @@ namespace
     {
         std::ifstream in(shipped); std::stringstream text; text << in.rdbuf();
         const auto fantom = PanelMap::parse(text.str());
-        check(fantom.controls.size() == 129 && fantom.estimated.empty() && fantom.analogDeadband == 1, "the FANTOM-07's map parses, every entry with its id");
+        check(fantom.controls.size() == 130 && fantom.estimated.empty() && fantom.analogDeadband == 1, "the FANTOM-07's map parses, every entry with its id");
         // Roland's layout (docs/fantom-0.md). Slider 1 (analog 9) at 1000: byte 2 holds the ID's top
         // two bits and, from bit 2, the value's top five, which must not read as ID bits.
         auto f = decode(fantom, {0x84, 9, uint8_t((1000 >> 7) << 2), uint8_t(1000 & 0x7F)});
@@ -98,6 +98,7 @@ namespace
         check(analog(16, 127).control == "fader:8" && near(analog(16, 127).input.value, 1) && near(analog(17, 64).input.value, 64 / 127.) && analog(17, 64).control == "knob:1",
               "slider 8 (analog 16) and knob 1 on 0 to 127");
         check(near(analog(7, 1023).input.value, 1) && near(analog(5, 512).input.value, 512 / 1023.) && analog(5, 512).control == "wheel:3", "the lever and WHEEL1 on 0 to 1023");
+        check(analog(2, 1023).control == "footswitch:1" && near(analog(2, 1023).input.value, 1) && near(analog(2, 512).input.value, 512 / 1023.), "the HOLD jack (analog 2) is footswitch:1, a position on 0 to 1023");
         check(analog(0, 1023).control == "knob:9" && near(analog(0, 1023).input.value, 1) && near(analog(1, 512).input.value, 512 / 1023.), "CUTOFF and RESONANCE on 0 to 1023");
         // The pads as the owner pressed them on November 12: from the bottom left, left to right,
         // row by row upward, switches 101, 103, 102, 100, then 98, 97, 96, 99, 92, 94, 95, 93, 91,

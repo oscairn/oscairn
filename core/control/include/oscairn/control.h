@@ -785,6 +785,11 @@ namespace oscairn
         /// there refuses a note on; a note off for it reaches every zone, so an input unplugged
         /// while a note was held still lets it go.
         virtual bool note( bool on, int key, double velocity, int channel = 0, const std::string& input = {} ) = 0;
+        /// A MIDI control change (`controller` 0..119, `value` 0..127) entering the graph as
+        /// `note`'s do, through the same queue and from the same source: a sustain pedal (64) and
+        /// the other pedals and controllers, for tests and remote clients. Parts' zones, device
+        /// selectors and ignored controllers apply as for a device's own.
+        virtual bool controller( int controller, int value, int channel = 0, const std::string& input = {} ) = 0;
         // All notes off (RFC 0030): every note played from the keys, MIDI inputs and the UI is
         // released at the next block, and every plugin that takes notes is reset, behind a note
         // effect too. Any thread; never waits.

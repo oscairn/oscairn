@@ -75,6 +75,13 @@ namespace oscairn
     // The platform's folder for Oscairn's user data: OSCAIRN_DATA_HOME, else Application Support
     // on macOS, else XDG_DATA_HOME or ~/.local/share.
     std::filesystem::path dataHome();
+    // A new folder name in the data folder for an install's or export's unpacked files (`kind`
+    // "install" or "export"): ".<kind>-<this process's ID>-<random>", nothing made yet.
+    std::filesystem::path stagingFolder(const char* kind);
+    // Such folders in `home` left by a process that is gone (an install killed or crashed) are
+    // removed, and those of another form older than a day; one of a process still running never.
+    // Only real folders directly in `home` whose names have that form; links are not followed.
+    void removeStaleStaging(const std::filesystem::path& home);
     // Whether the wall clock is known to be right (RFC 0035's time state): OSCAIRN_TIME says
     // "known" or "unknown" where a supervisor keeps the state; otherwise the clock is trusted, as
     // on a desktop, unless it reads before the floor.

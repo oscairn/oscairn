@@ -33,6 +33,8 @@
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 using namespace oscairn;
 namespace fs = std::filesystem;
@@ -261,23 +263,38 @@ int main(int argc, char** argv)
             std::string why; try { c.installArchive((temp.path / "Other.olib").string(), false, {}, true); } catch(const std::exception& e) { why = e.what(); }
             check(why.find("no " + platform() + " build") != std::string::npos && why.find("another device") != std::string::npos, "this device's build left out is refused: " + why);
         }
-        // An install or export cut short by a crash leaves its hidden folder in the data folder;
-        // the library clears those over a day old when it starts, and leaves newer ones, which
-        // may be another process's install in progress.
+        // An install or export cut short by a crash or a kill leaves its hidden folder in the data
+        // folder. The library clears, when it starts and before an install, one whose process is
+        // gone, and one of an older form (no process ID) over a day old; it leaves one of a process
+        // still running (this one: another session's install in progress), newer ones of the older
+        // form, and a link of that name, whose target it never touches.
         {
             const auto home = temp.path / "o";
             device(home);
             const auto old = fs::file_time_type::clock::now() - std::chrono::hours(25);
-            for(const auto* name : {".install-1", ".export-1", ".install-2", ".other-1"})
+            const pid_t gone = ::fork();
+            if(gone == 0) ::_exit(0);
+            ::waitpid(gone, nullptr, 0);
+            const auto dead = std::to_string(gone), alive = std::to_string(::getpid());
+            const std::vector<std::string> names{".install-1", ".export-1", ".install-2", ".other-1", ".install-" + dead + "-7", ".export-" + dead + "-7", ".install-" + alive + "-7"};
+            for(const auto& name : names)
             {
                 fs::create_directories(home / name / "Sounds");
                 std::ofstream(home / name / "Sounds" / "big.bin") << "x";
-                if(std::string(name) != ".install-2") fs::last_write_time(home / name, old);
+                if(name != ".install-2" && name.find('-', 9) == std::string::npos) fs::last_write_time(home / name, old);
             }
+            const auto outside = temp.path / "o-outside";
+            fs::create_directories(outside); std::ofstream(outside / "keep.bin") << "x";
+            fs::create_directory_symlink(outside, home / (".install-" + dead + "-8"));
             Session o(48000, 64);
             check(items(o, "sound").empty(), "the library starts");
             check(!fs::exists(home / ".install-1") && !fs::exists(home / ".export-1"), "an install's and an export's folder over a day old are cleared");
-            check(fs::is_directory(home / ".install-2") && fs::is_directory(home / ".other-1"), "a newer one, and any other hidden folder, stay");
+            check(!fs::exists(home / names[4]) && !fs::exists(home / names[5]), "an install's and an export's folder whose process is gone are cleared");
+            check(fs::is_directory(home / ".install-2") && fs::is_directory(home / ".other-1") && fs::is_directory(home / names[6]), "a newer one, one of a running process, and any other hidden folder, stay");
+            check(fs::is_symlink(home / (".install-" + dead + "-8")) && fs::exists(outside / "keep.bin"), "a link of that name is not followed");
+            fs::create_directories(home / names[4] / "Sounds");
+            try { o.installArchive((temp.path / "missing.olib").string(), false); } catch(const std::exception&) {}
+            check(!fs::exists(home / names[4]), "and before an install");
         }
         // Device E: the library's index is used, the file not read again while it is unchanged:
         // a name only the index holds comes back (RFC 0023 step 5: SQLite).

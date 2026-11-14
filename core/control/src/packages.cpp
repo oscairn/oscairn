@@ -128,7 +128,7 @@ std::unique_ptr<repository::Source> sourceFor(const std::string& source,const st
     if(source.rfind("https://",0)==0 || source.rfind("http://",0)==0)return repository::web(source,cancel);
     return repository::folder(source);
 }
-fs::path scratch(const char* suffix){std::random_device random;return dataHome()/(".install-"+std::to_string(random())+std::to_string(random())+suffix);}
+fs::path scratch(const char* suffix){return stagingFolder("install")+=suffix;}
 // The repository this device knows a source as: by its address, else, for a folder (a copy on a
 // drive), by its verified root key; null when it knows none.
 const Control::Repository* knownAs(const std::vector<Control::Repository>& known,const std::string& source,const std::string& rootKey){
@@ -424,6 +424,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     auto* w=work.get();
     packageWork_.reset();
     const auto assetRoot=assets_.root(); // read on the control thread; the job stages asset libraries with its own Store
+    removeStaleStaging(dataHome()); // a killed install's unpacked files, before this one needs the room
     const auto have=installedPackages(); // read on the control thread: which dependencies are installed already
     const auto ships=shipped();
     const auto known=repositories();

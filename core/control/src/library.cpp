@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <csignal>
 #include <cerrno>
 #include <condition_variable>
 #include <cstdint>
@@ -396,6 +397,41 @@ namespace oscairn
 #endif
     }
 
+    fs::path stagingFolder(const char* kind)
+    {
+        std::random_device random;
+        return dataHome() / ("." + std::string(kind) + "-" + std::to_string(::getpid()) + "-" + std::to_string(random()) + std::to_string(random()));
+    }
+
+    void removeStaleStaging(const fs::path& home)
+    {
+        std::error_code error;
+        const auto dayAgo = fs::file_time_type::clock::now() - std::chrono::hours(24);
+        for(const auto& entry : fs::directory_iterator(home, error))
+        {
+            const auto name = entry.path().filename().string();
+            const size_t prefix = name.starts_with(".install-") ? 9 : name.starts_with(".export-") ? 8 : 0;
+            if(!prefix) continue;
+            std::error_code unread;
+            if(!fs::is_directory(entry.symlink_status(unread)) || unread) continue; // a real folder, never a link's target
+            // stagingFolder's: its process's ID. Any other form (an older build's): only once over a day old.
+            const auto dash = name.find('-', prefix);
+            const auto digits = name.substr(prefix, dash == std::string::npos ? 0 : dash - prefix);
+            bool stale = false;
+            if(!digits.empty() && digits.size() <= 9 && digits.find_first_not_of("0123456789") == std::string::npos)
+            {
+                const auto pid = pid_t(std::stol(digits));
+                stale = pid != ::getpid() && ::kill(pid, 0) != 0 && errno == ESRCH;
+            }
+            else
+            {
+                const auto written = entry.last_write_time(unread);
+                stale = !unread && written < dayAgo;
+            }
+            if(stale) fs::remove_all(entry.path(), unread);
+        }
+    }
+
     bool timeKnown()
     {
         if(const char* state = std::getenv("OSCAIRN_TIME"); state && *state) return std::string_view(state) == "known";
@@ -501,19 +537,8 @@ namespace oscairn
     {
         if(home.empty()) home = dataHome();
         home_ = home; libraries_ = home / "Libraries"; cache_ = home / "library";
-        // An install's or export's unpack folder left by a crash. Only those over a day old: a
-        // newer one may be another process's still at work.
+        removeStaleStaging(home);
         std::error_code error;
-        const auto dayAgo = fs::file_time_type::clock::now() - std::chrono::hours(24);
-        for(const auto& entry : fs::directory_iterator(home, error))
-        {
-            const auto name = entry.path().filename().string();
-            if(!name.starts_with(".install-") && !name.starts_with(".export-")) continue;
-            std::error_code unread;
-            const bool folder = fs::is_directory(entry.symlink_status(unread));
-            const auto written = entry.last_write_time(unread);
-            if(folder && !unread && written < dayAgo) fs::remove_all(entry.path(), error);
-        }
         readUser();
         fs::remove(cache_ / "index.json", error); // the index before step 5's
         // The item types packages installed here (RFC 0023 step 3), Types/<package ID>/<type ID>.json.

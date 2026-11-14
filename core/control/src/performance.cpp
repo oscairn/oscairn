@@ -486,8 +486,7 @@ std::vector<std::string> Session::exportArchive(const std::string& file,const st
     if(archive.filename().empty() || fs::exists(archive))bad("the export file has no name or exists already");
     std::optional<signing::Key> key;
     if(sign.items || sign.archive)key=signingKey(sign.key);
-    std::random_device random;
-    const auto stage=dataHome()/(".export-"+std::to_string(random())+std::to_string(random())); // like installs: in the data folder, not the OS temp folder, which may be RAM (tmpfs)
+    const auto stage=stagingFolder("export"); // like installs: in the data folder, not the OS temp folder, which may be RAM (tmpfs)
     try{
         Package package;package.kind=kind;
         const auto from=write(stage,package);
@@ -2168,7 +2167,7 @@ std::string Session::savePerformanceToLibrary(const std::string& name,bool asNew
 namespace {
 // Unpacked inside the data folder, not the OS temp folder: on devices that mount /tmp as tmpfs,
 // a big archive would fill RAM on the way in, and copies across file systems cannot be renames.
-fs::path unpackFolder(){std::random_device random;return dataHome()/(".install-"+std::to_string(random())+std::to_string(random()));}
+fs::path unpackFolder(){return stagingFolder("install");}
 std::string freshId(){std::random_device random;constexpr char hex[]="0123456789abcdef";std::string id;for(int i=0;i<16;++i)id+=hex[random()&15];return id;}
 }
 
@@ -2185,6 +2184,7 @@ Control::Archive Session::archiveContents(const std::string& file) {
 }
 
 Control::Installed Session::installArchive(const std::string& file,bool asLibrary,const std::vector<std::string>& chosen,bool acceptUnsignedCode) {
+    removeStaleStaging(dataHome()); // a killed install's unpacked files, before this one needs the room
     const auto into=unpackFolder();
     const auto p=readPackage(file,into);
     // Checked against the revocation lists last kept from the repositories that are on (RFC 0031), with no network.

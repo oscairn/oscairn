@@ -48,7 +48,7 @@ Also the first interactive run of the desktop import; automated tests cover the 
 behind it, not the JUCE menu, file chooser or button state.
 
 The Legacy Sampler is no longer bundled with the app. To repeat these checks, build it from
-[oscairn/sampler](https://github.com/oscairn/sampler) and put `oscairn-legacy-sampler.clap` in a
+[oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler) and put `oscairn-legacy-sampler.clap` in a
 CLAP plugin folder, where the plugin scan finds it.
 
 - [x] Replace the synth with **Oscairn Legacy Sampler** in the plugin browser. **Prepare...** is

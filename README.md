@@ -24,7 +24,7 @@ Oscairn sets out to solve both. How, and how much of it is built today:
   third-party instruments can be built to do it too. Oscairn's own Basic Synth and Delay do, and
   so do Oscairn FM, Analog and the Sampler from [the package repository](#the-package-repository)
   (the deprecated Legacy Sampler does too, but is no longer bundled: build it from
-  [oscairn/sampler](https://github.com/oscairn/sampler) to install it by hand). A third-party plugin without it still switches instantly, through a
+  [oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler) to install it by hand). A third-party plugin without it still switches instantly, through a
   spare instance per prepared sound, each with its own memory.
 
   How many sounds one instance holds is the plugin's to say: the Basic Synth and the Legacy Sampler

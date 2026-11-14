@@ -273,7 +273,7 @@ Decided 2026-11-08, from what the milestone test found:
      target holds each point until the next, or reads them once per block)
 2. **Native sample patches** ([sample players and formats](sample-players-and-formats.md),
    [ESP observations](yamaha-esp-samples-research.md)). The Legacy Sampler lives in its own
-   repository, [oscairn/sampler](https://github.com/oscairn/sampler), since October 31, 2026
+   repository, [oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler), since October 31, 2026
    (like the FM and analog engines' forks), fetched at a pinned commit for the tests only. Since
    November 6, 2026 it is deprecated and no longer bundled with the desktop app or the OS image;
    it can be built from its repository and installed by hand.

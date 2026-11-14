@@ -37,7 +37,7 @@ vendored nor added to Oscairn's normal build by this change.
 
 ## Headless liquidsfz experiment
 
-The [probe](https://github.com/oscairn/sampler/blob/main/research/liquidsfz_probe.cpp) creates its own two-second mono
+The [probe](https://github.com/oscairn/legacy-sampler/blob/main/research/liquidsfz_probe.cpp) creates its own two-second mono
 48 kHz PCM WAV and two SFZ patches, one transposed seven semitones. It fully preloads the
 sample, plays the first patch, prepares a second Synth and later destroys it while the
 first note remains held. A third Synth supplies an independent first-patch reference.
@@ -55,7 +55,7 @@ not establish cross-process sharing, arbitrary SFZ correctness or real-time safe
 library paths. The existing allocation guard covers C++ allocation, not every C allocator,
 deallocation, lock or page fault.
 
-Reproduce with the commands in the Legacy Sampler repository's [research README](https://github.com/oscairn/sampler/blob/main/research/README.md).
+Reproduce with the commands in the Legacy Sampler repository's [research README](https://github.com/oscairn/legacy-sampler/blob/main/research/README.md).
 
 This deliberately compiles a research executable, not a supported production packaging
 configuration. The generated WAV/SFZ files remain in the chosen directory for inspection.
@@ -82,7 +82,7 @@ Checked at liquidsfz `4cc901d18b316cd377276f7eb6b8c325329b9860` for the
 
 ### Reference renders against liquidsfz
 
-[`liquidsfz_compare.cpp`](https://github.com/oscairn/sampler/blob/main/research/liquidsfz_compare.cpp) renders one
+[`liquidsfz_compare.cpp`](https://github.com/oscairn/legacy-sampler/blob/main/research/liquidsfz_compare.cpp) renders one
 second of a generated mono 48 kHz tone through liquidsfz and the Oscairn Legacy Sampler with the
 same one-region patches (2026-10-30, liquidsfz `4cc901d1`, macOS arm64):
 
@@ -102,7 +102,7 @@ that gain path and is unexplained. The release row was 16% before the Legacy Sam
 liquidsfz's exponential release (`lib/envelope.hh`: −60 dB at the release time, then
 silence). Velocity follows the same squared curve in both.
 
-Reproduce with the commands in the Legacy Sampler repository's [research README](https://github.com/oscairn/sampler/blob/main/research/README.md).
+Reproduce with the commands in the Legacy Sampler repository's [research README](https://github.com/oscairn/legacy-sampler/blob/main/research/README.md).
 
 This compares rendered numbers, not listening. It does not cover stereo samples,
 sample-rate conversion, sustain pedal or simultaneous voices.

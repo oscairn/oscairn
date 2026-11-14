@@ -405,7 +405,7 @@ the bounds, NaN, negative and infinite costs and levels: every report the engine
 range, and the worker keeps running. Without the voice bound it fails "counts bounded:
 4294967295 voices"; without the note bound the engine crashes.
 
-Not planned: the Legacy Sampler (`oscairn/sampler`), deprecated in favor of the sfizz-based
+Not planned: the Legacy Sampler (`oscairn/legacy-sampler`), deprecated in favor of the sfizz-based
 Oscairn Sampler, does not offer the extension. Not yet: the gate, a layered
 AWM2-class sound under pressure dropping quiet elements before whole notes, is **unverified**
 (RFC 0013's engine is not started; the fixture imitates its layers, and the converter session's

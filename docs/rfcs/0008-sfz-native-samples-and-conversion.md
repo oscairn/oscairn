@@ -10,7 +10,7 @@ Note, 2026-11-06: the Sampler built in step 2 is now the Oscairn Legacy Sampler
 Sampler (`org.oscairn.sampler`, [oscairn/sfizz](https://github.com/oscairn/sfizz)), which plays
 multisample SFZ and is where RFC 0013's engine is being built. The Legacy Sampler is no longer
 bundled with the desktop app or the OS image; it can be built from
-[oscairn/sampler](https://github.com/oscairn/sampler) and installed by hand.
+[oscairn/legacy-sampler](https://github.com/oscairn/legacy-sampler) and installed by hand.
 
 ## Progress
 
@@ -285,9 +285,9 @@ implementation. Therefore:
 Implemented 2026-10-29 and checked by the automated tests named below; **audible
 acceptance has not happened** and is queued with the other listening tests.
 
-- [Oscairn Legacy Sampler](https://github.com/oscairn/sampler) (its own repository since 2026-10-31) plays the baseline
+- [Oscairn Legacy Sampler](https://github.com/oscairn/legacy-sampler) (its own repository since 2026-10-31) plays the baseline
   profile over preloaded mono/stereo WAV with libsndfile; behavior and limits are in
-  [its README](https://github.com/oscairn/sampler#what-it-plays). Basic Synth and Legacy Sampler share
+  [its README](https://github.com/oscairn/legacy-sampler#what-it-plays). Basic Synth and Legacy Sampler share
   [one context implementation](../../core/clap-ext/include/oscairn-clap/sound-contexts-plugin.hpp).
 - `sounds.prepare` takes `sfz` with an asset `library` and `directory` (RFC 0009) through typed, JSON and remote controls; the
   desktop picker imports a `.wav` or `.sfz` file through the same model code.
@@ -299,7 +299,7 @@ acceptance has not happened** and is queued with the other listening tests.
   test also pass under ThreadSanitizer and AddressSanitizer/UBSan on macOS (ASan with
   `detect_odr_violation=0`: every plugin exports `clap_entry`).
 - Linux and macOS CI, including Linux ThreadSanitizer, pass with the libsndfile dependency.
-- Reference renders against liquidsfz `4cc901d1` ([comparison tool](https://github.com/oscairn/sampler/blob/main/research/liquidsfz_compare.cpp),
+- Reference renders against liquidsfz `4cc901d1` ([comparison tool](https://github.com/oscairn/legacy-sampler/blob/main/research/liquidsfz_compare.cpp),
   [results](../sample-players-and-formats.md#reference-renders-against-liquidsfz)): after
   matching level, pitch, transposition, tuning, volume, velocity and release agree within
   0.34% RMS. The release uses liquidsfz's exponential curve, and (Jacob, 2026-10-30) the

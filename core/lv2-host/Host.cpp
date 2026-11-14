@@ -121,7 +121,7 @@ class Lv2Host final : public PluginHost
     uint32_t emittedCount_=0;
     bool inputPanic_=false,outputPanic_=false;
     std::atomic<uint64_t> blocks_{0},drops_{0},errors_{0},deadlines_{0};
-    std::atomic<double> lastUs_{0},maxUs_{0};
+    std::atomic<double> lastUs_{0},maxUs_{0},totalUs_{0};
 
     static char* makePath(void* handle,const char* relative) noexcept
     {
@@ -661,7 +661,7 @@ public:
     bool popOutput(Event&) noexcept override{return false;} // output control values use atomic telemetry
     uint64_t outputEventDrops() const noexcept override{return 0;}
     const Event* outputEvents(uint32_t& count) const noexcept override{count=emittedCount_;return emitted_.data();}
-    kick::clap::Statistics statistics() const noexcept override{return {blocks_.load(),drops_.load()+worker_.drops(),errors_.load()+worker_.errors(),lastUs_.load(),maxUs_.load(),deadlines_.load(),stateSilences_.load(),0};}
+    kick::clap::Statistics statistics() const noexcept override{kick::clap::Statistics s{blocks_.load(),drops_.load()+worker_.drops(),errors_.load()+worker_.errors(),lastUs_.load(),maxUs_.load(),deadlines_.load(),stateSilences_.load(),0};s.cpuMicroseconds=totalUs_.load();return s;}
     bool process(const float* const* inputs,uint32_t ni,float* const* outputs,uint32_t no,uint32_t frames,const Event* events,uint32_t count,const clap_event_transport_t* t) noexcept override
     {
         emittedCount_=0;outputPanic_=false;
@@ -743,7 +743,7 @@ public:
         // Stable, bounded merge across multiple MIDI output ports.
         for(uint32_t i=1;i<emittedCount_;++i){auto e=emitted_[i];auto j=i;while(j && emitted_[j-1].header()->time>e.header()->time){emitted_[j]=emitted_[j-1];--j;}emitted_[j]=e;}
         const auto us=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-began).count();
-        lastUs_.store(us);if(us>maxUs_.load())maxUs_.store(us);if(mode_==ProcessingMode::Realtime && us>frames/rate_*1e6)++deadlines_;++blocks_;
+        lastUs_.store(us);if(us>maxUs_.load())maxUs_.store(us);totalUs_.store(totalUs_.load(std::memory_order_relaxed)+us,std::memory_order_relaxed);if(mode_==ProcessingMode::Realtime && us>frames/rate_*1e6)++deadlines_;++blocks_;
         return true;
     }
 };

@@ -421,6 +421,7 @@ namespace oscairn::worker
             s.wokeAt = std::chrono::nanoseconds(woke.time_since_epoch()).count();
             s.doneAt = std::chrono::nanoseconds(std::chrono::steady_clock::now().time_since_epoch()).count();
             s.cpuNs = threadCpuNanoseconds() - cpuAtWake;
+            s.cpuMicroseconds.store(s.cpuMicroseconds.load(std::memory_order_relaxed) + double(s.cpuNs) / 1e3, std::memory_order_relaxed);
             s.done.store(n.seen, std::memory_order_release);
             // The engine's thread is woken only when it said it sleeps on done (Shared::waiting): the
             // fence orders the store above before that read, as the engine's orders its flag before its read of done.

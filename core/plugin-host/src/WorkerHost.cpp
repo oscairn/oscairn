@@ -935,6 +935,7 @@ namespace oscairn
                 s.blocks = shared_->blocks.load(); s.droppedEvents = shared_->droppedEvents.load() + sysexDrops_.load(std::memory_order_relaxed); s.processErrors = shared_->processErrors.load();
                 s.droppedEvents += carryDrops_.load(std::memory_order_relaxed);
                 s.lastMicroseconds = shared_->lastMicroseconds.load(); s.maximumMicroseconds = shared_->maximumMicroseconds.load();
+                s.cpuMicroseconds = shared_->cpuMicroseconds.load(std::memory_order_relaxed);
                 s.lateBlocks = late_.load(std::memory_order_relaxed); s.silentBlocks = silent_.load(std::memory_order_relaxed);
                 s.deadlineMisses = shared_->deadlineMisses.load() + s.lateBlocks + s.silentBlocks;
                 s.allowanceMicroseconds = std::chrono::duration<double, std::micro>(process()->budget()).count();

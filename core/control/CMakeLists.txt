@@ -350,6 +350,12 @@ add_executable(oscairn-shared-costs-test tests/shared_costs.cpp)
 target_link_libraries(oscairn-shared-costs-test PRIVATE oscairn_control)
 add_test(NAME control-shared-costs COMMAND oscairn-shared-costs-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-shared-costs PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+# RFC 0025: a recorded cost is the plugin's own CPU time per block, alone, with the extra block and on a busy machine.
+add_executable(oscairn-measured-costs-test tests/measured_costs.cpp)
+target_link_libraries(oscairn-measured-costs-test PRIVATE oscairn_control)
+add_dependencies(oscairn-measured-costs-test oscairn-voice-fixture oscairn-plugin-worker)
+add_test(NAME control-measured-costs COMMAND oscairn-measured-costs-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(control-measured-costs PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
 
 add_executable(oscairn-sound-presets-test tests/sound_presets.cpp)
 target_link_libraries(oscairn-sound-presets-test PRIVATE oscairn_control_json)

@@ -417,7 +417,7 @@ namespace oscairn
         // cpu: the busiest sustained load, falling; rest: with no note sounding or held; voice: added
         // per sounding note; voices: the most notes seen sounding at once. All shares of a block's
         // time, from blocks that ran undisturbed (budget.cpp, measure).
-        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; }; // samples: accepted, at rest and voiced
+        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; }; // samples: the blocks measured, at rest and voiced
         Budget budget_;
         bool loadGuard_ = true; // OSCAIRN_LOAD_GUARD=off: a diagnostic and test setting, not a product mode
         std::map<std::string, Measurement> measured_;          // by plugin ID, version and build digest, and what it declared (pluginKey)
@@ -428,12 +428,10 @@ namespace oscairn
         // worker's CPU times of its blocks (recorded as the next block is handed over) before it counts.
         struct Learning
         {
-            struct Pending { double microseconds = 0; uint32_t voices = 0; uint64_t blocks = 0; bool quiet = false; uint32_t sounds = 1; }; // sounds: on the instance (RFC 0045)
-            uint64_t blocks = 0, quiet = 0; // the plugin's blocks at the last tick; blocks since a note last sounded
-            uint32_t samples = 0, restN = 0, voiceN = 0;
+            uint64_t blocks = 0, seen = 0; // the plugin's blocks at the last tick (0: none yet); blocks since it joined
+            double cpu = 0;                 // its statistics().cpuMicroseconds at the last tick
+            uint32_t restN = 0, voiceN = 0;
             double fast = 0;
-            bool pending = false; Pending held;
-            std::array<uint64_t, Histogram::buckets> was{}, before{}; // the worker's per-block CPU time histogram at the last two ticks
         };
         std::map<NodeId, Learning> learning_;
         std::map<NodeId, uint64_t> loadedBytes_;               // this process's growth as an in-process plugin loaded

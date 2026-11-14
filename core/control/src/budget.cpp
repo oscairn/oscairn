@@ -39,17 +39,19 @@ namespace oscairn
         // is not refused, and marked, so the user knows it is a guess.
         constexpr double unmeasuredCpu = .02;
         constexpr uint64_t unmeasuredMemory = 32ull << 20;
-        // The measured cost (Session::measure): at rest and per voice, a running mean of the CPU time
-        // of sampled blocks, each sample weighing its blocks over restBlocks (about 10 s of blocks at 128
-        // frames and 48 kHz, and at least 1/n while n is small); cpu, the busiest sustained load, a
-        // maximum of a short mean (fastBlocks, about a second) falling with a time constant of
-        // fallBlocks (a few minutes). A share is at most 1 (a block taking longer than itself is a miss).
-        // enoughSamples at rest before the rest is taken off a voiced sample; a value loaded from the
-        // file counts as seedSamples, so what is played now outweighs it quickly. quietSeconds without a
-        // note before a block counts as at rest (a release tail is not).
+        // The measured cost (Session::measure), a share of the block period (frames / sample rate): at rest
+        // and per voice, a running mean of the plugin's CPU time per block over each service tick's blocks,
+        // each tick weighing its blocks over restBlocks (about 10 s of blocks at 128 frames and 48 kHz, and at
+        // least 1/n while n is small); cpu, the busiest sustained load, a maximum of a short mean (fastBlocks,
+        // about a second) falling with a time constant of fallBlocks (a few minutes). A share is at most 1 (a
+        // block taking longer than itself is a miss). enoughSamples at rest before the rest is taken off a
+        // voiced sample; a value loaded from the file counts as seedSamples, so what is played now outweighs it
+        // quickly. At rest: no note held and the output silent for quietSeconds (a release tail is not at
+        // rest). A node's first warmupBlocks blocks are not measured (its load's first blocks). A figure is
+        // certain (admission takes it as it is) once certainBlocks blocks were measured.
         constexpr double restBlocks = 4000, fastBlocks = 400, fallBlocks = 60000, quietSeconds = .5;
-        constexpr uint32_t enoughSamples = 100, seedSamples = 4;
-        constexpr int measurementsVersion = 4; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops, its memory kept; 3: a shared instance's CPU all its sounds', its memory kept
+        constexpr uint32_t enoughSamples = 100, seedSamples = 4, warmupBlocks = 32, certainBlocks = 8000;
+        constexpr int measurementsVersion = 5; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops, its memory kept; 3: a shared instance's CPU all its sounds', its memory kept; 4: one block's wall time a tick, a shared instance's unbounded and rest taken during release tails, its memory kept
         fs::path measurementsFile() { return dataHome() / "measurements.json"; }
         std::string percent(double share) { char text[32]; std::snprintf(text, sizeof(text), "%.0f%%", share * 100); return text; }
     }
@@ -127,7 +129,7 @@ namespace oscairn
             return {name, plugin, guess.cpu, std::max(m.memory, guess.memory), m.memory > 0};
         }
         const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : m.cpu;
-        return {name, plugin, cpu, m.memory, true, {}, m.samples >= enoughSamples};
+        return {name, plugin, cpu, m.memory, true, {}, m.samples >= certainBlocks};
     }
 
     // Memory: the larger of the measurement and the declaration (RFC 0025: never the plugin's word
@@ -185,8 +187,8 @@ namespace oscairn
             const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(bytes.data(), bytes.size()), &std::free};
             const auto* version = detail::member(doc.get(), "version");
             const double read = version && version->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(version->payload)->number, nullptr) : 0;
-            if(read != measurementsVersion && read != 3 && read != 2) return;
-            const bool memoryOnly = read != measurementsVersion; // version 2's CPU figures were overstated, version 3's an instance's however many sounds shared it: measured again; the memory stands
+            if(read != measurementsVersion && read != 4 && read != 3 && read != 2) return;
+            const bool memoryOnly = read != measurementsVersion; // versions 2 to 4's CPU figures were overstated (see measurementsVersion): measured again; the memory stands
             const auto* plugins = detail::member(doc.get(), "plugins");
             if(!plugins || plugins->type != json_type_object) return;
             for(auto* e = static_cast<const json_object_s*>(plugins->payload)->start; e; e = e->next)
@@ -202,7 +204,7 @@ namespace oscairn
                 const bool possible = !memoryOnly && std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
                 const std::string key(e->name->string, e->name->string_size);
-                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e6))} : Measurement{0, 0, 0, 0, uint64_t(memory), 0};
+                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e9))} : Measurement{0, 0, 0, 0, uint64_t(memory), 0};
                 if(possible) setPluginCost(key.substr(0, key.find('@')), cpu); // RFC 0045, before its instances play: as last measured here
             }
         }
@@ -462,19 +464,16 @@ namespace oscairn
         saveMeasurements();
     }
 
-    // Each service tick, once a budget is set: every plugin's last block as a share of the block's
-    // time, in a running mean per plugin build (see the constants above), its memory every second.
-    // A tick's sample is left out when the plugin did not run since the last tick, and in its first 32
-    // blocks. For a plugin in a worker it is also held to the CPU time the worker's audio thread
-    // used for the blocks around it (a block longer than the largest bucket's top counts as a
-    // typical block of the window), so a block the thread was not scheduled for (a kernel stall, whether the
-    // engine then silenced the block or not) counts for no more than the work, and one that
-    // computed counts in full. Split by the notes sounding through the plugin: with none for
-    // quietSeconds, at rest; with some, per voice. RFC 0045: an instance several parts share is
-    // measured once, on its first context, and recorded per sound (its share over the sounds on it,
-    // its voices all its parts'), so a figure does not depend on how many parts shared the instance
-    // it was measured on; its memory is recorded only from an instance playing one sound.
-    // shortcut: one sample a tick, and a bucket's top for the CPU bound; read the worker's CPU time per block itself if admission must be exact.
+    // Each service tick, once a budget is set: every plugin's CPU time per block since the last tick
+    // (statistics().cpuMicroseconds over its blocks: for a plugin in a worker the CPU time of the worker's
+    // audio thread, so a block the thread was not scheduled for, a page fault waiting on storage, a wait
+    // for the extra block or a core shared with another worker counts for no more than the work), as a
+    // share of the block period, in a running mean per plugin build (see the constants above), its memory
+    // every second. Split by the notes sounding through the plugin: with none and its output silent for
+    // quietSeconds, at rest; with some, per voice. RFC 0045: an instance several parts share is measured
+    // once, on its first context, and recorded per sound (its share over the sounds on it, its voices all
+    // its parts'), so a figure does not depend on how many parts shared the instance it was measured on;
+    // its memory is recorded only from an instance playing one sound.
     void Session::measure()
     {
         if(budget_.cpu <= 0) { graph_.setVoiceBudget(loadGuard_ ? -1 : 0); return; } // RFC 0045's load guard: notes give way before a block is missed
@@ -484,19 +483,21 @@ namespace oscairn
         // RFC 0018's shared budget steals notes within the same CPU budget, from these measurements.
         graph_.setVoiceBudget(budget_.cpu * blockMicroseconds);
         const bool memoryNow = ++measureTicks_ % 200 == 0;
-        const uint64_t quietBlocks = uint64_t(quietSeconds * sampleRate_ / frames) + 1;
+        const auto quietFrames = uint64_t(quietSeconds * sampleRate_);
         auto sample = [&](NodeId node) {
             auto& host = graph_.host(node);
             if(!host.failure().empty()) { learning_.erase(node); return; } // a failed plugin, or a stand-in for one not here, costs nothing to learn from
             const auto st = host.statistics();
-            if(st.blocks < 32) return;
             auto& m = measured_[pluginKey(node)];
             auto& L = learning_[node];
             const double was = m.cpu, wasRest = m.rest, wasVoice = m.voice;
-            const uint64_t blocks = st.blocks > L.blocks ? st.blocks - L.blocks : 0;
-            const bool clean = L.blocks && blocks; // ran since the last tick
-            L.blocks = st.blocks;
+            if(st.blocks < L.blocks || st.cpuMicroseconds < L.cpu) L.blocks = 0; // restarted, or its instances changed: measured from here
+            const uint64_t blocks = L.blocks ? st.blocks - L.blocks : 0;
+            const double each = blocks ? (st.cpuMicroseconds - L.cpu) / double(blocks) : 0;
+            L.blocks = st.blocks; L.cpu = st.cpuMicroseconds;
+            L.seen += blocks;
             auto voices = graph_.sounding(node);
+            bool silent = graph_.silent(node, quietFrames);
             uint32_t sounds = 1;
             if(const auto* context = dynamic_cast<const SoundContext*>(&host))
             {
@@ -507,59 +508,33 @@ namespace oscairn
                     if(!other || other->engine() != context->engine()) return;
                     const auto v = graph_.sounding(n);
                     voices = v == UINT32_MAX || voices == UINT32_MAX ? UINT32_MAX : voices + v;
+                    silent = silent && graph_.silent(n, quietFrames);
                 };
                 for(const auto& [n, x] : nodes_) add(n);
                 for(const auto n : leaving_) add(n);
             }
-            L.quiet = voices == 0 ? L.quiet + blocks : 0;
-            auto accept = [&](const Learning::Pending& s, double boundMicroseconds) {
-                const double share = std::min(1.0, std::min(s.microseconds, boundMicroseconds) / blockMicroseconds) / s.sounds; // a sound's
-                auto weight = [&](uint32_t& n) { return std::max(1.0 / (n++ + 1), std::min(1.0, s.blocks / restBlocks)); };
-                L.fast = L.samples++ ? L.fast + (share - L.fast) * std::min(1.0, s.blocks / fastBlocks) : share;
-                m.cpu = std::max(L.fast, m.cpu * std::exp(-double(s.blocks) / fallBlocks));
-                if(s.voices == 0)
+            // A node's first blocks are its load's. shortcut: a prepared instrument whose instances change mid-tick gives one sample
+            // of their sum's jump (at most the period, as any); keep a base per instance if that is seen to move a figure.
+            if(blocks && L.seen >= warmupBlocks + blocks)
+            {
+                const double share = std::min(1.0, each / blockMicroseconds) / sounds; // a sound's
+                auto weight = [&](uint32_t& n) { return std::max(1.0 / (n++ + 1), std::min(1.0, blocks / restBlocks)); };
+                L.fast += (share - L.fast) * std::min(1.0, blocks / fastBlocks); // from 0: one block, a first touch among them, is not a second's load
+                m.cpu = std::max(L.fast, m.cpu * std::exp(-double(blocks) / fallBlocks));
+                m.samples = uint32_t(std::min<uint64_t>(uint64_t(m.samples) + blocks, 1'000'000'000));
+                if(voices == 0 && silent)
                 {
-                    if(!s.quiet) return;
                     if(!L.restN && m.rest > 0) L.restN = seedSamples;
                     m.rest += (share - m.rest) * weight(L.restN);
-                    m.samples = std::min<uint32_t>(m.samples + 1, 1'000'000);
-                    return;
                 }
-                else if(s.voices != UINT32_MAX)
+                else if(voices && voices != UINT32_MAX)
                 {
                     if(!L.voiceN && m.voice > 0) L.voiceN = seedSamples;
                     // The rest comes off only once it is known; until then the whole sample is the voices' (an upper bound).
-                    m.voice += (std::max(0.0, share - (L.restN >= enoughSamples ? m.rest : 0.0)) * s.sounds / s.voices - m.voice) * weight(L.voiceN); // a sound's share over its share of the voices
-                    m.voices = std::max(m.voices, s.voices);
-                }
-                else return;
-                m.samples = std::min<uint32_t>(m.samples + 1, 1'000'000);
-            };
-            const Learning::Pending now{st.lastMicroseconds, voices, blocks, L.quiet >= quietBlocks, sounds};
-            if(auto* timing = host.workerTiming())
-            {
-                const auto counts = timing->cpu.read().steady.counts;
-                if(std::ranges::any_of(std::views::iota(size_t(0), counts.size()), [&](size_t i) { return counts[i] < L.was[i]; })) // reset or restarted
-                {
-                    L.was = L.before = counts; L.pending = false;
-                }
-                else
-                {
-                    // The window's CPU times: the top of the largest bucket (what could explain a long block) and
-                    // of the middle one (what a block takes). A block longer than any CPU time of the window is
-                    // not explained by work, so it counts as a middle one; a noisy block elsewhere cannot lend it its time.
-                    uint64_t total = 0; size_t top = counts.size(), middle = counts.size();
-                    for(size_t i = 0; i < counts.size(); ++i) if(counts[i] > L.before[i]) { total += counts[i] - L.before[i]; top = i; }
-                    for(size_t i = 0, seen = 0; i < counts.size() && total; ++i)
-                        if(counts[i] > L.before[i] && (seen += counts[i] - L.before[i]) * 2 >= total) { middle = i; break; }
-                    auto topOf = [&](size_t i) { return i + 1 < counts.size() ? double(Histogram::upperMicroseconds(i)) : double(INFINITY); };
-                    if(L.pending && total)
-                        accept(L.held, L.held.microseconds <= topOf(top) ? L.held.microseconds : topOf(middle));
-                    L.pending = clean; L.held = now;
-                    L.before = L.was; L.was = counts;
-                }
+                    m.voice += (std::max(0.0, share - (L.restN >= enoughSamples ? m.rest : 0.0)) * sounds / voices - m.voice) * weight(L.voiceN); // a sound's share over its share of the voices
+                    m.voices = std::max(m.voices, voices);
+                } // else a release tail, or notes not counted: the busiest load only
             }
-            else if(clean) accept(now, INFINITY);
             if(m.voices) graph_.seedNoteCost(node, m.rest * blockMicroseconds, m.voice * blockMicroseconds);
             if(std::abs(m.rest - wasRest) > 1e-4 || std::abs(m.voice - wasVoice) > 1e-5) measurementsChanged_ = true;
             if(memoryNow && sounds == 1)

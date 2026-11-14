@@ -250,7 +250,7 @@ public:
         kick::clap::Statistics result{};
         for(const auto& s:desired_.instances)if(s){const auto v=s->host->statistics();
             result.blocks=std::max(result.blocks,v.blocks);result.droppedEvents+=v.droppedEvents;result.processErrors+=v.processErrors;
-            result.lastMicroseconds+=v.lastMicroseconds;result.maximumMicroseconds+=v.maximumMicroseconds;
+            result.lastMicroseconds+=v.lastMicroseconds;result.maximumMicroseconds+=v.maximumMicroseconds;result.cpuMicroseconds+=v.cpuMicroseconds;
             result.deadlineMisses+=v.deadlineMisses;result.controlSilences+=v.controlSilences;result.idleBlocks+=v.idleBlocks;result.restarts+=v.restarts;
             result.lateBlocks+=v.lateBlocks;result.silentBlocks+=v.silentBlocks;result.allowanceMicroseconds=std::max(result.allowanceMicroseconds,v.allowanceMicroseconds);
             result.busyBlocks+=v.busyBlocks;result.missPanics+=v.missPanics;result.minorFaults+=v.minorFaults;result.majorFaults+=v.majorFaults;result.involuntarySwitches+=v.involuntarySwitches;}

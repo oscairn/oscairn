@@ -10,7 +10,9 @@
 // its process call numbered CALL (from 1, in this instance) for CALLS calls, each spends US microseconds
 // more, as a block held up from outside or a sustained load beside the voices. OSCAIRN_FIXTURE_OUTPUT=CALL:VALUE[:CALLS],...:
 // its process calls CALL to CALL+CALLS-1 (one by default) write VALUE (nan, inf, any number) into the left channel's
-// middle frame, as a plugin gone wrong (or legitimately loud).
+// middle frame, as a plugin gone wrong (or legitimately loud). OSCAIRN_FIXTURE_BLOCK_US: the microseconds
+// every block spends per 128 frames, sounding or not (default 0). OSCAIRN_FIXTURE_CPU_CLOCK=1: the time
+// spent is the thread's CPU time, not the clock's, so the cost is exact however the thread is scheduled.
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -20,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 namespace {
 const char* features[]{CLAP_PLUGIN_FEATURE_INSTRUMENT,nullptr};
@@ -27,7 +30,7 @@ const clap_plugin_descriptor_t descriptor{CLAP_VERSION,"org.oscairn.test.voices"
 struct Voice { bool active=false,held=false; int32_t id=-1; int16_t channel=0,key=0; double velocity=0,volume=1,phase=0,level=1,layer=1; uint32_t chokeLeft=0; bool choking=false; uint64_t started=0; };
 struct Plugin {
     clap_plugin_t api{};const clap_host_t* host;
-    double rate=48000,microseconds=0;uint32_t chokeFrames=144,layers=1,frames=128;
+    double rate=48000,microseconds=0,blockMicroseconds=0;bool cpuClock=false;uint32_t chokeFrames=144,layers=1,frames=128;
     std::array<Voice,128> voices{};uint64_t started=0,calls=0;
     long spikeAt=0,spikeCalls=0;double spikeUs=0; // OSCAIRN_FIXTURE_SPIKE
     struct Bad { long at=0,calls=1; float value=0; }; std::array<Bad,8> bad{}; size_t badCount=0; // OSCAIRN_FIXTURE_OUTPUT
@@ -100,6 +103,8 @@ struct Plugin {
     }
     explicit Plugin(const clap_host_t* h):host(h){
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_VOICE_US"))microseconds=std::atof(us);
+        if(const char* us=std::getenv("OSCAIRN_FIXTURE_BLOCK_US"))blockMicroseconds=std::atof(us);
+        cpuClock=std::getenv("OSCAIRN_FIXTURE_CPU_CLOCK")!=nullptr;
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LAYERS"))layers=std::clamp(std::atoi(l),1,16);
         if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
         for(const char* v=std::getenv("OSCAIRN_FIXTURE_OUTPUT");v && *v && badCount<bad.size();){
@@ -123,6 +128,8 @@ struct Plugin {
             std::fill_n(left,b->frames_count,0.f);std::fill_n(right,b->frames_count,0.f);
             uint32_t sounding=0;for(const auto& v:s.voices)sounding+=v.active;
             const auto began=std::chrono::steady_clock::now();
+            auto cpuNow=[]{timespec t{};clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t);return std::chrono::seconds(t.tv_sec)+std::chrono::nanoseconds(t.tv_nsec);};
+            const auto cpuBegan=cpuNow();
             const auto* in=b->in_events;uint32_t done=0;
             for(uint32_t e=0;e<in->size(in);++e){
                 const auto* h=in->get(in,e);const uint32_t at=std::min(h->time,b->frames_count);
@@ -134,8 +141,9 @@ struct Plugin {
             // The voices' cost: busy, as DSP is, for their time.
             const long call=long(++s.calls);
             const double extra=s.spikeCalls && call>=s.spikeAt && call<s.spikeAt+s.spikeCalls?s.spikeUs:0;
-            const auto spend=std::chrono::duration<double,std::micro>(s.microseconds*sounding*b->frames_count/128.0+extra);
-            while(std::chrono::steady_clock::now()-began<spend){}
+            const auto spend=std::chrono::duration<double,std::micro>((s.microseconds*sounding+s.blockMicroseconds)*b->frames_count/128.0+extra);
+            if(s.cpuClock)while(cpuNow()-cpuBegan<spend){}
+            else while(std::chrono::steady_clock::now()-began<spend){}
             return CLAP_PROCESS_CONTINUE;
         };
         api.get_extension=[](const clap_plugin_t*,const char* id)->const void*{

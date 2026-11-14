@@ -585,6 +585,23 @@ such parts, saved with an instance each, estimated after either history against 
 times the lone part's cost at eight notes: fits both times (before, it fit after the lone part and
 not after the three sharing).
 
+Corrected 2026-11-14 (measurements version 5, [RFC 0025](0025-resource-budgets.md#the-cpu-model-per-core)):
+on the unit, after one play of ST Final, the Sampler's figures were about 0.25 of the period at rest
+(one 0.5) and the Performance was refused at the default budget on every later load, where a
+Sampler worker at rest uses about 32 us of CPU a block (0.012). A figure was one block's wall time a
+service tick, held to its worker's CPU histogram only for a node with a worker of its own: a sound
+context (a shared instance) has no `workerTiming`, so a shared Sampler's figure was the raw wall time
+of its block, up to a whole period with waits for storage and for other workers on its core, over
+the sounds on it (0.25 and 0.5 fit a block capped at the period over four sounds and over two; not
+confirmed on the unit); and a block counted
+as at rest half a second after the last key went up, while the pads' release tails still sounded.
+Now the figure is the plugin's own CPU time per block over each tick's blocks (its worker's audio
+thread's, a shared instance's on its lead context alike), at rest only with no key held and the
+output silent for half a second, a node's first 32 blocks not measured; version 4's CPU figures
+are measured again. A figure is certain only after 8,000 measured blocks (about 21 s): until then a
+Performance its figures would refuse opens with a notice if it fits with them at a quarter, so a
+Performance that opened unmeasured does not flip to refused after a first short play.
+
 ### The app's process and the audio (2026-11-14)
 
 Why the app is worse than the engine alone on the unit, measured with ST Final (bundle 79770480

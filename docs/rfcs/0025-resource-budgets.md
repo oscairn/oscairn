@@ -89,10 +89,21 @@ one core one after another; and the estimates themselves were overstated three t
 histogram bucket, and before the rest was known every voiced sample was charged wholly to its
 voices. Now:
 
-- **The figure** is unchanged: a block's time bounded by its worker's CPU times around it, a
-  bucket's top (2026-11-13: an exact mean of the worker's CPU per block was tried and let a stall
-  that sleeps while touching new memory move the rest, its page faults being the thread's CPU time;
-  control-estimates failed one run in two with it). Still open: the overstatement this leaves.
+- **The figure** (2026-11-14, measurements version 5): the plugin's own CPU time per block, the
+  mean over each service tick's blocks (`statistics().cpuMicroseconds`: its worker's audio thread's
+  CPU time, a shared instance's on its lead context; the wall time of `process` for a plugin in the
+  engine's process), skipping a node's first 32 blocks. Before, it was one block's wall time a
+  tick bounded by a bucket's top of the worker's CPU histogram, and not bounded at all for a sound
+  context, which has no worker timing of its own: on the FANTOM-07 a Sampler recorded about 0.25 of
+  the period at rest where its worker uses 0.012 ([RFC 0045](0045-audio-scheduling-on-small-devices.md#a-sounds-cost-not-an-instances)).
+  (2026-11-13 an exact mean was tried and let a stall that sleeps while touching new memory move the
+  rest. The rest is now taken only from blocks with no key held and the output silent for half a
+  second, so a release tail is not rest; with it control-estimates passed 10 runs of 10 on the Mac
+  and 10 of 10 in a quiet Linux container once its sleeping stall is judged one way (the rest drifted
+  down past the bound in one run of ten, which a stall, counted, could not do). With other work
+  loading the machine it still failed now and then in the container, once with the rest rising over
+  ordinary blocks after the computing stall.) **A cost is a share of the block period** (frames / sample rate), whatever the
+  plugin's lane: a worker's allowance or a block late changes when a block is missed, not what it costs.
 - **Voices** are fitted from samples with voices sounding, less the rest once it is known; until
   then the whole sample is the voices' (unchanged: not taking such samples left the cost per voice
   unknown for the first seconds of playing, which other tests rely on; with the exact figure above
@@ -105,11 +116,13 @@ voices. Now:
   is at most the budget's share of every audio core (budget × cores) and its costliest chain at
   most the budget's share of one block. A seamless change holds both Performances' totals against
   the same.
-- **Uncertain figures:** each figure counts its samples (`samples` in `measurements.json`, the
-  file now version 3; version 2's figures are discarded and measured again, being overstated). A
-  Performance that is refused by figures from fewer than 100 samples, and would fit with each of
-  those at a quarter (the overstatement seen on the unit), opens, with a notice saying so; adding a
-  plugin past the budget is refused all the same.
+- **Uncertain figures:** each figure counts the blocks it was measured from (`samples` in
+  `measurements.json`, the file now version 5; versions 2 to 4's CPU figures are discarded and
+  measured again, being overstated, their memory kept). A Performance that is refused by figures
+  from fewer than 8,000 blocks (about 21 s at 128 frames and 48 kHz), and would fit with each of
+  those at a quarter, opens, with a notice saying so; adding a plugin past the budget is refused all
+  the same. So a Performance that opened unmeasured is not refused on its next load by its own first
+  seconds of figures.
 
 Tested: control-admission (three parts at 40 % each fit on the cores where the sum refused them; a
 chain of two at 40 % is refused for its 80 %; from figures of five samples it opens with a notice);
@@ -152,7 +165,8 @@ time less the reliability level's margin (desktop 90%, instrument 75%, pass-thro
 of the profile's memory. Until a budget is set nothing is measured or checked, so tests and tools
 never write the user's data folder.
 
-- **Measured:** at each service tick, every plugin's last block as a share of the block's time
+- **Measured** (as first built; the figure and the rest's test are now as in "The CPU model per
+  core" above): at each service tick, every plugin's last block as a share of the block's time
   (at most 1), per plugin build (ID, version and the digest of its files, so a rebuild without a
   new version is measured again), skipping its first 32 blocks and a tick in which it ran no block;
   memory every second, a worker's share of its process's resident memory or, in the engine's

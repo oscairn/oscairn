@@ -255,7 +255,7 @@ struct Host::Impl {
     std::atomic<bool> restart{false}, callback{false}, wake{false}, flush{false}, panic{false};
     std::atomic<uint32_t> rescan{0}, latencyFrames{0};
     std::atomic<uint64_t> blocks{0}, dropped{0}, errors{0};
-    std::atomic<double> lastUs{0}, maxUs{0};
+    std::atomic<double> lastUs{0}, maxUs{0}, totalUs{0};
     std::atomic<uint64_t> deadlineMisses{0}, controlSilences{0}, idleBlocks{0};
     detail::Queue<Event, maxEvents> commands, emitted;
     std::atomic<uint64_t> outputDrops{0};
@@ -1290,7 +1290,7 @@ uint64_t Host::parameterReports() const noexcept { return impl->parameterReports
 uint32_t Host::latency() const noexcept { return impl->latencyFrames.load(); }
 bool Host::asleep() const noexcept { return impl->sleeping; }
 bool Host::wasReset() const noexcept { return impl->resetInProcess; }
-Statistics Host::statistics() const noexcept { auto& s = *impl; return {s.blocks.load(), s.dropped.load(), s.errors.load(), s.lastUs.load(), s.maxUs.load(), s.deadlineMisses.load(), s.controlSilences.load(), s.idleBlocks.load()}; }
+Statistics Host::statistics() const noexcept { auto& s = *impl; Statistics r{s.blocks.load(), s.dropped.load(), s.errors.load(), s.lastUs.load(), s.maxUs.load(), s.deadlineMisses.load(), s.controlSilences.load(), s.idleBlocks.load()}; r.cpuMicroseconds = s.totalUs.load(); return r; }
 bool Host::enqueue(const Event& e) noexcept {
     auto& s = *impl;
     if (!validEvent(e.header()) || e.header()->space_id != CLAP_CORE_EVENT_SPACE_ID || e.header()->type == CLAP_EVENT_MIDI_SYSEX) return false;
@@ -1470,6 +1470,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         s.blocks.fetch_add(1);
         const auto us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
         s.lastUs.store(us); if (us > s.maxUs.load()) s.maxUs.store(us);
+        s.totalUs.store(s.totalUs.load(std::memory_order_relaxed) + us, std::memory_order_relaxed);
         if (us > frames / s.sampleRate * 1e6) s.deadlineMisses.fetch_add(1);
         return true;
     } catch (...) { s.failed.store(true); s.errors.fetch_add(1); silence(); return false; }

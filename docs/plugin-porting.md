@@ -654,9 +654,10 @@ stepped, hidden and read-only flags. How the editors use them:
 - **Keep your cost steady:** the host measures each plugin's CPU per block and its memory on
   the device, by plugin ID, version and build, and refuses a Performance, or
   an added plugin, that would go over the device's budget, saying why
-  ([RFC 0025](rfcs/0025-resource-budgets.md)). CPU is a running mean of its block times, held to the
-  CPU time its audio thread used so a stall of the thread is not counted against it, split into a
-  cost at rest (no note sounding for half a second) and a cost per sounding note, with the busiest
+  ([RFC 0025](rfcs/0025-resource-budgets.md)). CPU is a running mean of its own CPU time per block
+  (its worker's audio thread's; in the engine's process the time of its `process` call), as a share
+  of the block period, so a stall of the thread is not counted against it, split into a
+  cost at rest (no key held and its output silent for half a second: a release tail is not rest) and a cost per sounding note, with the busiest
   recent load for a part with no note limit; in a part with a note limit, the estimate is at rest plus that many
   notes, so keep your per-voice cost proportional to the voices actually sounding. In a worker,
   memory is what the worker holds; in the engine's process, it is what the process grew by

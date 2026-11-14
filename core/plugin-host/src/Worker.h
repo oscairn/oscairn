@@ -50,7 +50,7 @@ namespace oscairn::worker
         double voiceCost = 0;
         oscairn_voice_budget_note_t voiceNotes[maxVoiceNotes]{};
         std::atomic<uint64_t> outputDrops{0}, blocks{0}, droppedEvents{0}, processErrors{0}, deadlineMisses{0}, controlSilences{0}, idleBlocks{0};
-        std::atomic<double> lastMicroseconds{0}, maximumMicroseconds{0};
+        std::atomic<double> lastMicroseconds{0}, maximumMicroseconds{0}, cpuMicroseconds{0}; // cpuMicroseconds: the audio thread's CPU time for its blocks so far
         // The worker's, for the timing report: when its audio thread ran for the last block and when
         // it was done with it, in steady_clock nanoseconds (the clock is the system's, the same in
         // both processes); the CPU time its audio thread used between the two (CLOCK_THREAD_CPUTIME_ID),

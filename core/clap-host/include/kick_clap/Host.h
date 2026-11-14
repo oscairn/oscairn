@@ -128,6 +128,9 @@ struct Statistics {
     // no events: only where events were lost, as a control silence in the worker); the page faults of the worker's audio thread (Linux; 0 elsewhere).
     // Also the worker's audio thread's involuntary context switches (Linux; 0 elsewhere).
     uint64_t busyBlocks = 0, missPanics = 0, minorFaults = 0, majorFaults = 0, involuntarySwitches = 0;
+    // Cumulative over `blocks`: the time the plugin's own blocks took, its process() in the engine's
+    // process, and the CPU time of its worker's audio thread for a plugin in a worker (RFC 0025's cost).
+    double cpuMicroseconds = 0;
 };
 
 // oscairn.hardware (oscairn-clap/hardware.h, RFC 0004): the process's accelerators, which every

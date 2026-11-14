@@ -665,6 +665,14 @@ stepped, hidden and read-only flags. How the editors use them:
   fit the device's budget, the change is a cut instead. A setlist prepares its next
   Performance while one plays: that one's plugins are created, activated and given their saved
   state, and get their main-thread callbacks, perhaps minutes before they first process.
+- **Loading while others play:** while a Performance loads, the player's notes keep reaching
+  the Performance playing, and its meters are read
+  ([Long requests](control-protocol.md#long-requests)), as the host creates the new instances
+  and gives them their state. Every call to a plugin still comes on its main thread (the
+  engine's control thread, or the worker's): the host never creates or restores an instance on
+  another thread. A plugin playing may so get notes on the audio thread while another
+  instance of it, in the same process, loads its state on the main thread: keep
+  nothing shared between instances that a load changes without a lock of the plugin's own.
 - **Expect a second life:** an instance that has played may be given another Performance's
   state instead of the host loading a new instance
   ([RFC 0021](rfcs/0021-sounds-performances-and-library.md#free-instances-across-a-change-and-instances-kept-warm)):

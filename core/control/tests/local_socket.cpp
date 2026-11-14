@@ -704,52 +704,84 @@ namespace
         });
     }
     // A long request (a Performance whose plugin's state takes 6 s to load) holds the control thread.
-    // The other clients are answered at once meanwhile: what needs that thread is refused as busy
-    // (it did not run), the apps relay works, and those refused hear when the engine is free.
-    void busyClient(const char* plugin)
+    // The other clients are answered at once meanwhile: what is safe during a load (reads, meters,
+    // notes) runs while the load creates and restores an instance of its own (a LoadWindow), any
+    // other request (a second load, an edit, controls.set) is refused as busy (it did not run), the
+    // apps relay works, and those refused hear when the engine is free.
+    // takeOver: the slow state goes to the playing instance, taken over (RFC 0021), outside any window,
+    // so even the safe requests are refused. fail: the load fails after the slow state, the playing
+    // Performance left as it was.
+    enum class Load{fresh,takeOver,fail};
+    void busyClient(const char* plugin,Load mode)
     {
         TemporaryDirectory directory;const auto saved=directory.child("slow"),marker=directory.child("slow-once");
-        Fixture f(plugin);f.session.savePerformance(saved);
+        Fixture f(plugin);const auto control=f.session.addMacro("m");f.session.savePerformance(saved);
+        if(mode==Load::takeOver){f.session.loadPerformance(saved);std::filesystem::remove_all(saved);f.session.savePerformance(saved);
+            for(int i=0;i<4000;++i)f.tick();} // 3 s silent: free to be taken over
+        if(mode==Load::fail){ // a note port layout it no longer has, found after the state loads
+            std::ifstream in(saved+"/performance.json");std::string text((std::istreambuf_iterator<char>(in)),{});
+            const auto at=text.find("\"noteInputs\":");check(at!=std::string::npos,"a saved node's note inputs");
+            text[at+13]='9';std::ofstream(saved+"/performance.json",std::ios::trunc)<<text;}
         const auto socket=directory.child("control.sock");f.server.listen(socket);
-        auto job=pair(),ui=pair(),host=pair();f.server.adopt(job[0]);f.server.adopt(ui[0]);f.server.adopt(host[0]);
+        auto job=pair(),ui=pair(),host=pair(),gone=pair();f.server.adopt(job[0]);f.server.adopt(ui[0]);f.server.adopt(host[0]);f.server.adopt(gone[0]);
         std::ofstream(marker)<<'x';::setenv("KICK_FIXTURE_SLOW_LOAD_ONCE",marker.c_str(),1);
         using Clock=std::chrono::steady_clock;
         clientWhileRendering(f,[&]{
             LocalClient loader,watcher,shell;loader.adopt(job[1]);watcher.adopt(ui[1]);shell.adopt(host[1]);
             check(watcher.call("subscribe",R"({"topics":["graph.changed","params.changed"]})").find("accepted")!=std::string::npos,"subscribed before the load");
             check(watcher.call("parts.meters").find("\"meters\"")!=std::string::npos,"the meters read while it plays");
+            const auto before=watcher.call("graph.get");
             std::atomic<bool> loaded=false;std::string reply;double seconds=0;
             std::thread loading([&]{const auto began=Clock::now();try{reply=loader.call("performance.load","{\"directory\":\""+saved+"\"}",30000);}catch(const std::exception& e){reply=e.what();}
                 seconds=std::chrono::duration<double>(Clock::now()-began).count();loaded=true;});
-            double slowest=0;size_t busy=0,calls=0,joined=0,cutOff=0;bool connected=false,prepareRefused=false;
-            while(!loaded)
+            double slowest=0;size_t busy=0,calls=0,joined=0,cutOff=0;bool connected=false,left=false;std::string prepare,edit,moved;
+            std::exception_ptr failed; // the load's thread joined first
+            while(!loaded && !failed)try
             {
                 // A client connecting meanwhile, many times over (more than the server's clients), says hello and leaves.
                 try{LocalClient late;late.connect(socket);joined+=late.call("session.hello","{}",1000).find("protocolVersion")!=std::string::npos;}
                 catch(const std::exception& e){if(!cutOff++)std::cerr<<"a client connecting during the load: "<<e.what()<<'\n';}
-                for(const char* method:{"session.status","controls.set","notes.send","parts.meters"})
+                for(const char* method:{"session.status","notes.send","parts.meters","wires.meters"})
                 {
-                    const auto params=std::string_view(method)=="controls.set"?R"({"control":1,"value":0.5})":std::string_view(method)=="notes.send"?R"({"on":false,"key":60})":"{}";
+                    const auto params=std::string_view(method)=="notes.send"?R"({"on":false,"key":60})":"{}";
                     const auto began=Clock::now();std::string answer;
                     try{answer=watcher.call(method,params,1000);}catch(const std::exception& e){check(false,std::string("a call during the load failed: ")+e.what());}
                     slowest=std::max(slowest,std::chrono::duration<double>(Clock::now()-began).count());++calls;
                     busy+=answer.find("-32009")!=std::string::npos;
-                    if(answer.find("\"result\"")==std::string::npos && answer.find("-32009")==std::string::npos)check(false,std::string(method)+" during the load answered neither data nor busy: "+answer);
+                    // notes.send may find its queue full: no audio is rendered here while the load holds this test's one thread.
+                    if(answer.find("\"result\"")==std::string::npos && answer.find("-32009")==std::string::npos && answer.find("note queue full")==std::string::npos)check(false,std::string(method)+" during the load answered neither data nor busy: "+answer);
                 }
-                // An app started again meanwhile gets its connection; a second long request is refused.
-                if(busy && !connected){shell.call("apps.connect",R"({"app":"com.example.setlist"})",1000);const int fd=shell.takeDescriptor();connected=fd>=0;if(fd>=0)::close(fd);}
-                if(busy && !prepareRefused)prepareRefused=watcher.call("performance.prepare","{\"directory\":\""+saved+"\"}",1000).find("-32009")!=std::string::npos;
+                // An app started again meanwhile gets its connection; a second long request, and an edit, are refused.
+                if(!connected){shell.call("apps.connect",R"({"app":"com.example.setlist"})",1000);const int fd=shell.takeDescriptor();connected=fd>=0;if(fd>=0)::close(fd);}
+                if(prepare.empty())prepare=watcher.call("performance.prepare","{\"directory\":\""+saved+"\"}",1000);
+                if(edit.empty())edit=watcher.call("transport.set",R"({"tempo":90})",1000);
+                if(moved.empty())moved=watcher.call("controls.set","{\"control\":"+std::to_string(control)+",\"value\":0.5}",1000);
+                // A client asking and leaving at once.
+                if(!left){send(gone[1],R"({"jsonrpc":"2.0","id":1,"method":"session.status"})" "\n");::close(gone[1]);left=true;}
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
-            loading.join();
-            check(reply.find("\"loaded\":true")!=std::string::npos,"the load completes: "+reply);
-            check(seconds>=5,"and was slow: "+std::to_string(seconds)+" s");
+            catch(...){failed=std::current_exception();}
+            loading.join();if(failed)std::rethrow_exception(failed);
+            check(seconds>=5,"the load was slow: "+std::to_string(seconds)+" s");
             std::cerr<<"busy: "<<calls<<" calls during a "<<seconds<<" s load, "<<busy<<" refused as busy, the slowest answered in "<<slowest*1000<<" ms; "<<joined<<" clients connected and said hello meanwhile\n";
             check(slowest<0.1,"every call during it answered in under 100 ms, the slowest "+std::to_string(slowest*1000)+" ms");
-            check(busy>=calls/2 && watcher.connected(),"refused as busy, the 1 s client still connected");
+            if(mode==Load::takeOver)check(busy>=calls/2,"outside a window the safe requests are refused as busy too");
+            else check(busy*4<calls,"the safe requests run during the load, not refused as busy");
             check(connected,"apps.connect answered during the load");
             check(joined>LocalServer::maxClients && !cutOff,"clients connecting during the load are accepted and answered: "+std::to_string(joined)+" said hello, "+std::to_string(cutOff)+" cut off");
-            check(prepareRefused,"a second long request during it is refused as busy");
+            check(prepare.find("-32009")!=std::string::npos,"a second long request during it is refused as busy: "+prepare);
+            check(edit.find("-32009")!=std::string::npos,"an edit during it is refused as busy: "+edit);
+            check(moved.find("-32009")!=std::string::npos,"a control moved during it is refused as busy: "+moved);
+            if(mode==Load::fail)
+            {
+                check(reply.find("note port layout changed")!=std::string::npos,"the load fails: "+reply);
+                {const auto after=watcher.call("graph.get");check(after.substr(after.find("\"result\""))==before.substr(before.find("\"result\"")),"the playing Performance as it was");}
+                std::ofstream(marker)<<'x';std::filesystem::remove_all(saved);
+                check(watcher.call("performance.save","{\"directory\":\""+saved+"\"}").find("\"result\"")!=std::string::npos,"saved again");
+                check(loader.call("performance.load","{\"directory\":\""+saved+"\"}",30000).find("\"loaded\":true")!=std::string::npos,"and another load runs");
+                return;
+            }
+            check(reply.find("\"loaded\":true")!=std::string::npos,"the load completes: "+reply);
             bool free=false,announced=false;
             for(int i=0;i<200 && !(free && announced);++i)
             {
@@ -980,7 +1012,9 @@ int main(int argc,char** argv)
         }
         if(argc==3 && std::string_view(argv[2])=="--properties"){propertyClient(argv[1]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--instances"){instanceClient(argv[1]);return 0;}
-        if(argc==3 && std::string_view(argv[2])=="--busy"){busyClient(argv[1]);return 0;}
+        if(argc==3 && std::string_view(argv[2])=="--busy"){busyClient(argv[1],Load::fresh);return 0;}
+        if(argc==3 && std::string_view(argv[2])=="--busy-taken"){busyClient(argv[1],Load::takeOver);return 0;}
+        if(argc==3 && std::string_view(argv[2])=="--busy-failing"){busyClient(argv[1],Load::fail);return 0;}
         if(argc==4 && std::string_view(argv[2])=="--effects"){effectClient(argv[1],argv[3]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--sounds"){soundClient(argv[1]);return 0;}
         if(argc==4 && std::string_view(argv[2])=="--parts"){partsClient(argv[1],argv[3]);return 0;}

@@ -10,6 +10,7 @@
 #include "oscairn/package.h"
 #include "oscairn/unavailable_plugin.h"
 #include "oscairn/sound_context.h"
+#include "oscairn/local_socket.h"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -1169,7 +1170,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         if((format!="clap" && format!="lv2") || id.empty() || path.empty() || (lv2Path(path)!=(format=="lv2")))bad("invalid plugin identity or format");
         const auto name=text(field(node,"name"));
         try {
-            NodeId runtime;bool restored=false; // a taken-over instance gets its state its own way
+            NodeId runtime;bool restored=false,fresh=false; // a taken-over instance gets its state its own way; a fresh one is this load's alone
             // RFC 0025: each plugin may declare what the memory budget leaves beside those loaded
             // before it (the Performance alone, as its estimate was checked); more is refused before it activates.
             std::vector<NodeId> loaded;for(const auto& [n,x]:names)loaded.push_back(n);
@@ -1199,7 +1200,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             // Not where nodes of its kind form groups on their own: opened fresh, they could join it.
             else if(shared && !kinds.count(kind(plugin)) && claimEngine(plugin,key,room)){runtime=next->add(claimedSound(node,key));restored=true;++reused;}
             else if(shared){
-                runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
+                runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};LoadWindow window;return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
                                       [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
                 const auto host=next->node(runtime).host;
                 if(SoundContext::busParameter(*host)!=CLAP_INVALID_ID){ // else a stand-in, restored as saved
@@ -1217,11 +1218,12 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
                 runtime=next->add(free[*f].host);origins[runtime]={free[*f].loaded.build,source(key)};++reused;restored=true;
                 if(free[*f].node){taken.push_back(free[*f].node);later.push_back({runtime,key,*f});first=false;}else{warm.push_back(free[*f].host.get());restoreTaken(runtime,node,room,*f);}
                 free[*f].host.reset();}
-            else{runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
-                                       [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});
+            else{runtime=resolvePlugin(node,root/"nodes"/key,refs[key],bundledPlugins_,[&](const std::string& p,const std::string& i){Clock c{stats.load};LoadWindow window;return next->add(p,i,room);},[&](NodeId n){next->remove(n);},
+                                       [&](NodeId n){return next->host(n).descriptor().version;},[&](std::shared_ptr<PluginHost> h){return next->add(std::move(h));});fresh=true;
                 // What another Performance may take over later: a plugin of its own, loaded (not a stand-in).
                 if(group[key]==1 && next->host(runtime).failure().empty())origins[runtime]={buildDigest(next->host(runtime).descriptor().path),source(key)};}
-            if(!restored)restore(runtime,node,room);
+            if(!restored && fresh){LoadWindow window;restore(runtime,node,room);}
+            else if(!restored)restore(runtime,node,room);
             else if(shared || joined){auto& h=joined?*joined->engine()->host:next->host(runtime); // a node saved alone, as its plugin's ports
                 checkPorts(field(node,"inputs"),h.inputPorts());checkPorts(field(node,"outputs"),h.outputPorts());
                 if(integer(field(node,"noteInputs"),16)!=h.noteInputPorts() || integer(field(node,"noteOutputs"),16)!=h.noteOutputPorts())bad("note port layout changed");}

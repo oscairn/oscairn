@@ -622,8 +622,7 @@ Opening a Performance (`library.load`, `performance.load`, `performance.prepare`
 `performance.reopen`, an audition), adding a plugin, installing a library: a request that loads
 plugins or reads samples can take seconds (4 to 20 on a FANTOM), and holds the control thread
 while it runs. It never holds the other clients. Once a request has run for 25 ms, a thread
-of the local server's own answers everyone else until it is done, and never calls into the
-engine meanwhile:
+of the local server's own answers everyone else until it is done:
 
 - `session.hello` and `apps.*` (connect, request, answer, pong) run as ever, and the apps'
   pings go out once a second: apps keep their connections, a shell can start an app and hand
@@ -632,6 +631,14 @@ engine meanwhile:
 - A client connecting meanwhile is accepted and answered as any other (its `session.hello`
   runs), and a client that leaves gives up its place at once, so connecting again and again
   during a load never finds the server full of clients already gone.
+- `session.status`, `parts.meters`, `wires.meters`, `notes.send`, `notes.panic`, `subscribe`
+  and `unsubscribe` run while the load is creating a plugin instance of its own or restoring
+  that new instance's state (most of a load that opens new instances), and act on the
+  Performance playing, never the one being read: a note played during a load plays the open
+  Performance until the new one is published. Outside those
+  stretches (estimating, preparing sounds beside a playing instance, giving a playing or warm
+  instance it takes over its state, publishing) they are refused as below, after a wait of at
+  most 10 ms. The meters hold their values from before the load until it ends.
 - Any other request with an ID is refused at once, within milliseconds: error `-32009`,
   `data: {busy, ms}`, the method running and for how long so far. **A request refused as busy
   did not run**, so asking again is safe, unlike after a timeout. A batch is refused member by
@@ -657,9 +664,20 @@ state again rather than repeating it. `LocalClient` keeps its connection through
 `session.hello` means it answers nothing at all: only then do the desktop and its apps give
 the connection up (the desktop reconnects; an app quits and its shell starts it again).
 
-Notes, `controls.set`, `params.set` and the like are refused during a long request too: they
-need the control thread. The keys and panel of a device reach the audio thread without it and
-play on, as the open Performance does until the new one is published.
+Edits (`params.set`, `graph.*`, `transport.set`, a save and the like) are refused during a long
+request: they would change what the load reads or replaces. So is `controls.set`: a control
+moving a parameter of a plugin in a worker waits for that worker, which a load into the same
+plugin host can hold for as long as its state takes. Notes may be refused too, outside the
+stretches above, and during any long request other than a load. The
+keys and panel of a device reach the audio thread without the control thread and play on, as
+the open Performance does until the new one is published.
+
+Engine side: the control thread holds a lock (the gate) while it runs a request, and lets it go
+only inside a `LoadWindow`, a scope that touches nothing the session knows yet (a new instance,
+its state, files). The local server's thread calls into the engine only holding the gate, so the
+session is never touched by two threads at once. The plugin work itself stays on the control
+thread, the plugins' main thread: an in-process CLAP instance belongs to the thread that first
+controls it.
 
 ### Apps
 

@@ -239,7 +239,17 @@ namespace oscairn
         }
         // A request taking longer than this holds the control thread: the helper answers the rest meanwhile.
         constexpr auto takeover=std::chrono::milliseconds(25);
+        // Run by the helper during a long request when the control thread is in a LoadWindow: they read,
+        // or play the open Performance through queues and atomics, and call no plugin's main-thread API.
+        // Not controls.set: a parameter of a plugin in a worker is a round trip under that worker's lock,
+        // which a load into the same plugin host holds for as long as the plugin's state takes.
+        const std::set<std::string> duringLoad{"session.status","parts.meters","wires.meters","notes.send","notes.panic","subscribe","unsubscribe"};
+        thread_local std::timed_mutex* openGate=nullptr; // the gate a request on this thread holds, while it runs
+        thread_local int windows=0;
     }
+
+    LoadWindow::LoadWindow(){if(openGate && !windows++)openGate->unlock();}
+    LoadWindow::~LoadWindow(){if(openGate && !--windows)openGate->lock();}
 
     struct LocalServer::Impl
     {
@@ -399,9 +409,9 @@ namespace oscairn
         std::unique_ptr<Watch> watch;
         // A request that runs long (a Performance's load or prepare, a plugin opening) holds the
         // control thread. Past `takeover` the helper answers the other clients meanwhile: what needs
-        // no Control (session.hello, the apps relay, pings) runs, every other request is refused as
-        // busy (-32009: it did not run) and its client is told once the engine is free
-        // (engine.busy). It never touches Control, so Control stays on the one control thread.
+        // no Control (session.hello, the apps relay, pings) runs, what is safe during a load runs while
+        // the control thread is in a LoadWindow (holding `gate`), every other request is refused as
+        // busy (-32009: it did not run) and its client is told once the engine is free (engine.busy).
         std::mutex runMutex;std::condition_variable runStarted;
         std::atomic<uint64_t> started{0};std::atomic<bool> running{false},stopping{false};
         Peer* runner=nullptr;const std::string* runLine=nullptr;Clock::time_point runSince; // under transport
@@ -409,6 +419,9 @@ namespace oscairn
         uint64_t hostNow=0;Clock::time_point hostAt;                                       // poll()'s clock, carried on:
         uint64_t clock()const{return hostNow+uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-hostAt).count());}
         std::thread helper;
+        // Control's: the control thread holds it while a request runs, but in a LoadWindow; the helper
+        // calls into Control only holding it, so Control is never touched by two threads at once.
+        std::timed_mutex gate;bool gateTried=false,gateHeld=false; // the helper's, for one pass of serve()
         void answer(Peer& peer,const std::optional<std::string>& reply)
         {
             const int passed=std::exchange(passing,-1);
@@ -426,7 +439,10 @@ namespace oscairn
             lock.unlock();
             struct Relock{Impl& s;std::unique_lock<std::recursive_mutex>& lock;~Relock(){s.running=false;lock.lock();s.runner=nullptr;s.runLine=nullptr;}};
             std::optional<std::string> reply;
-            {Relock relock{*this,lock};reply=peer.rpc.dispatch(line);}
+            {Relock relock{*this,lock};
+                std::unique_lock held(gate);openGate=&gate;
+                struct Close{~Close(){openGate=nullptr;}} close;
+                reply=peer.rpc.dispatch(line);}
             if(served)
             {
                 // Those refused may ask again; silence while the engine could not read pongs is not an app's.
@@ -451,6 +467,12 @@ namespace oscairn
             if(!doc || (doc->type!=json_type_object && doc->type!=json_type_array))return peer.rpc.dispatch(line);
             static const std::set<std::string> controlFree{"session.hello","apps.connect","apps.request","apps.answer","apps.pong"};
             if(doc->type==json_type_object && controlFree.count(methodOf(doc.get())))return peer.rpc.dispatch(line);
+            if(doc->type==json_type_object && duringLoad.count(methodOf(doc.get())))
+            {
+                // Waited for once a pass, briefly: a load outside its windows refuses the pass's requests at once.
+                if(!gateHeld && !gateTried){gateTried=true;gateHeld=gate.try_lock_for(std::chrono::milliseconds(10));}
+                if(gateHeld)return peer.rpc.dispatch(line);
+            }
             const auto ms=std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-runSince).count());
             std::vector<std::string> out;
             auto busy=[&](const json_value_s* request){
@@ -540,6 +562,8 @@ namespace oscairn
                     }
                     catch(const std::exception&){stream.close();} // failure isolates this client
                 }
+            if(gateHeld)gate.unlock();
+            gateHeld=gateTried=false;
             heartbeat(now);
             for(auto* list:{&peers,&joining})
                 for(auto& peer:*list)

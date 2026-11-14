@@ -125,6 +125,48 @@ namespace
         check(refused(parts), "a field with bytes and parts");
         // Fields from parts of bytes: byte 2 holds an ID's top bits (three, or an analog one's two)
         // and, above them, the value's top five or the step's top four.
+        // List navigation, as the map says (its `navigate`): the FANTOM's dial moves the pane last touched by the
+        // steps of its message, the first and last knobs under the screen the first and second panes, their pushes
+        // confirm there, ENTER confirms, EXIT cancels, and DEC and INC move by one a press.
+        {
+            auto nav = [&](std::array<uint8_t, 4> m) { return decode(fantom, m).navigation; };
+            const auto dial = nav({0x83, 6, 0xF << 3, 0xD});    // the VALUE dial, a step of -3
+            check(dial && dial->action == Navigation::Action::Move && dial->pane == -1 && dial->steps == -3, "the VALUE dial moves the focused list by its steps");
+            const auto left = nav({0x83, 0, 0, 2}), right = nav({0x83, 5, 0, 1});
+            check(left && left->pane == 0 && left->steps == 2 && right && right->pane == 1 && right->steps == 1, "E1 moves pane 0 and E6 pane 1");
+            check(!nav({0x83, 2, 0, 1}) && !nav({0x83, 0, 0, 0}), "E3 has none, and an encoder step of 0 is not a move");
+            check(nav({0xA2, 40, 0, 0}) && nav({0xA2, 40, 0, 0})->action == Navigation::Action::Confirm && nav({0xA2, 40, 0, 0})->pane == 0 && nav({0xA2, 57, 0, 0})->pane == 1, "E1's push confirms pane 0 and E6's pane 1");
+            check(nav({0xA2, 62, 0, 0})->action == Navigation::Action::Confirm && nav({0xA2, 62, 0, 0})->pane == -1 && nav({0xA2, 55, 0, 0})->action == Navigation::Action::Cancel, "ENTER confirms and EXIT cancels");
+            check(nav({0xA2, 58, 0, 0})->steps == 1 && nav({0xA2, 59, 0, 0})->steps == -1 && !nav({0x81, 58, 0, 0}) && !nav({0x81, 62, 0, 0}), "INC and DEC move by one a press, a release does nothing");
+            check(!nav({0xA2, 60, 0, 0}) && !nav({0xA2, 17, 0, 0}), "CURSOR LEFT and PLAY have none");
+        }
+        // Another device: different names and counts, one jog dial and two buttons, four knobs for four panes, an OK and a BACK.
+        // Nothing in the app names a control; this map is all a device needs.
+        {
+            const auto other = PanelMap::parse(mapJson(R"(
+                {"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "move"}},
+                {"kind": "encoder", "id": 10, "control": "dial:1", "navigate": {"action": "move", "pane": 0}},
+                {"kind": "encoder", "id": 11, "control": "dial:2", "step": -0.5, "navigate": {"action": "move", "pane": 1}},
+                {"kind": "encoder", "id": 12, "control": "dial:3", "navigate": {"action": "move", "pane": 2}},
+                {"kind": "encoder", "id": 13, "control": "dial:4", "navigate": {"action": "move", "pane": 3}},
+                {"kind": "switch", "id": 20, "control": "up", "navigate": {"action": "move", "steps": -1}},
+                {"kind": "switch", "id": 21, "control": "down", "navigate": {"action": "move", "steps": 4}},
+                {"kind": "switch", "id": 22, "control": "ok", "navigate": {"action": "confirm"}},
+                {"kind": "switch", "id": 23, "control": "back", "navigate": {"action": "cancel"}},
+                {"kind": "switch", "id": 24, "control": "pad:1"})"));
+            auto nav = [&](std::array<uint8_t, 4> m) { return decode(other, m).navigation; };
+            check(nav({0x80, 1, 0x7F, 0}) && nav({0x80, 1, 0x7F, 0})->steps == -1 && nav({0x80, 1, 5, 0})->steps == 5 && nav({0x80, 1, 5, 0})->pane == -1, "a jog dial's turns move the focused list");
+            check(nav({0x80, 13, 2, 0})->pane == 3 && nav({0x80, 12, 2, 0})->pane == 2 && nav({0x80, 10, 1, 0})->pane == 0, "four knobs, four panes");
+            check(nav({0x80, 11, 3, 0})->steps == -3, "a knob that turns the wrong way has a negative step, in the map");
+            check(nav({0x82, 20, 0, 0})->steps == -1 && nav({0x82, 21, 0, 0})->steps == 4, "buttons that move by the steps the map gives");
+            check(nav({0x82, 22, 0, 0})->action == Navigation::Action::Confirm && nav({0x82, 23, 0, 0})->action == Navigation::Action::Cancel && !nav({0x82, 24, 0, 0}), "OK confirms, BACK cancels");
+            check(refused(mapJson(R"({"kind": "analog", "id": 1, "control": "slider:1", "navigate": {"action": "move"}})")), "an absolute control cannot navigate");
+            check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "confirm"}})")), "an encoder only moves");
+            check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "move", "steps": 2}})")), "steps are a switch's");
+            check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "x", "navigate": {"action": "jump"}})")), "an unknown action");
+            check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "x", "navigate": {"action": "move", "steps": 0}})")), "steps of 0");
+            check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "x", "navigate": {"action": "move", "pane": -1}})")), "a pane from 0");
+        }
         const auto split = PanelMap::parse(R"({"format": "oscairn.panel-map", "version": 1, "protocol": "roland-i2c-slave",
             "layout": {"kind": {"bytes": [0], "mask": 31}, "kinds": {"encoder": 3, "analog": 4, "switchOn": 2, "switchOff": 1},
                        "id": {"parts": [{"byte": 2, "bits": 3}, {"byte": 1, "bits": 7}]}, "analogId": {"parts": [{"byte": 2, "bits": 2}, {"byte": 1, "bits": 7}]},

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -49,7 +50,10 @@ namespace oscairn
         int64_t analogDeadband = 0;                // steps: an analog control turning back by this much or less is chatter (PanelEvent)
         // A control: its message kind (encoder, analog, or switch for both switch kinds), ID and
         // identity; `max` and `step` override the layout's.
-        struct Control { Kind kind = Kind::Unknown; uint32_t id = 0; std::string control; int64_t max = 0; double step = 0; };
+        // `navigate`: what the control does in a list, whatever the device (physical_controls.h's Navigation):
+        // an encoder moves a pane's cursor by its steps, a switch moves it by `steps` (default 1) when
+        // pressed, confirms or cancels. An analog control cannot navigate (an absolute position has no steps: not yet).
+        struct Control { Kind kind = Kind::Unknown; uint32_t id = 0; std::string control; int64_t max = 0; double step = 0; std::optional<Navigation> navigate; };
         std::vector<Control> controls;
         std::vector<std::string> estimated; // "layout", "controls": not yet read off a real unit
 
@@ -74,6 +78,10 @@ namespace oscairn
         // either end. A move on in the same direction is never chatter, so a slow move arrives step
         // by step and the ends are always reached. The engine plays no chatter; the dump shows it.
         bool chatter = false;
+        // What the control does in a list (its map entry's `navigate`) for this message: an encoder's
+        // turn as a move by its steps (a negative `step` turns it round), a switch's press as its action;
+        // none for a release, or a control with none.
+        std::optional<Navigation> navigation;
     };
     PanelEvent decode(const PanelMap&, const std::array<uint8_t, 4>& message);
 

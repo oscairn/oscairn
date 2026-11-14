@@ -27,7 +27,7 @@ namespace oscairn::host
         };
     }
 
-    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play, PlayPad pad )
+    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play, PlayPad pad, PlayNavigated navigate )
     {
         // A device panel's own controls, played as a controller's are, by their identities; its
         // pads ("pad:N" in the map) through the Performance's pad map. The device is the panel
@@ -37,7 +37,7 @@ namespace oscairn::host
         std::stringstream text; text << file.rdbuf();
         auto parsed = PanelMap::parse( text.str() );
         std::fprintf( stderr, "oscairn: panel: %s through the panel holder at %s\n", device.c_str(), panelHolderSocket );
-        return std::make_unique<Held<PanelReader>>( panelHolderSocket, std::move( parsed ), [play = std::move( play ), pad = std::move( pad )]( const PanelEvent& e ) {
+        return std::make_unique<Held<PanelReader>>( panelHolderSocket, std::move( parsed ), [play = std::move( play ), pad = std::move( pad ), navigate = std::move( navigate )]( const PanelEvent& e ) {
             if( e.control.empty() || e.chatter ) return;
             if( e.control.starts_with( "pad:" ) )
             {
@@ -45,7 +45,7 @@ namespace oscairn::host
                 if( n >= 1 && e.input.kind == ControlInput::Kind::Switch ) pad( uint32_t( n - 1 ), e.input.value >= .5 );
                 return;
             }
-            play( e.control, e.input );
+            if( e.navigation ) navigate( e.control, e.input, *e.navigation ); else play( e.control, e.input );
         } );
     }
 

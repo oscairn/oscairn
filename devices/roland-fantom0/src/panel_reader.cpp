@@ -182,7 +182,7 @@ namespace oscairn
         if(const auto* d = member(layout, "analogDeadband")) p.analogDeadband = whole(d, "layout.analogDeadband", 0, 4095);
         std::set<std::pair<int, uint32_t>> seen;
         each(member(root, "controls"), "controls", 1024, [&](const json_value_s* v) {
-            fields(v, {"kind", "id", "control", "max", "step"}, "a control");
+            fields(v, {"kind", "id", "control", "max", "step", "navigate"}, "a control");
             Control c;
             const auto kind = text(member(v, "kind"), "a control's kind");
             c.kind = kind == "encoder" ? Kind::Encoder : kind == "analog" ? Kind::Analog : kind == "switch" ? Kind::SwitchOn : Kind::Unknown;
@@ -190,6 +190,24 @@ namespace oscairn
             c.control = text(member(v, "control"), "a control's control");
             if(const auto* m = member(v, "max")) { require(c.kind == Kind::Analog, "only an analog control has a max"); c.max = whole(m, "a control's max", 1, 4294967295.0); }
             if(const auto* s = member(v, "step")) { require(c.kind == Kind::Encoder, "only an encoder has a step"); c.step = number(s, "a control's step", -1, 1); require(c.step != 0, "a step is not 0"); }
+            if(const auto* n = member(v, "navigate"))
+            {
+                require(c.kind != Kind::Analog, "an analog control cannot navigate: an absolute position has no steps");
+                fields(n, {"action", "pane", "steps"}, "a control's navigate");
+                Navigation nav;
+                const auto action = text(member(n, "action"), "a navigate's action");
+                require(action == "move" || action == "confirm" || action == "cancel", "a navigate's action is move, confirm or cancel");
+                nav.action = action == "move" ? Navigation::Action::Move : action == "confirm" ? Navigation::Action::Confirm : Navigation::Action::Cancel;
+                require(c.kind != Kind::Encoder || nav.action == Navigation::Action::Move, "an encoder's navigate is move");
+                if(const auto* pane = member(n, "pane")) nav.pane = int(whole(pane, "a navigate's pane", 0, 15));
+                if(const auto* s = member(n, "steps"))
+                {
+                    require(c.kind == Kind::SwitchOn && nav.action == Navigation::Action::Move, "only a switch that moves has steps");
+                    nav.steps = int(number(s, "a navigate's steps", -64, 64));
+                    require(nav.steps != 0, "a navigate's steps is not 0");
+                }
+                c.navigate = nav;
+            }
             const auto* id = member(v, "id");
             if(!id) return; // not mapped yet
             c.id = uint32_t(whole(id, "a control's id", 0, 4294967295.0));
@@ -221,6 +239,13 @@ namespace oscairn
         case Kind::SwitchOn: e.input = {ControlInput::Kind::Switch, 1}; break;
         case Kind::SwitchOff: e.input = {ControlInput::Kind::Switch, 0}; break;
         default: break;
+        }
+        if(c->navigate)
+        {
+            auto nav = *c->navigate;
+            if(e.kind == Kind::Encoder) nav.steps = int(e.value) * (c->step < 0 ? -1 : 1);
+            if(e.kind == Kind::SwitchOff || (e.kind == Kind::Encoder && nav.steps == 0)) return e;
+            e.navigation = nav;
         }
         return e;
     }

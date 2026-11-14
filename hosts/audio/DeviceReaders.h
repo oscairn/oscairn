@@ -26,7 +26,10 @@ namespace oscairn::host
     /// on the same thread.
     using PlayControl = std::function<void( const std::string& control, const ControlInput& )>;
     using PlayPad = std::function<void( uint32_t pad, bool on )>;
-    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play, PlayPad pad );
+    /// A control the map gives a list navigation (its `navigate`) goes to `navigate` with it, in place
+    /// of `play`, so the engine decides which of the two the screen wants.
+    using PlayNavigated = std::function<void( const std::string& control, const ControlInput&, const Navigation& )>;
+    std::unique_ptr<DeviceReader> openPanel( const std::string& device, const std::string& map, PlayControl play, PlayPad pad, PlayNavigated navigate );
 
     /// The keyboard's MIDI inputs, in order: each one's name and the key its source number is kept
     /// by. Empty: this build reads no keyboard.

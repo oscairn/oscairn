@@ -200,6 +200,8 @@ namespace oscairn::host
             }, [this]( uint32_t pad, bool on ) {
                 { std::lock_guard lock( padLock_ ); pads_.emplace_back( pad, on ); }
                 triggerAsyncUpdate();
+            }, [this]( const std::string& control, const ControlInput& input, const Navigation& navigation ) {
+                session_->controllerControl( control, input, navigation );
             } );
             if( !panel_ ) throw std::runtime_error( "this build reads no panel (OSCAIRN_ROLAND_FANTOM0 is off)" );
         }

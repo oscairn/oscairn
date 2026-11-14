@@ -17,7 +17,7 @@ A library, an exported Performance, Sound or setlist, or a plugin package is one
 | `Licenses/<file>` | Its license texts and notices ([license and source](#license-and-source)) |
 | `Types/<package ID>/<file>.json` | A library's: each [item type](rfcs/0023-item-types.md#the-manifest) it declares, its ID under that package ID, or the type of an exported item a package declared; installed with it ([RFC 0023](rfcs/0023-item-types.md) step 3) |
 
-No name in the archive may be both a file and a folder (`Assets/x` and `Assets/x/y`): the archive is refused.
+No name in the archive may be both a file and a folder (`Assets/x` and `Assets/x/y`): the archive is refused. So is one with two names that differ only in case (`Assets/A` and `Assets/a`), on every platform, as a case-insensitive filesystem would unpack them as one file.
 
 The manifest:
 

@@ -260,6 +260,13 @@ int main()
             check(both, "an entry that is both a file and a folder is refused on reading");
         }
 
+        // Names that differ only in case unpack as one file on some filesystems: refused on reading, on every platform.
+        {
+            craft(root / "CaseOnly.olib", {top, sound, {"Assets/A", "x"}, {"Assets/a", "y"}});
+            bool same = false; try { readPackage(root / "CaseOnly.olib", {}); } catch(const std::runtime_error&) { same = true; }
+            check(same, "names differing only in case are refused on reading");
+        }
+
         // Signatures (RFC 0006): an item, a build and the whole archive, each verified on reading.
         const auto mine = signing::makeKey(root / "mine.key"), other = signing::makeKey(root / "other.key");
         const auto signedRoot = root / "signed";

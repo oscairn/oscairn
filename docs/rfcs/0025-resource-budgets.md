@@ -656,6 +656,20 @@ stay resident too, so a sampler or a reverb never takes a page fault from disk w
   page, which cannot be locked and is mapped at the process's first clock read, in a worker its
   audio thread's first wait; `applyMemoryPolicy` now reads the clock at the start: 0. A worker's
   faults are counted from its audio thread's start, not its creation.
+- What the engine's memory is made of (2026-11-14, the Linux container: the engine on the null
+  device, five workers, one Performance and two instances kept warm; PSS about 41 MB). Anonymous:
+  one glibc arena (132 KiB), seven 512 KiB stacks locked (the device callback's and the three graph
+  helpers' audio threads, and three others, JUCE's timer and MIDI-out threads expected among them,
+  not each identified) and nine service
+  threads' stacks unlocked, 4 MB resident in all; the main heap 8 to 10 MB; the workers' shared
+  blocks 3.3 MB (shared with them). File-backed: the engine's own binary 7.8 MB, libstdc++ 2.5,
+  libc 1.7, ALSA 1.1, and libcurl's TLS, crypto and network libraries (libcrypto 4.6, GnuTLS 2.1,
+  p11-kit 1.8, libunistring 1.7, Kerberos and the rest): about 15.7 MB locked for package downloads
+  on the control thread, which no audio thread calls. Now unlocked after `mlockall` (by name, as
+  the process maps them); the kernel may reclaim them and they fault back when a download needs
+  them: the engine's Locked went from 40.5 to 25.2 MB, its resident memory unchanged until memory is
+  short. The library extractor's and the control socket's watcher threads are `ServiceThread`s too.
+  `control-memory-lock` maps a crypto library before the lock and checks it is not locked.
 - glibc's allocator arenas: each is a 64 MiB reservation with no memory behind it until used
   (the seven on the FANTOM-07 cost no resident memory), but what other threads freed stays in its
   arena, locked. At `instrument` and above a process has at most two (`M_ARENA_MAX`); the audio

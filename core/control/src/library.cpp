@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/library.h"
+#include "oscairn/plugin_host.h" // ServiceThread
 #include "sheredom/json.h"
 #include "sqlite/sqlite3.h"
 #include "JsonInput.h"
@@ -213,7 +214,7 @@ namespace oscairn
         std::set<std::string> pending; // paths queued or under way
         std::map<std::string, Done> done;
         std::atomic<bool> stop{false};
-        std::thread worker; // last: started once the rest is
+        ServiceThread worker; // last: started once the rest is; off the audio path, its stack unlocked (RFC 0025)
     };
 
     // The index (RFC 0023 step 5): what was read of each file, by path, with the file's time, in

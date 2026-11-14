@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/local_socket.h"
 #include "oscairn/json_rpc.h"
+#include "oscairn/plugin_host.h" // ServiceThread
 #include "sheredom/json.h"
 #include "JsonInput.h"
 
@@ -370,7 +371,7 @@ namespace oscairn
             std::mutex mutex;std::condition_variable armedOrStopping;
             std::vector<pollfd> watched;bool armed=false,stopping=false;
             int pipe[2]{-1,-1};
-            std::thread thread;
+            ServiceThread thread; // off the audio path, its stack unlocked (RFC 0025)
             void run()
             {
                 for(;;)
@@ -632,7 +633,7 @@ namespace oscairn
         if(::socketpair(AF_UNIX,SOCK_STREAM,0,w->pipe)<0)systemError("socketpair");
         for(int fd:w->pipe)configure(fd);
         w->watched.push_back({s.listener,POLLIN,0});w->armed=s.listener>=0;
-        w->thread=std::thread([w=w.get()]{w->run();});
+        w->thread=ServiceThread([w=w.get()]{w->run();});
         s.watch=std::move(w);
     }
     void LocalServer::poll(uint64_t now)

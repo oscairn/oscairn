@@ -325,7 +325,26 @@ namespace oscairn
         mallopt(M_ARENA_MAX, 2);
 #endif
         if(mlockall(flags) != 0) missed += std::string("memory not locked (") + std::strerror(errno) + "; RLIMIT_MEMLOCK too low?)";
-        else if(!unlimited) missed += "future memory not locked: RLIMIT_MEMLOCK is " + std::to_string(uint64_t(memlock.rlim_cur));
+        else
+        {
+            if(!unlimited) missed += "future memory not locked: RLIMIT_MEMLOCK is " + std::to_string(uint64_t(memlock.rlim_cur));
+            // Libraries no audio thread calls into: TLS, crypto and network (libcurl's, for package
+            // downloads on the control thread), 12 MB of the engine's locked memory in the Linux container.
+            // Their pages may be reclaimed and are faulted back when a download needs them.
+            static constexpr std::string_view offPath[]{"libcurl", "libssl", "libcrypto", "libgnutls", "libnettle", "libhogweed", "libgmp", "libtasn1",
+                "libp11-kit", "libunistring", "libidn2", "libpsl", "libkrb5", "libk5crypto", "libkrb5support", "libgssapi", "libcom_err", "libkeyutils",
+                "libldap", "liblber", "libsasl2", "librtmp", "libssh", "libnghttp2", "libbrotli"};
+            std::ifstream maps("/proc/self/maps");
+            for(std::string line; std::getline(maps, line);)
+            {
+                const auto slash = line.rfind('/');
+                if(slash == std::string::npos) continue;
+                const std::string_view file(line.c_str() + slash + 1);
+                if(std::none_of(std::begin(offPath), std::end(offPath), [&](std::string_view l) { return file.substr(0, l.size()) == l && file.size() > l.size() && (file[l.size()] == '.' || file[l.size()] == '-' || file[l.size()] == '_'); })) continue;
+                unsigned long from = 0, to = 0;
+                if(std::sscanf(line.c_str(), "%lx-%lx", &from, &to) == 2 && to > from) munlock(reinterpret_cast<void*>(from), to - from);
+            }
+        }
         // Lowering it below 0 needs CAP_SYS_RESOURCE; raising it does not.
         std::ofstream adj("/proc/self/oom_score_adj");adj<<oomScoreAdj<<std::flush;
         if(!adj)missed+=std::string(missed.empty()?"":"; ")+"oom_score_adj not set to "+std::to_string(oomScoreAdj);

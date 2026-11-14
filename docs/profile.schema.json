@@ -94,6 +94,12 @@
           "minimum": 0,
           "maximum": 1000000
         },
+        "availableMemory": {
+          "type": "integer",
+          "description": "RFC 0045: the memory, in MiB, the system must keep available (Linux's MemAvailable); below it plugin instances kept warm are let go, oldest and largest first, and a Performance about to load lets go of those it does not use; omitted or 0: not watched",
+          "minimum": 0,
+          "maximum": 16777216
+        },
         "captureSeconds": {
           "type": "integer",
           "description": "the retroactive buffer's length in seconds until one is chosen in Recordings (RFC 0020), held in memory (11.5 MB a minute of stereo at 48 kHz) and locked at instrument level; 0: off, nothing allocated; omitted: 2 minutes with 2 GB or less, 10 minutes above",

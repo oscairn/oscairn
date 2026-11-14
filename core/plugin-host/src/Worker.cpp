@@ -358,6 +358,7 @@ namespace oscairn::worker
             Doorbell* bell = nullptr;
             std::atomic<Node*> live[maxNodes]{};
             std::atomic<uint32_t> count{0}, passes{0};
+            std::atomic<uint32_t> rendered{0}; // passes that rendered a block: whether the control thread has values to refresh
             std::atomic<bool> stop{false};
             double rate = 48000; uint32_t frames = 0;
         };
@@ -483,6 +484,7 @@ namespace oscairn::worker
                 (void)rendered;
 #endif
                 a.passes.fetch_add(1, std::memory_order_acq_rel);
+                if(n) a.rendered.fetch_add(1, std::memory_order_relaxed);
                 if(n) continue; // another node's block may have come meanwhile
                 if(a.stop.load(std::memory_order_acquire)) return;
                 if(spin && periodStart.time_since_epoch().count())
@@ -581,14 +583,22 @@ namespace oscairn::worker
             nodes.clear();
         };
         bool windows = false; // a plugin window opened here: from then on the platform's window events run between requests
+        uint32_t refreshed = 0; // sound.rendered when the values were last refreshed
         for(;;)
         {
+            // A plugin's values change in its blocks and in requests (each refreshes them after it), so with no
+            // block rendered since the last refresh (an instance kept warm, a Performance not playing) the tick
+            // copies nothing. The tick itself stays: with this thread woken only by requests, blocks were silenced
+            // after instances kept warm were taken over in the Linux container and the switches ran slower
+            // (control-performance-switch-workers failed 1 run in 5, 42 to 54 s; with the tick 0 in 5, 30 to 40 s;
+            // why, not found).
+            const uint32_t rendered = sound.rendered.load(std::memory_order_relaxed);
             pollfd p{socket, POLLIN, 0};
-            int ready = poll(&p, 1, windows ? 0 : 10);
+            int ready = poll(&p, 1, windows ? 0 : rendered != refreshed ? 10 : 100);
             if(ready == 0 && windows && kick::clap::runWindowEvents(socket, 10)) ready = poll(&p, 1, 0);
             else if(ready == 0 && windows) ready = poll(&p, 1, 10); // a platform whose plugins run their windows themselves
             // The plugin is serviced only when the engine asks, as in the engine; values are refreshed meanwhile.
-            if(ready == 0) { for(const auto& n : nodes) if(n) n->publish(); continue; }
+            if(ready == 0) { if(rendered != refreshed) { refreshed = rendered; for(const auto& n : nodes) if(n) n->publish(); } continue; }
             if(ready < 0) { if(errno == EINTR) continue; break; }
             Reader r;
             try { r.data = receive(socket); } catch(const std::exception&) { break; }

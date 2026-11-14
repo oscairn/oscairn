@@ -616,7 +616,11 @@ What stops when Roland's app is stopped, from what it was seen to do:
   app's own memory at start (about 40 MB), plugin instances, in use and kept warm, get about
   380 MiB. ST Final's workers held about 347 MB (480 MB with the engine) when swap filled to 240
   of 256 MB, so it fits with about 35 MiB to keep anything warm, and a change between it and
-  another Performance of more than about 35 MiB is a cut (both cannot ring together). The UI's
+  another Performance of more than about 35 MiB is a cut (both cannot ring together). Since 2026-11-14 the
+  profile also names `availableMemory` 200 MiB: whatever the books say, instances kept warm are let
+  go, oldest and largest first, while MemAvailable is below it, and before a Performance loads
+  (RFC 0045); an idle one's worker uses next to no CPU. The 200 is a guess above the 172 MB at which
+  two stalls were seen; to be measured. The UI's
   room is the app's reservations' headroom and those 77 MiB: estimated, not measured on the unit,
   and only in effect when the app sets the budget (an engine started with `--engine-only` has none,
   so it keeps instances warm by count). To check on the unit: `free -m` and swap use with ST Final

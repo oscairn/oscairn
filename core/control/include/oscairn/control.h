@@ -201,8 +201,11 @@ namespace oscairn
         // out, the prepared next entry) is the committed share: device less what is reserved
         // (`system`: the OS, the engine's base and the shell; the running and always-available
         // apps' reservations) and the margin. `floor` (the profile's performanceMemory) is the
-        // committed memory no app launch may take.
-        struct Budget { double cpu = 0; uint64_t memory = 0; uint64_t device = 0, system = 0, floor = 0, margin = 0; };
+        // committed memory no app launch may take. `available` (RFC 0045, the profile's availableMemory):
+        // the memory the system must keep available (Linux's MemAvailable); below it instances kept
+        // warm are let go, oldest and largest first, and a Performance about to load lets go of those
+        // it does not use until its estimate fits above it. 0: not watched.
+        struct Budget { double cpu = 0; uint64_t memory = 0; uint64_t device = 0, system = 0, floor = 0, margin = 0, available = 0; };
         virtual void setBudget(const Budget& budget) = 0;
         // An app's memory reservation (RFC 0025): what it needs to open and do its job.
         struct AppMemory { std::string app; uint64_t reserve = 0; };
@@ -220,14 +223,19 @@ namespace oscairn
         virtual Launch launchApp(const AppMemory& app, bool dropNext = false) = 0;
         virtual void appClosed(const std::string& app) = 0;
         // The memory classes now: reserved, the committed share, committed in use (open, ringing
-        // and a committed next entry), opportunistic held (a next entry prepared to cut).
+        // and a committed next entry), opportunistic held (a next entry prepared to cut); the
+        // budget's `available` floor and what the system has available now (0: not known here).
         struct MemoryState
         {
-            uint64_t device = 0, reserved = 0, share = 0, floor = 0, margin = 0, committed = 0, opportunistic = 0;
+            uint64_t device = 0, reserved = 0, share = 0, floor = 0, margin = 0, committed = 0, opportunistic = 0, available = 0, systemAvailable = 0;
             std::vector<AppMemory> running, alwaysAvailable;
             bool nextPrepared = false, nextCommitted = false;
         };
         virtual MemoryState memoryState() = 0;
+        // RFC 0045: every plugin instance kept warm let go now (each worker ends on a thread of its
+        // own): how many, and their resident memory as last read.
+        struct Released { uint32_t instances = 0; uint64_t bytes = 0; };
+        virtual Released releaseResidents() = 0;
         // engine.timing: the audio path's timing since the last reset (BlockTiming, timing.h). The
         // device callback's own duration and its lateness (its start minus the last one's plus a
         // period; early counts as 0), as the host reports them, and each plugin in a worker's block

@@ -1036,6 +1036,51 @@ engine reads it (`residentBytes`); a plugin in the engine's process counts none,
 go for memory (the shortcut RFC 0021 names). Unverified on the unit: whether 250 MiB keeps the UI
 out of swap. Only where the app sets the budget: `--engine-only` runs without one.
 
+Residents that cost nothing but memory, and give it back (2026-11-14). On the FANTOM-07 seven
+workers kept warm from earlier Performances held 135 MB (a 76.5 MB Analog and a 21 MB FM no loaded
+Performance used), their main threads at 0.5 to 2.6 % of a core while idle, and MemAvailable fell
+from 300 to 172 MB over a session. What was built:
+
+- **An idle worker costs next to nothing.** A worker's control thread woke every 10 ms to copy
+  its plugins' parameter values into the shared block, playing or not, and the engine asked each
+  instance kept warm for a service (a request and an answer) every tick, or every 20 ms on a
+  device. Now the control thread copies the values only when its audio thread has rendered a
+  block since the last copy, and with none rendered its tick is 100 ms instead of 10 (every
+  request still copies them after it); the engine services instances kept warm once a second (a
+  plugin's main-thread callbacks, which an idle one needs rarely). The audio thread still wakes
+  once a second from its doorbell wait, as before. Tried first and not kept: the control thread
+  sleeping until a request. In the Linux container `control-performance-switch-workers` then
+  failed 1 run in 5 (blocks silenced after instances kept warm were taken over) and took 42 to
+  54 s, against 0 in 5 and 30 to 40 s with the old tick and 0 in 5 and 34 to 42 s with the 100 ms
+  one; why, not found. Measured in the Linux container: a worker kept warm 0.5 % of a core before,
+  0.0 % in 10 s after (below `/proc`'s 10 ms resolution); on macOS 10 to 11 ms of CPU in 6 s.
+  `control-residents-workers` holds each worker kept warm to 0.3 % of a core while another
+  Performance plays.
+- **By the memory the system really has.** The profile's `compute.availableMemory` (MiB; the
+  budget's `available`, Linux's MemAvailable) is what must stay available. Once a second, while
+  less is available, instances kept warm are let go, oldest and largest first (the longest idle
+  times its resident memory), until those let go held the shortfall; after letting go, the next
+  check waits two seconds more, as a worker's memory comes back only as it ends. A Performance
+  about to load first lets go of those it does not use until what is available, less its
+  estimate (less what instances kept warm of its plugins hold, which it may take), stays above
+  the floor. Admission and the load guard do not change: an estimate still refuses as before;
+  instances kept warm are opportunistic and never counted there. The FANTOM-07's profile names
+  200 MiB, above the 172 MB the stalls were seen at (to be measured on the unit). The memory
+  pressure trigger (PSI) stays, for what this misses.
+- **A build replaced on disk** (a library install of a new version or build): an instance kept
+  warm whose plugin's build digest no longer matches the file at its path can never be taken over
+  (a free instance must match plugin, version, path and digest), so it is let go at the next
+  once-a-second check.
+- **`memory.release`** lets go of every instance kept warm now, each worker ending on a thread of
+  its own, and says how many and their memory ([control protocol](../control-protocol.md)).
+- `memory.state` gives the floor (`available`) and what the system has available (`systemAvailable`).
+
+`control-residents-workers` checks each: five workers kept warm idle while a Performance
+plays; one of them let go when its build is replaced; 1 KiB short of the floor, one more let go and
+none in use; above it, the rest stay; `memory.release` lets go of the rest; and a Performance
+opened with only the floor available lets go of the instance it does not use and takes over the four
+it uses.
+
 ### Migration, in stages that each leave main working
 
 1. Independent of hosts: the deadline rule, the engine's main-thread service cut, the sharing

@@ -666,7 +666,7 @@ namespace oscairn
     {
         controllers_->service(); // first: what the controls played reaches the model before anything reads it
         graph_.service();
-        for( const auto& w : warm_ ) w.host->service(); // instances kept warm get their main-thread callbacks too
+        tendResidents(); // instances kept warm: serviced once a second, let go when stale or when memory runs short
         if( prepared_ ) prepared_->next->service(); // its plugins' main-thread callbacks while it waits
         ringOut();
         retireSounds(); // RFC 0021: outgoing sounds beside the incoming ones go once idle

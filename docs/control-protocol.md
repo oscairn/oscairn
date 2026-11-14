@@ -1252,7 +1252,13 @@ fader or name in the Performance, nor wires to or from the rest of the graph.
   app or letting committed memory go; `offerNext` when only the committed next entry stands in
   the way, and `dropNext` then lets it go and admits. `memory.closed` takes `{app}`.
   `memory.state` (`{}`) returns `{device,reserved,share,floor,margin,committed,opportunistic,
-  running,alwaysAvailable,nextPrepared,nextCommitted}`. Apps run in the desktop app today, so a
+  available,systemAvailable,running,alwaysAvailable,nextPrepared,nextCommitted}`: `available` the
+  budget's floor for the system's available memory (`budget.set`'s optional `available`, in bytes;
+  0 not watched) and `systemAvailable` what the system has available now (Linux's MemAvailable; 0
+  where it is not known). Below the floor, plugin instances kept warm for the next change are let go,
+  oldest and largest first ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#resident-instances-the-agreed-resident-engines)).
+  `memory.release` (`{}`) lets go of every instance kept warm now and returns `{instances,bytes}`:
+  how many and their resident memory as last read. Apps run in the desktop app today, so a
   reservation is counted, not enforced per app.
 - `performance.save` and `library.save` both keep each part's `from`.
 - `performance.export` takes `{file}` and optional `editedSounds`, and returns

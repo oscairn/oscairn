@@ -60,6 +60,7 @@ namespace oscairn
         Launch launchApp(const AppMemory& app, bool dropNext = false) override;
         void appClosed(const std::string& app) override;
         MemoryState memoryState() override;
+        Released releaseResidents() override;
         Timing engineTiming(bool reset) override;
         Estimate estimate(const std::string& directory = {}) override;
         void forgetMeasurements() override;

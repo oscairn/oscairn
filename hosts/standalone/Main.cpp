@@ -1051,6 +1051,7 @@ namespace oscairn::standalone
                 // RFC 0025: with the profile's memory classes, the device's memory less what is
                 // reserved; the shell's base (and an in-process engine's) is this process's memory now.
                 Control::Budget budget{ profile.cpuBudget(), profile.memoryBudget() };
+                budget.available = uint64_t( profile.compute.availableMemory ) << 20; // RFC 0045: instances kept warm give it back
                 std::vector<Control::AppMemory> always;
                 if( profile.memoryClasses() )
                 {

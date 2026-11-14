@@ -136,6 +136,11 @@ An illustrative profile (the values are an example, not a real product's):
   nothing is allocated; omitted, 2 minutes with 2 GB or less and 10 minutes above. It is memory
   held (11.5 MB a minute of stereo at 48 kHz), locked at `instrument`. The FANTOM-07's is 30, what
   Capture saves (11.5 MB, where 2 minutes cost 46 MB of its 992 MiB).
+
+  Optional `availableMemory` (added 2026-11-14, MiB, less than `memory`): what the system must keep
+  available (Linux's MemAvailable); below it plugin instances kept warm for the next change are let
+  go, oldest and largest first ([RFC 0045](0045-audio-scheduling-on-small-devices.md#resident-instances-the-agreed-resident-engines)).
+  Omitted or 0: not watched. The FANTOM-07's is 200.
 - **`audio`:** its interface, the sample rates and the block size it runs at, headphones (a cue
   bus). Optional `device` (added 2026-11-09): the audio device the engine opens instead of the
   default, for a product whose interface is not ALSA's default or not plain stereo (the

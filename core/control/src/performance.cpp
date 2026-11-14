@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <locale>
 #include <mutex>
@@ -740,7 +742,14 @@ void Session::loadPerformance(const std::string& directory) {
             const auto used=reservedMemory(false)+budget_.margin+committedMemory()+e.memory;
             const auto room=used<budget_.device?budget_.device-used:0;
             uint64_t bytes=warmMemory();
-            letGo([&](const Free& w){if(bytes<=room || wanted.count(w.host->descriptor().id))return false;bytes-=std::min(bytes,w.host->residentBytes());return true;});}}
+            letGo([&](const Free& w){if(bytes<=room || wanted.count(w.host->descriptor().id))return false;bytes-=std::min(bytes,w.host->residentBytes());return true;});}
+        // And by the memory the system really has (the budget's `available`): its new instances, at its
+        // estimate less what instances kept warm of its plugins hold (it may take those), above the floor.
+        if(budget_.available)if(const auto have=systemAvailable()){
+            std::set<std::string> wanted;for(const auto& c:e.plugins)wanted.insert(c.plugin);
+            uint64_t taken=0;for(const auto& w:warm_)if(wanted.count(w.host->descriptor().id))taken+=w.host->residentBytes();
+            const auto need=budget_.available+(e.memory>taken?e.memory-taken:0);
+            if(have<need && letGoResidents(need-have,wanted))std::fprintf(stderr,"oscairn: let go of instances kept warm for the next Performance: %llu MiB available\n",static_cast<unsigned long long>(have>>20));}}
     // Prepared ahead (RFC 0021), the cue only publishes it; another one prepared is let go first.
     auto prepared=std::move(prepared_);preparedOpportunistic_=false;
     if(prepared && (prepared->root!=root || prepared->stamp!=stamp(root)))prepared.reset();
@@ -832,6 +841,49 @@ void Session::letGo(const std::function<bool(const Free&)>& which) {
                 auto batch=std::move(releasing_);releasing_.clear();
                 lock.unlock();batch.clear();lock.lock();}});}
     releaseWake_.notify_one();
+}
+
+uint64_t Session::letGoResidents(uint64_t bytes,const std::set<std::string>& keep) {
+    const auto now=std::chrono::steady_clock::now();
+    std::vector<std::pair<double,const PluginHost*>> order;
+    for(const auto& w:warm_)if(!keep.count(w.host->descriptor().id))
+        order.push_back({std::chrono::duration<double>(now-w.idle).count()*double(std::max<uint64_t>(1,w.host->residentBytes())),w.host.get()});
+    std::sort(order.begin(),order.end(),[](const auto& a,const auto& b){return a.first>b.first;});
+    std::set<const PluginHost*> chosen;uint64_t freed=0;
+    for(const auto& [score,host]:order){if(freed>=bytes)break;chosen.insert(host);freed+=host->residentBytes();}
+    letGo([&](const Free& w){return chosen.count(w.host.get())!=0;});
+    return freed;
+}
+
+void Session::tendResidents() {
+    const auto now=std::chrono::steady_clock::now();
+    if(warm_.empty() || now<residentsTended_+std::chrono::seconds(1))return;
+    residentsTended_=now;
+    for(const auto& w:warm_)w.host->service();
+    letGo([&](const Free& w){return !w.loaded.build.empty() && buildDigest(w.host->descriptor().path)!=w.loaded.build;});
+    if(!budget_.available || warm_.empty())return;
+    const auto have=systemAvailable();
+    if(!have || have>=budget_.available)return;
+    if(const auto freed=letGoResidents(budget_.available-have)){
+        std::fprintf(stderr,"oscairn: memory short (%llu MiB available): let go of %llu MiB of instances kept warm\n",static_cast<unsigned long long>(have>>20),static_cast<unsigned long long>(freed>>20));
+        residentsTended_=now+std::chrono::seconds(2);} // their workers' memory comes back as they end: not let go of twice
+}
+
+uint64_t Session::systemAvailable() {
+    const char* file=std::getenv("OSCAIRN_MEMINFO");
+#ifdef __linux__
+    if(!file || !*file)file="/proc/meminfo";
+#endif
+    if(!file || !*file)return 0; // shortcut: Linux's figure only; read the Mach VM statistics if a Mac needs residents let go by memory
+    std::ifstream in(file);std::string key;uint64_t kb=0;
+    while(in>>key>>kb){if(key=="MemAvailable:")return kb<<10;in.ignore(256,'\n');}
+    return 0;
+}
+
+Control::Released Session::releaseResidents() {
+    Released r;for(const auto& w:warm_){++r.instances;r.bytes+=w.host->residentBytes();}
+    letGo([](const Free&){return true;});
+    return r;
 }
 
 uint64_t Session::warmMemory() const {

@@ -540,7 +540,7 @@ namespace oscairn
     }
     void RemoteControl::setBudget(const Budget& b) {
         impl_->call("budget.set","{\"cpu\":"+encode(b.cpu)+",\"memory\":"+std::to_string(b.memory)+",\"device\":"+std::to_string(b.device)+",\"system\":"+std::to_string(b.system)+
-                    ",\"floor\":"+std::to_string(b.floor)+",\"margin\":"+std::to_string(b.margin)+'}');
+                    ",\"floor\":"+std::to_string(b.floor)+",\"margin\":"+std::to_string(b.margin)+",\"available\":"+std::to_string(b.available)+'}');
     }
     void RemoteControl::setAlwaysAvailable(const std::vector<AppMemory>& apps) {
         std::string list;for(const auto& a:apps)list+=(list.empty()?"":",")+std::string("{\"app\":")+quote(a.app)+",\"reserve\":"+std::to_string(a.reserve)+'}';
@@ -553,12 +553,16 @@ namespace oscairn
     void RemoteControl::appClosed(const std::string& app) { impl_->call("memory.closed","{\"app\":"+quote(app)+'}'); }
     Control::MemoryState RemoteControl::memoryState() {
         auto d=impl_->call("memory.state","{}");auto r=field(d.get(),"result");MemoryState m;
-        for(auto [key,to]:{std::pair{"device",&m.device},{"reserved",&m.reserved},{"share",&m.share},{"floor",&m.floor},{"margin",&m.margin},{"committed",&m.committed},{"opportunistic",&m.opportunistic}})
+        for(auto [key,to]:{std::pair{"device",&m.device},{"reserved",&m.reserved},{"share",&m.share},{"floor",&m.floor},{"margin",&m.margin},{"committed",&m.committed},{"opportunistic",&m.opportunistic},{"available",&m.available},{"systemAvailable",&m.systemAvailable}})
             *to=uint64_t(integer(field(r,key)));
         auto apps=[](V v){std::vector<AppMemory> out;for(auto a:array(v))out.push_back({string(field(a,"app")),uint64_t(integer(field(a,"reserve")))});return out;};
         m.running=apps(field(r,"running"));m.alwaysAvailable=apps(field(r,"alwaysAvailable"));
         m.nextPrepared=boolean(field(r,"nextPrepared"));m.nextCommitted=boolean(field(r,"nextCommitted"));
         return m;
+    }
+    Control::Released RemoteControl::releaseResidents() {
+        auto d=impl_->call("memory.release","{}");auto r=field(d.get(),"result");
+        return {uint32_t(integer(field(r,"instances"))),uint64_t(integer(field(r,"bytes")))};
     }
     Control::Timing RemoteControl::engineTiming(bool reset) {
         auto d=impl_->call("engine.timing",reset?"{\"reset\":true}":"{}");auto r=field(d.get(),"result");

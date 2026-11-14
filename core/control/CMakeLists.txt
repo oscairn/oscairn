@@ -386,6 +386,12 @@ if(UNIX)
         "control-native-sounds|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--sounds"
         "control-native-effects|oscairn-local-socket-test|$<TARGET_FILE:oscairn_basic_synth>|--effects|$<TARGET_FILE:oscairn_delay>")
 endif()
+if(BUILD_TESTING) # RFC 0045: instances kept warm idle and let go, a worker per instance
+    add_test(NAME control-residents-workers COMMAND oscairn-performance-switch-test
+        $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_sampler> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
+    set_tests_properties(control-residents-workers PROPERTIES TIMEOUT ${switch_timeout}
+        ENVIRONMENT "OSCAIRN_SWITCH_RESIDENTS=1;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
+endif()
 foreach(entry IN LISTS control_worker_tests)
     string(REPLACE "|" ";" parts "${entry}")
     list(POP_FRONT parts name)

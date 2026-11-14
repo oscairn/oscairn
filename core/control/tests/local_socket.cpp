@@ -437,12 +437,14 @@ namespace
             const auto synth=remote.nodeId("synth");
             check(remote.hasParameter(synth,1) && remote.parameters(synth).size()==1,"remote metadata snapshot");
             // RFC 0025's memory classes over the socket; with no CPU budget nothing is measured or refused.
-            remote.setBudget({0,0,1000,100,300,50});
+            remote.setBudget({0,0,1000,100,300,50,77});
             remote.setAlwaysAvailable({{"oscairn.library",20}});
             check(remote.launchApp({"oscairn.setlist",30}).admitted,"a launch crosses the socket");
             auto memory=remote.memoryState();
             check(memory.device==1000 && memory.floor==300 && memory.margin==50 && memory.running.size()==1 && memory.running[0].app=="oscairn.setlist" &&
-                  memory.running[0].reserve==30 && memory.alwaysAvailable.size()==1 && memory.alwaysAvailable[0].reserve==20,"the memory classes cross the socket");
+                  memory.running[0].reserve==30 && memory.alwaysAvailable.size()==1 && memory.alwaysAvailable[0].reserve==20 && memory.available==77,"the memory classes cross the socket");
+            const auto released=remote.releaseResidents();
+            check(released.instances==0 && released.bytes==0,"memory.release crosses the socket: nothing kept warm here");
             remote.appClosed("oscairn.setlist");
             check(remote.memoryState().running.empty(),"and an app closing");
             // engine.timing: the host's callback times, as the session recorded them, cross the socket.

@@ -61,6 +61,7 @@ namespace oscairn
         Launch launchApp(const AppMemory& app, bool dropNext = false) override;
         void appClosed(const std::string& app) override;
         MemoryState memoryState() override;
+        Released releaseResidents() override;
         Timing engineTiming(bool reset) override;
         /// Audio thread, after each device callback that rendered: when it started and ended and
         /// the device's period, in nanoseconds on one monotonic clock of the host's (engine.timing).
@@ -761,6 +762,18 @@ namespace oscairn
         // thread of its own (its process's exit never holds the control thread); one in the engine's
         // process here (CLAP destroys a plugin on its main thread).
         void letGo(const std::function<bool(const Free&)>& which);
+        // RFC 0045: instances kept warm (none of a plugin in `keep`) let go, oldest and largest first (the
+        // longest idle times their resident memory), until those let go held `bytes`; what they held.
+        uint64_t letGoResidents(uint64_t bytes, const std::set<std::string>& keep = {});
+        // Once a second, from service(): instances kept warm serviced (a plugin's main-thread callbacks,
+        // which an idle instance needs rarely); one whose build was replaced on disk let go, as no load
+        // can take it; and with the budget's `available`, the oldest and largest let go while the
+        // system has less available.
+        void tendResidents();
+        std::chrono::steady_clock::time_point residentsTended_{};
+        // What the system has available now (Linux's MemAvailable; OSCAIRN_MEMINFO names another
+        // file in /proc/meminfo's form, for tests); 0 when it is not known.
+        static uint64_t systemAvailable();
         std::mutex releaseMutex_;
         std::condition_variable releaseWake_;
         std::vector<std::shared_ptr<PluginHost>> releasing_; // under releaseMutex_

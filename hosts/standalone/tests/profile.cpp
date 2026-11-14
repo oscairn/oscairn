@@ -107,6 +107,10 @@ int main()
               "an allowance that is not a whole number of microseconds");
         check(Profile::parse(replaced(json, cores, cores + ", \"workerSpin\": 200")).compute.workerSpin == 200 && Profile::parse(json).compute.workerSpin == 0 &&
               refused(replaced(json, cores, cores + ", \"workerSpin\": -1")), "the spin before sleeping on a worker, in microseconds; none named, none");
+        // RFC 0045: the memory kept available, below which instances kept warm are let go.
+        check(Profile::parse(replaced(json, cores, cores + ", \"availableMemory\": 200")).compute.availableMemory == 200 && Profile::parse(json).compute.availableMemory == 0 &&
+              loadProfile("fantom-07").compute.availableMemory == 200 && refused(replaced(json, cores, cores + ", \"availableMemory\": 1000000")),
+              "the memory kept available in MiB, less than the device's; none named, not watched");
         // RFC 0020: the retroactive buffer's length until one is chosen; the FANTOM-07's what Capture saves.
         check(Profile::parse(replaced(json, cores, cores + ", \"captureSeconds\": 0")).compute.captureSeconds == 0 && Profile::parse(json).compute.captureSeconds == -1 &&
               loadProfile("fantom-07").compute.captureSeconds == 30 && refused(replaced(json, cores, cores + ", \"captureSeconds\": 3601")),

@@ -121,11 +121,12 @@ namespace oscairn::standalone
         }
         if(const auto v = root.getProperty("compute"); !v.isVoid())
         {
-            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin", "workerDeadline", "pluginHosts", "ownHost", "captureSeconds"}, "compute");
+            const auto& o = object(v, "compute"); fields(o, {"cores", "realtimeCores", "memory", "storage", "osMemory", "performanceMemory", "audioThreadCores", "workerAllowance", "workerSpin", "workerDeadline", "pluginHosts", "ownHost", "captureSeconds", "availableMemory"}, "compute");
             p.compute = {count(o, "cores", 1024), count(o, "realtimeCores", 1024), count(o, "memory", 1 << 24), count(o, "storage", 1 << 30),
                          count(o, "osMemory", 1 << 24), count(o, "performanceMemory", 1 << 24), numbers(o, "audioThreadCores", 63),
                          count(o, "workerAllowance", 1'000'000), count(o, "workerSpin", 1'000'000), flag(o, "workerDeadline"), count(o, "pluginHosts", 64), names(o, "ownHost"),
-                         o.hasProperty("captureSeconds") ? count(o, "captureSeconds", 3600) : -1};
+                         o.hasProperty("captureSeconds") ? count(o, "captureSeconds", 3600) : -1, count(o, "availableMemory", 1 << 24)};
+            require(!p.compute.memory || p.compute.availableMemory < p.compute.memory, "availableMemory is less than memory");
             require(p.compute.realtimeCores <= p.compute.cores, "more realtime cores than cores");
             for(const auto c : p.compute.audioThreadCores) require(c < p.compute.cores, "audioThreadCores names a core past cores");
             require(o.hasProperty("osMemory") == o.hasProperty("performanceMemory"), "osMemory and performanceMemory come together");

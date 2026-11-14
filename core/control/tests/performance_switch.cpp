@@ -19,11 +19,19 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <functional>
 #include <map>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
+#endif
+#ifdef __APPLE__
+#include <libproc.h>
+#include <mach/mach_time.h>
 #endif
 
 using namespace oscairn;
@@ -247,6 +255,24 @@ namespace
 #endif
         return n;
     }
+    // A process's CPU time so far, in seconds; -1 where it cannot be read.
+    double cpuOf(long pid)
+    {
+#ifdef __linux__
+        std::ifstream stat("/proc/" + std::to_string(pid) + "/stat"); std::string text; std::getline(stat, text);
+        const auto close = text.rfind(')'); if(close == std::string::npos) return -1;
+        std::istringstream rest(text.substr(close + 2)); std::string field; unsigned long long user = 0, system = 0;
+        for(int i = 3; i <= 15 && rest >> field; ++i) { if(i == 14) user = std::stoull(field); if(i == 15) system = std::stoull(field); }
+        return double(user + system) / double(sysconf(_SC_CLK_TCK));
+#elif defined(__APPLE__)
+        proc_taskinfo info{};
+        if(proc_pidinfo(int(pid), PROC_PIDTASKINFO, 0, &info, sizeof(info)) != int(sizeof(info))) return -1;
+        mach_timebase_info_data_t base{}; mach_timebase_info(&base);
+        return double(info.pti_total_user + info.pti_total_system) * base.numer / base.denom / 1e9;
+#else
+        (void)pid; return -1;
+#endif
+    }
     void memory(const char* what, Session& s) { std::printf("%-52s %7.0f MiB resident, %zu instances kept warm\n", what, resident(), s.warmInstances()); }
 
     void timeOnly(Session& s, const std::vector<fs::path>& p)
@@ -285,6 +311,88 @@ int main(int argc, char** argv)
         { std::vector<float> wave(48000); for(size_t f = 0; f < wave.size(); ++f) wave[f] = float(.3 * ((f * 3) % 200) / 200.0 - .15); writeWavFile(samples / "sample.wav", wave, 1, 48000); }
         const auto a = temp.path / "a", b = temp.path / "b", c = temp.path / "c";
         shared(a, 0, argv[1], argv[3], argv[4]); shared(b, 1, argv[1], argv[3], argv[4]); other(c, argv[2], samples);
+
+        // RFC 0045: residents cost nothing but memory, and give it back. Y's instrument (a copy of the
+        // plugin's build, replaced later) and C's four Samplers kept warm while G plays, paced as a device's
+        // callback; their workers use next to no CPU. Then the system's available memory (a /proc/meminfo
+        // of the test's) falls under the budget's floor: the oldest and largest go until the shortfall is
+        // let go, those in use stay. Y's build replaced on disk: no load can take its instance, so it goes
+        // within a second. memory.release lets go of the rest.
+        // Its own test (control-residents-workers, OSCAIRN_SWITCH_RESIDENTS): the rest of this one is long enough.
+        if(std::getenv("OSCAIRN_SWITCH_RESIDENTS"))
+        {
+            if(placementPolicy().worker.empty() || placementPolicy().hosts) throw std::runtime_error("residents are checked with a worker per instance");
+            const auto copy = temp.path / ("copy-" + fs::path(argv[4]).filename().string());
+            fs::copy(argv[4], copy, fs::copy_options::recursive);
+            const auto y = temp.path / "resident-y", g = temp.path / "resident-g";
+            single(y, copy.string().c_str(), .5); ringing(g, 0, argv[1], argv[3], .5);
+            std::set<long> earlier; for(const auto& h : pluginHosts()) earlier.insert(h.pid); // other Sessions' workers
+            Session t(48000, frames);
+            auto gone = [&] { for(int i = 0; i < int(48000 * 31 / frames) && t.leaving(); ++i) blocks(t, 1); };
+            auto paced = [&](double seconds, const std::function<bool()>& until = {}) {
+                const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+                while(std::chrono::steady_clock::now() < end && !(until && until())) { blocks(t, 1); std::this_thread::sleep_for(std::chrono::microseconds(2667)); }
+            };
+            load(t, y); quiet(t); load(t, c); gone(); quiet(t); load(t, g); gone();
+            check(t.warmInstances() == 5, "Y's instrument and C's Samplers kept warm: " + std::to_string(t.warmInstances()));
+            std::vector<long> resident;
+            for(const auto& h : pluginHosts())
+                if(!earlier.count(h.pid) && !h.plugins.empty() && std::none_of(h.plugins.begin(), h.plugins.end(), [](const std::string& p) { return p == "org.oscairn.basic-synth" || p == "org.oscairn.delay"; })) resident.push_back(h.pid);
+            check(resident.size() == 5, "five workers kept warm: " + std::to_string(resident.size()));
+            paced(.5); // past their last request
+            std::vector<double> before; for(const auto pid : resident) before.push_back(cpuOf(pid));
+            paced(6);
+            double most = 0; for(size_t i = 0; i < resident.size(); ++i) most = std::max(most, cpuOf(resident[i]) - before[i]);
+            std::printf("residents: the busiest of %zu workers kept warm used %.1f ms of CPU in 6 s while G played\n", resident.size(), most * 1e3);
+            check(before.empty() || before[0] < 0 || most <= .018, "a worker kept warm costs next to no CPU: at most 0.3% of a core (it was 0.5% in the Linux container), " + std::to_string(most * 1e3) + " ms in 6 s");
+            // Y's build replaced (a library install): no load can take its instance kept warm, which goes.
+            auto idle = [&] { std::map<std::string, size_t> n; for(const auto& i : t.engineTiming(false).instances) if(!i.inUse) ++n[i.plugin]; return n; };
+            std::string yPlugin; for(const auto& [id, n] : idle()) if(n == 1) yPlugin = id;
+            fs::path binary = copy; // a bundle's binary (macOS), else the file
+            if(fs::is_directory(copy)) for(const auto& f : fs::recursive_directory_iterator(copy)) if(f.is_regular_file() && f.path().parent_path().filename() == "MacOS") binary = f.path();
+            { std::ofstream f(binary, std::ios::app | std::ios::binary); f << "a new build"; }
+            paced(3, [&] { return t.warmInstances() < 5; });
+            check(!yPlugin.empty() && t.warmInstances() == 4 && idle().count(yPlugin) == 0, "the instance of a build replaced on disk let go, the others kept: " + std::to_string(t.warmInstances()));
+            // The floor: 1 GiB to keep available, 1 KiB short of it.
+            const auto meminfo = temp.path / "meminfo";
+            auto available = [&](uint64_t kb) { std::ofstream(meminfo) << "MemTotal:       8000000 kB\nMemFree:         100000 kB\nMemAvailable:   " << kb << " kB\n"; };
+            available((uint64_t(1) << 20) - 1);
+            ::setenv("OSCAIRN_MEMINFO", meminfo.c_str(), 1);
+            Session::Budget floor{64}; floor.available = uint64_t(1) << 30;
+            t.setBudget(floor);
+            auto listed = [&](bool inUse) { std::map<std::string, size_t> n; for(const auto& i : t.engineTiming(false).instances) if(i.inUse == inUse) ++n[i.plugin]; return n; };
+            const auto used = listed(true);
+            paced(2.5, [&] { return t.warmInstances() < 4; });
+            check(t.warmInstances() == 3 && listed(true) == used, "1 KiB short of the floor: one kept warm let go, none in use: " + std::to_string(t.warmInstances()));
+            check(t.memoryState().available == floor.available && t.memoryState().systemAvailable == (((uint64_t(1) << 20) - 1) << 10), "memory.state gives the floor and what is available");
+            available(uint64_t(4) << 20); // above it: nothing more goes
+            paced(3.5);
+            check(t.warmInstances() == 3, "above the floor, the rest stay: " + std::to_string(t.warmInstances()));
+            t.setBudget({});
+            ::unsetenv("OSCAIRN_MEMINFO");
+            const auto left = t.warmInstances();
+            const auto r = t.releaseResidents();
+            check(r.instances == left && r.bytes > 0 && t.warmInstances() == 0 && listed(true) == used, "memory.release lets go of every instance kept warm, none in use: " + std::to_string(r.instances));
+            // A Performance about to load with too little available: those kept warm it does not use go
+            // first, those it may take stay. C (four Samplers, never measured: its estimate their default
+            // guess) opened with exactly the floor available: Y's instrument goes, the Samplers are taken over.
+            Session u(48000, frames);
+            auto rung = [&] { for(int i = 0; i < int(48000 * 31 / frames) && u.leaving(); ++i) blocks(u, 1); };
+            load(u, y); quiet(u); load(u, c); rung(); quiet(u); load(u, g); rung();
+            check(u.warmInstances() == 5, "Y's instrument and C's Samplers kept warm: " + std::to_string(u.warmInstances()));
+            available(uint64_t(1) << 20);
+            ::setenv("OSCAIRN_MEMINFO", meminfo.c_str(), 1);
+            u.setBudget(floor);
+            const auto w = load(u, c); report("G -> C, the floor available", w);
+            check(w.loaded == 0 && w.reused == 4 && u.warmInstances() == 0, "the instrument let go before the read, the Samplers taken over: " + std::to_string(w.loaded) + " loaded, " +
+                  std::to_string(u.warmInstances()) + " kept warm");
+            u.setBudget({});
+            ::unsetenv("OSCAIRN_MEMINFO");
+            if(failures) return 1;
+            std::printf("ok: residents cost no CPU and give their memory back\n");
+            return 0;
+        }
+
 
         Session s(48000, frames);
         report("open A (cold)", load(s, a));

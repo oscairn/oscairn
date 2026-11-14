@@ -449,6 +449,7 @@ namespace oscairn
         m.share = memoryCeiling();
         m.committed = committedMemory();
         m.opportunistic = (prepared_ && preparedOpportunistic_ ? preparedMemory() : 0) + warmMemory();
+        m.available = budget_.available; m.systemAvailable = systemAvailable();
         m.running = running_; m.alwaysAvailable = alwaysAvailable_;
         m.nextPrepared = prepared_ != nullptr; m.nextCommitted = prepared_ && !preparedOpportunistic_;
         return m;

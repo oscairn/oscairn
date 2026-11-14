@@ -61,10 +61,22 @@ namespace oscairn::worker
         kick::clap::Event events[maxEvents];
         kick::clap::Event outputs[maxOutputEvents];
         std::atomic<double> parameterValues[maxParameters];
-        kick::clap::SysexPool inputBytes, outputBytes; // events' and outputs' SysEx bytes (see share)
+        // The events' and outputs' SysEx bytes (see share), after the audio, at these offsets from the block's
+        // start; 0: none, for a plugin that cannot receive (send) SysEx (PluginHost::takesSysex), whose SysEx
+        // is then dropped and counted on the engine's side (sysexDrops) and in its host (dropped).
+        uint32_t inputPool = 0, outputPool = 0;
+        kick::clap::SysexPool* inputBytes() noexcept { return pool(inputPool); }
+        kick::clap::SysexPool* outputBytes() noexcept { return pool(outputPool); }
         float* input(uint32_t channel) noexcept { return reinterpret_cast<float*>(this + 1) + size_t(channel) * maxFrames; }
         float* output(uint32_t channel) noexcept { return input(inputChannels + channel); }
-        static size_t bytes(uint32_t inputs, uint32_t outputs, uint32_t frames) { return sizeof(Shared) + sizeof(float) * size_t(inputs + outputs) * frames; }
+        // The audio's end, then each pool there is, 8-byte aligned.
+        static size_t audioEnd(uint32_t inputs, uint32_t outputs, uint32_t frames) { return (sizeof(Shared) + sizeof(float) * size_t(inputs + outputs) * frames + 7) & ~size_t(7); }
+        static size_t bytes(uint32_t inputs, uint32_t outputs, uint32_t frames, bool sysexIn = false, bool sysexOut = false)
+        {
+            return audioEnd(inputs, outputs, frames) + (size_t(sysexIn) + size_t(sysexOut)) * sizeof(kick::clap::SysexPool);
+        }
+    private:
+        kick::clap::SysexPool* pool(uint32_t at) noexcept { return at ? reinterpret_cast<kick::clap::SysexPool*>(reinterpret_cast<char*>(this) + at) : nullptr; }
     };
     // Writes every page of a shared mapping once, keeping what is there, so no first write on an audio
     // thread faults. Locking (mlockall) maps a shared page on a read, clean, and the first write to it
@@ -84,24 +96,25 @@ namespace oscairn::worker
     // pool in this process's mapping, false when the offset or size does not fit the pool (the
     // other process wrote garbage). Other events pass unchanged; share is false when the bytes
     // do not fit (the event is to be dropped).
-    inline bool share(kick::clap::Event& e, kick::clap::SysexPool& pool) noexcept
+    // No pool (a plugin that cannot take or send SysEx): SysEx is not shared, to be dropped.
+    inline bool share(kick::clap::Event& e, kick::clap::SysexPool* pool) noexcept
     {
         auto* h = reinterpret_cast<clap_event_header_t*>(e.bytes.data());
         if(h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_MIDI_SYSEX) return true;
-        if(!pool.hold(e)) return false;
+        if(!pool || !pool->hold(e)) return false;
         auto& x = *reinterpret_cast<clap_event_midi_sysex_t*>(h);
-        x.buffer = reinterpret_cast<const uint8_t*>(uintptr_t(x.buffer - pool.bytes));
+        x.buffer = reinterpret_cast<const uint8_t*>(uintptr_t(x.buffer - pool->bytes));
         return true;
     }
-    inline bool unshare(kick::clap::Event& e, const kick::clap::SysexPool& pool) noexcept
+    inline bool unshare(kick::clap::Event& e, const kick::clap::SysexPool* pool) noexcept
     {
         auto* h = reinterpret_cast<clap_event_header_t*>(e.bytes.data());
         if(h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_MIDI_SYSEX) return true;
-        if(h->size != sizeof(clap_event_midi_sysex_t)) return false;
+        if(!pool || h->size != sizeof(clap_event_midi_sysex_t)) return false;
         auto& x = *reinterpret_cast<clap_event_midi_sysex_t*>(h);
         const auto offset = uintptr_t(x.buffer);
         if(offset > kick::clap::SysexPool::maxBlock || x.size > kick::clap::SysexPool::maxBlock - offset) return false;
-        x.buffer = pool.bytes + offset;
+        x.buffer = pool->bytes + offset;
         return true;
     }
     static_assert(std::atomic<uint32_t>::is_always_lock_free && std::atomic<double>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free);

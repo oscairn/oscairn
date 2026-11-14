@@ -272,7 +272,9 @@ struct Host::Impl {
     std::array<Event, maxBlockEvents> blockOutput;
     uint32_t blockOutputCount = 0, publishedOutputCount = 0;
     bool resetInProcess = false; // audio thread: wasReset()
-    SysexPool sysexOutput; // the bytes of blockOutput's SysEx events
+    // The bytes of blockOutput's SysEx events; made (main thread, as the ports are read, before the audio
+    // thread can use it) only for a plugin with a note output that takes MIDI. Without it SysEx is dropped, counted.
+    std::unique_ptr<SysexPool> sysexOutput;
     bool inProcess = false;
     uint32_t chunkCount = 0;
     uint32_t outputFrameOffset = 0, currentProcessFrames = 1;
@@ -291,6 +293,9 @@ struct Host::Impl {
     std::atomic<uint64_t> guiSize{0}; // a size asked for off the main thread: width << 32 | height
     std::unique_ptr<detail::Window> window;
     static Impl& self(const clap_host_t* h) { return *static_cast<Impl*>(h->host_data); }
+    static bool midiPort(const std::vector<clap_note_port_info_t>& ports) {
+        return std::any_of(ports.begin(), ports.end(), [](const auto& p) { return (p.supported_dialects & CLAP_NOTE_DIALECT_MIDI) != 0; });
+    }
     bool main() {
         if (mainThread == std::thread::id{}) mainThread = std::this_thread::get_id();
         if (mainThread == std::this_thread::get_id()) return true;
@@ -799,6 +804,9 @@ struct Host::Impl {
             }
         if (outputs.empty() && noteOutputs.empty() && info.lanes.empty())
             throw std::runtime_error("Plugin has neither audio nor note outputs");
+        // Ports are read while the plugin is not processing (load, activation, restart); never freed here,
+        // so a pool the audio thread might hold stays valid.
+        if (!sysexOutput && midiPort(noteOutputs)) sysexOutput = std::make_unique<SysexPool>();
         size_t ni = 0, no = 0;
         for (const auto& p : inputs) ni += p.channels;
         for (const auto& p : outputs) no += p.channels;
@@ -891,7 +899,7 @@ struct Host::Impl {
             const auto& x = *reinterpret_cast<const clap_event_midi_sysex_t*>(event);
             bool data = true;
             for (uint32_t i = 1; i + 1 < x.size; ++i) data = data && x.buffer[i] < 0x80;
-            if (!data || !s.inProcess || !s.sysexOutput.hold(copy)) { s.dropped.fetch_add(1); return false; }
+            if (!data || !s.inProcess || !s.sysexOutput || !s.sysexOutput->hold(copy)) { s.dropped.fetch_add(1); return false; }
         }
         // Parameter and gesture events go to the control thread. Everything else
         // (notes, MIDI, expressions) is kept for the caller of process(), which
@@ -1259,6 +1267,8 @@ const std::vector<Port>& Host::outputPorts() const noexcept { return impl->outpu
 bool Host::usesClapNotes(uint32_t port) const noexcept { return port < impl->noteInputs.size() && (impl->noteInputs[port].supported_dialects & CLAP_NOTE_DIALECT_CLAP); }
 uint32_t Host::noteInputPorts() const noexcept { return static_cast<uint32_t>(impl->noteInputs.size()); }
 uint32_t Host::noteOutputPorts() const noexcept { return static_cast<uint32_t>(impl->noteOutputs.size()); }
+bool Host::takesSysex() const noexcept { return Impl::midiPort(impl->noteInputs); }
+bool Host::emitsSysex() const noexcept { return Impl::midiPort(impl->noteOutputs); }
 double Host::parameterValue(clap_id id) const noexcept {
     auto& s = *impl; const auto i = s.paramIndex(id);
     return i < s.paramInfo.size() ? s.paramValues[i].load() : 0;
@@ -1326,7 +1336,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         s.controlSilences.fetch_add(1); silence(); return false;
     }
     struct Release { std::atomic_flag& flag; ~Release() { flag.clear(std::memory_order_release); } } release{s.gate};
-    s.blockOutputCount = 0; s.sysexOutput.used = 0; s.inProcess = true;
+    s.blockOutputCount = 0; if (s.sysexOutput) s.sysexOutput->used = 0; s.inProcess = true;
     struct Publish {
         Impl& s;
         ~Publish() { s.inProcess = false; s.publishedOutputCount = s.blockOutputCount; }

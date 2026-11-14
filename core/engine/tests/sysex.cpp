@@ -9,7 +9,10 @@
 //   - of five 60 KiB messages at one sample, the four that fit a block's 256 KiB arrive and
 //     the fifth is dropped and counted;
 //   - nothing is allocated on the audio thread (the engine's side, in workers).
-//   oscairn-sysex-test WORKER sysex-fixture.clap
+// SysEx pools only where SysEx can go: the fixture's plugins, with note ports that take MIDI, take and
+// send it; the Delay, with no note port, neither, so its worker's shared block and its hosts hold no
+// pools; the kick fixture's synth, a MIDI note input and no note output, takes it and sends none (2026-11-14).
+//   oscairn-sysex-test WORKER sysex-fixture.clap DELAY.clap KICK-FIXTURE.clap
 #include "oscairn/graph.h"
 #include "AllocationGuard.h"
 #include "sysex_fixture.h"
@@ -66,6 +69,7 @@ namespace
         oscairn::setPlacementPolicy({inWorker ? worker : std::string(), oscairn::Placement::Worker});
         oscairn::Graph g(48000, block, oscairn::ProcessingMode::Offline);
         const auto source = g.add(fixture, "org.oscairn.test.sysex-source"), echo = g.add(fixture, "org.oscairn.test.sysex-echo");
+        check(g.host(source).takesSysex() && g.host(source).emitsSysex() && g.host(echo).takesSysex() && g.host(echo).emitsSysex(), where + "plugins with MIDI note ports take and send SysEx");
         g.connectNotes(source, echo);
         g.commit();
         Recorder recorder; recorder.node = echo;
@@ -111,9 +115,18 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc != 3) return std::fprintf(stderr, "usage: oscairn-sysex-test WORKER sysex-fixture.clap\n"), 2;
+    if(argc != 5) return std::fprintf(stderr, "usage: oscairn-sysex-test WORKER sysex-fixture.clap DELAY.clap KICK-FIXTURE.clap\n"), 2;
     for(bool inWorker : {false, true})
         for(uint32_t block : {256u, 37u}) run(argv[1], argv[2], block, inWorker);
+    for(bool inWorker : {false, true})
+    {
+        oscairn::setPlacementPolicy({inWorker ? argv[1] : std::string(), oscairn::Placement::Worker});
+        oscairn::Graph g(48000, 256, oscairn::ProcessingMode::Offline);
+        const auto delay = g.add(argv[3], "org.oscairn.delay"), synth = g.add(argv[4], "org.kick.test.synth");
+        const std::string where = inWorker ? "worker: " : "engine: ";
+        check(!g.host(delay).takesSysex() && !g.host(delay).emitsSysex(), where + "a plugin without a note port neither takes nor sends SysEx");
+        check(g.host(synth).takesSysex() && !g.host(synth).emitsSysex(), where + "one with a MIDI note input and no note output takes it and sends none");
+    }
     if(failures) return 1;
     std::printf("ok: SysEx delivered in order, byte for byte, at its sample; over-limit messages dropped and counted; engine and worker, two block sizes\n");
     return 0;

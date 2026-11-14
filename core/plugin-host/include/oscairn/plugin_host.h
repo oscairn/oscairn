@@ -117,6 +117,9 @@ namespace oscairn
         virtual std::vector<uint32_t> mainAudioPorts(bool input) const;
         virtual uint32_t noteInputPorts() const noexcept = 0;
         virtual bool usesClapNotes(uint32_t) const noexcept { return false; }
+        // Whether it can receive or send SysEx (kick::clap::Host::takesSysex); true where it is not known.
+        virtual bool takesSysex() const noexcept { return true; }
+        virtual bool emitsSysex() const noexcept { return true; }
         virtual void panic() noexcept = 0;
         virtual uint32_t noteOutputPorts() const noexcept = 0;
         virtual double parameterValue(clap_id id) const noexcept = 0;

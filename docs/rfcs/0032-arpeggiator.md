@@ -184,6 +184,15 @@ emptied each block, so nothing is allocated on the audio thread.
 - **Workers:** the shared block carries an input and an output pool of 256 KiB each, an event
   holding its offset there; the engine copies a worker's output out of the shared block and
   checks every offset, and counts a message that does not fit with the plugin's dropped events.
+- **Pools only where SysEx can go (2026-11-14).** SysEx travels only through note ports that take
+  MIDI (`CLAP_NOTE_DIALECT_MIDI`), so a plugin whose note inputs take none gets no input pools (the
+  worker's shared block's, the engine's carry and staged ones) and one whose note outputs take none
+  no output pools (the shared block's, the engine's copy and its host's own). Each pool is 256 KiB,
+  locked on both sides of a worker: a Delay saved 512 KiB of shared memory, 768 KiB of the engine's
+  heap and 256 KiB in its worker; a synth with a MIDI note input and no note output half that. A
+  plugin whose ports change to take MIDI after it loads (a rescan) gets its host's output pool then;
+  a worker's pools are fixed at load, and SysEx with no pool is dropped and counted as before.
+  `sysex` checks which plugins take and send it.
 - **Not built:** SysEx to hardware MIDI outputs (a part's MIDI out drops it), SysEx from
   hardware MIDI inputs, and LV2 plugins (their host drops it).
 

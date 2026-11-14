@@ -457,6 +457,7 @@ namespace oscairn
                 state_ = r.u8(); contexts_ = r.u32(); effects_ = r.u8();
                 window_ = r.u8(); snapshots_ = r.u8(); ringOut_ = r.u8(); savesSounds_ = r.u8();
                 voiceBudget_ = r.u8(); honorsVolume_ = r.u8();
+                sysexIn_ = r.u8(); sysexOut_ = r.u8();
                 description_ = r.data.substr(at, r.at - at);
 
                 // Shared block, sized for the ports and maximum block, handed over as a descriptor.
@@ -465,7 +466,7 @@ namespace oscairn
                 const auto frames = process()->frames;
                 capacity_ = frames * std::max<uint32_t>(1, (8192 + frames - 1) / frames);
                 const uint32_t ring = ringOut_ ? 4 : 0; // the ring-out buffer, after the ports' channels
-                bytes_ = Shared::bytes(channels(inputs_), channels(outputs_) + ring, capacity_);
+                bytes_ = Shared::bytes(channels(inputs_), channels(outputs_) + ring, capacity_, sysexIn_, sysexOut_);
                 const std::string name = "/osc-" + std::to_string(getpid()) + "-" + std::to_string(Process::counter.fetch_add(1));
                 try
                 {
@@ -485,6 +486,12 @@ namespace oscairn
                     dirtyPages(memory, bytes_); // no first write faults on the audio thread (Worker.h)
                     shared_ = new(memory) Shared();
                     inChannels_ = channels(inputs_); outChannels_ = channels(outputs_) + ring;
+                    // SysEx pools only where the plugin can take (send) SysEx: 256 KiB each, locked on both sides.
+                    size_t pools = Shared::audioEnd(inChannels_, outChannels_, capacity_);
+                    if(sysexIn_) { shared_->inputPool = uint32_t(pools); new(static_cast<char*>(memory) + pools) kick::clap::SysexPool(); pools += sizeof(kick::clap::SysexPool); }
+                    if(sysexOut_) { shared_->outputPool = uint32_t(pools); new(static_cast<char*>(memory) + pools) kick::clap::SysexPool(); }
+                    if(sysexIn_) carriedBytes_ = std::make_unique<kick::clap::SysexPool>();
+                    if(sysexOut_) sysexOutput_ = std::make_unique<kick::clap::SysexPool>();
                     shared_->inputChannels = inChannels_; shared_->outputChannels = outChannels_; shared_->ringOutChannels = ring;
                     shared_->maxFrames = capacity_; shared_->sampleRate = process()->rate; shared_->parameterCount = uint32_t(parameters_.size());
                     for(uint32_t i = 0; i < parameters_.size(); ++i) shared_->parameterValues[i].store(parameters_[i].defaultValue);
@@ -500,6 +507,7 @@ namespace oscairn
                     if(process()->mode == ProcessingMode::Realtime && listed(std::getenv("OSCAIRN_WORKER_EXTRA_BLOCK"), descriptor_.id))
                     {
                         extra_ = true;
+                        if(sysexIn_) stagedBytes_ = std::make_unique<kick::clap::SysexPool>(); // the staged block's SysEx
                         held_.assign(size_t(2) * outChannels_ * frames, 0.f);
                         for(uint32_t c = 0; c < 2 * outChannels_; ++c) heldPointers_.push_back(held_.data() + size_t(c) * frames);
                         stagedIn_.assign(size_t(std::max(1u, inChannels_)) * frames, 0.f);
@@ -863,6 +871,8 @@ namespace oscairn
             uint32_t noteInputPorts() const noexcept override { return noteInputs_; }
             uint32_t noteOutputPorts() const noexcept override { return noteOutputs_; }
             bool usesClapNotes(uint32_t port) const noexcept override { return port < clapNotes_.size() && clapNotes_[port]; }
+            bool takesSysex() const noexcept override { return sysexIn_; }
+            bool emitsSysex() const noexcept override { return sysexOut_; }
             // While down, a panic would reach the restarted worker and drop its first block's events.
             // With the extra block the worker may still be rendering the last block, which a panic now must not reach: it waits for the next one.
             void panic() noexcept override
@@ -957,7 +967,7 @@ namespace oscairn
             bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
                          const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override
             {
-                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false; missed_.store(false, std::memory_order_relaxed); kept_ = playedKept_ = true;
+                outputCount_ = 0; if(sysexOutput_) sysexOutput_->used = 0; reset_ = false; missed_.store(false, std::memory_order_relaxed); kept_ = playedKept_ = true;
                 if(frames <= capacity_) return rendered(block(inputs, ni, outputs, no, frames, events, count, transport, 0));
                 // Larger than the shared buffer: split as the in-engine host does, rebasing events,
                 // transport and output event times.
@@ -1001,7 +1011,7 @@ namespace oscairn
                               const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override
             {
                 if(!frames || frames > capacity_) return false;
-                outputCount_ = 0; sysexOutput_->used = 0; reset_ = false; kept_ = playedKept_ = true;
+                outputCount_ = 0; if(sysexOutput_) sysexOutput_->used = 0; reset_ = false; kept_ = playedKept_ = true;
                 if(extraBlock()) { startDelayed(inputs, ni, outputs, no, frames, events, count, transport, 0); return true; }
                 started_ = start(inputs, ni, outputs, no, frames, events, count, transport, 0);
                 return true;
@@ -1142,7 +1152,7 @@ namespace oscairn
                 // While busy (until finish), a restart waits; it sets failed first, so a block that starts later sees it.
                 busy_.store(true);
                 auto& s = *shared_;
-                if(process()->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; carriedBytes_->used = 0; return silence(); }
+                if(process()->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0; return silence(); }
                 process()->follow(frames);
                 if(const auto g = process()->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process()->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); } // restarted: the shared block holds the old worker's stamps
                 // A block the worker has not finished yet: stay silent rather than queue another, its events carried
@@ -1177,14 +1187,14 @@ namespace oscairn
                     else std::fill_n(audioIn(c), frames, 0.f);
                 }
                 uint32_t kept = 0;
-                s.inputBytes.used = 0;
+                if(auto* pool = s.inputBytes()) pool->used = 0;
                 for(uint32_t i = 0; i < count; ++i)
                 {
                     s.events[kept] = events[i];
-                    if(share(s.events[kept], s.inputBytes)) ++kept;
+                    if(share(s.events[kept], s.inputBytes())) ++kept;
                     else sysexDrops_.fetch_add(1, std::memory_order_relaxed);
                 }
-                carriedCount_ = 0; carriedBytes_->used = 0;
+                carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0;
                 s.frames = frames; s.eventCount = kept; s.hasTransport = transport != nullptr;
                 s.setLimits = limitsWaiting_ && shareLimits(s);
                 if(s.setLimits) limitsWaiting_ = false;
@@ -1298,7 +1308,7 @@ namespace oscairn
                 {
                     auto& e = output_[outputCount_] = s.outputs[i];
                     if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX &&
-                       (!unshare(e, s.outputBytes) || !sysexOutput_->hold(e))) { sysexDrops_.fetch_add(1, std::memory_order_relaxed); continue; }
+                       (!unshare(e, s.outputBytes()) || !sysexOutput_ || !sysexOutput_->hold(e))) { sysexDrops_.fetch_add(1, std::memory_order_relaxed); continue; }
                     auto& time = reinterpret_cast<clap_event_header_t*>(e.bytes.data())->time;
                     time = late ? offset : time + offset;
                     ++outputCount_;
@@ -1338,7 +1348,7 @@ namespace oscairn
                 if(later)
                 {
                     reinterpret_cast<clap_event_header_t*>(e.bytes.data())->time = 0;
-                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX && !carriedBytes_->hold(e))
+                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX && (!carriedBytes_ || !carriedBytes_->hold(e)))
                     { carryDrops_.fetch_add(1, std::memory_order_relaxed); return true; }
                 }
                 if(carriedCount_ == maxEvents)
@@ -1405,11 +1415,12 @@ namespace oscairn
                     if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], n, stagedInPointers_[c]);
                     else std::fill_n(stagedInPointers_[c], n, 0.f);
                 }
-                stagedBytes_->used = 0; stagedCount_ = 0;
+                if(stagedBytes_) stagedBytes_->used = 0;
+                stagedCount_ = 0;
                 for(uint32_t i = 0; i < std::min(count, maxEvents) && events; ++i)
                 {
                     auto e = events[i];
-                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX && !stagedBytes_->hold(e)) { sysexDrops_.fetch_add(1, std::memory_order_relaxed); continue; }
+                    if(e.header()->space_id == CLAP_CORE_EVENT_SPACE_ID && e.header()->type == CLAP_EVENT_MIDI_SYSEX && (!stagedBytes_ || !stagedBytes_->hold(e))) { sysexDrops_.fetch_add(1, std::memory_order_relaxed); continue; }
                     staged_[stagedCount_++] = e;
                 }
                 stagedTransport_ = transport ? *transport : clap_event_transport_t{}; stagedHasTransport_ = transport != nullptr;
@@ -1557,6 +1568,7 @@ namespace oscairn
             std::unordered_map<clap_id, uint32_t> index_;
             std::vector<kick::clap::Port> inputs_, outputs_;
             uint32_t noteInputs_ = 0, noteOutputs_ = 0, contexts_ = 0;
+            bool sysexIn_ = true, sysexOut_ = true; // from the description: whether it can take, send SysEx
             std::vector<uint8_t> clapNotes_;
             bool state_ = false, effects_ = false, window_ = false, snapshots_ = false, ringOut_ = false, savesSounds_ = false, voiceBudget_ = false, honorsVolume_ = false;
             std::string windowTitle_; // the window the engine last opened, for a restarted worker; under control
@@ -1597,7 +1609,7 @@ namespace oscairn
             // channel's last sample heard, and how far a silent block has faded it out.
             std::array<kick::clap::Event, maxEvents> carried_{};
             uint32_t carriedCount_ = 0, fadedOut_ = 0;
-            std::unique_ptr<kick::clap::SysexPool> carriedBytes_ = std::make_unique<kick::clap::SysexPool>();
+            std::unique_ptr<kick::clap::SysexPool> carriedBytes_; // made only for a plugin that takes SysEx
             std::atomic<uint64_t> carryDrops_{0};
             bool kept_ = true, playedKept_ = true, abandoned_ = false;
             std::vector<float> last_;
@@ -1617,14 +1629,14 @@ namespace oscairn
             std::vector<float> stagedIn_; std::vector<float*> stagedInPointers_;
             std::array<kick::clap::Event, maxEvents> staged_{};
             uint32_t stagedCount_ = 0, stagedFrames_ = 0, stagedOffset_ = 0;
-            std::unique_ptr<kick::clap::SysexPool> stagedBytes_ = std::make_unique<kick::clap::SysexPool>();
+            std::unique_ptr<kick::clap::SysexPool> stagedBytes_; // made only for a plugin that takes SysEx
             clap_event_transport_t stagedTransport_{}; bool stagedHasTransport_ = false;
             float* const* played_ = nullptr; uint32_t playedFrames_ = 0;
             float* const* playOutputs_ = nullptr; uint32_t playChannels_ = 0, playFrames_ = 0;
             WorkerTiming timing_;
             std::array<kick::clap::Event, maxEvents> chunk_{};
             std::vector<kick::clap::Event> output_, pending_;
-            std::unique_ptr<kick::clap::SysexPool> sysexOutput_ = std::make_unique<kick::clap::SysexPool>(); // output_'s SysEx bytes
+            std::unique_ptr<kick::clap::SysexPool> sysexOutput_; // output_'s SysEx bytes; made only for a plugin that sends SysEx
             std::atomic<uint64_t> sysexDrops_{0}; // SysEx that did not fit a block's pool on the way in or out
             // oscairn.voice-budget, audio thread: the limits waiting for the next block (the engine's
             // sound IDs), and the worker's last report, bounded. Voices past maxVoices are not credible.

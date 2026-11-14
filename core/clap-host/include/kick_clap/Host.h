@@ -288,6 +288,11 @@ public:
     uint32_t noteInputPorts() const noexcept;
     bool usesClapNotes(uint32_t port) const noexcept;
     uint32_t noteOutputPorts() const noexcept;
+    // SysEx (CLAP_EVENT_MIDI_SYSEX) goes only through note ports that take MIDI (CLAP_NOTE_DIALECT_MIDI):
+    // whether one of the plugin's inputs, or outputs, does. A plugin with none can neither receive nor send
+    // SysEx, and its SysEx pools are not made (here and in a worker's shared block).
+    bool takesSysex() const noexcept;
+    bool emitsSysex() const noexcept;
     double parameterValue(clap_id) const noexcept;
     std::string parameterText(clap_id, double value) const;
     bool setParameter(clap_id, double plainValue) noexcept;

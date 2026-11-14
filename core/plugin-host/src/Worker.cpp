@@ -261,6 +261,7 @@ namespace oscairn::worker
             w.u8(host.hasWindow());
             w.u8(host.preparesSnapshots()); w.u8(host.ringsOut()); w.u8(host.savesSounds());
             w.u8(host.voiceBudget()); w.u8(host.honorsVolume());
+            w.u8(host.takesSysex()); w.u8(host.emitsSysex());
         }
 
         // A crashing worker may take longer to exit than the hang limit (sanitizers report first), so
@@ -373,7 +374,7 @@ namespace oscairn::worker
             // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
             if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
             uint32_t events = 0; // SysEx pointed at this process's mapping of the pool
-            for(uint32_t i = 0; i < std::min(s.eventCount, maxEvents); ++i) if(unshare(s.events[i], s.inputBytes)) s.events[events++] = s.events[i];
+            for(uint32_t i = 0; i < std::min(s.eventCount, maxEvents); ++i) if(unshare(s.events[i], s.inputBytes())) s.events[events++] = s.events[i];
 #ifdef OSCAIRN_HOSTILE_SIZES
             hostileSizes(s, n.trueFrames, n.trueInputs, n.trueOutputs, false); // the plugin's host reads them
 #endif
@@ -393,11 +394,11 @@ namespace oscairn::worker
             }
             uint32_t count = 0; const auto* emitted = host.outputEvents(count);
             uint32_t kept = 0;
-            s.outputBytes.used = 0;
+            if(auto* pool = s.outputBytes()) pool->used = 0;
             for(uint32_t i = 0; i < count && kept < maxOutputEvents; ++i)
             {
                 s.outputs[kept] = emitted[i];
-                if(share(s.outputs[kept], s.outputBytes)) ++kept;
+                if(share(s.outputs[kept], s.outputBytes())) ++kept;
             }
             s.outputCount = kept; s.ok = ok;
             s.outputDrops.store(host.outputEventDrops() + (count - kept), std::memory_order_relaxed);
@@ -542,6 +543,10 @@ namespace oscairn::worker
                 if(memory == MAP_FAILED) throw std::runtime_error("Cannot map shared memory");
                 dirtyPages(memory, n->bytes); // before the audio thread writes it (the engine waits for this reply)
                 auto& s = *(n->shared = static_cast<Shared*>(memory));
+                // Its SysEx pools where the engine put them: inside the block, after its audio.
+                for(const auto at : {s.inputPool, s.outputPool})
+                    if(at && (at < Shared::audioEnd(s.inputChannels, s.outputChannels, s.maxFrames) || at % 8 || size_t(at) + sizeof(kick::clap::SysexPool) > n->bytes))
+                    { mapped[index].store(nullptr); munmap(memory, n->bytes); n->shared = nullptr; throw std::runtime_error("Shared memory's SysEx pools are out of place"); }
                 mapped[index].store(n->shared);
                 n->publish();
                 n->ids.resize(s.parameterCount);

@@ -331,7 +331,7 @@ add_executable(oscairn-sysex-test engine/tests/sysex.cpp)
 target_link_libraries(oscairn-sysex-test PRIVATE oscairn_engine)
 target_include_directories(oscairn-sysex-test PRIVATE clap-host/tests)
 add_dependencies(oscairn-sysex-test oscairn-sysex-fixture oscairn-plugin-worker)
-add_test(NAME sysex COMMAND oscairn-sysex-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-sysex-fixture>)
+add_test(NAME sysex COMMAND oscairn-sysex-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-sysex-fixture> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(sysex PROPERTIES TIMEOUT 60 ENVIRONMENT OSCAIRN_WORKER_BUDGET_US=50000)
 
 # RFC 0032 step 3 and RFC 0033 step 5: the free-running beat and the harmony, as a plugin sees them.

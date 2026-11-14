@@ -112,6 +112,8 @@ namespace oscairn
         const std::vector<kick::clap::Port>& outputPorts() const noexcept override { return port_; }
         uint32_t noteInputPorts() const noexcept override { return engine_->host->noteInputPorts(); }
         bool usesClapNotes(uint32_t port) const noexcept override { return engine_->host->usesClapNotes(port); }
+        bool takesSysex() const noexcept override { return engine_->host->takesSysex(); }
+        bool emitsSysex() const noexcept override { return engine_->host->emitsSysex(); }
         void panic() noexcept override { engine_->host->panic(); }
         uint32_t noteOutputPorts() const noexcept override { return 0; }
         double parameterValue(clap_id id) const noexcept override;

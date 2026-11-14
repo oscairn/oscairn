@@ -251,7 +251,8 @@ namespace
         const auto a = p.add(normal, "org.kick.test.midi", 0), s = p.add(slow, "org.kick.test.effect", 1);
         p.graph.commit();
         auto next = std::chrono::steady_clock::now();
-        for(uint32_t block = 0; block < 3000; ++block)
+        // Each start's first 2 s of late blocks are its load's, not too slow: four starts' worth and more.
+        for(uint32_t block = 0; block < 6000; ++block)
         {
             std::this_thread::sleep_until(next); next += period;
             p.playUnbounded(notes(block));

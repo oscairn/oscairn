@@ -303,7 +303,11 @@ another app asked for, is admitted by the engine (`launchApp`) first; refused, t
 notice gives the engine's reason ("Setlist did not open: it needs 60 MiB, 34 free for apps")
 and nothing starts. The reservation is let go (`appClosed`) when the app is stopped, closes its
 window, gives up after repeated crashes or crashes behind; one crashing in front is started
-again at once and keeps it. The shell's own asking (Home, the Apps menu) uses the same figure,
+again at once and keeps it. The engine lets it go itself when every connection of the app's
+has closed and none is back within 3 s (2026-11-14): an app that died, or whose shell went,
+without `memory.closed` reaching the engine no longer holds its reservation (on the FANTOM-07 a
+Setlist that had died still held 60 MiB); one its host starts again at once, which asks for the
+new connection before the process starts, keeps it (`control-local-stream`). The shell's own asking (Home, the Apps menu) uses the same figure,
 and the always-available set takes a process app's manifest reservation at start (not its
 measurement: the supervisor is made later). Oscairn's apps that still run inside the desktop
 app keep `Profile::appMemory`'s placeholders. `desktop-apps` runs the Setlist as a process

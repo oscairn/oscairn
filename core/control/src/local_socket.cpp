@@ -267,6 +267,11 @@ namespace oscairn
         std::vector<std::unique_ptr<Peer>> peers;
         std::vector<std::unique_ptr<Peer>> joining; // apps' connections made while peers are walked
         uint64_t nextPeer=1,lastPing=0;
+        // Apps whose every connection closed, and since when (RFC 0025): their memory reservation goes
+        // once none is back within appGrace, so an app that dies without memory.closed holds none, and
+        // one its host starts again at once (a new connection first, then the process) keeps its own.
+        std::map<std::string,uint64_t> appsGone;
+        static constexpr uint64_t appGrace=3000000000;
         uint32_t nextRequest=1;
         int passing=-1; // the descriptor apps.connect is answered with, until it is queued
         struct Pending { uint64_t asker,answerer; };
@@ -703,7 +708,20 @@ namespace oscairn
                         if(auto* asker=s.relay.find([&](const Impl::Peer& p){return p.id==r.second.asker;}))
                             asker->notice("apps.answered","{\"request\":"+std::to_string(r.first)+",\"result\":\"\"}");
                     return r.second.answerer==peer->id || r.second.asker==peer->id;});
+        // Timed by the clock, not poll()'s start: a long request (a load) may have run since, closing a
+        // connection on the helper thread meanwhile.
+        const auto gone=s.clock();
+        for(const auto& peer:s.peers)if(peer->stream.fd<0 && !peer->app.empty())s.appsGone.emplace(peer->app,gone);
         std::erase_if(s.peers,[](const auto& peer){return peer->stream.fd<0;});
+        for(auto it=s.appsGone.begin();it!=s.appsGone.end();)
+        {
+            const auto& app=it->first;
+            auto connected=[&](const auto& list){return std::any_of(list.begin(),list.end(),[&](const auto& p){return p->app==app && p->stream.fd>=0;});};
+            const bool back=connected(s.peers) || connected(s.joining);
+            if(!back && gone>=it->second && gone-it->second<Impl::appGrace){++it;continue;}
+            if(!back)s.control.appClosed(app); // the engine's own thread, as every request's
+            it=s.appsGone.erase(it);
+        }
         if(auto* w=s.watch.get())
         {
             // What the watcher looks at next: new requests, and room for replies held back.

@@ -201,11 +201,27 @@ namespace
             check(status.find(R"("silent":0)") != std::string::npos && status.find("com.example.other") == std::string::npos, "answered, no silence; one entry per app: " + status);
             own.poll(); check(own.takeNotifications().empty(), "its own second connection is not pinged");
             // A request out to an app that closes is canceled.
+            host.call("memory.launch", R"({"app":"com.example.setlist","reserve":31457280})"); // RFC 0025: its reservation, as its host asks before starting it
             const auto pending = host.call("apps.request", R"({"app":"com.example.setlist","action":"oscairn.send.performance","argument":"lib-8"})");
             app.disconnect();
             check(heard(host, "{\"request\":" + std::to_string(number(pending, "request")) + R"(,"result":""})"), "canceled when the app goes");
+            // Its reservation stays while any connection of its own does, and goes about 3 s after the last
+            // closes, though it never said memory.closed (an app that died); a connection back in time keeps it.
+            auto reserved = [&] { return host.call("memory.state").find("com.example.setlist") != std::string::npos; };
+            std::this_thread::sleep_for(std::chrono::milliseconds(3500));
+            check(reserved(), "the reservation stays while the app's own second connection is open");
+            own.disconnect();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            host.call("apps.connect", R"({"app":"com.example.setlist"})"); // started again at once by its host
+            LocalClient again; again.adopt(host.takeDescriptor());
+            std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+            check(reserved(), "and when it is started again within the grace");
+            again.disconnect();
+            bool released = false;
+            for(int i = 0; i < 60 && !released; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); released = !reserved(); }
+            check(released, "an app gone without memory.closed releases its reservation");
         });
-        check(f.server.clients() == 2, "the host and the app's own second connection remain");
+        check(f.server.clients() == 1, "the host remains");
     }
     // Permissions (RFC 0022 step 4): an app's connection may do what its host granted and no
     // more, names no file path but the library's own, and its own connections keep its grant;

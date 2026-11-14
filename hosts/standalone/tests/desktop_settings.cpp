@@ -179,7 +179,7 @@ int main(int argc, char** argv)
                 standalone::setDesktopMode(frame, 1);
                 frame.setSize(1000, 640);
                 auto* page = dynamic_cast<standalone::settings::AudioPage*>(frame.page());
-                check(page && frame.current()->id == "audio" && frame.shown().size() == 5, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
+                check(page && frame.current()->id == "audio" && frame.shown().size() == 6, "wide, with a mouse: the list at the left and the first page, Audio, beside it");
                 if(!page) return;
                 check(wait([&] { return page->listings() >= 1 && !page->busy(); }), "the devices are listed");
                 check(page->output.getNumItems() == 3 && page->output.getText() == "Studio" && page->output.isEnabled(), "the output devices, the one open chosen");
@@ -264,11 +264,11 @@ int main(int argc, char** argv)
                 if(!bar) return;
                 check(bar->cpu.getSelectedId() == 1 && bar->ram.getSelectedId() == 1 && !bar->file().exists(), "both as the device has them, nothing written");
                 check(bar->file() == configuration.getChildFile("top-bar.json"), "in the configuration folder");
-                bar->cpu.setSelectedId(3); // Bar
-                bar->ram.setSelectedId(5); // Hidden
+                bar->cpu.setSelectedId(3, juce::sendNotificationSync); // Bar
+                bar->ram.setSelectedId(5, juce::sendNotificationSync); // Hidden
                 auto saved = juce::JSON::parse(bar->file());
                 check(saved["cpu"] == "bar" && saved["ram"] == "none", "written: " + bar->file().loadFileAsString().toStdString());
-                bar->cpu.setSelectedId(1);
+                bar->cpu.setSelectedId(1, juce::sendNotificationSync);
                 saved = juce::JSON::parse(bar->file());
                 check(!saved.hasProperty("cpu") && saved["ram"] == "none", "the CPU as the device has it: left out");
                 standalone::settings::TopBarPage again(app);
@@ -501,7 +501,7 @@ int main(int argc, char** argv)
                 standalone::AppProcesses processes(engine, actions, apps, {themes, "OSCAIRN_PROFILE=desktop"});
                 check(processes.open("oscairn.settings") && processes.pid("oscairn.settings") > 0 && processes.pid("oscairn.settings") != ::getpid(), "Settings runs as a process of its own");
                 check(wait([&] { return processes.log("oscairn.settings").contains("oscairn-settings: started"); }), "its stderr is in its log");
-                check(processes.log("oscairn.settings").contains("with 5 pages for desktop"), "with this computer's pages");
+                check(processes.log("oscairn.settings").contains("with 6 pages for desktop"), "with this computer's pages");
                 check(wait([&] { return processes.state("oscairn.settings") == standalone::AppProcesses::State::Running; }, 2000), "and runs");
                 processes.stop("oscairn.settings");
                 check(wait([&] { return processes.pid("oscairn.settings") < 0; }), "stopped by the shell");

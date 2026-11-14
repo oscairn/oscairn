@@ -36,6 +36,7 @@ namespace oscairn
         [[noreturn]] void systemError(const char* operation)
         { throw std::system_error(errno,std::generic_category(),operation); }
         bool again() { return errno == EAGAIN || errno == EWOULDBLOCK; }
+        struct Timeout : std::runtime_error { Timeout() : std::runtime_error("Local RPC timed out; outcome may be unknown") {} };
         void configure(int fd)
         {
             const int status=fcntl(fd,F_GETFL), flags=fcntl(fd,F_GETFD);
@@ -71,7 +72,7 @@ namespace oscairn
             for(;;)
             {
                 const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-Clock::now()).count();
-                if(left<0)throw std::runtime_error("Local RPC timed out; outcome may be unknown");
+                if(left<0)throw Timeout();
                 pollfd p{fd,events,0};
                 const auto result=::poll(&p,1,static_cast<int>(std::min<int64_t>(left+1,60000)));
                 if(result<0 && errno==EINTR)continue;
@@ -565,6 +566,7 @@ namespace oscairn
         std::deque<std::string> messages;
         size_t messageBytes=0,notices=0; // notices: the notifications among messages
         std::set<uint64_t> unanswered;   // requests sent whose replies have not arrived
+        std::set<uint64_t> abandoned;    // of those, waits that timed out: their replies are dropped
         Waits waits;
         static uint64_t idOf(const json_value_s* id)
         {
@@ -585,6 +587,7 @@ namespace oscairn
                 {
                     const auto doc=frame(line);const auto* id=member(doc.get(),"id");
                     if(id && !unanswered.erase(idOf(id)))throw std::runtime_error("Mismatched RPC response ID");
+                    if(id && abandoned.erase(idOf(id)))continue;
                     // Replies to requests sent without waiting count only against the byte bound.
                     if((!id && notices>=128) || line.size()>LocalServer::maxQueuedBytes-messageBytes)
                     {
@@ -607,7 +610,7 @@ namespace oscairn
     };
     LocalClient::LocalClient():impl_(std::make_unique<Impl>()){}
     LocalClient::~LocalClient()=default;
-    void LocalClient::disconnect()noexcept{impl_->stream.reset();impl_->messages.clear();impl_->messageBytes=impl_->notices=0;impl_->unanswered.clear();}
+    void LocalClient::disconnect()noexcept{impl_->stream.reset();impl_->messages.clear();impl_->messageBytes=impl_->notices=0;impl_->unanswered.clear();impl_->abandoned.clear();}
     LocalClient::Waits LocalClient::waits()const{return impl_->waits;}
     bool LocalClient::connected()const{return impl_->stream && !impl_->stream->eof;}
     void LocalClient::adopt(int fd){disconnect();impl_->stream=std::make_unique<Stream>(fd,true);}
@@ -691,6 +694,8 @@ namespace oscairn
                 waitFor(impl_->stream->fd,POLLIN,deadline);
             }
         }
+        // Slow is not gone: the connection stays, and the reply, should it come, is dropped.
+        catch(const Timeout&){impl_->abandoned.insert(id);throw;}
         catch(...){disconnect();throw;}
     }
 }

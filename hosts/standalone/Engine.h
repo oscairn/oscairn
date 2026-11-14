@@ -285,13 +285,19 @@ namespace oscairn::standalone
             // The polled reads above keep their pace through edits: a fader dragged sends 60 a
             // second, and the open Performance may trail an edit by 250 ms (the undo names are
             // asked again after each edit).
-            try{f();}catch(const std::exception& e)
-            {
-                if(client_ && !client_->connected())failed(e.what());
-                else std::fprintf(stderr,"oscairn: control command: %s\n",e.what());
-            }
+            try{f();}catch(const std::exception& e){callFailed(e.what());}
         }
         void failed(const std::string& message);
+        // A call that failed: the connection is lost only when it is. A refusal keeps it, and so
+        // does a timeout while the engine still answers session.hello, which it does during a
+        // long request too: slow is not gone, but an engine that answers nothing is.
+        void callFailed(const std::string& message)
+        {
+            if(client_ && client_->connected() && message.find("timed out")!=std::string::npos && !answers(*client_))client_->disconnect();
+            if(client_ && !client_->connected())failed(message);
+            else std::fprintf(stderr,"oscairn: control command: %s\n",message.c_str());
+        }
+        static bool answers(LocalClient& client){try{client.call("session.hello","{}",1000);return true;}catch(const std::exception&){return false;}}
         void sendView(bool part, bool screen, std::vector<std::pair<uint32_t, uint32_t>> positions); // to the engine
         void readControllers(); // timer: positions and the control moved last, from the engine
         void refreshSounds(SoundAction action = {});

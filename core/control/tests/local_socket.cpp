@@ -376,7 +376,11 @@ namespace
     {
         auto fd=pair();LocalClient client;client.adopt(fd[0]);
         bool timeout=false;try{client.call("session.hello","{}",10);}catch(const std::runtime_error&){timeout=true;}
-        check(timeout && !client.connected(),"timeout closes uncertain connection without replay");::close(fd[1]);
+        check(timeout && client.connected(),"a timeout keeps the connection");
+        const auto sent=read(fd[1]);check(sent.find("\"id\":1,")!=std::string::npos && sent.find('\n')==sent.size()-1,"sent once, never replayed");
+        send(fd[1],R"({"jsonrpc":"2.0","id":1,"result":{}})" "\n");
+        for(int i=0;i<100;++i){client.poll();std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+        check(client.takeNotifications().empty() && client.connected(),"its late reply is dropped");::close(fd[1]);
         fd=pair();client.adopt(fd[0]);
         std::thread peer([&]{
             while(read(fd[1]).empty())std::this_thread::yield();

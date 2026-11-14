@@ -81,7 +81,7 @@ namespace oscairn::standalone
             if(fd<0)std::fprintf(stderr,"oscairn: no connection for %s: %s\n",app.c_str(),reply.c_str());
             return fd;
         }
-        catch(const std::exception& e){failed(e.what());return -1;}
+        catch(const std::exception& e){callFailed(e.what());return -1;}
     }
     void Engine::appRequest(const std::string& app,const std::string& action,const std::string& argument,std::function<void(const std::string&)> answer)
     {
@@ -93,14 +93,14 @@ namespace oscairn::standalone
             if(const auto n=reply["result"]["request"];n.isInt() || n.isInt64()){appAnswers_[uint64_t(juce::int64(n))]=std::move(answer);return;}
             std::fprintf(stderr,"oscairn: %s not asked: %s\n",action.c_str(),reply["error"]["message"].toString().toRawUTF8());
         }
-        catch(const std::exception& e){failed(e.what());}
+        catch(const std::exception& e){callFailed(e.what());}
         answer({});
     }
     void Engine::appAnswer(uint64_t request,const std::string& result)
     {
         if(!client_ || !connected())return;
         try{client_->send("apps.answer","{\"request\":"+std::to_string(request)+",\"result\":"+juce::JSON::toString(juce::String::fromUTF8(result.c_str())).toStdString()+'}');}
-        catch(const std::exception& e){failed(e.what());}
+        catch(const std::exception& e){callFailed(e.what());}
     }
     void Engine::appMessage(const std::string& message)
     {
@@ -110,7 +110,7 @@ namespace oscairn::standalone
         if(method=="apps.ping")
         {
             // Answered here, on the message thread: an app whose thread is stuck answers none.
-            try{client_->send("apps.pong","{\"ping\":"+std::to_string(juce::int64(params["ping"]))+'}');}catch(const std::exception& e){failed(e.what());}
+            try{client_->send("apps.pong","{\"ping\":"+std::to_string(juce::int64(params["ping"]))+'}');}catch(const std::exception& e){callFailed(e.what());}
         }
         else if(method=="apps.requested")
         {
@@ -436,7 +436,7 @@ namespace oscairn::standalone
                 result.editors=readEditors(control);
                 result.known=control.knownParameters();
             }
-            catch(const std::exception& e){result.error=e.what();result.disconnected=!client.connected();}
+            catch(const std::exception& e){result.error=e.what();result.disconnected=!client.connected() || (result.error.find("timed out")!=std::string::npos && !answers(client));}
             return result;
         });
     }

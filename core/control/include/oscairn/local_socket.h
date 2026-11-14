@@ -67,8 +67,10 @@ namespace oscairn
         void disconnect() noexcept;
         bool connected() const;
         /// params must be an encoded JSON object. Returns the complete response,
-        /// including RPC errors. Timeout/disconnect throws and closes the connection:
-        /// a sent mutation may have applied, so callers must refresh, never replay it.
+        /// including RPC errors. A timeout throws and keeps the connection (slow is not gone;
+        /// the reply, should it come, is dropped); a disconnect, or a request not wholly sent,
+        /// throws and closes it. Either way a sent mutation may have applied, so callers must
+        /// read the state again, never replay it.
         std::string call(std::string_view method, std::string_view params = "{}", unsigned timeoutMs = 1000);
         /// call() in two halves. send() writes the request without waiting for its reply and
         /// returns its ID; wait() gives that reply. The server answers in order, so a request

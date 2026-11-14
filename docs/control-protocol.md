@@ -901,7 +901,7 @@ malformed typed values and unsupported access receive `-32602`; a rejected write
 State export/preparation can perform filesystem I/O and background-work draining on the
 control thread. `RemoteControl` waits up to 30 seconds for `state.save` and `sounds.prepare`;
 other calls retain their normal timeout. A timeout is an **unknown outcome**, not cancellation:
-inspect the destination/context inventory after reconnecting instead of blindly retrying.
+inspect the destination/context inventory (the connection stays) instead of blindly retrying.
 An LV2 state export may briefly silence that instance while taking its snapshot; preparing
 a spare sound avoids restoring over a held instance. These operations are for preparation,
 not sample-timed performance changes.

@@ -196,6 +196,11 @@ public:
     // one declaring more is refused before it activates; 0, the default, sets no limit. An effect
     // context counts its context and asset bytes, an instance its shared bytes too.
     void setMemoryRoom(uint64_t bytes) noexcept;
+    // clap.audio-ports-activation. Main thread. The output ports the host takes sound from, bit i
+    // for port index i (the rest deactivated); until it is called the plugin is told nothing. A
+    // plugin that can activate ports while processing is told at the start of its next block; any
+    // other is restarted (service() deactivates and activates it, telling it meanwhile).
+    void setActiveOutputs(uint64_t ports) noexcept;
     // CLAP render (clap.render). Main thread, before a load: true tells a plugin with the extension
     // CLAP_RENDER_OFFLINE when it next initializes (an effect context made from this one inherits
     // it), unless it has a hard realtime requirement; otherwise it is told CLAP_RENDER_REALTIME.

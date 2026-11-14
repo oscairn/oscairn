@@ -2290,6 +2290,25 @@ namespace
         check(s.graphState().macros[0].targets.empty() && s.graphState().macros[1].targets.empty(), "removing the send drops the targets on it");
     }
 
+    // A plugin with several outputs is told which the graph takes sound from (CLAP's
+    // audio-ports-activation): the element-ports fixture plays an element into main while its
+    // port is not taken, into its port once a wire takes it, and into main again without it.
+    void activeOutputs(const char* audio)
+    {
+        Session s(48000, frames);
+        const auto inst = s.add("Elements", audio, "org.oscairn.test.element-ports");
+        const auto part = s.addPart("Sampler", {PartInput::Kind::None});
+        s.insertIntoPart(part, 0, inst); s.commit();
+        Audio x; x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 7), "main alone taken: every element in main: " + std::to_string(x.l[frames - 1]));
+        Wire w; w.from = inst; w.fromPort = 302; w.to = graphOutput; w.toPort = s.parts()[0].output;
+        const auto id = s.connectPorts(w); s.setMix(id, .5, 0, false, false); s.commit();
+        x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 4 + 1 + 2 * .5), "a wire takes the B port: its element leaves main for it: " + std::to_string(x.l[frames - 1]));
+        s.disconnectWire(id); s.commit(); x.run(s); x.run(s);
+        check(near(x.l[frames - 1], 7), "the wire gone: back in main: " + std::to_string(x.l[frames - 1]));
+    }
+
     // A solo undone, committed and saved: the same file as before it, playing the same. Each part
     // soloed and heard (a muted one unmuted), then put back as it was: a copy of the parts, since
     // parts() is the live model and the edits change it.
@@ -2465,6 +2484,7 @@ int main(int argc, char** argv)
         levelCurves(argv[1], temp.path);
         liveGains(argv[1], argv[2], temp.path);
         sendTargets(argv[1], argv[2], temp.path);
+        activeOutputs(argv[2]);
         soloRoundTrip(argv[1], argv[3], temp.path);
         persistence(argv[1], argv[2], argv[3], temp.path);
     }

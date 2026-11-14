@@ -252,6 +252,36 @@ differently: the parts sharing an instance share its voice pool (the Basic Synth
 shared voice budget rather than the pool limits in practice); a plugin meant to share should have
 a pool sized for several parts.
 
+### Several output ports
+
+A part can take each of a plugin's audio output ports into a lane of its own, each with its own
+chain of effects, joined again before the part's fader: a **ports split**
+([RFC 0011](rfcs/0011-performance-ui-and-editors.md#split-and-join)). That is how a sampler sends
+some elements through insertion A, others through insertion B and the rest past both: three
+stereo outputs, main, "to insert A" and "to insert B", and a lane on each. The ports are found by
+their stable IDs, so keep them, as CLAP requires.
+
+The host tells the plugin which output ports it takes sound from with CLAP's
+`clap.audio-ports-activation` (or its `draft-2` compat ID). Look at that and nothing else:
+
+- Oscairn calls `set_active(plugin, false, index, on, 32)` for **every** output port of a plugin
+  with more than one, once its wiring is first worked out (when it is added or its Performance
+  loads), and again for each port whose state changes. A port is active when a
+  wire takes sound from it (a lane of a ports split, or a wire drawn in Routing); the main ports
+  are always active.
+- Return true from `can_activate_while_processing`: then each call comes on the audio thread
+  just before a `process` call, between blocks, and the change is heard in that block with no
+  gap. A plugin that returns false is told while deactivated: Oscairn deactivates and activates
+  it again (its sound stops and its voices end for that moment) at each change.
+- Route what you would send to an inactive port into main instead. Treat a port the host has
+  never named in `set_active` as inactive too: CLAP starts every port active, and a host that
+  does not implement the extension (or one that only ever deactivates) would otherwise lose that
+  sound. So with Oscairn, or any host, taking only main, main carries everything.
+- The state is not saved: the host tells it again after every load, a worker restart included.
+
+The element-ports fixture (`core/engine/tests/audio_fixture.cpp`, `org.oscairn.test.element-ports`)
+does all of it in a few lines; `control-parts` plays it through a ports split.
+
 ### Presets
 
 Publish presets through CLAP preset discovery, and Oscairn lists them where sounds are picked and

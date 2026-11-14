@@ -148,7 +148,8 @@ namespace oscairn::worker
         ChokeRetiring, // sound-snapshots' choke_retiring (RFC 0005)
         SaveSound, SoundValues, // sound-snapshots draft 4: one sound on its own, a sound's values (RFC 0021)
         Reconfigure, // the plugin activated again at a new sample rate, the block size kept
-        Load // one more plugin in the worker, beside those it holds (Init sets the rate and block first)
+        Load, // one more plugin in the worker, beside those it holds (Init sets the rate and block first)
+        ActiveOutputs // the output ports the engine takes sound from (clap.audio-ports-activation)
     };
     // First byte of every message from the worker: a reply, or a request to the engine made while
     // the worker serves one (the plugin resolving a sound asset or finding an asset library; a node about to activate, with

@@ -4,6 +4,7 @@
 #include "Internal.h"
 #include "Window.h"
 #include <clap/ext/audio-ports.h>
+#include <clap/ext/audio-ports-activation.h>
 #include <clap/ext/note-ports.h>
 #include <clap/ext/params.h>
 #include <clap/ext/state.h>
@@ -186,6 +187,24 @@ struct Host::Impl {
     const clap_plugin_latency_t* pluginLatency = nullptr;
     const clap_plugin_timer_support_t* timerSupport = nullptr;
     const clap_plugin_posix_fd_support_t* fdSupport = nullptr;
+    // clap.audio-ports-activation: which output ports the host takes sound from (bit i, port index
+    // i), told once the caller says, on the audio thread at a block's start where the plugin can
+    // switch while processing, else at its next activation. Applied: the audio thread's (or the
+    // main thread's with the plugin inactive or gated).
+    const clap_plugin_audio_ports_activation_t* portsActivation = nullptr;
+    bool activateWhileProcessing = false;
+    std::atomic<uint64_t> wantedOutputs{0};
+    std::atomic<bool> outputsTold{false};
+    uint64_t appliedOutputs = 0; bool appliedTold = false;
+    void applyOutputs() {
+        if (!portsActivation || !outputsTold.load(std::memory_order_acquire)) return;
+        const auto want = wantedOutputs.load(std::memory_order_acquire);
+        for (size_t i = 0; i < outputs.size() && i < 64; ++i) {
+            const bool on = (want >> i) & 1;
+            if (!appliedTold || ((appliedOutputs >> i) & 1) != on) portsActivation->set_active(plugin, false, uint32_t(i), on, 32);
+        }
+        appliedOutputs = want; appliedTold = true;
+    }
     // oscairn.memory (RFC 0025): the plugin's estimate at its last activation, and the bytes the
     // next activation may declare (0: no limit), set by the caller and kept across loads.
     const oscairn_plugin_memory_t* memory = nullptr;
@@ -563,7 +582,7 @@ struct Host::Impl {
         if (plugin) { deactivate(); if (plugin->destroy) plugin->destroy(plugin); }
         if (auto* h = hardwareAccess.load()) h->releaseAll(this); // what the plugin did not release
         plugin = nullptr; params = nullptr; state = nullptr; sounds = nullptr; assetDependencies = nullptr; pluginLatency = nullptr;
-        timerSupport = nullptr; fdSupport = nullptr; memory = nullptr; hasDeclared = false;
+        timerSupport = nullptr; fdSupport = nullptr; memory = nullptr; hasDeclared = false; portsActivation = nullptr;
         timers.clear(); fds.clear();
         paramInfo.clear(); paramValues.reset(); cookies.clear(); inputs.clear(); outputs.clear(); noteInputs.clear(); noteOutputs.clear();
         inputBuffers.clear(); outputBuffers.clear(); inputPointers.clear(); outputPointers.clear(); scratch.clear();
@@ -615,6 +634,11 @@ struct Host::Impl {
         s.fdSupport = static_cast<const clap_plugin_posix_fd_support_t*>(s.plugin->get_extension(s.plugin, CLAP_EXT_POSIX_FD_SUPPORT));
         s.memory = static_cast<const oscairn_plugin_memory_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_MEMORY));
         if(s.memory && (!s.memory->estimate || !s.memory->current))throw std::runtime_error("Incomplete memory interface");
+        s.portsActivation = static_cast<const clap_plugin_audio_ports_activation_t*>(s.plugin->get_extension(s.plugin, CLAP_EXT_AUDIO_PORTS_ACTIVATION));
+        if(!s.portsActivation) s.portsActivation = static_cast<const clap_plugin_audio_ports_activation_t*>(s.plugin->get_extension(s.plugin, CLAP_EXT_AUDIO_PORTS_ACTIVATION_COMPAT));
+        if(s.portsActivation && !s.portsActivation->set_active) s.portsActivation = nullptr; // incomplete: told nothing
+        s.activateWhileProcessing = s.portsActivation && s.portsActivation->can_activate_while_processing && s.portsActivation->can_activate_while_processing(s.plugin);
+        s.appliedTold = false;
         s.findGui();
         // Initialized and not yet processing, on the main thread, as clap.render asks.
         const auto* render = static_cast<const clap_plugin_render_t*>(s.plugin->get_extension(s.plugin, CLAP_EXT_RENDER));
@@ -845,6 +869,7 @@ struct Host::Impl {
         }
         if (activationObserver) activationObserver(activationContext, hasDeclared ? &declared : nullptr);
         hardwareEpoch.fetch_add(1); // jobs from an earlier activation collect as stale
+        appliedTold = false; applyOutputs(); // deactivated: told every port again
         if (!plugin->activate(plugin, sampleRate, 1, maxFrames)) throw std::runtime_error("Plugin activation failed");
         active = true;
         transportObserved = false; haveHarmony = false;
@@ -1419,6 +1444,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
             s.processing = true;
         }
         if (s.flush.exchange(false)) s.flushParameters();
+        if (s.activateWhileProcessing && s.outputsTold.load(std::memory_order_relaxed) && (!s.appliedTold || s.wantedOutputs.load(std::memory_order_acquire) != s.appliedOutputs)) s.applyOutputs();
         // oscairn.voice-budget: new limits before the block (an audio-thread call outside process()).
         if (s.voiceBudget && s.limitsWaiting) { s.voiceBudget->set_limits(s.plugin, s.voiceLimit, s.voiceContexts.data(), s.voiceContextCount); s.limitsWaiting = false; }
         uint32_t next = 0;
@@ -1537,6 +1563,13 @@ bool Host::selectSound(uint32_t id,int16_t channel) {
 bool Host::preparesSoundSnapshots() const noexcept {return impl->soundSnapshots!=nullptr;}
 bool Host::ringsOut() const noexcept {return impl->ringOutChannels!=0;}
 bool Host::voiceBudget() const noexcept {return impl->voiceBudget!=nullptr;}
+void Host::setActiveOutputs(uint64_t ports) noexcept {
+    auto& s=*impl;
+    const bool told=s.outputsTold.load(std::memory_order_relaxed);
+    if(told && s.wantedOutputs.load(std::memory_order_relaxed)==ports)return;
+    s.wantedOutputs.store(ports,std::memory_order_release);s.outputsTold.store(true,std::memory_order_release);
+    if(s.portsActivation && !s.activateWhileProcessing && s.active)s.restart.store(true); // only while deactivated: service() activates it again
+}
 bool Host::honorsVolume() const noexcept {return impl->honorsVolume;}
 void Host::setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept {
     auto& s=*impl;if(!s.voiceBudget)return;

@@ -88,6 +88,7 @@ namespace oscairn
             }
             std::optional<oscairn_memory_t> declaredMemory() const override {oscairn_memory_t m{};if(host.declaredMemory(m))return m;return {};}
             void setMemoryRoom(uint64_t bytes) override {host.setMemoryRoom(bytes);}
+            void setActiveOutputs(uint64_t ports) override {host.setActiveOutputs(ports);}
             uint32_t soundContextCapacity() const noexcept override {return host.soundContextCapacity();}
             std::vector<oscairn_sound_context_info_t> soundContexts() const override {return host.soundContexts();}
             uint32_t prepareSound(const std::string& name,const std::vector<oscairn_sound_parameter_t>& p,const std::string& state,const std::string& preset,const std::string& sfz,const std::string& library,const std::string& directory) override {

@@ -727,6 +727,7 @@ namespace oscairn::worker
                     break;
                 }
                 case Op::SetMemoryRoom: host.setMemoryRoom(r.u64()); break;
+                case Op::ActiveOutputs: host.setActiveOutputs(r.u64()); break;
                 case Op::Window: { const bool show = r.u8(); host.showWindow(show, r.str()); windows = windows || show; break; }
                 case Op::Reset: w.u8(host.reset()); break;
                 case Op::Reconfigure: rate = r.f64(); host.reconfigure(rate, frames); break; // and the plugins loaded later load at it

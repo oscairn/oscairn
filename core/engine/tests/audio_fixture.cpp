@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include <clap/clap.h>
 #include <clap/ext/audio-ports.h>
+#include <clap/ext/audio-ports-activation.h>
+#include <atomic>
 #include <cstring>
 namespace {
 const char* features[]{CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,nullptr};
@@ -50,10 +52,57 @@ struct Plugin {
         };api.on_main_thread=[](const clap_plugin_t* p){auto& self=*static_cast<Plugin*>(p->plugin_data);if(self.requested){self.changed=true;self.host->request_restart(self.host);}};
     }
 };
+// A generator as an instrument whose elements go to insertion A, insertion B or past both, as the
+// Sampler's: three stereo outputs, main (ID 300), "to insert A" (301) and "to insert B" (302), and
+// three elements always sounding at 1 (to A), 2 (to B) and 4 (thru). An element whose port the host
+// has not activated (clap.audio-ports-activation, a port it never named counting as not) plays
+// into main; it can switch while processing.
+const char* generator[]{CLAP_PLUGIN_FEATURE_INSTRUMENT,nullptr};
+const clap_plugin_descriptor_t elementsDescriptor{CLAP_VERSION,"org.oscairn.test.element-ports","Element ports fixture","Oscairn","","","","1","Elements to insert A, insert B or main",generator};
+struct Elements {
+    clap_plugin_t api{};
+    std::atomic<bool> active[3]{false,false,false}; // as the host told it; main is always played
+    Elements(){
+        api.desc=&elementsDescriptor;api.plugin_data=this;
+        api.init=[](const clap_plugin_t*){return true;};
+        api.destroy=[](const clap_plugin_t* p){delete static_cast<Elements*>(p->plugin_data);};
+        api.activate=[](const clap_plugin_t*,double,uint32_t,uint32_t){return true;};
+        api.deactivate=[](const clap_plugin_t*){};api.start_processing=[](const clap_plugin_t*){return true;};
+        api.stop_processing=[](const clap_plugin_t*){};api.reset=[](const clap_plugin_t*){};
+        api.process=[](const clap_plugin_t* p,const clap_process_t* b)->clap_process_status{
+            auto& self=*static_cast<Elements*>(p->plugin_data);
+            if(b->audio_outputs_count!=3)return CLAP_PROCESS_ERROR;
+            const float element[3]{4,1,2}; // main's own, then those for A and B
+            float out[3]{4,0,0};
+            for(int k=1;k<3;++k)(self.active[k].load()?out[k]:out[0])+=element[k];
+            for(uint32_t port=0;port<3;++port)for(uint32_t c=0;c<2;++c)for(uint32_t i=0;i<b->frames_count;++i)b->audio_outputs[port].data32[c][i]=out[port];
+            return CLAP_PROCESS_CONTINUE;
+        };
+        api.get_extension=[](const clap_plugin_t*,const char* id)->const void*{
+            static const clap_plugin_audio_ports_t ports{
+                [](const clap_plugin_t*,bool input)->uint32_t{return input?0:3;},
+                [](const clap_plugin_t*,uint32_t i,bool input,clap_audio_port_info_t* p)->bool{
+                    if(input || i>2)return false;*p={};p->id=300+i;p->channel_count=2;p->flags=i?0:CLAP_AUDIO_PORT_IS_MAIN;
+                    std::strcpy(p->name,i==0?"Main":i==1?"To insert A":"To insert B");p->port_type=CLAP_PORT_STEREO;p->in_place_pair=CLAP_INVALID_ID;return true;
+                }};
+            static const clap_plugin_audio_ports_activation_t activation{
+                [](const clap_plugin_t*){return true;},
+                [](const clap_plugin_t* p,bool input,uint32_t index,bool on,uint32_t)->bool{
+                    if(input || index>2)return false;
+                    static_cast<Elements*>(p->plugin_data)->active[index].store(on);return true;
+                }};
+            if(!std::strcmp(id,CLAP_EXT_AUDIO_PORTS))return &ports;
+            return std::strcmp(id,CLAP_EXT_AUDIO_PORTS_ACTIVATION)?nullptr:&activation;
+        };
+        api.on_main_thread=[](const clap_plugin_t*){};
+    }
+};
 const clap_plugin_factory_t factory{
-    [](const clap_plugin_factory_t*)->uint32_t{return 3;},
-    [](const clap_plugin_factory_t*,uint32_t i){return i==0?&descriptor:i==1?&manyDescriptor:i==2?&excessiveDescriptor:nullptr;},
-    [](const clap_plugin_factory_t*,const clap_host_t* h,const char* id)->const clap_plugin_t*{if(!std::strcmp(id,manyDescriptor.id))return &(new Plugin(h,17))->api;if(!std::strcmp(id,excessiveDescriptor.id))return &(new Plugin(h,33))->api;return std::strcmp(id,descriptor.id)?nullptr:&(new Plugin(h))->api;}};
+    [](const clap_plugin_factory_t*)->uint32_t{return 4;},
+    [](const clap_plugin_factory_t*,uint32_t i){return i==0?&descriptor:i==1?&manyDescriptor:i==2?&excessiveDescriptor:i==3?&elementsDescriptor:nullptr;},
+    [](const clap_plugin_factory_t*,const clap_host_t* h,const char* id)->const clap_plugin_t*{
+        if(!std::strcmp(id,elementsDescriptor.id))return &(new Elements)->api;
+        if(!std::strcmp(id,manyDescriptor.id))return &(new Plugin(h,17))->api;if(!std::strcmp(id,excessiveDescriptor.id))return &(new Plugin(h,33))->api;return std::strcmp(id,descriptor.id)?nullptr:&(new Plugin(h))->api;}};
 }
 extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry{
     CLAP_VERSION,[](const char*){return true;},[](){},

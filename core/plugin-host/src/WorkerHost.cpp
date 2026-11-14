@@ -580,6 +580,7 @@ namespace oscairn
                 // The plugin's window, as the engine last asked; one that will not open does not stop the restart.
                 // shortcut: a window the person closed in the old worker opens again; the worker does not report closing.
                 if(!windowTitle_.empty()) try { process()->exchange(header(Op::Window).u8(1).str(windowTitle_).data); } catch(const std::exception&) {}
+                if(activeOutputs_) process()->exchange(header(Op::ActiveOutputs).u64(*activeOutputs_).data); // the ports the engine takes sound from, as last told
             }
             bool hasWindow() const override { return window_; }
             void showWindow(bool show, const std::string& title) override
@@ -733,6 +734,12 @@ namespace oscairn
             void forget() { declared_.reset(); }                                // under control
             uint32_t workerNode() const { return node_; }                      // under control
             void setMemoryRoom(uint64_t bytes) override { request(Op::SetMemoryRoom, Writer().u64(bytes)); }
+            void setActiveOutputs(uint64_t ports) override
+            {
+                auto lock = locked();
+                activeOutputs_ = ports;
+                if(!process()->failed.load()) try { process()->exchange(header(Op::ActiveOutputs).u64(ports).data); } catch(const std::exception&) {} // a worker down is told as it restarts (restore)
+            }
             uint32_t soundContextCapacity() const noexcept override { return contexts_; }
             std::vector<oscairn_sound_context_info_t> soundContexts() const override
             {
@@ -1572,6 +1579,7 @@ namespace oscairn
             std::vector<uint8_t> clapNotes_;
             bool state_ = false, effects_ = false, window_ = false, snapshots_ = false, ringOut_ = false, savesSounds_ = false, voiceBudget_ = false, honorsVolume_ = false;
             std::string windowTitle_; // the window the engine last opened, for a restarted worker; under control
+            std::optional<uint64_t> activeOutputs_; // the output ports the engine last said it takes sound from, for a restarted worker
             int shm_ = -1;
             Shared* shared_ = nullptr; size_t bytes_ = 0;
             uint32_t capacity_ = 0;

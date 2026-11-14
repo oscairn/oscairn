@@ -302,6 +302,33 @@ namespace oscairn
         staticPans_.insert(live.passed.begin(), live.passed.end());
         for(const auto bus : live.passed) for(const auto& [send, slot] : sendSlots_) if(send.first == bus) staticSends_.insert(send);
         writeLiveGains(); // the plan playing names the same slots, so they apply at once
+        tellActiveOutputs();
+    }
+
+    // Each plugin with several audio outputs is told which of them the graph takes sound from
+    // (CLAP's audio-ports-activation): its main ports always, any other port with a route from it,
+    // as a ports split's lane gives one. A plugin is told once, then at each change.
+    void Session::tellActiveOutputs()
+    {
+        const auto routes = graph_.describe().audioRoutes;
+        std::map<NodeId, std::pair<std::weak_ptr<PluginHost>, uint64_t>> told;
+        for(const auto& [id, name] : nodes_)
+        {
+            if(!graph_.contains(id)) continue;
+            const auto host = graph_.node(id).host;
+            const auto& ports = host->outputPorts();
+            if(ports.size() < 2) continue;
+            const auto main = host->mainAudioPorts(false);
+            uint64_t mask = 0;
+            for(size_t i = 0; i < ports.size() && i < 64; ++i)
+                if(std::find(main.begin(), main.end(), ports[i].id) != main.end() ||
+                   std::any_of(routes.begin(), routes.end(), [&](const AudioConnection& r) { return r.from.node == id && r.from.port == ports[i].id; }))
+                    mask |= uint64_t(1) << i;
+            const auto was = activeOutputs_.find(id);
+            if(was == activeOutputs_.end() || was->second.first.lock() != host || was->second.second != mask) host->setActiveOutputs(mask);
+            told[id] = {host, mask};
+        }
+        activeOutputs_ = std::move(told);
     }
 
     void Session::assignSlots()

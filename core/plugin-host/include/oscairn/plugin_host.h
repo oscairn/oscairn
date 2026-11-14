@@ -55,6 +55,9 @@ namespace oscairn
         // an effect context made from it); one declaring more is refused before it activates. 0: no limit.
         virtual std::optional<oscairn_memory_t> declaredMemory() const { return {}; }
         virtual void setMemoryRoom(uint64_t) {}
+        // Control thread. The audio output ports the graph takes sound from, bit i for port index i:
+        // CLAP's audio-ports-activation tells the plugin (kick::clap::Host::setActiveOutputs).
+        virtual void setActiveOutputs(uint64_t) {}
         // Control thread. Save to a NEW directory; restore from a saved directory.
         // Raw adapters may silence/reset during restore. Graph-pooled instruments instead
         // prepare/select a spare; state export still snapshots the selected channel-0 instance.

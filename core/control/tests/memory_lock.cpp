@@ -90,17 +90,15 @@ int main(int argc, char** argv)
         float l[frames], r[frames]; float* out[]{l, r};
         std::vector<kick::clap::Event> none, on{kick::clap::Event::note(true, 60, .8), kick::clap::Event::note(true, 64, .8)},
             off{kick::clap::Event::note(false, 60, 0), kick::clap::Event::note(false, 64, 0)};
+        // Each 100 blocks: notes on, the same notes struck again while held, then off.
         auto play = [&](int blocks) {
             for(int i = 0; i < blocks; ++i)
             {
-                session.process(out, frames, i % 100 == 0 ? on : i % 100 == 50 ? off : none);
+                session.process(out, frames, i % 100 == 0 || i % 100 == 25 ? on : i % 100 == 50 ? off : none);
                 std::this_thread::sleep_for(std::chrono::microseconds(500));
             }
         };
-        // The warm-up: each plugin's first blocks and notes, and a held note struck again (the second
-        // play starts with its notes on), whose first time costs the Synth's worker two faults (seen
-        // in the Linux container, as before this test's limits; not found why).
-        play(400); play(400);
+        // From the first block: each plugin's first blocks and notes are the audio path too.
         session.engineTiming(true);
         const auto before = faults();
         play(2000);

@@ -439,6 +439,11 @@ namespace oscairn::worker
             auto& bell = *a.bell;
             role = Role::Audio;
             makeRealtime(1e6 * a.frames / a.rate); // the block period, not the larger shared buffer
+#ifdef RUSAGE_THREAD
+            // Faults counted from here, rendering: the thread's own start (its stack, its scheduling) is not the audio path.
+            rusage started{}; getrusage(RUSAGE_THREAD, &started);
+#endif
+
             std::chrono::steady_clock::time_point periodStart{};
             std::chrono::nanoseconds period{};
             uint32_t spin = 0; // the spinNs of the last pass's requests
@@ -476,8 +481,8 @@ namespace oscairn::worker
                     for(uint32_t i = 0; i < n; ++i)
                     {
                         auto& s = *rendered[i]->shared;
-                        s.minorFaults.store(uint64_t(u.ru_minflt), std::memory_order_relaxed);
-                        s.majorFaults.store(uint64_t(u.ru_majflt), std::memory_order_relaxed);
+                        s.minorFaults.store(uint64_t(u.ru_minflt - started.ru_minflt), std::memory_order_relaxed);
+                        s.majorFaults.store(uint64_t(u.ru_majflt - started.ru_majflt), std::memory_order_relaxed);
                         s.involuntarySwitches.store(uint64_t(u.ru_nivcsw), std::memory_order_relaxed);
                     }
 #else
@@ -535,6 +540,7 @@ namespace oscairn::worker
                 void* memory = mmap(nullptr, n->bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
                 close(fd);
                 if(memory == MAP_FAILED) throw std::runtime_error("Cannot map shared memory");
+                dirtyPages(memory, n->bytes); // before the audio thread writes it (the engine waits for this reply)
                 auto& s = *(n->shared = static_cast<Shared*>(memory));
                 mapped[index].store(n->shared);
                 n->publish();
@@ -616,6 +622,7 @@ namespace oscairn::worker
                     close(fd);
                     if(memory == MAP_FAILED) throw std::runtime_error("Cannot map the worker's doorbell");
                     if(audioThread.joinable()) { munmap(memory, sizeof(Doorbell)); throw std::runtime_error("Worker already started"); }
+                    dirtyPages(memory, sizeof(Doorbell));
                     rate = r.f64(); frames = r.u32(); mode = r.u8() ? ProcessingMode::Offline : ProcessingMode::Realtime;
                     sound.bell = static_cast<Doorbell*>(memory); sound.rate = rate; sound.frames = frames;
                     served.bell = sound.bell; faultBell.store(sound.bell);

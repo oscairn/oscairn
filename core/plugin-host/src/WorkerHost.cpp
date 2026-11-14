@@ -178,6 +178,7 @@ namespace oscairn
                 fcntl(bellFd, F_SETFD, FD_CLOEXEC); // other plugins' workers must not inherit it
                 void* memory = ftruncate(bellFd, off_t(sizeof(Doorbell))) == 0 ? mmap(nullptr, sizeof(Doorbell), PROT_READ | PROT_WRITE, MAP_SHARED, bellFd, 0) : MAP_FAILED;
                 if(memory == MAP_FAILED) { close(bellFd); throw std::runtime_error("Cannot map a worker's doorbell"); }
+                dirtyPages(memory, sizeof(Doorbell)); // no first write faults on the audio thread (Worker.h)
                 bell = new(memory) Doorbell();
             }
 
@@ -481,6 +482,7 @@ namespace oscairn
 #endif
                     void* memory = mmap(nullptr, bytes_, PROT_READ | PROT_WRITE, MAP_SHARED, shm_, 0);
                     if(memory == MAP_FAILED) throw std::runtime_error("Cannot map worker shared memory");
+                    dirtyPages(memory, bytes_); // no first write faults on the audio thread (Worker.h)
                     shared_ = new(memory) Shared();
                     inChannels_ = channels(inputs_); outChannels_ = channels(outputs_) + ring;
                     shared_->inputChannels = inChannels_; shared_->outputChannels = outChannels_; shared_->ringOutChannels = ring;

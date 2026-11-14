@@ -643,10 +643,19 @@ stay resident too, so a sampler or a reverb never takes a page fault from disk w
   in as it grows. Measured in the Linux container (an engine and five workers on the null device,
   one Performance and two instances kept warm): the engine 60 to 62 MB PSS before, 47 to 49 after;
   each fixture worker 0.5 MB less. `control-memory-lock` checks that no page fault reaches the
-  thread rendering or a worker's audio thread across 2,000 blocks with notes. Found while
-  building it, not explained: the first time a held note is struck again on an instrument two
-  parts share, its worker's audio thread takes two minor faults (in the container, with the old
-  sizes too); the test plays that once before it counts.
+  thread rendering or a worker's audio thread across 2,000 blocks with notes, a held note struck
+  again among them, counted from the first block.
+- Locked is not yet written (2026-11-14). Locking maps a shared page (a worker's block, its
+  doorbell) on a read, clean, and the first write to it faults to mark it dirty where the CPU does
+  not track dirty pages itself (ARMv8.0, the FANTOM-07's Cortex-A53, has no hardware dirty bits).
+  In the Linux container, counted from the first block, the workers' audio threads took 31 faults
+  and the thread rendering 1 or 2: in the first blocks, and two the first time a held note was
+  struck again on an instrument two parts share (the pages then first written, the ring-out
+  channels by what the synth writes then; not traced to the address). Both sides now write every page of the block and the doorbell once
+  as they map them (an atomic add of 0, keeping what is there): 2 left. Those were the vDSO's clock
+  page, which cannot be locked and is mapped at the process's first clock read, in a worker its
+  audio thread's first wait; `applyMemoryPolicy` now reads the clock at the start: 0. A worker's
+  faults are counted from its audio thread's start, not its creation.
 - glibc's allocator arenas: each is a 64 MiB reservation with no memory behind it until used
   (the seven on the FANTOM-07 cost no resident memory), but what other threads freed stays in its
   arena, locked. At `instrument` and above a process has at most two (`M_ARENA_MAX`); the audio

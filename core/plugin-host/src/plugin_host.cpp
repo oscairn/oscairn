@@ -295,6 +295,9 @@ namespace oscairn
 
     std::string applyMemoryPolicy(int oomScoreAdj)
     {
+        // The vDSO's clock data page cannot be locked and is mapped into the process at its first read: a
+        // worker whose first clock read was its audio thread's took a fault there. Read now, at the start.
+        (void)std::chrono::steady_clock::now();
         const char* level=std::getenv("OSCAIRN_RELIABILITY");
         if(!level || (std::string(level)!="instrument" && std::string(level)!="pass-through"))return {};
 #ifdef __linux__

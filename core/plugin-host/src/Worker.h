@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 namespace oscairn::worker
 {
@@ -65,6 +66,19 @@ namespace oscairn::worker
         float* output(uint32_t channel) noexcept { return input(inputChannels + channel); }
         static size_t bytes(uint32_t inputs, uint32_t outputs, uint32_t frames) { return sizeof(Shared) + sizeof(float) * size_t(inputs + outputs) * frames; }
     };
+    // Writes every page of a shared mapping once, keeping what is there, so no first write on an audio
+    // thread faults. Locking (mlockall) maps a shared page on a read, clean, and the first write to it
+    // then faults to mark it dirty where the CPU does not track dirty pages itself (ARMv8.0 has no
+    // hardware dirty bits: the FANTOM-07's Cortex-A53). In the Linux container the audio threads took
+    // 29 to 30 such faults from the first block (two of them the first time a held note was struck
+    // again), the engine's thread 1 to 2. An atomic add of 0 to each page's first word: safe beside the
+    // other process's writes. Off the audio path, before the mapping is used there.
+    inline void dirtyPages(void* memory, size_t bytes) noexcept
+    {
+        const size_t page = size_t(sysconf(_SC_PAGESIZE));
+        for(size_t at = 0; at < bytes; at += page)
+            std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(static_cast<char*>(memory) + at)).fetch_add(0, std::memory_order_relaxed);
+    }
     // SysEx bytes cross the shared block in its pools, where the event's buffer holds an offset:
     // share copies them into the pool and stores the offset; unshare points the event at the
     // pool in this process's mapping, false when the offset or size does not fit the pool (the

@@ -5,7 +5,8 @@
 import { Theme } from "theme.slint";
 import { Bar, TopBar } from "topbar.slint";
 import { Home, HomeState, TileData } from "home.slint";
-export { Theme, Bar, HomeState, TileData }
+import { Setlist, SetlistState, SlotData, ListRow } from "setlist.slint";
+export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -40,6 +41,12 @@ export component Shell inherits Window {
         width: parent.width;
         height: parent.height - Theme.bar-height;
         visible: root.screen == 0;
+    }
+    Setlist {
+        y: Theme.bar-height;
+        width: parent.width;
+        height: parent.height - Theme.bar-height;
+        visible: root.screen == 1;
     }
     if root.screen == 2: Text {
         y: Theme.bar-height;

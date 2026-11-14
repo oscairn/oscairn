@@ -9,6 +9,7 @@ mod client;
 mod home;
 mod nav;
 mod profile;
+mod setlist;
 mod settings;
 mod shell;
 mod theme;

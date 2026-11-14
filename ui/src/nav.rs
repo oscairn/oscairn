@@ -82,6 +82,13 @@ impl Totals {
                 _ => {}
             }
         }
+        // Between two reads the moves came first as far as anyone can tell: a turn then a press
+        // confirms where the turn went.
+        actions.sort_by_key(|a| match a {
+            Action::Move { pane, .. } => (0, *pane),
+            Action::Confirm(pane) => (1, *pane),
+            _ => (2, None),
+        });
         actions
     }
 
@@ -128,16 +135,6 @@ impl Cursor {
     pub fn clear(self) -> Cursor {
         Cursor { at: None, ..self }
     }
-    /// A page back or on, with the cursor (if any) on the same place in it.
-    pub fn paged(self, by: i64) -> Cursor {
-        let pages = self.count.div_ceil(self.per_page).max(1) as i64;
-        let page = (self.first / self.per_page) as i64;
-        let first = ((page + by).clamp(0, pages - 1) as usize) * self.per_page;
-        match self.at {
-            Some(at) => self.to(first + at % self.per_page),
-            None => Cursor { first, ..self },
-        }
-    }
 }
 
 #[cfg(test)]
@@ -179,9 +176,6 @@ mod tests {
         let c = c.moved(1);
         assert_eq!((c.at, c.first), (Some(10), 10), "past the page: the next page");
         assert_eq!(c.moved(99).at, Some(24));
-        assert_eq!(c.paged(1).at, Some(20));
-        assert_eq!(c.paged(9).first, 20);
-        assert_eq!(Cursor::new(25, 10).paged(1), Cursor { at: None, count: 25, per_page: 10, first: 10 });
         assert_eq!(c.clear().at, None);
         let empty = Cursor::new(0, 10);
         assert_eq!((empty.moved(3).at, empty.to(5).at), (None, None));

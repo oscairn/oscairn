@@ -9,7 +9,7 @@ use crate::shell::{self, Request};
 use crate::theme;
 use crate::topbar::{MeterSettings, Show};
 use crate::nav::Action;
-use crate::{Bar, HomeState, Shell};
+use crate::{Bar, HomeState, SetlistState, Shell};
 use serde_json::json;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
@@ -45,6 +45,15 @@ pub struct Screen {
 
 impl Screen {
     pub fn new() -> Screen {
+        // The data and configuration folders of the tests' own, never the user's: the shell
+        // keeps the Setlist's state and reads the user's choices there. Set once, before any
+        // test reads them.
+        static FOLDERS: std::sync::Once = std::sync::Once::new();
+        FOLDERS.call_once(|| {
+            let root = std::env::temp_dir().join(format!("oscairn-ui-tests-{}", std::process::id()));
+            std::env::set_var("OSCAIRN_DATA_HOME", root.join("data"));
+            std::env::set_var("OSCAIRN_CONFIG_HOME", root.join("config"));
+        });
         let _ = slint::platform::set_platform(Box::new(Headless)); // once per test thread
         let ui = Shell::new().unwrap();
         let window = WINDOW.with(|w| w.borrow_mut().take()).unwrap();
@@ -218,6 +227,8 @@ fn the_top_bar_follows_the_engine() {
     f.answer("graph.get", json!({"scene": 1, "scenes": [{"id": 1, "name": "Verse"}]}));
     f.answer("library.query", json!({"items": [], "total": 24}));
     f.answer("library.query", json!({"items": [], "total": 1}));
+    f.answer("library.query", json!({"items": [], "total": 0})); // the Setlist's setlists
+    f.answer("library.query", json!({"items": [], "total": 0})); // and Performances
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null"}})));
     f.pump();
     f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
@@ -328,4 +339,106 @@ fn themes_switch_live_and_repaint_once() {
     assert_eq!((g.get_font_scale(), g.get_radius()), (1.4, 16.));
     assert_eq!(g.get_border(), slint::Color::from_rgb_u8(0x3a, 0x41, 0x4b), "an unusable color: the default theme's");
     assert_eq!(g.get_focus(), slint::Color::from_rgb_u8(0xff, 0xff, 0x00), "focus: the accent when the theme has none");
+}
+
+impl Fixture {
+    /// Answers the next `n` requests as a quiet engine would: setlists, Performances and a setlist
+    /// from `content`, anything else `{}`.
+    fn serve(&mut self, n: usize, content: &serde_json::Value) {
+        for _ in 0..n {
+            let request = self.engine.request();
+            let method = request["method"].as_str().unwrap_or_default().to_string();
+            let result = match method.as_str() {
+                "library.query" if request["params"]["type"] == "oscairn.setlist" => json!({"items": content["setlists"], "total": 2}),
+                "library.query" if request["params"]["limit"] == 1000 => json!({"items": content["performances"], "total": 40}),
+                "library.query" => json!({"items": [], "total": 0}),
+                "setlists.get" => json!({"setlist": content["setlist"]}),
+                _ => json!({}),
+            };
+            self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+            self.pump();
+        }
+    }
+
+    fn reply(&mut self, request: &serde_json::Value, body: serde_json::Value) {
+        let mut doc = json!({"jsonrpc": "2.0", "id": request["id"]});
+        doc.as_object_mut().unwrap().extend(body.as_object().unwrap().clone());
+        self.engine.send(&format!("{doc}\n"));
+        self.pump();
+    }
+
+    fn navigation(&mut self, n: serde_json::Value) {
+        self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controllers", "params": {"navigation": n}})));
+        self.pump();
+    }
+}
+
+// The Setlist on the shell: two panes, E1 (pane 0) through the setlists and E6 (pane 1) or the
+// dial through the slots; a view of slots at a time, the cursor past it turning a whole view; a
+// slot opens only on Confirm or a tap; a slot chosen while one opens waits, the last chosen winning;
+// a busy answer is tried again as the next; Cancel drops the cursor, then goes back.
+#[test]
+fn setlist_by_panes_pages_and_the_last_one_chosen() {
+    let performances: Vec<_> = (0..40).map(|i| json!({"id": format!("p{i}"), "name": format!("Song {i}"), "color": "", "path": format!("/lib/p{i}")})).collect();
+    let slots: Vec<_> = (0..30).map(|i| json!({"id": format!("p{i}"), "name": format!("Song {i}"), "color": "", "label": ""})).collect();
+    let content = json!({
+        "setlists": [{"id": "s1", "name": "Friday"}, {"id": "s2", "name": "Saturday"}],
+        "performances": performances,
+        "setlist": {"format": "oscairn.setlist", "version": 2, "info": {"id": "s1", "name": "Friday"}, "display": {"mode": "list"},
+            "pages": [{"name": "Set 1", "slots": slots}, {"name": "Encore", "slots": [null, {"id": "p39", "name": "Song 39", "color": "#3366cc", "label": ""}]}]},
+    });
+    let mut f = Fixture::new("setlist");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
+    // Everything asked on connecting answered: the shell's seven, the Setlist's two, then the setlist.
+    f.serve(10, &content);
+    let rows = |f: &Fixture| f.screen.ui.global::<SetlistState>().get_slots().iter().collect::<Vec<_>>();
+    let per_view = f.screen.ui.global::<SetlistState>().get_slots_per_view() as usize;
+    assert!(per_view >= 5, "a list view holds {per_view}");
+    assert_eq!((rows(&f).len(), rows(&f)[0].title.as_str(), f.screen.ui.global::<SetlistState>().get_name().as_str()), (per_view, "Song 0", "Friday"));
+    f.screen.frame();
+    f.screen.save("setlist");
+    assert_eq!(f.screen.frame(), None, "at rest");
+    // The panel: a baseline, then E6 (pane 1) twice: the cursor shown on the first slot, then on.
+    let nav = |m0: i64, m1: i64, m: i64, c1: i64, cancel: i64| json!({"move:0": m0, "move:1": m1, "move": m, "confirm:1": c1, "cancel": cancel});
+    f.navigation(nav(0, 0, 0, 0, 0));
+    f.navigation(nav(0, 1, 0, 0, 0));
+    f.screen.frame();
+    f.navigation(nav(0, 2, 0, 0, 0));
+    let cursor = |f: &Fixture| rows(f).iter().position(|r| r.cursor);
+    assert_eq!(cursor(&f), Some(1));
+    let repainted = f.screen.frame().unwrap();
+    assert!(repainted.3 <= 2 * 56 + 4 + 2, "a move repaints the two rows: {repainted:?}");
+    // The dial, on the pane last touched: past the view, a whole view on, never scrolled.
+    let pv = per_view as i64;
+    f.navigation(nav(0, 2, pv, 0, 0));
+    assert_eq!((cursor(&f), rows(&f)[0].number as usize), (Some(1), per_view + 1), "the next view, the cursor on its second row");
+    assert!(f.screen.ui.get_screen() == 1 && rows(&f).iter().all(|r| !r.playing), "nothing opened by moving");
+    // Confirm on pane 1: that slot opens.
+    f.navigation(nav(0, 2, pv, 1, 0));
+    let first = f.engine.request();
+    assert_eq!((first["method"].as_str(), first["params"]["id"].as_str()), (Some("library.load"), Some(&*format!("p{}", per_view + 1))));
+    // While it opens: two more chosen by tap; only the last opens next.
+    f.screen.ui.global::<SetlistState>().invoke_tapped_slot(3);
+    f.screen.ui.global::<SetlistState>().invoke_tapped_slot(4);
+    f.reply(&first, json!({"result": {}}));
+    let next = f.engine.request();
+    assert_eq!(next["params"]["id"].as_str(), Some(&*format!("p{}", per_view + 4)), "the last one chosen");
+    // Busy (another client's long request): tried again, and it opens.
+    f.reply(&next, json!({"error": {"code": -32009, "message": "busy"}}));
+    let again = f.engine.request();
+    assert_eq!(again["params"]["id"], next["params"]["id"]);
+    f.reply(&again, json!({"result": {}}));
+    assert_eq!(f.engine.request()["method"], "performance.prepare", "the next one prepared");
+    assert!(rows(&f)[4].playing);
+    // E1 (pane 0): the setlists' cursor.
+    f.navigation(nav(2, 2, pv, 1, 0));
+    let names = f.screen.ui.global::<SetlistState>().get_setlists().iter().collect::<Vec<_>>();
+    assert_eq!((names[0].cursor, names[0].shown), (true, true), "shown on the first setlist by the first move");
+    // Cancel: the cursors go; Cancel again: Home.
+    f.navigation(nav(2, 2, pv, 1, 1));
+    assert_eq!((cursor(&f), f.screen.ui.get_screen()), (None, 1));
+    f.navigation(nav(2, 2, pv, 1, 2));
+    assert_eq!(f.screen.ui.get_screen(), 0);
 }

@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The Setlist screen (src/setlist.rs): the setlists on the left, the open setlist's slots on the
+// right, a view of them at a time (a grid as the setlist's display says, or a list), Previous and
+// Next under them. Each pane's cursor is a border; the slot playing is marked apart from it.
+
+import { Theme } from "theme.slint";
+
+export struct ListRow {
+    name: string,
+    cursor: bool,
+    shown: bool, // the setlist open on the right
+}
+
+export struct SlotData {
+    number: int,
+    title: string,
+    note: string, // why it does not open: a placeholder, not in the library
+    tint: color,
+    tinted: bool,
+    empty: bool,
+    opens: bool,
+    playing: bool,
+    cursor: bool,
+}
+
+// What the Setlist shows, set by setlist.rs.
+export global SetlistState {
+    in property <[ListRow]> setlists;
+    in property <[SlotData]> slots;
+    in property <string> name;
+    in property <string> page;
+    in property <string> view; // which slots of the page show: "1–12 of 30"
+    in property <string> message;
+    in property <bool> grid;
+    in property <int> columns: 4;
+    in property <int> rows: 3;
+    in property <bool> can-previous;
+    in property <bool> can-next;
+    // How many rows of setlists, and how many slots, the screen holds: set by the screen.
+    in-out property <int> list-rows: 1;
+    in-out property <int> slots-per-view: 1;
+    callback tapped-slot(int);
+    callback tapped-setlist(int);
+    callback step(int);
+}
+
+component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+    border-radius: Theme.radius;
+    background: !enabled ? Theme.surface : touch.pressed ? Theme.accent : Theme.raised;
+    Text {
+        text: root.text;
+        color: root.enabled ? Theme.text : Theme.muted;
+        font-size: Theme.button;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Setlist inherits Rectangle {
+    property <length> row-height: Theme.touch;
+    property <length> list-width: 280px;
+    property <length> header: Theme.touch;
+    property <length> footer: Theme.touch + 24px + Theme.gap;
+    property <length> slots-x: list-width + 2 * Theme.margin;
+    property <length> slots-width: self.width - slots-x - Theme.margin;
+    property <length> slots-height: self.height - header - footer - 2 * Theme.margin - 2 * Theme.gap;
+    property <int> across: SetlistState.grid ? SetlistState.columns : 1;
+    property <int> down: SetlistState.grid ? SetlistState.rows : max(1, floor((slots-height + Theme.gap) / (56px + Theme.gap)));
+    property <length> cell-width: (slots-width - (across - 1) * Theme.gap) / across;
+    property <length> cell-height: SetlistState.grid ? (slots-height - (down - 1) * Theme.gap) / down : 56px;
+    // The sizes setlist.rs pages by: settled whenever the screen's size or the setlist's display changes.
+    changed down => { SetlistState.slots-per-view = across * down; }
+    changed across => { SetlistState.slots-per-view = across * down; }
+    changed height => { SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + Theme.gap) / (row-height + Theme.gap))); }
+    init => {
+        SetlistState.slots-per-view = across * down;
+        SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + Theme.gap) / (row-height + Theme.gap)));
+    }
+
+    for row[i] in SetlistState.setlists: Rectangle {
+        x: Theme.margin;
+        y: Theme.margin + i * (root.row-height + Theme.gap);
+        width: root.list-width;
+        height: root.row-height;
+        background: row.shown ? Theme.raised : Theme.surface;
+        border-radius: Theme.radius;
+        border-width: row.cursor ? 2px : 0px;
+        border-color: Theme.focus;
+        Text {
+            x: 12px;
+            width: parent.width - 24px;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Theme.body;
+            font-weight: row.shown ? 700 : 400;
+            color: Theme.text;
+            text: row.name;
+        }
+        TouchArea {
+            clicked => { SetlistState.tapped-setlist(i); }
+        }
+    }
+
+    Text {
+        x: root.slots-x;
+        y: Theme.margin;
+        width: root.slots-width / 2;
+        height: root.header;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.title;
+        font-weight: 700;
+        color: Theme.text;
+        text: SetlistState.name;
+    }
+    Text {
+        x: root.slots-x + root.slots-width / 2;
+        y: Theme.margin;
+        width: root.slots-width / 2;
+        height: root.header;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.body;
+        color: Theme.muted;
+        text: SetlistState.page + "   " + SetlistState.view;
+    }
+
+    for slot[i] in SetlistState.slots: Rectangle {
+        x: root.slots-x + mod(i, root.across) * (root.cell-width + Theme.gap);
+        y: Theme.margin + root.header + Theme.gap + floor(i / root.across) * (root.cell-height + Theme.gap);
+        width: root.cell-width;
+        height: root.cell-height;
+        border-radius: Theme.radius;
+        background: slot.empty ? Theme.background : slot.tinted ? slot.tint.mix(Theme.surface, slot.playing ? 0.85 : 0.45) : slot.playing ? Theme.raised : Theme.surface;
+        // The slot playing: an accent edge on its left; the cursor: a focus border round it.
+        if slot.playing: Rectangle {
+            x: 0;
+            width: 6px;
+            background: Theme.accent;
+            border-radius: Theme.radius;
+        }
+        Rectangle {
+            border-radius: Theme.radius;
+            border-width: slot.cursor ? 2px : 0px;
+            border-color: Theme.focus;
+        }
+        if !slot.empty: Text {
+            x: 14px;
+            y: 6px;
+            text: slot.number;
+            color: Theme.muted;
+            font-size: Theme.small;
+            font-weight: 700;
+        }
+        if !slot.empty: Text {
+            x: SetlistState.grid ? 14px : 64px;
+            width: parent.width - self.x - 10px;
+            height: parent.height;
+            text: slot.note == "" ? slot.title : slot.title + "\n" + slot.note;
+            color: slot.opens ? Theme.text : Theme.muted;
+            font-size: SetlistState.grid ? Theme.title : Theme.body;
+            font-weight: slot.playing ? 700 : 400;
+            wrap: word-wrap;
+            overflow: elide;
+            horizontal-alignment: SetlistState.grid ? center : left;
+            vertical-alignment: center;
+        }
+        TouchArea {
+            clicked => { SetlistState.tapped-slot(i); }
+        }
+    }
+
+    Text {
+        x: root.slots-x;
+        y: root.height - root.footer - Theme.margin;
+        width: root.slots-width;
+        height: 24px;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: SetlistState.message;
+    }
+    HorizontalLayout {
+        x: root.slots-x;
+        y: root.height - Theme.margin - Theme.touch;
+        width: root.slots-width;
+        height: Theme.touch;
+        spacing: Theme.gap;
+        Button {
+            text: "Previous";
+            enabled: SetlistState.can-previous;
+            clicked => { SetlistState.step(-1); }
+        }
+        Button {
+            text: "Next";
+            enabled: SetlistState.can-next;
+            clicked => { SetlistState.step(1); }
+        }
+    }
+}

@@ -52,4 +52,15 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   shown only, none while handing over; `controllers.view {lists}` on connect and around a
   handover. Keys and cursor semantics as ListCursor (no cursor until the first move, Cancel
   drops it then goes back, tap drops it, 2 px accent border). 25 passed.
+- Step 4, Setlist: `setlist.rs` (the prototype's model and screen on the shell), `slint/setlist.slint`:
+  two panes (setlists, slots), pane 0 / pane 1 / the pane last touched; a view of slots at a time,
+  the cursor past it turning a view; Confirm or tap opens; while one opens the last chosen waits
+  and opens next; a busy (-32009) load is tried again as the next; the next prepared; state in the
+  JUCE Setlist app's AppData/oscairn.setlist/state.json. Test against a fake engine. 29 passed.
+- MISTAKE found and fixed: before the fix, the Setlist test wrote the user's real
+  `~/Library/Application Support/Oscairn/AppData/oscairn.setlist/state.json` (now
+  `{"current":13,"setlist":"s1"}`, written 14:26 by a test run; what was there before is lost).
+  The tests now set OSCAIRN_DATA_HOME and OSCAIRN_CONFIG_HOME to a temporary folder first;
+  checked: a later run left the file's time unchanged. Nav totals now ordered moves, confirms,
+  cancels within one read.
 </content>

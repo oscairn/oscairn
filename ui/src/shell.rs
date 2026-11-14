@@ -12,8 +12,9 @@ use crate::client::{Client, Error, Event, BUSY};
 use crate::home::{self, Home};
 use crate::nav::{self, Action};
 use crate::profile::Profile;
+use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, HomeState, Shell, TileData};
+use crate::{Bar, HomeState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -34,12 +35,17 @@ pub enum Request {
     Library(bool),
     /// controllers.view: whether lists are on screen, so the panel's navigate controls navigate.
     View,
+    Setlist(setlist::Request),
 }
 
 impl Request {
     /// The engine taking long over it is shown: the musician waits on it.
     fn waited_on(&self) -> bool {
-        matches!(self, Request::Reopen)
+        match self {
+            Request::Reopen => true,
+            Request::Setlist(r) => setlist::Screen::waits(r),
+            _ => false,
+        }
     }
 }
 
@@ -83,6 +89,7 @@ pub struct App {
     handover: Option<&'static str>,
     /// The panel's navigation totals as last read.
     totals: nav::Totals,
+    setlist: setlist::Screen,
 }
 
 thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
@@ -123,6 +130,12 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, post: impl Fn(Event
     ui.global::<HomeState>().on_tapped(|i| with_app(|a| a.tap(i)));
     ui.global::<Bar>().on_home(|| with_app(|a| a.go(Screen::Home)));
     ui.on_key(|text| nav::from_key(&text).map(act).is_some());
+    let lists = ui.global::<SetlistState>();
+    lists.on_tapped_slot(|i| with_app(|a| a.on_setlist(|s| s.tap_slot(i.max(0) as usize))));
+    lists.on_tapped_setlist(|i| with_app(|a| a.on_setlist(|s| s.tap_setlist(i.max(0) as usize))));
+    lists.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
+    // The JUCE Setlist app's own state file, so either opens where the other left off.
+    let state = crate::settings::data_dir().map(|d| d.join("AppData/oscairn.setlist/state.json"));
     APP.with(|a| {
         let mut app = App {
             ui: ui.as_weak(),
@@ -137,6 +150,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, post: impl Fn(Event
             tiles,
             handover: None,
             totals: nav::Totals::default(),
+            setlist: setlist::Screen::new(ui, state),
         };
         app.show_home();
         *a.borrow_mut() = Some(app);
@@ -208,6 +222,7 @@ impl App {
                 self.ask_performance();
                 self.send(Request::Library(false), "library.query", json!({"kind": "performance", "limit": 1}));
                 self.send(Request::Library(true), "library.query", json!({"kind": "sound", "limit": 1}));
+                self.on_setlist(setlist::Screen::connected);
             }
             Event::Lost(why) => {
                 if let Some(ui) = self.ui() {
@@ -256,6 +271,10 @@ impl App {
     }
 
     fn reply(&mut self, request: Request, result: Result<Value, Error>) {
+        let request = match request {
+            Request::Setlist(r) => return self.on_setlist(|s| s.reply(r, result)),
+            other => other,
+        };
         let r = match result {
             Ok(r) => r,
             Err(e) => {
@@ -285,7 +304,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::View => {}
+            Request::Subscribe | Request::View | Request::Setlist(_) => {}
         }
     }
 
@@ -364,8 +383,13 @@ impl App {
                     self.open(app);
                 }
             }
-            (Screen::Setlist, Action::Cancel(_)) => self.go(Screen::Home),
-            (Screen::Setlist, _) => {}
+            (Screen::Setlist, _) => {
+                let mut back = false;
+                self.on_setlist(|s| back = s.act(action) == setlist::Outcome::Back);
+                if back {
+                    self.go(Screen::Home);
+                }
+            }
         }
     }
 
@@ -387,11 +411,22 @@ impl App {
         self.send(Request::View, "controllers.view", json!({"lists": lists}));
     }
 
+    /// Something for the Setlist screen, then what it asks the engine sent.
+    fn on_setlist(&mut self, f: impl FnOnce(&mut setlist::Screen)) {
+        f(&mut self.setlist);
+        for (request, method, params) in std::mem::take(&mut self.setlist.out) {
+            self.send(Request::Setlist(request), method, params);
+        }
+    }
+
     fn go(&mut self, screen: Screen) {
         if self.screen != screen {
             // A cursor drops when its screen goes, as on focus loss in the JUCE lists.
             self.home.cursor = self.home.cursor.clear();
             self.show_home();
+            if self.screen == Screen::Setlist {
+                self.on_setlist(setlist::Screen::hidden);
+            }
         }
         let was = self.screen;
         self.screen = screen;
@@ -407,6 +442,9 @@ impl App {
                 Screen::Opening => ui.get_opening(),
             });
             bar.set_home_button(screen != Screen::Home);
+        }
+        if screen == Screen::Setlist {
+            self.on_setlist(setlist::Screen::shown);
         }
     }
 

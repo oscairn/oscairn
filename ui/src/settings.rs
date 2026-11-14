@@ -21,6 +21,20 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(base.join("Oscairn"))
 }
 
+/// OSCAIRN_DATA_HOME, else the platform's place for Oscairn's data, as the engine has it
+/// (core/control/src/library.cpp): where the apps keep their state (AppData/<app id>).
+pub fn data_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("OSCAIRN_DATA_HOME").filter(|d| !d.is_empty()) {
+        return Some(dir.into());
+    }
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    if cfg!(target_os = "macos") {
+        return Some(home.join("Library/Application Support/Oscairn"));
+    }
+    let base = std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or(home.join(".local/share"));
+    Some(base.join("oscairn"))
+}
+
 fn read(name: &str) -> Option<String> {
     std::fs::read_to_string(config_dir()?.join(name)).ok()
 }

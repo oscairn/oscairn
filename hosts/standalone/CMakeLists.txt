@@ -317,6 +317,16 @@ add_dependencies(oscairn_plugin_crash_test oscairn_basic_synth oscairn-plugin-sc
 add_test(NAME desktop-plugin-crash COMMAND oscairn_plugin_crash_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan>
     $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-process_crash>)
 set_tests_properties(desktop-pad-editor desktop-plugin-crash PROPERTIES TIMEOUT 60 ENVIRONMENT "${worker_environment}")
+# What the device's screens draw (RFC 0045), counted: none at rest; scrolling the Library, its list.
+juce_add_console_app(oscairn_ui_draw_test PRODUCT_NAME "Oscairn UI Draw Test")
+target_sources(oscairn_ui_draw_test PRIVATE tests/ui_draw.cpp PaintCounter.cpp ${settings_sources} DesktopShell.cpp PlayView.cpp DesktopProfile.cpp LibraryPane.cpp Catalog.cpp Launcher.cpp Recording.cpp Setlist.cpp ParameterGrid.cpp CompactEditor.cpp ZoneEditor.cpp Screen.cpp Panel.cpp Layout.cpp PadEditor.cpp PartsView.cpp PartsModel.cpp Engine.cpp Theme.cpp SoundPickerModel.cpp)
+target_include_directories(oscairn_ui_draw_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/core/control/third_party)
+target_link_libraries(oscairn_ui_draw_test PRIVATE oscairn_standalone_icons oscairn_audio_host oscairn_host_process oscairn_control_socket juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_compile_definitions(oscairn_ui_draw_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 OSCAIRN_RELEASE="${OSCAIRN_RELEASE}" OSCAIRN_SOURCE_COMMIT="${OSCAIRN_SOURCE_COMMIT}")
+add_dependencies(oscairn_ui_draw_test oscairn_basic_synth oscairn-plugin-scan)
+add_test(NAME ui-draw COMMAND oscairn_ui_draw_test "$<TARGET_FILE_DIR:oscairn_step_sequencer>" $<TARGET_FILE:oscairn-plugin-scan> "${CMAKE_CURRENT_SOURCE_DIR}/themes"
+    "${CMAKE_CURRENT_SOURCE_DIR}/layouts/kick-screen.json" "${CMAKE_CURRENT_SOURCE_DIR}/profiles/fantom-07.json")
+set_tests_properties(ui-draw PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE) # counts frames against the clock: alone
 # macOS: no test here shows a window on the screen of whoever runs it (tests/hidden_windows.mm,
 # loaded into each test and the apps it starts), but desktop-window-order, which is about windows
 # coming forward and runs only when asked.

@@ -2317,6 +2317,13 @@ int main(int argc, char** argv)
             engine.soundAction(open);
             check(!id.empty() && until([&] { return said.size() == 2; }) && said[1].find("needs 50%") != std::string::npos,
                   "opened from the library and refused: the app hears why: " + (said.size() < 2 ? std::string("nothing") : said[1]));
+            // Its own refusals are not said again from the engine's status; another client's load refused is said too.
+            for(int i = 0; i < 150; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil(10); // timer ticks, status notifications among them
+            check(said.size() == 2, "the app's own refusals are said once each: " + std::to_string(said.size()));
+            LocalClient other; other.connect(path);
+            const auto answer = other.call("performance.load", "{\"directory\":\"" + folder + "\"}", 5000);
+            check(answer.find("-32005") != std::string::npos && until([&] { return said.size() == 3; }) && said[2].find("needs 50%") != std::string::npos,
+                  "another client's load refused: the app hears why: " + (said.size() < 3 ? answer : said[2]));
             standalone::LaunchNotice notice("The Performance did not open", juce::String(said.empty() ? "" : said[0]));
             check(notice.message().contains("needs 50%") && notice.ok.isVisible() && !notice.letGo.isVisible(), "the notice over the screen says it, with OK");
         }

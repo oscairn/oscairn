@@ -312,6 +312,7 @@ namespace oscairn::standalone
         SoundPickerState soundPicker_;
         std::map<std::string,Editor> editors_;
         std::string soundMessage_;
+        std::optional<uint64_t> refusalsSeen_; uint64_t ownRefusals_=0; uint32_t refusalTicks_=0; // SessionStatus::refusedLoads said (timerCallback)
         std::string exportTarget_, exportWritten_; // an export replacing a file: the file, and where it is written first
         uint32_t soundTicks_ = 0;
         std::deque<std::function<void()>> pendingControls_;

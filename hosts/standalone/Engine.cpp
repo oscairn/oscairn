@@ -482,6 +482,8 @@ namespace oscairn::standalone
         // Not opened: said over the screen, whatever asked (a lost connection is said as one instead).
         if(onNotOpened && !result.disconnected && (reopened || soundJobKind_==SoundAction::LoadPerformance || soundJobKind_==SoundAction::LoadFromLibrary))
             if(const auto& why=reopened && result.error.empty()?result.message:result.error;!why.empty())onNotOpened(why);
+        // A load of its own the engine refused counts in its status too: not said twice (timerCallback).
+        if(loaded && !result.disconnected && (!result.error.empty() || (reopened && !result.message.empty())))++ownRefusals_;
         if(result.disconnected)
         {
             pendingControls_.clear();
@@ -804,6 +806,8 @@ namespace oscairn::standalone
     }
     void Engine::timerCallback()
     {
+        // The refusals before its first tick (before any job of its own is done) were said to whoever asked.
+        if(!refusalsSeen_ && control_)refusalsSeen_=control_->sessionStatus().refusedLoads;
         // Jobs done, in the order asked; `done` may ask another.
         while(!jobs_.empty() && jobs_.front().error.wait_for(std::chrono::seconds(0))==std::future_status::ready)
         {
@@ -835,6 +839,14 @@ namespace oscairn::standalone
             if(soundJob_.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return;
             finishSounds();
             if(soundJob_.valid())return;
+        }
+        // A Performance another client (a remote, a script) asked for that did not open: said as the app's own are.
+        if(onNotOpened && failure_.empty() && ++refusalTicks_%16==0)
+        {
+            const auto s=control_->sessionStatus();
+            const auto fresh=s.refusedLoads-std::min(s.refusedLoads,*refusalsSeen_),own=std::min(fresh,ownRefusals_);
+            ownRefusals_-=own;refusalsSeen_=s.refusedLoads;
+            if(fresh>own && !s.refusal.empty())onNotOpened(s.refusal);
         }
         if(!remote_)
         {

@@ -135,6 +135,9 @@ namespace oscairn
             uint64_t badOutputBlocks = 0;
             uint64_t audioDeviceList = 0; // changes when the host's audio devices come or go: audioDevices() again
             uint64_t midiPortList = 0; // changes when MIDI inputs come or go, or a port's profiles or ignoring change: midiPorts() again
+            // Performance loads that failed, whichever client (or the engine itself) asked, and why the last did: so an
+            // app says why a Performance it did not ask for did not open.
+            uint64_t refusedLoads = 0; std::string refusal;
             // The keys held now on each source that has any (a MIDI input's source, or 0 for the
             // built-in keys, pads and UI notes), in ascending order: what an input's on-screen
             // keyboard lights. Read from the last rendered block.

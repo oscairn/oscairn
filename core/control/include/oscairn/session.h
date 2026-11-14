@@ -654,6 +654,8 @@ namespace oscairn
         double masterLevel_ = 1, masterPan_ = 0; // the Performance's main output
         std::map<NodeId, std::string> roles_;   // RFC 0016's node roles
         std::vector<std::string> notices_;      // SessionStatus::notices
+        uint64_t refusedLoads_ = 0; std::string refusal_; // SessionStatus::refusedLoads and refusal
+        void openPerformance(const std::string& directory); // loadPerformance's work: a failure is counted there
         std::vector<AssignmentOverride> assignments_; // physical controls' overrides (physical_controls.cpp)
         uint32_t nextMacro_ = 1;
         bool staged_ = false;

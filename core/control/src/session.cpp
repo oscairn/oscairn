@@ -436,6 +436,7 @@ namespace oscairn
             }
         }
         result.notices.insert(result.notices.end(), notices_.begin(), notices_.end()); // the host's (the audio device's) first
+        result.refusedLoads = refusedLoads_; result.refusal = refusal_;
         for( size_t source = 0; source < maxSources; ++source )
         {
             Control::SessionStatus::HeldNotes held{ uint8_t( source ), {} };

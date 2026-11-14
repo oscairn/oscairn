@@ -756,6 +756,11 @@ namespace {
 }
 
 void Session::loadPerformance(const std::string& directory) {
+    try{openPerformance(directory);}
+    catch(const std::exception& e){++refusedLoads_;refusal_=e.what();throw;}
+}
+
+void Session::openPerformance(const std::string& directory) {
     const auto began=std::chrono::steady_clock::now();
     audition_.reset(); // opening a Performance keeps what an audition tried; auditionStart sets its own after
     const auto root=performanceRoot(directory);
@@ -2824,6 +2829,7 @@ std::string Session::reopenPerformance() {
     std::string folder;
     try{const auto bytes=state_files::read(last_,64*1024);const std::unique_ptr<json_value_s,decltype(&std::free)> doc(json_parse(bytes.data(),bytes.size()),&std::free);folder=text(field(doc.get(),"performance"));}
     catch(const std::exception&){return {};} // none remembered
+    const auto refusedBefore=refusedLoads_;
     try{
         std::error_code e;
         if(!fs::is_regular_file(fs::path(folder)/"performance.json",e))throw std::runtime_error("it is no longer there");
@@ -2842,6 +2848,8 @@ std::string Session::reopenPerformance() {
         std::string why=x.what();if(why.starts_with("Performance: "))why.erase(0,13);
         auto notice="The last Performance, "+fs::path(folder).filename().string()+", did not open, so Untitled is open: "+why;
         notices_.push_back(notice);std::fprintf(stderr,"oscairn: %s\n",notice.c_str());
+        if(refusedLoads_==refusedBefore)++refusedLoads_; // refused before the load (read beside, or gone): a refused load all the same
+        refusal_=notice;
         return notice;
     }
 }

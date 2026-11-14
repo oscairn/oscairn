@@ -1384,15 +1384,16 @@ on the display; `--engine-only` the engine alone.
    ([RFC 0045 step 6](rfcs/0045-audio-scheduling-on-small-devices.md#the-allowance-from-the-deadline-step-6-status)),
    off in the profile until measured.
 
-   The profile sets `compute.pluginHosts` to 3: the plugins share three plugin hosts, worker
-   processes holding any plugins each, placed by measured cost, in place of a worker per instance
-   ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#plugin-hosts-and-resident-instances)):
-   ST Final's nine workers become three processes, which with the engine's thread is four audio
-   threads on four cores, so each host spins for its next block too. A crash or hang takes down one
-   host, which restarts with its instances; the plugin it is put down to gets a worker of its own
-   from then on. `OSCAIRN_PLUGIN_HOSTS=0 ./oscairn-fantom-start` gives each instance a worker of its
-   own, as before, for comparing; `OSCAIRN_OWN_HOST=org.oscairn.analog` (IDs separated by commas)
-   gives a plugin a worker of its own beside the hosts. `oscairn-engine-timing` still lists every
+   The profile gives each plugin instance a worker of its own (no `compute.pluginHosts`). Three
+   plugin hosts, worker processes holding any plugins each, placed by measured cost
+   ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#plugin-hosts-and-resident-instances)),
+   measured worse on the unit (2026-11-14, ST Final in the app, 41 s played and recorded): 3,608
+   deadline misses against 512 to 1,335 with a worker per instance, Analog and a Sampler placed in
+   one host whose audio thread took 86 % of a core. `OSCAIRN_PLUGIN_HOSTS=3 ./oscairn-fantom-start`
+   still gives three hosts, for comparing; there a crash or hang takes down one host, which restarts
+   with its instances, and the plugin it is put down to gets a worker of its own from then on;
+   `OSCAIRN_OWN_HOST=org.oscairn.analog` (IDs separated by commas) gives a plugin a worker of its
+   own beside the hosts. `oscairn-engine-timing` still lists every
    instance; its `wake` in a host includes waiting for the host's instances before it in the block.
 
 3. **The kernel beside them,** for comparison, with nothing of Oscairn running but the holder:

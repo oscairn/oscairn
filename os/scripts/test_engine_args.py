@@ -32,7 +32,7 @@ assert engine.settings(allowed)["OSCAIRN_WORKER_BUDGET_US"] == "2000", "the work
 assert engine.settings(fantom)["OSCAIRN_WORKER_BUDGET_US"] == "", "none named: derived from the block"
 assert engine.settings(fantom)["OSCAIRN_WORKER_SPIN_US"] == "200", "the FANTOM-07's spin before sleeping on a worker"
 assert engine.settings(load("kick"))["OSCAIRN_WORKER_SPIN_US"] == "", "none named: none"
-assert engine.settings(fantom)["OSCAIRN_PLUGIN_HOSTS"] == "3", "the FANTOM-07's three plugin hosts"
+assert engine.settings(fantom)["OSCAIRN_PLUGIN_HOSTS"] == "", "the FANTOM-07: a worker per instance (three hosts measured worse on the unit)"
 assert engine.settings(load("kick"))["OSCAIRN_PLUGIN_HOSTS"] == "" and engine.settings(load("kick"))["OSCAIRN_OWN_HOST"] == "", "none named: a worker per instance"
 assert engine.settings(fantom)["OSCAIRN_WORKER_DEADLINE"] == "", "the allowance until the deadline is measured on the unit"
 assert engine.settings({**fantom, "compute": {**fantom["compute"], "workerDeadline": True}})["OSCAIRN_WORKER_DEADLINE"] == "1"

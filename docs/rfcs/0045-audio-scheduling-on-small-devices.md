@@ -816,8 +816,8 @@ processes; on the unit, `oscairn-engine-timing` per worker (to become per host) 
 
 ### Stage 2 status: plugin hosts (2026-11-13)
 
-Built, behind `OSCAIRN_PLUGIN_HOSTS` (the profile's `compute.pluginHosts`; 3 on the FANTOM-07, 0
-and so a worker per instance everywhere else). What was built and decided while building:
+Built, behind `OSCAIRN_PLUGIN_HOSTS` (the profile's `compute.pluginHosts`; 0, a worker per instance, everywhere, the FANTOM-07 included
+since three hosts measured worse there: [fantom-0.md](../fantom-0.md)). What was built and decided while building:
 
 - **One audio thread and one doorbell per worker, in both modes.** `Op::Init` now starts a worker
   with no plugin (the rate, the block, the mode and the doorbell, a small shared block of its own);

@@ -175,6 +175,9 @@ namespace oscairn
         // reset and its notes go on (RFC 0045's miss policy: a worker's late or busy block). False: the
         // events were lost, and the caller resets the plugin and forgets its notes.
         virtual bool eventsKept() const noexcept { return false; }
+        // Its blocks past the allowance, played late or silenced, since it loaded (Statistics' lateBlocks and
+        // silentBlocks), for the load guard's every block: a plugin in a worker; 0 for one in the engine's process.
+        virtual uint64_t missedBlocks() const noexcept { return 0; }
         // Control thread: the memory a plugin in its own worker holds (its share of the worker's
         // physical footprint on macOS, resident memory on Linux); 0 where the host cannot tell (a
         // plugin in the engine's process).

@@ -200,8 +200,9 @@ int main(int argc, char** argv)
                         number(field(w, "involuntarySwitches")));
             // The load guard on its lane: notes given up and why.
             if(const auto* g = oscairn::detail::member(w, "guard"); g && number(field(g, "limit")) > 0)
-                std::printf("  load guard: lane limit %.0f us, took %.0f us in the last block; notes faded %.0f for the lane, %.0f for the lanes' total, %.0f choked (a block about to be missed)\n",
-                            number(field(g, "limit")), number(field(g, "took")), number(field(g, "faded")), number(field(g, "fadedForTotal")), number(field(g, "choked")));
+                std::printf("  load guard: lane limit %.0f us, took %.0f us in the last block; notes faded %.0f for the lane, %.0f for the lanes' total, %.0f for lost blocks, %.0f choked (a block about to be missed); %.0f blocks lost\n",
+                            number(field(g, "limit")), number(field(g, "took")), number(field(g, "faded")), number(field(g, "fadedForTotal")), number(field(g, "fadedForLoss")),
+                            number(field(g, "choked")), number(field(g, "lost")));
         }
         for(V w : array(field(r, "workers")))
         {

@@ -113,6 +113,7 @@ namespace oscairn
             bool budgeted = false; // its notes are in the shared budget (the engine core), which measures its cost per note
             uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
             bool inProcess = false; // it renders in the engine's process (no PluginHost::lane): within the callback's time
+            uint64_t missed = 0; // audio thread: its host's missedBlocks at its last block
             std::vector<float> lastOut; uint32_t fadedFor = 0; // audio thread, the output guard: each channel's last good sample, and the frames faded since
             // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
             std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
@@ -619,7 +620,8 @@ namespace oscairn
         if(!found)return {};
         const auto& a=*found;
         return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed),
-                a.stolenForDevice.load(std::memory_order_relaxed),a.laneLimit.load(std::memory_order_relaxed),a.laneTook.load(std::memory_order_relaxed)};
+                a.stolenForDevice.load(std::memory_order_relaxed),a.laneLimit.load(std::memory_order_relaxed),a.laneTook.load(std::memory_order_relaxed),
+                a.stolenForLoss.load(std::memory_order_relaxed),a.lostBlocks.load(std::memory_order_relaxed)};
     }
     Graph::OutputGuard Graph::outputGuard( NodeId node ) const
     {
@@ -865,6 +867,13 @@ namespace oscairn
         {
             std::vector<std::vector<oscairn_source>> sources(plan->steps.size());
             std::vector<std::vector<oscairn_context>> contexts(plan->steps.size());
+            std::vector<std::vector<oscairn_link>> next(plan->steps.size()); // where each step's audio goes, its largest gain there
+            for(size_t i=0;i<plan->steps.size();++i)for(const auto& r:plan->steps[i].audioSources)if(r.source>=0)
+            {
+                auto& links=next[size_t(r.source)];
+                auto it=std::find_if(links.begin(),links.end(),[&](const oscairn_link& l){return l.step==i;});
+                if(it==links.end())links.push_back({uint32_t(i),std::abs(r.gain)});else it->gain=std::max(it->gain,std::abs(r.gain));
+            }
             std::vector<oscairn_step> steps;
             for(size_t i=0;i<plan->steps.size();++i)
             {
@@ -872,7 +881,8 @@ namespace oscairn
                 for(auto& s:step.noteSources)sources[i].push_back({s.route->ledger,reinterpret_cast<const oscairn_zones*>(&s.zones),s.peers.data(),uint32_t(s.peers.size()),s.channel,s.draining});
                 for(auto& c:step.contexts)contexts[i].push_back({c.channel,coreActivity(c.activity.get())});
                 const bool late=step.host && std::all_of(plan->steps.begin(),plan->steps.end(),[&](const Plan::Step& o){return !o.host || o.lane!=step.lane || o.host->oneBlockLate();});
-                steps.push_back({coreActivity(step.activity.get()),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),step.lane,step.inProcess,late});
+                steps.push_back({coreActivity(step.activity.get()),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),step.lane,step.inProcess,late,
+                                 next[i].data(),uint32_t(next[i].size())});
             }
             const auto budgeted=std::make_unique<bool[]>(steps.size());
             plan->notes.reset(OSCAIRN_CORE(notes_new)(steps.data(),uint32_t(steps.size()),uint32_t(lanes.size()),budgeted.get()));
@@ -1406,6 +1416,8 @@ namespace oscairn
             // cost per voice, RFC 0025); its block's time against its lane's limit and its cost per note measured, the
             // plugin's own voice report when it gives up its own; its NOTE_ENDs; and the note-end watchdog.
             oscairn_finish rendered{};rendered.took=budgeting?float(step.host->blockMicroseconds()):0.f;rendered.processed=processed;rendered.reset=reset;
+            // RFC 0045's guard: a block of its played late or silenced since its last (a worker past its allowance).
+            const uint64_t missed=step.host->missedBlocks();rendered.missed=missed>step.missed;step.missed=missed;
             if(budgeting && step.budgeted && processed)
             {
                 rendered.voices=step.host->voiceReport(rendered.voice_cost,rendered.notes,rendered.note_count);

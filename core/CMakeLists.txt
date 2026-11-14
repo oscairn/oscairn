@@ -493,6 +493,16 @@ set_tests_properties(voice-extension-hostile PROPERTIES TIMEOUT 60 ENVIRONMENT "
 # RFC 0045's load guard in real time: notes give way before a worker's block is missed, with no budget and with the profiles' budget.
 add_test(NAME load-guard COMMAND oscairn-load-guard-test $<TARGET_FILE:oscairn-voice-fixture> ${worker_timing})
 set_tests_properties(load-guard PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_US=100;OSCAIRN_WORKER_BUDGET_US=1000;OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
+# RFC 0045's no-glitch guard: lost blocks, the chain after an instrument and the callback's slack (the Rust core's rules).
+add_executable(oscairn-guard-test engine/tests/guard.cpp)
+target_link_libraries(oscairn-guard-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-guard-test oscairn-voice-fixture oscairn-plugin-worker)
+if(OSCAIRN_ENGINE_CORE STREQUAL "rust")
+    foreach(case IN ITEMS losses)
+        add_test(NAME guard-${case} COMMAND oscairn-guard-test $<TARGET_FILE:oscairn-voice-fixture> $<IF:$<BOOL:${worker_timing}>,--no-timing,--timing> ${case})
+        set_tests_properties(guard-${case} PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>")
+    endforeach()
+endif()
 # RFC 0045's extra block: a listed plugin one block late, sample for sample, others on time.
 add_executable(oscairn-worker-extra-block-test engine/tests/worker_extra_block.cpp)
 target_link_libraries(oscairn-worker-extra-block-test PRIVATE oscairn_engine)

@@ -30,7 +30,7 @@ OSCAIRN_SAME(perNote,per_note) OSCAIRN_SAME(seedRest,seed_rest) OSCAIRN_SAME(see
 OSCAIRN_SAME(hardChokes,hard_chokes) OSCAIRN_SAME(stolenForDevice,stolen_for_device) OSCAIRN_SAME(laneLimit,lane_limit)
 OSCAIRN_SAME(laneTook,lane_took) OSCAIRN_SAME(badOutput,bad_output) OSCAIRN_SAME(badRun,bad_run) OSCAIRN_SAME(stranded,stranded)
 OSCAIRN_SAME(ownVoices,own_voices) OSCAIRN_SAME(honorsVolume,honors_volume) OSCAIRN_SAME(perNoteScale,per_note_scale)
-OSCAIRN_SAME(voiceLimit,voice_limit) OSCAIRN_SAME(overLimit,over_limit)
+OSCAIRN_SAME(voiceLimit,voice_limit) OSCAIRN_SAME(overLimit,over_limit) OSCAIRN_SAME(stolenForLoss,faded_for_loss) OSCAIRN_SAME(lostBlocks,lost)
 #undef OSCAIRN_SAME
 static_assert(sizeof(Graph::Activity)==sizeof(oscairn_activity));
 

@@ -33,14 +33,25 @@ pub struct Step {
     pub in_process: bool,
     pub late_lane: bool,
     pub budgeted: bool,
+    /// The later steps its audio goes to, each with the largest gain on the way; and those it comes from.
+    pub next: Vec<(usize, f32)>,
+    prev: Vec<(usize, f32)>,
     recent: [f32; 5], // its last blocks' times, for the median the lane's limit is held against
     recent_at: usize,
     recent_n: usize,
 }
 
 impl Step {
-    pub fn new(activity: Option<Shared<Activity>>, sources: Vec<Source>, contexts: Vec<SoundContext>, lane: usize, in_process: bool, late_lane: bool) -> Step {
-        Step { activity, sources, contexts, lane, in_process, late_lane, budgeted: false, recent: [0.0; 5], recent_at: 0, recent_n: 0 }
+    pub fn new(
+        activity: Option<Shared<Activity>>,
+        sources: Vec<Source>,
+        contexts: Vec<SoundContext>,
+        lane: usize,
+        in_process: bool,
+        late_lane: bool,
+        next: Vec<(usize, f32)>,
+    ) -> Step {
+        Step { activity, sources, contexts, lane, in_process, late_lane, budgeted: false, next, prev: Vec::new(), recent: [0.0; 5], recent_at: 0, recent_n: 0 }
     }
     /// Its usual block, the median of its last five: a block held up from outside moves nothing, two in
     /// a row neither, while three of a real overload do.
@@ -96,6 +107,7 @@ pub struct Rendered<'a> {
     pub took: f32,
     pub processed: bool,
     pub reset: bool,
+    pub missed: bool,
     pub own_voices: bool,
     pub honors_volume: bool,
     pub voices: u32,
@@ -110,6 +122,7 @@ pub struct Notes {
     timing: Timing,
     budgeting: bool,
     total: f32,
+    reach: Vec<f32>, // scratch, per step: the gain from it to a step whose block was lost (mark_lost)
 }
 
 /// Where a step's merged events go, with the channel the current connection's events take.
@@ -158,7 +171,15 @@ impl Notes {
                 step.budgeted = true;
             }
         }
-        Notes { budget: Budget::new(entries, lanes), steps, timing: Timing::default(), budgeting: false, total: 0.0 }
+        for s in 0..steps.len() {
+            for (t, gain) in steps[s].next.clone() {
+                if let Some(next) = steps.get_mut(t) {
+                    next.prev.push((s, gain));
+                }
+            }
+        }
+        let n = steps.len();
+        Notes { budget: Budget::new(entries, lanes), steps, timing: Timing::default(), budgeting: false, total: 0.0, reach: vec![0.0; n] }
     }
 
     /// A block starts: each lane's limit, the smaller of the budget and LOAD_MARGIN of the time its
@@ -257,9 +278,13 @@ impl Notes {
     }
 
     /// After a step's plugin rendered (Graph::process's finish): routes emptied if its notes are gone,
-    /// the notes sounding through it counted, its cost measured, its NOTE_ENDs taken, and released
-    /// notes its plugin never ended let go once it has been silent a while.
+    /// the notes sounding through it counted, its cost measured, a lost block marked on its lane and
+    /// those before it, its NOTE_ENDs taken, and released notes its plugin never ended let go once it
+    /// has been silent a while.
     pub fn finish(&mut self, rs: &mut Routes, s: usize, r: &Rendered) {
+        if r.missed && self.budgeting {
+            self.mark_lost(s);
+        }
         let Notes { steps, budget, timing, budgeting, .. } = self;
         let Some(step) = steps.get_mut(s) else { return };
         if r.reset {
@@ -338,8 +363,29 @@ impl Notes {
         self.budget.voice_limit(rs, step.lane, a, voices)
     }
 
-    /// The block is done: each lane judged against its limit, the lanes together against the total,
-    /// and each node's lane's limit and time kept for the timing report.
+    /// A lost block on step `s`: its lane is marked, and every lane before it on the way, by the largest
+    /// gain from there (an insert's instrument, a bus's senders at their send levels).
+    fn mark_lost(&mut self, s: usize) {
+        if let Some(a) = self.steps.get(s).and_then(|x| x.activity) {
+            a.lost.fetch_add(1, Relaxed);
+        }
+        self.reach.fill(0.0);
+        for i in (0..=s).rev() {
+            let Some(step) = self.steps.get(i) else { continue };
+            let gain = step.next.iter().map(|&(n, g)| self.reach.get(n).map_or(0.0, |r| r * g.abs())).fold(if i == s { 1.0 } else { 0.0 }, f32::max);
+            if let Some(r) = self.reach.get_mut(i) {
+                *r = gain;
+            }
+            if let (true, Some(lane)) = (gain > 0.0, self.budget.lanes.get_mut(step.lane)) {
+                lane.losses |= 1;
+                lane.weight = lane.weight.max(gain);
+            }
+        }
+    }
+
+    /// The block is done: each lane judged against its limit, the lanes together against the total; then
+    /// lost blocks give a note up while they continue; each node's lane's limit and time kept for the
+    /// timing report.
     pub fn end(&mut self, rs: &mut Routes) {
         if !self.budgeting {
             return;
@@ -351,6 +397,13 @@ impl Notes {
             self.budget.measured(rs, i, took);
         }
         self.budget.device(rs, self.total);
+        self.budget.lost(rs);
+        for lane in &mut self.budget.lanes {
+            lane.losses <<= 1;
+            if lane.losses == 0 {
+                lane.weight = 0.0;
+            }
+        }
         for step in &self.steps {
             if let (Some(a), Some(lane)) = (&step.activity, self.budget.lanes.get(step.lane)) {
                 a.lane_limit.set(lane.limit);

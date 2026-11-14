@@ -59,6 +59,7 @@ typedef struct
     bool stranded, own_voices, honors_volume;
     float per_note_scale;
     uint32_t voice_limit, over_limit;
+    uint64_t faded_for_loss, lost;
 } oscairn_activity;
 
 /* A note connection into a step: its ledger, zones (copied), the routes sharing its part's note
@@ -74,9 +75,11 @@ typedef struct
     bool draining;
 } oscairn_source;
 typedef struct { int16_t channel; oscairn_activity* activity; } oscairn_context; /* a shared engine's sound context */
+typedef struct { uint32_t step; float gain; } oscairn_link; /* audio to a later step, the largest gain of its routes */
 /* A step of the plan, in plan order: its node's activity, its note connections and contexts, and its
  * budget lane: the thread it renders on; in_process: in the engine's process (the callback's time);
- * late_lane: every plugin on its lane renders a block late (a period's time). */
+ * late_lane: every plugin on its lane renders a block late (a period's time); next: the later steps its
+ * audio goes to. */
 typedef struct
 {
     oscairn_activity* activity;
@@ -86,6 +89,8 @@ typedef struct
     uint32_t context_count;
     uint32_t lane;
     bool in_process, late_lane;
+    const oscairn_link* next;
+    uint32_t next_count;
 } oscairn_step;
 
 /* One block's timing, microseconds: budget as Graph::setVoiceBudget (0 none, below 0 the load
@@ -109,13 +114,14 @@ typedef struct
     bool after_notes;
 } oscairn_key;
 
-/* What a step's plugin made of its block: the microseconds it took; whether it rendered, and
- * whether its notes are gone (a lost block, or its host reset it); its oscairn.voice-budget report
+/* What a step's plugin made of its block: the microseconds it took; whether it rendered, whether its
+ * notes are gone (a lost block, or its host reset it), and whether its block was late or silenced (a
+ * worker past its allowance); its oscairn.voice-budget report
  * (read when the budget counts its notes and it rendered); the events it sent (its NOTE_ENDs). */
 typedef struct
 {
     float took;
-    bool processed, reset, own_voices, honors_volume;
+    bool processed, reset, missed, own_voices, honors_volume;
     uint32_t voices;
     double voice_cost;
     const oscairn_voice_budget_note_t* notes;
@@ -159,7 +165,8 @@ typedef struct
  *   into merged (each event's channel as it came into heard, when given). overflow: in, the block is
  *   already lost; out, whether it was: then its routes are emptied and nothing is merged. Returns the
  *   events merged.
- * notes_finish: after the step's plugin rendered: its notes counted and costed, its NOTE_ENDs taken.
+ * notes_finish: after the step's plugin rendered: its notes counted and costed, a lost block marked on
+ *   its lane and the lanes before it (the Rust core), its NOTE_ENDs taken.
  * notes_voice_limit: oscairn.voice-budget: the voices a step that gives up its own may keep.
  * notes_end: the block is done: the lanes judged against their limits, the timing report kept. */
 OSCAIRN_CORE_API(rust_core_)

@@ -5,7 +5,9 @@
 // pedals and held keys, every activity counter, the voice limits, what taps and harmonies route,
 // and what a plan change's retired routes send. The plugins' side is modeled here, the same for
 // both: block times from the notes each holds, NOTE_ENDs after a tail (one in 13 never), lost and
-// reset blocks, silence for the note-end watchdog, a plugin that gives up its own voices.
+// reset blocks, silence for the note-end watchdog, a plugin that gives up its own voices. The Rust core's rules the C++
+// reference does not have (RFC 0045's guard past 12a: lost blocks, the chain after a step, the callback's slack) get
+// no input here: no block reported lost, no audio links, no slack; the guard's own test (guard.cpp) covers them.
 //   oscairn-core-diff-test [plans] [blocks]
 #include "../src/engine_core.h"
 #include "oscairn/graph.h"
@@ -194,7 +196,7 @@ void run(uint64_t seed,uint32_t blocks)
                 sources[i].push_back({side.routes[s.route],&s.zones,peers[s.route].data(),uint32_t(peers[s.route].size()),s.channel,s.draining});
             }
             for(auto c:plan[i].contexts)contexts[i].push_back({c,side.activities[context++]->core()});
-            steps.push_back({side.activities[i]->core(),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),plan[i].lane,plan[i].inProcess,plan[i].lateLane});
+            steps.push_back({side.activities[i]->core(),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),plan[i].lane,plan[i].inProcess,plan[i].lateLane,nullptr,0});
         }
         auto budgeted=std::make_unique<bool[]>(plan.size());
         side.core.notesFree(side.notes);
@@ -268,7 +270,7 @@ void run(uint64_t seed,uint32_t blocks)
                     p.push_back({b+(x.header.type==CLAP_EVENT_NOTE_CHOKE?1:endTail),note(CLAP_EVENT_NOTE_END,0,x.channel,x.key,0,x.note_id,x.port_index)});
                 }
                 const float took=(plan[s].rest+plan[s].perNote*float(live))*(spike?3.f:1.f);
-                const oscairn_finish f{took,processed,reset,plan[s].ownVoices,plan[s].honors,2*live,plan[s].perNote*.5,voices.data(),uint32_t(voices.size()),sent.data(),uint32_t(sent.size())};
+                const oscairn_finish f{took,processed,reset,false,plan[s].ownVoices,plan[s].honors,2*live,plan[s].perNote*.5,voices.data(),uint32_t(voices.size()),sent.data(),uint32_t(sent.size())};
                 side.core.notesFinish(side.notes,uint32_t(s),&f);
                 if(plan[s].ownVoices)a.voiceLimit=side.core.notesVoiceLimit(side.notes,uint32_t(s),2*live);
             }

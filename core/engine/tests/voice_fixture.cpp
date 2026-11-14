@@ -188,10 +188,43 @@ struct Plugin {
         };
     }
 };
+// And an effect whose block costs time, for the guard's tests (org.oscairn.test.costly-effect): stereo through,
+// OSCAIRN_FIXTURE_EFFECT_US microseconds a block of 128 frames while its input sounds, scaled by the input's mean level over
+// OSCAIRN_FIXTURE_EFFECT_LEVEL when that is set (at most the whole time), asleep on silence; as the voices, read at load.
+const char* effectFeatures[]{CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,nullptr};
+const clap_plugin_descriptor_t effectDescriptor{CLAP_VERSION,"org.oscairn.test.costly-effect","Costly effect","Oscairn","","","","1","",effectFeatures};
+struct Effect {
+    clap_plugin_t api{};double microseconds=0,level=0;
+    static Effect& self(const clap_plugin_t* p){return *static_cast<Effect*>(p->plugin_data);}
+    Effect(){
+        if(const char* us=std::getenv("OSCAIRN_FIXTURE_EFFECT_US"))microseconds=std::atof(us);
+        if(const char* l=std::getenv("OSCAIRN_FIXTURE_EFFECT_LEVEL"))level=std::atof(l);
+        api.desc=&effectDescriptor;api.plugin_data=this;
+        api.init=[](const clap_plugin_t*){return true;};api.destroy=[](const clap_plugin_t* p){delete &self(p);};
+        api.activate=[](const clap_plugin_t*,double,uint32_t,uint32_t){return true;};api.deactivate=[](const clap_plugin_t*){};
+        api.start_processing=[](const clap_plugin_t*){return true;};api.stop_processing=[](const clap_plugin_t*){};
+        api.reset=[](const clap_plugin_t*){};api.on_main_thread=[](const clap_plugin_t*){};
+        api.process=[](const clap_plugin_t* p,const clap_process_t* b)->clap_process_status{
+            const auto& s=self(p);const auto began=std::chrono::steady_clock::now();double sum=0;
+            for(uint32_t c=0;c<2;++c)for(uint32_t i=0;i<b->frames_count;++i){const float x=b->audio_inputs[0].data32[c][i];b->audio_outputs[0].data32[c][i]=x;sum+=std::fabs(x);}
+            if(sum==0)return CLAP_PROCESS_SLEEP;
+            const double share=s.level>0?std::min(1.0,sum/(2.0*b->frames_count)/s.level):1;
+            const auto spend=std::chrono::duration<double,std::micro>(s.microseconds*share*b->frames_count/128.0);
+            while(std::chrono::steady_clock::now()-began<spend){}
+            return CLAP_PROCESS_CONTINUE;};
+        api.get_extension=[](const clap_plugin_t*,const char* id)->const void*{
+            static const clap_plugin_audio_ports_t audio{
+                [](const clap_plugin_t*,bool)->uint32_t{return 1;},
+                [](const clap_plugin_t*,uint32_t i,bool input,clap_audio_port_info_t* p){if(i)return false;*p={};p->id=0;p->channel_count=2;p->flags=CLAP_AUDIO_PORT_IS_MAIN;p->port_type=CLAP_PORT_STEREO;p->in_place_pair=CLAP_INVALID_ID;std::strcpy(p->name,input?"In":"Out");return true;}};
+            return std::strcmp(id,CLAP_EXT_AUDIO_PORTS)?nullptr:&audio;};
+    }
+};
 const clap_plugin_factory_t factory{
-    [](const clap_plugin_factory_t*)->uint32_t{return 1;},
-    [](const clap_plugin_factory_t*,uint32_t i)->const clap_plugin_descriptor_t*{return i?nullptr:&descriptor;},
-    [](const clap_plugin_factory_t*,const clap_host_t* host,const char* id)->const clap_plugin_t*{return std::strcmp(id,descriptor.id)?nullptr:&(new Plugin(host))->api;}};
+    [](const clap_plugin_factory_t*)->uint32_t{return 2;},
+    [](const clap_plugin_factory_t*,uint32_t i)->const clap_plugin_descriptor_t*{return i==0?&descriptor:i==1?&effectDescriptor:nullptr;},
+    [](const clap_plugin_factory_t*,const clap_host_t* host,const char* id)->const clap_plugin_t*{
+        if(!std::strcmp(id,descriptor.id))return &(new Plugin(host))->api;
+        return std::strcmp(id,effectDescriptor.id)?nullptr:&(new Effect)->api;}};
 }
 extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry{CLAP_VERSION,[](const char*){return true;},[]{},
     [](const char* id)->const void*{return std::strcmp(id,CLAP_PLUGIN_FACTORY_ID)?nullptr:&factory;}};

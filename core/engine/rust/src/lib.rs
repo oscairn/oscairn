@@ -104,6 +104,11 @@ pub struct CContext {
     activity: *mut Activity,
 }
 #[repr(C)]
+pub struct CLink {
+    step: u32,
+    gain: f32,
+}
+#[repr(C)]
 pub struct CStep {
     activity: *mut Activity,
     sources: *const CSource,
@@ -113,12 +118,15 @@ pub struct CStep {
     lane: u32,
     in_process: bool,
     late_lane: bool,
+    next: *const CLink,
+    next_count: u32,
 }
 #[repr(C)]
 pub struct CFinish {
     took: f32,
     processed: bool,
     reset: bool,
+    missed: bool,
     own_voices: bool,
     honors_volume: bool,
     voices: u32,
@@ -238,7 +246,8 @@ pub unsafe extern "C" fn rust_core_notes_new(steps: *const CStep, count: u32, la
             let contexts = slice(s.contexts, s.context_count)
                 .iter()
                 .filter_map(|c| Some(SoundContext { channel: c.channel, activity: Shared(NonNull::new(c.activity)?) }));
-            steps_out.push(Step::new(NonNull::new(s.activity).map(Shared), sources, contexts.collect(), s.lane as usize, s.in_process, s.late_lane));
+            let next = slice(s.next, s.next_count).iter().map(|l| (l.step as usize, l.gain)).collect();
+            steps_out.push(Step::new(NonNull::new(s.activity).map(Shared), sources, contexts.collect(), s.lane as usize, s.in_process, s.late_lane, next));
         }
     }
     let notes = Notes::new(steps_out, lanes as usize);
@@ -310,6 +319,7 @@ pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, fi
         took: f.took,
         processed: f.processed,
         reset: f.reset,
+        missed: f.missed,
         own_voices: f.own_voices,
         honors_volume: f.honors_volume,
         voices: f.voices,
@@ -348,7 +358,7 @@ mod tests {
     #[test]
     fn layouts() {
         assert_eq!(size_of::<Event>(), 64);
-        assert_eq!(size_of::<Activity>(), 112);
+        assert_eq!(size_of::<Activity>(), 128);
         assert_eq!((offset_of!(Activity, rest), offset_of!(Activity, stolen), offset_of!(Activity, lane_limit)), (28, 48, 72));
         assert_eq!((offset_of!(Activity, stranded), offset_of!(Activity, per_note_scale), offset_of!(Activity, over_limit)), (92, 96, 104));
         assert_eq!(size_of::<Zones>(), 8 * 72 + 8);
@@ -378,7 +388,7 @@ mod tests {
     static ALLOCATOR: Counting = Counting;
 
     // A block allocates nothing: routing a flood of notes past a tight budget (steals, chokes, fades),
-    // NOTE_ENDs, the watchdog, the lanes judged.
+    // NOTE_ENDs, the watchdog, the lanes judged, lost blocks.
     #[test]
     fn blocks_allocate_nothing() {
         let activity = Activity::default();
@@ -398,6 +408,8 @@ mod tests {
             lane: 0,
             in_process: false,
             late_lane: false,
+            next: std::ptr::null(),
+            next_count: 0,
         };
         let mut budgeted = false;
         // SAFETY: one step whose arrays and pointers outlive the notes.
@@ -425,6 +437,7 @@ mod tests {
                 took: 500.0,
                 processed: true,
                 reset: b % 97 == 0,
+                missed: b % 3 == 0,
                 own_voices: false,
                 honors_volume: false,
                 voices: 0,
@@ -444,6 +457,7 @@ mod tests {
         }
         COUNTING.with(|c| c.set(false));
         assert!(budgeted && activity.stolen.load(Relaxed) + activity.hard_chokes.load(Relaxed) > 0, "notes were given up");
+        assert!(activity.faded_for_loss.load(Relaxed) > 0, "for lost blocks too");
         assert_eq!(ALLOCATIONS.load(Relaxed), 0);
         // SAFETY: made above, freed once.
         unsafe {

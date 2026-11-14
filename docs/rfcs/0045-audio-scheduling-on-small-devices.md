@@ -49,6 +49,7 @@ Checked when built and tested; the sections below say how.
       ([what the tools report](#what-the-timing-tools-must-report))
 - [ ] 12. The no-glitch guard, in the engine core in Rust ([the guard](#the-no-glitch-guard-2026-11-14)):
   - [x] 12a. Every plugin's notes can be given up, however it takes notes or reports its voices
+  - [x] 12b. Lost blocks a trigger, on the lane and every instrument lane before it
 
 ## Problem
 
@@ -804,7 +805,7 @@ glitch notes is given up before that happens; voices may be given up for load fr
 audio too (the app, the engine's other threads), which separate UI work keeps rare. The guard is in
 the engine core (`core/engine/rust`, behind `core/engine/src/engine_core.h`; the C++ core is kept
 selectable with `OSCAIRN_ENGINE_CORE=cpp`, as the reference the differential test holds the Rust
-to, with the same rules). Its rules, as built:
+to, which has rule 12a and none after it). Its rules, as built:
 
 - Which note goes, for every rule: released notes before held ones, held notes beyond their part's
   reserve next, a part's highest and lowest held keys last; within each, the part of lower priority,
@@ -821,6 +822,17 @@ to, with the same rules). Its rules, as built:
   Tested by `load-guard`: 20 notes, twice the allowance, into the fixture taking MIDI notes only,
   then into one reporting no voices and no cost: before, nothing given up (299 blocks missed after
   block 300, single run); after, notes give way and the worker is not restarted.
+- 12b. Lost blocks are a trigger. A step whose block was played late or silenced (a worker past its
+  allowance) marks its lane, and every lane before it on the plan's audio routes (an insert's
+  instrument, a bus's senders), each with the largest gain on the way. On a lane marked in two of
+  its last eight blocks, this one among them, one note fades: from the marked lane where it frees the
+  most time (cost per note times that gain), quietest released first; then three blocks (the fade
+  and a block to see it) before the next. Notes whose cost was never measured go too: losses are the
+  evidence. Never choked for this signal. `engine.timing`'s guard counts them (`fadedForLoss`) and
+  the lane's lost blocks (`lost`). Tested by `guard` (losses): an instrument of eight notes, within
+  its own lane, into an effect in its own worker whose block grows with its input past its
+  allowance: before, nothing given up and the effect lost 254 blocks between blocks 500 and 800;
+  after, 7 notes faded and none lost from block 500 on (single runs).
 
 ## Core placement
 

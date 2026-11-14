@@ -963,6 +963,7 @@ namespace oscairn
             WorkerTiming* workerTiming() noexcept override { return &timing_; }
             // The budget's every block: the one value, not statistics()' gathering of every counter.
             double blockMicroseconds() const noexcept override { return shared_->lastMicroseconds.load(std::memory_order_relaxed); }
+            uint64_t missedBlocks() const noexcept override { return late_.load(std::memory_order_relaxed) + silent_.load(std::memory_order_relaxed); }
             kick::clap::Statistics statistics() const noexcept override
             {
                 kick::clap::Statistics s;

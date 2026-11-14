@@ -110,7 +110,7 @@ class PreparedInstrument final:public PluginHost {
             for(size_t p=0;p<16;++p)for(int c=0;c<16;++c)if(channels[p][c])
                 {
                     if(!append(s,Event::midi(0xb0|c,120,0,e.header()->time,p)))return false;
-                    for(auto& n:s.notes.notes)if(NoteRoute::matches(n,-1,p,c,-1)){ended(n,e.header()->time);n.used=false;}
+                    for(auto& n:s.notes.notes)if(NoteRoute::matches(n,-1,p,c,-1)){ended(n,e.header()->time);s.notes.drop(n);}
                 }
         }
         return s.notes.route(e,nextNote_,[&](const Event& out){return append(s,out);},[&](const auto& n,uint32_t t){ended(n,t);});

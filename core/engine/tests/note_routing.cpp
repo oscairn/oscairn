@@ -8,6 +8,7 @@
 #include <cmath>
 #include <iostream>
 #include <span>
+#include <string>
 #include <vector>
 using namespace oscairn;
 using kick::clap::Event;
@@ -335,5 +336,43 @@ int main(int argc,char** argv){try{
         forbidAllocation=true;const bool offBlock=f.process(out,512,nullptr,releases.data(),512);forbidAllocation=false;
         check(offBlock && f.eventDrops()==0,"a full block of releases does too");
     }
-    std::cout<<"ok: route ownership, retirement, sustain, physical MIDI overflow, the steal fade, draining, retiring and moving a tap\n";
+    {
+        // The held-key mask a harmony reads (heldKeys) is kept as notes come and go, never rebuilt from
+        // the slots: after random events through every path that holds, lifts or lets a slot go, it
+        // matches a rescan. A CLAP route with and without a fade, sharing a note limit, and a MIDI one.
+        uint32_t seed=7;auto next=[&](uint32_t n){seed=seed*1664525u+1013904223u;return (seed>>8)%n;};
+        NoteRoute fading(16u),choking(16u),midiOut(16u);fading.clap.fill(true);choking.clap.fill(true);fading.fadeFrames=64;
+        NoteRoute* const peers[]{&fading,&choking};
+        NoteZones zones;zones.count=2;zones.zones[0].maxNotes=40;zones.zones[1].transpose=12;zones.zones[1].lowKey=60;
+        uint32_t nextId=1;
+        auto emit=[&](const Event&){return next(50)!=0;}; // now and then the destination is full
+        auto end=[](const NoteRoute::Note&,uint32_t){};
+        auto agrees=[](const NoteRoute& r){
+            std::array<uint64_t,2> keys{};
+            for(const auto& n:r.notes)if(n.used && n.held && n.key>=0 && n.key<128)keys[size_t(n.key/64)]|=uint64_t(1)<<(n.key%64);
+            return keys==r.heldKeys;};
+        for(int step=0;step<200000;++step)
+        {
+            auto& r=*std::array{&fading,&choking,&midiOut}[next(3)];
+            const int key=40+int(next(40)),channel=int(next(3));
+            const bool many=step/20000%2; // half the time notes pile up, to fill the slots
+            switch(next(12))
+            {
+            case 0:case 1:case 2:r.route(Event::note(true,key,.5,next(128),channel),nextId,emit,end,&zones,0,false,&r==&midiOut?std::span<NoteRoute* const>{}:std::span<NoteRoute* const>(peers));break;
+            case 3:case 4:if(!many)r.route(Event::note(false,key,0,next(128),channel),nextId,emit,end,&zones);break;
+            case 5:r.route(Event::midi(0x90|channel,uint8_t(key),uint8_t(1+next(127)),next(128)),nextId,emit,end,&zones);break;
+            case 6:if(!many)r.route(Event::midi(0x80|channel,uint8_t(key),0,next(128)),nextId,emit,end,&zones);break;
+            case 7:r.route(Event::midi(0xb0|channel,64,next(2)?127:0,next(128)),nextId,emit,end,&zones);break;
+            case 8:if(!next(20))r.route(Event::midi(0xb0|channel,next(2)?120:123,0,next(128)),nextId,emit,end,&zones);break;
+            case 9:{clap_event_note_t end{};end.header={sizeof end,0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_END,0};
+                end.note_id=next(2)?int32_t(nextId-1-next(64)):-1;end.port_index=0;end.channel=int16_t(channel);end.key=int16_t(next(4)?key:-1);
+                r.ended(Event::from(end));break;}
+            case 10:{auto& n=r.notes[next(64)];if(n.used){if(next(2))r.choke(n,next(128));else r.steal(n,next(128));}break;}
+            case 11:if(!next(500))r.clear();else if(!next(500))r.retire(emit,[](size_t,int){return uint8_t(0);});
+                else{r.fade(128,emit);r.advance(128);}break;
+            }
+            check(agrees(r),"after step "+std::to_string(step)+", the held keys kept match a rescan of the slots");
+        }
+    }
+    std::cout<<"ok: route ownership, retirement, sustain, physical MIDI overflow, the steal fade, draining, retiring, moving a tap and the held keys kept\n";
 }catch(const std::exception& e){forbidAllocation=false;std::cerr<<e.what()<<'\n';return 1;}}

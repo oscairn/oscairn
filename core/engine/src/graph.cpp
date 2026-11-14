@@ -1215,7 +1215,7 @@ namespace oscairn
             auto& held=*h.held;
             auto add=[&](uint32_t time){
                 oscairn_harmony_t x{};x.key_root=h.root;x.scale=h.scale;
-                for(const auto& n:held.route.notes)if(n.used && n.held && n.key>=0 && n.key<128)x.held[n.key/64]|=uint64_t(1)<<(n.key%64);
+                x.held[0]=held.route.heldKeys[0];x.held[1]=held.route.heldKeys[1];
                 recognizeChord(x);
                 if(h.count && !std::memcmp(&x,&held.last,sizeof x))return;
                 held.last=x;

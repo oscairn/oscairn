@@ -45,7 +45,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # The scripts ask the engine for session.status with it (os/scripts/control-request.c).
     add_executable(oscairn-control-request ${PROJECT_SOURCE_DIR}/os/scripts/control-request.c)
     add_test(NAME devices-fantom-start COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/fantom_start.sh ${CMAKE_CURRENT_SOURCE_DIR}/bundle)
-    set_tests_properties(devices-fantom-start PROPERTIES TIMEOUT 30)
+    # About 50 dry runs at most a second each; 29 s seen on a shared runner, where 30 s cut it off.
+    set_tests_properties(devices-fantom-start PROPERTIES TIMEOUT 120)
     # WRITE, MENU and TEMPO (gpio-keys, evdev): input_event records through a pipe.
     add_executable(oscairn-input-keys-test tests/input_keys_test.cpp src/InputKeys.cpp)
     target_include_directories(oscairn-input-keys-test PRIVATE src)

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Launcher.h"
+#include <tuple>
+#include <utility>
 
 namespace oscairn::standalone
 {
@@ -11,6 +13,7 @@ namespace oscairn::standalone
 
     TopBar::TopBar(Engine& engine, const juce::String& where, Shell shell) : engine_(engine), where_(where), shell_(std::move(shell))
     {
+        setOpaque(true); // paint() fills it: the view under it is not drawn with it
         // The bar's icons stand alone, without a button's fill; All notes off in the danger color.
         for(auto* b : std::initializer_list<IconButton*>{&home_, &back_, &apps_, &more_, &notesOff_}) b->setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
         auto wire = [this](IconButton& b, const std::function<void()>& f, const char* tip) {
@@ -58,6 +61,9 @@ namespace oscairn::standalone
         // The open Performance and its scene; the tempo and the engine's load. Nothing while
         // hidden, as in an app in the background; the constructor's call, before the timer, fills it.
         if(!showing(*this) && isTimerRunning()) return;
+        // Drawn again only for a change, and only what changed (RFC 0045: on a device each frame slows the audio).
+        const auto was = std::make_tuple(context_, scene_, notesOff_.isVisible(), stop_.isVisible());
+        const auto wasStatus = std::make_pair(status_, load_);
         if(const auto info = engine_.performanceInfo()) context_ = juce::String::fromUTF8(info->name.empty() ? "Untitled" : info->name.c_str());
         const auto& graph = engine_.graph();
         scene_.clear();
@@ -68,8 +74,8 @@ namespace oscairn::standalone
         // A hardware button playing Panic (the device's or a controller's profile, or the Performance) replaces it (RFC 0030).
         notesOff_.setVisible(shell_.notesOff != nullptr && !panicOnHardware(engine_.controlGroups(), engine_.assignments()));
         stop_.setVisible(status.playing);
-        resized();
-        repaint();
+        if(was != std::make_tuple(context_, scene_, notesOff_.isVisible(), stop_.isVisible())) { resized(); repaint(); }
+        else if(wasStatus != std::make_pair(status_, load_)) { const auto old = statusArea_; resized(); repaint(old.getUnion(statusArea_)); }
     }
 
     void TopBar::resized()
@@ -180,6 +186,7 @@ namespace oscairn::standalone
         shell.home = {}; shell.back = {}; return shell; }()) // Home is here; nothing to go back to
     {
         setTitle("Home");
+        setOpaque(true); // paint() fills it: the screen under it is not drawn with it
         bar_.showMark();
         addAndMakeVisible(bar_);
         addChildComponent(recovery_); // the engine's notice and Restart, when it is gone
@@ -189,9 +196,10 @@ namespace oscairn::standalone
 
     void Launcher::timerCallback()
     {
-        for(size_t i = 0; i < apps_.size(); ++i) states_[i] = apps_[i].state ? apps_[i].state() : juce::String();
+        // A tile's line drawn again only when it changed (RFC 0045).
+        for(size_t i = 0; i < apps_.size(); ++i)
+            if(auto state = apps_[i].state ? apps_[i].state() : juce::String(); state != states_[i]) { states_[i] = std::move(state); if(i < tiles_.size()) repaint(stateArea(i)); }
         recovery_.update();
-        repaint();
     }
 
     void Launcher::open(int app)
@@ -220,6 +228,11 @@ namespace oscairn::standalone
         repaint();
     }
 
+    juce::Rectangle<int> Launcher::stateArea(size_t tile) const
+    {
+        return tiles_[tile].reduced(dense(*this) ? 12 : 16).removeFromBottom(int(textSize(TextRole::Small, mode())) + 4);
+    }
+
     void Launcher::paint(juce::Graphics& g)
     {
         g.fillAll(ink(Ink::Background));
@@ -234,7 +247,7 @@ namespace oscairn::standalone
             const auto well = inside.removeFromTop(iconSide).removeFromLeft(iconSide).toFloat();
             g.setColour(ink(Ink::Raised)); g.fillRoundedRectangle(well, std::min(12.f, themeData().radius + 4));
             drawIcon(g, apps_[i].icon, well.reduced(12), ink(Ink::Text));
-            auto state = inside.removeFromBottom(int(small) + 4);
+            const auto state = stateArea(i); inside.removeFromBottom(state.getHeight());
             g.setColour(ink(Ink::Text)); drawInked(g, apps_[i].name, inside.removeFromBottom(int(title) + 6), juce::Font(juce::FontOptions(title, juce::Font::bold)));
             g.setColour(ink(Ink::Muted)); drawInked(g, states_[i], state, juce::Font(juce::FontOptions(small)));
         }

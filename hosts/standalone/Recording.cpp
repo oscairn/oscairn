@@ -76,6 +76,7 @@ namespace oscairn::standalone
         // Nothing while hidden; the constructor's call, before the timer, fills it.
         if(!showing(*this) && isTimerRunning()) return;
         const auto before = message_;
+        const bool wasDanger = danger_;
         recording_ = engine_.recordingTake();
         record_.setToggleState(recording_ != 0, juce::dontSendNotification);
         record_.setTooltip(recording_ ? "Stop recording" : "Record Main and the notes played");
@@ -93,7 +94,7 @@ namespace oscairn::standalone
         }
         else message_.clear();
         if(message_ != before) { if(auto* p = getParentComponent()) p->resized(); }
-        repaint();
+        if(message_ != before || danger_ != wasDanger) repaint(); // only a change is drawn again (RFC 0045)
     }
 
     void RecordButtons::resized()

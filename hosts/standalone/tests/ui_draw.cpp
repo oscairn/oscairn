@@ -4,8 +4,8 @@
 // in other processes), counted by PaintCounter: the screens as the app shows them on that
 // profile's 1280 x 720 panel (its scale, the panel's layout under Home and the apps' frames; the
 // Setlist and Settings in windows of their own, as their processes have), against a real engine
-// session over the control socket without an audio device. Each screen is left untouched, then
-// the Library's list scrolls. Prints a line for each.
+// session over the control socket without an audio device. Each screen is left untouched, when
+// it draws nothing; then the Library's list scrolls. Prints a line for each.
 //   oscairn_ui_draw_test PLUGIN_DIR SCANNER THEMES LAYOUT PROFILE
 #include "../Launcher.h"
 #include "../LibraryPane.h"
@@ -19,6 +19,7 @@
 #include "oscairn/local_socket.h"
 #include "oscairn/session.h"
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -45,12 +46,16 @@ int main(int argc, char** argv)
         auto server = std::make_unique<LocalServer>(*session);
         server->listen(socket.string());
         std::atomic<bool> running = true;
-        // No audio is rendered: nothing the screens show changes unless they are touched.
+        std::atomic<int> render = 0;
+        // No audio is rendered but the blocks asked for (into memory, on this thread): nothing the
+        // screens show changes unless they are touched.
         std::thread control([&] {
+            std::array<float, 128> l{}, r{}; float* out[2]{l.data(), r.data()};
             while(running)
             {
                 server->poll(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()));
                 session->service();
+                for(; render > 0; --render) session->process(nullptr, 0, out, 2, 128);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             server.reset(); session.reset();
@@ -131,6 +136,7 @@ int main(int argc, char** argv)
                 pump(1500); // its first readings and layouts
                 const auto r = measure(top, 3000);
                 report(what, r);
+                check(r.frames == 0, std::string(what) + ": nothing changes, so nothing is drawn");
                 return r;
             };
             standalone::TopBar::Shell shell;
@@ -138,16 +144,33 @@ int main(int argc, char** argv)
 
             // Home.
             {
+                juce::String library = "121 Performances";
                 std::vector<standalone::Launcher::App> apps{
                     {"Performance", "piano", [] { return juce::String("Untitled: play or edit it"); }, [] {}},
                     {"Groovebox", "layout-grid", [] { return juce::String("Patterns for the open Performance"); }, [] {}},
-                    {"Library", "library-big", [] { return juce::String("121 Performances"); }, [] {}},
+                    {"Library", "library-big", [&] { return library; }, [] {}},
                     {"Setlist", "list-music", [] { return juce::String("Songs in order, for the stage"); }, [] {}},
                     {"Settings", "settings", [] { return juce::String("Audio, MIDI and more"); }, [] {}}};
                 standalone::Launcher home(engine, apps, [&] { auto s = shell; s.home = {}; s.back = {}; return s; }());
                 standalone::setDesktopMode(home, 2);
                 panel.overlay(&home);
                 atRest("Home, at rest", window);
+                // A value that changes: only it is drawn again, not the bar or the tiles under it.
+                // The tempo in the top bar (the engine's transport, which a block reports)...
+                start();
+                engine.setTempo(133);
+                pump(100); render = 4; pump(1000);
+                auto c = counter.counts(window);
+                const double bar = screen.width * standalone::TopBar::heightFor(home) * screen.scale();
+                std::printf("%-26s %6d frames %10lld pixels (the top bar is %.0f)\n", "Home, the tempo changed", c.frames, (long long) c.pixels, bar);
+                check(c.frames > 0 && c.pixels < bar / 4, "the tempo changed: only it is drawn again");
+                // ...and a tile's line of state.
+                start();
+                library = "122 Performances";
+                pump(1500);
+                c = counter.counts(window);
+                std::printf("%-26s %6d frames %10lld pixels (a tile is %.0f)\n", "Home, a tile's state", c.frames, (long long) c.pixels, 200.0 * 120 * screen.scale() * screen.scale());
+                check(c.frames > 0 && c.pixels < 200.0 * 120 * screen.scale() * screen.scale() / 3, "a tile's state changed: only its line is drawn again");
                 panel.overlay(nullptr);
             }
 

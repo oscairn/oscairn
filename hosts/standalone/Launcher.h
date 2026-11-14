@@ -113,6 +113,7 @@ namespace oscairn::standalone
     private:
         void timerCallback() override;
         int mode() const { return std::max(1, desktopMode(*this)); }
+        juce::Rectangle<int> stateArea(size_t tile) const; // where its line of state is drawn
 
         Engine& engine_;
         std::vector<App> apps_;

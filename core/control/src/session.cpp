@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <optional>
@@ -25,6 +26,7 @@ namespace oscairn
     {
         if( !std::isfinite( sampleRate ) || sampleRate <= 0 || maxFrames == 0 )
             throw std::invalid_argument( "session needs a positive sample rate and block size" );
+        if( const char* guard = std::getenv( "OSCAIRN_LOAD_GUARD" ); guard && !std::strcmp( guard, "off" ) ) loadGuard_ = false;
         graph_.setAssets( &assets_ );
         graph_.setListener( &recorder_ );
         controllers_ = std::make_unique<ControllerInput>( *this );

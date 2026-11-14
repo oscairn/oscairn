@@ -49,6 +49,9 @@ namespace oscairn
         // The folder of the plugins bundled with the app (the engine's --plugins), where a document's
         // plugin not at its saved path or in the store is looked for by format and ID. Set before use.
         void setBundledPlugins(const std::filesystem::path& folder) { bundledPlugins_ = folder; }
+        // Whether the graph gives notes up for load (RFC 0045's load guard, or a CPU budget set), as the
+        // last service() set it. OSCAIRN_LOAD_GUARD=off when the Session is made switches the guard off.
+        bool loadGuard() const noexcept { return graph_.voiceBudget() != 0; }
 
         // Edits are staged; a failed commit leaves the live plan unchanged and the
         // staging area available for correction. Empty names address nodes by ID only.
@@ -416,6 +419,7 @@ namespace oscairn
         // time, from blocks that ran undisturbed (budget.cpp, measure).
         struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; }; // samples: accepted, at rest and voiced
         Budget budget_;
+        bool loadGuard_ = true; // OSCAIRN_LOAD_GUARD=off: a diagnostic and test setting, not a product mode
         std::map<std::string, Measurement> measured_;          // by plugin ID, version and build digest, and what it declared (pluginKey)
         bool measurementsLoaded_ = false, measurementsChanged_ = false;
         std::chrono::steady_clock::time_point measurementsSaved_{};

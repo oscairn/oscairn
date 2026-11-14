@@ -7,11 +7,12 @@ use crate::client::tests::{FakeEngine, WAIT};
 use crate::client::Event;
 use crate::shell::{self, Request};
 use crate::topbar::{MeterSettings, Show};
-use crate::{Bar, Shell};
+use crate::nav::{Action, Roles};
+use crate::{Bar, HomeState, Shell};
 use serde_json::json;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
-use slint::{ComponentHandle, PhysicalSize, Rgb8Pixel};
+use slint::{ComponentHandle, Model, PhysicalSize, Rgb8Pixel};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -172,7 +173,7 @@ impl Fixture {
         let _ = std::fs::remove_file(&path);
         let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         let (tx, events) = mpsc::channel();
-        shell::start(&screen.ui, path, 992 << 20, move |e| {
+        shell::start(&screen.ui, path, &crate::profile::Profile::load(Some("fantom-07")).unwrap(), move |e| {
             let _ = tx.send(e);
         })
         .unwrap();
@@ -205,7 +206,9 @@ fn the_top_bar_follows_the_engine() {
     f.answer("performance.reopen", json!({"notice": ""}));
     f.answer("performance.info", json!({"name": "Grand Piano", "unsaved": false}));
     f.answer("graph.get", json!({"scene": 1, "scenes": [{"id": 1, "name": "Verse"}]}));
-    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42}})));
+    f.answer("library.query", json!({"items": [], "total": 24}));
+    f.answer("library.query", json!({"items": [], "total": 1}));
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null"}})));
     f.pump();
     f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
     f.answer("transport.get", json!({"tempo": 96.5, "playing": false}));
@@ -215,10 +218,55 @@ fn the_top_bar_follows_the_engine() {
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.95}})));
     f.pump();
     assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 42, "within half a second of the last: not shown");
+    let lines: Vec<String> = f.screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
+    assert_eq!(lines, ["Grand Piano: play or edit it", "24 Performances, 1 Sound", "Songs in order, for the stage", "Patterns and steps", "No audio device (--audio null)"]);
     f.screen.frame();
     f.screen.save("topbar-engine");
     f.engine.writer.shutdown(std::net::Shutdown::Both).unwrap();
     f.pump(); // the subscribe still out, failed
     f.pump();
     assert!(f.screen.ui.get_engine().starts_with("lost"));
+}
+
+/// Home's tile `n` in the window, as home.slint lays it out (margin 6, gap 4, 120 tall).
+fn tile(s: &Screen, n: i32) -> Rect {
+    let columns = s.ui.get_home_columns();
+    let width = (W as i32 - 12 - (columns - 1) * 4) / columns;
+    (6 + (n % columns) * (width + 4), 48 + 6 + (n / columns) * 124, width + 1, 120)
+}
+
+// Home: the profile's apps; keys, the panel's roles and taps move the cursor, a move repaints
+// the two tiles it leaves and reaches, nothing opens until confirmed; Setlist is a Rust screen,
+// Settings a JUCE one the display is handed to.
+#[test]
+fn home_moves_by_keys_panel_and_touch() {
+    let mut f = Fixture::new("home");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let s = &mut f.screen;
+    let names: Vec<String> = s.ui.global::<HomeState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
+    assert_eq!(names, ["Performance", "Library", "Setlist", "Groovebox", "Settings"]);
+    s.frame();
+    s.save("home");
+    assert_eq!(s.frame(), None, "at rest");
+    let key = |s: &Screen, k: slint::platform::Key| s.ui.invoke_key(slint::SharedString::from(k), false);
+    assert!(key(s, slint::platform::Key::RightArrow));
+    let repainted = s.frame().unwrap();
+    let (a, b) = (tile(s, 0), tile(s, 1));
+    assert!(within(repainted, (a.0, a.1, b.0 + b.2 - a.0, a.3)), "a move repainted {repainted:?}: tiles 0 and 1 are {a:?} {b:?}");
+    let cursor = |s: &Screen| s.ui.global::<HomeState>().get_tiles().iter().position(|t| t.cursor);
+    assert_eq!((cursor(s), s.ui.get_screen()), (Some(1), 0), "moved, nothing opened");
+    // The panel: the data dial two steps on, as a FANTOM-07's map would have it.
+    let roles = Roles::parse(&json!({"navigation": {"cursor": ["data"], "confirm": ["enter"]}}));
+    shell::act(roles.action("data", 2).unwrap());
+    assert_eq!(cursor(s), Some(3));
+    shell::act(Action::Move { pane: 0, by: -1 });
+    shell::act(roles.action("enter", 1).unwrap());
+    assert_eq!((s.ui.get_screen(), s.ui.global::<Bar>().get_where().as_str(), s.ui.global::<Bar>().get_home_button()), (1, "Setlist", true));
+    assert!(key(s, slint::platform::Key::Escape), "Cancel goes Home");
+    assert_eq!(s.ui.get_screen(), 0);
+    s.ui.global::<HomeState>().invoke_tapped(4); // Settings: a JUCE screen
+    assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Settings", Some("settings")));
+    s.frame();
+    s.save("home-opening-settings");
 }

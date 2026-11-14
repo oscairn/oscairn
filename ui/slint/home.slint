@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Home (RFC 0030): a tile per app, as the JUCE Launcher lays them out on a device's screen
+// (Launcher.cpp: columns of about 200 pixels, 120 tall, the least gap), the cursor a border.
+
+import { Theme } from "theme.slint";
+
+export struct TileData {
+    name: string,
+    line: string,
+    icon: int,
+    cursor: bool,
+}
+
+// What Home shows, set by shell.rs.
+export global HomeState {
+    in property <[TileData]> tiles;
+    callback tapped(int);
+}
+
+export component Home inherits Rectangle {
+    out property <int> columns: clamp(floor((self.width - 2 * Theme.margin) / 200px), 1, max(1, HomeState.tiles.length));
+    property <length> tile-width: (self.width - 2 * Theme.margin - (columns - 1) * Theme.gap) / columns;
+    property <length> tile-height: 120px;
+    // As home.rs's APPS: Performance, Library, Setlist, Groovebox, Recordings, Settings.
+    property <[image]> icons: [
+        @image-url("../../hosts/standalone/icons/piano.svg"),
+        @image-url("../../hosts/standalone/icons/library-big.svg"),
+        @image-url("../../hosts/standalone/icons/list-music.svg"),
+        @image-url("../../hosts/standalone/icons/layout-grid.svg"),
+        @image-url("../../hosts/standalone/icons/audio-lines.svg"),
+        @image-url("../../hosts/standalone/icons/settings.svg"),
+    ];
+    for tile[i] in HomeState.tiles: Rectangle {
+        x: Theme.margin + mod(i, root.columns) * (root.tile-width + Theme.gap);
+        y: Theme.margin + floor(i / root.columns) * (root.tile-height + Theme.gap);
+        width: root.tile-width;
+        height: root.tile-height;
+        background: Theme.surface;
+        border-radius: Theme.radius;
+        border-width: tile.cursor ? 3px : 1px;
+        border-color: tile.cursor ? Theme.focus : Theme.border;
+        Rectangle {
+            x: 12px;
+            y: 12px;
+            width: 48px;
+            height: 48px;
+            background: Theme.raised;
+            border-radius: min(12px, Theme.radius + 4px);
+            Image {
+                width: 24px;
+                height: 24px;
+                source: root.icons[tile.icon];
+                colorize: Theme.text;
+            }
+        }
+        Text {
+            x: 12px;
+            y: parent.height - 12px - 18px - self.height;
+            width: parent.width - 24px;
+            overflow: elide;
+            font-size: Theme.title;
+            font-weight: 700;
+            color: Theme.text;
+            text: tile.name;
+        }
+        Text {
+            x: 12px;
+            y: parent.height - 12px - self.height;
+            width: parent.width - 24px;
+            overflow: elide;
+            font-size: Theme.small;
+            color: Theme.muted;
+            text: tile.line;
+        }
+        TouchArea {
+            clicked => { HomeState.tapped(i); }
+        }
+    }
+}

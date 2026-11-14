@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The shell's window: the top bar, the screen shown under it, and the engine's state when it is
-// busy or gone.
+// busy or gone. Keys go to shell.rs, which makes navigation actions of them.
 
 import { Theme } from "theme.slint";
 import { Bar, TopBar } from "topbar.slint";
-export { Theme, Bar }
+import { Home, HomeState, TileData } from "home.slint";
+export { Theme, Bar, HomeState, TileData }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -14,13 +15,40 @@ export component Shell inherits Window {
     default-font-family: "Inter";
     // Empty while the engine answers; else what is wrong ("busy 3.2 s", "lost: ...").
     in property <string> engine;
+    // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening (`opening` names it).
+    in property <int> screen;
+    in property <string> opening;
+    callback key(string, bool) -> bool; // a key's text and Shift; true when it was taken
     out property <length> resources-x: bar.resources-x;
     out property <length> resources-width: bar.resources-width;
     out property <length> tempo-x: bar.tempo-x;
+    out property <int> home-columns: home.columns;
 
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (root.key(event.text, event.modifiers.shift)) { return accept; }
+            return reject;
+        }
+    }
     bar := TopBar {
         y: 0;
         width: parent.width;
+    }
+    home := Home {
+        y: Theme.bar-height;
+        width: parent.width;
+        height: parent.height - Theme.bar-height;
+        visible: root.screen == 0;
+    }
+    if root.screen == 2: Text {
+        y: Theme.bar-height;
+        height: parent.height - Theme.bar-height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: Theme.title;
+        color: Theme.muted;
+        text: "Opening " + root.opening + "...";
     }
     if root.engine != "": Rectangle {
         x: Theme.margin;

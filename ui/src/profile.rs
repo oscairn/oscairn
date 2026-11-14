@@ -24,6 +24,10 @@ pub struct Profile {
     pub top_bar: MeterSettings,
     /// compute.memory in bytes; 0 when the profile does not say.
     pub memory: u64,
+    /// The apps Home offers; none: every one (a computer).
+    pub apps: Vec<String>,
+    /// panel.map: the panel map's file name (beside the program, in share/oscairn/panels) or path.
+    pub panel_map: String,
 }
 
 impl Profile {
@@ -50,6 +54,8 @@ impl Profile {
             frame_rate: screen["frameRate"].as_u64().map(|f| f.min(1000) as u32),
             top_bar: crate::settings::over(MeterSettings::default(), &screen["topBar"]),
             memory: doc["compute"]["memory"].as_u64().unwrap_or(0).min(1 << 24) << 20,
+            apps: doc["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect(),
+            panel_map: doc["panel"]["map"].as_str().unwrap_or_default().into(),
         })
     }
 
@@ -70,6 +76,7 @@ mod tests {
         let p = Profile::load(Some("fantom-07")).unwrap();
         assert_eq!((p.id.as_str(), p.on_device, p.theme.as_str(), p.frame_rate()), ("fantom-07", true, "oscairn-block", 30));
         assert_eq!((p.memory, p.top_bar), (992 << 20, MeterSettings { cpu: Show::Both, ram: Show::Both }));
+        assert_eq!((p.apps.len(), p.apps[3].as_str(), p.panel_map.as_str()), (5, "oscairn.setlist", "fantom-07.json"));
         assert_eq!(Profile::load(None).unwrap().frame_rate(), 0); // a computer: no cap
         assert!(Profile::load(Some("no-such-profile")).is_err());
     }

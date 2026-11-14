@@ -6,6 +6,8 @@
 //! It never ends because the engine is slow or gone: it says so and waits.
 
 mod client;
+mod home;
+mod nav;
 mod profile;
 mod settings;
 mod shell;
@@ -39,6 +41,6 @@ fn main() -> Result<(), slint::PlatformError> {
     let post = move |event| {
         let _ = weak.upgrade_in_event_loop(move |_| shell::dispatch(event));
     };
-    shell::start(&ui, socket.into(), profile.memory, post).map_err(|e| slint::PlatformError::Other(e.to_string()))?;
+    shell::start(&ui, socket.into(), &profile, post).map_err(|e| slint::PlatformError::Other(e.to_string()))?;
     ui.run()
 }

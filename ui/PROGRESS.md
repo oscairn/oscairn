@@ -24,4 +24,13 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   changes, nothing drawn at rest; the shell against a fake engine on a socket. Mac: 16 passed,
   clippy clean. Pictures in ui/target/screens looked at by eye. The JUCE Settings page for it is
   written and waits on the JUCE build (build-ui, started 14:2x) to compile and run its test.
+- Interim report sent. Owner (via coordinator): cpuLoad confirmed as the CPU figure; themes must
+  be built in properly (installed themes, live switch, neutral format, tests): a step of its own
+  after Home, before Setlist.
+- Step 3: navigation (`nav.rs`: actions, keyboard map, panel-map roles `navigation`, a paging
+  cursor), Home (`home.rs`, `slint/home.slint`): the profile's apps in the JUCE order with icon,
+  name and state line (Performance name, library totals, audio device), border cursor (theme
+  `focus`, the accent by default), Confirm/tap opens: Setlist a Rust screen, the rest a JUCE
+  handover (asked for, not yet carried out: step 5). Tests: keys, panel roles and taps; a cursor
+  move repaints within the two tiles; nothing at rest. 22 passed on the Mac.
 </content>

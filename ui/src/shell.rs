@@ -9,12 +9,16 @@
 //! `graph.changed` asks `performance.info` and `graph.get` again. Nothing else wakes it at rest.
 
 use crate::client::{Client, Error, Event, BUSY};
+use crate::home::{self, Home};
+use crate::nav::{self, Action};
+use crate::profile::Profile;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, Shell};
+use crate::{Bar, HomeState, Shell, TileData};
 use serde_json::{json, Value};
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -26,6 +30,8 @@ pub enum Request {
     Graph,
     Transport,
     Memory,
+    /// library.query's total of Performances (false) or Sounds (true), for Home's Library line.
+    Library(bool),
 }
 
 impl Request {
@@ -45,6 +51,18 @@ struct Shown {
     tempo: String,
     cpu: Meter,
     ram: Meter,
+    audio_device: String,
+    performances: Option<u64>,
+    sounds: Option<u64>,
+}
+
+/// The screen shown under the top bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Screen {
+    Home = 0,
+    Setlist = 1,
+    /// A JUCE screen asked for: the display is being handed over (docs/rust-ui.md).
+    Opening = 2,
 }
 
 pub struct App {
@@ -56,6 +74,11 @@ pub struct App {
     /// performance.info and graph.get refused while the engine was busy: asked again at the next meters.
     stale: bool,
     watchdog: slint::Timer,
+    screen: Screen,
+    home: Home,
+    tiles: Rc<VecModel<TileData>>,
+    /// The JUCE app's name for the screen asked for (its --app), once one is.
+    handover: Option<&'static str>,
 }
 
 thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
@@ -87,19 +110,31 @@ pub fn show_settings(ui: &Shell, settings: MeterSettings) {
 
 /// Starts the shell on `ui`, a client of the engine's socket at `socket`. `post` takes each of the
 /// client's events, on its reader thread, to the UI thread, which hands it to `dispatch`.
-pub fn start(ui: &Shell, socket: PathBuf, device_memory: u64, post: impl Fn(Event<Request>) + Send + 'static) -> std::io::Result<()> {
+pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, post: impl Fn(Event<Request>) + Send + 'static) -> std::io::Result<()> {
     let client = Client::start(socket, post)?;
     ui.set_engine("connecting".into());
+    let home = Home::new(&profile.apps, ui.get_home_columns().max(1) as usize);
+    let tiles = Rc::new(VecModel::<TileData>::default());
+    ui.global::<HomeState>().set_tiles(tiles.clone().into());
+    ui.global::<HomeState>().on_tapped(|i| with_app(|a| a.tap(i)));
+    ui.global::<Bar>().on_home(|| act(Action::Home));
+    ui.on_key(|text, shift| nav::from_key(&text, shift).map(act).is_some());
     APP.with(|a| {
-        *a.borrow_mut() = Some(App {
+        let mut app = App {
             ui: ui.as_weak(),
             client,
-            device_memory,
+            device_memory: profile.memory,
             shown: Shown::default(),
             last_meters: None,
             stale: false,
             watchdog: slint::Timer::default(),
-        })
+            screen: Screen::Home,
+            home,
+            tiles,
+            handover: None,
+        };
+        app.show_home();
+        *a.borrow_mut() = Some(app);
     });
     Ok(())
 }
@@ -107,6 +142,16 @@ pub fn start(ui: &Shell, socket: PathBuf, device_memory: u64, post: impl Fn(Even
 /// One of the client's events, on the UI thread.
 pub fn dispatch(event: Event<Request>) {
     with_app(|a| a.event(event))
+}
+
+/// A navigation action from any source, on the UI thread.
+pub fn act(action: Action) {
+    with_app(|a| a.act(action))
+}
+
+/// The JUCE screen asked for, if one is: the program ends to hand the display over.
+pub fn handover() -> Option<&'static str> {
+    APP.with(|a| a.borrow().as_ref().and_then(|a| a.handover))
 }
 
 impl App {
@@ -154,6 +199,8 @@ impl App {
                 self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed"]}));
                 self.send(Request::Reopen, "performance.reopen", json!({}));
                 self.ask_performance();
+                self.send(Request::Library(false), "library.query", json!({"kind": "performance", "limit": 1}));
+                self.send(Request::Library(true), "library.query", json!({"kind": "sound", "limit": 1}));
             }
             Event::Lost(why) => {
                 if let Some(ui) = self.ui() {
@@ -182,7 +229,11 @@ impl App {
             return;
         }
         self.last_meters = Some(now);
-        self.show(|s| s.cpu = topbar::cpu(status));
+        let device = status["audioDevice"].as_str().unwrap_or_default().to_string();
+        self.show(|s| {
+            s.cpu = topbar::cpu(status);
+            s.audio_device = device;
+        });
         self.ask(Request::Memory, "memory.state");
         self.ask(Request::Transport, "transport.get");
         if self.stale {
@@ -216,6 +267,10 @@ impl App {
                     eprintln!("oscairn-ui: the last Performance did not open: {notice}");
                 }
             }
+            Request::Library(sounds) => {
+                let total = r["total"].as_u64();
+                self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
+            }
             Request::Subscribe => {}
         }
     }
@@ -246,6 +301,97 @@ impl App {
             bar.set_ram_known(next.ram.0.is_some());
             bar.set_ram_level(level(next.ram));
         }
+        let lines_changed = (&next.performance, &next.audio_device, next.performances, next.sounds) != (&was.performance, &was.audio_device, was.performances, was.sounds);
         self.shown = next;
+        if lines_changed {
+            self.show_home();
+        }
+    }
+
+    /// A tile's line: what the JUCE Launcher says of each app, from what the shell knows.
+    fn line(&self, app: &home::App) -> String {
+        let s = &self.shown;
+        let plural = |n: u64, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
+        match app.id {
+            "oscairn.performance" if !s.performance.is_empty() => format!("{}: play or edit it", s.performance),
+            "oscairn.library" => match (s.performances, s.sounds) {
+                (Some(p), Some(n)) => format!("{}, {}", plural(p, "Performance"), plural(n, "Sound")),
+                _ => app.line.into(),
+            },
+            "oscairn.settings" if s.audio_device == "null" => "No audio device (--audio null)".into(),
+            "oscairn.settings" if !s.audio_device.is_empty() => s.audio_device.clone(),
+            _ => app.line.into(),
+        }
+    }
+
+    /// Home's tiles, each set only when it changed: a cursor move redraws the two tiles.
+    fn show_home(&mut self) {
+        for (n, &i) in self.home.tiles.iter().enumerate() {
+            let app = &home::APPS[i];
+            let tile = TileData { name: app.name.into(), line: self.line(app).into(), icon: app.icon, cursor: n == self.home.cursor.at };
+            match self.tiles.row_data(n) {
+                Some(was) if was == tile => {}
+                Some(_) => self.tiles.set_row_data(n, tile),
+                None => self.tiles.push(tile),
+            }
+        }
+    }
+
+    fn act(&mut self, action: Action) {
+        match (self.screen, action) {
+            (Screen::Opening, _) => {} // the display is going to the JUCE app
+            (_, Action::Home) => self.go(Screen::Home),
+            (Screen::Home, _) => {
+                if let Some(ui) = self.ui() {
+                    self.home.columns = ui.get_home_columns().max(1) as usize;
+                }
+                let open = self.home.act(action);
+                self.show_home();
+                if let Some(app) = open {
+                    self.open(app);
+                }
+            }
+            (Screen::Setlist, Action::Cancel) => self.go(Screen::Home),
+            (Screen::Setlist, _) => {}
+        }
+    }
+
+    fn tap(&mut self, tile: i32) {
+        if self.screen != Screen::Home {
+            return;
+        }
+        let open = self.home.tap(tile.max(0) as usize);
+        self.show_home();
+        if let Some(app) = open {
+            self.open(app);
+        }
+    }
+
+    fn go(&mut self, screen: Screen) {
+        self.screen = screen;
+        if let Some(ui) = self.ui() {
+            ui.set_screen(screen as i32);
+            let bar = ui.global::<Bar>();
+            bar.set_where(match screen {
+                Screen::Home => "Home".into(),
+                Screen::Setlist => "Setlist".into(),
+                Screen::Opening => ui.get_opening(),
+            });
+            bar.set_home_button(screen != Screen::Home);
+        }
+    }
+
+    /// An app's tile confirmed: a Rust screen shows; a JUCE one gets the display (docs/rust-ui.md).
+    fn open(&mut self, app: &'static home::App) {
+        match app.id {
+            "oscairn.setlist" => self.go(Screen::Setlist),
+            id => {
+                if let Some(ui) = self.ui() {
+                    ui.set_opening(app.name.into());
+                }
+                self.handover = id.strip_prefix("oscairn.");
+                self.go(Screen::Opening);
+            }
+        }
     }
 }

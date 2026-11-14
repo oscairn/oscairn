@@ -17,6 +17,8 @@ export global Theme {
     in property <color> accent: #FF9A45;
     in property <color> positive: #5AD9A4;
     in property <color> danger: #FF6B63;
+    // The cursor's border: the accent unless the theme says otherwise.
+    in property <color> focus: accent;
     in property <length> radius: 6px;
     in property <float> font-scale: 1;
     // The meters' yellow (hosts/standalone/Icons.h, meterYellow).

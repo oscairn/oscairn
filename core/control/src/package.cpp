@@ -203,7 +203,13 @@ namespace oscairn
                 list += std::string(list.empty() ? "" : ",") + "{\"path\":" + detail::quote(a.path) + ",\"sha256\":" + detail::quote(a.sha256) + ",\"size\":" + std::to_string(a.size) + '}';
             assets = "{\"version\":" + detail::quote(package.assetVersion) + ",\"files\":[" + list + "]}";
         }
-        for(const auto& d : package.assetDependencies) dependencies += std::string(dependencies.empty() ? "" : ",") + "{\"id\":" + detail::quote(d.id) + ",\"version\":" + detail::quote(d.version) + '}';
+        auto listOf = [](const std::vector<Package::Dependency>& list) {
+            std::string out;
+            for(const auto& d : list) out += std::string(out.empty() ? "" : ",") + "{\"id\":" + detail::quote(d.id) + ",\"version\":" + detail::quote(d.version) + '}';
+            return out;
+        };
+        dependencies = listOf(package.assetDependencies);
+        if(!package.packageDependencies.empty()) dependencies += "],\"packages\":[" + listOf(package.packageDependencies); // absent when none, as manifests written before it
         return "{\"format\":\"oscairn.library\",\"version\":3,\"id\":" + detail::quote(package.id) + ",\"name\":" + detail::quote(package.name) +
                ",\"kind\":" + detail::quote(package.kind) + ",\"license\":" + detail::quote(package.license) + ",\"source\":" + source +
                ",\"items\":[" + items + "],\"plugins\":[" + plugins + "],\"assets\":" + assets + ",\"dependencies\":{\"assets\":[" + dependencies + "]},\"files\":{" + files + "}}\n";
@@ -369,12 +375,13 @@ namespace oscairn
             for(const auto& t : itemTypes()) if(!t.handler.empty()) kept[t.folder] = t.extensions.at(0);
             for(const auto& t : declared) if(!t.handler.empty()) kept[t.folder] = t.extensions.at(0);
             std::vector<std::string> contents;
+            std::string outside; // the first entry in no folder this device knows: refused once the manifest says what it needs
             for(const auto& e : entries)
             {
                 const auto& name = e.name;
                 if(!safe(name)) bad("an entry with an unsafe name: " + name);
                 const auto top = name.substr(0, name.find('/'));
-                if(name != "library.json" && name != "library.sig" && !folders.count(top)) bad("an entry outside its folders: " + name);
+                if(name != "library.json" && name != "library.sig" && !folders.count(top)) { if(outside.empty()) outside = name; continue; }
                 if(e.link) bad("a link: " + name);
                 if((nameBytes += name.size()) > maxNameBytes) bad("its names are too long");
                 if(!names.insert(name).second) bad("an entry twice: " + name);
@@ -399,6 +406,18 @@ namespace oscairn
                 }
             }
             if(manifest.empty()) bad("it has no library.json");
+            if(!outside.empty())
+            {
+                // Most often the folder of an item type a package it needs declares (samples, waveforms): name them.
+                std::string needs;
+                if(detail::jsonPreflight(manifest, 16).empty())
+                    if(const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(manifest.data(), manifest.size()), &std::free}; doc)
+                        if(const V list = detail::member(detail::member(doc.get(), "dependencies"), "packages"); list && list->type == json_type_array)
+                            for(auto* e = static_cast<const json_array_s*>(list->payload)->start; e; e = e->next)
+                                if(const V id = detail::member(e->value, "id"), version = detail::member(e->value, "version"); id && version && id->type == json_type_string && version->type == json_type_string)
+                                    needs += (needs.empty() ? "" : ", ") + text(id) + " " + text(version) + " or later";
+                bad("an entry in a folder of no item type this device knows: " + outside + (needs.empty() ? "" : "; it needs the packages " + needs + ", which may declare it"));
+            }
             // Room for what it holds and one entry more (RFC 0031), before anything is written.
             if(extract && !inPlace && fs::space(into).available < total + largest) bad("there is not room for it on this device: it needs " + std::to_string((total + largest) >> 20) + " MiB");
             if(extract && !inPlace)
@@ -543,15 +562,19 @@ namespace oscairn
                 for(const auto& n : names)
                     if(n.rfind("Assets/", 0) == 0 && !listed.count(n.substr(7)) && !folders.count(n.substr(7))) bad("a file under Assets/ the asset package does not list: " + n);
             }
-            // A plugin package's asset libraries: each by ID and the least version it needs.
+            // A plugin package's asset libraries, and the packages any kind needs: each by ID and the least version.
             if(const V dependencies = detail::member(d, "dependencies"); dependencies && dependencies->type == json_type_object)
-                if(const V list = detail::member(dependencies, "assets"); list && list->type == json_type_array)
-                    for(auto* e = static_cast<const json_array_s*>(list->payload)->start; e; e = e->next)
-                    {
-                        Package::Dependency dependency{text(detail::member(e->value, "id")), text(detail::member(e->value, "version"))};
-                        if(!plainId(dependency.id) || !plainId(dependency.version) || p.assetDependencies.size() >= 256) bad("an asset dependency is wrong: " + dependency.id);
-                        p.assetDependencies.push_back(std::move(dependency));
-                    }
+                for(const auto* member : {"assets", "packages"})
+                    if(const V list = detail::member(dependencies, member); list && list->type == json_type_array)
+                        for(auto* e = static_cast<const json_array_s*>(list->payload)->start; e; e = e->next)
+                        {
+                            auto& into = member[0] == 'a' ? p.assetDependencies : p.packageDependencies;
+                            Package::Dependency dependency{text(detail::member(e->value, "id")), text(detail::member(e->value, "version"))};
+                            if(!plainId(dependency.id) || !plainId(dependency.version) || into.size() >= 256 || dependency.id == p.id ||
+                               std::any_of(into.begin(), into.end(), [&](const auto& x) { return x.id == dependency.id; }))
+                                bad(std::string(member[0] == 'a' ? "an asset" : "a package") + " dependency is wrong, named twice or the package itself: " + dependency.id);
+                            into.push_back(std::move(dependency));
+                        }
             if(!p.assetDependencies.empty() && p.kind != "plugin") bad("only a plugin package names asset dependencies");
             // RFC 0031: a license of the publisher's own (LicenseRef-) comes with its text.
             if((p.kind == "plugin" || p.kind == "asset") && licenseRef(p.license))

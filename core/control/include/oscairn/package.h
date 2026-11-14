@@ -52,6 +52,9 @@ namespace oscairn
         // A plugin package's asset libraries, each by ID and the least version it needs.
         struct Dependency { std::string id, version; };
         std::vector<Dependency> assetDependencies;
+        // The packages it needs, of any kind, each by ID and the least version (dependencies.packages):
+        // installed first from a repository, said when missing from a file.
+        std::vector<Dependency> packageDependencies = {};
         // The files of the types a handler keeps (samples and waveforms, RFC 0023), each
         // <type folder>/<id><extension>, in the archive's order: writePackage packs them last, in
         // this order (one sound's samples together); readPackage lists them as the archive has them.

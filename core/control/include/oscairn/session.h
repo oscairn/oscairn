@@ -148,6 +148,11 @@ namespace oscairn
         // What uses an asset library (RFC 0009 step 4), each named: library items, the open
         // Performance, Performances saved outside the library, plugin packages in the store.
         std::vector<std::string> assetLibraryUsers(const std::string& library);
+        // The installed packages that name this one in dependencies.packages, as "<id> <version>".
+        std::vector<std::string> packageDependents(const std::string& id);
+        // Whether a package is installed here at least at `least` (one recorded without a version,
+        // installed from a file whose manifest carries none, counts as any).
+        bool packageInstalled(const std::string& id, const std::string& least);
         bool selectSound(NodeId node,uint32_t id,int16_t channel=-1) override {return graph_.host(node).selectSound(id,channel);}
         bool discardSound(NodeId node,uint32_t id,bool cutTail=false) override {return graph_.host(node).discardSound(id,cutTail);}
         GraphState graphState() const override;

@@ -213,7 +213,8 @@ int main(int argc, char** argv)
 #endif
                     const auto view = box->getViewport()->getScreenBounds();
                     const auto area = view.getWidth() * double(view.getHeight()) * screen.scale() * screen.scale();
-                    std::printf("%-26s %6.0f pixels a frame; the list's view is %.0f\n", "", c.frames ? double(c.pixels) / c.frames : 0.0, area);
+                    std::printf("%-26s %6.0f pixels and %.2f ms a frame; the list's view is %.0f\n", "", c.frames ? double(c.pixels) / c.frames : 0.0, c.frames ? c.ms / c.frames : 0.0, area);
+                    check(c.frames > 0 && double(c.pixels) / c.frames <= area * 1.1, "scrolling draws the list's view and little else");
                 }
                 // Paging, for a panel without touch scrolling: a page is the rows shown less one, held at the ends.
                 if(box)

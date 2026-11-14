@@ -37,6 +37,7 @@ std::vector<V> array(V v,size_t limit){if(!v || v->type!=json_type_array)bad("ex
 double number(V v){if(!v || v->type!=json_type_number)bad("expected number");const auto* n=static_cast<const json_number_s*>(v->payload);std::istringstream in(std::string(n->number,n->number_size));in.imbue(std::locale::classic());double value;if(!(in>>value) || !in.eof() || !std::isfinite(value))bad("invalid number");return value;}
 bool boolean(V v){if(!v || (v->type!=json_type_true && v->type!=json_type_false))bad("expected boolean");return v->type==json_type_true;}
 uint32_t integer(V v,uint32_t max=UINT32_MAX){const auto n=number(v);if(n<0 || n>max || n!=std::floor(n))bad("invalid integer");return static_cast<uint32_t>(n);}
+uint32_t newId(V v){const auto n=integer(v);if(n==UINT32_MAX)bad("an ID with no ID after it");return n;} // a part, scene or control ID: the next one is the largest plus one
 std::string quote(std::string_view s){if(s.size()>4096 || s.find('\0')!=std::string_view::npos)bad("invalid string");return detail::quote(s);}
 std::string numeric(double value){if(!std::isfinite(value))bad("nonfinite value");char buffer[64];const auto result=std::to_chars(buffer,buffer+sizeof(buffer),value);if(result.ec!=std::errc{})bad("number encoding failed");return {buffer,result.ptr};}
 std::string join(const std::vector<std::string>& values){std::string out="[";for(const auto& v:values){if(out.size()>1)out+=',';out+=v;}return out+']';}
@@ -1252,7 +1253,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
         std::set<uint32_t> partIds;
         std::set<NodeId> partNodes; // a node belongs to one part
         for(auto p:array(field(d,"parts"),256)){
-            fields(p,{"id","name","input","chain","splits","output","bus","sends","level","pan","mute","solo","midiOut","key","from"});Part part;part.id=integer(field(p,"id"));part.name=text(field(p,"name"));
+            fields(p,{"id","name","input","chain","splits","output","bus","sends","level","pan","mute","solo","midiOut","key","from"});Part part;part.id=newId(field(p,"id"));part.name=text(field(p,"name"));
             if(const auto from=field(p,"from");from->type!=json_type_null){
                 fields(from,{"sound","revision","name","modified"});
                 part.from={text(field(from,"sound")),text(field(from,"revision")),text(field(from,"name")),boolean(field(from,"modified"))};
@@ -1332,7 +1333,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             const auto& all=next->host(at.node).parameters();if(std::none_of(all.begin(),all.end(),[&](const auto& p){return p.id==at.param;}))bad("unknown scene parameter");return at;};
         for(auto at:array(field(d,"sceneUntouched"),65536)){fields(at,{"node","param"});const auto p=parameterAt(at);if(std::find(untouched.begin(),untouched.end(),p)!=untouched.end())bad("duplicate untouched parameter");untouched.push_back(p);}
         for(auto s:array(field(d,"scenes"),256)){
-            fields(s,{"id","name","scope","glide","curve","launch","off","offWires","parts","wires","values","controls","master"});Scene scene;scene.id=integer(field(s,"id"));scene.name=text(field(s,"name"));
+            fields(s,{"id","name","scope","glide","curve","launch","off","offWires","parts","wires","values","controls","master"});Scene scene;scene.id=newId(field(s,"id"));scene.name=text(field(s,"name"));
             sceneTransition(s,scene);
             if(!scene.id || !sceneIds.insert(scene.id).second)bad("invalid or duplicate scene");
             scene.scope=sceneScope(field(s,"scope"));
@@ -1365,7 +1366,7 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
     {
         std::set<uint32_t> macroIds;
         const auto list=array(field(d,"controls"),4096);
-        for(auto m:list){const auto id=integer(field(m,"id"));if(!id || !macroIds.insert(id).second)bad("invalid or duplicate control");}
+        for(auto m:list){const auto id=newId(field(m,"id"));if(!id || !macroIds.insert(id).second)bad("invalid or duplicate control");}
         for(auto m:list){
             fields(m,{"id","part","name","value","targets","source"});Macro macro;macro.id=integer(field(m,"id"));macro.part=integer(field(m,"part"));macro.name=text(field(m,"name"));macro.value=number(field(m,"value"));
             if(const V source=member(m,"source")){fields(source,{"node","lane"});macro.sourceNode=node(field(source,"node"));macro.sourceLane=integer(field(source,"lane"));if(macro.sourceNode==graphInput || macro.sourceNode==graphOutput)bad("invalid control source");}

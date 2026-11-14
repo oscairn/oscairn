@@ -159,6 +159,28 @@ static void native(const char* synth,const char* delay,const char* seq,const fs:
     try {for(int i=0;i<12;++i){a.loadPerformance(file.string());a.service();a.savePerformance((root/("live"+std::to_string(i))).string());}}
     catch(...){stop=true;audio.join();throw;}stop=true;audio.join();check(rendered>0,"concurrent render");reset.run(a);a.service();
 }
+// A part, scene or control ID of 4294967295 would leave the next ID at zero: refused when read (a
+// large one below it loads, and the next one is its successor).
+static void topIds(const fs::path& root) {
+    Session s(48000,127);s.addPart("A");s.addScene("S");s.addMacro("M");s.commit();
+    const auto file=root/"ids";s.savePerformance(file.string());
+    const std::vector<std::pair<std::string,std::vector<std::pair<std::string,std::string>>>> kinds{
+        {"part",{{"\"id\":1,\"name\":\"A\"","\"id\":@,\"name\":\"A\""},{"\"part\":1,","\"part\":@,"}}},
+        {"scene",{{"\"id\":1,\"name\":\"S\"","\"id\":@,\"name\":\"S\""},{"\"scene\":1,","\"scene\":@,"}}},
+        {"control",{{"\"id\":1,\"part\":0,\"name\":\"M\"","\"id\":@,\"part\":0,\"name\":\"M\""}}}};
+    for(const auto& [kind,edits]:kinds)for(const char* id:{"4294967295","4000000000"}){
+        const auto copy=root/("ids-"+kind+"-"+id);fs::copy(file,copy,fs::copy_options::recursive);
+        for(auto [from,to]:edits){to.replace(to.find('@'),1,id);replaceText(copy/"performance.json",from,to);}
+        Session t(48000,127);std::string why;try{t.loadPerformance(copy.string());}catch(const std::exception& e){why=e.what();}
+        if(std::string(id)=="4294967295")check(why.find("no ID after it")!=std::string::npos,("a "+kind+" ID of 4294967295 is refused, saying why: "+why).c_str());
+        else{
+            check(why.empty(),("a large "+kind+" ID loads: "+why).c_str());
+            if(kind=="part")check(t.addPart("B")==4000000001u,"the next part takes the ID after the largest");
+            if(kind=="scene")check(t.addScene("T")==4000000001u,"the next scene takes the ID after the largest");
+            if(kind=="control")check(t.addMacro("N")==4000000001u,"the next control takes the ID after the largest");
+        }
+    }
+}
 static void hosted(const char* path,const fs::path& root) {
     Session s(48000,127);const auto n=s.add("synth",path,"org.kick.test.midi");s.connectNotes(graphInput,n);s.connectAudio(n,graphOutput);s.commit();
     const auto a=s.prepareSound(n,"Quiet",{{7,.25}}),b=s.prepareSound(n,"Loud",{{7,.75}});s.selectSound(n,a,0);s.selectSound(n,b,1);
@@ -170,4 +192,4 @@ static void hosted(const char* path,const fs::path& root) {
     check(rejected && !fs::exists(root/"incomplete"),"mid-save plugin failure must not publish a partial Performance");
     for(const auto& entry:fs::directory_iterator(root))check(!entry.path().filename().string().starts_with(".oscairn-state-"),"failed save staging cleaned up");
 }
-int main(int argc,char** argv){try{check(argc==5,"synth/delay/sequencer/fixture arguments");state_files::TemporaryDirectory temp;rewindClock();native(argv[1],argv[2],argv[3],temp.path);hosted(argv[4],temp.path);std::cout<<"ok: complete Performance roundtrip, failed-load isolation, native/pool state and concurrent publication\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(int argc,char** argv){try{check(argc==5,"synth/delay/sequencer/fixture arguments");state_files::TemporaryDirectory temp;rewindClock();native(argv[1],argv[2],argv[3],temp.path);hosted(argv[4],temp.path);topIds(temp.path);std::cout<<"ok: complete Performance roundtrip, failed-load isolation, native/pool state and concurrent publication\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -26,7 +26,9 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <thread>
+#include <fcntl.h>
 #include <unistd.h>
 #if defined(__linux__)
  #include <dlfcn.h>
@@ -108,7 +110,8 @@ int main(int argc, char** argv)
             panel.setBounds(window.getLocalBounds());
             window.addToDesktop(juce::ComponentPeer::windowIsTemporary);
             window.setVisible(true);
-            standalone::PaintCounter counter;
+            std::optional<standalone::PaintCounter> counting; // one at a time: the logging one is tried last
+            auto& counter = counting.emplace();
 
             // Left alone for a while, then counted: frames, pixels (the window's: the panel's 1280 x 720,
             // also on macOS, where JUCE paints a window that is on no screen, as the test's hidden ones
@@ -270,6 +273,31 @@ int main(int argc, char** argv)
                 own(settings);
                 atRest("Settings, at rest", settings);
                 settings.removeFromDesktop();
+            }
+            // OSCAIRN_UI_PAINT_LOG's counter: a line a second on stderr for a window that drew.
+            {
+                counting.reset();
+                const auto log = juce::File::createTempFile("oscairn-paint-log");
+                std::fflush(stderr);
+                const int saved = ::dup(2), file = ::open(log.getFullPathName().toRawUTF8(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+                ::dup2(file, 2);
+                {
+                    standalone::PaintCounter logging(true);
+                    juce::Component drawn;
+                    drawn.setName("Drawn");
+                    drawn.setBounds(0, 0, 200, 100);
+                    drawn.addToDesktop(juce::ComponentPeer::windowIsTemporary);
+                    drawn.setVisible(true);
+                    logging.watch();
+                    for(int i = 0; i < 25; ++i) { drawn.repaint(); pump(100); }
+                    drawn.removeFromDesktop();
+                }
+                std::fflush(stderr);
+                ::dup2(saved, 2); ::close(saved); ::close(file);
+                const auto written = log.loadFileAsString();
+                log.deleteFile();
+                std::printf("%-26s %s\n", "The paint log says", written.upToFirstOccurrenceOf("\n", false, false).toRawUTF8());
+                check(written.contains("oscairn: UI paint \"Drawn\": ") && written.contains(" frames/s, ") && written.contains(" pixels/s, ") && written.contains(" ms/s"), "the paint log's line for the window that drew: " + written.toStdString());
             }
             configuration.deleteRecursively();
         }

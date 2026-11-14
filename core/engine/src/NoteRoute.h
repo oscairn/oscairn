@@ -345,7 +345,7 @@ inline float VoiceBudget::estimate(uint32_t lane,Counting counting) const noexce
         if(e.lane!=lane)continue;
         if(e.rest)total+=e.cost->restNow();
         uint32_t n=0;
-        for(const auto& slot:e.route->notes)
+        for(const auto& slot:e.route->active())
             if(slot.used && (!slot.stolen || counting==Ending || (counting==Fading && slot.fadeAt>=0 && slot.faded<NoteRoute::fadeSteps)))++n;
         total+=float(n)*e.cost->noteNow();
     }
@@ -361,7 +361,7 @@ inline float VoiceBudget::estimate(uint32_t lane,Counting counting) const noexce
 inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved) noexcept
 {
     for(auto& g:groups)g={};
-    for(const auto& e:entries)for(const auto& slot:e.route->notes)if(slot.used && !slot.stolen && slot.held)
+    for(const auto& e:entries)for(const auto& slot:e.route->active())if(slot.used && !slot.stolen && slot.held)
     {auto& g=groups[e.group];++g.held;g.low=std::min(g.low,slot.key);g.high=std::max(g.high,slot.key);}
     Victim best;int bestRank=0;uint8_t bestPriority=0;bool bestHonors=false;const NoteRoute::Note* chosen=nullptr;
     for(const auto& e:entries)
@@ -373,7 +373,7 @@ inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved) noex
         const auto& g=groups[e.group];
         const NoteZone* z=e.zones && e.zones->count?&e.zones->zones[0]:nullptr;
         const uint16_t reserve=z?z->reserve:0;const uint8_t priority=z?z->priority:0;
-        for(size_t i=0;i<e.route->notes.size();++i)
+        for(size_t i=0;i<e.route->top;++i)
         {
             const auto& slot=e.route->notes[i];
             if(!slot.used || slot.stolen || !e.route->clap[slot.address.port_index&15])continue;
@@ -400,7 +400,7 @@ inline float VoiceBudget::reserves(uint32_t lane) noexcept
     {
         if(e.lane!=lane)continue;
         if(e.rest)total+=e.cost->restNow();
-        for(const auto& slot:e.route->notes)if(slot.used && !slot.stolen && slot.held){auto& g=groups[e.group];++g.held;g.cost+=e.cost->noteNow();}
+        for(const auto& slot:e.route->active())if(slot.used && !slot.stolen && slot.held){auto& g=groups[e.group];++g.held;g.cost+=e.cost->noteNow();}
     }
     for(size_t i=0;i<entries.size();++i)if(const auto& g=groups[i];g.held)
     {
@@ -413,7 +413,7 @@ inline float VoiceBudget::reserves(uint32_t lane) noexcept
 inline VoiceBudget::Victim VoiceBudget::fadingNote(uint32_t lane) const noexcept
 {
     Victim best;const NoteRoute::Note* chosen=nullptr;
-    for(const auto& e:entries)if(e.lane==lane && e.cost->noteNow()>0)for(size_t i=0;i<e.route->notes.size();++i)
+    for(const auto& e:entries)if(e.lane==lane && e.cost->noteNow()>0)for(size_t i=0;i<e.route->top;++i)
     {
         const auto& slot=e.route->notes[i];
         if(slot.used && slot.stolen && slot.fadeAt>=0 && slot.faded<NoteRoute::fadeSteps && (!chosen || slot.id<chosen->id)){best={&e,i};chosen=&slot;}

@@ -48,7 +48,7 @@ namespace
         "https://github.com/oscairn/oscairn",
         "",
         "",
-        "0.1.0",
+        "0.2.0",
         "A small polyphonic subtractive synth for tests and demos",
         features,
     };

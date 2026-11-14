@@ -51,14 +51,18 @@ int main(int argc, char** argv)
         server->listen(socket.string());
         std::atomic<bool> running = true;
         std::atomic<int> render = 0;
+        std::atomic<bool> play = false; // a chord held and rendered, block after block
         // No audio is rendered but the blocks asked for (into memory, on this thread): nothing the
         // screens show changes unless they are touched.
         std::thread control([&] {
             std::array<float, 128> l{}, r{}; float* out[2]{l.data(), r.data()};
+            bool held = false;
             while(running)
             {
                 server->poll(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()));
                 session->service();
+                if(play != held) { for(const int key : {48, 60, 64, 67}) session->note(play, key, .8); held = play; }
+                if(held) session->process(nullptr, 0, out, 2, 128);
                 for(; render > 0; --render) session->process(nullptr, 0, out, 2, 128);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
@@ -247,6 +251,17 @@ int main(int argc, char** argv)
                 standalone::setDesktopMode(frame, 2);
                 panel.overlay(&frame);
                 atRest("Performance, at rest", window);
+                // Playing: its part's meter moves, and the top bar's load may; only they are drawn again.
+                play = true;
+                pump(1000);
+                start();
+                pump(2000);
+                const auto c = counter.counts(window);
+                report("Performance, playing", rate(c, 2.0));
+                std::printf("%-26s %6.0f pixels a frame\n", "", c.frames ? double(c.pixels) / c.frames : 0.0);
+                check(c.frames > 0 && double(c.pixels) / c.frames < screen.width * screen.height / 20.0, "playing: the meters are drawn again, not the screen");
+                play = false;
+                pump(500);
                 panel.overlay(nullptr);
             }
             window.removeFromDesktop();

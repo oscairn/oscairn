@@ -620,7 +620,10 @@ What stops when Roland's app is stopped, from what it was seen to do:
   profile also names `availableMemory` 200 MiB: whatever the books say, instances kept warm are let
   go, oldest and largest first, while MemAvailable is below it, and before a Performance loads
   (RFC 0045); an idle one's worker uses next to no CPU. The 200 is a guess above the 172 MB at which
-  two stalls were seen; to be measured. The UI's
+  two stalls were seen; to be measured. A plugin not yet measured is estimated at what it declared when it
+  last played (`oscairn.memory`), its package's estimate, or 8 MiB and its binary, no longer at 32 MiB
+  (RFC 0025's memory guess): the 13-plugin Performance estimated at 370 MB and refused would count
+  each such plugin at about 8 MiB plus its code. The UI's
   room is the app's reservations' headroom and those 77 MiB: estimated, not measured on the unit,
   and only in effect when the app sets the budget (an engine started with `--engine-only` has none,
   so it keeps instances warm by count). To check on the unit: `free -m` and swap use with ST Final

@@ -36,9 +36,13 @@ namespace oscairn
     {
         namespace fs = std::filesystem;
         // What a plugin never measured here counts as: small, so a desktop with many new plugins
-        // is not refused, and marked, so the user knows it is a guess.
+        // is not refused, and marked, so the user knows it is a guess. Its memory, without its own
+        // oscairn.memory figure or its package's estimate: a worker's floor and its build's code,
+        // which a locked worker holds resident whole. The floor: a fixture plugin's worker holds 8.0 to
+        // 9.1 MB resident in the Linux container (aarch64, locked; the figure a measurement here
+        // takes), the smallest workers measured on the FANTOM-07 7 MB (5.2 to 5.7 MB PSS).
         constexpr double unmeasuredCpu = .02;
-        constexpr uint64_t unmeasuredMemory = 32ull << 20;
+        constexpr uint64_t workerFloor = 8ull << 20;
         // The measured cost (Session::measure), a share of the block period (frames / sample rate): at rest
         // and per voice, a running mean of the plugin's CPU time per block over each service tick's blocks,
         // each tick weighing its blocks over restBlocks (about 10 s of blocks at 128 frames and 48 kHz, and at
@@ -65,10 +69,29 @@ namespace oscairn
         }
         uint64_t total(const oscairn_memory_t& m) { return m.shared_bytes + m.context_bytes + m.asset_bytes; }
 
-        // A plugin never measured here (its key "<id>@<version>..."): its package's declared
+        // A build's code: a file's size, or a bundle's binaries' (a macOS bundle's Contents/MacOS, an
+        // LV2 bundle's shared objects), not its other files (presets, samples), which are not mapped.
+        uint64_t codeBytes(const std::string& path)
+        {
+            std::error_code e;
+            if(path.empty()) return 0;
+            if(!fs::is_directory(path, e)) { const auto n = fs::file_size(path, e); return e ? 0 : uint64_t(n); }
+            uint64_t n = 0;
+            for(fs::recursive_directory_iterator it(path, e), end; !e && it != end; it.increment(e))
+            {
+                const auto& f = it->path();
+                if(!it->is_regular_file(e) || !(f.parent_path().filename() == "MacOS" || f.extension() == ".so" || f.extension() == ".dylib")) continue;
+                if(const auto size = fs::file_size(f, e); !e) n += size;
+            }
+            return n;
+        }
+
+        // A plugin never measured here (its key "<id>@<version>..."): its memory what it declared
+        // through oscairn.memory when it last activated here (`declared`), else its package's
         // estimate for this platform, kept beside its build in the store (estimate.json, RFC 0025
-        // step 5), else the default. Still marked unmeasured.
-        Control::Cost declaredCost(const std::string& key, const std::string& name, const std::string& plugin)
+        // step 5), else the worker's floor and its build's code (`path`); its CPU the package's
+        // estimate, else the default. Still marked unmeasured.
+        Control::Cost declaredCost(const std::string& key, const std::string& name, const std::string& plugin, const std::string& path, uint64_t declared)
         {
             if(key.size() > plugin.size() && key.compare(0, plugin.size(), plugin) == 0 && key[plugin.size()] == '@')
             {
@@ -84,11 +107,12 @@ namespace oscairn
                             return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : -1.0;
                         };
                         const double cpu = number("cpu"), memory = number("memory");
-                        if(cpu >= 0 && cpu <= 64 && memory >= 0 && memory <= double(1ull << 40)) return {name, plugin, cpu, uint64_t(memory), false};
+                        if(cpu >= 0 && cpu <= 64 && memory >= 0 && memory <= double(1ull << 40)) return {name, plugin, cpu, declared ? declared : uint64_t(memory), false};
                     }
                     catch(const std::exception&) {} // none for that format
             }
-            return {name, plugin, unmeasuredCpu, unmeasuredMemory, false, {}, false}; // not certain: the default guess, which never refuses (estimateOf)
+            // not certain: the default guess, which never refuses for its CPU (estimateOf)
+            return {name, plugin, unmeasuredCpu, declared ? declared : workerFloor + codeBytes(path), false, {}, false};
         }
     }
 
@@ -108,7 +132,7 @@ namespace oscairn
     // with no limit, or before its voices are measured, the busiest block seen. A build asked for
     // without a declaration (a Performance not open) counts at the most of what its declarations
     // were measured at; one without a digest (not here), at the most of that version's builds.
-    Control::Cost Session::costOf(const std::string& key, const std::string& name, const std::string& plugin, uint32_t limit) const
+    Control::Cost Session::costOf(const std::string& key, const std::string& name, const std::string& plugin, uint32_t limit, const std::string& path) const
     {
         Measurement m; bool found = false;
         if(const auto it = measured_.find(key); it != measured_.end()) { m = it->second; found = true; }
@@ -119,17 +143,18 @@ namespace oscairn
                 if(next != '#' && (next != ' ' || key.find(' ') != std::string::npos)) continue;
                 found = true;
                 const auto& x = it->second;
-                m = {std::max(m.cpu, x.cpu), std::max(m.rest, x.rest), std::max(m.voice, x.voice), std::max(m.voices, x.voices), std::max(m.memory, x.memory), std::max(m.samples, x.samples)};
+                m = {std::max(m.cpu, x.cpu), std::max(m.rest, x.rest), std::max(m.voice, x.voice), std::max(m.voices, x.voices), std::max(m.memory, x.memory), std::max(m.samples, x.samples), std::max(m.declared, x.declared)};
             }
-        if(!found) return declaredCost(key, name, plugin);
+        if(!found) return declaredCost(key, name, plugin, path, 0);
         // Its CPU forgotten, or none sampled yet: the guess, with the memory as measured.
         if(m.cpu <= 0 && m.rest <= 0 && m.voice <= 0)
         {
-            const auto guess = declaredCost(key, name, plugin);
-            return {name, plugin, guess.cpu, std::max(m.memory, guess.memory), m.memory > 0};
+            const auto guess = declaredCost(key, name, plugin, path, m.declared);
+            return {name, plugin, guess.cpu, m.memory ? m.memory : guess.memory, m.memory > 0};
         }
         const double cpu = limit && m.voice > 0 ? m.rest + m.voice * limit : m.cpu;
-        return {name, plugin, cpu, m.memory, true, {}, m.samples >= certainBlocks};
+        // Its memory not measured (only an instance playing one sound records it): the guess, not 0.
+        return {name, plugin, cpu, m.memory ? m.memory : declaredCost(key, name, plugin, path, m.declared).memory, true, {}, m.samples >= certainBlocks};
     }
 
     // Memory: the larger of the measurement and the declaration (RFC 0025: never the plugin's word
@@ -140,7 +165,7 @@ namespace oscairn
     {
         const auto& host = graph.host(node);
         // RFC 0045: the CPU measured is a sound's (Session::measure), so each node sharing an instance counts its own.
-        auto c = costOf(pluginKey(graph, node), name, host.descriptor().id, limit);
+        auto c = costOf(pluginKey(graph, node), name, host.descriptor().id, limit, host.descriptor().path);
         const auto declared = declaredBy(host);
         std::optional<oscairn_effect_resources_t> resources;
         if(!declared) try { resources = host.effectResources(); } catch(const std::exception&) {}
@@ -197,14 +222,15 @@ namespace oscairn
                     const auto* v = detail::member(e->value, key);
                     return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : 0.0;
                 };
-                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples");
+                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples"), declared = number("declared");
                 if(!std::isfinite(memory) || memory < 0 || memory > double(1ull << 40)) continue;
+                const auto said = std::isfinite(declared) && declared >= 0 && declared <= double(1ull << 40) ? uint64_t(declared) : 0;
                 // An impossible cost (a share above the audio time itself, negative, not a number) is
                 // dropped and measured again; the memory stands.
                 const bool possible = !memoryOnly && std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
                 const std::string key(e->name->string, e->name->string_size);
-                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e9))} : Measurement{0, 0, 0, 0, uint64_t(memory), 0};
+                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e9)), said} : Measurement{0, 0, 0, 0, uint64_t(memory), 0, said};
                 if(possible) setPluginCost(key.substr(0, key.find('@')), cpu); // RFC 0045, before its instances play: as last measured here
             }
         }
@@ -218,7 +244,7 @@ namespace oscairn
         bool first = true;
         for(const auto& [key, m] : measured_)
         {
-            char numbers[200]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples);
+            char numbers[240]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u,\"declared\":%llu}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples, static_cast<unsigned long long>(m.declared));
             text += std::string(first ? "" : ",") + detail::quote(key) + ":" + numbers; first = false;
         }
         text += "}}\n";
@@ -458,7 +484,7 @@ namespace oscairn
     void Session::forgetMeasurements()
     {
         loadMeasurements();
-        for(auto& [key, m] : measured_) m = {0, 0, 0, 0, m.memory, 0};
+        for(auto& [key, m] : measured_) m = {0, 0, 0, 0, m.memory, 0, m.declared};
         learning_.clear();
         for(const auto& [node, name] : nodes_) graph_.seedNoteCost(node, 0, 0);
         measurementsChanged_ = true;
@@ -538,6 +564,10 @@ namespace oscairn
             }
             if(m.voices) graph_.seedNoteCost(node, m.rest * blockMicroseconds, m.voice * blockMicroseconds);
             if(std::abs(m.rest - wasRest) > 1e-4 || std::abs(m.voice - wasVoice) > 1e-5) measurementsChanged_ = true;
+            // What it declares (oscairn.memory), kept for estimates of a Performance not open: from its own
+            // instance, not an effect context (whose share is its context's).
+            if(graph_.effectSource(node) == node)
+                if(const auto d = declaredBy(host); d && total(*d) != m.declared) { m.declared = total(*d); measurementsChanged_ = true; }
             if(memoryNow && sounds == 1)
             {
                 auto bytes = host.residentBytes();
@@ -702,7 +732,8 @@ namespace oscairn
             const auto* plugin = detail::member(e->value, "plugin");
             const auto id = text(detail::member(plugin, "id")), key = text(detail::member(e->value, "key"));
             const auto digest = buildDigest(text(detail::member(plugin, "pathHint"))); // the build it will load, where it is here
-            coming.push_back(costOf(id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest), text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0));
+            coming.push_back(costOf(id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest), text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0,
+                                    text(detail::member(plugin, "pathHint"))));
             if(partOf.count(key)) coming.back().part = partOf.at(key); // a node sharing an instance counts its own sound's CPU (RFC 0045)
         }
         return estimateOf(coming, playing);

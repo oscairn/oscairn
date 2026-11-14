@@ -147,7 +147,7 @@ control-estimates updated for the file's version. Memory admission is as it was.
 
 | Step | Built | Missing for the gate |
 | --- | --- | --- |
-| 5. Estimates in packages and Sounds | Measurements per plugin build on the device (step 1); `estimate` for a Performance in a folder from them | Packages carry no estimate (`Package::Build` has none) and `oscairn-plugin-check` measures nothing, so a plugin not measured here counts at the flat 2% and 32 MiB; a Sound's folder cannot be estimated (only `performance.json` is read); installing checks nothing; library items say nothing about fitting |
+| 5. Estimates in packages and Sounds | Measurements per plugin build on the device (step 1); `estimate` for a Performance in a folder from them | Packages carry no estimate (`Package::Build` has none) and `oscairn-plugin-check` measures nothing, so a plugin not measured here counts at the flat 2% and a memory guess (32 MiB until 2026-11-14); a Sound's folder cannot be estimated (only `performance.json` is read); installing checks nothing; library items say nothing about fitting |
 | 8. App reservations in manifests | The engine's reservations and launch admission (step 6); the shell asking `launchApp` before Home, the Apps menu and `--app` open an app; the Setlist's manifest declares `memory.reserve` 60 and `max` 400, read by `AppProcesses`, which stops it past its maximum (`desktop-apps`) | The shell asks with `Profile::appMemory`'s placeholders, not the manifest; an app started by an action (`AppProcesses::start`) is not asked at all; a process that exits, is stopped or gives up keeps its reservation; nothing measures an app's peak or raises its reservation |
 | 9. Opportunistic memory and eviction | Instances kept warm (order 2), a next entry prepared to cut (order 4), the committed next entry last (order 5); let go on demand (a launch, a reservation, committed growth) and on Linux PSI (`control-parts`, `control-performance-switch`) | Entries further ahead (order 3): the session prepares one entry only; macOS memory pressure is not read; the sample file cache (order 1) is the kernel's page cache by design |
 | 10. Linux cgroups, locking, OOM order | A cgroup per worker under `OSCAIRN_CGROUP` with `memory.max` from its declarations and no swap, the engine in `engine/`, `mlockall` and `oom_score_adj` (engine -999, workers 300), the PSI trigger; the session raises `RLIMIT_MEMLOCK`; since 3461f86 the engine and workers run in the `oscairn-audio` cpuset partition | The image does not set `OSCAIRN_CGROUP`, and the engine's move into `oscairn-audio` (`OSCAIRN_AUDIO_CGROUP`) and into `$OSCAIRN_CGROUP/engine` would have to be one tree; apps' cgroups and scores (apps are processes now, RFC 0022 step 2); the engine's `memory.min`; +1000 for workers holding only opportunistic plugins; zram |
@@ -201,7 +201,8 @@ never write the user's data folder.
   matching) are not counted, unless they slow that call; a worker's whole CPU time, every thread's, is
   reported in `session.status` but not budgeted.
 - **Estimated:** the open Performance, or one in a folder from its document's plugin identities;
-  a plugin never measured here counts at 2% of the audio time and 32 MiB, marked unmeasured. A
+  a plugin never measured here counts at 2% of the audio time and a memory guess, marked
+  unmeasured (the guess below, since 2026-11-14; 32 MiB before). A
   measured plugin in a part with a note limit (RFC 0018) counts at rest plus its cost per voice
   for that many notes, so the estimate is the part's worst case; with no limit, or before a
   voice was measured, it counts at its busiest block seen.
@@ -221,7 +222,23 @@ platform (it now sets a budget, so the plugin is measured while it plays, and pr
 for `oscairn-sign plugin-package --estimate <platform> <cpu> <memory-bytes>`; the figure is at
 its own 256 frames and 48 kHz, not the device's block). Installing keeps it beside the build as
 `estimate.json`; a plugin this device has never measured counts at it instead of the 2% and
-32 MiB default, still marked unmeasured, and its own measurement replaces it once it plays.
+the memory guess, still marked unmeasured, and its own measurement replaces it once it plays.
+
+**The memory guess** (2026-11-14). A guess still counts toward admission (the owner's ruling: what
+does not fit in memory ends in killed workers on stage), so it must be a good one; the flat 32 MiB
+estimated a 13-plugin Performance on the FANTOM-07 at 370 MB where its measured workers were 7 to
+16 MB each, and refused it. A plugin's memory before it is measured here is, in order: what it
+declared through `oscairn.memory` at its last activation here (kept in `measurements.json` as
+`declared`, from its own instance, an effect context's not counted), which a Performance not open
+can then use (before, only an open instance's declaration counted, so Oscairn VA, which declares
+its memory, was estimated at the default until it was measured); its package's `estimate`; else a
+worker's floor and its build's code: 8 MiB (a fixture plugin's worker holds 8.0 to 9.1 MB
+resident in the Linux container, the figure a measurement takes; the smallest workers measured on
+the FANTOM-07 7 MB) plus the size of its binary (a file, or a bundle's `Contents/MacOS` and shared
+objects), which a locked worker holds resident whole. A plugin whose CPU was measured but not its
+memory (memory is read only from an instance playing one sound) counts the same guess, where it
+counted 0. For an instance several parts share, the declaration is the whole instance's, counted
+for each part: on the high side. `control-parts` checks the floor and code and the declaration.
 Measurements stay private: an export carries no estimate. A Sound in a folder is estimated
 from its `sound.json` as a Performance is. With a budget set, installing says, for each item
 it placed, that it does not fit and why ("Set does not fit this device: it needs 95% of the

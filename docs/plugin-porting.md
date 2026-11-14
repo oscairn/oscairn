@@ -664,7 +664,9 @@ stepped, hidden and read-only flags. How the editors use them:
   notes, so keep your per-voice cost proportional to the voices actually sounding. In a worker,
   memory is what the worker holds; in the engine's process, it is what the process grew by
   while the plugin loaded. A plugin never measured on the device counts as 2% of the block's
-  time and 32 MiB until it is. A new version starts unmeasured, and so does a new build of the
+  time until it is, and as memory what it declared through `oscairn.memory` when it last played
+  on the device, else its package's estimate, else 8 MiB plus the size of its binary (a locked
+  worker holds the binary's code resident); so declaring your memory makes the guess yours. A new version starts unmeasured, and so does a new build of the
   same version: the build is the SHA-256 digest of the plugin's files (its bundle on macOS), as
   the Performance lock records it, taken again when any of them is written, so a rebuilt 0.1.0
   is measured again without a version bump. A Performance not open is estimated from the build
@@ -807,7 +809,7 @@ What changes for the plugin:
   `--estimate <platform> <cpu> <memory-bytes>` gives a build its resource estimate
   ([RFC 0025](rfcs/0025-resource-budgets.md#status)), as `oscairn-plugin-check` prints it
   on that platform: a device that has not measured your plugin itself counts it at this,
-  not at the default of 2% of the audio time and 32 MiB, when it checks what fits. Installing
+  not at the default of 2% of the audio time and its memory guess, when it checks what fits. Installing
   a Performance or Sound that will not fit says so, and the library marks it.
   Samples or patches your plugin reads ship as an asset package (`oscairn-sign asset-package`),
   named by your plugin package with `--asset-dependency <library-id> <least-version>`: the

@@ -418,7 +418,7 @@ namespace oscairn
         // cpu: the busiest sustained load, falling; rest: with no note sounding or held; voice: added
         // per sounding note; voices: the most notes seen sounding at once. All shares of a block's
         // time, from blocks that ran undisturbed (budget.cpp, measure).
-        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; }; // samples: the blocks measured, at rest and voiced
+        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; }; // samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here
         Budget budget_;
         bool loadGuard_ = true; // OSCAIRN_LOAD_GUARD=off: a diagnostic and test setting, not a product mode
         std::map<std::string, Measurement> measured_;          // by plugin ID, version and build digest, and what it declared (pluginKey)
@@ -443,7 +443,7 @@ namespace oscairn
         std::string pluginKey(NodeId node) const { return pluginKey(graph_, node); }
         std::string pluginKey(const Graph& graph, NodeId node) const;
         // limit: the notes its part may play at once (RFC 0018), 0 for none.
-        Cost costOf(const std::string& key, const std::string& name, const std::string& plugin, uint32_t limit = 0) const;
+        Cost costOf(const std::string& key, const std::string& name, const std::string& plugin, uint32_t limit = 0, const std::string& path = {}) const; // path: its build, for the guess
         // A loaded plugin's cost: its measurement, its memory the larger of that and what it
         // declared (oscairn.memory); an effect context made from another counts its own bytes.
         Cost nodeCost(const Graph& graph, NodeId node, const std::string& name = {}, uint32_t limit = 0) const;

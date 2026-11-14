@@ -1558,6 +1558,42 @@ namespace
     // declaration, so a plugin's modes do not share one figure; admission counts the larger of the
     // declaration and the measurement; a plugin or a saved state declaring more than the budget
     // leaves is refused before it activates; effect contexts count their own bytes.
+    // RFC 0025, a plugin's memory guess before it is measured, which admission counts: the worker's
+    // floor (8 MiB) and its build's code where it says nothing; what it declared through oscairn.memory
+    // when it last played here where it did, for a Performance not open; never 0 where its CPU was
+    // measured but its memory not (an instance several parts share is not measured for memory).
+    void memoryGuess(const char* fixture, const fs::path& root)
+    {
+        constexpr uint64_t MiB = 1ull << 20;
+        const auto home = root / "guess-home";
+        fs::create_directories(home);
+        ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1);
+        uint64_t code = 0; std::error_code e;
+        if(fs::is_directory(fixture)) { for(const auto& f : fs::recursive_directory_iterator(fixture)) if(f.is_regular_file() && f.path().parent_path().filename() == "MacOS") code += f.file_size(); }
+        else code = fs::file_size(fixture, e);
+        {
+            Session s(48000, frames);
+            s.setBudget({.9, 0});
+            const auto a = s.add("a", fixture, "org.kick.test.synth");
+            const auto part = s.addPart("A"); s.insertIntoPart(part, 0, a); s.commit();
+            const auto g = s.estimate();
+            check(g.plugins.size() == 1 && !g.plugins[0].measured && code > 0 && g.memory == 8 * MiB + code,
+                  "a plugin saying nothing counts the worker's floor and its code: " + std::to_string(g.memory) + " for " + std::to_string(code) + " bytes of code");
+            // The memory effect declares 1 MiB and its gain times 16 (9 MiB at .5): measured as it plays (its CPU,
+            // not yet its memory, which is read every 200 ticks), its declaration kept.
+            s.remove(a); s.commit();
+            const auto m = s.add("m", fixture, "org.kick.test.memory");
+            const auto p = s.addPart("M"); s.insertIntoPart(p, 0, m); s.commit();
+            s.setParameter(m, 7, .5);
+            Audio x; s.note(true, 60, 1); for(int i = 0; i < 64; ++i) x.run(s); s.note(false, 60, 0);
+            s.savePerformance((root / "guess-m").string());
+        } // the measurements saved
+        Session t(48000, frames);
+        t.setBudget({.9, 0});
+        const auto g = t.estimate((root / "guess-m").string());
+        check(g.plugins.size() == 1 && g.memory == 9 * MiB, "a Performance not open counts what its plugin declared when it last played here: " + std::to_string(g.memory >> 20) + " MiB");
+    }
+
     void declaredMemory(const char* fixture, const char* delay, const fs::path& root)
     {
         constexpr uint64_t MiB = 1ull << 20;
@@ -2367,6 +2403,7 @@ int main(int argc, char** argv)
         budgets(argv[1], temp.path);
         rebuilt(argv[1], temp.path);
         declaredMemory(argv[1], argv[3], temp.path);
+        memoryGuess(argv[1], temp.path);
         memoryClasses(argv[1], temp.path);
         controls(argv[1], temp.path);
         summing(argv[1]);

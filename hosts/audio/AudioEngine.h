@@ -13,6 +13,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <memory>
@@ -117,6 +118,16 @@ namespace oscairn::host
         juce::StringArray seenDevices_;
         uint64_t deviceList_ = 0;
         std::atomic<bool>        started_{ false }; // the device's rate matched the graph's
+        // The device watched (watchDevice): callbacks played (audio thread), and on the control thread
+        // the count last seen and when it moved, the reopenings since it last played, when the next
+        // may be tried, and what is said of it in the status.
+        std::atomic<uint64_t>    callbacks_{ 0 };
+        uint64_t                 seenCallbacks_ = 0;
+        std::chrono::steady_clock::time_point movedAt_{}, retryAt_{}, watchedAt_{};
+        uint32_t                 reopenings_ = 0;
+        std::string              deviceNotice_, stalledName_;
+        juce::AudioDeviceManager::AudioDeviceSetup stalledSetup_;
+        void watchDevice();
         // Callbacks that came more than a buffer late, counted as underruns where the device
         // reports none of its own (audio thread; reset when the device starts).
         std::atomic<uint64_t>    lateCallbacks_{ 0 };

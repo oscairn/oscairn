@@ -435,7 +435,7 @@ namespace oscairn
                                           st.lateBlocks - std::min(base.lateBlocks, st.lateBlocks), st.silentBlocks - std::min(base.silentBlocks, st.silentBlocks)});
             }
         }
-        result.notices = notices_;
+        result.notices.insert(result.notices.end(), notices_.begin(), notices_.end()); // the host's (the audio device's) first
         for( size_t source = 0; source < maxSources; ++source )
         {
             Control::SessionStatus::HeldNotes held{ uint8_t( source ), {} };

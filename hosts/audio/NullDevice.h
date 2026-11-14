@@ -51,6 +51,9 @@ namespace oscairn::host
             if( auto* c = std::exchange( callback_, nullptr ) ) c->audioDeviceStopped();
         }
         bool isPlaying() override { return callback_ != nullptr; }
+        /// Paced: its thread ends while it stays open and started, as JUCE's ALSA device's does on a
+        /// failed write (a device that died, for the engine's recovery test).
+        void freeze() { stopThread( 1000 ); }
         juce::String getLastError() override { return {}; }
         int getCurrentBufferSizeSamples() override { return size_; }
         double getCurrentSampleRate() override { return rate_; }

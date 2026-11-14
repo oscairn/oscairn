@@ -119,7 +119,7 @@ namespace oscairn::host
         const auto outputs=std::max(ChannelMap::required(config.outputs),config.deviceChannels);
         preferred.useDefaultInputChannels=false;preferred.useDefaultOutputChannels=false;
         preferred.inputChannels.setRange(0,inputs,true);preferred.outputChannels.setRange(0,outputs,true);
-        if(config.nullDevice) // the device a profile names becomes the null device, with its channels; nothing else is listed
+        if(config.nullDevice && !devices) // the device a profile names becomes the null device, with its channels; nothing else is listed (a test's null devices instead, given)
         {
             juce::Array<double> rates{48000,44100,88200,96000}; // the first is its default
             if(config.sampleRate)rates.addIfNotAlreadyThere(config.sampleRate);
@@ -404,9 +404,52 @@ namespace oscairn::host
             if( pad < PadMap::pads ) session_->pad( pad, on, 1.0 );
     }
 
+    // The device stopped calling back while open and playing: its thread ended on a failed write or
+    // wait, or an underrun did not recover (on the FANTOM-07 the DMA froze after a burst of kernel
+    // console messages, and audio stayed dead until a restart). After half a second, or 32 periods if
+    // longer, without a callback it is closed and opened again as it was set, at once, then twice
+    // more half a second apart, then every 10 s until it plays; the plugins and what is loaded stay
+    // as they are. Said in the status (audioReady false meanwhile, a notice) and logged.
+    void AudioEngine::watchDevice()
+    {
+        using namespace std::chrono;
+        const auto now = steady_clock::now();
+        auto* device = devices_.getCurrentAudioDevice();
+        const auto played = callbacks_.load( std::memory_order_relaxed );
+        // Not watched for a while (the machine asleep, this thread held up): counted from now.
+        const bool unwatched = now - std::exchange( watchedAt_, now ) > milliseconds( 250 );
+        // None open but the one this closed to open again: none to watch (a device gone, said by changeListenerCallback).
+        if( played != seenCallbacks_ || ( !device && !reopenings_ ) || ( device && !started_ ) || unwatched )
+        {
+            if( played != seenCallbacks_ && reopenings_ )
+            {
+                notice_ = deviceNotice_ = "The audio device " + stalledName_ + " stopped and was opened again (" + std::to_string( reopenings_ ) + ( reopenings_ == 1 ? " try)" : " tries)" );
+                std::fprintf( stderr, "oscairn: %s\n", deviceNotice_.c_str() );
+                reopenings_ = 0;
+            }
+            seenCallbacks_ = played; movedAt_ = now;
+            return;
+        }
+        const auto period = duration<double>( device ? device->getCurrentBufferSizeSamples() / std::max( 1.0, device->getCurrentSampleRate() ) : 0. );
+        const auto limit = std::max( duration<double>( .5 ), 32 * period );
+        if( now - movedAt_ < limit || now < retryAt_ ) return;
+        if( !reopenings_ ) { devices_.getAudioDeviceSetup( stalledSetup_ ); stalledName_ = opened_; } // what is opened again, kept through tries that fail
+        ++reopenings_;
+        deviceNotice_ = "The audio device " + stalledName_ + " stopped (no callback for " + std::to_string( int( duration<double, std::milli>( now - movedAt_ ).count() ) ) + " ms); opening it again, try " + std::to_string( reopenings_ );
+        std::fprintf( stderr, "oscairn: %s\n", deviceNotice_.c_str() );
+        notice_ = deviceNotice_;
+        devices_.closeAudioDevice();
+        const auto error = devices_.setAudioDeviceSetup( stalledSetup_, true );
+        if( auto* d = devices_.getCurrentAudioDevice() ) opened_ = d->getName().toStdString();
+        else std::fprintf( stderr, "oscairn: the audio device did not open again: %s\n", error.toRawUTF8() );
+        retryAt_ = steady_clock::now() + ( reopenings_ < 3 ? milliseconds( 500 ) : milliseconds( 10000 ) );
+        movedAt_ = steady_clock::now(); // its first callbacks are waited for as long again
+    }
+
     void AudioEngine::service()
     {
         applyRate();
+        watchDevice();
         session_->service();
         if( midiDevicesDirty_.exchange( false ) )
             { openMidiInputs(); openMidiOutputs(); }
@@ -425,7 +468,8 @@ namespace oscairn::host
             status.audioUnderruns=xruns>=0?uint64_t(xruns):lateCallbacks_.load(std::memory_order_relaxed);
         }
         status.audioDeviceList=deviceList_;
-        status.audioReady=started_.load();
+        status.audioReady=started_.load() && !reopenings_;
+        if(!deviceNotice_.empty())status.notices.push_back(deviceNotice_);
         status.cpuLoad = devices_.getCpuUsage();
         status.midiEventDrops=droppedMidi_.load()+droppedOut_.load();
         // shortcut: every desktop input is reported as USB; port and network kinds need the device's own input table (RFC 0012).
@@ -688,6 +732,7 @@ namespace oscairn::host
                                                    const juce::AudioIODeviceCallbackContext& )
     {
         if(numSamples<=0)return;
+        callbacks_.store(callbacks_.load(std::memory_order_relaxed)+1,std::memory_order_relaxed); // this thread's alone
 #ifdef __linux__
         // JUCE's ALSA thread is not real-time; once per device start it takes the engine's place in
         // RFC 0035's priority table (CoreAudio's thread on macOS already is).

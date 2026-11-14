@@ -78,6 +78,14 @@ add_dependencies(oscairn_audio_devices_test oscairn_step_sequencer oscairn_basic
 add_test(NAME engine-audio-devices COMMAND oscairn_audio_devices_test $<TARGET_FILE_DIR:oscairn_step_sequencer>)
 add_test(NAME engine-audio-devices-worker COMMAND oscairn_audio_devices_test $<TARGET_FILE_DIR:oscairn_step_sequencer> $<TARGET_FILE:oscairn-plugin-worker>)
 set_tests_properties(engine-audio-devices engine-audio-devices-worker PROPERTIES TIMEOUT 60)
+# A device that stops calling back opened again, on the test's null devices: no audio or MIDI device is opened.
+juce_add_console_app(oscairn_audio_recovery_test PRODUCT_NAME "oscairn-audio-recovery-test")
+target_sources(oscairn_audio_recovery_test PRIVATE audio_recovery_test.cpp)
+target_compile_definitions(oscairn_audio_recovery_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(oscairn_audio_recovery_test PRIVATE oscairn_audio_host oscairn_control_json juce::juce_recommended_config_flags)
+add_dependencies(oscairn_audio_recovery_test oscairn_step_sequencer oscairn_basic_synth oscairn_delay)
+add_test(NAME engine-audio-recovery COMMAND oscairn_audio_recovery_test $<TARGET_FILE_DIR:oscairn_step_sequencer>)
+set_tests_properties(engine-audio-recovery PROPERTIES TIMEOUT 60)
 
 # A device panel's slider in the engine without the app (the FANTOM-07's map, read from a pipe):
 # the null device, so no audio or MIDI device is opened.

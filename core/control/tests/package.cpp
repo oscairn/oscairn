@@ -238,6 +238,14 @@ int main()
             check(wrong, "an asset package listing a wrong size is refused on reading");
         }
 
+        // A path of 610 bytes, under the 1024 the docs allow, is read and extracted.
+        {
+            const std::string longName = "Assets/" + std::string(250, 'a') + "/" + std::string(250, 'b') + "/" + std::string(100, 'c');
+            craft(root / "LongPath.olib", {{"library.json", listing("\"Sounds/Bass.osound/sound.json\":\"" + assets::sha256("{}") + "\",\"" + longName + "\":\"" + assets::sha256("x") + "\"")}, sound, {longName, "x"}});
+            std::string why; try { readPackage(root / "LongPath.olib", root / "long-path-out"); } catch(const std::exception& e) { why = e.what(); }
+            check(why.empty(), "a 610-byte path is extracted: " + why);
+        }
+
         // Signatures (RFC 0006): an item, a build and the whole archive, each verified on reading.
         const auto mine = signing::makeKey(root / "mine.key"), other = signing::makeKey(root / "other.key");
         const auto signedRoot = root / "signed";

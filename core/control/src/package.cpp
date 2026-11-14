@@ -325,7 +325,9 @@ namespace oscairn
                 {
                     mz_zip_archive_file_stat st;
                     if(!mz_zip_reader_file_stat(&z.zip, i, &st)) bad("an entry cannot be read");
-                    std::string name = st.m_filename;
+                    std::string name(mz_zip_reader_get_filename(&z.zip, i, nullptr, 0), '\0'); // st.m_filename stops at 511 bytes
+                    mz_zip_reader_get_filename(&z.zip, i, name.data(), mz_uint(name.size()));
+                    name.resize(std::strlen(name.c_str()));
                     const bool directory = mz_zip_reader_is_file_a_directory(&z.zip, i);
                     if(directory && !name.empty() && name.back() == '/') name.pop_back();
                     entries.push_back({name, st.m_uncomp_size, directory, ((st.m_external_attr >> 16) & S_IFMT) == S_IFLNK, i});

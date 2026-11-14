@@ -12,10 +12,12 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <mutex>
 #include <optional>
 #include <random>
+#include <set>
 #include <thread>
 
 namespace oscairn {
@@ -264,8 +266,9 @@ struct Session::PackageWork {
     uint64_t id=0;           // set before the thread starts
     PackageJob job;          // guarded by mutex
     bool unpacked=false;     // the thread is done and left packages, each in its folder, to move into place
-    std::vector<std::pair<Package,fs::path>> packages; // the asset libraries it needs first, then the package
+    std::vector<std::pair<Package,fs::path>> packages; // the packages it needs, each after its own, then the package
     std::map<std::string,std::string> manifests; // each one's manifest SHA-256 (its identity) as the index lists it, by package ID
+    std::map<std::string,std::string> versions;  // each one's version as the index lists it, by package ID
     bool acceptUnsignedCode=false;
     bool replace=false;      // the user chose the repository's build over a different one installed
     std::string source;      // the repository's address, recorded with what it installs
@@ -420,14 +423,16 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
     work->id=work->job.id=++packageJobs_;work->job.state="running";work->acceptUnsignedCode=acceptUnsignedCode;work->replace=replace;work->source=addressOf(source);
     auto* w=work.get();
     packageWork_.reset();
-    const auto assetRoot=assets_.root(); // read on the control thread; the job reads which libraries are installed from its own Store
+    const auto assetRoot=assets_.root(); // read on the control thread; the job stages asset libraries with its own Store
+    const auto have=installedPackages(); // read on the control thread: which dependencies are installed already
     const auto ships=shipped();
     const auto known=repositories();
     const auto expected=recordedKeys(known,ships,source,preinstallFolder_);
-    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,ships,known,expected,officialName=known.front().name]{
+    w->thread=std::thread([w,source,id,version,trusted,revoked,assetRoot,have,ships,known,expected,officialName=known.front().name]{
         std::string rootKey,error,chosen,repositoryId,name,claimed;uint64_t serial=0;
-        std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each asset library it needs
-        std::map<std::string,std::string> manifests;
+        std::vector<std::pair<Package,fs::path>> unpacked; // the package, then each package it needs, as found
+        std::vector<size_t> order; // indices into unpacked: each package after those it needs
+        std::map<std::string,std::string> manifests,versions;
         try{
             auto from=sourceFor(source,&w->cancel);
             const auto index=repository::open(*from,trusted,revoked,rootKey,claimed,kept(),expected);
@@ -451,7 +456,7 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
                 std::vector<std::string> signers{package.publisherKey},builds;
                 for(const auto& plugin:got.plugins)for(const auto& b:plugin.builds){builds.push_back(b.sha256);for(const auto& s:b.signatures)signers.push_back(signing::keyId(s.key));}
                 if(const auto w=withdrawal(lists,package.id,pick.version,signers,builds);!w.reason.empty())throw std::runtime_error("refused: "+withdrawnSaying(package.id,pick.version,w));
-                manifests[package.id]=pick.manifestSha256;
+                manifests[package.id]=pick.manifestSha256;versions[package.id]=pick.version;
             };
             // The newest stable version this device can install that is neither yanked nor withdrawn, and at least `least`.
             auto newest=[&](const repository::Package& package,const std::string& least){
@@ -474,17 +479,34 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
             if(const auto why=repository::incompatible(*pick,OSCAIRN_VERSION,platform());!why.empty())throw std::runtime_error(id+" "+pick->version+" cannot be installed here: "+why);
             chosen=pick->version;
             unpack(*package,*pick);
-            // The asset libraries it needs that this device lacks, or has too old, from the same repository.
-            const auto needs=unpacked.front().first.assetDependencies;
+            // The packages it needs that this device lacks, or has too old, from the same repository, and
+            // the ones they need in turn, depth first: each installed after those it needs. All of them
+            // are found and checked here, before anything is installed; a cycle, a chain deeper than
+            // 16 or one the repository lacks refuses the install, naming it.
+            constexpr size_t deepest=16;
+            auto satisfied=[&](const Package::Dependency& d){return std::any_of(have.begin(),have.end(),[&](const auto& p){return p.id==d.id && (p.version.empty() || !repository::older(p.version,d.version));});};
+            std::vector<std::string> chain{id};
+            std::set<std::string> planned{id};
+            auto named=[&](const std::vector<std::string>& ids){std::string s;for(const auto& x:ids)s+=(s.empty()?"":" -> ")+x;return s;};
+            std::function<void(size_t)> visit=[&](size_t at){
+                std::vector<std::pair<Package::Dependency,bool>> needs; // and whether it must be an asset library
+                for(const auto& d:unpacked[at].first.assetDependencies)needs.push_back({d,true});
+                for(const auto& d:unpacked[at].first.packageDependencies)needs.push_back({d,false});
+                for(const auto& [d,asset]:needs){
+                    if(std::find(chain.begin(),chain.end(),d.id)!=chain.end()){auto cycle=chain;cycle.push_back(d.id);throw std::runtime_error("refused: a cycle of package dependencies: "+named(cycle));}
+                    if(satisfied(d) || planned.count(d.id))continue;
+                    if(chain.size()>=deepest)throw std::runtime_error("refused: package dependencies nested deeper than "+std::to_string(deepest)+": "+named(chain)+" -> "+d.id);
+                    const auto dependency=std::find_if(index.packages.begin(),index.packages.end(),[&](const auto& p){return p.id==d.id;});
+                    const auto* release=dependency==index.packages.end()?nullptr:newest(*dependency,d.version);
+                    if(!release)throw std::runtime_error(named(chain)+" needs the "+(asset?"asset library ":"package ")+d.id+" "+d.version+" or later, which "+called+" does not have");
+                    unpack(*dependency,*release);
+                    if(asset && unpacked.back().first.kind!="asset")throw std::runtime_error("refused: "+d.id+" is not an asset library");
+                    planned.insert(d.id);chain.push_back(d.id);visit(unpacked.size()-1);chain.pop_back();
+                }
+                order.push_back(at);
+            };
+            visit(0);
             const assets::Store installed(assetRoot);
-            for(const auto& d:needs){
-                if(!installed.libraryRoot(d.id,d.version).empty())continue;
-                const auto library=std::find_if(index.packages.begin(),index.packages.end(),[&](const auto& p){return p.id==d.id;});
-                const auto* release=library==index.packages.end()?nullptr:newest(*library,d.version);
-                if(!release)throw std::runtime_error(id+" "+chosen+" needs the asset library "+d.id+" "+d.version+" or later, which "+called+" does not have");
-                unpack(*library,*release);
-                if(unpacked.back().first.kind!="asset")throw std::runtime_error("refused: "+d.id+" is not an asset library");
-            }
             // An asset library's files into the store and its tree of links, made here, a file at a
             // time: the control thread moves the tree into place whole (installUnpacked).
             for(const auto& [got,into]:unpacked)if(got.kind=="asset"){
@@ -499,8 +521,9 @@ uint64_t Session::installFromRepository(const std::string& source,const std::str
         if(!web(source))for(const auto& s:ships)if(!rootKey.empty() && s.key==rootKey)w->source=s.address;
         w->job.rootKey=rootKey;w->job.repository=repositoryId;w->job.name=name;w->job.claimedName=claimed;w->job.serial=serial;w->job.package=id;w->job.version=chosen;
         if(!error.empty()){w->job.state="failed";w->job.error=error;return;}
-        std::rotate(unpacked.begin(),unpacked.begin()+1,unpacked.end()); // the libraries first, so the package finds them installed
-        w->packages=std::move(unpacked);w->manifests=std::move(manifests);w->unpacked=true;
+        std::vector<std::pair<Package,fs::path>> ordered; // what it needs first, so each finds them installed
+        for(const auto at:order)ordered.push_back(std::move(unpacked[at]));
+        w->packages=std::move(ordered);w->manifests=std::move(manifests);w->versions=std::move(versions);w->unpacked=true;
     });
     packageWork_=std::move(work);
     return packageJobs_;
@@ -553,13 +576,13 @@ Control::PackageJob Session::packageJob(uint64_t id){
         try{installUnpacked(packages.back().first,packages.back().second,true,{},w.acceptUnsignedCode,true,true,false,w.replace);}
         catch(const CodeRefused& e){done.state="failed";done.error=e.what();done.installed.code=e.code;} // its signers' keys, to trust
         catch(const std::exception& e){done.state="failed";done.error=e.what();}
-        // Each asset library it needs, then the package; installUnpacked removes each folder either way.
+        // Each package it needs, then the package; installUnpacked removes each folder either way.
         for(auto& [package,into]:packages){
             if(done.state=="failed"){std::error_code e;fs::remove_all(into,e);continue;}
             try{
-                const bool dependency=&package!=&packages.back().first; // a library the package needs, installed first
+                const bool dependency=&package!=&packages.back().first; // a package the package needs, installed first
                 const auto installed=installUnpacked(package,into,true,{},w.acceptUnsignedCode,true,false,dependency,w.replace && !dependency);
-                recordPackage(package,true,w.job.version,w.source,w.manifests[package.id],installed.otherBuild); // an asset library is recorded at its own version
+                recordPackage(package,true,w.versions[package.id],w.source,w.manifests[package.id],installed.otherBuild); // each at its own version
                 done.installed.added+=installed.added;done.installed.skipped+=installed.skipped;
                 done.installed.notes.insert(done.installed.notes.end(),installed.notes.begin(),installed.notes.end());
                 done.installed.code.insert(done.installed.code.end(),installed.code.begin(),installed.code.end());

@@ -11,7 +11,8 @@
 // sounds into the playing instance and sound as each opened fresh. Asked for, a share spills the
 // same way, and the protocol shares and lists the shares. With the fixture (RFC 0045): five parts and
 // an effect open in the same layout fresh, after a Performance whose playing instance has room for
-// only some of them, while they play, and in a new Session, sharing or (OSCAIRN_SHARING=cpu) not.
+// only some of them, reopened while they play several times, and in a new Session, sharing or
+// (OSCAIRN_SHARING=cpu) not, the synth's path hint a bare file name.
 #include "oscairn/session.h"
 #include "oscairn/json_rpc.h"
 #include "oscairn/plugin_host.h"
@@ -24,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -331,7 +333,14 @@ int main(int argc, char** argv)
     }
 
     // RFC 0045: the same layout on every load, whatever played before and whatever is loaded already.
+    // Saved with the Basic Synth's path hint a bare file name, as a Performance converted elsewhere and
+    // carried to the unit names its plugin, so the synth loads from the bundled plugins' folder.
     if(fixture)
+    {
+        const auto bundled = temp.path / "bundled";
+        fs::create_directories(bundled);
+        fs::copy(synth, bundled / fs::path(synth).filename(), fs::copy_options::recursive);
+        auto session = [&] { auto s = std::make_unique<Session>(48000, frames); s->setBundledPlugins(bundled); return s; };
         for(const bool cpu : {false, true})
         {
             if(cpu) ::setenv("OSCAIRN_SHARING", "cpu", 1);
@@ -340,11 +349,16 @@ int main(int argc, char** argv)
                 Session s(48000, frames); separately(s, 5);
                 const auto part = s.addPart("Effect"); s.insertIntoPart(part, 0, s.add("effect", fixture, "org.kick.test.effect")); s.commit();
                 s.savePerformance(five.string());
+                auto document = slurp(five / "performance.json");
+                const std::string hint = "\"pathHint\":\"" + std::string(synth) + "\"";
+                for(auto at = document.find(hint); at != std::string::npos; at = document.find(hint, at))
+                    document.replace(at, hint.size(), "\"pathHint\":\"" + fs::path(synth).filename().string() + "\"");
+                std::ofstream(five / "performance.json") << document;
             }
             const std::string bias = cpu ? "OSCAIRN_SHARING=cpu: " : "";
             std::string fresh;
             {
-                Session s(48000, frames);
+                auto p = session(); auto& s = *p;
                 s.loadPerformance(five.string()); block(s);
                 fresh = layout(s);
                 std::printf("%sthe layout opened fresh:\n%s", bias.c_str(), fresh.c_str());
@@ -353,18 +367,23 @@ int main(int argc, char** argv)
                 s.loadPerformance(separate.string()); gone(s); quiet(s);
                 s.loadPerformance(five.string()); gone(s);
                 check(layout(s) == fresh, bias + "the same layout after a Performance with room for some of it:\n" + layout(s));
-                // Reopened while it plays, its instance with room for two: two used to join it, the other three on a new one.
-                quiet(s);
-                s.loadPerformance(five.string()); gone(s);
-                check(layout(s) == fresh, bias + "the same layout reopened while it plays:\n" + layout(s));
+                // Reopened while it plays, several times: its instance with room for two, two used to join it and the other
+                // three go on a new one; on the unit, with the hint not where the plugin loads, each reopen alternated layouts.
+                for(int reopen = 1; reopen <= 4; ++reopen)
+                {
+                    quiet(s);
+                    s.loadPerformance(five.string()); gone(s);
+                    check(layout(s) == fresh, bias + "the same layout reopened while it plays, time " + std::to_string(reopen) + ":\n" + layout(s));
+                }
             }
             {
-                Session s(48000, frames);
+                auto p = session(); auto& s = *p;
                 s.loadPerformance(five.string()); block(s);
                 check(layout(s) == fresh, bias + "the same layout in a new Session:\n" + layout(s));
             }
             ::unsetenv("OSCAIRN_SHARING");
         }
+    }
 
 #ifndef _WIN32
     // A shared engine's worker that fails and is given up (crashed past its restarts; on the unit,

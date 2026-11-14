@@ -501,6 +501,14 @@ differently, each found in the code and the first reproduced by the test below:
    nodes of its plugin formed on their own would have joined opened fresh.
 6. **The measured cost** fed admission per instance, whatever shared it
    ([below](#a-sounds-cost-not-an-instances)).
+7. **This Performance's own instances matched by the saved path hint** (found 2026-11-14, after
+   the rule below shipped): a node joined one only when the path the instance loaded from was the
+   node's `pathHint` text, while a playing instance was matched by the build the node would load.
+   ST Final, converted elsewhere, names `oscairn-sampler-linux-arm64.clap`, a bare file name, and
+   the Sampler loads from the store: opened fresh, its five Sampler parts each started an instance
+   no later part could join (10 instances, as if saved apart); reopened while it played, they
+   joined a playing instance wherever it had room for the rest, so the reopens alternated between
+   one shared instance (6 workers) and Bass, Pad and Pad 2 alone with Sweep and K2 sharing (9).
 
 Looked for and not found: no unordered container decides any of it (`nodes_` and `measured_` are
 ordered maps, and node IDs grow in read order); a Performance's plugins load one after another on
@@ -511,7 +519,8 @@ the control thread, so no parallel opens race; a worker's restart restores its i
 - A saved engine opens as one instance, as saved (a Performance saved while its parts shared an
   instance keeps that, whatever the bias, as before: its layout is that document's).
 - With the bias `memory`, `balanced` or unset (sharing), the nodes that can share, of one plugin
-  (ID, version and path), in document order, fill instances: each joins the first of this
+  (ID, version and path hint, each instance matched by the build the node loads, wherever the hint
+  points), in document order, fill instances: each joins the first of this
   Performance's instances of the plugin with room, else starts the next. The first node's unplayed
   sounds go as it starts the group, so the room is the plugin's (its free sounds, output buses and
   channels), not the saved state's.
@@ -546,7 +555,10 @@ worker): five Basic Synth parts saved with an instance each, so they share as th
 fixture's effect, opened fresh, again after a Performance of three parts sharing an instance (room
 for four), again while they play (room for two), and in a new Session, list the same layout, workers
 included, each time; so do they with `OSCAIRN_SHARING=cpu`, an instance each. On the code before the
-change the same test listed 5, then 4 + 1, then 3 + 2. Its earlier checks, that a change between
+change the same test listed 5, then 4 + 1, then 3 + 2. Since 2026-11-14 the five are saved with the
+Basic Synth's path hint a bare file name, loaded from the bundled plugins' folder as ST Final's Sampler
+is from the store, and reopened while they play four times: before the fix of point 7 they opened on
+an instance each and the reopens alternated between 5 and 1 + 1 + 1 + 2, as on the unit. Its earlier checks, that a change between
 the separate and the shared layouts loads no instance, still hold.
 
 #### A sound's cost, not an instance's

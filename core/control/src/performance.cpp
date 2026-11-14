@@ -300,9 +300,6 @@ std::shared_ptr<SoundContext> joinEngine(const std::shared_ptr<SoundContext::Eng
     if(!one)return nullptr;
     const auto [channel,bus]=freePlace(*e);
     try{return std::make_shared<SoundContext>(e,channel,bus,selected[0],later);}catch(...){h.discardSound(selected[0]);throw;}}
-// Whether a shared engine's instance is the plugin a document's node names.
-bool sameKind(const SoundContext::Engine& e,const std::string& id,const std::string& path,const std::string& version){
-    const auto& d=e.host->descriptor();return d.id==id && d.path==path && d.version==version;}
 // A plugin refused before activating because it declared more memory than the budget left
 // (kick::clap::Host's reason, which reaches here as text, also from a worker): not a stand-in.
 bool memoryRefusal(const std::exception& e){return std::string(e.what()).find(" MiB of memory where ")!=std::string::npos;}
@@ -1093,8 +1090,9 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             const auto shared=soundOf(node); // RFC 0021 slice 3
             std::shared_ptr<SoundContext> joined;bool first=false; // formed on their own
             if(!siblings && !shared && formable(node,key)){
-                const auto version=text(field(plugin,"version"));const auto rest=left[kind(plugin)]--; // this node and those of its kind after it
-                for(const auto& e:engines)if(sameKind(*e,id,path,version) && (joined=joinEngine(e,root/"nodes"/key,false,room)))break;
+                const auto rest=left[kind(plugin)]--; // this node and those of its kind after it
+                // By the build the node would load, as a playing engine is: its path hint may name another place (RFC 0045).
+                if(const auto w=want(plugin))for(const auto& e:engines)if(same(*w,*e->host,Loaded{e->build,{}}) && (joined=joinEngine(e,root/"nodes"/key,false,room)))break;
                 if(!joined){const auto playingNow=playingEngines(plugin);const auto mine=adopted.find(kind(plugin));
                     for(const auto& e:playingNow)
                         if((mine!=adopted.end()?mine->second==e.get():!engaged.count(e.get()) && SoundContext::room(*e)>=rest) && (joined=joinEngine(e,root/"nodes"/key,true,room))){

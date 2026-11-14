@@ -1444,6 +1444,10 @@ namespace
             const auto part = s.addPart("A"); s.insertIntoPart(part, 0, a); s.commit();
             auto e = s.estimate();
             check(e.plugins.size() == 1 && !e.plugins[0].measured && near(e.cpu, .02), "a plugin not yet measured counts at the default: " + std::to_string(e.cpu));
+            s.setBudget({1e-9, 0});
+            e = s.estimate();
+            check(e.fits && e.uncertain, "a plugin not yet measured never refuses: it opens, said uncertain, where its guess alone would pass the budget");
+            s.setBudget({.9, 0});
             Audio x; s.note(true, 60, 1);
             for(int i = 0; i < 64; ++i) x.run(s);
             e = s.estimate();

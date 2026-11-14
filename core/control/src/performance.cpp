@@ -741,7 +741,7 @@ void Session::loadPerformance(const std::string& directory) {
     // Over the budget it is refused, saying what does not fit (RFC 0025), keeping what is prepared.
     bool seamless=true;uint64_t incoming=0;std::string uncertain;
     if(budget_.cpu>0){const auto e=estimate(root.string());if(!e.fits)bad("this Performance "+tooMuch(e));seamless=e.seamless;incoming=e.memory;
-        if(e.uncertain)uncertain="opened though it may not fit: it "+tooMuch(e)+", by figures from too few blocks to be sure";
+        if(e.uncertain)uncertain="opened though it may not fit: it "+tooMuch(e)+", by figures from too few blocks to be sure or not yet measured";
         if(!seamless)std::fprintf(stderr,"oscairn: opened at once: with the last Performance ringing out it would not fit\n");
         // RFC 0045: room for its new instances before they load. Instances kept warm whose plugin it does not
         // use go first, least recently used first; those it may take stay (evictOpportunistic after the change).

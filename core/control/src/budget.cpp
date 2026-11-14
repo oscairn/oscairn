@@ -85,7 +85,7 @@ namespace oscairn
                     }
                     catch(const std::exception&) {} // none for that format
             }
-            return {name, plugin, unmeasuredCpu, unmeasuredMemory, false};
+            return {name, plugin, unmeasuredCpu, unmeasuredMemory, false, {}, false}; // not certain: the default guess, which never refuses (estimateOf)
         }
     }
 
@@ -594,7 +594,22 @@ namespace oscairn
             }
             e.uncertain = memoryFits && total <= budget_.cpu * e.cores && longest <= budget_.cpu;
         }
-        e.fits = memoryFits && (cpuFits || e.uncertain);
+        // A plugin not yet measured and with no estimate of its package's never refuses one (the owner,
+        // 2026-11-13): its default guess counts while the rest fits, but one that fits without the
+        // guessed plugins opens, said, and they are measured as it plays.
+        auto guessed = [](const Cost& c) { return !c.measured && !c.certain; };
+        if(!(memoryFits && (cpuFits || e.uncertain)) && std::any_of(plugins.begin(), plugins.end(), guessed))
+        {
+            double total = 0, longest = 0; uint64_t bytes = 0; std::map<std::string, double> known;
+            for(const auto& c : plugins)
+            {
+                if(guessed(c)) continue;
+                const double x = !c.certain ? c.cpu / 4 : c.cpu;
+                total += x; bytes += c.memory; longest = std::max(longest, c.part.empty() ? x : known[c.part] += x);
+            }
+            e.uncertain = (!ceiling || bytes + recording <= ceiling) && total <= budget_.cpu * e.cores && longest <= budget_.cpu;
+        }
+        e.fits = (memoryFits && cpuFits) || e.uncertain;
         // shortcut: a change is seamless only while both Performances' totals fit one block's budget, as before the
         // per-core model; hold them against budget x cores once a device has measured changes ringing out on several cores.
         e.seamless = e.fits && cpu <= budget_.cpu && (!ceiling || memory + recording <= ceiling);
@@ -607,17 +622,22 @@ namespace oscairn
         std::string why = e.longest > budget_.cpu ? "needs " + percent(e.longest) + " of the audio time where this device allows " + percent(budget_.cpu) + " in one block, for its costliest part, one plugin after another"
                                                   : "needs " + percent(e.cpu) + " of the audio time where this device allows " + percent(budget_.cpu) + " on each of " + std::to_string(e.cores) + " cores";
         const auto ceiling = memoryCeiling();
-        if(ceiling && e.memory > ceiling)
+        const auto recording = recorder_.committedBytes(); // as estimateOf counts it beside the Performance
+        const bool cpuFits = e.cpu <= budget_.cpu * e.cores && e.longest <= budget_.cpu;
+        const bool memoryOver = ceiling && e.memory + recording > ceiling;
+        if(cpuFits && memoryOver) why.clear(); // its CPU fits: only the memory is said
+        if(memoryOver)
         {
-            why += ", and " + std::to_string(e.memory >> 20) + " MiB of memory where it allows " + std::to_string(ceiling >> 20);
+            why += std::string(why.empty() ? "needs " : ", and ") + std::to_string((e.memory + recording) >> 20) + " MiB of memory where it allows " + std::to_string(ceiling >> 20) +
+                   (recording ? " (" + std::to_string(recording >> 20) + " MiB of it recording's, the capture buffer's among them)" : std::string());
             // With memory classes, the running apps (not always available) that hold the difference.
             std::vector<AppMemory> closable;
             if(memoryClasses())
                 for(const auto& a : running_) if(std::none_of(alwaysAvailable_.begin(), alwaysAvailable_.end(), [&](const AppMemory& x) { return x.app == a.app; })) closable.push_back(a);
             std::sort(closable.begin(), closable.end(), [](const AppMemory& a, const AppMemory& b) { return a.reserve > b.reserve; });
             uint64_t freed = 0; std::string names;
-            for(const auto& a : closable) if(ceiling + freed < e.memory) { freed += a.reserve; names += (names.empty() ? "" : " and ") + a.app + " (" + std::to_string(a.reserve >> 20) + " MiB)"; }
-            if(!names.empty() && ceiling + freed >= e.memory) why += "; closing " + names + " would free enough";
+            for(const auto& a : closable) if(ceiling + freed < e.memory + recording) { freed += a.reserve; names += (names.empty() ? "" : " and ") + a.app + " (" + std::to_string(a.reserve >> 20) + " MiB)"; }
+            if(!names.empty() && ceiling + freed >= e.memory + recording) why += "; closing " + names + " would free enough";
         }
         std::string most;
         for(size_t i = 0; i < e.plugins.size() && i < 3; ++i)

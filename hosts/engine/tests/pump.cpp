@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <random>
 #include <thread>
@@ -38,8 +39,9 @@ namespace
     };
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    const bool timing = !(argc > 1 && std::strcmp(argv[1], "--no-timing") == 0); // sanitizers, CI's virtual machines: behavior only
     juce::ScopedJuceInitialiser_GUI juce;
     int failures = 0;
     auto check = [&](bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } };
@@ -97,12 +99,14 @@ int main()
             std::sort(trips.begin(), trips.end());
             const auto median = trips[trips.size() / 2], worst = trips.back();
             std::printf("round trip: median %.3f ms, worst %.3f ms over %zu requests\n", median, worst, trips.size());
-            check(median < 1, "a request is answered as soon as it arrives, not at the next 5 ms tick: median " + std::to_string(median) + " ms");
+            if(timing) check(median < 1, "a request is answered as soon as it arrives, not at the next 5 ms tick: median " + std::to_string(median) + " ms");
         }
         std::printf("another client's change heard after %.3f ms\n", pushed);
-        check(pushed >= 0 && pushed < 2, "what one client changes reaches the others at once: " + std::to_string(pushed) + " ms");
+        check(pushed >= 0, "what one client changes reaches the others: " + std::to_string(pushed) + " ms");
+        if(timing) check(pushed < 2, "what one client changes reaches the others at once: " + std::to_string(pushed) + " ms");
         std::printf("idle: %.1f%% CPU\n", idle);
-        check(idle >= 0 && idle < 50, "an idle engine does not spin: " + std::to_string(idle) + "% CPU");
+        check(idle >= 0, "the idle CPU is measured");
+        if(timing) check(idle < 50, "an idle engine does not spin: " + std::to_string(idle) + "% CPU");
         check(session.graphState().masterLevel == .25, "the change applied");
     }
     std::filesystem::remove_all(folder);

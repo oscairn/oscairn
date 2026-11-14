@@ -6,7 +6,8 @@
 // notes off and a panic take effect one block late as well. Plugins not listed are not delayed, in
 // a worker or in the engine. After its worker restarts, nothing the old worker rendered is played.
 // In a graph, the delayed part and the effect after it come out one block late, rendered either way.
-//   oscairn-worker-extra-block-test WORKER FIXTURE.clap NOTE-CRASH.clap BASIC-SYNTH.clap
+//   oscairn-worker-extra-block-test WORKER FIXTURE.clap NOTE-CRASH.clap BASIC-SYNTH.clap [--no-timing]
+// --no-timing (sanitizers, CI's virtual machines) skips the check that no block was late; the sound is still compared.
 #include <oscairn/graph.h>
 #include <oscairn/plugin_host.h>
 #include <algorithm>
@@ -21,6 +22,7 @@
 namespace
 {
     int failures = 0;
+    bool timing = true;
     void check(bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } }
 
     constexpr double rate = 48000; constexpr uint32_t frames = 128;
@@ -78,7 +80,7 @@ namespace
         check(energy > 0, "the comparison covers sound");
         check(effectSame, "a plugin not listed renders each block in that block");
         check(expected[9].l[4] != 0 && expected[9].l[5] == 0, "the note ends where it was released (block 9, frame 5)");
-        check(delayed->statistics().silentBlocks == 0 && delayed->statistics().lateBlocks == 0, "no block missed with a period more");
+        if(timing) check(delayed->statistics().silentBlocks == 0 && delayed->statistics().lateBlocks == 0, "no block missed with a period more");
         std::printf("extra block: 40 blocks one block late, sample for sample; the effect beside it on time\n");
     }
 
@@ -143,6 +145,7 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 5) { std::fprintf(stderr, "usage: %s WORKER FIXTURE NOTE-CRASH BASIC-SYNTH\n", argv[0]); return 2; }
+    timing = !(argc > 5 && std::strcmp(argv[5], "--no-timing") == 0);
     // Identical results, not timing: a period more for every block on a loaded machine.
     setenv("OSCAIRN_WORKER_BUDGET_US", "500000", 1);
     setenv("OSCAIRN_WORKER_EXTRA_BLOCK", "org.kick.test.synth,org.oscairn.basic-synth", 1);

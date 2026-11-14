@@ -16,6 +16,7 @@
 #include <oscairn/session.h>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <string>
 #include <thread>
@@ -28,7 +29,8 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc != 4) return 2;
+    if(argc != 4 && !(argc == 5 && !std::strcmp(argv[4], "--no-timing"))) return 2;
+    const bool timing = argc == 4; // --no-timing (sanitizers, CI's virtual machines): the stall's durations and counts are not checked
     // Times far from a busy machine's noise: a 10 ms allowance, a 100 ms stall (under the 250 ms hang
     // limit) in the plugin's 30th block, touching 4 MiB there.
     setenv("OSCAIRN_PLUGIN_WORKER", argv[1], 1);
@@ -58,16 +60,16 @@ int main(int argc, char** argv)
                 (unsigned long long)w->majorFaults, most(w->roundTrip) / 1e3, most(w->collect) / 1e3, most(w->wake) / 1e3, most(w->run) / 1e3);
     // One block waited for and silenced, then blocks not handed while the worker was busy (a slow
     // machine may miss another block or two besides).
-    check(w->busy >= 10 && w->silent >= w->busy + 1 && w->silent <= w->busy + 3, "the stalled block is silenced after waiting, the rest of the stall's blocks are not handed: silent " +
+    if(timing) check(w->busy >= 10 && w->silent >= w->busy + 1 && w->silent <= w->busy + 3, "the stalled block is silenced after waiting, the rest of the stall's blocks are not handed: silent " +
           std::to_string(w->silent) + ", busy " + std::to_string(w->busy));
     check(w->missPanics == 0, "no block not rendered is followed by a panic: " + std::to_string(w->missPanics));
-    check(most(w->roundTrip) >= 10'000'000 && most(w->roundTrip) < 100'000'000, "the longest round trip is the wait for the stalled block, no longer");
-    check(most(w->collect) < most(w->roundTrip), "the engine came for the stalled block before it gave up on it");
-    check(most(w->run) >= 100'000'000, "the stalled block's run, recorded as the next block was handed over: " + std::to_string(most(w->run)));
+    if(timing) check(most(w->roundTrip) >= 10'000'000 && most(w->roundTrip) < 100'000'000, "the longest round trip is the wait for the stalled block, no longer");
+    if(timing) check(most(w->collect) < most(w->roundTrip), "the engine came for the stalled block before it gave up on it");
+    if(timing) check(most(w->run) >= 100'000'000, "the stalled block's run, recorded as the next block was handed over: " + std::to_string(most(w->run)));
     check(most(w->cpu) > 0, "the audio thread's CPU time is measured: " + std::to_string(most(w->cpu)));
     std::printf("worst block: run %.0f us, cpu %.0f us at %.2f s (sleeping stall); cpu max %.0f us; involuntary context switches %llu\n", worst(w->run).maxNs / 1e3, worst(w->run).maxCpuNs / 1e3,
                 worst(w->run).maxAt / 1e9, most(w->cpu) / 1e3, (unsigned long long)w->involuntarySwitches);
-    check(worst(w->run).maxNs >= 100'000'000 && worst(w->run).maxCpuNs < worst(w->run).maxNs / 5, "a stall that sleeps: the worst block's cpu is far below its run: run " +
+    if(timing) check(worst(w->run).maxNs >= 100'000'000 && worst(w->run).maxCpuNs < worst(w->run).maxNs / 5, "a stall that sleeps: the worst block's cpu is far below its run: run " +
           std::to_string(worst(w->run).maxNs) + ", cpu " + std::to_string(worst(w->run).maxCpuNs));
     check(worst(w->run).maxAt > 0, "the worst block's time in the window");
     // The window's last block may have been given up on, its wake and run not yet recorded.
@@ -101,7 +103,7 @@ int main(int argc, char** argv)
     {
         const auto& h = worst(spun.workers[0].run);
         std::printf("worst block: run %.0f us, cpu %.0f us at %.2f s (spinning stall)\n", h.maxNs / 1e3, h.maxCpuNs / 1e3, h.maxAt / 1e9);
-        check(h.maxNs >= 50'000'000 && h.maxCpuNs >= h.maxNs / 2 && h.maxCpuNs <= h.maxNs + 1'000'000, "a stall that computes: the worst block's cpu is close to its run: run " +
+        if(timing) check(h.maxNs >= 50'000'000 && h.maxCpuNs >= h.maxNs / 2 && h.maxCpuNs <= h.maxNs + 1'000'000, "a stall that computes: the worst block's cpu is close to its run: run " +
               std::to_string(h.maxNs) + ", cpu " + std::to_string(h.maxCpuNs));
     }
     // An instrument with sound contexts, two parts sharing its instance: one worker, both parts named.

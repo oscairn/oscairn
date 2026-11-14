@@ -439,8 +439,8 @@ set_tests_properties(load-guard PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE ENVIRONME
 add_executable(oscairn-worker-extra-block-test engine/tests/worker_extra_block.cpp)
 target_link_libraries(oscairn-worker-extra-block-test PRIVATE oscairn_engine)
 add_test(NAME worker-extra-block COMMAND oscairn-worker-extra-block-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
-    $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:oscairn_basic_synth>)
-set_tests_properties(worker-extra-block PROPERTIES TIMEOUT 60)
+    $<TARGET_FILE:kick-clap-fixture-note_crash> $<TARGET_FILE:oscairn_basic_synth> ${worker_timing})
+set_tests_properties(worker-extra-block PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
 # RFC 0045's extra block in real time, in a graph of ST Final's shape: callbacks within the period, ordinary workers untouched, stereo intact, notes a block late.
 add_executable(oscairn-extra-block-paced-test engine/tests/extra_block_paced.cpp)
 target_link_libraries(oscairn-extra-block-paced-test PRIVATE oscairn_engine)

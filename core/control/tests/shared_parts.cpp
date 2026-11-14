@@ -13,7 +13,8 @@
 // an effect open in the same layout fresh, after a Performance whose playing instance has room for
 // only some of them, reopened while they play several times, and in a new Session, sharing or
 // (OSCAIRN_SHARING=cpu) not, the synth's path hint a bare file name. Each sharing part's own meter
-// is checked as well as the master (the synth plays a bus the host has not activated into main).
+// is checked as well as the master (the synth plays a bus the host has not activated into main),
+// and a node with a wire from a bus is never grouped.
 #include "oscairn/session.h"
 #include "oscairn/json_rpc.h"
 #include "oscairn/plugin_host.h"
@@ -356,6 +357,29 @@ int main(int argc, char** argv)
         s.commit();
         const auto listed = rpc.dispatch(R"({"jsonrpc":"2.0","id":5,"method":"graph.get"})");
         check(added && added->find("\"node\":") != std::string::npos && listed && count(*listed, "\"shared\":{\"engine\":" + std::to_string(first)) == 3, "graph.add of a Basic Synth joins the instance");
+    }
+
+    // A node with a wire leaving another output than main (a ports split's lane, a wire drawn in
+    // Routing) is never grouped, so a port is never a sound's bus and a lane on one instance: neither
+    // when the plugin is added beside it nor when its Performance opens. The others share as before.
+    {
+        const auto lanes = temp.path / "lanes";
+        Session s(48000, frames);
+        const auto lone = s.add("lanes", synth);
+        const auto part = s.addPart("Lanes"); s.insertIntoPart(part, 0, lone);
+        Wire w; w.from = lone; w.fromPort = 3; w.to = graphOutput; w.toPort = s.parts()[0].output;
+        s.connectPorts(w); s.commit(); block(s);
+        const auto other = s.add("other", synth); s.commit();
+        const auto third = s.add("third", synth); s.commit(); block(s);
+        auto g = s.graphState();
+        check(!g.shared.count(lone) && g.shared.size() == 2 && g.shared.at(third).engine == other, "added beside a Basic Synth with a wire from a bus, the others share without it");
+        auto offMain = [](const Session& x, NodeId n) { return std::any_of(x.wires().begin(), x.wires().end(), [&](const Wire& v) { return v.from == n && v.fromPort == 3; }); };
+        check(offMain(s, lone), "its wire from the bus kept");
+        s.savePerformance(lanes.string());
+        Session t(48000, frames); t.loadPerformance(lanes.string()); block(t);
+        g = t.graphState();
+        const auto opened = t.nodeId("lanes");
+        check(!g.shared.count(opened) && g.shared.size() == 2 && offMain(t, opened), "opened, it is alone on its instance, its wire kept, the others sharing");
     }
 
     // Each part's own meter, not only the master: the Basic Synth plays a sound whose bus the host has

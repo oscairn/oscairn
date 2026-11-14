@@ -26,6 +26,18 @@ namespace oscairn
     LoadWindow::LoadWindow(){if(gate && !open_++)gate->unlock();}
     LoadWindow::~LoadWindow(){if(gate && !--open_)gate->lock();}
 
+    namespace
+    {
+        // An audio wire leaving another output of the node than its main ones (a ports split's lane, a
+        // wire drawn in Routing): such a node never shares its instance, as when a Performance opens,
+        // so a port of one instance is a lane or a sound's bus, never both.
+        bool offMain( const std::vector<Wire>& wires, NodeId node, const PluginHost& host )
+        {
+            const auto main = host.mainAudioPorts(false);
+            return std::any_of(wires.begin(), wires.end(), [&](const Wire& w) { return w.kind == WireKind::Audio && w.from == node && std::find(main.begin(), main.end(), w.fromPort) == main.end(); });
+        }
+    }
+
     Session::Session( double sampleRate, uint32_t maxFrames, Lv2BufferLimits lv2Buffers, AudioLayout audio )
         : sampleRate_( sampleRate ), maxFrames_( maxFrames ), graph_( sampleRate, maxFrames, ProcessingMode::Realtime, lv2Buffers, std::move(audio) ), transport_( sampleRate ), recorder_( sampleRate, maxFrames )
     {
@@ -66,7 +78,7 @@ namespace oscairn
             const auto& d = host->descriptor();
             if( (!pluginId.empty() && d.id != pluginId) || (d.path != path && !std::filesystem::equivalent(d.path, path, e)) ) continue;
             if( const auto* c = dynamic_cast<const SoundContext*>(host.get()) ) { if( SoundContext::room(*c->engine()) ) return n; }
-            else if( const auto engine = SoundContext::lead(host); engine && SoundContext::room(*engine) ) return n;
+            else if( const auto engine = SoundContext::lead(host); engine && SoundContext::room(*engine) && !offMain(wires_, n, *host) ) return n;
         }
         return std::nullopt;
     }
@@ -79,7 +91,7 @@ namespace oscairn
         const auto host = graph_.node(node).host;
         if( const auto* c = dynamic_cast<const SoundContext*>(host.get()) ) return c->engine();
         auto engine = SoundContext::lead(host);
-        if( !engine ) return nullptr;
+        if( !engine || offMain(wires_, node, *host) ) return nullptr;
         if( const auto l = loaded_.find(node); l != loaded_.end() ) engine->build = l->second.build;
         graph_.share(node, std::make_shared<SoundContext>(engine, 0, 0, std::nullopt)); // its sound as its channel 1 selects it
         loaded_.erase(node); // no longer an instance another Performance may take over

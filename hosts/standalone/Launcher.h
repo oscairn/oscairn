@@ -130,6 +130,7 @@ namespace oscairn::standalone
         AppFrame(Engine& engine, const juce::String& name, juce::Component& app, TopBar::Shell shell);
         TopBar& bar() { return bar_; }
         juce::Component& app() { return app_; }
+        void paint(juce::Graphics&) override;
         void resized() override;
 
     private:

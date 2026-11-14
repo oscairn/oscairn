@@ -261,9 +261,12 @@ namespace oscairn::standalone
 
     AppFrame::AppFrame(Engine& engine, const juce::String& name, juce::Component& app, TopBar::Shell shell) : app_(app), bar_(engine, name, std::move(shell))
     {
+        setOpaque(true); // paint() fills it: the panel's screen under it is not drawn with the app
         addAndMakeVisible(bar_);
         addAndMakeVisible(app_);
     }
+
+    void AppFrame::paint(juce::Graphics& g) { g.fillAll(ink(Ink::Background)); }
 
     void AppFrame::resized()
     {
@@ -335,6 +338,7 @@ namespace oscairn::standalone
     AppSwitcher::AppSwitcher(Engine& engine, std::vector<Running> running, std::function<void(int)> open, std::function<void(int)> close, TopBar::Shell shell)
         : running_(std::move(running)), open_(std::move(open)), close_(std::move(close)), bar_(engine, "Running apps", [&] { shell.apps = {}; return shell; }())
     {
+        setOpaque(true); // paint() fills it
         addAndMakeVisible(bar_);
     }
 

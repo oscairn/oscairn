@@ -183,6 +183,13 @@ int main(int argc, char** argv)
                 panel.overlay(&frame);
                 check(wait([&] { return library.items().size() == 120; }), "the Library lists the test's Performances");
                 atRest("Library, at rest", window);
+                // Its whole view drawn again ten times, as a change of what it lists draws it: the time a frame.
+                {
+                    start();
+                    for(int i = 0; i < 10; ++i) { library.repaint(); pump(60); }
+                    const auto c = counter.counts(window);
+                    std::printf("%-26s %6d frames %10lld pixels %7.2f ms a frame\n", "Library, its view redrawn", c.frames, (long long) c.pixels, c.frames ? c.ms / c.frames : 0.0);
+                }
                 auto* box = [&]() -> juce::ListBox* { for(auto* c : library.getChildren()) if(auto* b = dynamic_cast<juce::ListBox*>(c)) return b; return nullptr; }();
                 check(box != nullptr && box->getViewport() != nullptr, "the Library's list");
                 if(box)

@@ -6,6 +6,7 @@
 //! card, heading and view panel goes, the cursor's moves over tiles in two dimensions, and an
 //! envelope's curve. The widgets are slint/grid.slint; a screen on it is params.rs.
 
+use crate::views::View;
 use serde_json::Value;
 
 pub const FLAG_HIDDEN: u64 = 1 << 2;
@@ -42,6 +43,9 @@ pub struct Param {
     pub index: u64,
     /// A time or rate field's stage length at evenly spaced values.
     pub seconds: Vec<f64>,
+    /// An algorithm's routing at each value from its minimum: eight operators' input masks, the
+    /// carriers' mask, and the feedback's operator from and to (1 to 8; 0 none).
+    pub algorithms: Vec<[u8; 11]>,
 }
 
 impl Param {
@@ -98,8 +102,21 @@ pub fn parse(list: &Value) -> Vec<Param> {
             field: p["field"].as_str().unwrap_or_default().into(),
             index: p["index"].as_u64().unwrap_or(0),
             seconds: p["seconds"].as_array().into_iter().flatten().filter_map(Value::as_f64).collect(),
+            algorithms: p["algorithms"].as_array().into_iter().flatten().map(routing).collect(),
         })
         .collect()
+}
+
+/// One algorithm's routing as `params.list` writes it (`inputs`, `carriers`, `feedbackFrom`, `feedbackTo`).
+fn routing(a: &Value) -> [u8; 11] {
+    let mut r = [0u8; 11];
+    for (k, v) in a["inputs"].as_array().into_iter().flatten().take(8).enumerate() {
+        r[k] = v.as_u64().unwrap_or(0) as u8;
+    }
+    r[8] = a["carriers"].as_u64().unwrap_or(0) as u8;
+    r[9] = a["feedbackFrom"].as_u64().unwrap_or(0) as u8;
+    r[10] = a["feedbackTo"].as_u64().unwrap_or(0) as u8;
+    r
 }
 
 /// The control a tile gets (slint/grid.slint's `kind`).
@@ -185,9 +202,8 @@ pub struct Tile {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Panel {
     pub rect: Rect,
-    pub title: String,
-    pub envelope: Envelope,
-    /// The envelope's parameters (indexes into the parameters), which its points refer to by place.
+    pub view: View,
+    /// The view's parameters (indexes into the parameters), which an envelope's, filter's and LFO's shapes refer to by place.
     pub params: Vec<usize>,
 }
 
@@ -249,7 +265,7 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
             }
         }
         let panel = |out: &mut Laid, y: &mut f32, envelope: Envelope, list: Vec<usize>| {
-            out.panels.push(Panel { rect: Rect { x: 0., y: *y, w: width, h: ENVELOPE }, title: "Envelope".into(), envelope, params: list });
+            out.panels.push(Panel { rect: Rect { x: 0., y: *y, w: width, h: ENVELOPE }, view: View::Envelope(envelope), params: list });
             *y += ENVELOPE + gap;
         };
         for (view, index) in keys {
@@ -538,7 +554,79 @@ pub fn wave_icon(name: &str) -> i32 {
 /// commands, the filled area's (the same points, closed down to the baseline under the first and last),
 /// and each point's place (the node's center, the same point). The widget draws all three in the panel's
 /// own pixels. `params`: the envelope's parameters; `norm`: a parameter's value from 0 to 1.
+#[cfg(test)]
 pub fn envelope_curve(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f64, w: f32, h: f32, top: f32) -> (String, String, Vec<(f32, f32)>) {
+    let l = envelope_layout(e, params, norm, w, h, top);
+    let points = l.handles.iter().map(|h| h.at).collect();
+    (l.line, l.fill, points)
+}
+
+/// An envelope's seconds-axis position (0 to 1) of a time of `seconds` when the longest stage is `longest`.
+fn time_across(seconds: f64, longest: f64) -> f64 {
+    (seconds / SHORT_STAGE).ln_1p() / (longest / SHORT_STAGE).ln_1p()
+}
+
+/// About even below 50 ms and logarithmic past it, so a 30 ms release, a 250 ms decay and a 5 s pad all read.
+const SHORT_STAGE: f64 = 0.05;
+
+/// The normal value (0 to 1) of a time field whose stage is `seconds` long, inside the first interval of the
+/// plugin's evenly spaced `s` that holds it (times rise with the value, rates fall), else at the nearer end.
+fn normal_at(s: &[f64], seconds: f64) -> f64 {
+    for k in 0..s.len().saturating_sub(1) {
+        let (a, b) = (s[k], s[k + 1]);
+        if (seconds - a) * (seconds - b) > 0. {
+            continue;
+        }
+        let f = if a == b {
+            0.
+        } else if a > 0. && b > 0. && seconds > 0. {
+            (seconds / a).ln() / (b / a).ln()
+        } else {
+            (seconds - a) / (b - a)
+        };
+        return (k as f64 + f) / (s.len() - 1) as f64;
+    }
+    match (s.first(), s.last()) {
+        (Some(a), Some(b)) if (seconds - a).abs() <= (seconds - b).abs() => 0.,
+        _ => 1.,
+    }
+}
+
+/// What dragging a stage's node to `across` (0 to 1 of its segment) sets its time or rate parameter to, as a
+/// value from 0 to 1 (`Param::denorm` makes the value): the inverse of how the stage is drawn.
+pub fn stage_normal(p: &Param, rate: bool, longest: f64, across: f64) -> f64 {
+    let across = across.clamp(0., 1.);
+    if longest > 0. && p.seconds.len() >= 2 {
+        normal_at(&p.seconds, SHORT_STAGE * (across * (longest / SHORT_STAGE).ln_1p()).exp_m1())
+    } else if rate {
+        1. - across
+    } else {
+        across
+    }
+}
+
+/// An envelope laid out in a panel: its plot's edges, the node of each point with where its segment starts, the
+/// segment's width and least width, and the paths drawn from those points.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvLayout {
+    pub bottom: f32,
+    pub height: f32,
+    pub segment: f32,
+    pub least: f32,
+    pub longest: f64,
+    pub handles: Vec<EnvHandle>,
+    pub line: String,
+    pub fill: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnvHandle {
+    pub at: (f32, f32),
+    /// Where its segment starts across.
+    pub from: f32,
+}
+
+pub fn envelope_layout(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f64, w: f32, h: f32, top: f32) -> EnvLayout {
     let (left, right, bottom) = (14., w - 14., h - 10.);
     let (aw, ah) = (right - left, bottom - top);
     let hold = aw * 0.14;
@@ -549,7 +637,7 @@ pub fn envelope_curve(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f
     let across = |t: usize, rate: bool| -> f64 {
         let v = norm(t);
         if longest > 0. {
-            (seconds_at(&params[t].seconds, v) / 0.05).ln_1p() / (longest / 0.05).ln_1p()
+            time_across(seconds_at(&params[t].seconds, v), longest)
         } else if rate {
             1. - v
         } else {
@@ -560,21 +648,22 @@ pub fn envelope_curve(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f
     let mut x = left;
     let start = level(e.start, 0.);
     let mut line = format!("M {left:.1} {start:.1}");
-    let mut points = Vec::new();
+    let mut handles = Vec::new();
     for p in &e.points {
+        let from = x;
         if let Some(t) = p.time {
             x += least + across(t, p.rate) as f32 * (segment - least);
         }
         let y = level(p.level, p.fixed);
         line += &format!(" L {x:.1} {y:.1}");
-        points.push((x, y));
+        handles.push(EnvHandle { at: (x, y), from });
         if p.sustain {
             x += hold;
             line += &format!(" L {x:.1} {y:.1}");
         }
     }
     let fill = format!("{line} L {x:.1} {bottom:.1} L {left:.1} {bottom:.1} Z");
-    (line, fill, points)
+    EnvLayout { bottom, height: ah, segment, least, longest, handles, line, fill }
 }
 
 fn norm_or(p: Option<usize>, fixed: f64, norm: &dyn Fn(usize) -> f64) -> f64 {

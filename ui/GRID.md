@@ -22,6 +22,13 @@ the parameter pages on it are `ui/src/params.rs`.
 - RFC 0042 (vertical sliders and organ drawbars) is proposed and unbuilt: its widgets are for
   Play's slider row (a drawbar fills from the top: a reversed set), not selected by any
   `params.list` field yet (draft 6's `reversed` is not defined). The shell has both widgets.
+  Checked for the parameter pages (2026-11-15): the reference does not select them there either.
+  `ParameterGrid::build` chooses among buttons, switch, list, slider (horizontal), knob and range
+  only (ParameterGrid.cpp L1490-1507, `Control`), `enum oscairn_widget` (ui.h L72-80) has no
+  vertical or drawbar value, and RFC 0042 says "no drawbar view or drawbar roles: a drawbar is a
+  level, and the screen draws the set the same way". So there is nothing in the plugin's data to
+  select them by, and inventing a hint would not be matching the reference: they stay widgets for
+  Play's slider row until a hint (draft 6) is defined.
 
 ## Layout rules (hosts/standalone/ParameterGrid.cpp `build`, L1287-1588; RFC 0019 L420-490)
 
@@ -74,14 +81,33 @@ the parameter pages on it are `ui/src/params.rs`.
   `log1p(s/0.05)/log1p(longest/0.05)` when every time field has `seconds`, else the normalized
   value (a rate reversed). Levels by the parameter's normalized value.
 
+## The reference's views (ParameterGrid.cpp; every graph or compound view it has)
+
+Panel heights in touch mode (build L1352-1397): FM operators 300, envelope 180, key map 180, filter
+160, LFO 140. Order in a group: FM operators, described envelopes, key maps, then (parameters in no
+view, by name) filter, LFO, named envelope. Shapes recognized: `envelopeOf` L113-192, `mapOf`
+L194-222, `fmOf` L224-247, `algorithmLayout` L249-285, `lfoOf`/`waveNamed` L287-310,
+`filterOf`/`filterNamed` L312-331. Shipped plugins in plugins/: basic-synth (an envelope by `view`
+fields), lfo (an LFO by name: Shape + Rate + Phase); none declares a filter, key map or FM view (those
+come with the engines of other repos and third-party plugins), so the order built is LFO, filter,
+key map, FM operators.
+
+| View | Reference | Drag | Rust | Status |
+|---|---|---|---|---|
+| Envelope | `Envelope` L478-570 | a node: time across, level up | views.rs `draw_envelope`, grid.rs `envelope_layout` | done (names: ADSR only; DX7 and FM-X names not ported) |
+| Filter response | `Filter` L359-415 | none (a preview) | | not yet |
+| LFO waveform | `Lfo` L419-473 | none (a preview) | | not yet |
+| Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | | not yet |
+| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | | not yet |
+
 ## Checklist (shell)
 
 Control kinds:
 - [x] tile with spans (a column span; the last of a row widens), headings, linked runs as one card
 - [x] knob (drag up/down; dial)
 - [x] slider horizontal (drag; bipolar fill)
-- [x] slider vertical (widget only: no data selects it; Play's mixer faders not yet moved onto it)
-- [x] drawbar (vertical, fills from the top; widget only, no data selects it yet)
+- [x] slider vertical (widget only: no data selects it, nor does the reference's; Play's mixer faders not yet moved onto it)
+- [x] drawbar (vertical, fills from the top; widget only: no data selects it, nor does the reference's)
 - [x] switch (tap; press)
 - [x] list / dropdown (opens a list; dial moves, press chooses, cancel closes)
 - [x] buttons / split button (one stop per value; dial steps the stops)
@@ -92,7 +118,9 @@ Control kinds:
 - [ ] FM operator view with algorithm diagram (FM, VA's and PCM's FM-style views)
 - [ ] filter response view (recognized by name: Cutoff + Resonance + Type)
 - [ ] LFO waveform view (recognized by name: Wave/Shape + Rate/Speed)
-- [ ] dragging an envelope's points (the stages are edited on their tiles meanwhile)
+- [x] dragging an envelope's points (touch: a node within 24 px is taken, its time across and its level up
+      and down are set inside gestures; the reference's non-touch editing is the stages' tiles, as here,
+      and the node the cursor's tile sets is marked; src/views.rs, tests/views.rs)
 
 Layout rules:
 - [x] pages, tabs, headings, priority order, range high hidden

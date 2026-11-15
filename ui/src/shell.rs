@@ -289,6 +289,13 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     grid.on_show_page(|k| with_app(|a| a.on_params(|p| p.show_page(k))));
     grid.on_show_tab(|k| with_app(|a| a.on_params(|p| p.show_tab(k))));
     grid.on_scrolled(|by| with_app(|a| a.on_params(|p| p.scrolled(by))));
+    grid.on_view_down(|v, x, y| {
+        let mut taken = false;
+        with_app(|a| taken = a.on_params(|p| p.view_down(v, x, y)));
+        taken
+    });
+    grid.on_view_move(|v, x, y| with_app(|a| a.on_params(|p| p.view_move(v, x, y))));
+    grid.on_view_up(|v| with_app(|a| a.on_params(|p| p.view_up(v))));
     grid.on_back(|| with_app(|a| a.back()));
     grid.on_resized(|| with_app(|a| a.on_params(crate::params::Screen::shown)));
     let keys = ui.global::<KeyboardState>();

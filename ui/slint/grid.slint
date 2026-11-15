@@ -43,9 +43,42 @@ export struct GridHeading {
     text: string,
 }
 
+// A handle of a view (an envelope's node): where it is, whether the cursor's tile sets it, whether a touch holds it.
 export struct GridPoint {
     x: length,
     y: length,
+    lit: bool,
+    held: bool,
+}
+
+// A path in the panel's own pixels, drawn unscaled: `ink` is a theme color (see `ViewPanel.ink`), `width` a hairline (0), thin (1) or the cursor's (2).
+export struct GridShape {
+    ink: int,
+    fill: bool,
+    width: int,
+    commands: string,
+}
+
+export struct GridLabel {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    text: string,
+    ink: int,
+    bold: bool,
+    align: int, // 0 from the left, 1 centered, 2 from the right
+}
+
+export struct GridBox {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    fill: int,
+    edge: int, // -1 none
+    text: string,
+    text-ink: int,
 }
 
 export struct GridPanel {
@@ -54,9 +87,10 @@ export struct GridPanel {
     w: length,
     h: length,
     title: string,
-    line: string, // path commands in the panel's own pixels
-    fill: string,
+    shapes: [GridShape],
     points: [GridPoint],
+    labels: [GridLabel],
+    boxes: [GridBox],
 }
 
 export global GridState {
@@ -87,6 +121,10 @@ export global GridState {
     callback release(int);
     callback tap(int, int); // a tile and a stop (buttons), or -1
     callback choose(int); // a dropdown's value, or -1 to close it
+    // A touch on a view's panel (its index, the place in the panel's pixels): down says whether it took a handle.
+    callback view-down(int, length, length) -> bool;
+    callback view-move(int, length, length);
+    callback view-up(int);
     callback show-page(int);
     callback show-tab(int);
     callback scrolled(length);
@@ -387,10 +425,20 @@ component Tile inherits Rectangle {
     }
 }
 
-// A view's panel (an envelope's curve): a section with its title, the curve, its points.
-component EnvelopePanel inherits Section {
+// A view's panel (an envelope's curve, a filter's response...): a section with its title and what the view draws,
+// from one set of points: paths in the panel's own pixels (no scaling), boxes, labels and handles.
+component ViewPanel inherits Section {
     in property <GridPanel> data;
-    property <length> point: 12px; // an envelope point's diameter
+    in property <int> index;
+    property <bool> taken; // a touch holds a handle
+    property <length> last;
+    // The theme's color for a view's ink (src/views.rs `Ink`).
+    pure function ink(i: int) -> color {
+        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : Theme.accent.with-alpha(Theme.wash-light);
+    }
+    pure function stroke(w: int) -> length {
+        return w == 0 ? Theme.hair : w == 1 ? Theme.thin : Theme.cursor-width;
+    }
     Text {
         x: Theme.pad-wide + Theme.pad-tight / 2;
         y: Theme.pad-tight + Theme.pad-tight / 2;
@@ -399,36 +447,81 @@ component EnvelopePanel inherits Section {
         font-size: Theme.small;
         font-weight: 700;
     }
-    Path {
+    for s in data.shapes: Path {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height;
         fit: preserve; // the commands are in pixels of this panel: no scaling, no stroke inset
-        fill: Theme.accent.with-alpha(Theme.wash-light);
-        stroke: transparent; // the same stroke width as the line, so both are placed alike
-        stroke-width: Theme.cursor-width;
-        commands: data.fill;
+        fill: s.fill ? root.ink(s.ink) : transparent;
+        stroke: s.fill ? transparent : root.ink(s.ink); // a fill keeps the stroke width of a line, so both are placed alike
+        stroke-width: root.stroke(s.width);
+        commands: s.commands;
     }
-    Path {
-        x: 0;
-        y: 0;
-        width: root.width;
-        height: root.height;
-        fit: preserve;
-        stroke: Theme.accent;
-        stroke-width: Theme.cursor-width;
-        commands: data.line;
+    for b in data.boxes: Rectangle {
+        x: b.x;
+        y: b.y;
+        width: b.w;
+        height: b.h;
+        border-radius: Theme.radius / 2;
+        background: root.ink(b.fill);
+        border-width: b.edge >= 0 ? Theme.hair : 0px;
+        border-color: b.edge >= 0 ? root.ink(b.edge) : transparent;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: b.text;
+            color: root.ink(b.text-ink);
+            font-size: Theme.small;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    for l in data.labels: Text {
+        x: l.x;
+        y: l.y;
+        width: l.w;
+        height: l.h;
+        text: l.text;
+        color: root.ink(l.ink);
+        font-size: Theme.small;
+        font-weight: l.bold ? 700 : 400;
+        horizontal-alignment: l.align == 1 ? center : l.align == 2 ? right : left;
+        vertical-alignment: center;
+        overflow: elide;
     }
     for p in data.points: Rectangle {
-        x: p.x - root.point / 2;
-        y: p.y - root.point / 2;
-        width: root.point;
-        height: root.point;
-        border-radius: root.point / 2;
+        x: p.x - Theme.node / 2;
+        y: p.y - Theme.node / 2;
+        width: Theme.node;
+        height: Theme.node;
+        border-radius: Theme.node / 2;
         background: Theme.text;
-        border-width: Theme.cursor-width;
-        border-color: Theme.accent;
+        border-width: p.lit || p.held ? 1.5 * Theme.cursor-width : Theme.cursor-width;
+        border-color: p.lit ? Theme.focus : Theme.accent;
+    }
+    // Touch: a handle is taken and dragged; a drag elsewhere scrolls the page.
+    TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.taken = GridState.view-down(root.index, self.mouse-x, self.mouse-y);
+                root.last = self.absolute-position.y + self.mouse-y;
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                if (root.taken) { GridState.view-up(root.index); }
+                root.taken = false;
+            }
+        }
+        moved => {
+            if (root.taken) {
+                GridState.view-move(root.index, self.mouse-x, self.mouse-y);
+            } else {
+                // The panel moves as the page scrolls: the place on the window, not in the panel.
+                GridState.scrolled(root.last - (self.absolute-position.y + self.mouse-y));
+                root.last = self.absolute-position.y + self.mouse-y;
+            }
+        }
     }
 }
 
@@ -540,12 +633,13 @@ export component Grid inherits Rectangle {
             font-weight: 700;
             overflow: elide;
         }
-        for p in GridState.panels: EnvelopePanel {
+        for p[i] in GridState.panels: ViewPanel {
             x: p.x;
             y: p.y - GridState.scroll;
             width: p.w;
             height: p.h;
             data: p;
+            index: i;
         }
         for c in GridState.cards: Section {
             x: c.x;

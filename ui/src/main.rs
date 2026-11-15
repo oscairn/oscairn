@@ -27,6 +27,7 @@ mod settings;
 mod shell;
 mod theme;
 mod topbar;
+mod views;
 #[cfg(test)]
 mod tests;
 

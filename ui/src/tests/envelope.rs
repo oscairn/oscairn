@@ -70,7 +70,7 @@ fn measure(w: usize, h: usize, scale: f32) -> Vec<(String, f64)> {
     s.frame();
     let panel = s.ui.global::<crate::GridState>().get_panels().iter().next().expect("an envelope panel");
     let nodes: Vec<P> = panel.points.iter().map(|q| (q.x as f64, q.y as f64)).collect();
-    let verts = vertices(panel.line.as_str());
+    let verts = vertices(panel.shapes.iter().nth(1).expect("the line").commands.as_str());
     let k = f64::from(scale);
     let green = |x: usize, y: usize| {
         let p = s.pixels[y * w + x];

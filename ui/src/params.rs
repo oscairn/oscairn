@@ -21,7 +21,8 @@
 
 use crate::grid::{self, by_priority, Control, Laid, Param, FLAG_HIDDEN};
 use crate::nav::Action;
-use crate::{GridCard, GridHeading, GridPanel, GridPoint, GridState, GridTile, Shell};
+use crate::views;
+use crate::{GridBox, GridCard, GridHeading, GridLabel, GridPanel, GridPoint, GridShape, GridState, GridTile, Shell};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::collections::HashMap;
@@ -89,6 +90,8 @@ pub struct Screen {
     list_first: usize,
     /// The parameters whose gestures are open.
     gestures: Vec<u32>,
+    /// A view's handle held by touch: the panel and the handle.
+    view_held: Option<(usize, views::Held)>,
     message: String,
     /// The page last published to the screen knobs.
     published: Value,
@@ -127,6 +130,7 @@ impl Screen {
             list_cursor: 0,
             list_first: 0,
             gestures: vec![],
+            view_held: None,
             message: String::new(),
             published: Value::Null,
             out: vec![],
@@ -376,16 +380,45 @@ impl Screen {
         }
     }
 
-    fn panel_data(&self, panel: &grid::Panel) -> GridPanel {
-        let refs: Vec<&Param> = panel.params.iter().map(|&i| &self.params[i]).collect();
-        let norm = |k: usize| refs[k].norm(self.value(refs[k]));
+    /// A panel's view drawn from the values now, and what `f` makes of it with what it reads.
+    fn with_view<R>(&self, panel: &grid::Panel, f: impl FnOnce(&views::Ctx) -> R) -> R {
         let (scale, spacing) = self.ui.upgrade().map_or((1., 1.), |ui| {
             let theme = ui.global::<crate::Theme>();
             (theme.get_font_scale(), theme.get_spacing())
         });
-        let (line, fill, points) = grid::envelope_curve(&panel.envelope, &refs, &norm, panel.rect.w, panel.rect.h, grid::envelope_top(scale, spacing));
-        let points: Vec<GridPoint> = points.into_iter().map(|(x, y)| GridPoint { x, y }).collect();
-        GridPanel { x: panel.rect.x, y: panel.rect.y, w: panel.rect.w, h: panel.rect.h, title: panel.title.as_str().into(), line: line.into(), fill: fill.into(), points: ModelRc::new(VecModel::from(points)) }
+        let norm = |i: usize| self.params[i].norm(self.value(&self.params[i]));
+        let ctx = views::Ctx {
+            params: &self.params,
+            members: &panel.params,
+            norm: &norm,
+            focus: self.cursor.and_then(|c| self.laid.tiles.get(c)).map(|t| t.param),
+            w: panel.rect.w,
+            h: panel.rect.h,
+            top: grid::envelope_top(scale, spacing),
+        };
+        f(&ctx)
+    }
+
+    fn panel_data(&self, k: usize) -> GridPanel {
+        let panel = &self.laid.panels[k];
+        let held = self.view_held.as_ref().filter(|h| h.0 == k).map(|h| &h.1);
+        let drawn = self.with_view(panel, |c| (views::draw(&panel.view, c), held.map(|h| views::touched(&panel.view, c, h)).unwrap_or_default(), c.focus));
+        let (d, taken, focus) = drawn;
+        let shapes: Vec<GridShape> = d.shapes.into_iter().map(|s| GridShape { ink: s.ink as i32, fill: s.fill, width: s.width, commands: s.commands.into() }).collect();
+        let points: Vec<GridPoint> = d.handles.iter().map(|h| GridPoint { x: h.at.0, y: h.at.1, lit: focus.is_some_and(|f| h.params.contains(&f)), held: !taken.is_empty() && h.params == taken }).collect();
+        let labels: Vec<GridLabel> = d.labels.into_iter().map(|l| GridLabel { x: l.x, y: l.y, w: l.w, h: l.h, text: l.text.into(), ink: l.ink as i32, bold: l.bold, align: l.align }).collect();
+        let boxes: Vec<GridBox> = d.boxes.into_iter().map(|b| GridBox { x: b.x, y: b.y, w: b.w, h: b.h, fill: b.fill as i32, edge: b.edge.map_or(-1, |e| e as i32), text: b.text.into(), text_ink: b.text_ink as i32 }).collect();
+        GridPanel {
+            x: panel.rect.x,
+            y: panel.rect.y,
+            w: panel.rect.w,
+            h: panel.rect.h,
+            title: d.title.into(),
+            shapes: ModelRc::new(VecModel::from(shapes)),
+            points: ModelRc::new(VecModel::from(points)),
+            labels: ModelRc::new(VecModel::from(labels)),
+            boxes: ModelRc::new(VecModel::from(boxes)),
+        }
     }
 
     /// Keeps the cursor's tile in view.
@@ -428,7 +461,7 @@ impl Screen {
         g.set_cards(Rc::new(VecModel::from(cards)).into());
         let headings: Vec<GridHeading> = self.laid.headings.iter().map(|(y, t)| GridHeading { y: *y, text: t.as_str().into() }).collect();
         g.set_headings(Rc::new(VecModel::from(headings)).into());
-        let panels: Vec<GridPanel> = self.laid.panels.iter().map(|p| self.panel_data(p)).collect();
+        let panels: Vec<GridPanel> = (0..self.laid.panels.len()).map(|k| self.panel_data(k)).collect();
         g.set_panels(Rc::new(VecModel::from(panels)).into());
         g.set_scroll(self.scroll);
         let message = if self.params.is_empty() && self.entries.is_empty() && self.message.is_empty() { "Reading the parameters...".to_string() } else { self.message.clone() };
@@ -655,6 +688,44 @@ impl Screen {
     }
 
     pub fn release(&mut self, _tile: i32) {
+        self.end_gestures();
+        self.show();
+    }
+
+    /// A touch on a view's panel at (x, y) in the panel's pixels: whether it took a handle (its parameters'
+    /// gestures begin; the cursor and a value being changed with the dial let go).
+    pub fn view_down(&mut self, panel: i32, x: f32, y: f32) -> bool {
+        let k = panel as usize;
+        let Some(p) = self.laid.panels.get(k) else { return false };
+        let Some((held, ids)) = self.with_view(p, |c| views::grab(&p.view, c, (x, y)).map(|h| (h.clone(), views::touched(&p.view, c, &h)))) else { return false };
+        self.end_gestures();
+        self.edit = Edit::None;
+        self.cursor = None;
+        for i in ids {
+            self.begin(self.params[i].id);
+        }
+        self.view_held = Some((k, held));
+        self.show();
+        true
+    }
+
+    pub fn view_move(&mut self, panel: i32, x: f32, y: f32) {
+        let k = panel as usize;
+        let (Some(p), Some((held_panel, held))) = (self.laid.panels.get(k), self.view_held.clone()) else { return };
+        if held_panel != k {
+            return;
+        }
+        for (i, to) in self.with_view(p, |c| views::drag(&p.view, c, &held, (x, y))) {
+            let param = self.params[i].clone();
+            if to != self.value(&param) {
+                self.set(&param, to);
+            }
+        }
+        self.show();
+    }
+
+    pub fn view_up(&mut self, _panel: i32) {
+        self.view_held = None;
         self.end_gestures();
         self.show();
     }

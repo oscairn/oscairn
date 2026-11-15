@@ -10,6 +10,10 @@
 //     every voice back by the end (5,000 blocks, the ceiling forgotten after 10 s healthy).
 //   permanent: 8 voices fit from block 300 on, for 6,000 blocks (16 s): the limit settles under 9 and the blocks lost
 //     after the first second of it stay few (one probe's losses each, the probes rare).
+//   sparse: 8 voices fit and while more sound one block in 150 is lost (a chain near the callback's deadline): voices
+//     still go, losses that far apart count, until they stop.
+//   unfit: one block in 150 lost whatever sounds (the effects after it leave no room): down to one voice and held
+//     there, the blocks lost with nothing left to give counted (unfitBlocks).
 //   oscairn-core-recovery-test
 #include "../src/engine_core.h"
 #include "oscairn/graph.h"
@@ -39,9 +43,10 @@ Event note(uint16_t type,int16_t key)
     n.note_id=-1;n.port_index=0;n.channel=0;n.key=key;n.velocity=.8;return from(n);
 }
 
-struct Run { std::vector<uint32_t> limit,voices; std::vector<bool> lost; };
-// blocks: how long; overloaded: whether block b is in the overload; over: the voices that fit in it.
-template<class Overloaded> Run run(uint32_t blocks,Overloaded&& overloaded,uint32_t over)
+struct Run { std::vector<uint32_t> limit,voices; std::vector<bool> lost; uint64_t unfit=0; };
+// blocks: how long; overloaded: whether block b is in the overload; over: the voices that fit in it; every: one block
+// in this many loses then (1: each; more: sparse losses, as a chain near the callback's deadline loses them).
+template<class Overloaded> Run run(uint32_t blocks,Overloaded&& overloaded,uint32_t over,uint32_t every=1)
 {
     oscairn_route* route=rust_core_route_new(1,1,256);
     alignas(oscairn::Graph::Activity) unsigned char bytes[sizeof(oscairn::Graph::Activity)]{};
@@ -66,13 +71,14 @@ template<class Overloaded> Run run(uint32_t blocks,Overloaded&& overloaded,uint3
         rust_core_notes_route(notes,0,keys.data(),uint32_t(keys.size()),frames,&id,merged.data(),uint32_t(merged.size()),nullptr,&overflow);
         const uint32_t live=rust_core_route_live(route),limit=a->voiceLimit;
         const uint32_t voices=limit?std::min(live,limit):live; // the plugin keeps within its limit
-        const bool lost=overloaded(b) && voices>over;
+        const bool lost=overloaded(b) && voices>over && b%every==0;
         const oscairn_finish f{20.f+50.f*float(voices),true,false,lost,true,true,voices,50,nullptr,0,nullptr,0};
         rust_core_notes_finish(notes,0,&f);
         a->voiceLimit=rust_core_notes_voice_limit(notes,0,voices,nullptr,0);
-        rust_core_notes_end(notes,NAN);
+        rust_core_notes_end(notes,150.f); // the callback 150 us inside its deadline, as on the unit
         r.limit.push_back(a->voiceLimit);r.voices.push_back(voices);r.lost.push_back(lost);
     }
+    r.unfit=a->unfitBlocks;
     rust_core_notes_free(notes);rust_core_route_free(route);
     return r;
 }
@@ -107,6 +113,22 @@ int main()
         std::printf("permanent: %u blocks lost in its first second, %u in the 15 s after, at most %u voices then, %u at the end\n",count(r.lost,300,675),late,most,r.voices.back());
         check(r.voices.back()<=8,"it settles at the voices that fit");
         check(late<=12,"probes lose few blocks: "+std::to_string(late));
+    }
+    {
+        // Sparse losses: one block in 150 lost while more than 8 voices sound, for 30 s from block 300.
+        const auto r=run(11550,[](uint32_t b){return b>=300;},8,150);
+        std::printf("sparse: %u blocks lost in the first 10 s, %u in the 20 s after, %u voices at the end\n",count(r.lost,300,4050),count(r.lost,4050,11550),r.voices.back());
+        check(r.voices.back()<=8,"sparse losses shed voices too: "+std::to_string(r.voices.back()));
+        check(count(r.lost,4050,11550)<=8,"and the losses become rare: "+std::to_string(count(r.lost,4050,11550)));
+    }
+    {
+        // A chain that cannot fit: one block in 150 lost whatever sounds. The voices go down to one and stay there,
+        // and the blocks lost with nothing left to give are counted.
+        const auto r=run(6300,[](uint32_t b){return b>=300;},0,150);
+        uint32_t least=99;for(uint32_t b=3000;b<6300;++b)least=std::min(least,r.voices[b]);
+        std::printf("unfit: %u voices at the end, at least %u from block 3000, %llu blocks lost with nothing left to give\n",r.voices.back(),least,(unsigned long long)r.unfit);
+        check(r.voices.back()==1 && least==1,"down to one voice and held there: "+std::to_string(r.voices.back()));
+        check(r.unfit>0,"the chain that cannot fit is counted");
     }
     return failures?1:0;
 }

@@ -61,7 +61,7 @@ typedef struct
     bool stranded, own_voices, honors_volume;
     float per_note_scale;
     uint32_t voice_limit, over_limit;
-    uint64_t faded_for_loss, lost, faded_for_deadline;
+    uint64_t faded_for_loss, lost, faded_for_deadline, unfit;
 } oscairn_activity;
 
 /* A note connection into a step: its ledger, zones (copied), the routes sharing its part's note

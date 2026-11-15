@@ -47,6 +47,7 @@ pub struct Activity {
     pub faded_for_loss: AtomicU64,
     pub lost: AtomicU64,
     pub faded_for_deadline: AtomicU64,
+    pub unfit: AtomicU64,
 }
 
 /// The blocks a plugin that gives up its own voices may sound more than its limit before its notes
@@ -119,9 +120,10 @@ impl Entry {
         if !self.cost.own_voices.load(Relaxed) || limit == 0 {
             return;
         }
-        // A probe fails where the trouble comes after a probe's wait healthy, at or past the ceiling (not the blocks
-        // a fall takes, its limit a block behind).
-        if self.ceiling != 0 && self.calm >= PROBE_BLOCKS && limit >= self.ceiling {
+        // A probe fails where trouble comes with the cap raised to the ceiling or past it (not in the blocks a fall
+        // takes, the cap one under the ceiling, its limit a block behind; nor where losses a probe's wait apart reset
+        // the healthy count before they were answered).
+        if self.ceiling != 0 && self.cap >= self.ceiling {
             self.probes = (self.probes + 1).min(MOST_PROBE_DOUBLINGS);
         }
         (self.ceiling, self.cost_at, self.calm) = (limit, self.cost.note_now(), 0);
@@ -153,7 +155,8 @@ pub struct Lane {
     pub others_took: f32,
     pub losses: u8,
     pub weight: f32,
-    pub hold: u8, // blocks before the next note goes for its losses
+    pub hold: u8,   // blocks before the next note goes for its losses
+    pub since: u32, // blocks since its last loss, plus one; 0 for none yet
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -178,6 +181,9 @@ const SOFT: f32 = 0.85; // stealing starts here, so fades have time
 const DEVICE_HOLD_BLOCKS: u32 = 8;
 /// After a voice goes for a lane's lost blocks, the blocks before the next: its fade (5 ms).
 const LOSS_HOLD_BLOCKS: u8 = 2;
+/// A loss this close after the lane's last (2 s) counts as losses going on, however far apart: a chain near the
+/// callback's deadline loses blocks one at a time.
+const LOSS_MEMORY_BLOCKS: u32 = 750;
 /// A lowered limit's way back (12k), in healthy blocks: below its ceiling less one, a voice back each 8 (21 ms);
 /// at or above it, a voice each 750 (2 s), doubled for each probe that failed, at most twice; the ceiling forgotten
 /// after 3,750 (10 s) or once the cost per voice moved by a quarter.
@@ -236,7 +242,8 @@ impl Budget {
     /// whose notes cost: a MIDI-dialect plugin's too, ended by a note-off.
     /// lane: every lane's notes for None. costed: only nodes whose notes are measured to cost (giving one up
     /// frees time), else any (time is running out, whatever the measurements say). owned: a plugin keeping
-    /// within its limit too, whose limit `give_up` then lowers.
+    /// within its limit too, whose limit `give_up` then lowers; and none from a part down to its last voice (the
+    /// floor the loss and deadline rules hold: its limit at 1, or one note left).
     fn choose(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool) -> Victim {
         self.count_held(rs, None);
         let mut best: Victim = None;
@@ -247,8 +254,11 @@ impl Budget {
             if lane.is_some_and(|l| l != e.lane) || (costed && a.note_now() <= 0.0) || (!owned && a.own_voices.load(Relaxed) && within) {
                 continue;
             }
-            let honors = a.honors_volume.load(Relaxed);
             let (r, g) = (&rs[e.route], self.groups.get(e.group).copied().unwrap_or(NO_GROUP));
+            if owned && (if a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) != 0 { a.voice_limit.load(Relaxed) <= 1 } else { r.used.and_not(r.stolen).count() <= 1 }) {
+                continue;
+            }
+            let honors = a.honors_volume.load(Relaxed);
             for i in r.used.and_not(r.stolen).iter() {
                 let s = r.slot(i);
                 let rank = if r.held.has(i) {
@@ -431,23 +441,36 @@ impl Budget {
         }
         Some(&e.cost)
     }
-    /// Blocks are being lost (two in the last eight on a lane, one of them this block): on each such lane a
-    /// voice goes, quietest released first, then the fade's time (LOSS_HOLD_BLOCKS) before the next, so the
-    /// lanes losing blocks all give way at once and keep giving way while losses go on. Never choked: losses
-    /// say nothing of how much is over.
+    /// Blocks are being lost (on a lane this block, and two in its last eight or its last loss within
+    /// LOSS_MEMORY_BLOCKS): on each such lane a voice goes, quietest released first, then the fade's time
+    /// (LOSS_HOLD_BLOCKS) before the next, so the lanes losing blocks all give way at once and keep giving way
+    /// while losses go on. Never choked: losses say nothing of how much is over. Down to every part's last
+    /// voice, the loss is counted (`unfit`, on the lane's nodes holding notes): the chain after it cannot fit.
     pub fn lost(&mut self, rs: &mut Routes) {
         for i in 0..self.lanes.len() {
             let Some(l) = self.lanes.get_mut(i) else { continue };
+            let now = l.losses & 1 != 0;
+            let recent = l.since != 0 && l.since <= LOSS_MEMORY_BLOCKS;
+            l.since = if now { 1 } else if l.since != 0 { l.since.saturating_add(1) } else { 0 };
             if l.hold != 0 {
                 l.hold -= 1;
                 continue;
             }
-            if l.losses.count_ones() < 2 || l.losses & 1 == 0 {
+            if !now || (l.losses.count_ones() < 2 && !recent) {
                 continue;
             }
             l.hold = LOSS_HOLD_BLOCKS;
-            if let Some(a) = self.choose(rs, Some(i), false, false, true).and_then(|v| self.give_up(rs, v)) {
-                a.faded_for_loss.fetch_add(1, Relaxed);
+            match self.choose(rs, Some(i), false, false, true) {
+                Some(v) => {
+                    if let Some(a) = self.give_up(rs, v) {
+                        a.faded_for_loss.fetch_add(1, Relaxed);
+                    }
+                }
+                None => {
+                    for e in self.entries.iter().filter(|e| e.lane == i && rs[e.route].used.any()) {
+                        e.cost.unfit.fetch_add(1, Relaxed);
+                    }
+                }
             }
         }
     }

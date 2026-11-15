@@ -59,6 +59,7 @@ Checked when built and tested; the sections below say how.
   - [x] 12i. Limit first: lost blocks and the deadline lower a voice-budget plugin's limit, a fade only as the backstop
   - [x] 12j. Each sound context of a shared instance its own limit
   - [x] 12k. A lowered limit comes back while notes are held: fast below its ceiling, probing above it, the ceiling aging out
+  - [x] 12l. Losses far apart still shed (a loss within 2 s of the last), down to each part's last voice; a chain that cannot fit counted
 
 ## Problem
 
@@ -940,6 +941,24 @@ to, which has rule 12a and none after it). Its rules, as built:
   10 by probing 1,322 blocks after it, all voices back by block 5,000 and nothing lost after it; a
   permanent overload of 8 voices for 16 s: 18 blocks lost in its first second, 4 in the 15 s after,
   never more than 9 voices, 7 at the end. And `guard` (starved), above.
+- 12l. Losses one at a time, and a chain that cannot fit (2026-11-15). On the FANTOM-07, Sick tines
+  pedalled (five parts on one shared FM instance in a worker, then five serial effect workers): the
+  guard shed in the first 5 s and then nothing more, while about 7 blocks were lost each 5 s for the
+  next 25 s with the callback 100 to 250 us inside its deadline. Cause, shown by `engine-core-recovery`
+  (sparse): losses that far apart never met 12b's trigger (two in a lane's last eight blocks) nor 12d's
+  (two in the last four blocks' slack bits, which shift every block once the slack is measured). Now a
+  loss on a lane counts as losses going on as well where its last was within 750 blocks (2 s). And
+  12b and 12d stop at each part's last voice (a voice-budget plugin's limit at 1, else one note
+  left): a block lost on a lane with every part there at its last voice is counted on the lane's nodes
+  holding notes (`unfit` in `engine.timing`'s guard; `unfitBlocks` in NoteCost), the chain after it
+  having no room for even that. A failed 12k probe is now trouble with the cap at or past the ceiling
+  (the healthy count is no test: a second loss a probe's wait later resets it before it is answered).
+  Tested by `engine-core-recovery` with the callback 150 us inside its deadline: 8 voices fit and one
+  block in 150 lost while more sound, for 30 s: before, nothing shed, 512 voices and 50 blocks lost in
+  the last 20 s; after, 8 voices and 6 lost in the last 20 s (each a probe's). One block in 150 lost
+  whatever sounds: before, 162 voices at the end and nothing counted; after, one voice from block
+  3,000 on and 21 lost blocks counted as `unfit`. Not reproduced on a shared instance over five
+  buses in a graph (the case is the core's arithmetic, driven directly).
 
 ## Core placement
 

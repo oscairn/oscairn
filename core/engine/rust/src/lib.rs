@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn layouts() {
         assert_eq!(size_of::<Event>(), 64);
-        assert_eq!(size_of::<Activity>(), 136);
+        assert_eq!(size_of::<Activity>(), 144);
         assert_eq!((offset_of!(Activity, rest), offset_of!(Activity, stolen), offset_of!(Activity, lane_limit)), (28, 48, 72));
         assert_eq!((offset_of!(Activity, stranded), offset_of!(Activity, per_note_scale), offset_of!(Activity, over_limit)), (92, 96, 104));
         assert_eq!(size_of::<Zones>(), 8 * 72 + 8);

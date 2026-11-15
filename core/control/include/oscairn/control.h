@@ -280,7 +280,7 @@ namespace oscairn
                 // loaded: faded for the lane's limit, faded for the lanes' total, choked for a block that would
                 // have been missed, faded for blocks lost on the lane or after it, and faded as the callback's time ran out
                 // (any lane's notes); and the nodes' own blocks lost.
-                struct Guard { double limit = 0, took = 0; uint64_t faded = 0, fadedForTotal = 0, choked = 0, fadedForLoss = 0, lost = 0, fadedForDeadline = 0; } guard;
+                struct Guard { double limit = 0, took = 0; uint64_t faded = 0, fadedForTotal = 0, choked = 0, fadedForLoss = 0, lost = 0, fadedForDeadline = 0, unfit = 0; } guard;
             };
             std::vector<Worker> workers;
             // Each plugin instance loaded (RFC 0045's resident instances), once however many nodes

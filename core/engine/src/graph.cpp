@@ -614,7 +614,8 @@ namespace oscairn
         const auto& a=*found;
         return {a.rest.load(std::memory_order_relaxed),a.perNote.load(std::memory_order_relaxed),a.stolen.load(std::memory_order_relaxed),a.hardChokes.load(std::memory_order_relaxed),
                 a.stolenForDevice.load(std::memory_order_relaxed),a.laneLimit.load(std::memory_order_relaxed),a.laneTook.load(std::memory_order_relaxed),
-                a.stolenForLoss.load(std::memory_order_relaxed),a.lostBlocks.load(std::memory_order_relaxed),a.stolenForDeadline.load(std::memory_order_relaxed)};
+                a.stolenForLoss.load(std::memory_order_relaxed),a.lostBlocks.load(std::memory_order_relaxed),a.stolenForDeadline.load(std::memory_order_relaxed),
+                a.unfitBlocks.load(std::memory_order_relaxed)};
     }
     Graph::OutputGuard Graph::outputGuard( NodeId node ) const
     {

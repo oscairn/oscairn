@@ -124,7 +124,14 @@ int main(int argc, char** argv)
         check(moved > 2.5e-4 && moved < .01, "a stall that computes moves the rest by about one sample's share: " + std::to_string(moved));
         // Counted, a stall could only raise the rest; the rest's own drift down over these blocks (its first samples' startup
         // costs wearing off, seen in the Linux container as one run in ten) is not the stall.
-        check(asleep.after - asleep.before < std::max(.25 * moved, 3 * noise), "a stall that sleeps does not move the rest: " + std::to_string(asleep.after - asleep.before) + " against " + std::to_string(moved));
+        // A stall that was counted would raise the rest by about `moved` every time; the rest's other drift, on a shared runner, is one measurement's: the least of up to three.
+        double drift = asleep.after - asleep.before;
+        for(int again = 1; again < 3 && drift >= std::max(.25 * moved, 3 * noise); ++again)
+        {
+            const auto repeated = stall(root / ("asleep" + std::to_string(again)), argv[2], "2500:100000:0:0");
+            drift = std::min(drift, repeated.after - repeated.before);
+        }
+        check(drift < std::max(.25 * moved, 3 * noise), "a stall that sleeps does not move the rest: " + std::to_string(drift) + " against " + std::to_string(moved));
         // Ordinary blocks wear the jump off: most of it is gone, and what is left is under half of it beside the rest's own drift.
         check(spun.after - spun.later > .7 * moved && spun.later - spun.before < .5 * moved + 3 * noise,
               "and it wears off over ordinary blocks: " + std::to_string(spun.before) + ", " + std::to_string(spun.after) + ", then " + std::to_string(spun.later));

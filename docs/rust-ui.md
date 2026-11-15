@@ -268,8 +268,8 @@ Play; Play's Cancel still goes to where Play was opened from.
   four only. The last row hands over (below). Read only beside it: the sound (the first Instrument,
   and the library Sound it came from, "edited" when changed), its engine (the plugin), where it
   plays, its sends with their levels, its insert effects (each chain node but that instrument, "off"
-  when switched off). It shows what fits; a long chain is cut.
-- **Without touch:** any knob (E1, E6) or the dial moves the cursor; a press on a value starts
+  when switched off). It shows what fits; the right knob (pane 1) or the panel's arrows scroll it a view at a time.
+- **Without touch:** the left knob (E1) or the dial moves the cursor (E6 scrolls the panel); a press on a value starts
   changing it (the row turns accent) and the dial then changes it, each step sent at once (level a
   fiftieth of the fader's travel through the JUCE skew, pan 0.05, keys and transpose a semitone,
   a pedal one choice); a press or Cancel ends the change. A press on Mute or Solo toggles it. A
@@ -285,8 +285,8 @@ Play; Play's Cancel still goes to where Play was opened from.
   `setZone`; a pedal at `all` is left out, as a save writes it). From the engine: `graph.get`
   (the shell's), `controls.changed` while Play or Part is shown (one subscription across both),
   `session.status` once on opening and its notifications (the inputs). A refusal is said and the
-  graph asked again. The note router does not yet deliver by `receive` (control-protocol.md), so
-  the pedal rows set what the file holds and are heard only once the engine core does.
+  graph asked again. The engine core's note router delivers each part's pedals by `receive`
+  (`NoteZones::takesPedal`), so the pedal rows are heard.
 - **Still handed over** (the "Rename, sound, effects, sends: Oscairn app" row opens the JUCE
   Performance app, which does not open on this part): the name (`parts.name` exists; the shell has
   no text entry), choosing the sound, the chain's plugins and splits, where the part plays and its

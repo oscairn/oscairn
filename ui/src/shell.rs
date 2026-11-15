@@ -185,6 +185,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     let part = ui.global::<PartState>();
     part.on_tapped(|i| with_app(|a| a.part_act(|p| p.tap(i))));
     part.on_step(|i, by| with_app(|a| a.on_part(|p| p.step_row(i, by))));
+    part.on_info_scroll(|by| with_app(|a| a.on_part(|p| p.scroll_info(by))));
     part.on_back(|| with_app(|a| a.go(Screen::Play)));
     // The JUCE Setlist app's own state file, so either opens where the other left off.
     let state = crate::settings::data_dir().map(|d| d.join("AppData/oscairn.setlist/state.json"));

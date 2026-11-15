@@ -6,11 +6,13 @@
 //! with a border cursor, and what the part is made of beside it, read only: its sound and engine,
 //! where it plays and its sends, its insert effects.
 //!
-//! Without touch: any knob or the dial moves the cursor; a press on a value starts changing it,
+//! Without touch: the left knob (pane 0) or the dial moves the cursor; a press on a value starts changing it,
 //! after which the dial changes it (each step is sent, as the JUCE sliders send each move) and a
 //! press or Cancel ends that; a press on mute or solo toggles it; on "Plays from" opens the list of
 //! devices, where a press ticks one; Cancel closes the list, then drops the cursor, then goes back.
-//! Touch: a tap does what a press does, - and + step a value.
+//! The right knob (pane 1) scrolls the read-only panel when it holds more than fits, a view at a
+//! time, with the same cursor. Touch: a tap does what a press does, - and + step a value, and the
+//! panel's arrows scroll it.
 //!
 //! Everything is read from `graph.get` (asked by the shell on each `graph.changed`), the levels and
 //! mutes that move live from `controls.changed` and the inputs from `session.status`. Edits are
@@ -112,6 +114,8 @@ pub struct Screen {
     editing: bool,
     /// The devices list, open: its own cursor.
     menu: Option<Cursor>,
+    /// The read-only panel's own cursor: its view turns a page at a time.
+    info_cursor: Cursor,
     rows: Rc<VecModel<SettingData>>,
     info: Rc<VecModel<InfoLine>>,
     /// Requests for the shell to send.
@@ -125,7 +129,7 @@ impl Screen {
         let state = window.global::<PartState>();
         state.set_rows(ModelRc::from(rows.clone()));
         state.set_info(ModelRc::from(info.clone()));
-        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], cursor: Cursor::new(0, 1), editing: false, menu: None, rows, info, out: vec![] }
+        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, out: vec![] }
     }
 
     /// The part to show, from the graph already read.
@@ -134,6 +138,7 @@ impl Screen {
         self.cursor = Cursor::new(0, 1);
         self.editing = false;
         self.menu = None;
+        self.info_cursor = Cursor::new(0, 1);
         self.say(String::new());
         self.load();
         self.show();
@@ -331,7 +336,11 @@ impl Screen {
             .map(|(i, r)| SettingData { cursor: cursor.at == Some(i), editing: self.editing && self.menu.is_none() && cursor.at == Some(i), ..r })
             .collect();
         update(&self.rows, shown);
-        update(&self.info, self.info());
+        let lines = self.info();
+        let per = state.get_info_per_view().max(1) as usize;
+        self.info_cursor = fit(self.info_cursor, lines.len(), per);
+        state.set_info_more(lines.len() > per);
+        update(&self.info, lines.into_iter().skip(self.info_cursor.first).take(per).collect());
         state.set_name(self.part["name"].as_str().unwrap_or_default().into());
         state.set_title(if self.menu.is_some() { "Plays from: press to tick or untick" } else { "" }.into());
         state.set_view(if cursor.count == 0 { String::new() } else { format!("{} {}–{} of {}", if self.menu.is_some() { "Devices" } else { "Settings" }, cursor.first + 1, end, cursor.count) }.into());
@@ -483,6 +492,8 @@ impl Screen {
     pub fn act(&mut self, action: Action) -> Outcome {
         let item = self.cursor.at.and_then(|at| self.items().get(at).copied());
         match action {
+            // The right knob scrolls the read-only panel; the others, and the dial, the list.
+            Action::Move { pane: Some(1), by } => self.info_cursor = self.info_cursor.moved(by as i64),
             Action::Move { by, .. } => self.step(by as i64, item),
             Action::Arrow { dx: 0, dy } => self.step(dy as i64, item),
             Action::Arrow { dx, .. } => match item.filter(|_| self.editing && self.menu.is_none()) {
@@ -544,6 +555,12 @@ impl Screen {
         let outcome = self.confirm();
         self.show();
         outcome
+    }
+
+    /// The panel's up or down button: a view.
+    pub fn scroll_info(&mut self, by: i32) {
+        self.info_cursor = self.info_cursor.moved(by as i64 * self.info_cursor.per_page as i64);
+        self.show();
     }
 
     /// - or + on a row: that value stepped.

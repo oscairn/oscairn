@@ -83,9 +83,9 @@ fn part_cursor_edits_and_requests() {
     assert_eq!(ui.global::<crate::PartState>().get_name().as_str(), "Keys");
     assert_eq!(cursor_at(ui), None, "no cursor until a move");
     // Either pane's knob and the dial move the cursor; the first move shows it.
-    part.act(Action::Move { pane: Some(1), by: 1 });
-    assert_eq!(cursor_at(ui), Some(0));
     part.act(Action::Move { pane: Some(0), by: 1 });
+    assert_eq!(cursor_at(ui), Some(0));
+    part.act(Action::Move { pane: None, by: 1 });
     mv(&mut part, 1);
     assert_eq!(cursor_at(ui), Some(2));
     part.act(Action::Arrow { dx: 0, dy: -1 });
@@ -305,7 +305,7 @@ fn part_on_the_shell() {
     assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str(), part.get_name().as_str()), (4, "Part", "Keys"), "a press on the part opens it");
     // Moves on either pane move the cursor; a press on Pan, the dial; a tap on Mute.
     nav(&mut f, "move:0", 1);
-    nav(&mut f, "move:1", 1);
+    nav(&mut f, "move", 1);
     assert_eq!(cursor_at(&ui), Some(1));
     nav(&mut f, "confirm", 1);
     nav(&mut f, "move", -1);
@@ -395,4 +395,37 @@ fn part_draws_in_every_theme() {
     mv(&mut part, 2);
     assert!(s.frame().is_some());
     png(&s, "part-devices");
+}
+
+// A long insert-effects list scrolls: the right knob (pane 1) turns the read-only panel a view at
+// a time, the panel's arrows too; the left knob and the dial keep to the settings.
+#[test]
+fn part_info_scrolls_by_the_right_knob() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut graph = part_graph();
+    let mut chain = vec![json!(1)];
+    for i in 0..10 {
+        graph["nodes"].as_array_mut().unwrap().push(json!({"id": 100 + i, "name": format!("Fx {i}"), "plugin": {"name": "Fx"}, "audioInputs": [{"channels": 2}], "audioOutputs": [{"channels": 2}], "noteInputs": 0, "noteOutputs": 0, "enabled": true}));
+        chain.push(json!(100 + i));
+    }
+    graph["parts"][0]["chain"] = json!(chain);
+    let mut part = crate::part::Screen::new(&s.ui);
+    ui.global::<crate::PartState>().set_rows_per_view(20);
+    ui.global::<crate::PartState>().set_info_per_view(6);
+    part.graph(&graph);
+    part.open(10);
+    let p = ui.global::<crate::PartState>();
+    assert_eq!((info_lines(ui).len(), p.get_info_more(), info_lines(ui)[0].as_str()), (6, true, "Sound"));
+    part.act(Action::Move { pane: Some(1), by: 1 });
+    assert_eq!(info_lines(ui)[0], "Sound", "the first move shows the cursor");
+    part.act(Action::Move { pane: Some(1), by: 6 });
+    assert_ne!(info_lines(ui)[0], "Sound", "past the view: the next view");
+    assert_eq!(cursor_at(ui), None, "the settings' cursor did not move");
+    part.scroll_info(-1);
+    assert_eq!(info_lines(ui)[0], "Sound");
+    part.scroll_info(1);
+    assert_ne!(info_lines(ui)[0], "Sound");
+    part.act(Action::Move { pane: Some(1), by: 1000 });
+    assert_eq!(info_lines(ui).last().unwrap(), "Fx 9", "the end of the list");
 }

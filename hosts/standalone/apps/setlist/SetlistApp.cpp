@@ -15,6 +15,7 @@
 #include "../../Theme.h"
 #include <cstdlib>
 #include <vector>
+#include <sys/mman.h>
 #include <unistd.h>
 
 namespace oscairn::standalone
@@ -81,11 +82,15 @@ namespace oscairn::standalone
                 if(const auto marker = stateFile().getSiblingFile("leaked"); !marker.exists() && marker.create().wasOk())
                     { static std::vector<std::unique_ptr<uint64_t[]>> leaked; uint64_t x = 88172645463325252ull; // varied, so the system cannot compress it away
                       for(int i = 0; i < mb; ++i) { leaked.emplace_back(new uint64_t[1 << 17]); for(int j = 0; j < (1 << 17); ++j) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; leaked.back()[size_t(j)] = x; } } }
-            // For tests: hold that many MB for a second after each start, then let it go: a spike, not a use.
+            // For tests: hold that many MB for a second after each start, then let it go: a spike, not a use. Mapped,
+            // as a window's graphics memory is, and so given back at once: memory freed to the heap stays in the
+            // footprint on macOS 27 (a minute later it was all still there).
             if(const int mb = juce::SystemStats::getEnvironmentVariable("OSCAIRN_TEST_SPIKE", {}).getIntValue(); mb > 0)
-                { auto spike = std::make_shared<std::vector<std::unique_ptr<uint64_t[]>>>(); uint64_t x = 88172645463325252ull;
-                  for(int i = 0; i < mb; ++i) { spike->emplace_back(new uint64_t[1 << 17]); for(int j = 0; j < (1 << 17); ++j) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; spike->back()[size_t(j)] = x; } }
-                  juce::Timer::callAfterDelay(1000, [spike] { spike->clear(); std::fprintf(stderr, "oscairn-setlist: the test's spike let go\n"); }); }
+                if(const size_t bytes = size_t(mb) << 20; auto* spike = static_cast<uint64_t*>(::mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0)))
+                    if(spike != MAP_FAILED)
+                    { uint64_t x = 88172645463325252ull;
+                      for(size_t j = 0; j < bytes / 8; ++j) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; spike[j] = x; }
+                      juce::Timer::callAfterDelay(1000, [spike, bytes] { ::munmap(spike, bytes); std::fprintf(stderr, "oscairn-setlist: the test's spike let go\n"); }); }
             const auto args = juce::StringArray::fromTokens(commandLine, true);
             if(const int at = args.indexOf("--snapshot"); at >= 0 && at + 1 < args.size())
             {

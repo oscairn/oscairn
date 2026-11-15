@@ -14,6 +14,7 @@ mod home;
 mod keyboard;
 mod nav;
 mod params;
+mod piano;
 mod part;
 mod play;
 mod profile;

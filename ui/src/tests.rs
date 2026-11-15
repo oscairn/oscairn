@@ -894,4 +894,5 @@ fn play_draws_in_every_theme() {
 mod part;
 mod keyboard;
 mod pages;
+mod piano;
 mod shellpages;

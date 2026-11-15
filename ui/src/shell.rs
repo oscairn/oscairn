@@ -18,12 +18,13 @@ use crate::chain;
 use crate::keyboard;
 use crate::params;
 use crate::part;
+use crate::piano;
 use crate::sounds;
 use crate::play;
 use crate::profile::Profile;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, HomeState, KeyboardState, PartState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, HomeState, KeyboardState, PartState, PianoState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -46,6 +47,10 @@ pub enum Request {
     Library(bool),
     /// controllers.view: whether lists are on screen, so the panel's navigate controls navigate.
     View,
+    /// session.status, asked as the playing keyboard opens.
+    Keys,
+    /// notes.send from the playing keyboard: nothing to read in the answer.
+    Notes,
     Setlist(setlist::Request),
     Play(play::Request),
     Part(part::Request),
@@ -129,6 +134,12 @@ pub struct App {
     scan_started: bool,
     /// The on-screen keyboard, open for the screen that asked for text.
     keyboard: Option<(Screen, keyboard::Keyboard)>,
+    /// The on-screen playing keyboard (piano.rs), over whatever screen opened it.
+    piano: Option<piano::Piano>,
+    /// Ends a note the playing keyboard's cursor started.
+    piano_tap: slint::Timer,
+    /// The graph as last read, for the playing keyboard's bands.
+    last_graph: Value,
     /// The profile's textEntry is onScreen: the keyboard shows its keys.
     text_on_screen: bool,
     /// Repeats Del, Left and Right while one is held.
@@ -184,6 +195,23 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     ui.global::<HomeState>().on_tapped(|i| with_app(|a| a.tap(i)));
     ui.global::<Bar>().on_home(|| with_app(|a| a.go(Screen::Home)));
     ui.on_key(|text| key(&text));
+    ui.on_key_released(|text| {
+        with_app(|a| {
+            let _ = a.on_piano(|p| p.typed(&text, false));
+        })
+    });
+    let keys = ui.global::<PianoState>();
+    keys.on_key_down(|i, y| {
+        with_app(|a| {
+            let _ = a.on_piano(|p| p.touch(i.max(0) as usize, true, y as f64));
+        })
+    });
+    keys.on_key_up(|i| {
+        with_app(|a| {
+            let _ = a.on_piano(|p| p.touch(i.max(0) as usize, false, 0.));
+        })
+    });
+    keys.on_control(|i| with_app(|a| a.piano_control(i.max(0) as usize)));
     let lists = ui.global::<SetlistState>();
     lists.on_tapped_slot(|i| with_app(|a| a.on_setlist(|s| s.tap_slot(i.max(0) as usize))));
     lists.on_tapped_setlist(|i| with_app(|a| a.on_setlist(|s| s.tap_setlist(i.max(0) as usize))));
@@ -241,12 +269,16 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             params: params::Screen::new(ui),
             scan_started: false,
             keyboard: None,
+            piano: None,
+            piano_tap: slint::Timer::default(),
+            last_graph: Value::Null,
             text_on_screen: profile.text_on_screen,
             repeat: slint::Timer::default(),
             play_from: Screen::Home,
             meters: slint::Timer::default(),
             performance_id: String::new(),
         };
+        app.part.keys = profile.on_screen_keyboard;
         app.show_home();
         *a.borrow_mut() = Some(app);
     });
@@ -401,6 +433,9 @@ impl App {
     /// The meters, at most every METER_INTERVAL: the CPU from this status, RAM and the tempo asked.
     fn status(&mut self, status: &Value) {
         self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
+        if self.on_piano(|p| !p.status(status)) == Some(true) {
+            self.close_piano(); // its input was unplugged
+        }
         let now = Instant::now();
         if self.last_meters.is_some_and(|t| now.duration_since(t) < METER_INTERVAL) {
             return;
@@ -468,7 +503,14 @@ impl App {
                 self.follow();
                 self.show(|s| s.performance = topbar::performance(&r))
             }
+            Request::Keys => {
+                if self.on_piano(|p| !p.status(&r)) == Some(true) {
+                    self.close_piano();
+                }
+            }
             Request::Graph => {
+                self.last_graph = r.clone();
+                self.on_piano(|p| p.graph(&r));
                 self.on_play(|p| p.graph(&r));
                 self.on_part(|p| p.graph(&r));
                 self.on_chain(|c| c.graph(&r));
@@ -489,7 +531,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) => {}
         }
     }
 
@@ -556,6 +598,9 @@ impl App {
     }
 
     fn key(&mut self, text: &str) -> bool {
+        if self.keyboard.is_none() && self.on_piano(|p| p.typed(text, true)) == Some(true) {
+            return true;
+        }
         if !self.text_on_screen && self.keyboard.is_some() {
             let outcome = self.keyboard.as_mut().map(|(_, k)| k.typed(text));
             self.keyboard_outcome(outcome);
@@ -567,6 +612,9 @@ impl App {
     fn act(&mut self, action: Action) {
         if self.keyboard.is_some() {
             return self.keyboard_act(action);
+        }
+        if self.piano.is_some() {
+            return self.piano_act(action);
         }
         match (self.screen, action) {
             (Screen::Opening, Action::Cancel(_)) if !self.hands_over => self.go(Screen::Home),
@@ -662,11 +710,66 @@ impl App {
                 self.start_scan();
                 self.go(Screen::Chain);
             }
+            part::Outcome::Keys(input) => self.open_piano(&input),
             part::Outcome::Sound => {
                 self.sounds.open(self.part.id());
                 self.go(Screen::Sounds);
             }
             part::Outcome::Stay => {}
+        }
+    }
+
+    /// Something for the playing keyboard if it is open, then the notes it played sent.
+    fn on_piano<R>(&mut self, f: impl FnOnce(&mut piano::Piano) -> R) -> Option<R> {
+        let r = f(self.piano.as_mut()?);
+        let out = std::mem::take(&mut self.piano.as_mut()?.out);
+        for (method, params) in out {
+            self.send(Request::Notes, method, params);
+        }
+        if self.piano.as_ref().is_some_and(|p| p.tapping()) && !self.piano_tap.running() {
+            self.piano_tap.start(slint::TimerMode::SingleShot, piano::TAP, || with_app(|a| a.piano_tap_end()));
+        }
+        Some(r)
+    }
+
+    fn piano_tap_end(&mut self) {
+        self.on_piano(piano::Piano::tap_end);
+    }
+
+    /// The playing keyboard over the current screen, for `input` (empty: the built-in keys).
+    fn open_piano(&mut self, input: &str) {
+        let Some(ui) = self.ui() else { return };
+        if let Some(mut old) = self.piano.take() {
+            old.close();
+        }
+        let mut piano = piano::Piano::open(&ui, input, &Value::Null, &self.last_graph);
+        let out = std::mem::take(&mut piano.out);
+        self.piano = Some(piano);
+        for (method, params) in out {
+            self.send(Request::Notes, method, params);
+        }
+        self.send(Request::Keys, "session.status", json!({}));
+    }
+
+    fn close_piano(&mut self) {
+        if self.piano.is_some() {
+            self.on_piano(piano::Piano::release);
+        }
+        if let Some(mut p) = self.piano.take() {
+            p.close();
+        }
+        self.piano_tap.stop();
+    }
+
+    fn piano_act(&mut self, action: Action) {
+        if self.on_piano(|p| p.act(action)) == Some(piano::Outcome::Close) {
+            self.close_piano();
+        }
+    }
+
+    fn piano_control(&mut self, n: usize) {
+        if self.on_piano(|p| p.tap_control(n)) == Some(piano::Outcome::Close) {
+            self.close_piano();
         }
     }
 
@@ -844,6 +947,7 @@ impl App {
     }
 
     fn go(&mut self, screen: Screen) {
+        self.close_piano();
         if let Some((_, k)) = self.keyboard.take() {
             k.close();
             self.on_part(part::Screen::not_entered);
@@ -969,6 +1073,12 @@ pub fn set_text_on_screen(on: bool) {
 thread_local! {
     /// `--plugins DIR`, where the plugin scanner looks (else beside the program, as the JUCE app).
     static PLUGIN_DIR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Tests: the playing keyboard opened as the Part screen's row does.
+#[cfg(test)]
+pub fn open_piano(input: &str) {
+    with_app(|a| a.open_piano(input))
 }
 
 /// The plugin folder the command line gave.

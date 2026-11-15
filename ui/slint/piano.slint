@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The on-screen playing keyboard (src/piano.rs), the JUCE KeyboardWindow's job on the stage screen:
+// two octaves and the next C (15 white keys, each at least a touch target wide), a band per part
+// the input plays above the keys, and a header with the octave, Fixed, Sustain and Close.
+
+import { Theme } from "theme.slint";
+
+export struct PianoKey {
+    x: float, // in white-key units from the left
+    w: float,
+    black: bool,
+    lit: bool, // sounding from the input (heldNotes)
+    held: bool, // pressed here
+    cursor: bool,
+    label: string, // a C's name
+}
+
+export struct PianoBand {
+    x: float, // in white-key units
+    w: float,
+    row: int,
+    name: string,
+}
+
+export struct PianoControl {
+    label: string,
+    on: bool,
+    cursor: bool,
+}
+
+export global PianoState {
+    in property <bool> open;
+    in property <string> title;
+    in property <string> range; // "C3–C5"
+    in property <float> whites: 15; // the keys' width in white-key units
+    in property <[PianoKey]> keys;
+    in property <[PianoBand]> bands;
+    in property <[PianoControl]> controls; // Octave down, Octave up, Fixed velocity, Sustain, Close
+    callback key-down(int, float); // a key's index, and how far down it the finger is, 0..1
+    callback key-up(int);
+    callback control(int);
+}
+
+export component Piano inherits Rectangle {
+    property <length> white: (self.width - 2 * Theme.margin) / PianoState.whites;
+    property <length> board-y: Theme.margin + Theme.touch + 2 * Theme.gap + 6 * (4px + 2px) + Theme.gap;
+    background: Theme.surface;
+    TouchArea { }
+    Text {
+        x: Theme.margin;
+        y: Theme.margin;
+        width: parent.width * 0.3;
+        height: Theme.touch;
+        text: PianoState.title;
+        color: Theme.text;
+        font-size: Theme.body;
+        font-weight: 700;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Text {
+        x: parent.width * 0.3 + Theme.touch + Theme.gap;
+        y: Theme.margin;
+        width: Theme.touch * 2;
+        height: Theme.touch;
+        text: PianoState.range;
+        color: Theme.muted;
+        font-size: Theme.body;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    for c[i] in PianoState.controls: Rectangle {
+        // Octave down and up flank the range; the rest are to the right.
+        x: i == 0 ? parent.width * 0.3 : i == 1 ? parent.width * 0.3 + Theme.touch * 3 + 2 * Theme.gap : parent.width - Theme.margin - (5 - i) * (Theme.touch * 2 + Theme.gap) + Theme.gap;
+        y: Theme.margin;
+        width: i < 2 ? Theme.touch : Theme.touch * 2;
+        height: Theme.touch;
+        border-radius: Theme.radius;
+        background: c.on ? Theme.accent : Theme.raised;
+        Text {
+            text: c.label;
+            color: c.on ? Theme.background : Theme.text;
+            font-size: Theme.button;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        TouchArea {
+            clicked => { PianoState.control(i); }
+        }
+        Rectangle {
+            border-radius: Theme.radius;
+            border-width: c.cursor ? 2px : 0px;
+            border-color: Theme.focus;
+        }
+    }
+    for b in PianoState.bands: Rectangle {
+        x: Theme.margin + b.x * root.white + 1px;
+        y: Theme.margin + Theme.touch + 2 * Theme.gap + b.row * 6px;
+        width: max(2px, b.w * root.white - 2px);
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+    // White keys first, black over them.
+    for k[i] in PianoState.keys: Rectangle {
+        if !k.black: Rectangle {
+            x: Theme.margin + k.x * root.white;
+            y: root.board-y;
+            width: k.w * root.white - 1px;
+            height: root.height - root.board-y - Theme.margin;
+            border-radius: Theme.radius;
+            background: k.held ? Theme.accent : k.lit ? Theme.accent.transparentize(0.5) : #f4f4f0;
+            Text {
+                y: parent.height - Theme.touch;
+                height: Theme.touch;
+                width: parent.width;
+                text: k.label;
+                color: #444;
+                font-size: Theme.small;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea {
+                pointer-event(e) => {
+                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                        PianoState.key-down(i, self.mouse-y / self.height);
+                    } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                        PianoState.key-up(i);
+                    }
+                }
+            }
+            Rectangle {
+                border-radius: Theme.radius;
+                border-width: k.cursor ? 3px : 0px;
+                border-color: Theme.focus;
+            }
+        }
+    }
+    for k[i] in PianoState.keys: Rectangle {
+        if k.black: Rectangle {
+            x: Theme.margin + k.x * root.white;
+            y: root.board-y;
+            width: k.w * root.white;
+            height: (root.height - root.board-y - Theme.margin) * 0.6;
+            border-radius: Theme.radius;
+            background: k.held ? Theme.accent : k.lit ? Theme.accent.darker(0.3) : #1b1b1d;
+            TouchArea {
+                pointer-event(e) => {
+                    if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                        PianoState.key-down(i, self.mouse-y / self.height);
+                    } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                        PianoState.key-up(i);
+                    }
+                }
+            }
+            Rectangle {
+                border-radius: Theme.radius;
+                border-width: k.cursor ? 3px : 0px;
+                border-color: Theme.focus;
+            }
+        }
+    }
+}

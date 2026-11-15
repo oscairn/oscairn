@@ -32,6 +32,8 @@ pub struct Profile {
     /// screens[0].textEntry is `onScreen`: no typing keyboard, so text is typed on the on-screen
     /// keyboard's keys (the JUCE app's TextKeyboard); otherwise (the default) a typing keyboard does it.
     pub text_on_screen: bool,
+    /// The on-screen playing keyboard is offered: `onScreenKeyboard`, else unless the device has keys of its own for notes (Profile.cpp).
+    pub on_screen_keyboard: bool,
     /// panel.map: the panel map's file name (beside the program, in share/oscairn/panels) or path.
     pub panel_map: String,
 }
@@ -49,7 +51,7 @@ fn screen_scale(screen: &Value) -> f64 {
 impl Profile {
     /// A built-in profile by its id, or a profile file by its path; none: this computer's.
     pub fn load(given: Option<&str>) -> Result<Profile, String> {
-        let Some(given) = given.filter(|g| !g.is_empty()) else { return Ok(Profile::default()) };
+        let Some(given) = given.filter(|g| !g.is_empty()) else { return Ok(Profile { on_screen_keyboard: true, ..Profile::default() }) };
         let text = match built_in::PROFILES.iter().find(|(id, _)| *id == given) {
             Some((_, text)) => text.to_string(),
             None => std::fs::read_to_string(given).map_err(|e| format!("no built-in profile {given}, and {given}: {e}"))?,
@@ -73,6 +75,7 @@ impl Profile {
             memory: doc["compute"]["memory"].as_u64().unwrap_or(0).min(1 << 24) << 20,
             apps: doc["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect(),
             text_on_screen: screen["textEntry"] == "onScreen",
+            on_screen_keyboard: doc["onScreenKeyboard"].as_bool().unwrap_or_else(|| !doc["controls"].as_array().is_some_and(|c| c.iter().any(|c| c["kind"] == "keys" && c["role"] == "notes"))),
             panel_map: doc["panel"]["map"].as_str().unwrap_or_default().into(),
         })
     }

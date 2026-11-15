@@ -9,7 +9,8 @@ import { Setlist, SetlistState, SlotData, ListRow } from "setlist.slint";
 import { Play, PlayState, SceneData, StripData } from "play.slint";
 import { Part, PartState, SettingData, InfoLine } from "part.slint";
 import { Keyboard, KeyboardState, KeyData } from "keyboard.slint";
-export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, PartState, SettingData, InfoLine, KeyboardState, KeyData }
+import { Piano, PianoState, PianoKey, PianoBand, PianoControl } from "piano.slint";
+export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, PartState, SettingData, InfoLine, KeyboardState, KeyData, PianoState, PianoKey, PianoBand, PianoControl }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -24,6 +25,7 @@ export component Shell inherits Window {
     in property <string> opening;
     in property <bool> hands-over; // false: this shell cannot hand the display over (a computer)
     callback key(string) -> bool; // a key's text; true when it was taken
+    callback key-released(string);
     out property <length> resources-x: bar.resources-x;
     out property <length> resources-width: bar.resources-width;
     out property <length> tempo-x: bar.tempo-x;
@@ -33,6 +35,10 @@ export component Shell inherits Window {
     keys := FocusScope {
         key-pressed(event) => {
             if (root.key(event.text)) { return accept; }
+            return reject;
+        }
+        key-released(event) => {
+            root.key-released(event.text);
             return reject;
         }
     }
@@ -74,6 +80,11 @@ export component Shell inherits Window {
         text: root.hands-over ? "Opening " + root.opening + "..." : root.opening + " is not in this UI yet: open it in the Oscairn app. Escape goes back.";
     }
     if KeyboardState.open: Keyboard {
+        y: Theme.bar-height;
+        width: parent.width;
+        height: parent.height - Theme.bar-height;
+    }
+    if PianoState.open: Piano {
         y: Theme.bar-height;
         width: parent.width;
         height: parent.height - Theme.bar-height;

@@ -40,7 +40,7 @@ fn info_lines(ui: &Shell) -> Vec<String> {
 }
 
 /// The part screen on its own, with `graph`, the whole list as one view.
-fn part_screen(s: &Screen, graph: &serde_json::Value, id: u32) -> crate::part::Screen {
+pub fn part_screen(s: &Screen, graph: &serde_json::Value, id: u32) -> crate::part::Screen {
     let mut part = crate::part::Screen::new(&s.ui);
     s.ui.global::<crate::PartState>().set_rows_per_view(30);
     part.graph(graph);
@@ -79,7 +79,7 @@ fn part_cursor_edits_and_requests() {
     let list: Vec<(&str, &str)> = list.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     assert_eq!(
         list,
-        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Input channel", "Any channel"), ("Lowest velocity", "0"), ("Highest velocity", "127"), ("Notes at once", "Any"), ("Reserved notes", "None"), ("Priority", "0 (gives way first)"), ("Plays to", "Main"), ("MIDI out", "Off ›"), ("MIDI out channel", "Own channels"), ("Send to Reverb", "−6.0 dB"), ("Sound", "Rhodes ›"), ("Insert effects", "›"), ("Name", "Keys ›"), ("Remove part", "Press twice")]
+        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Input channel", "Any channel"), ("Lowest velocity", "0"), ("Highest velocity", "127"), ("Notes at once", "Any"), ("Reserved notes", "None"), ("Priority", "0 (gives way first)"), ("Plays to", "Main"), ("MIDI out", "Off ›"), ("MIDI out channel", "Own channels"), ("Send to Reverb", "−6.0 dB"), ("Keyboard", "plays this part ›"), ("Sound", "Rhodes ›"), ("Insert effects", "›"), ("Name", "Keys ›"), ("Remove part", "Press twice")]
     );
     assert_eq!(
         info_lines(ui),
@@ -97,7 +97,7 @@ fn part_cursor_edits_and_requests() {
     part.act(Action::Arrow { dx: 0, dy: -1 });
     assert_eq!(cursor_at(ui), Some(1));
     part.act(Action::End(1));
-    assert_eq!(cursor_at(ui), Some(24), "End: the last");
+    assert_eq!(cursor_at(ui), Some(25), "End: the last");
     part.act(Action::End(-1));
     assert_eq!(cursor_at(ui), Some(0));
     assert!(edits(&mut part).is_empty(), "moving the cursor sends nothing");
@@ -218,10 +218,10 @@ fn part_cursor_edits_and_requests() {
     part.not_entered();
     part.act(Action::Move { pane: None, by: 1 });
     assert_eq!(part.act(Action::Confirm(None)), Stay);
-    assert_eq!(rows(ui)[24].1, "Press again to remove");
+    assert_eq!(rows(ui)[25].1, "Press again to remove");
     part.act(Action::Move { pane: None, by: -1 });
     part.act(Action::Move { pane: None, by: 1 });
-    assert_eq!(rows(ui)[24].1, "Press twice", "moving away undoes the first press");
+    assert_eq!(rows(ui)[25].1, "Press twice", "moving away undoes the first press");
     assert!(requests(&mut part).is_empty());
     // A bus has the fader's settings and where it plays to; an audio part no keys.
     let _bus = part_screen(&s, &part_graph(), 12);
@@ -230,7 +230,7 @@ fn part_cursor_edits_and_requests() {
     let mut audio = part_graph();
     audio["parts"][1]["input"] = json!({"kind": "audio", "port": 0});
     let _audio = part_screen(&s, &audio, 11);
-    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "MIDI out", "MIDI out channel", "Send to Reverb", "Sound", "Insert effects", "Name", "Remove part"]);
+    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "MIDI out", "MIDI out channel", "Send to Reverb", "Keyboard", "Sound", "Insert effects", "Name", "Remove part"]);
     assert_eq!(info_lines(ui)[5], "Reverb", "plays through a bus");
 }
 

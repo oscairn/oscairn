@@ -54,6 +54,8 @@ pub enum Outcome {
     /// The insert chain, and the sound chooser.
     Chain,
     Sound,
+    /// The on-screen playing keyboard for this input (empty: the built-in keys).
+    Keys(String),
     /// A press on the name: the on-screen keyboard, with this title and text; `entered` takes the result.
     Prompt(String, String),
 }
@@ -78,6 +80,7 @@ enum Item {
     MaxNotes,
     Reserve,
     Priority,
+    Keyboard,
     Pedal(usize),
     MidiOut,
     MidiChannel,
@@ -155,6 +158,8 @@ pub struct Screen {
     info_cursor: Cursor,
     rows: Rc<VecModel<SettingData>>,
     info: Rc<VecModel<InfoLine>>,
+    /// The profile offers the on-screen playing keyboard (a "Keyboard" row).
+    pub keys: bool,
     /// Requests for the shell to send.
     pub out: Vec<Out>,
 }
@@ -166,7 +171,19 @@ impl Screen {
         let state = window.global::<PartState>();
         state.set_rows(ModelRc::from(rows.clone()));
         state.set_info(ModelRc::from(info.clone()));
-        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], outputs: vec![], removing: false, asking: false, active: false, cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, out: vec![] }
+        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], outputs: vec![], removing: false, asking: false, active: false, cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, keys: true, out: vec![] }
+    }
+
+    /// The input that plays this part, for its keyboard: the first device rule that names a connected
+    /// input; else the built-in keys (empty).
+    fn keys_input(&self) -> String {
+        let named = self.part["input"]["devices"].as_array().into_iter().flatten().filter(|r| matches!(r["kind"].as_str(), Some("usbNamed" | "network"))).filter_map(|r| r["pattern"].as_str());
+        for pattern in named {
+            if let Some(e) = self.inputs.iter().find(|e| e["name"].as_str().is_some_and(|n| n.to_lowercase().contains(&pattern.to_lowercase()))) {
+                return e["name"].as_str().unwrap_or_default().to_string();
+            }
+        }
+        String::new()
     }
 
     /// The part to show, from the graph already read.
@@ -272,6 +289,9 @@ impl Screen {
             items.extend([Item::MidiOut, Item::MidiChannel]);
         }
         items.extend(self.buses().into_iter().map(|(id, _)| Item::Send(id)));
+        if self.keys && self.part["input"]["kind"] != "bus" {
+            items.push(Item::Keyboard);
+        }
         items.extend([Item::Sound, Item::Effects, Item::Name, Item::Remove]);
         items
     }
@@ -436,6 +456,7 @@ impl Screen {
                 let name = self.buses().into_iter().find(|b| b.0 == bus).map(|b| b.1).unwrap_or_default();
                 (format!("Send to {name}"), db(self.send_level_of(bus)), 0, false)
             }
+            Item::Keyboard => ("Keyboard".into(), "plays this part ›".into(), 2, false),
             Item::Sound => ("Sound".into(), self.sound_name() + " ›", 2, false),
             Item::Effects => ("Insert effects".into(), "›".into(), 2, false),
             Item::Remove => ("Remove part".into(), if self.removing { "Press again to remove" } else { "Press twice" }.into(), 2, self.removing),
@@ -716,7 +737,7 @@ impl Screen {
                     self.edit("parts.send", params);
                 }
             }
-            Item::Mute | Item::Solo | Item::Devices | Item::MidiOut | Item::Name | Item::Remove | Item::Sound | Item::Effects => {}
+            Item::Mute | Item::Solo | Item::Devices | Item::MidiOut | Item::Name | Item::Remove | Item::Sound | Item::Effects | Item::Keyboard => {}
         }
     }
 
@@ -819,6 +840,7 @@ impl Screen {
                 return Outcome::Prompt("Name of the part".into(), self.part["name"].as_str().unwrap_or_default().into());
             }
             Item::Sound => return Outcome::Sound,
+            Item::Keyboard => return Outcome::Keys(self.keys_input()),
             Item::Effects => return Outcome::Chain,
             Item::Remove if !self.removing => self.removing = true,
             Item::Remove => {

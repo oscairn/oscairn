@@ -348,6 +348,9 @@ target_link_libraries(oscairn-note-routing-test PRIVATE oscairn_engine)
 target_include_directories(oscairn-note-routing-test PRIVATE clap-host/tests)
 add_test(NAME note-routing COMMAND oscairn-note-routing-test $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn-lifecycle-fixture> $<TARGET_FILE:kick-clap-fixture-normal>)
 set_tests_properties(note-routing PROPERTIES TIMEOUT 30)
+if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    set_tests_properties(note-routing PROPERTIES TIMEOUT 120) # its work is CPU, which a sanitizer multiplies (26 of 30 s under ThreadSanitizer on CI); the limit is for a hang
+endif()
 # The engine core: the Rust implementation bit for bit against its C++ reference; and the crate's own tests.
 add_executable(oscairn-core-diff-test engine/tests/core_diff.cpp)
 target_link_libraries(oscairn-core-diff-test PRIVATE oscairn_engine)
@@ -361,7 +364,11 @@ set_tests_properties(engine-core-diff PROPERTIES TIMEOUT 300)
 # The plan's audio (buffers, mixing, output guard, meters) the same way; `bench cpp|rust` times each.
 add_executable(oscairn-audio-diff-test engine/tests/audio_diff.cpp)
 target_link_libraries(oscairn-audio-diff-test PRIVATE oscairn_engine)
-add_test(NAME engine-audio-diff COMMAND oscairn-audio-diff-test)
+set(audio_diff_size) # under a sanitizer the same 200 plans for 700 blocks, not 2000: the whole took 280 of its 300 s under ThreadSanitizer on CI
+if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    set(audio_diff_size 200 700)
+endif()
+add_test(NAME engine-audio-diff COMMAND oscairn-audio-diff-test ${audio_diff_size})
 set_tests_properties(engine-audio-diff PROPERTIES TIMEOUT 300)
 # A plan's block (the step loop, events merged and passed on, harmonies, taps, the plugins' calls) the same way.
 add_executable(oscairn-run-diff-test engine/tests/run_diff.cpp)

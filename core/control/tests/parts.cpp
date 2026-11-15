@@ -838,6 +838,44 @@ namespace
         check(near(x.l[frames - 1], before), "unmuted, C plays again: " + std::to_string(x.l[frames - 1]) + " for " + std::to_string(before));
     }
 
+    // A converted Performance: parts with sends to buses that have no box, muted, past them a Master
+    // with one box. The muted buses pass nothing, before and after a scene (whose list has only the
+    // parts, in the scope of Enabled too) is recalled; unmuted, the sends arrive at send x part x bus.
+    void mutedBusesInMaster(const char* fixture, const char* delay)
+    {
+        Session s(48000, frames);
+        std::vector<uint32_t> keys;
+        for(int i = 0; i < 5; ++i)
+        {
+            const auto n = s.add("synth" + std::to_string(i), fixture, "org.kick.test.synth");
+            s.setParameter(n, 7, .05);
+            keys.push_back(s.addPart("P" + std::to_string(i + 1)));
+            s.insertIntoPart(keys.back(), 0, n);
+        }
+        s.commit();
+        const auto scene = s.addScene("One"); // lists the five parts only, as the converter's scenes do
+        const auto master = s.addPart("Master", {PartInput::Kind::Bus}), reverb = s.addPart("Reverb", {PartInput::Kind::Bus}), variation = s.addPart("Variation", {PartInput::Kind::Bus});
+        const auto eq = s.add("eq", delay); s.setParameter(eq, 3, 0);
+        s.insertIntoPart(master, 0, eq);
+        for(const auto k : keys) { s.setPartOutput(k, master); s.setSend(k, reverb, .462); s.setSend(k, variation, .323); }
+        s.setPartOutput(reverb, master); s.setPartOutput(variation, master);
+        s.setPartLevel(reverb, .8, true); s.setPartLevel(variation, .5, true); s.commit();
+        Audio x;
+        s.note(true, 60, 1); for(int i = 0; i < 5; ++i) x.run(s);
+        check(near(x.l[frames - 1], .25), "muted empty buses: the main signals only: " + std::to_string(x.l[frames - 1]));
+        s.selectScene(scene); for(int i = 0; i < 5; ++i) x.run(s);
+        check(near(x.l[frames - 1], .25), "after a scene of the parts (enabled in scope): still only the main signals: " + std::to_string(x.l[frames - 1]));
+        s.setPartSolo(keys[0], true); s.commit(); for(int i = 0; i < 5; ++i) x.run(s);
+        check(near(x.l[frames - 1], .05), "with P1 soloed: P1 alone, nothing from the muted buses: " + std::to_string(x.l[frames - 1]));
+        s.setPartSolo(keys[0], false); s.commit();
+        s.setPartLevel(reverb, .8, false); s.commit(); for(int i = 0; i < 5; ++i) x.run(s);
+        check(near(x.l[frames - 1], .25 + .25 * .462 * .8), "Reverb unmuted: send x part x bus arrives: " + std::to_string(x.l[frames - 1]));
+        s.selectScene(scene); for(int i = 0; i < 5; ++i) x.run(s);
+        check(near(x.l[frames - 1], .25 + .25 * .462 * .8), "and a scene leaves it as it was: " + std::to_string(x.l[frames - 1]));
+        s.setPartLevel(variation, .5, false); s.commit(); for(int i = 0; i < 5; ++i) x.run(s);
+        check(near(x.l[frames - 1], .25 + .25 * .462 * .8 + .25 * .323 * .5), "both unmuted: " + std::to_string(x.l[frames - 1]));
+    }
+
     void emptyBus(const char* fixture)
     {
         Session s(48000, frames);
@@ -2788,6 +2826,7 @@ int main(int argc, char** argv)
         voiceBudget(argv[7], temp.path);
         buses(argv[1], argv[3]);
         emptyBus(argv[1]);
+        mutedBusesInMaster(argv[1], argv[3]);
         innerZones(argv[1], argv[5], argv[3], temp.path);
         scenes(argv[1], temp.path);
         sceneZones(argv[1], temp.path);

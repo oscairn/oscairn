@@ -48,11 +48,27 @@
 
 #include <cstdio>
 #include <memory>
+#include <utility>
 
 namespace oscairn::standalone
 {
     namespace
     {
+        // A line on stderr with the wall clock in milliseconds, so a device run can lay the app's
+        // start and end beside the keeper's (oscairn-fantom-start's "timing" lines in its log).
+        void timing( const char* phase )
+        {
+            std::fprintf( stderr, "oscairn-timing: %s ms=%lld\n", phase, static_cast<long long>( juce::Time::currentTimeMillis() ) );
+        }
+        // The first time its window is painted.
+        struct FirstPaint : juce::ComponentListener
+        {
+            bool done = false;
+            void componentPainted( juce::Component&, const juce::ComponentPaintDiagnostics& ) override
+            {
+                if( !std::exchange( done, true ) ) timing( "first frame" );
+            }
+        };
         struct NamedLayout
         {
             juce::String name; // the file name without .json
@@ -290,7 +306,7 @@ namespace oscairn::standalone
         const bool homeQuits_ = juce::SystemStats::getEnvironmentVariable( "OSCAIRN_HOME_QUITS", {} ) == "1";
         void leave()
         {
-            if( homeQuits_ ) juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            if( homeQuits_ ) { timing( "quit requested" ); juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
             else showHome();
         }
         // Home (RFC 0030): the launcher, as the window's content on the desktop, over the screen
@@ -890,6 +906,7 @@ namespace oscairn::standalone
         void initialise( const juce::String& commandLine ) override
         {
             oscairn::ignoreTickSignal();
+            timing( "app started" );
             commandLine_ = commandLine;
             const auto args = juce::StringArray::fromTokens( commandLine, true );
             offscreen = args.contains( "--snapshot" );
@@ -1058,6 +1075,7 @@ namespace oscairn::standalone
             try
             {
                 engine_ = starting_.get();
+                timing( "engine connected" );
                 // The session's setup from the profile (SessionSetup.h): the engine this app starts
                 // is not given the profile. This UI's own memory with it: its process's memory now
                 // (an in-process engine's too).
@@ -1091,6 +1109,8 @@ namespace oscairn::standalone
                     else throw std::invalid_argument( "--input-mode must be automatic, mouse or touch" );
                 }
                 window_ = std::make_unique<Window>( *engine_, std::move( layouts ), Layout::parse( json ), profile,*theme_,juce::File(dir.unquoted()), mode, profileSource( args ) );
+                firstPaint_.done = false;
+                window_->addComponentListener( &firstPaint_ ); // removed with the window
                 // With --audio null this process opens no MIDI port either: its engine opens none.
                 if( args.contains( "--snapshot" ) || nullAudio_ )
                     std::fprintf( stderr, "oscairn: 0 MIDI ports open in the app\n" );
@@ -1153,6 +1173,7 @@ namespace oscairn::standalone
             splash_.reset();
             paints_.reset();
             theme_.reset();
+            timing( "shut down" );
         }
 
     private:
@@ -1222,6 +1243,7 @@ namespace oscairn::standalone
         std::unique_ptr<Theme> theme_;
         std::unique_ptr<PaintCounter> paints_;
         std::unique_ptr<Engine> engine_;
+        FirstPaint firstPaint_; // before the window, which it listens to, so it ends after it
         std::unique_ptr<Window> window_;
         std::unique_ptr<Controllers> controllers_;
         std::unique_ptr<Splash> splash_;

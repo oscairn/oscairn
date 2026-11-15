@@ -310,4 +310,48 @@ check "a failing tickgen reset is logged and the start goes on" "[ $status = 0 ]
 : > "$bundle/crash"
 wait_for 'its engine is not running' 20
 check "the app ended with its engine: not started again" "[ $status = 0 ] && grep -q 'the app ended (status 3) and its engine is not running: not started again' '$log' && [ \$(grep -c 'app started' '$bundle/ran') = 1 ]"
+# The handover (keep_ui) on a stand-in bundle and /proc: the Rust UI ends with status 3, the X
+# server (a stand-in, serving only after 0.5 s) starts, the app runs once it serves, the X server
+# is signaled the moment the app ends, and the Rust UI starts only after it is gone, with the
+# touch rule back; the keeper logs each phase with milliseconds.
+keep=$bundle/keeper
+mkdir -p "$keep/var/oscairn/log" "$keep/var/oscairn/run" "$keep/tmp" "$keep/proc/net" "$keep/rules"
+: > "$keep/proc/net/unix"
+cat > "$keep/start-chroot.sh" <<'EOF'
+#!/bin/sh
+k=$(dirname "$0")
+case "$*" in
+*xwininfo*) [ -e "$k/x-serves" ] ;;
+*/usr/bin/Xorg*)
+	[ ! -e "$k/rules/99-oscairn-touch.rules" ] && echo "x: no rule" >> "$k/order" || echo "x: RULE" >> "$k/order"
+	mkdir -p "$k/proc/$$"; echo Xorg > "$k/proc/$$/comm"
+	trap 'rm -rf "$k/proc/$$"; : > "$k/proc/net/unix"; rm -f "$k/x-serves"; sleep 0.3; echo "x: gone" >> "$k/order"; exit 0' TERM
+	echo '0: 00000002 0 0 0001 01 2 @/tmp/.X11-unix/X0' > "$k/proc/net/unix"
+	( sleep 0.5; : > "$k/x-serves" ) &
+	while :; do sleep 0.05; done ;;
+*/usr/bin/Oscairn*)
+	[ -e "$k/x-serves" ] && echo "app: X serving" >> "$k/order" || echo "app: X NOT serving" >> "$k/order"
+	sleep 0.2; exit 0 ;;
+*/usr/bin/oscairn-ui*)
+	[ -e "$k/rules/99-oscairn-touch.rules" ] && r=rule || r=norule
+	grep -q Xorg "$k"/proc/[0-9]*/comm 2>/dev/null && r="$r X-STILL-UP"
+	echo "ui: $r" >> "$k/order"
+	if [ ! -e "$k/ui-ran" ]; then : > "$k/ui-ran"; echo settings > "$k/tmp/oscairn-handover"; exit 3; fi
+	: > "$k/var/oscairn/run/stopped"; exit 0 ;;
+esac
+EOF
+chmod +x "$keep/start-chroot.sh"
+(
+	root=$keep state=$keep/var/oscairn proc=$keep/proc log=$keep/var/oscairn/log/oscairn-fantom.log rotation=90 rules=$keep/rules matrix="0 1 0 -1 0 1" dry= OSCAIRN_PROFILE=fantom-07
+	for f in say touch_rule keep_ui display_serves; do eval "$(sed -n "/^$f()/,/^}/p" "$scripts/oscairn-fantom-start")"; done
+	for f in fnap now_ms lap display_up named xorg_ours handed_over nap; do eval "$(grep "^$f()" "$scripts/oscairn-fantom-start")"; done
+	touch_rule
+	keep_ui
+) > "$keep/keeper.out" 2>&1
+klog=$keep/var/oscairn/log/oscairn-fantom.log
+lapms() { sed -n "s/.*timing $1[^:]*: ms=[0-9]* (+\\([0-9]*\\) ms).*/\\1/p" "$klog"; }
+check "the handover: X before the app, X gone before the Rust UI, the rule off for X and back for the UI" "[ \"\$(tr '\\n' ' ' < '$keep/order')\" = 'ui: rule x: no rule app: X serving x: gone ui: rule ' ]"
+check "the keeper waited on the X server serving (0.5 s in the stand-in), not a fixed time" "[ \$(lapms 'X ready') -ge 500 ] && [ \$(lapms 'X ready') -lt 3000 ]"
+check "each phase logged with milliseconds, in order" "[ \"\$(sed -n 's/.*timing \\([A-Za-z]* [A-Za-z]*\\).*/\\1/p' '$klog' | tr '\\n' ',')\" = 'handover requested,X ready,app started,app exited,X gone,shell started,' ]"
+check "the X server waited for to end (its 0.3 s), not given up on" "[ \$(( \$(lapms 'X gone') - \$(lapms 'app exited') )) -ge 280 ]"
 exit $fail

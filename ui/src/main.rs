@@ -56,6 +56,9 @@ use profile::Profile;
 slint::include_modules!();
 
 fn main() -> Result<(), slint::PlatformError> {
+    // The wall clock in milliseconds, for a device run to lay beside the keeper's timing lines
+    // (the backend prints "shell first frame" the same way, vendor/README.md).
+    eprintln!("oscairn-timing: shell started ms={}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()));
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let profile = Profile::load(arg("--profile").or_else(|| std::env::var("OSCAIRN_PROFILE").ok()).as_deref()).unwrap_or_else(|e| {

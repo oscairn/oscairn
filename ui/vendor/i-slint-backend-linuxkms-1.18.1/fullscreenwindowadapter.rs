@@ -221,6 +221,11 @@ impl FullscreenWindowAdapter {
 
 impl FullscreenWindowAdapter {
     fn log_frame(self: &Rc<Self>, start: std::time::Instant) {
+        static FIRST: std::sync::Once = std::sync::Once::new();
+        FIRST.call_once(|| {
+            let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+            eprintln!("oscairn-timing: shell first frame ms={ms}");
+        });
         let mut log = self.frame_log.borrow_mut();
         let Some(log) = log.as_mut() else { return };
         log.push((start, start.elapsed()));

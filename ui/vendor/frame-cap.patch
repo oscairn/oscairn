@@ -69,7 +69,7 @@ diff -ru a/fullscreenwindowadapter.rs b/fullscreenwindowadapter.rs
              // Check once after rendering if we have running animations and
              // remember that to trigger a redraw after the frame is on the screen.
              // Timers might have been updated if the event loop is woken up
-@@ -179,6 +217,51 @@
+@@ -179,6 +217,56 @@
          }
          Ok(())
      }
@@ -77,6 +77,11 @@ diff -ru a/fullscreenwindowadapter.rs b/fullscreenwindowadapter.rs
 +
 +impl FullscreenWindowAdapter {
 +    fn log_frame(self: &Rc<Self>, start: std::time::Instant) {
++        static FIRST: std::sync::Once = std::sync::Once::new();
++        FIRST.call_once(|| {
++            let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
++            eprintln!("oscairn-timing: shell first frame ms={ms}");
++        });
 +        let mut log = self.frame_log.borrow_mut();
 +        let Some(log) = log.as_mut() else { return };
 +        log.push((start, start.elapsed()));

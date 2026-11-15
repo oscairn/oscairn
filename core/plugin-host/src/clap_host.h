@@ -12,10 +12,11 @@
  * A call returning bool, or int (-1), can fail: false (or -1) and oscairn_clap_error says why on this thread.
  * Lists are given item by item to a callback, during the call; the strings and arrays it is handed live as long.
  *
- * C, so bindgen reads it; C++ sees kick::clap::Event, kick::clap::Statistics, std::atomic<uint32_t> and
- * kick::clap::AssetResolver in the same bytes (clap_host_cpp.cpp asserts their layout). */
+ * C, so bindgen reads it; C++ sees kick::clap::Event, kick::clap::Statistics and std::atomic<uint32_t> in the same
+ * bytes (clap_host_cpp.cpp asserts their layout). */
 #pragma once
 #include <clap/events.h>
+#include <kick_clap/bridge.h> /* oscairn_clap_assets */
 #include <oscairn-clap/effect-contexts.h>
 #include <oscairn-clap/memory.h>
 #include <oscairn-clap/sound-contexts.h>
@@ -30,7 +31,6 @@
 typedef kick::clap::Event oscairn_clap_event;
 typedef kick::clap::Statistics oscairn_clap_statistics;
 typedef std::atomic<uint32_t> oscairn_clap_wake;
-typedef kick::clap::AssetResolver oscairn_clap_assets;
 extern "C" {
 #else
 typedef struct { _Alignas(8) uint8_t bytes[64]; } oscairn_clap_event; /* kick::clap::Event */
@@ -48,9 +48,6 @@ typedef struct
     uint64_t calledBlocks, restedBlocks;
     double cpuMicroseconds;
 } oscairn_clap_statistics;
-/* shortcut: kick::clap::AssetResolver, opaque, so only the C++ host can resolve assets; a C table of its four calls
- * replaces it when the Rust host takes assets (stage 4 of agent-notes/rust-graph.md's plan). */
-typedef struct oscairn_clap_assets oscairn_clap_assets;
 #endif
 
 typedef struct oscairn_clap_host oscairn_clap_host; /* one plugin instance */
@@ -101,7 +98,6 @@ typedef struct
     void (*parameter)(void* context, const oscairn_clap_parameter* parameter);
 } oscairn_clap_description;
 typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
-
 #define OSCAIRN_CLAP_API(p) \
     /* Failures */ \
     const char* p##clap_error(int* kind); \
@@ -131,7 +127,7 @@ typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
     int p##clap_declared_memory(const oscairn_clap_host* host, oscairn_memory_t* memory); \
     void p##clap_set_memory_room(oscairn_clap_host* host, uint64_t bytes); \
     void p##clap_set_active_outputs(oscairn_clap_host* host, uint64_t ports); \
-    void p##clap_set_assets(oscairn_clap_host* host, oscairn_clap_assets* assets); \
+    void p##clap_set_assets(oscairn_clap_host* host, const oscairn_clap_assets* assets); /* copied; null: none */ \
     bool p##clap_asset_dependencies(const oscairn_clap_host* host, void (*each)(void* context, const oscairn_clap_asset* asset), void* context); \
     bool p##clap_show_window(oscairn_clap_host* host, bool show, const char* title); \
     bool p##clap_presets(oscairn_clap_host* host, void (*each)(void* context, const oscairn_clap_preset* preset), void* context); \
@@ -181,9 +177,18 @@ typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
  * when they fail; nothing given then. int returns: 1 true, 0 false, -1 failed. prepare_snapshot: what saveSnapshot
  * wrote for a native engine, prepared beside the playing sounds, the sound each MIDI channel selects into ids.
  * save_sound: one sound as such a snapshot. parameter_text: the text, given once. */
+/* The host the build picked (CMake's OSCAIRN_CLAP_HOST): the Rust one, or its C++ reference. */
+#if OSCAIRN_CLAP_HOST_RUST
+#define OSCAIRN_CLAP(name) rust_clap_##name
+#else
+#define OSCAIRN_CLAP(name) cpp_clap_##name
+#endif
 OSCAIRN_CLAP_API(cpp_)
 OSCAIRN_CLAP_API(rust_) /* being written: the ones core/clap-host/rust defines so far, which clap-host-rust compares */
 
 #ifdef __cplusplus
 }
+/* A C++ AssetResolver as the table (plugin_host.cpp): Host.cpp's oscairn.assets calls past their thread and argument
+ * checks, the resolver's answers in the plugin's buffers. The resolver outlives every host given it. */
+oscairn_clap_assets oscairn_clap_assets_of(kick::clap::AssetResolver* assets);
 #endif

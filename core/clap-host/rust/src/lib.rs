@@ -180,7 +180,26 @@ host_fn! {
     }
     fn rust_clap_set_memory_room(h, bytes: u64) -> () { (*h).memory_room = bytes }
     fn rust_clap_set_active_outputs(h, ports: u64) -> () { set_active_outputs(h, ports) }
-    fn rust_clap_set_assets(h, assets: *mut oscairn_clap_assets) -> () { (*h).assets = assets.cast::<c_void>() }
+    fn rust_clap_set_assets(h, assets: *const oscairn_clap_assets) -> () { (*h).assets = assets.as_ref().copied() }
+    fn rust_clap_show_window(h, show: bool, title: *const c_char) -> bool {
+        if !main(h) { return failed((*h).message.clone(), false) }
+        if !show { if !(*h).plugin.is_null() { destroy_gui(h) } return true }
+        if (*h).plugin.is_null() || (*h).gui_api.is_null() { return failed("Plugin has no window here".into(), false) }
+        match show_gui(h, CStr::from_ptr(title)) { Ok(()) => true, Err(e) => { destroy_gui(h); failed(e, false) } }
+    }
+    fn rust_clap_presets(h, each: Option<unsafe extern "C" fn(*mut c_void, *const oscairn_clap_preset)>, context: *mut c_void) -> bool {
+        let Some(library) = (*h).library.clone() else { return true };
+        if !main(h) || library.entry.is_null() { return true }
+        struct To { each: unsafe extern "C" fn(*mut c_void, *const oscairn_clap_preset), context: *mut c_void }
+        unsafe extern "C" fn one(c: *mut c_void, name: *const c_char, kind: u32, location: *const c_char, key: *const c_char) {
+            // SAFETY: the To below, alive for the call; the strings kick_clap's.
+            unsafe { let t = &*c.cast::<To>(); (t.each)(t.context, &oscairn_clap_preset { name, kind, location, load_key: key }) }
+        }
+        let mut to = To { each: each.unwrap(), context };
+        let assets = (*h).assets;
+        let failure = kick_clap_presets(library.entry.cast(), (*h).info.id.as_ptr(), assets.as_ref().map_or(std::ptr::null(), |a| a), Some(one), std::ptr::from_mut(&mut to).cast());
+        if failure.is_null() { true } else { failed(CStr::from_ptr(failure).to_string_lossy().into_owned(), false) }
+    }
     fn rust_clap_declared_memory(h, memory: *mut oscairn_clap_sys::oscairn_memory_t) -> c_int {
         if (*h).plugin.is_null() || !(*h).has_declared { return 0 }
         *memory = (*h).declared;
@@ -381,11 +400,8 @@ mod tests {
     #[test]
     fn clap_host_h_unchanged() {
         let fnv = |b: &[u8]| b.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
-        assert_eq!(
-            fnv(include_bytes!("../../../plugin-host/src/clap_host.h")),
-            crate::bindings::MADE_FROM,
-            "clap_host.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen"
-        );
+        let now = [fnv(include_bytes!("../../../plugin-host/src/clap_host.h")), fnv(include_bytes!("../../include/kick_clap/bridge.h"))];
+        assert_eq!(now, crate::bindings::MADE_FROM, "clap_host.h or kick_clap/bridge.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
     }
     /// The vendored oscairn-clap-sys was generated from oscairn-clap's headers as core/clap-ext holds them.
     #[test]

@@ -9,7 +9,7 @@
 // Note input 0 takes CLAP notes, note input 1 MIDI only, so the host translates both ways; its time parameter's texts
 // ("12.5 ms", "1.2 s") are what the host reads seconds from (oscairn.ui draft 4, without seconds()).
 // It also has native sounds (oscairn.sound-contexts draft 5 with their own state, sound-snapshots draft 4 with a
-// ring-out buffer), effect contexts (one), presets inside it ("first" loads, anything else is refused without a word),
+// ring-out buffer), effect contexts (two), presets inside it ("first" loads, anything else is refused without a word),
 // and a state that refuses bytes not its own, logging why; a sound's name may fill its 64 bytes without a NUL.
 #include <clap/clap.h>
 #include <oscairn-clap/beat.h>
@@ -20,6 +20,7 @@
 #include <oscairn-clap/effect-contexts.h>
 #include <oscairn-clap/memory.h>
 #include <oscairn-clap/voice-budget.h>
+#include <oscairn-clap/assets.h>
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
@@ -153,11 +154,26 @@ namespace
         auto& x = r.sounds[r.soundCount++]; x.id = r.nextSound++; std::memset(x.name, 'x', 64); std::memcpy(x.name, name, std::strlen(name) < 64 ? std::strlen(name) + (std::strlen(name) < 8) : 64);
         return x.id;
     }
-    uint32_t prepare(const clap_plugin_t* p, const char* name, const oscairn_sound_parameter_t* values, uint32_t count, const char* patch, const oscairn_asset_ref_t*, char* message, uint32_t size)
+    uint32_t prepare(const clap_plugin_t* p, const char* name, const oscairn_sound_parameter_t* values, uint32_t count, const char* patch, const oscairn_asset_ref_t* base, char* message, uint32_t size)
     {
         auto& r = self(p);
         for(uint32_t i = 0; i < count; ++i) fold(r.hash, values[i]);
         fold(r.hash, patch != nullptr);
+        // A patch's files through the host's asset store (oscairn.assets draft 4), every answer kept.
+        if(const auto* a = static_cast<const oscairn_host_assets_t*>(r.host->get_extension(r.host, OSCAIRN_EXT_ASSETS)); a && patch)
+        {
+            oscairn_asset_ref_t ref{}; std::snprintf(ref.library, sizeof ref.library, "%s", base ? base->library : "none"); std::snprintf(ref.path, sizeof ref.path, "%s/%s", base ? base->path : "", patch);
+            char path[256]{}, text[128]{};
+            fold(r.hash, a->resolve(r.host, &ref, path, sizeof path, text, sizeof text)); fold(r.hash, path, sizeof path); fold(r.hash, text, sizeof text); fold(r.hash, ref.sha256, sizeof ref.sha256);
+            fold(r.hash, a->resolve(r.host, &ref, path, 4, text, sizeof text)); fold(r.hash, text, sizeof text); // too small for it
+            std::memset(text, 0, sizeof text); std::memset(path, 0, sizeof path);
+            fold(r.hash, a->library_root(r.host, ref.library, "1.0", path, sizeof path)); fold(r.hash, path, sizeof path);
+            fold(r.hash, a->create(r.host, "/tmp/made.wav", &ref, text, sizeof text)); fold(r.hash, text, sizeof text);
+            std::snprintf(ref.path, sizeof ref.path, "sample:%064d", 7); oscairn_sample_location_t at{};
+            fold(r.hash, a->resolve_sample(r.host, &ref, path, sizeof path, &at, text, sizeof text)); fold(r.hash, path, sizeof path); fold(r.hash, at);
+            std::memset(ref.sha256, 0, sizeof ref.sha256); fold(r.hash, a->resolve_sample(r.host, &ref, path, sizeof path, &at, text, sizeof text)); fold(r.hash, path, sizeof path); fold(r.hash, at);
+            std::snprintf(ref.path, sizeof ref.path, "not-a-sample"); fold(r.hash, a->resolve_sample(r.host, &ref, path, sizeof path, &at, text, sizeof text)); fold(r.hash, text, sizeof text);
+        }
         if(!std::strcmp(name, "Reject")) { std::snprintf(message, size, "rejected by the recorder"); return CLAP_INVALID_ID; }
         return addSound(r, name);
     }
@@ -197,7 +213,7 @@ namespace
         values[0] = {0, 0.5}; values[1] = {2, double(id)}; return 2;
     }
     const oscairn_plugin_sound_snapshots_t snapshots{prepareSnapshot, ringOut, choke, saveSound, soundValues};
-    const clap_plugin_t* createContext(const clap_plugin_t*, const clap_host_t* host) { return effectContexts++ ? nullptr : create(nullptr, host, descriptor.id); }
+    const clap_plugin_t* createContext(const clap_plugin_t*, const clap_host_t* host) { return effectContexts++ >= 2 ? nullptr : create(nullptr, host, descriptor.id); }
     bool resources(const clap_plugin_t*, oscairn_effect_resources_t* r) { *r = {1 << 20, 4096, 2, uint32_t(1 + effectContexts), false}; return true; }
     const oscairn_plugin_effect_contexts_t effects{createContext, resources};
     bool fromLocation(const clap_plugin_t* p, uint32_t kind, const char* location, const char* key)

@@ -6,6 +6,7 @@
 #include <kick_clap/Discovery.h>
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <filesystem>
 
 static_assert(sizeof(oscairn_clap_event) == 64 && alignof(oscairn_clap_event) == 8);
@@ -22,7 +23,38 @@ OSCAIRN_STATISTICS_AT(restedBlocks, 18) OSCAIRN_STATISTICS_AT(cpuMicroseconds, 1
 static_assert(sizeof(kick::clap::Statistics) == 8 * 20);
 #undef OSCAIRN_STATISTICS_AT
 
-struct oscairn_clap_host { kick::clap::Host host; };
+// An oscairn_clap_assets table as the kick::clap::AssetResolver the host takes: what it says, thrown when it fails.
+struct TableResolver final : kick::clap::AssetResolver
+{
+    oscairn_clap_assets table{};
+    static std::string text(const char* p) { return p; }
+    std::string resolve(const std::string& library, const std::string& path, std::string& sha256) override
+    {
+        oscairn_asset_ref_t ref{}; char file[65536], message[512]{};
+        std::snprintf(ref.library, sizeof ref.library, "%s", library.c_str()); std::snprintf(ref.path, sizeof ref.path, "%s", path.c_str()); std::snprintf(ref.sha256, sizeof ref.sha256, "%s", sha256.c_str());
+        if(!table.resolve(table.context, &ref, file, sizeof file, message, sizeof message)) throw std::runtime_error(message);
+        sha256 = ref.sha256; return file;
+    }
+    std::string libraryRoot(const std::string& library, const std::string& minVersion) const override
+    {
+        char path[65536]; return table.library_root(table.context, library.c_str(), minVersion.c_str(), path, sizeof path) ? path : std::string();
+    }
+    kick::clap::AssetReference create(const std::string& file) override
+    {
+        oscairn_asset_ref_t ref{}; char message[512]{};
+        if(!table.create(table.context, file.c_str(), &ref, message, sizeof message)) throw std::runtime_error(message);
+        return {ref.library, ref.path, ref.sha256};
+    }
+    SampleLocation resolveSample(const std::string& id) override
+    {
+        oscairn_asset_ref_t ref{}; std::snprintf(ref.path, sizeof ref.path, "sample:%s", id.c_str());
+        char pack[65536], message[512]{}; oscairn_sample_location_t at{};
+        if(!table.resolve_sample(table.context, &ref, pack, sizeof pack, &at, message, sizeof message)) throw std::runtime_error(message);
+        return {pack, at.offset, at.length, at.preload};
+    }
+};
+
+struct oscairn_clap_host { kick::clap::Host host; TableResolver assets; };
 
 namespace
 {
@@ -74,6 +106,8 @@ oscairn_clap_host* cpp_clap_effect_context(oscairn_clap_host* source)
     return guard([&]{
         auto child=std::make_unique<oscairn_clap_host>();
         if(!child->host.loadEffectContext(source->host))throw std::runtime_error(child->host.error());
+        child->assets.table = source->assets.table; // its own copy: the source may go first
+        if(source->assets.table.resolve) child->host.setAssets(&child->assets);
         child->host.lockAudioLayout();return child.release();
     }, static_cast<oscairn_clap_host*>(nullptr));
 }
@@ -119,7 +153,11 @@ int cpp_clap_effect_resources(const oscairn_clap_host* h, oscairn_effect_resourc
 int cpp_clap_declared_memory(const oscairn_clap_host* h, oscairn_memory_t* m) { return guardInt([&]{ return h->host.declaredMemory(*m); }); }
 void cpp_clap_set_memory_room(oscairn_clap_host* h, uint64_t bytes) { h->host.setMemoryRoom(bytes); }
 void cpp_clap_set_active_outputs(oscairn_clap_host* h, uint64_t ports) { h->host.setActiveOutputs(ports); }
-void cpp_clap_set_assets(oscairn_clap_host* h, oscairn_clap_assets* assets) { h->host.setAssets(assets); }
+void cpp_clap_set_assets(oscairn_clap_host* h, const oscairn_clap_assets* assets)
+{
+    if(assets) h->assets.table = *assets;
+    h->host.setAssets(assets ? &h->assets : nullptr);
+}
 bool cpp_clap_asset_dependencies(const oscairn_clap_host* h, void (*each)(void*, const oscairn_clap_asset*), void* context)
 {
     std::vector<kick::clap::AssetReference> all;

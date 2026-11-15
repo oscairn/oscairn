@@ -68,6 +68,7 @@ namespace
         decltype(&cpp_clap_select_sound) selectSound; decltype(&cpp_clap_discard_sound) discardSound; decltype(&cpp_clap_prepare_snapshot) prepareSnapshot;
         decltype(&cpp_clap_save_sound) saveSound; decltype(&cpp_clap_sound_values) soundValues; decltype(&cpp_clap_choke_retiring) chokeRetiring;
         decltype(&cpp_clap_asset_dependencies) assetDependencies; decltype(&cpp_clap_load_preset) loadPreset;
+        decltype(&cpp_clap_presets) presets; decltype(&cpp_clap_set_assets) setAssets;
         decltype(&cpp_clap_set_voice_limits) setVoiceLimits; decltype(&cpp_clap_voice_report) voiceReport; decltype(&cpp_clap_mirror_wake) mirrorWake;
     };
 #define OSCAIRN_API(p) Api{p##clap_error, p##clap_new, p##clap_free, p##clap_revision, p##clap_describe, p##clap_note_input_ports, p##clap_note_output_ports, \
@@ -78,7 +79,7 @@ namespace
     p##clap_rings_out, p##clap_process, p##clap_output_events, p##clap_panic, p##clap_asleep, p##clap_restful, p##clap_rested, p##clap_was_reset, \
     p##clap_save_state, p##clap_load_state, p##clap_effect_context, p##clap_sound_contexts, p##clap_prepare_sound, p##clap_prepare_preset, \
     p##clap_select_sound, p##clap_discard_sound, p##clap_prepare_snapshot, p##clap_save_sound, p##clap_sound_values, p##clap_choke_retiring, \
-    p##clap_asset_dependencies, p##clap_load_preset, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake}
+    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake}
 
     // A transcript: labeled items, each its bytes.
     struct Transcript
@@ -102,6 +103,22 @@ namespace
     std::string scratch; // the same folder for each implementation's run, emptied between them: paths in messages agree
     std::string file(const std::string& path) { FILE* f = std::fopen(path.c_str(), "rb"); std::string r; if(f) { char b[4096]; size_t n; while((n = std::fread(b, 1, sizeof b, f)) > 0) r.append(b, n); std::fclose(f); } return r; }
 
+    // A sound asset store for the hosts, given as the engine gives its own: libraries under /assets, made files refused,
+    // samples in one pack.
+    struct Store final : kick::clap::AssetResolver
+    {
+        std::string resolve(const std::string& library, const std::string& path, std::string& sha256) override
+        {
+            if(sha256.empty()) sha256 = std::string(64, '4');
+            return "/assets/" + library + "/" + path;
+        }
+        std::string libraryRoot(const std::string& library, const std::string&) const override { return "/roots/" + library; }
+        SampleLocation resolveSample(const std::string& id) override { return {"/packs/" + id.substr(0, 4) + ".pack", 4096, 512, 64}; }
+    } resolver;
+    const oscairn_clap_assets store = oscairn_clap_assets_of(&resolver);
+    // Refuses an activation declaring more than 256 KiB shared (as a worker's engine with no room), while set.
+    void refuseLarge(void*, const oscairn_memory_t* declared) { if(declared && declared->shared_bytes > (1u << 18)) throw std::runtime_error("no room for it here"); }
+
     // The control side: state, effect contexts, native sounds and snapshots, assets, presets, and their failures.
     void control(Transcript& t, const Api& a, oscairn_clap_host* h, const std::string& n, const std::vector<uint32_t>& ids, const std::vector<double>& minimum,
                  const std::vector<uint32_t>& flags, uint32_t ni, uint32_t no, bool& allocated)
@@ -124,6 +141,10 @@ namespace
           result(t, a, n + "load other plugin's", a.loadState(h, (dir + "-other").c_str())); }
         auto* fx = a.effectContext(h);
         t.put(n + "effect context", fx != nullptr);
+        kick::clap::Host::observeActivations(refuseLarge, nullptr);
+        auto* refused = a.effectContext(h);
+        kick::clap::Host::observeActivations(nullptr, nullptr);
+        t.put(n + "refused effect context", refused != nullptr); if(refused) a.free(refused); else failure(t, a, n + "refused effect context");
         auto* second = a.effectContext(h);
         t.put(n + "second effect context", second != nullptr); if(second) a.free(second); else failure(t, a, n + "second effect context");
         if(fx)
@@ -141,7 +162,10 @@ namespace
         list(n + "sounds");
         std::vector<oscairn_sound_parameter_t> values;
         for(size_t i = 0; i < ids.size() && values.size() < 2; ++i) if(!(flags[i] & CLAP_PARAM_IS_READONLY)) values.push_back({ids[i], minimum[i]});
+        a.setAssets(h, &store);
         uint32_t sound = 0;
+        uint32_t patched = 0;
+        result(t, a, n + "prepare patch", a.prepareSound(h, "Patched", nullptr, 0, "region.sfz", "lib.one", "kit", &patched));
         result(t, a, n + "prepare", a.prepareSound(h, "Second", values.data(), uint32_t(values.size()), "", "", "", &sound)); t.put(n + "prepared", sound);
         result(t, a, n + "prepare bad", a.prepareSound(h, "A name far longer than the sixty-three bytes a sound's name may hold, surely", nullptr, 0, "", "", "", &sound));
         const std::string longest(63, 'n'), over(64, 'o');
@@ -189,6 +213,9 @@ namespace
         std::vector<std::string> assets;
         result(t, a, n + "assets", a.assetDependencies(h, [](void* c, const oscairn_clap_asset* x) { static_cast<std::vector<std::string>*>(c)->push_back(std::string(x->library) + "/" + x->path + "#" + x->sha256 + (x->optional ? "?" : "")); }, &assets));
         for(const auto& x : assets) t.text(n + "asset", x.c_str());
+        std::vector<std::string> listed;
+        result(t, a, n + "presets", a.presets(h, [](void* c, const oscairn_clap_preset* p) { static_cast<std::vector<std::string>*>(c)->push_back(std::string(p->name) + "|" + std::to_string(p->kind) + "|" + p->location + "|" + p->load_key); }, &listed));
+        for(const auto& x : listed) t.text(n + "preset", x.c_str());
         result(t, a, n + "load preset", a.loadPreset(h, &bogus));
         const oscairn_clap_preset inside{"", 1, "", "first"};
         result(t, a, n + "load preset inside", a.loadPreset(h, &inside));

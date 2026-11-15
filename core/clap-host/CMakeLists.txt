@@ -3,7 +3,7 @@ project(KickClapHost VERSION 0.1.0 LANGUAGES C CXX)
 
 option(KICK_CLAP_BUILD_TESTS "Build CLAP host conformance fixtures" ON)
 option(KICK_CLAP_SANITIZE "Enable address and undefined-behavior sanitizers" OFF)
-add_library(kick_clap_host STATIC src/Host.cpp src/Discovery.cpp)
+add_library(kick_clap_host STATIC src/Host.cpp src/Discovery.cpp src/Bridge.cpp)
 # The host's windows for plugin editors (CLAP gui): Cocoa on macOS, none elsewhere yet.
 if(APPLE)
     enable_language(OBJCXX)

@@ -185,7 +185,9 @@ pub struct Host {
     voice_notes: Box<[oscairn_voice_budget_note_t; MAX_BLOCK_EVENTS]>,
     asset_dependencies: *const oscairn_plugin_asset_dependencies_t,
     asset_optional: bool,
-    pub assets: *mut c_void,
+    pub assets: Option<crate::bindings::oscairn_clap_assets>,
+    window: *mut crate::bindings::kick_clap_window,
+    hardware_epoch: AtomicU32,
     plugin_latency: *const clap_plugin_latency,
     timer_support: *const clap_plugin_timer_support,
     fd_support: *const clap_plugin_posix_fd_support,
@@ -410,7 +412,9 @@ impl Host {
             voice_notes: Box::new(unsafe { std::mem::zeroed() }),
             asset_dependencies: null(),
             asset_optional: false,
-            assets: null_mut(),
+            assets: None,
+            window: null_mut(),
+            hardware_epoch: AtomicU32::new(0),
             plugin_latency: null(),
             timer_support: null(),
             fd_support: null(),
@@ -736,8 +740,7 @@ unsafe fn report(message: *mut c_char, capacity: u32, text: &str) -> bool {
     }
     false
 }
-// shortcut: assets resolve through the C++ AssetResolver, which this host cannot call yet: with one set it says so.
-// Stage 4 (agent-notes/rust-host.md) gives it a C table.
+// oscairn.assets: the thread and the plugin's arguments checked here, the rest the resolver's (clap_host.h's table).
 unsafe extern "C" fn resolve_asset(
     h: *const clap_host,
     r: *mut oscairn_asset_ref_t,
@@ -755,7 +758,10 @@ unsafe extern "C" fn resolve_asset(
         if r.is_null() || path.is_null() || capacity == 0 {
             return report(message, size, "invalid asset request");
         }
-        report(message, size, if (*s).assets.is_null() { "this host has no sound asset store" } else { "this host cannot resolve assets yet" })
+        match (*s).assets {
+            Some(a) => a.resolve.unwrap()(a.context, r, path, capacity, message, size),
+            None => report(message, size, "this host has no sound asset store"),
+        }
     }
 }
 unsafe extern "C" fn create_asset(h: *const clap_host, file: *const c_char, r: *mut oscairn_asset_ref_t, message: *mut c_char, size: u32) -> bool {
@@ -768,7 +774,10 @@ unsafe extern "C" fn create_asset(h: *const clap_host, file: *const c_char, r: *
         if file.is_null() || r.is_null() {
             return report(message, size, "invalid asset request");
         }
-        report(message, size, if (*s).assets.is_null() { "this host has no sound asset store" } else { "this host cannot create assets yet" })
+        match (*s).assets {
+            Some(a) => a.create.unwrap()(a.context, file, r, message, size),
+            None => report(message, size, "this host has no sound asset store"),
+        }
     }
 }
 unsafe extern "C" fn resolve_sample(
@@ -789,21 +798,21 @@ unsafe extern "C" fn resolve_sample(
         if r.is_null() || path.is_null() || capacity == 0 || location.is_null() {
             return report(message, size, "invalid sample request");
         }
-        if (*s).assets.is_null() {
-            return report(message, size, "this host has no sample store");
+        match (*s).assets {
+            Some(a) => a.resolve_sample.unwrap()(a.context, r, path, capacity, location, message, size),
+            None => report(message, size, "this host has no sample store"),
         }
-        let name = field(&(*r).path);
-        let digest = field(&(*r).sha256);
-        let name = name.to_string_lossy();
-        if !name.starts_with("sample:") || (!digest.is_empty() && *digest.to_string_lossy() != name[7..]) {
-            return report(message, size, &format!("not a sample reference: {name}"));
-        }
-        report(message, size, "this host cannot resolve samples yet")
     }
 }
-// As the C++ host without an AssetResolver: no library root (with one, stage 4).
-unsafe extern "C" fn library_root(_: *const c_void, _: *const c_char, _: *const c_char, _: *mut c_char, _: u32) -> bool {
-    false
+unsafe extern "C" fn library_root(owner: *const c_void, library: *const c_char, min: *const c_char, path: *mut c_char, capacity: u32) -> bool {
+    let h = owner.cast::<clap_host>();
+    // SAFETY: the owner is the host the plugin was given (oscairn.assets draft 2).
+    unsafe {
+        if h.is_null() || !is_main(h) || library.is_null() || path.is_null() || capacity == 0 {
+            return false;
+        }
+        (*me(h)).assets.is_some_and(|a| a.library_root.unwrap()(a.context, library, min, path, capacity))
+    }
 }
 unsafe extern "C" fn preset_error(h: *const clap_host, _: u32, _: *const c_char, _: *const c_char, _: i32, message: *const c_char) {
     // SAFETY: as is_main.
@@ -831,7 +840,11 @@ unsafe extern "C" fn gui_request_resize(h: *const clap_host, width: u32, height:
             (*s).gui_size.store((u64::from(width) << 32) | u64::from(height), SeqCst);
             return true;
         }
-        false // shortcut: the host's own window stays C++'s (stage 4)
+        if (*s).window.is_null() {
+            return false;
+        }
+        bridge::kick_clap_window_size((*s).window, width, height);
+        true
     }
 }
 unsafe extern "C" fn gui_request_show(h: *const clap_host) -> bool {
@@ -909,31 +922,40 @@ unsafe fn publish_harmony(s: *mut Host, h: Option<&oscairn_harmony_t>) {
         (*s).harmony_sequence.store(n + 2, Release);
     }
 }
-// oscairn.hardware: no accelerators here yet (the C++ host's come from oscairn::hardware::Service through a C++
-// interface; stage 4 gives it a C table). As the C++ host with none set.
+// oscairn.hardware: the process's, through kick_clap (bridge.h), with this host as the owner of its plugin's leases.
+use crate::bindings as bridge;
 unsafe extern "C" fn hardware_count(_: *const clap_host) -> u32 {
-    0
+    // SAFETY: a plain call.
+    unsafe { bridge::kick_clap_hardware_count() }
 }
-unsafe extern "C" fn hardware_get(_: *const clap_host, _: u32, _: *mut oscairn_hardware_accelerator_t) -> bool {
-    false
+unsafe extern "C" fn hardware_get(_: *const clap_host, index: u32, out: *mut oscairn_hardware_accelerator_t) -> bool {
+    // SAFETY: the plugin's pointer, checked there.
+    unsafe { bridge::kick_clap_hardware_get(index, out) }
 }
-unsafe extern "C" fn hardware_supports(_: *const clap_host, _: u32, operation: *const c_char) -> bool {
-    let _ = operation;
-    false
+unsafe extern "C" fn hardware_supports(_: *const clap_host, index: u32, operation: *const c_char) -> bool {
+    // SAFETY: as hardware_get.
+    unsafe { bridge::kick_clap_hardware_supports(index, operation) }
 }
-unsafe extern "C" fn hardware_reserve(_: *const clap_host, _: u32, request: *const oscairn_hardware_request_t, lease: *mut oscairn_hardware_lease_t) -> i32 {
-    // SAFETY: the plugin's request, or null.
-    if request.is_null() || lease.is_null() || unsafe { (*request).operation.is_null() } {
-        return oscairn_hardware_status::OSCAIRN_HARDWARE_INVALID as i32;
-    }
-    oscairn_hardware_status::OSCAIRN_HARDWARE_UNAVAILABLE as i32
+unsafe extern "C" fn hardware_reserve(
+    h: *const clap_host,
+    index: u32,
+    request: *const oscairn_hardware_request_t,
+    lease: *mut oscairn_hardware_lease_t,
+) -> i32 {
+    // SAFETY: as hardware_get.
+    unsafe { bridge::kick_clap_hardware_reserve(me(h).cast(), index, request, lease) }
 }
-unsafe extern "C" fn hardware_release(_: *const clap_host, _: u32) {}
-unsafe extern "C" fn hardware_submit(_: *const clap_host, _: u32, _: *const oscairn_hardware_job_t) -> i32 {
-    oscairn_hardware_status::OSCAIRN_HARDWARE_INVALID as i32
+unsafe extern "C" fn hardware_release(h: *const clap_host, lease: u32) {
+    // SAFETY: as hardware_get.
+    unsafe { bridge::kick_clap_hardware_release(me(h).cast(), lease) }
 }
-unsafe extern "C" fn hardware_collect(_: *const clap_host, _: u32, _: *mut oscairn_hardware_result_t) -> i32 {
-    oscairn_hardware_status::OSCAIRN_HARDWARE_INVALID as i32
+unsafe extern "C" fn hardware_submit(h: *const clap_host, lease: u32, job: *const oscairn_hardware_job_t) -> i32 {
+    // SAFETY: as hardware_get.
+    unsafe { bridge::kick_clap_hardware_submit(me(h).cast(), (*me(h)).hardware_epoch.load(Relaxed), lease, job) }
+}
+unsafe extern "C" fn hardware_collect(h: *const clap_host, lease: u32, result: *mut oscairn_hardware_result_t) -> i32 {
+    // SAFETY: as hardware_get.
+    unsafe { bridge::kick_clap_hardware_collect(me(h).cast(), (*me(h)).hardware_epoch.load(Relaxed), lease, result) }
 }
 
 struct Table<T>(T);
@@ -1090,6 +1112,7 @@ pub unsafe fn close(s: *mut Host) {
                 destroy((*s).plugin);
             }
         }
+        bridge::kick_clap_hardware_release_all(s.cast()); // what the plugin did not release
         (*s).plugin = null();
         (*s).params = null();
         (*s).state = null();
@@ -1320,7 +1343,8 @@ unsafe fn find_gui(s: *mut Host) {
             return;
         }
         let p = (*s).plugin;
-        let window: Option<&CStr> = if cfg!(target_os = "macos") { Some(CLAP_WINDOW_API_COCOA) } else { None };
+        let api = bridge::kick_clap_window_api();
+        let window: Option<&CStr> = (!api.is_null()).then(|| CStr::from_ptr(api));
         let platform = if cfg!(target_os = "macos") {
             CLAP_WINDOW_API_COCOA
         } else if cfg!(windows) {
@@ -1336,13 +1360,77 @@ unsafe fn find_gui(s: *mut Host) {
         }
     }
 }
+/// Host.cpp's showGui: the editor made (embedded in a window of the host's own, or floating), titled and shown.
+///
+/// # Safety
+/// As main; a plugin with a window here.
+pub unsafe fn show_gui(s: *mut Host, title: &CStr) -> R<()> {
+    unsafe extern "C" fn closing(c: *mut c_void) {
+        // SAFETY: the window's host, alive while its window is.
+        unsafe { (*c.cast::<Host>()).gui_gone.store(true, SeqCst) }
+    }
+    unsafe extern "C" fn resized(c: *mut c_void, w: *mut u32, h: *mut u32) {
+        // SAFETY: as closing; the window's own sizes.
+        unsafe {
+            let s = c.cast::<Host>();
+            let g = &*(*s).gui;
+            if let Some(adjust) = g.adjust_size {
+                adjust((*s).plugin, w, h);
+            }
+            if let Some(set) = g.set_size {
+                set((*s).plugin, *w, *h);
+            }
+        }
+    }
+    // SAFETY: the caller's.
+    unsafe {
+        let g = &*(*s).gui;
+        let p = (*s).plugin;
+        if !(*s).gui_created.load(SeqCst) {
+            bridge::kick_clap_start_windows();
+            if !g.create.unwrap()(p, (*s).gui_api, (*s).gui_floating) {
+                return Err("Plugin could not open its window".into());
+            }
+            (*s).gui_created.store(true, SeqCst);
+            if !(*s).gui_floating {
+                let (mut width, mut height) = (0, 0);
+                if !g.get_size.unwrap()(p, &mut width, &mut height) || width == 0 || height == 0 {
+                    (width, height) = (640, 480);
+                }
+                let resizable = g.can_resize.is_some_and(|f| f(p));
+                (*s).window = bridge::kick_clap_window_create(title.as_ptr(), width, height, resizable, s.cast(), Some(closing), Some(resized));
+                let parent = clap_window { api: (*s).gui_api, specific: clap_window_handle { ptr: bridge::kick_clap_window_view((*s).window) } };
+                if !g.set_parent.unwrap()(p, &parent) {
+                    return Err("Plugin could not open its window in the host's".into());
+                }
+            }
+        }
+        if !(*s).window.is_null() {
+            bridge::kick_clap_window_title((*s).window, title.as_ptr());
+        } else if let Some(suggest) = g.suggest_title {
+            suggest(p, title.as_ptr());
+        }
+        // An embedded editor shows with its window; a floating one must show itself.
+        if !g.show.unwrap()(p) && (*s).gui_floating {
+            return Err("Plugin could not show its window".into());
+        }
+        if !(*s).window.is_null() {
+            bridge::kick_clap_window_show((*s).window, true);
+        }
+        Ok(())
+    }
+}
 /// # Safety
 /// As main.
-unsafe fn destroy_gui(s: *mut Host) {
+pub unsafe fn destroy_gui(s: *mut Host) {
     // SAFETY: the caller's.
     unsafe {
         if (*s).gui_created.swap(false, SeqCst) {
             ((*(*s).gui).destroy.unwrap())((*s).plugin);
+        }
+        if !(*s).window.is_null() {
+            bridge::kick_clap_window_free((*s).window);
+            (*s).window = null_mut();
         }
         for f in [&(*s).gui_show, &(*s).gui_hide, &(*s).gui_gone, &(*s).gui_hints] {
             f.store(false, SeqCst);
@@ -1362,13 +1450,28 @@ unsafe fn service_gui(s: *mut Host) {
             destroy_gui(s);
             return;
         }
-        (*s).gui_size.swap(0, SeqCst);
-        (*s).gui_hints.swap(false, SeqCst);
+        let g = &*(*s).gui;
+        let w = (*s).window;
+        let size = (*s).gui_size.swap(0, SeqCst);
+        if size != 0 && !w.is_null() {
+            bridge::kick_clap_window_size(w, (size >> 32) as u32, size as u32);
+        }
+        if (*s).gui_hints.swap(false, SeqCst) && !w.is_null() {
+            if let Some(f) = g.can_resize {
+                bridge::kick_clap_window_resizable(w, f((*s).plugin));
+            }
+        }
         if (*s).gui_hide.swap(false, SeqCst) {
-            ((*(*s).gui).hide.unwrap())((*s).plugin);
+            g.hide.unwrap()((*s).plugin);
+            if !w.is_null() {
+                bridge::kick_clap_window_show(w, false);
+            }
         }
         if (*s).gui_show.swap(false, SeqCst) {
-            ((*(*s).gui).show.unwrap())((*s).plugin);
+            g.show.unwrap()((*s).plugin);
+            if !w.is_null() {
+                bridge::kick_clap_window_show(w, true);
+            }
         }
     }
 }
@@ -1820,7 +1923,11 @@ pub unsafe fn activate(s: *mut Host) -> R<()> {
                 }
             }
         }
-        // shortcut: no activation observer (Host::observeActivations, the worker's) here yet; the worker stage adds it.
+        let refused = bridge::kick_clap_activating(if (*s).has_declared { &(*s).declared } else { null() });
+        if !refused.is_null() {
+            return Err(CStr::from_ptr(refused).to_string_lossy().into_owned());
+        }
+        (*s).hardware_epoch.fetch_add(1, SeqCst); // jobs from an earlier activation collect as stale
         (*s).applied_told = false;
         apply_outputs(s); // deactivated: told every port again
         if !((*(*s).plugin).activate.unwrap())((*s).plugin, rate, 1, (*s).max_frames) {
@@ -2920,7 +3027,7 @@ pub unsafe fn inherit(s: *mut Host, parent: *const Host) {
         (*s).context = true;
         (*s).memory_room = (*parent).memory_room;
         (*s).offline = (*parent).offline;
-        (*s).assets = (*parent).assets;
+        (*s).assets = (*parent).assets; // a copy of the table: the parent may go first
     }
 }
 /// # Safety

@@ -188,7 +188,7 @@ development; rebuild against the current headers.
 | Free-running beat (`oscairn.beat`) | For arpeggiators and clocks: a beat position shared by every plugin that runs while the transport is stopped | [beat](https://github.com/oscairn/oscairn-clap/blob/main/docs/beat.md) | Test fixture (`follower_fixture.cpp`) |
 | Harmony (`oscairn.harmony`, `oscairn.harmony/draft`) | For harmonizers, chord memories and scripts: the part's key, scale and held chord | [harmony](https://github.com/oscairn/oscairn-clap/blob/main/docs/harmony.md) | Test fixture (`follower_fixture.cpp`) |
 | Sound assets (`oscairn.assets/draft-4`, `oscairn.asset-dependencies/draft-2`) | For samplers: the host resolves sample files, and Performances list their samples so they can be checked and moved between machines; draft 4 adds samples in Oscairn Sample Packs and waveforms by id (`sample:<id>`, `waveform:<id>`), a sample resolved to its pack and record offset by `resolve_sample` ([library archive](library-archive.md#samples-and-waveforms)) | [assets](https://github.com/oscairn/oscairn-clap/blob/main/docs/assets.md) | Legacy Sampler; asset libraries' preset providers (Oscairn Analog's factory patches); the sample fixture (`core/engine/tests/sample_fixture.cpp`) for draft 4 |
-| Hardware backends (`oscairn.hardware/draft`) | A backend of your own for a device's DSP, FPGA region or sound chip, with your CPU path for every other device, offline rendering and failures. Draft: not yet in oscairn-clap | The header, `core/clap-ext/include/oscairn-clap/hardware.h`; [below](#hardware-backends-draft) | Test fixture (`core/hardware/tests/hardware_fixture.cpp`) |
+| Hardware backends (`oscairn.hardware/draft`) | A backend of your own for a device's DSP, FPGA region or sound chip, with your CPU path for every other device, offline rendering and failures. Draft | The header, `core/clap-ext/include/oscairn-clap/hardware.h`; [below](#hardware-backends-draft) | Test fixture (`core/hardware/tests/hardware_fixture.cpp`) |
 | CLAP preset discovery | Presets listed in Oscairn's sound lists and prepared as instant-switch sounds | SDK [preset-discovery-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/preset-discovery-plugin.md) | Basic Synth |
 
 The sections below are what the host does around them, which no single extension's page covers.
@@ -603,7 +603,7 @@ path. `release()` in `deactivate`. Your state holds nothing of the accelerator, 
 must match your CPU path within a tolerance you state; a different sound is a saved mode of its
 own. Every desktop and every product so far offers the extension with no accelerators, and a plugin
 in a worker process sees none, so the CPU path is the one that plays today; Oscairn tests the
-contract with a simulated accelerator. The header is in Oscairn's copy and not yet in oscairn-clap,
+contract with a simulated accelerator. The header is in oscairn-clap (and Oscairn's copy of it)
 and changes without notice.
 
 ## The plugin's window

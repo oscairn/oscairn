@@ -97,7 +97,7 @@ are used here only to describe compatibility or what the documents compare with.
 >   installable or exportable [archives](docs/library-archive.md);
 > - **resource budgets** measured on the device, refusing what would not fit;
 > - a **desktop app** that starts at Home, with the Performance, Library, Setlist and
->   Groovebox apps, themes, and the panel layouts of the KICK, the Ignite and a 49-key
+>   Groovebox apps, themes, and the panel layouts of the KICK, the Ignite, a MODX M screen and a 49-key
 >   keyboard; and **device profiles** that make it a device's screen;
 > - a **Linux image** that boots into it, tested in QEMU ([`os/`](os/README.md)).
 >
@@ -307,7 +307,7 @@ What is in place:
   Changed here so that note-only plugins (sequencers) load and their notes reach the next
   plugin in the same block, concurrent CLAP state saves avoid gating audio (exclusive native/LV2
   snapshots may briefly silence a node), a bad
-  event no longer resets the plugin, and an instance uses 0.41 MB instead of 1.55 MB.
+  event no longer resets the plugin.
   The JUCE session, touchscreen panel, player and audio-device benchmark that came with it
   were removed as unused on 2026-11-12.
 - **Engine** (`core/engine`): the graph (plugin nodes; audio connections summed, note

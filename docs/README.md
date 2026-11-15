@@ -22,7 +22,7 @@ an implemented capability.
 | Export plugin state or edit sample properties | [Sound-management controls](control-protocol.md#state-export-presets-and-patch-properties) |
 | Choose or build the main sequencer | [Sequencer evaluation](sequencer-evaluation.md) |
 | See why the Modular instrument was ported as it was | [Modular engine evaluation](modular-engine-evaluation.md), [the wrapper](../plugins/modular/README.md) |
-| Design parts, routing, mixer, plugin editors or control assignments | [Performance UI RFC](rfcs/0011-performance-ui-and-editors.md) (proposed) |
+| Design parts, routing, mixer, plugin editors or control assignments | [Performance UI RFC](rfcs/0011-performance-ui-and-editors.md) (in progress: steps 1 to 4 and undo built) |
 | Drive external MIDI/CV gear, sync clocks or link several devices in one setlist | [Sync and multi-device RFC](rfcs/0012-sync-external-midi-and-multi-device.md) (in progress: MIDI out and clock out built) |
 | Build native sample support or choose a sample format | [SFZ-based native samples and conversion plan](rfcs/0008-sfz-native-samples-and-conversion.md), [player/format research](sample-players-and-formats.md), [ESP observations](yamaha-esp-samples-research.md) (first one-region slice implemented; multisample planned) |
 | Save, reopen, import or export a Performance | [Format and behavior](performance-format.md), [JSON Schema](performance.schema.json) |

@@ -248,6 +248,11 @@ Decided 2026-11-08, from what the milestone test found:
      following the editor page shown, done;
      [status](rfcs/0011-performance-ui-and-editors.md#step-6-status))
    - [x] Play, the Performance app's first view ([status](rfcs/0011-performance-ui-and-editors.md#play-status))
+   - [ ] the UI in Rust, replacing the JUCE app's screens one at a time ([Rust UI](rust-ui.md)): the
+     shell with Home, the Setlist and Play is built and tested off the device; every other screen is
+     still JUCE, which stays the default unless a profile says `"ui": "rust"`; not yet run on a unit
+   - [x] the engine thread's core (note routing, the voice budget) and the graph's audio in Rust,
+     each tested bit for bit against its C++ reference (`engine-core-diff`, `engine-audio-diff`)
    - [x] the full scene model: blocks and wires enabled per scene, and what each scene saves
      (plugins and wires switched off and on, seamlessly, scenes recording all of it with a
      scope, and the desktop's controls for it, done
@@ -284,7 +289,7 @@ Decided 2026-11-08, from what the milestone test found:
      where it separates cleanly. Extend SFZ only for demonstrated gaps; SoundFont remains a
      separate engine candidate.
    - [ ] an engine that can do everything an AWM2 Part can (decided by Jacob, October 30,
-     2026; [RFC 0013](rfcs/0013-awm2-class-sample-engine.md), proposed), specified from
+     2026; [RFC 0013](rfcs/0013-awm2-class-sample-engine.md), in progress), specified from
      Yamaha's documentation and black-box measurements, with no Yamaha code; Yamaha
      waveforms imported from the user's own installation, never included. Order:
      multisample (RFC 0008 step 3), the measurement harness and AEG tables, elements and XA
@@ -325,7 +330,7 @@ Decided 2026-11-08, from what the milestone test found:
      - [x] audio helpers for plugins in the engine's process
      - [ ] measured on the target
    - [ ] audio scheduling and placement on small devices
-     ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#progress), proposed 2026-11-13):
+     ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#progress), accepted 2026-11-13 but for decision 6):
      a missed worker block that no longer ends the part's notes, an allowance from the block's
      deadline, the display off the audio cores, one block of latency for a heavy part only, and
      share by default, split under load
@@ -681,7 +686,7 @@ Each starts as an RFC:
 - [ ] signed updates with A/B system images
 - [ ] the platform as a DAW plugin
 
-- [ ] **Packages and portability** ([RFC 0006](rfcs/0006-packages-and-portability.md), proposed;
+- [ ] **Packages and portability** ([RFC 0006](rfcs/0006-packages-and-portability.md), in progress;
   built: stand-ins for plugins not here, the plugin store with Used by and removal, locks in
   documents, archives carrying and installing every platform's CLAP builds with every file
   hashed, optional signatures on items, plugin builds and whole archives with a trust store, and
@@ -714,7 +719,7 @@ Each starts as an RFC:
   reviewed Git capability-profile catalog with authenticated offline snapshots and explicit
   verification status. Add multiple-device preparation/readiness and revision-aware editing
   round trips without silently merging opaque states or overwriting rehearsed setlists.
-- [ ] **The package repository** ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#progress), proposed):
+- [ ] **The package repository** ([RFC 0031](rfcs/0031-package-repository-and-distribution.md#progress), in progress, the official repository live):
   a static, signed index and package files that any web host, mirror, folder or USB drive can
   serve; several repositories per device; publishing with signatures required, CI checks,
   immutable versions and yanking; Install… in the Library and a Catalog app filtered by the

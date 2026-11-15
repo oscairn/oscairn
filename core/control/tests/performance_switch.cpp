@@ -42,6 +42,19 @@ namespace
     int failures = 0;
     void check(bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } }
     constexpr uint32_t frames = 128;
+    // A shared CI runner (CI is set) or a sanitizer build slows and enlarges what is timed and measured: only there are the limits relaxed.
+    bool relaxed()
+    {
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+        return true;
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+        return true;
+#endif
+#endif
+        const char* ci = std::getenv("CI");
+        return ci && *ci;
+    }
 
     struct Audio
     {
@@ -382,12 +395,13 @@ int main(int argc, char** argv)
             check(r.instances == left && r.bytes > 0 && t.warmInstances() == 0 && listed(true) == used, "memory.release lets go of every instance kept warm, none in use: " + std::to_string(r.instances));
             // A Performance about to load with too little available: those kept warm it does not use go
             // first, those it may take stay. C (four Samplers, never measured: its estimate their default
-            // guess) opened with the floor 1 KiB short: Y's instrument goes, the Samplers are taken over.
+            // guess) opened with exactly the floor available: Y's instrument goes, the Samplers are taken over.
             Session u(48000, frames);
             auto rung = [&] { for(int i = 0; i < int(48000 * 31 / frames) && u.leaving(); ++i) blocks(u, 1); };
             load(u, y); quiet(u); load(u, c); rung(); quiet(u); load(u, g); rung();
             check(u.warmInstances() == 5, "Y's instrument and C's Samplers kept warm: " + std::to_string(u.warmInstances()));
-            available((uint64_t(1) << 20) - 1); // 1 KiB short of the floor: C's Samplers' own memory (more than the estimate, in a sanitizer build) is then never enough to need none freed
+            // Relaxed: 1 KiB short of the floor, so the Samplers' own memory (more than the estimate, in a sanitizer build) is never enough to need none freed.
+            available(relaxed() ? (uint64_t(1) << 20) - 1 : uint64_t(1) << 20);
             ::setenv("OSCAIRN_MEMINFO", meminfo.c_str(), 1);
             u.setBudget(floor);
             const auto w = load(u, c); report("G -> C, the floor available", w);

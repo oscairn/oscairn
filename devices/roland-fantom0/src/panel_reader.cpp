@@ -182,7 +182,7 @@ namespace oscairn
         if(const auto* d = member(layout, "analogDeadband")) p.analogDeadband = whole(d, "layout.analogDeadband", 0, 4095);
         std::set<std::pair<int, uint32_t>> seen;
         each(member(root, "controls"), "controls", 1024, [&](const json_value_s* v) {
-            fields(v, {"kind", "id", "control", "max", "step", "navigate"}, "a control");
+            fields(v, {"kind", "id", "control", "max", "step", "invert", "navigate"}, "a control");
             Control c;
             const auto kind = text(member(v, "kind"), "a control's kind");
             c.kind = kind == "encoder" ? Kind::Encoder : kind == "analog" ? Kind::Analog : kind == "switch" ? Kind::SwitchOn : Kind::Unknown;
@@ -190,8 +190,15 @@ namespace oscairn
             c.control = text(member(v, "control"), "a control's control");
             if(const auto* m = member(v, "max")) { require(c.kind == Kind::Analog, "only an analog control has a max"); c.max = whole(m, "a control's max", 1, 4294967295.0); }
             if(const auto* s = member(v, "step")) { require(c.kind == Kind::Encoder, "only an encoder has a step"); c.step = number(s, "a control's step", -1, 1); require(c.step != 0, "a step is not 0"); }
+            if(const auto* i = member(v, "invert"))
+            {
+                require(c.kind != Kind::Encoder, "an encoder is not inverted (give it a negative step)");
+                require(i->type == json_type_true || i->type == json_type_false, "a control's invert is true or false");
+                c.invert = i->type == json_type_true;
+            }
             if(const auto* n = member(v, "navigate"))
             {
+                require(!c.invert, "an inverted control does not navigate");
                 require(c.kind != Kind::Analog, "an analog control cannot navigate: an absolute position has no steps");
                 fields(n, {"action", "pane", "steps"}, "a control's navigate");
                 Navigation nav;
@@ -235,9 +242,9 @@ namespace oscairn
         switch(e.kind)
         {
         case Kind::Encoder: e.input = {ControlInput::Kind::Relative, double(e.value) * (c->step ? c->step : map.encoderStep)}; break;
-        case Kind::Analog: e.input = {ControlInput::Kind::Absolute, std::clamp(double(e.value) / double(c->max ? c->max : map.analogMax), 0.0, 1.0)}; break;
-        case Kind::SwitchOn: e.input = {ControlInput::Kind::Switch, 1}; break;
-        case Kind::SwitchOff: e.input = {ControlInput::Kind::Switch, 0}; break;
+        case Kind::Analog: { const double p = std::clamp(double(e.value) / double(c->max ? c->max : map.analogMax), 0.0, 1.0); e.input = {ControlInput::Kind::Absolute, c->invert ? 1 - p : p}; } break;
+        case Kind::SwitchOn: e.input = {ControlInput::Kind::Switch, c->invert ? 0.0 : 1.0}; break;
+        case Kind::SwitchOff: e.input = {ControlInput::Kind::Switch, c->invert ? 1.0 : 0.0}; break;
         default: break;
         }
         if(c->navigate)

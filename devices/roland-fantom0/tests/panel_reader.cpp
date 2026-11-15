@@ -117,6 +117,17 @@ namespace
         check(refused(mapJson(R"({"kind": "lever", "id": 1, "control": "wheel:1"})")), "an unknown kind");
         check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "max": 3})")), "a max on a switch");
         check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "colour": 3})")), "an unknown field");
+        {
+            // A normally-closed pedal: `invert` reads an analog position or a switch's press the other way round.
+            const auto inv = PanelMap::parse(mapJson(R"({"kind": "analog", "id": 3, "control": "footswitch:1", "invert": true}, {"kind": "switch", "id": 5, "control": "footswitch:2", "invert": true},
+                {"kind": "analog", "id": 4, "control": "footswitch:3", "invert": false})"));
+            check(near(decode(inv, {0x81, 3, 0, 0}).input.value, 1) && near(decode(inv, {0x81, 3, 7, 0x68}).input.value, 0), "an inverted analog: up is down");
+            check(decode(inv, {0x82, 5, 0, 0}).input.value == 0 && decode(inv, {0x83, 5, 0, 0}).input.value == 1, "an inverted switch: pressed reads off");
+            check(near(decode(inv, {0x81, 4, 0, 0}).input.value, 0), "invert false changes nothing");
+        }
+        check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "knob:1", "invert": true})")), "invert on an encoder");
+        check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "invert": 1})")), "a non-boolean invert");
+        check(refused(mapJson(R"({"kind": "switch", "id": 1, "control": "button:1", "invert": true, "navigate": {"action": "confirm"}})")), "invert with navigate");
         check(refused(R"({"format": "oscairn.panel-map", "version": 2})"), "another version");
         auto bytes = mapJson(controls); bytes.replace(bytes.find("\"bytes\": [0]"), 12, "\"bytes\": [4]");
         check(refused(bytes), "a byte past the message");

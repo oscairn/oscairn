@@ -53,7 +53,7 @@ namespace oscairn
         // `navigate`: what the control does in a list, whatever the device (physical_controls.h's Navigation):
         // an encoder moves a pane's cursor by its steps, a switch moves it by `steps` (default 1) when
         // pressed, confirms or cancels. An analog control cannot navigate (an absolute position has no steps: not yet).
-        struct Control { Kind kind = Kind::Unknown; uint32_t id = 0; std::string control; int64_t max = 0; double step = 0; std::optional<Navigation> navigate; };
+        struct Control { Kind kind = Kind::Unknown; uint32_t id = 0; std::string control; int64_t max = 0; double step = 0; bool invert = false; std::optional<Navigation> navigate; }; // invert: a normally-closed pedal, an analog position or a switch's press read the other way round
         std::vector<Control> controls;
         std::vector<std::string> estimated; // "layout", "controls": not yet read off a real unit
 

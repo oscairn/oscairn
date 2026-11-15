@@ -1235,7 +1235,9 @@ the app's lists, whatever the device ([The panel in lists](#the-panel-in-lists))
 (`move`, `confirm` or `cancel`), optionally a `pane` (the list pane from the left, 0 first) and,
 on a switch that moves, `steps` a press moves by. An encoder's `navigate` is a move by its
 steps (a negative `step` turns it round); an analog control cannot navigate (an absolute
-position has no steps; not yet). A device with no entry for a role does not have that control.
+position has no steps; not yet). An analog or switch control may have `"invert": true`, for a
+normally-closed pedal: its position reads 1 minus itself and a press reads as off (the map refuses
+it on an encoder, which has a negative `step`, and with a `navigate`). A device with no entry for a role does not have that control.
 
 The shipped map's layout and IDs are **read from Roland's programs**, and on the unit every
 control the owner touched decoded to its name

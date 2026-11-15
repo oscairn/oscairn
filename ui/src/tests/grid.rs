@@ -398,3 +398,32 @@ fn grid_pictures() {
         png(&s, &format!("grid-desktop-{}x{}@{}", (w as f32 / scale) as usize, (h as f32 / scale) as usize, scale));
     }
 }
+
+// Every kind of tile, the envelope and the dropdown in every theme (the built-in ones and the two odd
+// ones): laid out again for the theme's gap between sections (none where they join), pictures in
+// target/theme-shots.
+#[test]
+fn the_grid_draws_in_every_theme() {
+    fit_to_window();
+    let mut s = Screen::new();
+    let mut p = open(&mut s, every_kind(), &every_kind_values());
+    p.act(Action::Move { pane: None, by: 2 });
+    for t in &all_themes() {
+        theme::apply(&s.ui, t);
+        p.shown();
+        let tiles = tiles(&s.ui);
+        let gap = tiles[3].x - (tiles[2].x + tiles[2].w);
+        let joined = t.data.style.sections == crate::SectionStyle::Joined;
+        assert_eq!(gap, if joined { 0. } else { crate::grid::SECTION_GAP }, "{}: the gap between neighbors", t.id);
+        add_upright_widgets(&s.ui);
+        assert!(s.frame().is_some(), "{}: drawn", t.id);
+        shot(&s, &format!("grid-{}", t.id));
+    }
+    p.act(Action::Move { pane: None, by: 5 });
+    p.act(Action::Confirm(None));
+    for t in &all_themes() {
+        theme::apply(&s.ui, t);
+        assert!(s.frame().is_some(), "{}: drawn", t.id);
+        shot(&s, &format!("grid-dropdown-{}", t.id));
+    }
+}

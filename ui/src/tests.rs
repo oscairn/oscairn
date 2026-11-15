@@ -419,6 +419,7 @@ fn themes_switch_live_and_repaint_once() {
         assert!(s.frame().is_some(), "{}: repainted", t.id);
         assert_eq!(s.frame(), None, "{}: once", t.id);
         s.save(&format!("theme-{}", t.id));
+        shot(s, &format!("home-{}", t.id));
     }
     let g = s.ui.global::<crate::Theme>();
     assert_eq!((g.get_font_scale(), g.get_radius()), (0.9, 0.), "the last theme applied");
@@ -484,6 +485,13 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.screen.frame();
     f.screen.save("setlist");
     assert_eq!(f.screen.frame(), None, "at rest");
+    for t in &all_themes() {
+        theme::apply(&f.screen.ui, t);
+        assert!(f.screen.frame().is_some(), "{}: drawn", t.id);
+        shot(&f.screen, &format!("setlist-{}", t.id));
+    }
+    theme::apply(&f.screen.ui, &theme::chosen(&theme::Places::default(), "", ""));
+    f.screen.frame();
     // The panel: a baseline, then E6 (pane 1) twice: the cursor shown on the first slot, then on.
     let nav = |m0: i64, m1: i64, m: i64, c1: i64, cancel: i64| json!({"move:0": m0, "move:1": m1, "move": m, "confirm:1": c1, "cancel": cancel});
     f.navigation(nav(0, 0, 0, 0, 0));
@@ -726,8 +734,17 @@ fn play_graph() -> serde_json::Value {
 /// A viewable copy of the picture in target/screens/NAME.png: a PNG made by hand (stored zlib
 /// blocks, no image crate).
 fn png(s: &Screen, name: &str) {
+    png_in("target/screens", s, name);
+}
+
+/// The same for a screen in a theme: target/theme-shots/NAME.png, which the theme work looks at.
+fn shot(s: &Screen, name: &str) {
+    png_in("target/theme-shots", s, name);
+}
+
+fn png_in(folder: &str, s: &Screen, name: &str) {
     use std::io::Write;
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/screens");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(folder);
     std::fs::create_dir_all(&dir).unwrap();
     let mut raw = Vec::new();
     let (w, h) = (s.w, s.h);
@@ -961,6 +978,7 @@ fn play_draws_in_every_theme() {
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         s.save(&format!("play-{}", t.id));
         png(&s, &format!("play-{}", t.id));
+        shot(&s, &format!("play-{}", t.id));
     }
     at_fantom_scale(&mut s, "play", || play.graph(&play_graph()));
 }
@@ -972,3 +990,32 @@ mod pages;
 mod piano;
 mod shellpages;
 mod grid;
+
+// `apply` puts every property of a theme in the window's `Theme` global: the nine colors and the
+// optional two, the metrics, the eight style choices, the wires, the splash's colors, and what is
+// derived (a dark theme, the text on the accent, the piano keys' inks); a second window is its own.
+#[test]
+fn applying_a_theme_sets_every_property() {
+    let s = Screen::new();
+    let other = Screen::new();
+    for t in &all_themes() {
+        theme::apply(&s.ui, t);
+        let (g, d) = (s.ui.global::<crate::Theme>(), &t.data);
+        let colors = [g.get_background(), g.get_surface(), g.get_raised(), g.get_border(), g.get_text(), g.get_muted(), g.get_accent(), g.get_positive(), g.get_danger()];
+        assert_eq!(colors, d.colors, "{}", t.id);
+        assert_eq!((g.get_warning(), g.get_focus()), (d.warning.unwrap_or(slint::Color::from_rgb_u8(0xe8, 0xc5, 0x47)), d.focus.unwrap_or(d.colors[6])), "{}", t.id);
+        assert_eq!((g.get_radius(), g.get_font_scale()), (d.radius, d.font_scale), "{}", t.id);
+        let st = d.style;
+        assert_eq!((g.get_buttons(), g.get_edges(), g.get_depth(), g.get_sliders()), (st.buttons, st.edges, st.depth, st.sliders), "{}", t.id);
+        assert_eq!((g.get_tabs(), g.get_marks(), g.get_sections(), g.get_rows()), (st.tabs, st.marks, st.sections, st.rows), "{}", t.id);
+        let w = d.wires;
+        assert_eq!([g.get_wire_audio(), g.get_wire_notes(), g.get_wire_disabled(), g.get_wire_draining(), g.get_wire_unconnected(), g.get_wire_control()], [w.audio, w.notes, w.disabled, w.draining, w.unconnected, w.control], "{}", t.id);
+        assert_eq!((g.get_splash_background(), g.get_splash_ink()), (d.splash.background.unwrap_or(d.colors[0]), d.splash.ink.unwrap_or(d.colors[4])), "{}", t.id);
+        assert_eq!(g.get_dark(), t.id != "oscairn-light" && t.id != "odd-joined", "{}: a dark background", t.id);
+        let light_accent = t.id == "oscairn-dark" || t.id == "oscairn-classic" || t.id == "oscairn-block" || t.id == "odd";
+        assert_eq!(g.get_on_accent(), if light_accent { slint::Color::from_rgb_u8(0, 0, 0) } else { slint::Color::from_rgb_u8(255, 255, 255) }, "{}: black on a bright accent", t.id);
+        assert_eq!(theme::section_gap(&s.ui, 6.), if t.data.style.sections == crate::SectionStyle::Joined { 0. } else { 6. }, "{}", t.id);
+    }
+    // Held per window: the other one still has what it had.
+    assert_eq!(other.ui.global::<crate::Theme>().get_radius(), 6., "a theme applied to one window is not another's");
+}

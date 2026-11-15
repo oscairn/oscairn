@@ -381,3 +381,27 @@ fn a_tinted_row_keeps_the_text_readable() {
     let odd = row_fill(c(0x00aa00), dark_base, text, true);
     assert_eq!(odd.green(), ((0x21 as f32) * 0.7 + 0xaa as f32 * 0.3).round() as u8, ".3 on an odd row");
 }
+
+// The screens take their colors, corners, strokes and sizes from the `Theme` global: no .slint file
+// but theme.slint has a literal color, or a literal corner radius or font size.
+#[test]
+fn no_screen_hardcodes_what_the_theme_sets() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("slint");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if !name.ends_with(".slint") || name == "theme.slint" {
+            continue;
+        }
+        checked += 1;
+        for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+            let code = line.split("//").next().unwrap_or_default();
+            let hex_color = code.split('#').skip(1).any(|r| r.chars().take_while(char::is_ascii_hexdigit).count() >= 3);
+            let literal = |key: &str| code.trim_start().strip_prefix(key).is_some_and(|v| v.trim_start().starts_with(|c: char| c.is_ascii_digit()));
+            assert!(!hex_color && !code.contains("Colors.") && !code.contains("rgb(") && !code.contains("rgba("), "{name}:{}: a literal color: {line}", n + 1);
+            assert!(!literal("border-radius:") && !literal("font-size:"), "{name}:{}: a literal radius or font size: {line}", n + 1);
+        }
+    }
+    assert!(checked >= 9, "the screens were read");
+}

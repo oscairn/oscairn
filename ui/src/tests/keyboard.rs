@@ -145,6 +145,7 @@ fn keyboard_draws_in_every_theme() {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         png(&s, &format!("keyboard-{}", t.id));
+        shot(&s, &format!("keyboard-{}", t.id));
     }
     at_fantom_scale(&mut s, "keyboard", || ());
 }

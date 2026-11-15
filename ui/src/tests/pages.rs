@@ -242,6 +242,7 @@ fn pages_draw_in_every_theme() {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         png(&s, &format!("chain-{}", t.id));
+        shot(&s, &format!("chain-{}", t.id));
     }
     at_fantom_scale(&mut s, "chain", || c.graph(&graph()));
 }

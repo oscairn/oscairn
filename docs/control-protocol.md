@@ -164,7 +164,7 @@ request members.
 | `scenes.store` | `scene`: captures it into that scene again | `{"accepted":true}` |
 | `scenes.select` | `scene`: applies the kinds in its scope at once and commits staged graph edits; plugins switched off ring out | `{"accepted":true}` |
 | `scenes.remove`, `scenes.name` | `scene` (and `name`); removing one takes it from every mapping's `offIn` | `{"accepted":true}` |
-| `scenes.scope` | `scene`, `scope`: the kinds selecting it applies, of `enabled`, `mutes`, `mix`, `parameters`, `mappings`; the rest stay as they are | `{"accepted":true}` |
+| `scenes.scope` | `scene`, `scope`: the kinds selecting it applies, of `enabled`, `mutes`, `mix`, `parameters`, `mappings`, `zones`; the rest stay as they are | `{"accepted":true}` |
 | `scenes.transition` | `scene`, optional `glide` (milliseconds, at most 60000; 0 or absent: at once), `curve` (`linear`, `ease` or `equal-power`) and `launch` (`now`, `beat` or `bar`): how selecting it moves there (below) | `{"accepted":true}` |
 | `scenes.untouched` | `parameters`: the `{node, param}` scenes never touch (they touch every other automatable, writable parameter); one taken back gets its current value in every scene | `{"accepted":true}` |
 | `controls.add` | optional `name` and `part`, the part that owns it (RFC 0021; 0 or absent: the Performance). A part's control targets only its part's plugins and its other controls, and goes with it into a Sound and when it is removed | numeric `control` |
@@ -409,7 +409,7 @@ that would loop are refused. Scenes store control values (`controls` in each sce
 `graph.get` lists them (`scenes`), `sceneUntouched` (the parameters scenes never touch) and
 `scene` (the one last selected or stored, or 0). A scene holds its `scope` (the kinds selecting
 it applies) and, as stored: `off`, the plugins switched off, and `offWires`, the wires; `parts`,
-each part's `level`, `pan`, `mute`, `solo`, `sends` and its splits' `lanes` Mix rows; `wires`,
+each part's `level`, `pan`, `mute`, `solo`, `sends` and its splits' `lanes` Mix rows, and `zones` (its input zones, as `parts.input` takes them; present only once the scene has stored them); `wires`,
 user wires' Mix rows; `values` for every parameter scenes touch; and `controls`, each control's
 value. Wires are named by what they join (`kind`, `part` (0 for a user wire), `from`, `to`,
 `fromPort`, `toPort`, `send`, `split`, `lane`, `fader`), as a part's wires are rebuilt under new
@@ -417,7 +417,7 @@ IDs. Which control mappings are off in a scene is on each target (`offIn`, scene
 mappings off in the scene last selected that applies mappings are skipped. Kinds: `enabled`
 (plugins and wires on or off), `mutes` (parts' mute and solo), `mix` (the rest of the parts' and
 lanes' faders, sends and user wires' Mix rows), `parameters` (plugin parameters and controls'
-values), `mappings`. Selecting a scene switches plugins off seamlessly (held notes and tails
+values), `mappings`, `zones` (the parts' input zones: key and velocity range, channels, transpose; recalling sets them as `parts.input` would, so notes already held go on sounding and release normally, and a part with no `zones` in the scene is left alone). Selecting a scene switches plugins off seamlessly (held notes and tails
 ring out), changes route gains and sends only the parameter values that differ, so held notes
 and tails go on.
 

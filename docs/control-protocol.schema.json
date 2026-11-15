@@ -7253,14 +7253,15 @@
                 "scope": {
                   "type": "array",
                   "uniqueItems": true,
-                  "maxItems": 5,
+                  "maxItems": 6,
                   "items": {
                     "enum": [
                       "enabled",
                       "mutes",
                       "mix",
                       "parameters",
-                      "mappings"
+                      "mappings",
+                      "zones"
                     ]
                   }
                 }
@@ -10151,14 +10152,15 @@
         "scope": {
           "type": "array",
           "uniqueItems": true,
-          "maxItems": 5,
+          "maxItems": 6,
           "items": {
             "enum": [
               "enabled",
               "mutes",
               "mix",
               "parameters",
-              "mappings"
+              "mappings",
+              "zones"
             ]
           },
           "description": "The kinds selecting it applies"
@@ -10206,6 +10208,14 @@
               },
               "solo": {
                 "type": "boolean"
+              },
+              "zones": {
+                "type": "array",
+                "maxItems": 8,
+                "description": "Memorised: the part's input zones recalling the scene sets; absent, the scene leaves them alone",
+                "items": {
+                  "$ref": "#/$defs/Zone"
+                }
               },
               "sends": {
                 "type": "array",

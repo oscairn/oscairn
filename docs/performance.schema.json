@@ -1243,14 +1243,15 @@
         "scope": {
           "type": "array",
           "uniqueItems": true,
-          "maxItems": 5,
+          "maxItems": 6,
           "items": {
             "enum": [
               "enabled",
               "mutes",
               "mix",
               "parameters",
-              "mappings"
+              "mappings",
+              "zones"
             ]
           },
           "description": "The kinds selecting it applies: plugins and wires on or off; parts' mute and solo; the mix (parts' level, pan and sends, lanes' and user wires' Mix rows); plugin parameters and controls' values; which control mappings are on (each target's offIn)"
@@ -1296,6 +1297,14 @@
               },
               "solo": {
                 "type": "boolean"
+              },
+              "zones": {
+                "type": "array",
+                "maxItems": 8,
+                "description": "Memorised: the part's input zones recalling the scene sets; absent, the scene leaves them alone",
+                "items": {
+                  "$ref": "#/$defs/Zone"
+                }
               },
               "sends": {
                 "type": "array",

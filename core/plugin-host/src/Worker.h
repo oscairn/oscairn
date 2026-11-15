@@ -5,6 +5,7 @@
 #pragma once
 #include <kick_clap/Host.h>
 #include "oscairn/realtime.h"
+#include "worker_shared.h"
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -15,61 +16,20 @@
 
 namespace oscairn::worker
 {
-    constexpr uint32_t maxEvents = kick::clap::Host::maxProcessEvents; // a graph block's notes plus its beat and harmony (see maxProcessEvents)
-    constexpr uint32_t maxOutputEvents = 1024;
-    constexpr uint32_t maxParameters = 4096;
-    constexpr uint32_t maxVoiceNotes = kick::clap::Host::maxBlockEvents; // the notes a voice-budget report holds, as kick::clap::Host's
+    // The layout is worker_shared.h's, the one definition engine, worker and the Rust bindings share.
+    constexpr uint32_t maxEvents = OSCAIRN_WORKER_MAX_EVENTS;
+    constexpr uint32_t maxOutputEvents = OSCAIRN_WORKER_MAX_OUTPUT_EVENTS;
+    constexpr uint32_t maxParameters = OSCAIRN_WORKER_MAX_PARAMETERS;
+    constexpr uint32_t maxVoiceNotes = OSCAIRN_WORKER_MAX_VOICE_NOTES;
+    static_assert(maxEvents == kick::clap::Host::maxProcessEvents && maxVoiceNotes == kick::clap::Host::maxBlockEvents);
+    static_assert(sizeof(kick::clap::Event) == 64 && alignof(kick::clap::Event) == 8);
+    static_assert(sizeof(oscairn_atomic_u32) == 4 && sizeof(oscairn_atomic_u64) == 8 && sizeof(oscairn_atomic_f64) == 8 &&
+                  alignof(oscairn_atomic_u64) == 8 && alignof(oscairn_atomic_f64) == 8); // as the C view (bindgen) lays them out
 
-    // Header of the shared block; audio follows it. request/done carry block sequence
-    // numbers; the engine writes everything before request, the worker after done.
-    struct alignas(64) Shared
+    // The shared block's header (worker_shared.h), zeroed but for the sample rate; audio follows it.
+    struct Shared : oscairn_worker_shared
     {
-        std::atomic<uint32_t> request{0};
-        alignas(64) std::atomic<uint32_t> done{0};
-        alignas(64) std::atomic<uint32_t> panic{0};
-        std::atomic<uint32_t> crashed{0}; // the signal that is ending the worker, set as it dies
-        std::atomic<uint32_t> asleep{0};  // the plugin said, in the last block, that it is asleep (CLAP_PROCESS_SLEEP)
-        // The worker's: asleep after its last block with nothing pending but input (PluginHost::restful), and a wake
-        // pending since (a request_process, command, select, choke or panic reached the plugin; PluginHost::mirrorWake).
-        // The engine's, with each request: the blocks it left the plugin asleep uncalled since the last, and their frames.
-        std::atomic<uint32_t> restful{0}, wake{0};
-        uint32_t restedBlocks = 0, restedFrames = 0;
-        // The engine's: its thread is (about to be) asleep on done, so the worker wakes it; otherwise the
-        // worker makes no system call to hand a block back (RFC 0045, plugin hosts).
-        std::atomic<uint32_t> waiting{0};
-        uint32_t frames = 0, eventCount = 0, hasTransport = 0, ok = 0, outputCount = 0;
-        uint32_t inputChannels = 0, outputChannels = 0, maxFrames = 0, parameterCount = 0;
-        // outputChannels ends with ringOutChannels (4 for a plugin with a ring-out buffer, RFC 0005, else
-        // 0); ringOut: this block's caller asked for them.
-        uint32_t ringOutChannels = 0, ringOut = 0;
-        uint32_t reset = 0; // the worker's: the plugin was reset in the last block (wasReset); nonzero is true
-        // The engine's, with each request (RFC 0045): how long, in nanoseconds, the worker's audio thread may spin
-        // around the next block's expected hand-over instead of sleeping until it; 0: sleep (spinWindow, realtime.h).
-        uint32_t spinNs = 0;
-        double sampleRate = 48000;
-        clap_event_transport_t transport{};
-        // oscairn.voice-budget (RFC 0018). The engine's: when setLimits, the limits the plugin takes
-        // before this block. The worker's: what the plugin reported after it, which the engine bounds.
-        uint32_t setLimits = 0, voiceLimit = 0, voiceContextCount = 0;
-        oscairn_voice_budget_context_t voiceContexts[OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS]{};
-        uint32_t activeVoices = 0, voiceNoteCount = 0;
-        double voiceCost = 0;
-        oscairn_voice_budget_note_t voiceNotes[maxVoiceNotes]{};
-        std::atomic<uint64_t> outputDrops{0}, blocks{0}, droppedEvents{0}, processErrors{0}, deadlineMisses{0}, controlSilences{0}, idleBlocks{0};
-        std::atomic<double> lastMicroseconds{0}, maximumMicroseconds{0}, cpuMicroseconds{0}; // cpuMicroseconds: the audio thread's CPU time for its blocks so far
-        // The worker's, for the timing report: when its audio thread ran for the last block and when
-        // it was done with it, in steady_clock nanoseconds (the clock is the system's, the same in
-        // both processes); the CPU time its audio thread used between the two (CLOCK_THREAD_CPUTIME_ID),
-        // in nanoseconds; and its audio thread's page faults and involuntary context switches so far (Linux).
-        int64_t wokeAt = 0, doneAt = 0, cpuNs = 0;
-        std::atomic<uint64_t> minorFaults{0}, majorFaults{0}, involuntarySwitches{0};
-        kick::clap::Event events[maxEvents];
-        kick::clap::Event outputs[maxOutputEvents];
-        std::atomic<double> parameterValues[maxParameters];
-        // The events' and outputs' SysEx bytes (see share), after the audio, at these offsets from the block's
-        // start; 0: none, for a plugin that cannot receive (send) SysEx (PluginHost::takesSysex), whose SysEx
-        // is then dropped and counted on the engine's side (sysexDrops) and in its host (dropped).
-        uint32_t inputPool = 0, outputPool = 0;
+        Shared() noexcept : oscairn_worker_shared{} { sampleRate = 48000; }
         kick::clap::SysexPool* inputBytes() noexcept { return pool(inputPool); }
         kick::clap::SysexPool* outputBytes() noexcept { return pool(outputPool); }
         float* input(uint32_t channel) noexcept { return reinterpret_cast<float*>(this + 1) + size_t(channel) * maxFrames; }
@@ -124,43 +84,30 @@ namespace oscairn::worker
     }
     static_assert(std::atomic<uint32_t>::is_always_lock_free && std::atomic<double>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free);
 
-    // A worker process's one doorbell (RFC 0045, plugin hosts): its single audio thread sleeps on
-    // ring, which the engine moves after handing any of its nodes a block, and then renders every
-    // node with a request pending, in node order. The engine makes the wake-up system call only
-    // while the worker says it sleeps. rendering and serving name the node the audio thread renders
-    // and the node the control thread serves (UINT32_MAX: none), read by the engine after a hang to
-    // tell which plugin it was; faulted, set by the crash handler, the one the thread that crashed
-    // was in (its rendering or serving; UINT32_MAX for none, or a thread of the plugins' own). The
-    // worker may write anything, so the engine only looks the index up among its own nodes.
-    struct alignas(64) Doorbell
+    struct Doorbell : oscairn_worker_doorbell // see worker_shared.h
     {
-        std::atomic<uint32_t> ring{0};
-        std::atomic<uint32_t> sleeping{0};
-        alignas(64) std::atomic<uint32_t> rendering{UINT32_MAX}, serving{UINT32_MAX}, faulted{UINT32_MAX};
+        Doorbell() noexcept : oscairn_worker_doorbell{} { rendering.store(UINT32_MAX); serving.store(UINT32_MAX); faulted.store(UINT32_MAX); }
     };
 
-    // Requests. Init, Load and Shutdown concern the worker; every other request is followed by
-    // the index of the plugin node it addresses. A worker holds the plugins loaded into it (one,
-    // or several in a plugin host, RFC 0045) and the effect contexts created from each.
+    // The requests and replies (worker_shared.h), by their C++ names.
     enum class Op : uint8_t
     {
-        Init = 1, Service, SetParameter, Gesture, ParameterText, SaveState, LoadState, Shutdown,
-        CreateEffectContext, DestroyNode, EffectResources, SoundContexts, PrepareSound, SelectSound,
-        DiscardSound, SaveSnapshot, LoadSnapshot, AssetDependencies, LoadPreset, Memory, SetMemoryRoom,
-        Window, // the plugin's own window: shown (with its title) or closed
-        Reset,
-        PrepareSnapshot, // a native snapshot's sounds prepared beside the playing ones (RFC 0021)
-        ChokeRetiring, // sound-snapshots' choke_retiring (RFC 0005)
-        SaveSound, SoundValues, // sound-snapshots draft 4: one sound on its own, a sound's values (RFC 0021)
-        Reconfigure, // the plugin activated again at a new sample rate, the block size kept
-        Load, // one more plugin in the worker, beside those it holds (Init sets the rate and block first)
-        ActiveOutputs, // the output ports the engine takes sound from (clap.audio-ports-activation)
-        Event // one event to the plugin at its next block (PluginHost::sendEvent)
+        Init = OSCAIRN_WORKER_INIT, Service = OSCAIRN_WORKER_SERVICE, SetParameter = OSCAIRN_WORKER_SET_PARAMETER, Gesture = OSCAIRN_WORKER_GESTURE,
+        ParameterText = OSCAIRN_WORKER_PARAMETER_TEXT, SaveState = OSCAIRN_WORKER_SAVE_STATE, LoadState = OSCAIRN_WORKER_LOAD_STATE,
+        Shutdown = OSCAIRN_WORKER_SHUTDOWN, CreateEffectContext = OSCAIRN_WORKER_CREATE_EFFECT_CONTEXT, DestroyNode = OSCAIRN_WORKER_DESTROY_NODE,
+        EffectResources = OSCAIRN_WORKER_EFFECT_RESOURCES, SoundContexts = OSCAIRN_WORKER_SOUND_CONTEXTS, PrepareSound = OSCAIRN_WORKER_PREPARE_SOUND,
+        SelectSound = OSCAIRN_WORKER_SELECT_SOUND, DiscardSound = OSCAIRN_WORKER_DISCARD_SOUND, SaveSnapshot = OSCAIRN_WORKER_SAVE_SNAPSHOT,
+        LoadSnapshot = OSCAIRN_WORKER_LOAD_SNAPSHOT, AssetDependencies = OSCAIRN_WORKER_ASSET_DEPENDENCIES, LoadPreset = OSCAIRN_WORKER_LOAD_PRESET,
+        Memory = OSCAIRN_WORKER_MEMORY, SetMemoryRoom = OSCAIRN_WORKER_SET_MEMORY_ROOM, Window = OSCAIRN_WORKER_WINDOW, Reset = OSCAIRN_WORKER_RESET,
+        PrepareSnapshot = OSCAIRN_WORKER_PREPARE_SNAPSHOT, ChokeRetiring = OSCAIRN_WORKER_CHOKE_RETIRING, SaveSound = OSCAIRN_WORKER_SAVE_SOUND,
+        SoundValues = OSCAIRN_WORKER_SOUND_VALUES, Reconfigure = OSCAIRN_WORKER_RECONFIGURE, Load = OSCAIRN_WORKER_LOAD,
+        ActiveOutputs = OSCAIRN_WORKER_ACTIVE_OUTPUTS, Event = OSCAIRN_WORKER_EVENT
     };
-    // First byte of every message from the worker: a reply, or a request to the engine made while
-    // the worker serves one (the plugin resolving a sound asset or finding an asset library; a node about to activate, with
-    // what it declares, for the engine to refit the worker's memory limit before it allocates).
-    enum Reply : char { Failed = 0, Done = 1, ResolveAsset = 2, Reserve = 3, Invalid = 4 /* std::invalid_argument */, CreateAsset = 5, LibraryRoot = 6, ResolveSample = 7 };
+    enum Reply : char
+    {
+        Failed = OSCAIRN_WORKER_FAILED, Done = OSCAIRN_WORKER_DONE, ResolveAsset = OSCAIRN_WORKER_RESOLVE_ASSET, Reserve = OSCAIRN_WORKER_RESERVE,
+        Invalid = OSCAIRN_WORKER_INVALID, CreateAsset = OSCAIRN_WORKER_CREATE_ASSET, LibraryRoot = OSCAIRN_WORKER_LIBRARY_ROOT, ResolveSample = OSCAIRN_WORKER_RESOLVE_SAMPLE
+    };
 
     // Length-prefixed messages over a stream socket.
     struct Writer

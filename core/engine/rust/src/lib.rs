@@ -677,12 +677,16 @@ mod tests {
         assert_eq!(size_of::<Key>(), 24);
     }
 
-    // bindings.rs was generated from these headers as they are (core/engine/rust/bindgen regenerates it).
+    // bindings.rs was generated from these headers as they are (the engine core's and the engine-worker shared block's) (core/engine/rust/bindgen regenerates it).
     #[test]
     fn engine_core_h_unchanged() {
         let fnv = |b: &[u8]| b.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
-        let now = [fnv(include_bytes!("../../src/engine_core.h")), fnv(include_bytes!("../../../clap-ext/include/oscairn-clap/voice-budget.h"))];
-        assert_eq!(now, bindings::MADE_FROM, "engine_core.h or voice-budget.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
+        let now = [
+            fnv(include_bytes!("../../src/engine_core.h")),
+            fnv(include_bytes!("../../../clap-ext/include/oscairn-clap/voice-budget.h")),
+            fnv(include_bytes!("../../../plugin-host/src/worker_shared.h")),
+        ];
+        assert_eq!(now, bindings::MADE_FROM, "engine_core.h, voice-budget.h or worker_shared.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
     }
 
     /// Counts the allocations this thread makes while `COUNTING` is set.

@@ -113,11 +113,11 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// Trouble with its plugin giving up its own voices (a voice given up for lost blocks or the deadline): the ceiling set at the limit in force, the cap one under it, the way back
-    /// started again; trouble at or past the ceiling is a failed probe.
-    fn trouble(&mut self) {
-        let limit = self.cost.voice_limit.load(Relaxed);
-        if !self.cost.own_voices.load(Relaxed) || limit == 0 {
+    /// Trouble (a voice given up for lost blocks or the deadline), `limit` what its node sounded under: a plugin giving
+    /// up its own voices, its limit in force; any other, the notes the host holds for the node (12m). The ceiling set
+    /// there, the cap one under it, the way back started again; trouble at or past the ceiling is a failed probe.
+    fn trouble(&mut self, limit: u32) {
+        if limit == 0 {
             return;
         }
         // A probe fails where trouble comes with the cap raised to the ceiling or past it (not in the blocks a fall
@@ -245,13 +245,17 @@ impl Budget {
     /// within its limit too, whose limit `give_up` then lowers; and none from a part down to its last voice (the
     /// floor the loss and deadline rules hold: its limit at 1, or one note left).
     fn choose(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool) -> Victim {
+        self.choose_on(rs, lane, reserved, costed, owned, None)
+    }
+    /// choose, from `node`'s connections alone when given.
+    fn choose_on(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool, node: Option<*const Activity>) -> Victim {
         self.count_held(rs, None);
         let mut best: Victim = None;
         let (mut best_rank, mut best_priority, mut best_honors, mut best_velocity, mut best_id) = (0, 0u8, false, 0f32, 0i32);
         for (k, e) in self.entries.iter().enumerate() {
             let a = &e.cost;
             let within = a.voice_limit.load(Relaxed) != 0 && a.over_limit.load(Relaxed) <= OVER_LIMIT_BLOCKS;
-            if lane.is_some_and(|l| l != e.lane) || (costed && a.note_now() <= 0.0) || (!owned && a.own_voices.load(Relaxed) && within) {
+            if lane.is_some_and(|l| l != e.lane) || node.is_some_and(|n| !std::ptr::eq(&**a, n)) || (costed && a.note_now() <= 0.0) || (!owned && a.own_voices.load(Relaxed) && within) {
                 continue;
             }
             let (r, g) = (&rs[e.route], self.groups.get(e.group).copied().unwrap_or(NO_GROUP));
@@ -352,7 +356,9 @@ impl Budget {
     /// Before a note into route `me` at `time` passes on: under its lane's soft limit, notes fade to
     /// make room for it; only what would miss the lane's block is choked.
     pub fn admit(&mut self, rs: &mut Routes, me: Route, time: u32) {
-        let Some(mine) = self.entries.iter().find(|e| e.route == me) else { return };
+        let Some(k) = self.entries.iter().position(|e| e.route == me) else { return };
+        self.capped(rs, k, time);
+        let Some(mine) = self.entries.get(k) else { return };
         let lane = mine.lane;
         let limit = self.lane(lane).limit;
         if limit <= 0.0 {
@@ -368,6 +374,30 @@ impl Budget {
             }
         }
         self.choke(rs, lane, 1.0, cost, Some(me), time, true);
+    }
+    /// The notes the host holds for entry `k`'s node (unreleased or released, not given up), across its connections.
+    fn node_notes(&self, rs: &Routes, k: usize) -> u32 {
+        let Some(node) = self.entries.get(k).map(|e| &*e.cost) else { return 0 };
+        self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node)).map(|e| rs[e.route].used.and_not(rs[e.route].stolen).count()).sum()
+    }
+    /// 12m: before a note into entry `k` passes on, a plugin that does not give up its own voices, its node capped after
+    /// lost blocks or the deadline, keeps under its cap: its node's quietest released note fades first, so a note
+    /// struck again does not bring back what the losses took.
+    fn capped(&mut self, rs: &mut Routes, k: usize, time: u32) {
+        let Some(node) = self.entries.get(k).map(|e| &*e.cost as *const Activity) else { return };
+        // SAFETY: the node's activity lives as long as the plan's entries, which this borrows.
+        let own = unsafe { &*node }.own_voices.load(Relaxed);
+        let cap = self.entries.iter().filter(|e| e.cap != 0 && std::ptr::eq(&*e.cost, node)).map(|e| e.cap).min().unwrap_or(0);
+        if own || cap == 0 {
+            return;
+        }
+        while self.node_notes(rs, k) >= cap {
+            let Some(v) = self.choose_on(rs, None, false, false, false, Some(node)) else { break };
+            let at = if self.entries.get(v.0).is_some_and(|e| e.route == self.entries[k].route) { time } else { 0 };
+            if let Some(a) = self.steal(rs, v, at) {
+                a.stolen.fetch_add(1, Relaxed);
+            }
+        }
     }
     /// After a block whose plugins took `total` microseconds on `lane`: past the limit in this block
     /// and the one before, notes fade until the estimate, scaled to the measurement, fits the soft
@@ -433,9 +463,11 @@ impl Budget {
     /// (it chooses the voice: their levels, layers and streams are its to know); else the note fades.
     /// Its node's activity, for the count.
     fn give_up(&mut self, rs: &mut Routes, (k, i): (usize, usize)) -> Option<&Activity> {
+        let own = self.entries.get(k)?.cost.own_voices.load(Relaxed);
+        let held = if own { 0 } else { self.node_notes(rs, k) };
         let e = self.entries.get_mut(k)?;
-        let backstop = !e.cost.own_voices.load(Relaxed) || e.cost.voice_limit.load(Relaxed) <= 1 || e.cost.over_limit.load(Relaxed) > BACKSTOP_BLOCKS;
-        e.trouble();
+        let backstop = !own || e.cost.voice_limit.load(Relaxed) <= 1 || e.cost.over_limit.load(Relaxed) > BACKSTOP_BLOCKS;
+        e.trouble(if own { e.cost.voice_limit.load(Relaxed) } else { held });
         if backstop {
             rs[e.route].steal(i, 0);
         }
@@ -487,7 +519,9 @@ impl Budget {
     /// probe) above it, the ceiling forgotten after FORGET_BLOCKS or once the cost per voice moved by COST_DRIFT.
     /// `slack_low`: the callback's slack ran low this block, or a block was lost.
     pub fn recover(&mut self, rs: &Routes, slack_low: bool) {
-        for e in &mut self.entries {
+        for k in 0..self.entries.len() {
+            let held = self.node_notes(rs, k);
+            let Some(e) = self.entries.get_mut(k) else { continue };
             if e.cap == 0 {
                 continue;
             }
@@ -496,7 +530,7 @@ impl Budget {
                 continue;
             }
             let l = self.lanes.get(e.lane).copied().unwrap_or_default();
-            let limit = e.cost.voice_limit.load(Relaxed);
+            let limit = if e.cost.own_voices.load(Relaxed) { e.cost.voice_limit.load(Relaxed) } else { held };
             if slack_low || l.losses != 0 || (l.limit > 0.0 && l.took > SOFT * l.limit) {
                 e.calm = 0;
                 continue;

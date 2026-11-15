@@ -83,6 +83,73 @@ template<class Overloaded> Run run(uint32_t blocks,Overloaded&& overloaded,uint3
     return r;
 }
 uint32_t count(const std::vector<bool>& v,uint32_t from,uint32_t to){uint32_t n=0;for(uint32_t i=from;i<to && i<v.size();++i)n+=v[i];return n;}
+
+// Three sounds on one shared instance (a plugin without oscairn.voice-budget: the host fades its notes) on lane 0, into an
+// effect on lane 1, as Sick tines' five parts on one FM instance into the effect workers. The sustain pedal down on each
+// sound's channel, six keys struck, then each sound strikes a key again every 375 blocks (1 s), staggered, so notes pile
+// up under the pedal. The effect loses a block with a chance per block of 0.004 for each voice past `fit` across the three
+// sounds (a fixed seed): the losses on the downstream lane, the voices on the upstream one.
+struct Chain { std::vector<uint32_t> voices; std::vector<bool> lost; uint64_t faded=0,unfit=0; };
+Chain chain(uint32_t blocks,uint32_t fit)
+{
+    using A=oscairn::Graph::Activity;
+    struct Act { alignas(A) unsigned char bytes[sizeof(A)]{}; A* get(){return std::launder(reinterpret_cast<A*>(bytes));} oscairn_activity* core(){return reinterpret_cast<oscairn_activity*>(bytes);} };
+    Act instrument,effect,context[3];
+    new(instrument.bytes) A;new(effect.bytes) A;for(auto& c:context)new(c.bytes) A;
+    instrument.get()->seedRest=20;instrument.get()->seedNote=30;effect.get()->seedRest=300;
+    oscairn_route* routes[3];oscairn_zones zones{};oscairn_source sources[3];oscairn_context contexts[3];
+    for(int c=0;c<3;++c){routes[c]=rust_core_route_new(1,1,256);sources[c]={routes[c],&zones,nullptr,0,int16_t(c),false};contexts[c]={int16_t(c),context[c].core()};}
+    const oscairn_link link{1,1.f};
+    const oscairn_step steps[2]{{instrument.core(),sources,3,contexts,3,0,false,false,&link,1},{effect.core(),nullptr,0,nullptr,0,1,false,false,nullptr,0}};
+    bool budgeted[2]{};
+    oscairn_notes* notes=rust_core_notes_new(steps,2,2,budgeted);
+    const oscairn_block timing{-1,2666.67f,2266.67f,1333.33f,2,96000,0};
+    std::vector<Event> merged(kick::clap::Host::maxProcessEvents),ends,due;
+    std::vector<int16_t> heard(merged.size());
+    uint32_t id=0;uint64_t seed=12345;Chain r;
+    auto chance=[&]{seed=seed*6364136223846793005ull+1442695040888963407ull;return double(seed>>11)/double(1ull<<53);};
+    for(uint32_t b=0;b<blocks;++b)
+    {
+        rust_core_notes_begin(notes,&timing);
+        std::vector<Event> in;std::vector<int16_t> src;
+        for(int16_t c=0;c<3;++c)
+        {
+            auto on=[&](uint16_t type,int16_t key){clap_event_note_t n{};n.header={sizeof n,0,CLAP_CORE_EVENT_SPACE_ID,type,0};n.note_id=-1;n.channel=c;n.key=key;n.velocity=.8;in.push_back(from(n));};
+            if(b==0)
+            {
+                clap_event_midi_t m{};m.header={sizeof m,0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_MIDI,0};m.data[0]=uint8_t(0xb0|c);m.data[1]=64;m.data[2]=127;in.push_back(from(m));
+                for(int16_t k=0;k<6;++k){on(CLAP_EVENT_NOTE_ON,int16_t(48+k));on(CLAP_EVENT_NOTE_OFF,int16_t(48+k));}
+            }
+            else if((b+125*uint32_t(c))%375==0){const int16_t k=int16_t(48+(b/375)%6);on(CLAP_EVENT_NOTE_OFF,k);on(CLAP_EVENT_NOTE_ON,k);on(CLAP_EVENT_NOTE_OFF,k);}
+            while(src.size()<in.size())src.push_back(c);
+        }
+        std::vector<oscairn_key> keys;
+        for(uint32_t i=0;i<in.size();++i)keys.push_back({0,i,&in[i],src[i],0xff,false});
+        bool overflow=false;
+        const uint32_t n=rust_core_notes_route(notes,0,keys.data(),uint32_t(keys.size()),frames,&id,merged.data(),uint32_t(merged.size()),heard.data(),&overflow);
+        // The plugin: a note choked (a fade's end) ends the next block; every other note sounds on under the pedal.
+        due.swap(ends);ends.clear();
+        for(uint32_t i=0;i<n;++i)
+        {
+            clap_event_note_t x;std::memcpy(&x,merged[i].bytes,sizeof x);
+            if(x.header.space_id==CLAP_CORE_EVENT_SPACE_ID && x.header.size==sizeof x && x.header.type==CLAP_EVENT_NOTE_CHOKE)
+            {x.header.type=CLAP_EVENT_NOTE_END;ends.push_back(from(x));}
+        }
+        uint32_t voices=0;for(auto* rt:routes)voices+=rust_core_route_live(rt);
+        const oscairn_finish played{20.f+30.f*float(voices),true,false,false,false,true,0,0,nullptr,0,due.data(),uint32_t(due.size())};
+        rust_core_notes_finish(notes,0,&played);
+        bool none=false;
+        rust_core_notes_route(notes,1,nullptr,0,frames,&id,merged.data(),uint32_t(merged.size()),nullptr,&none);
+        const bool lost=voices>fit && chance()<0.004*double(voices-fit);
+        const oscairn_finish fx{300,true,false,lost,false,false,0,0,nullptr,0,nullptr,0};
+        rust_core_notes_finish(notes,1,&fx);
+        rust_core_notes_end(notes,150.f);
+        r.voices.push_back(voices);r.lost.push_back(lost);
+    }
+    r.faded=instrument.get()->stolenForLoss+instrument.get()->stolenForDeadline;r.unfit=instrument.get()->unfitBlocks;
+    rust_core_notes_free(notes);for(auto* rt:routes)rust_core_route_free(rt);
+    return r;
+}
 }
 
 int main()
@@ -129,6 +196,16 @@ int main()
         std::printf("unfit: %u voices at the end, at least %u from block 3000, %llu blocks lost with nothing left to give\n",r.voices.back(),least,(unsigned long long)r.unfit);
         check(r.voices.back()==1 && least==1,"down to one voice and held there: "+std::to_string(r.voices.back()));
         check(r.unfit>0,"the chain that cannot fit is counted");
+    }
+    {
+        // The pedalled chain: 6 voices fit across three sounds, for 30 s.
+        const auto r=chain(11250,6);
+        std::printf("chain: voices at 5 s steps:");for(uint32_t b=0;b<11250;b+=1875)std::printf(" %u",r.voices[b]);
+        std::printf("; lost per 5 s:");for(uint32_t b=0;b<11250;b+=1875)std::printf(" %u",count(r.lost,b,b+1875));
+        std::printf("; %llu given up, %llu unfit\n",(unsigned long long)r.faded,(unsigned long long)r.unfit);
+        check(count(r.lost,5625,11250)<=6,"after 15 s the losses are rare: "+std::to_string(count(r.lost,5625,11250)));
+        uint32_t most=0;for(uint32_t b=5625;b<11250;++b)most=std::max(most,r.voices[b]);
+        check(most<=8,"the voices stay near what fits: "+std::to_string(most));
     }
     return failures?1:0;
 }

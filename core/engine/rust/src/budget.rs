@@ -51,7 +51,10 @@ pub struct Activity {
 
 /// The blocks a plugin that gives up its own voices may sound more than its limit before its notes
 /// are given up as any plugin's (Activity::overLimitBlocks).
-const OVER_LIMIT_BLOCKS: u32 = 16;
+const OVER_LIMIT_BLOCKS: u32 = 16; // a fade's time and more, against the lane's own limit
+/// For lost blocks and the deadline, the blocks past the limit of a block before after which a plugin giving up
+/// its own voices has its notes faded from outside: its fade may run into the next block.
+const BACKSTOP_BLOCKS: u32 = 1;
 
 impl Activity {
     pub fn rest_now(&self) -> f32 {
@@ -87,7 +90,7 @@ impl Activity {
 
 /// A note connection into a plugin taking CLAP notes: its route, its node's cost, its part's group
 /// (the first entry of its part, else itself), whether it counts its node at rest, its lane, and its
-/// part's reserve and priority.
+/// part's reserve and priority; cut, the voices the guard took off its node's limit (a plugin giving up its own).
 pub struct Entry {
     pub route: Route,
     pub cost: Shared<Activity>,
@@ -98,6 +101,7 @@ pub struct Entry {
     pub part: u32,
     pub reserve: u16,
     pub priority: u8,
+    pub cut: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -124,6 +128,7 @@ pub struct Lane {
     pub others_took: f32,
     pub losses: u8,
     pub weight: f32,
+    pub hold: u8, // blocks before the next note goes for its losses
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -141,18 +146,17 @@ pub struct Budget {
     pub lanes: Vec<Lane>,
     device_over: bool,
     device_hold: u32,
-    loss_hold: u32,
 }
 
 const SOFT: f32 = 0.85; // stealing starts here, so fades have time
 /// After notes fade for the total, the blocks it waits before judging it again.
 const DEVICE_HOLD_BLOCKS: u32 = 8;
-/// After a note fades for lost blocks, the blocks before the next: its fade (5 ms) and a block to see it.
-const LOSS_HOLD_BLOCKS: u32 = 3;
+/// After a voice goes for a lane's lost blocks, the blocks before the next: its fade (5 ms).
+const LOSS_HOLD_BLOCKS: u8 = 2;
 
 impl Budget {
     pub fn new(entries: Vec<Entry>, lanes: usize) -> Budget {
-        Budget { groups: vec![NO_GROUP; entries.len()], entries, lanes: vec![Lane::default(); lanes.max(1)], device_over: false, device_hold: 0, loss_hold: 0 }
+        Budget { groups: vec![NO_GROUP; entries.len()], entries, lanes: vec![Lane::default(); lanes.max(1)], device_over: false, device_hold: 0 }
     }
     fn lane(&self, lane: usize) -> Lane {
         self.lanes.get(lane).copied().unwrap_or_default()
@@ -198,15 +202,16 @@ impl Budget {
     /// up its own voices is left to the voice limit it was given while it keeps within it. Notes of nodes
     /// whose notes cost: a MIDI-dialect plugin's too, ended by a note-off.
     /// lane: every lane's notes for None. costed: only nodes whose notes are measured to cost (giving one up
-    /// frees time), else any (time is running out, whatever the measurements say).
-    fn choose(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool) -> Victim {
+    /// frees time), else any (time is running out, whatever the measurements say). owned: a plugin keeping
+    /// within its limit too, whose limit `give_up` then lowers.
+    fn choose(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool) -> Victim {
         self.count_held(rs, None);
         let mut best: Victim = None;
         let (mut best_rank, mut best_priority, mut best_honors, mut best_velocity, mut best_id) = (0, 0u8, false, 0f32, 0i32);
         for (k, e) in self.entries.iter().enumerate() {
             let a = &e.cost;
             let within = a.voice_limit.load(Relaxed) != 0 && a.over_limit.load(Relaxed) <= OVER_LIMIT_BLOCKS;
-            if lane.is_some_and(|l| l != e.lane) || (costed && a.note_now() <= 0.0) || (a.own_voices.load(Relaxed) && within) {
+            if lane.is_some_and(|l| l != e.lane) || (costed && a.note_now() <= 0.0) || (!owned && a.own_voices.load(Relaxed) && within) {
                 continue;
             }
             let honors = a.honors_volume.load(Relaxed);
@@ -283,10 +288,10 @@ impl Budget {
         while self.estimate(rs, lane, Counting::Fading) * scale + extra > limit {
             let mut v = self.fading_note(rs, lane);
             if v.is_none() {
-                v = self.choose(rs, Some(lane), false, true);
+                v = self.choose(rs, Some(lane), false, true, false);
             }
             if v.is_none() && at_note_on && self.reserves(rs, lane) * scale + extra > limit {
-                v = self.choose(rs, Some(lane), true, true); // reserves alone pass the hard limit
+                v = self.choose(rs, Some(lane), true, true, false); // reserves alone pass the hard limit
             }
             let Some((e, i)) = v.and_then(|(k, i)| Some((self.entries.get(k)?, i))) else { return };
             if !rs[e.route].stolen.has(i) {
@@ -313,7 +318,7 @@ impl Budget {
         // A plugin that gives up its own voices keeps the new note within its limit itself.
         let cost = if mine.cost.own_voices.load(Relaxed) { 0.0 } else { mine.cost.note_now() };
         while self.estimate(rs, lane, Counting::Kept) + cost > SOFT * limit {
-            let Some(v) = self.choose(rs, Some(lane), false, true) else { break };
+            let Some(v) = self.choose(rs, Some(lane), false, true, false) else { break };
             let at = if self.entries.get(v.0).is_some_and(|e| e.route == me) { time } else { 0 };
             if let Some(a) = self.steal(rs, v, at) {
                 a.stolen.fetch_add(1, Relaxed);
@@ -339,7 +344,7 @@ impl Budget {
         }
         let scale = (total / e).min(1.25);
         while self.estimate(rs, lane, Counting::Kept) * scale > SOFT * limit {
-            let Some(v) = self.choose(rs, Some(lane), false, true) else { break };
+            let Some(v) = self.choose(rs, Some(lane), false, true, false) else { break };
             if let Some(a) = self.steal(rs, v, 0) {
                 a.stolen.fetch_add(1, Relaxed);
             }
@@ -368,7 +373,7 @@ impl Budget {
             let mut best: Victim = None;
             let mut most = 0.0;
             for i in 0..self.lanes.len() {
-                if let Some(v) = self.choose(rs, Some(i), false, true) {
+                if let Some(v) = self.choose(rs, Some(i), false, true, false) {
                     let each = self.entries.get(v.0).map_or(0.0, |e| e.cost.note_now());
                     if each > most {
                         (best, most) = (Some(v), each);
@@ -381,39 +386,53 @@ impl Budget {
             self.device_hold = DEVICE_HOLD_BLOCKS;
         }
     }
-    /// Blocks are being lost (two in the last eight on a lane, one of them this block): one note fades, from
-    /// the marked lane where it frees the most time, weighted by the gain on its way to the lost block;
-    /// quietest released first within it. Then the fade's time (LOSS_HOLD_BLOCKS) before the next, so one
-    /// excess does not take more notes than it needs. Never choked: losses say nothing of how much is over.
-    pub fn lost(&mut self, rs: &mut Routes) {
-        if self.loss_hold != 0 {
-            self.loss_hold -= 1;
-            return;
+    /// A voice goes: from a plugin giving up its own voices and keeping within a limit above one, off its limit
+    /// (it chooses the voice: their levels, layers and streams are its to know); else the note fades.
+    /// Its node's activity, for the count.
+    fn give_up(&mut self, rs: &mut Routes, (k, i): (usize, usize)) -> Option<&Activity> {
+        let e = self.entries.get_mut(k)?;
+        let a = &e.cost;
+        if a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) > 1 && a.over_limit.load(Relaxed) <= BACKSTOP_BLOCKS {
+            e.cut += 1;
+        } else {
+            rs[e.route].steal(i, 0);
         }
-        let mut best: Victim = None;
-        let mut most = 0.0;
+        Some(&e.cost)
+    }
+    /// Blocks are being lost (two in the last eight on a lane, one of them this block): on each such lane a
+    /// voice goes, quietest released first, then the fade's time (LOSS_HOLD_BLOCKS) before the next, so the
+    /// lanes losing blocks all give way at once and keep giving way while losses go on. Never choked: losses
+    /// say nothing of how much is over.
+    pub fn lost(&mut self, rs: &mut Routes) {
         for i in 0..self.lanes.len() {
-            let l = self.lane(i);
+            let Some(l) = self.lanes.get_mut(i) else { continue };
+            if l.hold != 0 {
+                l.hold -= 1;
+                continue;
+            }
             if l.losses.count_ones() < 2 || l.losses & 1 == 0 {
                 continue;
             }
-            if let Some(v) = self.choose(rs, Some(i), false, false) {
-                let each = self.entries.get(v.0).map_or(0.0, |e| e.cost.note_now()) * l.weight;
-                if best.is_none() || each > most {
-                    (best, most) = (Some(v), each);
-                }
+            l.hold = LOSS_HOLD_BLOCKS;
+            if let Some(a) = self.choose(rs, Some(i), false, false, true).and_then(|v| self.give_up(rs, v)) {
+                a.faded_for_loss.fetch_add(1, Relaxed);
             }
         }
-        if let Some(a) = best.and_then(|v| self.steal(rs, v, 0)) {
-            a.faded_for_loss.fetch_add(1, Relaxed);
-            self.loss_hold = LOSS_HOLD_BLOCKS;
+    }
+    /// The engine's own time is running out (the callback's slack, or blocks lost): a voice goes across every
+    /// lane, quietest released first.
+    pub fn deadline(&mut self, rs: &mut Routes) {
+        if let Some(a) = self.choose(rs, None, false, false, true).and_then(|v| self.give_up(rs, v)) {
+            a.faded_for_deadline.fetch_add(1, Relaxed);
         }
     }
-    /// The engine's own time is running out (the callback's slack): one note fades across every lane,
-    /// quietest released first.
-    pub fn deadline(&mut self, rs: &mut Routes) {
-        if let Some(a) = self.choose(rs, None, false, false).and_then(|v| self.steal(rs, v, 0)) {
-            a.faded_for_deadline.fetch_add(1, Relaxed);
+    /// The voices taken off a plugin's limit come back once it holds no note (the player let go): while notes
+    /// are held, giving them back would only bring the losses back.
+    pub fn calm(&mut self, rs: &Routes) {
+        for e in &mut self.entries {
+            if !rs[e.route].used.any() {
+                e.cut = 0;
+            }
         }
     }
     /// oscairn.voice-budget: the voices a node on `lane` that gives up its own may keep, `admitted` the
@@ -422,14 +441,18 @@ impl Budget {
     /// already), never fewer than those admitted unless the lane is measured over its limit, and then at
     /// most a quarter fewer than it sounds a block; 0 for no limit (no budget, or no cost measured).
     pub fn voice_limit(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> u32 {
+        let cut: u32 = self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node)).map(|e| e.cut).sum();
+        self.limit_for(rs, lane, node, voices, admitted).map_or(0, |l| l.saturating_sub(cut).max(1))
+    }
+    fn limit_for(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> Option<u32> {
         let each = node.note_now() / node.per_note_scale.get();
         let l = self.lane(lane);
         if l.limit <= 0.0 || each <= 0.0 {
-            return 0;
+            return None;
         }
         let room = ((SOFT * l.limit - self.estimate(rs, lane, Counting::Kept)) / each).floor();
         let least = if l.over { (voices as f32 * 0.75).floor() } else { admitted };
         // Held below 2^16 voices, as a cost near 0 makes the room huge.
-        65536f32.min(1f32.max(least).max(admitted + room)) as u32
+        Some(65536f32.min(1f32.max(least).max(admitted + room)) as u32)
     }
 }

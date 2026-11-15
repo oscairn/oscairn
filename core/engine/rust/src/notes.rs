@@ -39,8 +39,9 @@ pub struct Step {
     recent: [f32; 5], // its last blocks' times, for the median the lane's limit is held against
     recent_at: usize,
     recent_n: usize,
-    cost: f32,  // its last block's usual time; an effect asleep, its cost awake
-    awake: f32, // an effect's usual time when it last ran awake
+    limit_before: u32, // the voice limit in force a block earlier, which it has had a block and a fade to keep to
+    cost: f32,         // its last block's usual time; an effect asleep, its cost awake
+    awake: f32,        // an effect's usual time when it last ran awake
 }
 
 impl Step {
@@ -66,6 +67,7 @@ impl Step {
             recent: [0.0; 5],
             recent_at: 0,
             recent_n: 0,
+            limit_before: 0,
             cost: 0.0,
             awake: 0.0,
         }
@@ -142,7 +144,8 @@ pub struct Notes {
     total: f32,
     reach: Vec<f32>, // scratch, per step: the gain from it to a step whose block was lost (mark_lost)
     after: Vec<f32>, // scratch, per step: the costliest way from it to the output (begin)
-    slack: u8,       // the last four blocks, a bit each set where the callback's slack ran low, the latest lowest
+    slack: u8,       // the last four blocks, a bit each set where the callback's slack ran low or a block was lost
+    lost_now: bool,  // a step's block lost in this block
 }
 
 /// Where a step's merged events go, with the channel the current connection's events take.
@@ -187,6 +190,7 @@ impl Notes {
                     part,
                     reserve: zone.map_or(0, |z| z.reserve),
                     priority: zone.map_or(0, |z| z.priority),
+                    cut: 0,
                 });
                 step.budgeted = true;
             }
@@ -208,6 +212,7 @@ impl Notes {
             reach: vec![0.0; n],
             after: vec![0.0; n],
             slack: 0,
+            lost_now: false,
         }
     }
 
@@ -362,7 +367,7 @@ impl Notes {
                 // A plugin that reports no voices while notes live, or whose block was not rendered, is counted by
                 // its notes; one giving up its own voices is judged against its limit so even when its blocks are lost.
                 let voices = if r.voices == 0 || !r.processed { live } else { r.voices };
-                let limit = a.voice_limit.load(Relaxed);
+                let limit = std::mem::replace(&mut step.limit_before, a.voice_limit.load(Relaxed));
                 a.over_limit.store(if limit != 0 && voices > limit { a.over_limit.load(Relaxed) + 1 } else { 0 }, Relaxed);
                 if r.processed {
                     a.own_voices.store(r.own_voices, Relaxed);
@@ -429,6 +434,7 @@ impl Notes {
     /// A lost block on step `s`: its lane is marked, and every lane before it on the way, by the largest
     /// gain from there (an insert's instrument, a bus's senders at their send levels).
     fn mark_lost(&mut self, s: usize) {
+        self.lost_now = true;
         if let Some(a) = self.steps.get(s).and_then(|x| x.activity) {
             a.lost.fetch_add(1, Relaxed);
         }
@@ -470,12 +476,16 @@ impl Notes {
                 lane.weight = 0.0;
             }
         }
-        if slack.is_finite() {
-            self.slack = (self.slack << 1 | u8::from(slack <= self.timing.low_slack)) & 0xf;
+        // A block lost anywhere counts as the callback's time run out: with waits cut wave by wave the
+        // callback ends before its deadline, its slack never at 0.
+        if slack.is_finite() || self.lost_now {
+            self.slack = (self.slack << 1 | u8::from(self.lost_now || slack <= self.timing.low_slack)) & 0xf;
             if self.slack.count_ones() >= 2 && self.slack & 1 != 0 {
                 self.budget.deadline(rs);
             }
         }
+        self.lost_now = false;
+        self.budget.calm(rs);
         for step in &self.steps {
             if let (Some(a), Some(lane)) = (&step.activity, self.budget.lanes.get(step.lane)) {
                 a.lane_limit.set(lane.limit);

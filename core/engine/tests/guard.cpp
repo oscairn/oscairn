@@ -14,11 +14,14 @@
 //     extension: the eight sound, none given up.
 //   limit-first: the losses case with the instrument giving up its own voices: its limit is lowered and it gives up
 //     its own, the host's notes untouched; one that ignores its limit has notes faded from outside after it.
+//   starved: two parts giving up their own voices, each well within its own lane, sending to a bus effect in a worker
+//     of its own that loses blocks (load not of their making): voices go within a few blocks of the first loss,
+//     off the parts' limits, and keep going while losses go on.
 //   deadline: instruments in the engine's process, each well within its lane, while the callback reaches its deadline
 //     after each block (load from outside the audio): notes give way across the lanes; with a heavy but healthy block
 //     (little left, the default threshold 0) or the whole time to spare, none; with a profile's threshold of 900 us
 //     (OSCAIRN_DEADLINE_SLACK_US), that little left is too little and notes give way.
-// Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline|burst|limit-first] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
+// Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline|burst|limit-first|starved] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
 // notes give way; a name runs that case alone.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
@@ -143,6 +146,31 @@ Limited limited(const char* plugin,bool ignore){
     return {g.sounding(instrument),g.host(instrument).voiceReport(cost,notes,count),c.stolen+c.stolenForLoss+c.hardChokes+c.stolenForDeadline};
 }
 
+// Two own-voices parts into a bus effect losing blocks: the block of its first loss, the voices taken off the parts'
+// limits by then plus 10 blocks, and the effect's losses from block 500 to 800.
+struct Starved { uint32_t first=0; uint64_t early=0,lateLost=0; };
+Starved starved(const char* plugin){
+    setenv("OSCAIRN_FIXTURE_VOICE_US","40",1);setenv("OSCAIRN_FIXTURE_VOICE_BUDGET","1",1);
+    Graph g(48000,frames);
+    const auto a=g.add(plugin),b=g.add(plugin);
+    setenv("OSCAIRN_FIXTURE_EFFECT_US","1600",1);setenv("OSCAIRN_FIXTURE_EFFECT_LEVEL","0.2",1);
+    const auto bus=g.add(plugin,effect);
+    for(uint32_t p=0;p<2;++p){const auto n=p?b:a;NoteZone z;z.channels=uint16_t(1u<<p);z.part=p+1;g.connectNotes(graphInput,n,{z});g.connectAudio(n,bus);}
+    g.connectAudio(bus,graphOutput);
+    g.commit();g.setVoiceBudget(-1);
+    Starved r;uint64_t at500=0,mark=0;
+    play(g,800,[&](uint32_t block){
+        const uint64_t lost=g.host(bus).statistics().deadlineMisses;
+        if(!r.first && lost)r.first=block;
+        if(r.first && block==r.first+10)r.early=g.noteCost(a).stolenForLoss+g.noteCost(b).stolenForLoss+g.noteCost(a).stolenForDeadline+g.noteCost(b).stolenForDeadline;
+        if(block==500)at500=lost;
+        mark=lost;
+        auto e=held(block,8,0);for(auto& x:held(block,8,1))e.push_back(x);return e;});
+    unsetenv("OSCAIRN_FIXTURE_EFFECT_US");unsetenv("OSCAIRN_FIXTURE_EFFECT_LEVEL");unsetenv("OSCAIRN_FIXTURE_VOICE_BUDGET");
+    r.lateLost=mark-at500;
+    return r;
+}
+
 // The chain's case, its notes released and the effects asleep: the instrument lane's limit then.
 double asleep(const char* plugin){
     setenv("OSCAIRN_WORKER_DEADLINE","1",1);setenv("OSCAIRN_FIXTURE_VOICE_US","90",1);
@@ -214,10 +242,18 @@ int main(int argc,char** argv){try{
     }
     if(only.empty() || only=="limit-first"){
     const auto own=limited(argv[1],false),ignoring=limited(argv[1],true);
-    std::printf("limit-first: keeping to its limit, the host holds %u notes, it sounds %u voices, %llu faded from outside; ignoring it: %u, %u, %llu\n",
+    std::printf("limit-first: keeping to its limit, the host holds %u notes, it sounds %u voices, %llu given up by the guard; ignoring it: %u, %u, %llu\n",
         own.held,own.voices,(unsigned long long)own.faded,ignoring.held,ignoring.voices,(unsigned long long)ignoring.faded);
-    check(own.faded==0 && own.held==8 && own.voices<8,"lost blocks lower the plugin's limit: it gives up its own voices, none faded from outside");
-    check(ignoring.faded>0,"a plugin that ignores its limit has notes faded from outside");
+    // The host fades a note of one keeping to its limit only once that limit is down to a voice and losses go on.
+    check(own.voices<own.held && own.held>=6,"lost blocks lower the plugin's limit: it gives up its own voices first, the host's notes kept");
+    check(ignoring.held+4<=own.held,"a plugin that ignores its limit has notes faded from outside");
+    }
+    if(only.empty() || only=="starved"){
+    const auto st=starved(argv[1]);
+    std::printf("starved: the bus effect's first lost block %u, voices given up within 10 blocks of it %llu, blocks lost from 500 to 800 %llu\n",st.first,(unsigned long long)st.early,(unsigned long long)st.lateLost);
+    check(st.first>0,"the bus effect loses blocks");
+    check(st.early>0,"voices go within a few blocks of the first loss");
+    if(timing)check(st.lateLost<=5,"and keep going until losses stop: "+std::to_string(st.lateLost));
     }
     if(only.empty() || only=="deadline"){
     const auto d=late(argv[1]);

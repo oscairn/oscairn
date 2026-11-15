@@ -42,6 +42,7 @@ struct oscairn_notes
     {
         Graph::Activity* activity; std::vector<Source> sources; std::vector<Context> contexts; uint32_t lane; bool inProcess, lateLane, budgeted=false;
         std::array<float,5> recent{}; uint8_t recentAt=0, recentN=0; // its last blocks' times (typical)
+        uint32_t limitBefore=0; // the voice limit in force a block earlier, which it has had a block and a fade to keep to
     };
     std::vector<Step> steps;
     oscairn::VoiceBudget budget;
@@ -226,7 +227,8 @@ void cpp_core_notes_finish(oscairn_notes* notes,uint32_t s,const oscairn_finish*
             // giving up its own voices is judged against its limit so even when its blocks are lost.
             const uint32_t voices=f->voices && f->processed?f->voices:live;
             auto& a=*step.activity;
-            a.overLimit=a.voiceLimit && voices>a.voiceLimit?a.overLimit+1:0;
+            const uint32_t before=std::exchange(step.limitBefore,a.voiceLimit);
+            a.overLimit=before && voices>before?a.overLimit+1:0;
             if(f->processed)
             {
                 a.ownVoices=f->own_voices;a.honorsVolume=f->honors_volume;

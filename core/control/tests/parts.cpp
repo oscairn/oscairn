@@ -2612,7 +2612,8 @@ namespace
         }
         check(killed > 0, "a worker to kill");
         bool dipped = false; // the kill is heard (silence, or the old routing) before the restart is
-        for(int i = 0; i < 500 && !(dipped && near(level(), 5)); ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); s.service(); s.process(nullptr, 0, x.out, 2, frames); dipped = dipped || !near(level(), 5); }
+        // Until it is so, 30 s at most: a restarted worker's start and its plugin's load take what a shared runner gives them.
+        for(int i = 0; i < 3000 && !(dipped && near(level(), 5)); ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); s.service(); s.process(nullptr, 0, x.out, 2, frames); dipped = dipped || !near(level(), 5); }
         check(dipped && near(level(), 5), "the worker restarted, told its ports again: the same routing: " + std::to_string(level()));
     }
 #endif

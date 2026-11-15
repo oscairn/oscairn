@@ -325,6 +325,12 @@ namespace oscairn
                     else std::fprintf(stderr,"oscairn: OSCAIRN_WORKER_MEMORY_MB=%s is not a whole number of megabytes, ignored (the limit stays %llu)\n",mb,(unsigned long long)(initial.memoryLimit>>20));}
                 if(const char* s=std::getenv("OSCAIRN_PLUGIN_SCAN"))initial.scan=s;
                 if(const char* h=std::getenv("OSCAIRN_PLUGIN_HOSTS");h && *h){char* end=nullptr;const long n=std::strtol(h,&end,10);if(!*end && n>=0 && n<=64)initial.hosts=uint32_t(n);}
+                if(const char* w=std::getenv("OSCAIRN_WORKERS");w && *w){
+                    const std::string v=w;
+                    if(v=="plugin")initial.hosts=0;
+                    else if(v=="chain"){initial.hosts=0;initial.chain=true;}
+                    else if(v=="pool"){if(!initial.hosts)initial.hosts=3;}
+                    else std::fprintf(stderr,"oscairn: OSCAIRN_WORKERS=%s is not plugin, chain or pool, ignored\n",w);}
                 if(const char* list=std::getenv("OSCAIRN_OWN_HOST"))for(std::string_view rest=list;!rest.empty();){
                     const auto comma=rest.find(',');if(const auto id=rest.substr(0,comma);!id.empty())initial.ownHost.emplace(id);
                     rest=comma==rest.npos?std::string_view():rest.substr(comma+1);}
@@ -333,6 +339,31 @@ namespace oscairn
         }
     }
     void setPlacementPolicy(PlacementPolicy p) {policy()=std::move(p);}
+    namespace {thread_local PlacementGroup currentGroup;}
+    PlacementScope::PlacementScope(PlacementGroup group):previous_(std::exchange(currentGroup,std::move(group))) {}
+    PlacementScope::~PlacementScope() {currentGroup=std::move(previous_);}
+    const PlacementGroup& placementGroup() noexcept {return currentGroup;}
+    std::map<std::string,PlacementGroup> placementGroups(const std::vector<std::string>& nodes,const std::vector<std::pair<std::string,std::string>>& audio,const std::string& prefix)
+    {
+        std::map<std::string,PlacementGroup> groups;
+        std::set<std::string> known(nodes.begin(),nodes.end()),visiting;
+        std::function<const PlacementGroup&(const std::string&)> group=[&](const std::string& n)->const PlacementGroup& {
+            if(const auto g=groups.find(n);g!=groups.end())return g->second;
+            if(!visiting.insert(n).second)return groups[n]={prefix+n,false}; // a cycle: its own
+            std::optional<std::string> from;bool joins=true,any=false;
+            for(const auto& [a,b]:audio)if(b==n && a!=n && known.count(a))
+            {
+                any=true;
+                const auto g=group(a);
+                if(g.alone || (from && *from!=g.key)){joins=false;}
+                from=g.key;
+            }
+            visiting.erase(n);
+            return groups[n]=!any?PlacementGroup{prefix+n,true}:joins?PlacementGroup{*from,false}:PlacementGroup{prefix+n,false};
+        };
+        for(const auto& n:nodes)group(n);
+        return groups;
+    }
     const PlacementPolicy& placementPolicy() {return policy();}
     uint64_t residentBytes(long pid)
     {

@@ -130,6 +130,8 @@ check "or 0 from the environment, a worker per instance to compare; OSCAIRN_OWN_
 echo "OSCAIRN_WORKER_REST='0'" >> "$bundle/etc/default/oscairn-engine"
 out=$("$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
 check "OSCAIRN_WORKER_REST from the profile's file, last" "echo \"\$out\" | grep -q 'OSCAIRN_PLUGIN_HOSTS=3 OSCAIRN_WORKER_REST=0 oscairn-engine-run'"
+out=$(OSCAIRN_WORKERS=chain OSCAIRN_ENGINE_AUDIO_CORES=3 OSCAIRN_WORKER_AUDIO_CORES=0-2 "$bundle/oscairn-fantom-start" --dry-run --engine-only 2>&1)
+check "OSCAIRN_WORKERS and the engine's and workers' core lists handed to the engine, after it" "echo \"\$out\" | grep -q 'OSCAIRN_WORKER_REST=0 OSCAIRN_WORKERS=chain OSCAIRN_ENGINE_AUDIO_CORES=3 OSCAIRN_WORKER_AUDIO_CORES=0-2 oscairn-engine-run'"
 echo "OSCAIRN_ENGINE_ARGS='--output-device hw:1,0 --device-channels 6 --keyboard-device /dev/ttyGS0'" > "$bundle/etc/default/oscairn-engine"
 
 # The first-party plugins' device settings: OSCAIRN_SAMPLER_*, _ANALOG_*, _FM_*, _ARPEGGIATOR_*, _EFFECTS_*.

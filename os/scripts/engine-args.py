@@ -20,7 +20,14 @@
                          before it sleeps, in microseconds; empty: none
     OSCAIRN_PLUGIN_HOSTS  compute.pluginHosts, the plugin hosts the plugins in workers share;
                          empty: a worker per plugin instance
-    OSCAIRN_OWN_HOST     compute.ownHost as plugin IDs separated by commas, given workers of their own
+    OSCAIRN_OWN_HOST     compute.ownHost as plugin IDs (or publishers, "com.example.*") separated by
+                         commas, given workers of their own
+    OSCAIRN_WORKERS      compute.workers: plugin, chain or pool (RFC 0045's plugin groups); empty: as
+                         compute.pluginHosts says
+    OSCAIRN_ENGINE_AUDIO_CORES  compute.engineAudioCores as a CPU list, the cores the engine's audio
+                         thread and helpers keep to in place of audioThreadCores; empty: those
+    OSCAIRN_WORKER_AUDIO_CORES  compute.workerAudioCores likewise for workers' audio threads; with
+                         chain or pool, each worker process one of them, round-robin
     OSCAIRN_UI           the first screen's ui: juce (absent) for the JUCE app under X, rust for the
                          Rust UI on the display without X (docs/rust-ui.md)
     OSCAIRN_UI_ROTATION  the first screen's rotation in degrees (0 absent), for the Rust UI and its touch
@@ -83,6 +90,9 @@ def settings(profile):
         "OSCAIRN_WORKER_SPIN_US": str((profile.get("compute") or {}).get("workerSpin") or ""),
         "OSCAIRN_PLUGIN_HOSTS": str((profile.get("compute") or {}).get("pluginHosts") or ""),
         "OSCAIRN_OWN_HOST": ",".join((profile.get("compute") or {}).get("ownHost", [])),
+        "OSCAIRN_WORKERS": (profile.get("compute") or {}).get("workers", ""),
+        "OSCAIRN_ENGINE_AUDIO_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("engineAudioCores", [])),
+        "OSCAIRN_WORKER_AUDIO_CORES": ",".join(str(c) for c in (profile.get("compute") or {}).get("workerAudioCores", [])),
         "OSCAIRN_UI": ((profile.get("screens") or [{}])[0]).get("ui", "juce"),
         "OSCAIRN_UI_ROTATION": str(((profile.get("screens") or [{}])[0]).get("rotation", 0)),
     }

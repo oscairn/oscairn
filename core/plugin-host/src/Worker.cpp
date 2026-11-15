@@ -85,6 +85,18 @@ namespace oscairn::worker
         }
     }
 
+    namespace { int workerSlot = -2; }
+    void setWorkerSlot(int slot) noexcept { workerSlot = slot; }
+    uint64_t audioThreadMask(const char* shared, const char* own, int slot) noexcept
+    {
+        if(!own || !*own) return cpuMask(shared);
+        const uint64_t mask = cpuMask(own);
+        if(slot < 0 || !mask) return mask;
+        const int n = __builtin_popcountll(mask);
+        for(int c = 0, k = slot % n; c < 64; ++c) if(mask >> c & 1 && k-- == 0) return uint64_t(1) << c;
+        return mask;
+    }
+
     std::chrono::nanoseconds workerAllowance(uint32_t frames, double rate, const char* overrideMicroseconds) noexcept
     {
         if(overrideMicroseconds && *overrideMicroseconds)
@@ -145,14 +157,16 @@ namespace oscairn::worker
         return thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY, reinterpret_cast<thread_policy_t>(&policy), THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
 #else
         (void)periodUs; sched_param p{}; p.sched_priority = linuxPriority;
-        if(const char* list = std::getenv("OSCAIRN_AUDIO_THREAD_CORES"); list && *list)
+        const char* shared = std::getenv("OSCAIRN_AUDIO_THREAD_CORES");
+        const char* own = std::getenv(workerSlot >= -1 ? "OSCAIRN_WORKER_AUDIO_CORES" : "OSCAIRN_ENGINE_AUDIO_CORES");
+        if((shared && *shared) || (own && *own))
         {
             cpu_set_t cpus; CPU_ZERO(&cpus);
-            const auto mask = cpuMask(list);
+            const auto mask = audioThreadMask(shared, own, workerSlot);
             for(int c = 0; c < 64; ++c) if(mask >> c & 1) CPU_SET(c, &cpus);
             // Once per audio thread, at its start; said, not fatal: the thread runs anywhere then.
             if(const int e = mask ? pthread_setaffinity_np(pthread_self(), sizeof cpus, &cpus) : EINVAL; e != 0)
-                std::fprintf(stderr, "oscairn: OSCAIRN_AUDIO_THREAD_CORES=%s not applied to an audio thread: %s\n", list, std::strerror(e));
+                std::fprintf(stderr, "oscairn: audio cores %s not applied to an audio thread: %s\n", own && *own ? own : shared, std::strerror(e));
         }
         return pthread_setschedparam(pthread_self(), SCHED_FIFO, &p) == 0;
 #endif

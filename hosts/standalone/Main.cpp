@@ -1010,6 +1010,10 @@ namespace oscairn::standalone
                 if( profile.compute.pluginHosts ) setenv( "OSCAIRN_PLUGIN_HOSTS", std::to_string( profile.compute.pluginHosts ).c_str(), 0 );
                 if( std::string own; !profile.compute.ownHost.empty() )
                     { for( const auto& id : profile.compute.ownHost ) own += ( own.empty() ? "" : "," ) + id; setenv( "OSCAIRN_OWN_HOST", own.c_str(), 0 ); }
+                // How plugins share worker processes (RFC 0045's plugin groups), and each side's audio cores; likewise.
+                if( !profile.compute.workers.empty() ) setenv( "OSCAIRN_WORKERS", profile.compute.workers.c_str(), 0 );
+                for( const auto& [list, name] : { std::pair{ &profile.compute.engineAudioCores, "OSCAIRN_ENGINE_AUDIO_CORES" }, std::pair{ &profile.compute.workerAudioCores, "OSCAIRN_WORKER_AUDIO_CORES" } } )
+                    if( std::string cores; !list->empty() ) { for( auto c : *list ) cores += ( cores.empty() ? "" : "," ) + std::to_string( c ); setenv( name, cores.c_str(), 0 ); }
                 if( socket.isEmpty() && helper.empty() )
                     if( const auto missed = applyMemoryPolicy( -999 ); !missed.empty() && profile.reliability != "desktop" )
                         std::fprintf( stderr, "oscairn: %s\n", missed.c_str() );

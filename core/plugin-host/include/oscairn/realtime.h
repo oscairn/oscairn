@@ -30,6 +30,13 @@ namespace oscairn::worker
     // A CPU list's CPUs as bits; 0 for an empty or malformed list or a CPU past 63.
     // shortcut: CPUs 0 to 63 only; use cpu_set_t throughout for a part with more.
     uint64_t cpuMask(const char* list) noexcept;
+    // The CPUs an audio thread keeps to: its own side's list (OSCAIRN_ENGINE_AUDIO_CORES for the engine's audio thread and
+    // helpers, OSCAIRN_WORKER_AUDIO_CORES for a worker's), else the shared one (OSCAIRN_AUDIO_THREAD_CORES); with its own
+    // list and a slot (0 and up: a worker process of `chain` or `pool`, numbered as they start), only the slot-th of its
+    // CPUs, round-robin, so groups of different parts land on different cores. 0: anywhere.
+    uint64_t audioThreadMask(const char* shared, const char* own, int slot) noexcept;
+    // This process's worker slot (a worker process: its number from the engine, -1 for none; the engine: -2).
+    void setWorkerSlot(int slot) noexcept;
     // A plugin worker's allowance (RFC 0010, RFC 0045): how long the engine waits for a block it
     // handed a worker, counted from the hand-over, before the block is missed (silenced). Half the
     // block's period: the graph's longest usual chain is two workers one after the other (an

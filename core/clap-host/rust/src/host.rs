@@ -2316,15 +2316,7 @@ pub unsafe fn voice_report(s: *const Host, cost: &mut f64, notes: &mut *const os
 /// s is a live host.
 pub unsafe fn restful(s: *const Host) -> bool {
     // SAFETY: the caller's.
-    unsafe {
-        (*s).sleeping.load(SeqCst)
-            && !(*s).wake.load(SeqCst)
-            && !(*s).flush.load(SeqCst)
-            && !(*s).panic.load(SeqCst)
-            && (*s).carry_count == 0
-            && !(*s).wants_beat.load(SeqCst)
-            && !(*s).wants_harmony.load(SeqCst)
-    }
+    unsafe { (*s).sleeping.load(SeqCst) && !(*s).wake.load(SeqCst) && !(*s).flush.load(SeqCst) && !(*s).panic.load(SeqCst) && (*s).carry_count == 0 }
 }
 /// # Safety
 /// Audio thread.
@@ -2494,6 +2486,8 @@ unsafe fn render(
         struct Collect {
             total: usize,
             harmony_came: bool, // a block without one: the plugin is in no part
+            timing: usize,      // of total, the beat and harmony events, which alone wake no plugin asleep
+            harmony_new: bool,
         }
         unsafe fn deliver(s: *mut Host, c: &mut Collect, frames: u32, e: Event) {
             // SAFETY: render's.
@@ -2517,6 +2511,7 @@ unsafe fn render(
                         }
                         (*s).last_harmony = x;
                         (*s).have_harmony = true;
+                        c.harmony_new = true;
                         publish_harmony(s, Some(&x));
                     }
                     if c.total == RENDER_EVENTS {
@@ -2525,6 +2520,7 @@ unsafe fn render(
                     }
                     (*s).ordered[c.total] = Timed { event: e, order: c.total as u32 };
                     c.total += 1;
+                    c.timing += 1;
                     return;
                 }
                 // Events in other spaces (param-target) are for the caller, never for a plugin.
@@ -2584,7 +2580,7 @@ unsafe fn render(
                 }
             }
         }
-        let mut c = Collect { total: 0, harmony_came: false };
+        let mut c = Collect { total: 0, harmony_came: false, timing: 0, harmony_new: false };
         for i in 0..(*s).carry_count as usize {
             append(s, &mut c, frames, (*s).carry_events[i]);
         }
@@ -2612,6 +2608,7 @@ unsafe fn render(
             // channel and port.
             ((*p).reset.unwrap())(p);
             total = 0;
+            c.timing = 0;
             (*s).reset_in_process = true;
             (*s).sleeping.store(false, SeqCst);
             (*s).have_harmony = false; // the harmony comes again next block
@@ -2629,7 +2626,12 @@ unsafe fn render(
         }
         let transport = transport.as_ref();
         let transport_wake = (*s).transport.changed(transport, frames, (*s).sample_rate);
-        if (*s).sleeping.load(SeqCst) && total == 0 && !has_input && !transport_wake && !(*s).wake.swap(false, SeqCst) && !(*s).flush.load(SeqCst) {
+        // The beat and a harmony change alone wake no plugin asleep: they come with the block that does (the beat's tempo
+        // changes only with the transport, which wakes it); a harmony held back here is sent again then.
+        if (*s).sleeping.load(SeqCst) && total == c.timing && !has_input && !transport_wake && !(*s).wake.swap(false, SeqCst) && !(*s).flush.load(SeqCst) {
+            if c.harmony_new {
+                (*s).have_harmony = false;
+            }
             (*s).idle_blocks.fetch_add(1, SeqCst);
             (*s).steady_time += i64::from(frames);
             silence();

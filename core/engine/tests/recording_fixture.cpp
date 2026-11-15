@@ -287,7 +287,8 @@ namespace
         fold(r.hash, b->audio_inputs_count); fold(r.hash, b->audio_outputs_count);
         bool sound = false;
         for(uint32_t c = 0; c < b->audio_inputs[0].channel_count; ++c) { fold(r.hash, b->audio_inputs[0].data32[c], b->frames_count * sizeof(float)); for(uint32_t i = 0; i < b->frames_count; ++i) sound = sound || b->audio_inputs[0].data32[c][i] != 0; }
-        const bool events = b->in_events->size(b->in_events) != 0;
+        bool events = false; // the beat and harmony alone are no reason to wake (it sleeps through them, as a host may let it)
+        for(uint32_t i = 0; i < b->in_events->size(b->in_events); ++i) events = events || b->in_events->get(b->in_events, i)->space_id == CLAP_CORE_EVENT_SPACE_ID;
         take(r, b->in_events, b->out_events, true);
         for(uint32_t i = 0; i < b->frames_count; ++i)
         {

@@ -8,12 +8,14 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <system_error>
@@ -67,8 +69,12 @@ namespace
             const auto node=session.add("synth",plugin);
             session.connectNotes(graphInput,node);session.connectAudio(node,graphOutput);session.commit();
         }
+        // The server belongs to the thread that polls it: a client thread has tick() adopt its socket, and waits until it has.
+        std::mutex adoption;std::condition_variable adopted;std::vector<int> adopting;
+        void adoptFromClient(int fd){std::unique_lock lock(adoption);adopting.push_back(fd);adopted.wait(lock,[&]{return adopting.empty();});}
         void tick()
         {
+            {std::lock_guard lock(adoption);if(!adopting.empty()){for(const int fd:adopting)server.adopt(fd);adopting.clear();adopted.notify_all();}}
             const auto time=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
             server.poll(static_cast<uint64_t>(time));session.service();
             float* out[]{left.data(),right.data()};
@@ -222,7 +228,7 @@ namespace
             check(released, "an app gone without memory.closed releases its reservation");
             // An app a shell launched in its own process (no connection of its own: the JUCE app's
             // Settings) goes with that shell's connection, a shell killed without memory.closed.
-            auto fd2 = pair(); f.server.adopt(fd2[0]);
+            auto fd2 = pair(); f.adoptFromClient(fd2[0]);
             LocalClient shell; shell.adopt(fd2[1]);
             shell.call("memory.launch", R"({"app":"com.example.settings","reserve":1048576})");
             auto settings = [&] { return host.call("memory.state").find("com.example.settings") != std::string::npos; };

@@ -84,20 +84,39 @@ if(OSCAIRN_UI)
     add_subdirectory(ui)
 endif()
 
-# Every test gets a data folder of its own unless it names one, so no test writes into the real
-# one (~/Library/Application Support/Oscairn): the engine keeps counters there.
+# Every test runs with a home, a data folder and a settings folder of its own under the build tree, so no
+# test reads or writes the real ones (~/Library/Application Support/Oscairn): HOME (and so JUCE's "~" and
+# the engine's fallback) is one shared empty folder, build/test-home. The test-home-clear fixture empties
+# it and build/test-data before the first test; test-home-empty runs after the last and fails when
+# anything appeared in build/test-home. A test that names its own OSCAIRN_* folder keeps it.
+set(oscairn_test_home "${CMAKE_BINARY_DIR}/test-home")
+set(oscairn_test_data "${CMAKE_BINARY_DIR}/test-data")
 function(oscairn_isolate_tests dir)
     get_property(tests DIRECTORY "${dir}" PROPERTY TESTS)
     foreach(test IN LISTS tests)
-        get_property(environment TEST "${test}" DIRECTORY "${dir}" PROPERTY ENVIRONMENT)
-        if(NOT environment MATCHES "OSCAIRN_DATA_HOME=")
-            set_property(TEST "${test}" DIRECTORY "${dir}" APPEND PROPERTY ENVIRONMENT
-                "OSCAIRN_DATA_HOME=${CMAKE_BINARY_DIR}/test-data/${test}")
+        if(test MATCHES "^test-home-")
+            continue()
         endif()
+        get_property(environment TEST "${test}" DIRECTORY "${dir}" PROPERTY ENVIRONMENT)
+        set(isolated "HOME=${oscairn_test_home}")
+        foreach(name IN ITEMS DATA CONFIG)
+            if(NOT environment MATCHES "OSCAIRN_${name}_HOME=")
+                string(TOLOWER "${name}" folder)
+                list(APPEND isolated "OSCAIRN_${name}_HOME=${oscairn_test_data}/${test}/${folder}")
+            endif()
+        endforeach()
+        set_property(TEST "${test}" DIRECTORY "${dir}" APPEND PROPERTY ENVIRONMENT ${isolated})
+        set_property(TEST "${test}" DIRECTORY "${dir}" APPEND PROPERTY FIXTURES_REQUIRED test-home)
     endforeach()
     get_property(subdirectories DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
     foreach(subdirectory IN LISTS subdirectories)
         oscairn_isolate_tests("${subdirectory}")
     endforeach()
 endfunction()
+add_test(NAME test-home-clear COMMAND ${CMAKE_COMMAND} -E rm -rf "${oscairn_test_home}" "${oscairn_test_data}")
+add_test(NAME test-home-made COMMAND ${CMAKE_COMMAND} -E make_directory "${oscairn_test_home}")
+set_tests_properties(test-home-clear PROPERTIES FIXTURES_SETUP test-home-cleared)
+set_tests_properties(test-home-made PROPERTIES FIXTURES_REQUIRED test-home-cleared FIXTURES_SETUP test-home)
+add_test(NAME test-home-empty COMMAND ${CMAKE_COMMAND} -DFOLDER=${oscairn_test_home} -P ${CMAKE_SOURCE_DIR}/tools/test-home-empty.cmake)
+set_tests_properties(test-home-empty PROPERTIES FIXTURES_CLEANUP test-home)
 oscairn_isolate_tests("${CMAKE_SOURCE_DIR}")

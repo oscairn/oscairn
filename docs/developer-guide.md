@@ -72,7 +72,13 @@ the [LV2 guide](../core/lv2-host/README.md). The default build does not require 
 ### Run the tests
 
 `ctest --test-dir build-dev` runs every test the configuration built; `-R` picks some by name
-(`ctest --test-dir build-dev -R '^control-'`). The names group by area:
+(`ctest --test-dir build-dev -R '^control-'`). A test never touches the developer's own folders:
+the top-level `CMakeLists.txt` runs every registered test with `HOME` set to the empty
+`build-dev/test-home` and, unless the test names its own, `OSCAIRN_DATA_HOME` and
+`OSCAIRN_CONFIG_HOME` under `build-dev/test-data/<test>/`. The `test-home-clear` fixture empties both
+before a run, and `test-home-empty` runs last and fails if anything appeared in `test-home`, so a
+test that unsets a folder variable or reaches for `~` is caught; restore a variable's old value
+instead of unsetting it. The names group by area:
 
 | Names | What they cover | Built with |
 | --- | --- | --- |

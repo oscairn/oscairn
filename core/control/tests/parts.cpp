@@ -2753,6 +2753,9 @@ int main(int argc, char** argv)
     try
     {
 #ifndef _WIN32
+        // These blocks are rendered as fast as they run, not at a device's pace, and compared for what they play: on a machine too slow for real time
+        // (a sanitizer build) the load guard would give notes up, and a note's first sample read as silence.
+        ::setenv("OSCAIRN_LOAD_GUARD", "off", 1);
         if(argc > 9 && !std::strcmp(argv[8], "--pending-pedals")) // pending the engine core's pedal delivery: registered disabled
         {
             state_files::TemporaryDirectory home; ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1); // never the real data folder

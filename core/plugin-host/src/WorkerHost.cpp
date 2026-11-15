@@ -1067,6 +1067,38 @@ namespace oscairn
                 return true;
             }
             bool finishProcess() noexcept override { return rendered(extraBlock() ? finishDelayed() : started_ && finish()); }
+            bool groupable() const noexcept override { return !extra_; }
+            bool handed() const noexcept override { return started_ && busy_.load(std::memory_order_relaxed); }
+            // RFC 0045's plugin groups: fused when a source was handed this block (each source not handed has its engine
+            // output, final by now, written into its shared output for the worker to mix); standalone, the engine's input,
+            // when none was; lost, as a busy block, when a source is still busy with an old block or no longer in this
+            // worker (a crash moved it).
+            bool startGrouped(const GroupRoute* routes, uint32_t n, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
+                              const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override
+            {
+                if(n > maxFused || std::none_of(routes, routes + n, [](const GroupRoute& r) { return r.source->handed(); }))
+                    return startProcess(inputs, ni, outputs, no, frames, events, count, transport);
+                bool lost = false;
+                for(uint32_t i = 0; i < n; ++i)
+                {
+                    const auto& source = *static_cast<const WorkerHost*>(routes[i].source); // groupable: a WorkerHost
+                    if(source.process() != process() || (!source.handed() && source.shared_->done.load(std::memory_order_acquire) != source.sequence_)) lost = true;
+                }
+                if(!lost)
+                    for(uint32_t i = 0; i < n; ++i)
+                    {
+                        auto& source = *const_cast<WorkerHost*>(static_cast<const WorkerHost*>(routes[i].source));
+                        if(source.handed() || std::any_of(routes, routes + i, [&](const GroupRoute& r) { return r.source == routes[i].source; })) continue;
+                        for(uint32_t c = 0; c < source.outChannels_; ++c)
+                            if(c < routes[i].sourceChannels && routes[i].sourceOutputs[c]) std::copy_n(routes[i].sourceOutputs[c], frames, source.audioOut(c));
+                            else std::fill_n(source.audioOut(c), frames, 0.f);
+                        source.shared_->published = source.shared_->published + 1;
+                    }
+                group_ = routes; groupCount_ = n; groupLost_ = lost;
+                const bool started = startProcess(inputs, ni, outputs, no, frames, events, count, transport);
+                group_ = nullptr; groupCount_ = 0; groupLost_ = false;
+                return started;
+            }
 
         private:
             struct Prepared
@@ -1216,7 +1248,7 @@ namespace oscairn
                 else if(graceLeft_) --graceLeft_;
                 // A block the worker has not finished yet: stay silent rather than queue another, its events carried
                 // to the next block handed (RFC 0045); only a release lost on the way is reset for.
-                if(s.done.load(std::memory_order_acquire) != sequence_)
+                if(s.done.load(std::memory_order_acquire) != sequence_ || groupLost_)
                 {
                     silent_.fetch_add(1, std::memory_order_relaxed); busyBlocks_.fetch_add(1, std::memory_order_relaxed);
                     for(uint32_t i = 0; i < count; ++i) if(!carry(events[i], true)) kept_ = false;
@@ -1241,11 +1273,20 @@ namespace oscairn
                     if(lost) s.panic.store(1, std::memory_order_relaxed); // the request below publishes it
                     events = carried_.data(); count = carriedCount_;
                 }
-                for(uint32_t c = 0; c < inChannels_; ++c)
+                // In a group's block the worker mixes the input from the other nodes' outputs (RFC 0045's plugin groups).
+                s.fusedCount = groupCount_;
+                for(uint32_t i = 0; i < groupCount_; ++i)
                 {
-                    if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, audioIn(c));
-                    else std::fill_n(audioIn(c), frames, 0.f);
+                    const auto& r = group_[i];
+                    const auto& source = *static_cast<const WorkerHost*>(r.source);
+                    s.fused[i] = {source.node_, r.from, r.to, r.live, r.first, !source.handed(), r.gain, r.start, r.end};
                 }
+                if(!groupCount_)
+                    for(uint32_t c = 0; c < inChannels_; ++c)
+                    {
+                        if(inputs && c < ni && inputs[c]) std::copy_n(inputs[c], frames, audioIn(c));
+                        else std::fill_n(audioIn(c), frames, 0.f);
+                    }
                 uint32_t kept = 0;
                 if(replayAgain_.exchange(false, std::memory_order_relaxed)) replay_ = true;
                 // A panic drops a block's controllers, the replay with them: one reaching this block (or the block it was in) has it sent again.
@@ -1703,6 +1744,10 @@ namespace oscairn
             int64_t runNs_ = 0; // what a block usually takes in the worker (workerTimes)
             std::vector<float> stagedIn_; std::vector<float*> stagedInPointers_;
             std::array<kick::clap::Event, maxEvents> staged_{};
+            // RFC 0045's plugin groups, audio thread, for the start under way: this node's routes from others of its worker.
+            static constexpr uint32_t maxFused = OSCAIRN_WORKER_MAX_FUSED;
+            static_assert(maxFused == maxGroupRoutes);
+            const GroupRoute* group_ = nullptr; uint32_t groupCount_ = 0; bool groupLost_ = false;
             uint32_t stagedCount_ = 0, stagedFrames_ = 0, stagedOffset_ = 0;
             std::unique_ptr<kick::clap::SysexPool> stagedBytes_; // made only for a plugin that takes SysEx
             clap_event_transport_t stagedTransport_{}; bool stagedHasTransport_ = false;
@@ -2064,7 +2109,9 @@ namespace oscairn
             bool own(const std::string& id, const PlacementPolicy& policy)
             {
                 std::lock_guard lock(listed);
-                return policy.ownHost.count(id) || crashed.count(id);
+                // An entry ending in ".*" names a publisher: every plugin whose ID starts with what comes before it.
+                return policy.ownHost.count(id) || crashed.count(id) || std::any_of(policy.ownHost.begin(), policy.ownHost.end(), [&](const std::string& o) {
+                    return o.size() > 2 && o.ends_with(".*") && id.starts_with(std::string_view(o).substr(0, o.size() - 1)); });
             }
             void crashedIn(const std::string& id) { std::lock_guard lock(listed); crashed.insert(id); }
             double cost(Process& p) // under mutex

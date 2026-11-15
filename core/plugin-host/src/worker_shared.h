@@ -34,8 +34,20 @@ enum
     OSCAIRN_WORKER_MAX_EVENTS = 2 * 512 + 1 + 32, /* kick::clap::Host::maxProcessEvents: a graph block's notes, its beat and harmony */
     OSCAIRN_WORKER_MAX_OUTPUT_EVENTS = 1024,
     OSCAIRN_WORKER_MAX_PARAMETERS = 4096,
-    OSCAIRN_WORKER_MAX_VOICE_NOTES = 512 /* kick::clap::Host::maxBlockEvents: the notes a voice-budget report holds */
+    OSCAIRN_WORKER_MAX_VOICE_NOTES = 512, /* kick::clap::Host::maxBlockEvents: the notes a voice-budget report holds */
+    OSCAIRN_WORKER_MAX_FUSED = 64 /* the routes into one node a group's block mixes in the worker */
 };
+
+/* RFC 0045's plugin groups: one audio route into a node from another node of its worker, mixed in the worker before
+ * the node renders, as the engine's audio core mixes it (audio_cpp.cpp's mix): the source's output channel `from`
+ * (after the output guard) into this node's input channel `to`, times gain, and with live, the block's live gain
+ * product ramped from start to end; first: the channel's first route, which writes rather than adds. published: the
+ * source was not rendered this block, its output written by the engine. */
+typedef struct oscairn_worker_fused
+{
+    uint32_t node, from, to, live, first, published;
+    float gain, start, end;
+} oscairn_worker_fused;
 
 /* Header of the block shared per node; audio follows it (planar floats, inputs then outputs, maxFrames each),
  * then the SysEx pools. request and done carry block sequence numbers; the engine writes everything before
@@ -88,6 +100,11 @@ typedef struct oscairn_worker_shared
      * block's start; 0: none, for a plugin that cannot receive (send) SysEx (PluginHost::takesSysex), whose SysEx
      * is then dropped and counted on the engine's side (sysexDrops) and in its host (dropped). */
     uint32_t inputPool, outputPool;
+    /* The engine's, with each request (RFC 0045's plugin groups): the routes from other nodes of the worker its input is
+     * mixed from in the worker (0: the input planes as the engine wrote them); and, moved each time the engine writes
+     * this node's output itself (a source not rendered this block), a count the worker runs its output guard by. */
+    uint32_t fusedCount, published;
+    oscairn_worker_fused fused[OSCAIRN_WORKER_MAX_FUSED];
 } oscairn_worker_shared;
 
 /* A worker process's one doorbell (RFC 0045, plugin hosts): its single audio thread sleeps on ring, which the

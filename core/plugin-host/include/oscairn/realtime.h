@@ -73,6 +73,9 @@ namespace oscairn::worker
     // plan playing (Graph's playable); all ("all"): any, after its hold; never ("0"): none, every worker every block.
     enum class WorkerRest { disabled, all, never };
     WorkerRest workerRest() noexcept;
+    // OSCAIRN_WORKER_GROUPS, read as each plan is made: unless "0", nodes of one worker process whose audio flows between
+    // them are rendered there in one round trip (RFC 0045's plugin groups, Graph's compile); "0": each its own, as before.
+    bool workerGroups() noexcept;
     // What became of a block the engine handed a worker, once it came for it: on time (done when it
     // came, or found done within the allowance); late, found done but past the allowance, its sound
     // played all the same (the engine's own thread woke late); or silent, not done within the

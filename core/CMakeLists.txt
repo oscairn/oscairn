@@ -130,8 +130,9 @@ target_include_directories(oscairn_engine PUBLIC engine/include)
 target_link_libraries(oscairn_engine PUBLIC oscairn_plugin_host oscairn_engine_core)
 target_compile_options(oscairn_engine PRIVATE -Wall -Wextra)
 # Rust never fuses a multiply and an add unless it says mul_add; nor does the C++ core (run_cpp.cpp says std::fma at those same spots), so the two agree bit for bit. Nor does the
-# recorder, whose taps redo the graph's mix of a connection (live gains ramped) and must sum to what plays exactly.
-set_source_files_properties(engine/src/core_cpp.cpp engine/src/audio_cpp.cpp engine/src/run_cpp.cpp engine/src/recorder.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
+# recorder, whose taps redo the graph's mix of a connection (live gains ramped) and must sum to what plays exactly. Nor does a worker,
+# which mixes a plugin group's routes as the core does (RFC 0045).
+set_source_files_properties(engine/src/core_cpp.cpp engine/src/audio_cpp.cpp engine/src/run_cpp.cpp engine/src/recorder.cpp plugin-host/src/Worker.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
 if(OSCAIRN_ENGINE_CORE STREQUAL "rust")
     target_compile_definitions(oscairn_engine PRIVATE OSCAIRN_ENGINE_CORE_RUST=1)
 elseif(NOT OSCAIRN_ENGINE_CORE STREQUAL "cpp")
@@ -444,6 +445,9 @@ if(UNIX)
     target_link_libraries(oscairn-handoff-bench PRIVATE kick_clap_host)
     add_test(NAME handoff-bench COMMAND oscairn-handoff-bench --check)
     add_test(NAME handoff-bench-plugin COMMAND oscairn-handoff-bench --check --plugin $<TARGET_FILE:oscairn_basic_synth> --id org.oscairn.basic-synth)
+    # RFC 0045's plugin groups: a 22-plugin Performance's block by placement, groups on or off (tools/worker-bench).
+    add_executable(oscairn-group-bench ../tools/worker-bench/group_bench.cpp)
+    target_link_libraries(oscairn-group-bench PRIVATE oscairn_engine)
     # RFC 0034: a graph block's time, serial and parallel (tools/graph-bench).
     add_executable(oscairn-graph-bench ../tools/graph-bench/graph_bench.cpp)
     target_link_libraries(oscairn-graph-bench PRIVATE oscairn_control)
@@ -633,6 +637,18 @@ add_test(NAME worker-failures COMMAND oscairn-worker-failures-test $<TARGET_FILE
 set_tests_properties(worker-failures PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
 # RFC 0045's plugin hosts: placement by cost, the same sound as in the engine, a host killed while playing, a
 # plugin crashing a shared host moved to a worker of its own, instances loaded and unloaded beside one playing.
+# RFC 0045's plugin groups: every routing case grouped renders as ungrouped, under each rest mode.
+add_executable(oscairn-plugin-groups-test engine/tests/plugin_groups.cpp)
+target_link_libraries(oscairn-plugin-groups-test PRIVATE oscairn_engine)
+foreach(rest IN ITEMS disabled all 0)
+    set(groups_env "KICK_FIXTURE_EFFECT_SLEEP=1")
+    if(NOT rest STREQUAL "disabled")
+        set(groups_env "KICK_FIXTURE_EFFECT_SLEEP=1;OSCAIRN_WORKER_REST=${rest}")
+    endif()
+    add_test(NAME plugin-groups-rest-${rest} COMMAND oscairn-plugin-groups-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>)
+    set_tests_properties(plugin-groups-rest-${rest} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE ENVIRONMENT "${groups_env}")
+endforeach()
+
 add_executable(oscairn-plugin-hosts-test engine/tests/plugin_hosts.cpp)
 target_link_libraries(oscairn-plugin-hosts-test PRIVATE oscairn_engine)
 add_test(NAME plugin-hosts COMMAND oscairn-plugin-hosts-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>

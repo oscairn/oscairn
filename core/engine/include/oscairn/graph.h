@@ -424,6 +424,9 @@ namespace oscairn
         /// Whether the node, with the plugin it has now, is in the last plan committed or published
         /// (control thread): what is queued for it reaches it.
         bool planned( NodeId node ) const;
+        /// RFC 0045's plugin groups: whether the node renders in the round trip of the nodes its audio comes from, in the
+        /// last plan committed or published (control thread).
+        bool grouped( NodeId node ) const;
 
         /// Frees plans the audio thread has finished with.
         void collect();
@@ -565,7 +568,7 @@ namespace oscairn
             std::atomic<size_t>   head_{ 0 }, tail_{ 0 };
         };
 
-        Plan* compile() const;
+        Plan* compile(bool ramped = false) const; // ramped: for commit(true), whose gains ramp (no plugin groups)
         void  checkSource( NodeId from, bool audio ) const;
         void  checkDestination( NodeId to, bool audio ) const;
 
@@ -617,6 +620,7 @@ namespace oscairn
         Retired            retired_;
         uint64_t plansCompiled_ = 0; // control thread
         std::map<NodeId, const PluginHost*> planned_; // control thread: see planned()
+        std::vector<NodeId> grouped_; // control thread: see grouped()
         void notePlanned() { planned_.clear(); for( const auto& [id, node] : nodes_ ) planned_[id] = node.host.get(); }
         std::array<std::atomic<float>, liveGains> liveTarget_; // see setLiveGain; set to 1 by the constructor
         std::array<std::atomic<bool>, liveGains> liveJump_{};  // see setLiveGain's ramp

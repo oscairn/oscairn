@@ -61,6 +61,7 @@ Checked when built and tested; the sections below say how.
   - [x] 12k. A lowered limit comes back while notes are held: fast below its ceiling, probing above it, the ceiling aging out
   - [x] 12l. Losses far apart still shed (a loss within 2 s of the last), down to each part's last voice; a chain that cannot fit counted
   - [x] 12m. A plugin without the voice budget held under what lost, across keys struck again
+  - [x] 12n. A voice comes back only where the measurements say it fits; a probe that loses doubles its wait until release
 
 ## Problem
 
@@ -963,7 +964,9 @@ to, which has rule 12a and none after it). Its rules, as built:
 - 12m. A plugin without the voice budget held under what lost (2026-11-15). With 12l on the unit,
   Sick tines pedalled still lost about 2 blocks a second for 30 s, voices hovering at 2 to 3 a part:
   each loss faded a note and the next key struck brought one back, as 12k's ceiling and cap applied
-  only to plugins giving up their own voices (the FM instance does not). Now trouble on any plugin
+  only to plugins giving up their own voices (whether FM 0.5.4 offers the extension was not known
+  then; the engines session says it does, and then the voices came back by 12k's way back, which 12n
+  makes wait for the measurements). Now trouble on any plugin
   sets the ceiling at the notes the host holds for its node (all its connections, every sound of a
   shared instance) and caps it one under; a note into a capped node first fades the node's quietest
   released note, so a key struck again does not bring back what the losses took; the cap comes back
@@ -972,6 +975,22 @@ to, which has rule 12a and none after it). Its rules, as built:
   block with a chance of 0.004 a block for each voice past 6 across the three; the pedal down, each
   sound striking a key again every 375 blocks: before, voices at 5 s steps 18 8 9 8 9 8 and lost per
   5 s 26 14 16 14 16 13; after, voices 18 7 7 7 7 7 and lost 15 2 0 2 2 1 (each later pair a probe).
+- 12n. The way back by the measurements, not by a loss (2026-11-15). The owner's rule: notes never
+  glitch, so a probe that costs a pair of lost blocks every few seconds is no steady state. A voice
+  comes back (below the ceiling or past it) only where the measurements say it fits: the lane's
+  recent worst block (the largest, falling 1 % a block) plus the node's cost per note within the
+  lane's soft limit (85 %), and the callback's recent worst slack (the same) less that cost still at
+  least 15 % of the deadline (340 us at 48 kHz and 128 frames). Without those measurements (no slack,
+  no cost or no lane limit) a voice comes back only after 10 s healthy, at the probe's pace. A probe
+  that still loses a block doubles the wait for the next until the notes are let go. The ceiling is
+  per node: a shared instance's sounds share it (`voice_limit`'s cap is the least over the node's
+  connections, and each sound's limit is its share of the node's), and a loss on a lane after the
+  node reaches it through the plan's audio links. Tested by `engine-core-recovery` (chain), now with
+  the callback's slack its deadline less the instrument's block and the effects' (1,900 us), a block
+  lost by chance once less than 150 us is left, then the effects at 500 us from 75 s: voices 18, 7,
+  6 from 15 s on, the last block lost at 12 s, none in the 63 s after with keys struck again each
+  second, and voices back to 29 once the effects' load fell. The transient case recovers by the same
+  measurements (past 10 voices 1,318 blocks after the overload, all back by the end).
 
 ## Core placement
 

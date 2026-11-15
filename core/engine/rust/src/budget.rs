@@ -157,6 +157,7 @@ pub struct Lane {
     pub weight: f32,
     pub hold: u8,   // blocks before the next note goes for its losses
     pub since: u32, // blocks since its last loss, plus one; 0 for none yet
+    pub worst: f32, // its recent worst block's time: the largest, falling 1 % a block (12n)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -184,12 +185,13 @@ const LOSS_HOLD_BLOCKS: u8 = 2;
 /// A loss this close after the lane's last (2 s) counts as losses going on, however far apart: a chain near the
 /// callback's deadline loses blocks one at a time.
 const LOSS_MEMORY_BLOCKS: u32 = 750;
-/// A lowered limit's way back (12k), in healthy blocks: below its ceiling less one, a voice back each 8 (21 ms);
-/// at or above it, a voice each 750 (2 s), doubled for each probe that failed, at most twice; the ceiling forgotten
-/// after 3,750 (10 s) or once the cost per voice moved by a quarter.
+/// A lowered limit's way back (12k, 12n), in healthy blocks: below its ceiling less one, a voice back each 8
+/// (21 ms); at or above it, a voice each 750 (2 s), doubled for each probe that lost a block, until the notes are let
+/// go (held under 2^16 times); each only where the measurements say the voice fits; the ceiling forgotten after
+/// 3,750 (10 s) or once the cost per voice moved by a quarter.
 const RECOVER_BLOCKS: u32 = 8;
 const PROBE_BLOCKS: u32 = 750;
-const MOST_PROBE_DOUBLINGS: u8 = 2;
+const MOST_PROBE_DOUBLINGS: u8 = 16;
 const FORGET_BLOCKS: u32 = 3750;
 const COST_DRIFT: f32 = 0.25;
 
@@ -517,8 +519,12 @@ impl Budget {
     /// healthy block (no loss on its lane in its last eight, the lane within its soft limit, the callback's slack
     /// fine) a voice back each RECOVER_BLOCKS below the ceiling less one, each PROBE_BLOCKS (doubled per failed
     /// probe) above it, the ceiling forgotten after FORGET_BLOCKS or once the cost per voice moved by COST_DRIFT.
-    /// `slack_low`: the callback's slack ran low this block, or a block was lost.
-    pub fn recover(&mut self, rs: &Routes, slack_low: bool) {
+    /// `slack_low`: the callback's slack ran low this block, or a block was lost. 12n: a voice comes back only where
+    /// it fits by the measurements: the lane's recent worst block and the node's cost per note within the lane's soft
+    /// limit, and `room` (the callback's recent worst slack; None unmeasured) less that cost still at least the soft
+    /// limit's margin of `deadline`. Without the measurements (no slack, no cost, no lane limit), only after
+    /// FORGET_BLOCKS healthy, at the probe's pace.
+    pub fn recover(&mut self, rs: &Routes, slack_low: bool, room: Option<f32>, deadline: f32) {
         for k in 0..self.entries.len() {
             let held = self.node_notes(rs, k);
             let Some(e) = self.entries.get_mut(k) else { continue };
@@ -540,8 +546,11 @@ impl Budget {
             if e.ceiling != 0 && (e.calm >= FORGET_BLOCKS || (cost - e.cost_at).abs() > COST_DRIFT * e.cost_at) {
                 (e.ceiling, e.probes) = (0, 0);
             }
-            let every = if e.ceiling == 0 || e.cap + 1 < e.ceiling { RECOVER_BLOCKS } else { PROBE_BLOCKS << e.probes };
-            if e.calm % every == 0 {
+            let measured = cost > 0.0 && l.limit > 0.0 && room.is_some();
+            let fits = l.worst + cost <= SOFT * l.limit && room.is_some_and(|r| r - cost >= (1.0 - SOFT) * deadline);
+            let probe = PROBE_BLOCKS.saturating_mul(1 << e.probes.min(MOST_PROBE_DOUBLINGS));
+            let every = if !measured { probe } else if e.ceiling == 0 || e.cap + 1 < e.ceiling { RECOVER_BLOCKS } else { probe };
+            if e.calm % every == 0 && (if measured { fits } else { e.calm >= FORGET_BLOCKS }) {
                 e.cap += 1;
             }
             if e.ceiling == 0 && e.cap > limit + 1 {

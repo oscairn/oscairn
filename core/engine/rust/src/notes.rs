@@ -146,6 +146,7 @@ pub struct Notes {
     after: Vec<f32>, // scratch, per step: the costliest way from it to the output (begin)
     slack: u8,       // the last four blocks, a bit each set where the callback's slack ran low or a block was lost
     lost_now: bool,  // a step's block lost in this block
+    worst_used: f32, // the callback's recent worst time to its deadline less slack: the largest, falling 1 % a block; -1 unmeasured
 }
 
 /// Where a step's merged events go, with the channel the current connection's events take.
@@ -217,6 +218,7 @@ impl Notes {
             after: vec![0.0; n],
             slack: 0,
             lost_now: false,
+            worst_used: -1.0,
         }
     }
 
@@ -470,6 +472,7 @@ impl Notes {
             let Some(lane) = self.budget.lanes.get_mut(i) else { continue };
             lane.others = lane.others_took;
             let took = lane.took;
+            lane.worst = took.max(lane.worst * 0.99);
             self.budget.measured(rs, i, took);
         }
         self.budget.device(rs, self.total);
@@ -490,7 +493,11 @@ impl Notes {
         }
         let low_now = self.lost_now || slack <= self.timing.low_slack;
         self.lost_now = false;
-        self.budget.recover(rs, low_now);
+        if slack.is_finite() {
+            self.worst_used = (self.timing.deadline - slack).max(self.worst_used * 0.99);
+        }
+        let room = (self.worst_used >= 0.0).then(|| self.timing.deadline - self.worst_used);
+        self.budget.recover(rs, low_now, room, self.timing.deadline);
         for step in &self.steps {
             if let (Some(a), Some(lane)) = (&step.activity, self.budget.lanes.get(step.lane)) {
                 a.lane_limit.set(lane.limit);

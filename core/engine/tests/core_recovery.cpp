@@ -75,7 +75,7 @@ template<class Overloaded> Run run(uint32_t blocks,Overloaded&& overloaded,uint3
         const oscairn_finish f{20.f+50.f*float(voices),true,false,lost,true,true,voices,50,nullptr,0,nullptr,0};
         rust_core_notes_finish(notes,0,&f);
         a->voiceLimit=rust_core_notes_voice_limit(notes,0,voices,nullptr,0);
-        rust_core_notes_end(notes,150.f); // the callback 150 us inside its deadline, as on the unit
+        rust_core_notes_end(notes,2266.67f-f.took); // the callback's slack: its deadline less the plugin's block
         r.limit.push_back(a->voiceLimit);r.voices.push_back(voices);r.lost.push_back(lost);
     }
     r.unfit=a->unfitBlocks;
@@ -87,10 +87,11 @@ uint32_t count(const std::vector<bool>& v,uint32_t from,uint32_t to){uint32_t n=
 // Three sounds on one shared instance (a plugin without oscairn.voice-budget: the host fades its notes) on lane 0, into an
 // effect on lane 1, as Sick tines' five parts on one FM instance into the effect workers. The sustain pedal down on each
 // sound's channel, six keys struck, then each sound strikes a key again every 375 blocks (1 s), staggered, so notes pile
-// up under the pedal. The effect loses a block with a chance per block of 0.004 for each voice past `fit` across the three
-// sounds (a fixed seed): the losses on the downstream lane, the voices on the upstream one.
+// up under the pedal. The callback's time is the instrument's block (20 us and 30 us a voice) and the effects' (`effects`
+// us a block, by block); with less than 150 us of its deadline left the effect loses a block, by a chance of the shortfall
+// over 600 us (a fixed seed): the losses on the downstream lane, the voices on the upstream one.
 struct Chain { std::vector<uint32_t> voices; std::vector<bool> lost; uint64_t faded=0,unfit=0; };
-Chain chain(uint32_t blocks,uint32_t fit)
+template<class Effects> Chain chain(uint32_t blocks,Effects&& effects)
 {
     using A=oscairn::Graph::Activity;
     struct Act { alignas(A) unsigned char bytes[sizeof(A)]{}; A* get(){return std::launder(reinterpret_cast<A*>(bytes));} oscairn_activity* core(){return reinterpret_cast<oscairn_activity*>(bytes);} };
@@ -140,10 +141,11 @@ Chain chain(uint32_t blocks,uint32_t fit)
         rust_core_notes_finish(notes,0,&played);
         bool none=false;
         rust_core_notes_route(notes,1,nullptr,0,frames,&id,merged.data(),uint32_t(merged.size()),nullptr,&none);
-        const bool lost=voices>fit && chance()<0.004*double(voices-fit);
-        const oscairn_finish fx{300,true,false,lost,false,false,0,0,nullptr,0,nullptr,0};
+        const float slack=2266.67f-played.took-effects(b);
+        const bool lost=slack<150 && chance()<(150-slack)/600;
+        const oscairn_finish fx{effects(b),true,false,lost,false,false,0,0,nullptr,0,nullptr,0};
         rust_core_notes_finish(notes,1,&fx);
-        rust_core_notes_end(notes,150.f);
+        rust_core_notes_end(notes,slack);
         r.voices.push_back(voices);r.lost.push_back(lost);
     }
     r.faded=instrument.get()->stolenForLoss+instrument.get()->stolenForDeadline;r.unfit=instrument.get()->unfitBlocks;
@@ -198,14 +200,15 @@ int main()
         check(r.unfit>0,"the chain that cannot fit is counted");
     }
     {
-        // The pedalled chain: 6 voices fit across three sounds, for 30 s.
-        const auto r=chain(11250,6);
-        std::printf("chain: voices at 5 s steps:");for(uint32_t b=0;b<11250;b+=1875)std::printf(" %u",r.voices[b]);
-        std::printf("; lost per 5 s:");for(uint32_t b=0;b<11250;b+=1875)std::printf(" %u",count(r.lost,b,b+1875));
+        // The pedalled chain: effects of 1,900 us leave room for 6 voices across three sounds, for 75 s; then 500 us for 25 s.
+        const auto r=chain(37500,[](uint32_t b){return b<28125?1900.f:500.f;});
+        std::printf("chain: voices at 5 s steps:");for(uint32_t b=0;b<37500;b+=1875)std::printf(" %u",r.voices[b]);
+        std::printf("; lost per 5 s:");for(uint32_t b=0;b<37500;b+=1875)std::printf(" %u",count(r.lost,b,b+1875));
         std::printf("; %llu given up, %llu unfit\n",(unsigned long long)r.faded,(unsigned long long)r.unfit);
-        check(count(r.lost,5625,11250)<=6,"after 15 s the losses are rare: "+std::to_string(count(r.lost,5625,11250)));
-        uint32_t most=0;for(uint32_t b=5625;b<11250;++b)most=std::max(most,r.voices[b]);
-        check(most<=8,"the voices stay near what fits: "+std::to_string(most));
+        uint32_t settled=0;for(uint32_t b=0;b<28125;++b)if(r.lost[b])settled=b;
+        std::printf("chain: last block lost %u (%.1f s), voices at 75 s %u, at the end %u\n",settled,settled/375.0,r.voices[28124],r.voices.back());
+        check(settled<5625,"settled within 15 s, then 60 s with keys struck again and no block lost: last lost at "+std::to_string(settled));
+        check(r.voices.back()>r.voices[28124]+5,"and voices come back when the effects' load falls: "+std::to_string(r.voices.back()));
     }
     return failures?1:0;
 }

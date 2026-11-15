@@ -238,8 +238,8 @@ cut by the host's estimate), plus the room the lane has left at the plugin's cos
 below that only when the lane is measured over its limit, at most a quarter a block. When blocks are
 lost or the callback runs out of time, the host lowers the limit by a voice rather than fading a note:
 the plugin chooses which voice goes. The limit can also rise again while the plugin is playing, with
-its notes still held: a voice back every few milliseconds up to just under where the trouble came,
-then a voice every two seconds or more past it, so be ready to sound more voices at any block. The
+its notes still held, a voice at a time, and only where the host's measurements (its block's time and
+the callback's) say the next voice fits: be ready to sound more voices at any block. The
 guard never takes a part below one voice for lost blocks; where even that does not fit,
 `engine.timing` says so (`unfit`).
 The host fades a note from outside only as the backstop, when the plugin is not within its limit

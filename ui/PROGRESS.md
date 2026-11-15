@@ -206,3 +206,21 @@ ui/PERFORMANCE-APP.md (the owner's requirements received 2026-11-15). Next, in o
 4. The rest of the inventory as listed in the previous HOW TO RESUME, then step 5 (no handover).
 Known: the scene tile number overlaps its name on Play at 1.55 (not fixed); the pages column stays
 180 px on narrow windows.
+
+Branch `rust-theme` (from rust-grid 3a97dd63): the owner's requirement (2026-11-15), "implement the theme system:
+colors, button styles and corner rounding, spacing, all that stuff". Checklist and audit: ui/THEME.md.
+- Baseline before: `sh ui/target/test.sh test` 76 passed, `cargo clippy --all-targets` clean (ran online: `--offline`
+  found no crates in this worktree's cache).
+- [x] Audit of the reference's properties and the Rust UI's hardcoded values (THEME.md section 1).
+- [x] theme.rs loads the whole format under the reference's rules and words (strict: a partial file is refused whole,
+  as `ThemeData::parse` does; defaults only for what it lets a file omit); `Theme` global carries colors, radius,
+  type, the eight style choices, wires, splash; the fallback chain is `Theme::reload`'s.
+- [x] Screens converted: Home, top bar, engine banner, Play, Part (and the chain and sounds lists on it), the text
+  keyboard, the piano, Setlist, the grid (tiles, sliders, knobs, split buttons, dropdowns, tabs, pages, panels).
+  Sections joined: the grid's layout has no gap (`theme::section_gap`).
+- [x] Tests: 84 pass (76 before; new: loading every built-in file with its values, defaults, refusals, folder rules,
+  the choice, row fill, apply sets every property, no literal color/radius/font size in a .slint file, the grid's
+  gap per theme). Every screen under the four built-in themes and two odd ones: ui/target/theme-shots/ (ignored).
+- Not done: `wires` and `splash` are loaded and carried, drawn by nothing (no routing view or splash in the Rust UI);
+  the desktop type scale (12/14/13/18); list rows as the reference's `drawListRow` bands; the reference's exact
+  `fontScale` bounds are a float/double quirk (THEME.md section 2) that Theme.cpp should settle.

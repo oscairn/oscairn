@@ -92,3 +92,65 @@ Rust: `grid.rs:18-22` layout sizes (gap 6, tile 84, knob extra 36, heading 30, e
 rules, not theme values; the gap must be 0 in a joined theme: `sectionGap`), `grid.rs:520` (20), the knob arc
 geometry in `grid.rs`; `theme.rs` defaults for missing colors (`apply`), the `Inter` fallback family.
 No other Rust file draws.
+
+## 2. After
+
+### What loads and what it styles
+
+Every property above is read by `ui/src/theme.rs` (`ThemeData::parse`, `load_folder`, `chosen`:
+the reference's `parse`, `load`, `inside`, `reload` and `defaultId`, with its words) and set on the
+window's `Theme` global by `theme::apply`: 11 colors (the nine and `warning`, `focus`), `radius`,
+`fontScale`, the eight `style` choices (Slint enums), the six `wires`, `splash` (its two colors, and
+its image when the theme's folder has one) and the font files. All 34 properties the reference
+stores or checks (`version`, `id`, `name`, `font` x3, `fontScale`, `radius`, 9 colors, 8 style, 6
+wires, 3 splash) are loaded and checked, and the two optional colors the reference accepts without
+storing (`warning`, `focus`) are used.
+
+Used: colors by every screen; `radius` through `Theme.section-radius` (radius + 2, 0 joined),
+`button-radius`, `field-radius`, `mark-radius` (the reference's `buttonRadius`, `fieldRadius`, mark
+corner); `fontScale` in the four type sizes; `style.buttons` Button, text keyboard keys, Part's
+step buttons, the grid's switch and split buttons, Home's icon chip, Back/Previous/Next; `edges`
+every Section, Button, Field, key; `depth` the 1 px shadow under buttons, keys, split buttons,
+thumbs, knob discs and the lifted tab; `sliders` the grid's sliders and range thumbs, the knob's disc
+and pointer, Play's faders (a drawbar and the upright slider are the same widget); `tabs` the grid's
+tab strip; `marks` Play's M and S; `sections` every card, tile, strip and panel, and the gap between
+them (the grid's layout reads it, Slint's screens use `Theme.gap-between`); `rows` the colors of
+Setlist slots (a mark left or right, a dot, or the slot's fill with the reference's contrast rule,
+`Theme.row-fill`); the piano keys' colors come from the text and surface inks as Panel.cpp's board
+has them. `wires` and `splash` are carried and tested but no screen draws them yet (no routing view,
+no splash in the Rust UI).
+
+### Hardcoded values: gone, or named once
+
+No .slint file but `theme.slint` has a color, a corner radius or a font size as a literal
+(`no_screen_hardcodes_what_the_theme_sets` fails the test run otherwise). Left as named
+constants in `theme.slint` (the `Theme` global), listed here as "no theme property": touch target 44
+and bar height 48 (RFC 0019), the dense gap 4 and margin 6 (Theme.h), inner paddings 10, 12, 8, 4,
+a small button's width 110, the dropdown 420 and pages column 180, cursor 2 px, key cursor 3 px,
+hairline 1 px, mark 6 px, thumb 16 px, knob arc 6 px, the alphas of theme colors (wash .25 and .17
+and .4, track .35, hairline .6, slider track .55, dim .45, disabled .4), the piano key corner 4, the
+type scale 13/16/15/20 (the touch scale; the desktop scale 12/14/13/18 is not in this UI yet). A
+screen's own layout rule stays a named property at the top of its component (Home 200 x 120 and its
+icon chip, a strip's meters, a switch 38 x 24, the heading 28, a knob at most 76, a drag of 150, the
+envelope point 12, a band 4 high). `shell.slint`'s 1280 x 720 is a preferred window size. In
+`grid.rs`, `SECTION_GAP` (6), tile 84, knob extra 36, heading 30, envelope 180 are ParameterGrid's
+rules; the gap passed to `layout` is `theme::section_gap`. The format has no spacing property, so
+"wide spacing" is only what `sections: joined` removes.
+
+### Where the reference's behavior is not (yet) matched
+
+- `fontScale` 0.8 and 1.4 exactly are refused, as in the reference: it compares the double with float
+  bounds (`number("fontScale",1,.8f,1.4f)`), so only values strictly between 0.8000000119 and
+  1.3999999762 pass. Probably unintended there; the Rust loader repeats it (one format, no second
+  dialect) and a test pins it. Worth fixing in Theme.cpp, and then here.
+- A partial file is refused whole, not merged over the default (the previous Rust loader merged and
+  clamped; the reference does neither). What a file may omit is `fontScale`, `radius`,
+  `colors.warning`, `colors.focus`, `font.bold` and `splash`.
+- Font checking is the reference's container check (`fontContainer`); not JUCE's
+  `createSystemTypefaceFor` and the 'A' glyph test. A splash image is checked for its form (PNG
+  signature, an `<svg` root) and size, not decoded.
+- Cursors are rounded in the shape of what they mark (`focus` color, 2 px), not the reference's square
+  accent `drawRect`. Rows apart (Setlist, Part, chain and sounds lists) are drawn as sections, not as
+  `drawListRow` bands (alternate row lift, the colored row only where a theme has a row color).
+  Tabs are drawn on the grid only; marks on Play only. The reference's hover shades are drawn on
+  buttons; text boxes and the Settings widgets do not exist in the Rust UI yet.

@@ -714,7 +714,7 @@ fn next_edit(f: &mut Fixture) -> serde_json::Value {
 
 // Play on the shell: the Performance's scenes, parts and master from graph.get; the left knob
 // (pane 0) through the scenes and the right (pane 1) through the parts, a press selecting a scene
-// or muting a part; touch on the scene tiles, M, S and the faders; levels moved live by
+// or a part (Part, below); touch on the scene tiles, M, S and the faders; levels moved live by
 // controls.changed; the meters asked only while Play is shown; Cancel drops the cursors, then goes
 // back; Edit hands the display to the JUCE app.
 #[test]
@@ -773,11 +773,11 @@ fn play_by_panes_touch_and_meters() {
     assert_eq!((select["method"].as_str(), select["params"]["scene"].as_u64()), (Some("scenes.select"), Some(1)));
     assert_eq!(scenes(&f).iter().position(|s| s.on), Some(0), "shown at once");
     f.reply(&select, json!({"result": {"accepted": true}}));
-    // E6 (pane 1) twice: the cursor on the first part, then the second; press: it is muted.
+    // E6 (pane 1) twice: the cursor on the first part, then the second; M on it mutes.
     nav(&mut f, "move:1", 1);
     nav(&mut f, "move:1", 1);
     assert_eq!(strips(&f).iter().position(|s| s.cursor), Some(1));
-    nav(&mut f, "confirm:1", 1);
+    play.invoke_mute_tapped(1); // a press here selects the part (Part screen, below); M mutes
     let mute = next_edit(&mut f);
     assert_eq!((mute["method"].as_str(), mute["params"].clone()), (Some("parts.level"), json!({"part": 11, "level": 1.0, "mute": true})));
     f.reply(&mute, json!({"result": {"accepted": true}}));
@@ -873,3 +873,6 @@ fn play_draws_in_every_theme() {
         png(&s, &format!("play-{}", t.id));
     }
 }
+
+#[cfg(test)]
+mod part;

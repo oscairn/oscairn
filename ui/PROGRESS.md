@@ -130,3 +130,14 @@ leaving it (the owner: switching to a JUCE screen takes several seconds).
   `graph.get` as before, `controls.changed` while shown, `parts.meters` every 100 ms while shown. No
   new engine request. Tests (headless, fake engine): panes, touch, live levels, meters, back, handover,
   themes; pictures in ui/target/screens.
+
+Branch `rust-part` from `main` (fc9d6ba0): the Part screen in the Rust shell, so a part's level, pan,
+mute, solo, devices, key range, transpose and pedals are set without leaving it.
+- Part (`src/part.rs`, `slint/part.slint`, docs/rust-ui.md "Part"): opened from Play by a press on a
+  part or a tap on its name (Play's press no longer mutes; M and S stay on the strip). A settings list
+  with a border cursor, the dial changing a value after a press, a devices list as the JUCE menu, the
+  three pedals' receive each (all, none, own), the sound, engine, sends and insert effects read only,
+  and a labelled row that hands over to the JUCE app for the rest. Requests: `parts.level`,
+  `parts.pan`, `parts.solo`, `parts.input`, `session.status`; none new. Tests (`src/tests/part.rs`):
+  cursor per pane, each edit's request, pedal round trip, refusal, touch, back, handover, themes.
+  Not run on a unit; no window was shown.

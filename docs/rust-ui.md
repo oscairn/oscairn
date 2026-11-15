@@ -3,7 +3,7 @@
 The owner decided on November 14, 2026 that Oscairn's UI moves to Rust ("Rust direction: yes on
 ui and readers") and that the Rust UI replaces the JUCE app screen by screen, as each is ready
 ("yes want rust to replace juce as each one is ready"). The first screens are the stage ones:
-the shell with its top bar, Home, Setlist and Play. Its toolkit is Slint 1.18.1 with
+the shell with its top bar, Home, Setlist, Play and Part. Its toolkit is Slint 1.18.1 with
 its software renderer, chosen by the Setlist prototype (branch `experiment/rust-setlist`, its
 README has the measurements and the toolkit comparison).
 
@@ -233,10 +233,12 @@ opened from); Edit is the handover.
   time as fit (as many as the screen holds at 110 px each); the cursor past them turns a whole view.
 - **Without touch:** pane 0 (the left knob, E1) moves a border cursor over the scenes, pane 1 (E6)
   over the parts, the dial the pane last touched; a press (ENTER) on a scene selects it
-  (`scenes.select`), on a part toggles its mute (`parts.level`); EXIT drops the cursors, then goes
+  (`scenes.select`), on a part selects it (the Part screen, below); EXIT drops the cursors, then goes
   back. Keys: Left and Right move along the pane last touched, Up goes to the scenes, Down to the
   parts, Home and End the first and last, Page Up and Down are Previous and Next (as in the
-  Setlist), Return confirms, Escape cancels. Touch: a scene tile selects, M and S toggle, a fader
+  Setlist), Return confirms, Escape cancels. Touch: a scene tile selects, a tap on a strip's name
+  selects the part, M and S toggle (the one-press mute on the panel is gone: a press opens the part,
+  where mute is a row), a fader
   is touched or dragged (`parts.level`, `master.set`, sent each time it moves a hundredth).
 - **From the engine:** `graph.get` (the shell already asks it on each `graph.changed`; Play adds
   no request to it), `controls.changed` for levels and mutes moved live (subscribed on opening Play
@@ -246,11 +248,53 @@ opened from); Edit is the handover.
 - **Still handed over to the JUCE app**, from the "Edit, knob banks, Learn: Oscairn app" entry
   (the display goes to the Performance app, which opens on its own Play): the knob row and its
   banks (the Performance's controls or a part's, resolved through the panel's layers), Learn, the
-  Performance/part switch and bank button, selecting a part, Edit itself (the part pages, effects,
+  Performance/part switch and bank button, Edit itself (the part pages, effects,
   routing, saving), adding a scene (the "+ Scene" tile), the "No MIDI device" line with the
   on-screen keyboard, and Save. Not ported either: a part's pan and sends have no control in
-  Play (the JUCE Play has none), and meters past two channels show two bars.
+  Play (the JUCE Play has none; the Part screen has the pan), and meters past two channels show two bars.
 - **Not measured:** the 100 ms meter poll's cost on a unit, and its look at the FANTOM-07's scale.
+
+## Part
+
+`part.rs` and `slint/part.slint`: the JUCE Part page (PartsView.cpp, PartsModel.cpp's `partFields`)
+for one part, opened from Play by selecting it (a press on it, a tap on its name). Back returns to
+Play; Play's Cancel still goes to where Play was opened from.
+
+- **Settings** (a list with a border cursor, a view of as many rows as fit): Level (dB), Pan, Mute,
+  Solo; for a part that plays notes also "Plays from" (the devices, below), Lowest key, Highest
+  key, Transpose (+-24, as the JUCE slider), and the Sustain, Sostenuto and Soft pedal each: Every
+  pedal, None, or Its devices' pedals (the JUCE page has one setting for sustain and sostenuto
+  together; here the three are apart, as `receive` has them). A bus or an audio part has the first
+  four only. The last row hands over (below). Read only beside it: the sound (the first Instrument,
+  and the library Sound it came from, "edited" when changed), its engine (the plugin), where it
+  plays, its sends with their levels, its insert effects (each chain node but that instrument, "off"
+  when switched off). It shows what fits; a long chain is cut.
+- **Without touch:** any knob (E1, E6) or the dial moves the cursor; a press on a value starts
+  changing it (the row turns accent) and the dial then changes it, each step sent at once (level a
+  fiftieth of the fader's travel through the JUCE skew, pan 0.05, keys and transpose a semitone,
+  a pedal one choice); a press or Cancel ends the change. A press on Mute or Solo toggles it. A
+  press on "Plays from" opens the devices list (Any, Built in, All external, All USB, Network, then
+  each input of `session.status`), where a press ticks or unticks (Any clears), as the JUCE menu;
+  Cancel closes it. Cancel otherwise: ends a change, then drops the cursor, then goes back. Keys:
+  Up and Down move the cursor, Left and Right change the value, Return and Escape.
+- **Touch:** a tap on a row is a press; the - and + beside a value step it; Back at the top left.
+- **Requests:** only existing ones. `parts.level` (level and mute), `parts.pan`, `parts.solo`, and
+  `parts.input` for the devices, the first zone's keys and transpose and the `receive` of each
+  pedal, sent with the part's input as `graph.get` gave it and the one setting changed (a zone
+  that passes everything is dropped and the highest key never goes under the lowest, as the JUCE
+  `setZone`; a pedal at `all` is left out, as a save writes it). From the engine: `graph.get`
+  (the shell's), `controls.changed` while Play or Part is shown (one subscription across both),
+  `session.status` once on opening and its notifications (the inputs). A refusal is said and the
+  graph asked again. The note router does not yet deliver by `receive` (control-protocol.md), so
+  the pedal rows set what the file holds and are heard only once the engine core does.
+- **Still handed over** (the "Rename, sound, effects, sends: Oscairn app" row opens the JUCE
+  Performance app, which does not open on this part): the name (`parts.name` exists; the shell has
+  no text entry), choosing the sound, the chain's plugins and splits, where the part plays and its
+  send levels (`parts.output`, `parts.send` exist; not made here), MIDI out, input channel,
+  velocities, notes at once, reserve and priority.
+- **Missing from the engine:** nothing found that the JUCE page uses in process and has no
+  request: every setting above has one. (The sound picker and plugin insertion go through the
+  JUCE app's own scanner and library views, not tried here.)
 
 ## Adding a screen
 

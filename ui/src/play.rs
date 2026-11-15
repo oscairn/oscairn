@@ -7,8 +7,11 @@
 //! (subscribed only while this screen is shown), and the meters from `parts.meters`, asked every
 //! METER_INTERVAL while it is shown and never otherwise.
 //!
+//! Selecting a part (a press on it, a tap on its name) opens the Part screen (part.rs); mute and solo
+//! stay on the strip's M and S and on that screen.
+//!
 //! Not here, handed to the JUCE app from the screen's "Edit" entry: the knob row and its banks,
-//! Learn, selecting a part (Edit's part pages), adding a scene, the on-screen keyboard hint.
+//! Learn, Edit's other pages, adding a scene, the on-screen keyboard hint.
 
 use crate::nav::{Action, Cursor};
 use crate::setlist::update;
@@ -39,6 +42,8 @@ pub enum Outcome {
     Back,
     /// Previous (-1) or Next (1) of the setlist.
     Step(i64),
+    /// A part selected (a press on it): its Part screen.
+    Open(u32),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -57,12 +62,12 @@ pub struct Part {
 
 const NOTES: [&str; 12] = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
 
-fn note_name(n: i64) -> String {
+pub(crate) fn note_name(n: i64) -> String {
     if (0..=127).contains(&n) { format!("{}{}", NOTES[n as usize % 12], n / 12 - 1) } else { "–".into() }
 }
 
 /// The inputs a part takes notes from, as PartsModel.cpp's devicesName names them.
-fn devices_name(rules: &Value) -> String {
+pub(crate) fn devices_name(rules: &Value) -> String {
     let Some(rules) = rules.as_array().filter(|r| !r.is_empty()) else { return "Any device".into() };
     let names: Vec<String> = rules
         .iter()
@@ -91,7 +96,7 @@ fn devices_name(rules: &Value) -> String {
 }
 
 /// What kind of box a node is, as PartsModel.cpp's roleOf: "Instrument" is a part's sound.
-fn is_instrument(node: &Value) -> bool {
+pub(crate) fn is_instrument(node: &Value) -> bool {
     let channels = |key: &str| node[key].as_array().map_or(0, |p| p.iter().map(|p| p["channels"].as_u64().unwrap_or(0)).sum::<u64>());
     let (i, o) = (channels("audioInputs"), channels("audioOutputs"));
     let ni = node["noteInputs"].as_u64().unwrap_or(0);
@@ -99,7 +104,7 @@ fn is_instrument(node: &Value) -> bool {
 }
 
 /// The nodes of a chain in order, a split's lanes in place of it.
-fn chain_nodes(chain: &Value, splits: &Value, depth: usize, out: &mut Vec<u64>) {
+pub(crate) fn chain_nodes(chain: &Value, splits: &Value, depth: usize, out: &mut Vec<u64>) {
     for entry in chain.as_array().into_iter().flatten() {
         match entry.as_u64() {
             Some(node) => out.push(node),
@@ -169,7 +174,7 @@ pub fn fraction(level: f64, max: f64) -> f32 {
     (level / max).clamp(0., 1.).sqrt() as f32
 }
 
-fn level_at(fraction: f32, max: f64) -> f64 {
+pub(crate) fn level_at(fraction: f32, max: f64) -> f64 {
     ((max * (fraction as f64).powi(2)) * 1000.).round() / 1000.
 }
 
@@ -414,8 +419,8 @@ impl Screen {
                     }
                 }
                 _ => {
-                    if let Some(at) = self.part_cursor.at {
-                        self.toggle_mute(at);
+                    if let Some(p) = self.part_cursor.at.and_then(|at| self.parts.get(at)) {
+                        return Outcome::Open(p.id);
                     }
                 }
             },
@@ -440,6 +445,11 @@ impl Screen {
         self.scene_cursor = self.scene_cursor.clear();
         self.select_scene(i.max(0) as usize);
         self.show();
+    }
+
+    /// A tap on a strip's name: that part selected, its Part screen.
+    pub fn tap_open(&mut self, row: i32) -> Option<u32> {
+        self.parts.get(self.at(row)).map(|p| p.id)
     }
 
     pub fn tap_mute(&mut self, row: i32) {

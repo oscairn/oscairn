@@ -14,11 +14,12 @@
 use crate::client::{Client, Error, Event, BUSY};
 use crate::home::{self, Home};
 use crate::nav::{self, Action};
+use crate::part;
 use crate::play;
 use crate::profile::Profile;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, HomeState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, HomeState, PartState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -43,6 +44,7 @@ pub enum Request {
     View,
     Setlist(setlist::Request),
     Play(play::Request),
+    Part(part::Request),
 }
 
 impl Request {
@@ -80,6 +82,8 @@ pub enum Screen {
     Opening = 2,
     /// The Performance's scenes, parts and meters (play.rs).
     Play = 3,
+    /// One part's settings (part.rs), opened from Play.
+    Part = 4,
 }
 
 pub struct App {
@@ -104,6 +108,7 @@ pub struct App {
     totals: nav::Totals,
     setlist: setlist::Screen,
     play: play::Screen,
+    part: part::Screen,
     /// Where Play was opened from, which Cancel goes back to.
     play_from: Screen,
     /// Asks for the meters while Play is shown, and only then.
@@ -120,6 +125,11 @@ fn with_app(f: impl FnOnce(&mut App)) {
             f(app)
         }
     })
+}
+
+/// The screens that follow levels and mutes moved live (controls.changed).
+fn live(screen: Screen) -> bool {
+    matches!(screen, Screen::Play | Screen::Part)
 }
 
 fn level(m: Meter) -> i32 {
@@ -163,6 +173,19 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     play.on_held(|i, down| with_app(|a| a.on_play(|p| p.hold(i, down))));
     play.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
     play.on_edit(|| with_app(|a| a.hand_over(&home::APPS[0])));
+    play.on_part_tapped(|i| {
+        with_app(|a| {
+            let mut id = None;
+            a.on_play(|p| id = p.tap_open(i));
+            if let Some(id) = id {
+                a.open_part(id);
+            }
+        })
+    });
+    let part = ui.global::<PartState>();
+    part.on_tapped(|i| with_app(|a| a.part_act(|p| p.tap(i))));
+    part.on_step(|i, by| with_app(|a| a.on_part(|p| p.step_row(i, by))));
+    part.on_back(|| with_app(|a| a.go(Screen::Play)));
     // The JUCE Setlist app's own state file, so either opens where the other left off.
     let state = crate::settings::data_dir().map(|d| d.join("AppData/oscairn.setlist/state.json"));
     APP.with(|a| {
@@ -183,6 +206,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             totals: nav::Totals::default(),
             setlist: setlist::Screen::new(ui, state),
             play: play::Screen::new(ui),
+            part: part::Screen::new(ui),
             play_from: Screen::Home,
             meters: slint::Timer::default(),
             performance_id: String::new(),
@@ -293,7 +317,7 @@ impl App {
                 self.send(Request::Library(false), "library.query", json!({"kind": "performance", "limit": 1}));
                 self.send(Request::Library(true), "library.query", json!({"kind": "sound", "limit": 1}));
                 self.on_setlist(setlist::Screen::connected);
-                if self.screen == Screen::Play {
+                if live(self.screen) {
                     self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
                 }
             }
@@ -305,7 +329,10 @@ impl App {
             Event::Notification { method, params } => match method.as_str() {
                 "status" => self.status(&params),
                 "graph.changed" => self.ask_performance(),
-                "controls.changed" => self.on_play(|p| p.controls(&params)),
+                "controls.changed" => {
+                    self.on_play(|p| p.controls(&params));
+                    self.on_part(|p| p.controls(&params));
+                }
                 // Read always, so the totals stay current; acted on only by the screen shown, and
                 // by none while the display goes to the JUCE app (act drops them then).
                 "controllers" => {
@@ -327,6 +354,7 @@ impl App {
 
     /// The meters, at most every METER_INTERVAL: the CPU from this status, RAM and the tempo asked.
     fn status(&mut self, status: &Value) {
+        self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
         let now = Instant::now();
         if self.last_meters.is_some_and(|t| now.duration_since(t) < METER_INTERVAL) {
             return;
@@ -348,6 +376,12 @@ impl App {
         let request = match request {
             Request::Setlist(r) => return self.on_setlist(|s| s.reply(r, result)),
             Request::Play(r) => return self.on_play(|p| p.reply(r, result)),
+            Request::Part(r) => {
+                if self.on_part(|p| p.reply(r, result)) {
+                    self.ask_performance();
+                }
+                return;
+            }
             other => other,
         };
         let r = match result {
@@ -372,6 +406,7 @@ impl App {
             }
             Request::Graph => {
                 self.on_play(|p| p.graph(&r));
+                self.on_part(|p| p.graph(&r));
                 self.show(|s| s.scene = topbar::scene(&r))
             }
             Request::Transport => self.show(|s| s.tempo = topbar::tempo(&r)),
@@ -388,7 +423,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) | Request::Play(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) | Request::Play(_) | Request::Part(_) => {}
         }
     }
 
@@ -477,9 +512,11 @@ impl App {
                         self.go(from);
                     }
                     play::Outcome::Step(by) => self.on_setlist(|s| s.step_by(by)),
+                    play::Outcome::Open(id) => self.open_part(id),
                     play::Outcome::Stay => {}
                 }
             }
+            (Screen::Part, _) => self.part_act(|p| p.act(action)),
             (Screen::Setlist, _) => {
                 let mut back = false;
                 self.on_setlist(|s| back = s.act(action) == setlist::Outcome::Back);
@@ -525,6 +562,30 @@ impl App {
         }
     }
 
+    /// Something for the Part screen, then what it asks the engine sent.
+    fn on_part<R>(&mut self, f: impl FnOnce(&mut part::Screen) -> R) -> R {
+        let r = f(&mut self.part);
+        for (request, method, params) in std::mem::take(&mut self.part.out) {
+            self.send(Request::Part(request), method, params);
+        }
+        r
+    }
+
+    /// A navigation action or tap for the Part screen, and where it takes the shell.
+    fn part_act(&mut self, f: impl FnOnce(&mut part::Screen) -> part::Outcome) {
+        match self.on_part(f) {
+            part::Outcome::Back => self.go(Screen::Play),
+            part::Outcome::Handover => self.hand_over(&home::APPS[0]),
+            part::Outcome::Stay => {}
+        }
+    }
+
+    /// A part selected in Play: its settings.
+    fn open_part(&mut self, id: u32) {
+        self.part.open(id);
+        self.go(Screen::Part);
+    }
+
     /// Previous and Next show on Play while the Performance open is the setlist's slot playing.
     fn follow(&mut self) {
         let on = !self.performance_id.is_empty() && self.setlist.playing() == Some(self.performance_id.as_str());
@@ -549,9 +610,14 @@ impl App {
             if self.screen == Screen::Play {
                 self.play.hidden();
                 self.meters.stop();
+            }
+            if self.screen == Screen::Part {
+                self.on_part(part::Screen::hidden);
+            }
+            if live(self.screen) && !live(screen) {
                 self.send(Request::Subscribe, "unsubscribe", json!({"topics": ["controls.changed"]}));
             }
-            if screen == Screen::Play {
+            if screen == Screen::Play && self.screen != Screen::Part {
                 self.play_from = self.screen;
             }
         }
@@ -567,6 +633,7 @@ impl App {
                 Screen::Home => "Home".into(),
                 Screen::Setlist => "Setlist".into(),
                 Screen::Play => "Play".into(),
+                Screen::Part => "Part".into(),
                 Screen::Opening => ui.get_opening(),
             });
             bar.set_home_button(screen != Screen::Home);
@@ -574,9 +641,16 @@ impl App {
         if screen == Screen::Setlist {
             self.on_setlist(setlist::Screen::shown);
         }
-        if was != Screen::Play && screen == Screen::Play {
+        if !live(was) && live(screen) {
             // The first controls.changed after subscribing carries every level and mute.
             self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
+        }
+        if screen == Screen::Part {
+            self.ask_performance();
+            self.send(Request::Part(part::Request::Status), "session.status", json!({}));
+            self.on_part(part::Screen::shown);
+        }
+        if was != Screen::Play && screen == Screen::Play {
             self.ask_performance();
             self.follow();
             self.play.shown();

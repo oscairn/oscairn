@@ -10,6 +10,7 @@
 mod client;
 mod home;
 mod nav;
+mod part;
 mod play;
 mod profile;
 mod setlist;

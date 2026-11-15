@@ -40,6 +40,7 @@ export global PlayState {
     // How many part strips the screen holds besides the master: set by the screen.
     in-out property <int> strips-per-view: 1;
     callback scene-tapped(int);
+    callback part-tapped(int); // a strip's name: select the part
     callback mute-tapped(int);
     callback solo-tapped(int);
     callback level(int, float); // a strip's row (-1 the master) and the fader's new place
@@ -102,6 +103,7 @@ component Mark inherits Rectangle {
 component Strip inherits Rectangle {
     in property <StripData> data;
     in property <bool> is-master;
+    callback open-tapped();
     callback mute-tapped();
     callback solo-tapped();
     callback level(float);
@@ -132,6 +134,10 @@ component Strip inherits Rectangle {
             color: Theme.muted;
             font-size: Theme.small;
             overflow: elide;
+        }
+        if !root.is-master: TouchArea {
+            height: root.top - 4px;
+            clicked => { root.open-tapped(); }
         }
         // The fader and its meters as a pair, centered above the marks.
         fader := Rectangle {
@@ -275,6 +281,7 @@ export component Play inherits Rectangle {
         width: root.cell;
         height: root.strips-height;
         data: strip;
+        open-tapped => { PlayState.part-tapped(i); }
         mute-tapped => { PlayState.mute-tapped(i); }
         solo-tapped => { PlayState.solo-tapped(i); }
         level(f) => { PlayState.level(i, f); }

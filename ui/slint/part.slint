@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The Part screen (src/part.rs), the JUCE Part page's settings for one part: a list of settings on
+// the left (each its name and value; a cursor is a focus border, a value being changed with the
+// dial an accent one), what the part is made of on the right, read only.
+
+import { Theme } from "theme.slint";
+import { Button } from "setlist.slint";
+
+export struct SettingData {
+    label: string,
+    value: string,
+    kind: int, // 0 a value changed with the dial (and - +), 1 on or off, 2 an action, 3 a list
+    on: bool,
+    cursor: bool,
+    editing: bool,
+}
+
+export struct InfoLine {
+    head: bool,
+    text: string,
+}
+
+export global PartState {
+    in property <string> name;
+    in property <string> title; // what the list is while it is not the settings
+    in property <[SettingData]> rows;
+    in property <[InfoLine]> info;
+    in property <string> view;
+    in property <string> message;
+    // How many rows the screen holds: set by the screen.
+    in-out property <int> rows-per-view: 1;
+    callback tapped(int);
+    callback step(int, int); // a row and -1 or 1
+    callback back();
+}
+
+component Row inherits Rectangle {
+    in property <SettingData> data;
+    callback tapped();
+    callback step(int);
+    property <length> buttons: data.kind == 0 ? 2 * Theme.touch + 4px : 0px;
+    background: data.editing ? Theme.accent.transparentize(0.83) : Theme.surface;
+    border-radius: Theme.radius;
+    TouchArea {
+        clicked => { root.tapped(); }
+    }
+    Text {
+        x: 10px;
+        width: parent.width * 0.4 - 10px;
+        height: parent.height;
+        text: data.label;
+        color: Theme.text;
+        font-size: Theme.body;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Text {
+        x: parent.width * 0.4;
+        width: parent.width * 0.6 - 10px - root.buttons;
+        height: parent.height;
+        text: data.value;
+        color: data.editing || data.on ? Theme.accent : Theme.text;
+        font-size: Theme.body;
+        font-weight: 700;
+        overflow: elide;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+    if data.kind == 0: Button {
+        x: parent.width - 2 * Theme.touch - 4px;
+        width: Theme.touch;
+        height: parent.height;
+        text: "−";
+        clicked => { root.step(-1); }
+    }
+    if data.kind == 0: Button {
+        x: parent.width - Theme.touch;
+        width: Theme.touch;
+        height: parent.height;
+        text: "+";
+        clicked => { root.step(1); }
+    }
+    Rectangle {
+        border-radius: Theme.radius;
+        border-width: data.cursor ? 2px : 0px;
+        border-color: data.editing ? Theme.accent : Theme.focus;
+    }
+}
+
+export component Part inherits Rectangle {
+    property <length> header: Theme.touch;
+    property <length> footer: Theme.touch;
+    property <length> list-width: (self.width - 3 * Theme.margin) * 0.58;
+    property <length> list-y: Theme.margin + header + Theme.gap;
+    property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
+    property <int> per-view: max(1, floor((list-height + Theme.gap) / (Theme.touch + Theme.gap)));
+    changed per-view => { PartState.rows-per-view = per-view; }
+    init => { PartState.rows-per-view = per-view; }
+
+    Button {
+        x: Theme.margin;
+        y: Theme.margin;
+        width: 110px;
+        height: root.header;
+        text: "Back";
+        clicked => { PartState.back(); }
+    }
+    Text {
+        x: Theme.margin + 110px + 2 * Theme.gap;
+        y: Theme.margin;
+        width: root.width - 110px - 2 * Theme.margin - 2 * Theme.gap;
+        height: root.header;
+        text: PartState.title == "" ? PartState.name : PartState.name + " · " + PartState.title;
+        color: Theme.text;
+        font-size: Theme.title;
+        font-weight: 700;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    for row[i] in PartState.rows: Row {
+        x: Theme.margin;
+        y: root.list-y + i * (Theme.touch + Theme.gap);
+        width: root.list-width;
+        height: Theme.touch;
+        data: row;
+        tapped => { PartState.tapped(i); }
+        step(by) => { PartState.step(i, by); }
+    }
+    Rectangle {
+        x: 2 * Theme.margin + root.list-width;
+        y: root.list-y;
+        width: root.width - self.x - Theme.margin;
+        height: root.list-height;
+        background: Theme.surface;
+        border-radius: Theme.radius;
+        clip: true;
+        VerticalLayout {
+            x: 10px;
+            y: 8px;
+            width: parent.width - 20px;
+            height: parent.height - 16px;
+            alignment: start;
+            spacing: 3px;
+            for line in PartState.info: Text {
+                text: line.text;
+                color: line.head ? Theme.muted : Theme.text;
+                font-size: line.head ? Theme.small : Theme.body;
+                font-weight: line.head ? 700 : 400;
+                overflow: elide;
+            }
+        }
+    }
+    Text {
+        x: Theme.margin;
+        y: root.height - Theme.margin - root.footer;
+        width: root.width - 2 * Theme.margin;
+        height: root.footer;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: PartState.message == "" ? PartState.view : PartState.message + "   " + PartState.view;
+    }
+}

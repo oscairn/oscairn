@@ -252,7 +252,7 @@ impl Curve {
             1 => ((4.0 * x).exp() - 1.0) / (4f64.exp() - 1.0),
             2 => ((4f64.exp() - 1.0) * x).ln_1p() / 4.0,
             3 => x * x * (3.0 - 2.0 * x), // 2x is exact: fused or not, the same
-            4 if x > 0.0 => std::hint::black_box(10f64).powf((self.high - self.low).mul_add(x, self.low) / 20.0),
+            4 if x > 0.0 => ((self.high - self.low).mul_add(x, self.low) / 20.0 * std::f64::consts::LN_10).exp(),
             4 => 0.0,
             5 => x.powf(self.exponent),
             _ => x,

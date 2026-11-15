@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <numbers>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -605,8 +606,8 @@ namespace oscairn
         case Kind::Exponential: return ( std::exp( 4 * x ) - 1 ) / ( std::exp( 4.0 ) - 1 );
         case Kind::Logarithmic: return std::log1p( ( std::exp( 4.0 ) - 1 ) * x ) / 4;
         case Kind::SCurve: return x * x * ( 3 - 2 * x );
-        // The base is opaque so the optimizer keeps pow (it would turn pow( 10, y ) into exp10, which rounds differently, at -O1 and up only); the Rust run does the same.
-        case Kind::Db: { static volatile double ten = 10.0; return x > 0 ? std::pow( ten, std::fma( high - low, x, low ) / 20 ) : 0; }
+        // exp, not pow( 10, y ): clang turns that into exp10 from -O1 up, which rounds differently from pow; the Rust run does the same sum.
+        case Kind::Db: return x > 0 ? std::exp( std::fma( high - low, x, low ) / 20 * std::numbers::ln10 ) : 0;
         case Kind::Power: return std::pow( x, exponent );
         }
         return x;

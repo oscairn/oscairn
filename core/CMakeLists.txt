@@ -108,6 +108,9 @@ add_custom_target(oscairn_engine_core_build ${engine_core_cmds} BYPRODUCTS ${eng
 add_library(oscairn_engine_core STATIC IMPORTED GLOBAL)
 set_target_properties(oscairn_engine_core PROPERTIES IMPORTED_LOCATION "${engine_core_lib}")
 add_dependencies(oscairn_engine_core oscairn_engine_core_build)
+# The staticlib holds the Rust CLAP host, which calls C symbols of kick_clap_host (Bridge.cpp, WindowBridge.cpp). A GNU linker reads archives
+# once, in order, so kick_clap_host must come after this library in every consumer's link line; this edge makes CMake put it there.
+set_target_properties(oscairn_engine_core PROPERTIES INTERFACE_LINK_LIBRARIES kick_clap_host)
 
 add_library(oscairn_engine STATIC
     engine/src/audio_cpp.cpp

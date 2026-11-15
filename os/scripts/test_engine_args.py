@@ -62,3 +62,6 @@ out = subprocess.run(["/bin/sh", "-c", script + '\neval "set -- $OSCAIRN_ENGINE_
                      capture_output=True, text=True, check=True).stdout.splitlines()
 assert out == engine.engine_args(mapped), out
 print("ok: the headless engine's options match the app's; no screen is headless")
+assert engine.settings(fantom)["OSCAIRN_WORKERS"] == "" and engine.settings(fantom)["OSCAIRN_WORKER_AUDIO_CORES"] == "", "the FANTOM-07: no grouping policy, one core list"
+split = {"compute": {"workers": "chain", "engineAudioCores": [3], "workerAudioCores": [0, 1, 2]}}
+assert engine.settings(split)["OSCAIRN_WORKERS"] == "chain" and engine.settings(split)["OSCAIRN_ENGINE_AUDIO_CORES"] == "3" and engine.settings(split)["OSCAIRN_WORKER_AUDIO_CORES"] == "0,1,2", "workers and the two core lists"

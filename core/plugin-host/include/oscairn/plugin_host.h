@@ -160,6 +160,8 @@ namespace oscairn
         // keeps a lane for: its worker's (a plugin host's, shared by every plugin in it); null, one lane
         // for them all, for plugins rendering in the engine's process. Main thread.
         virtual const void* lane() const noexcept { return nullptr; }
+        // The process ID of the worker it plays in (0: none, or in the engine's process, or the worker down). Main thread.
+        virtual long workerPid() const { return 0; }
         // RFC 0045's plugin groups: nodes of one worker process handed their blocks together and rendered there in one
         // round trip, a node's input mixed in the worker from the others' outputs. groupable: a worker node, which can.
         // handed: audio thread, a block started and not yet finished. startGrouped: startProcess for a node whose
@@ -324,6 +326,10 @@ namespace oscairn
         // makes least (setPluginCost); 0: a worker of its own for each plugin instance (RFC 0010). The
         // memory limit is then each host's. Offline rendering always has workers of their own.
         uint32_t hosts = 0;
+        // RFC 0045's plugin groups, `chain` (with no hosts): each placement group (PlacementScope) a worker process of
+        // its own, shared by nothing else and gone with its last plugin; with hosts, a group is never split over them
+        // and a group placed alone takes a host no other group shares while there are hosts enough.
+        bool chain = false;
         // Plugin IDs given a worker of their own all the same, as without hosts, and publishers (an entry ending in
         // ".*", "com.example.*": every ID starting "com.example."); a plugin whose crash or hang took a shared host
         // down joins them for the rest of the engine's life.
@@ -334,8 +340,31 @@ namespace oscairn
     // a loaded plugin's preset listing reads through (empty: a worker's plugin lists none);
     // OSCAIRN_PLUGIN_HOSTS the plugin hosts (a whole number, 0 to 64) and OSCAIRN_OWN_HOST the plugins
     // given workers of their own (IDs separated by commas).
+    // OSCAIRN_WORKERS: plugin (a worker per instance, hosts 0), chain (a worker per group), pool (OSCAIRN_PLUGIN_HOSTS
+    // hosts, 3 if unset); unset: OSCAIRN_PLUGIN_HOSTS alone, as before.
     void setPlacementPolicy(PlacementPolicy);
     const PlacementPolicy& placementPolicy();
+    // RFC 0045's plugin groups: the group the plugins loaded on this thread while it lives belong to (key; empty: none),
+    // and whether it is a part's instrument or another plugin no audio reaches from a plugin (alone), which `pool` keeps
+    // apart from the others while it has hosts enough. Placement only: what plays where is the plan's (Graph).
+    struct PlacementGroup { std::string key; bool alone = false; };
+    class PlacementScope
+    {
+    public:
+        explicit PlacementScope(PlacementGroup group);
+        ~PlacementScope();
+        PlacementScope(const PlacementScope&) = delete;
+        PlacementScope& operator=(const PlacementScope&) = delete;
+    private:
+        PlacementGroup previous_;
+    };
+    const PlacementGroup& placementGroup() noexcept; // this thread's
+    // The groups for a graph's nodes from its audio connections (from, to; a source not among the nodes is outside),
+    // by the rule the plan compiler groups by (Graph's compile): a node no plugin's audio reaches is alone; one whose
+    // audio all comes from one group that is not alone joins it; any other heads a group of its own. Keys are the
+    // group's first node, prefixed. Nodes in any order; a cycle's nodes head their own.
+    std::map<std::string, PlacementGroup> placementGroups(const std::vector<std::string>& nodes, const std::vector<std::pair<std::string, std::string>>& audio,
+                                                          const std::string& prefix);
     std::shared_ptr<PluginHost> loadPluginInWorker(const std::string& program, const std::string& path, const std::string& pluginId,
                                                    double sampleRate, uint32_t maxFrames, ProcessingMode mode = ProcessingMode::Realtime, uint64_t memoryLimit = 0,
                                                    uint64_t memoryRoom = 0);

@@ -116,6 +116,9 @@ namespace oscairn
             // RFC 0045: one of the pool's plugin hosts, holding the plugins placed in it (else a worker of one
             // plugin's own); its doorbell, which its audio thread sleeps on, kept across restarts.
             bool pooled = false;
+            int slot = -1; // a `chain` or `pool` process's number, its core among the workers' audio cores (audioThreadMask); -1: none
+            static inline std::atomic<int> slots{0};
+            bool alone = false; // a pool's host holding a group placed alone (RFC 0045's plugin groups); under the pool's mutex
             int bellFd = -1; Doorbell* bell = nullptr;
             // The worker's index of the node a crash or hang is put down to (UINT32_MAX: none), read as it failed.
             uint32_t blamed = UINT32_MAX; // under failureMutex
@@ -257,7 +260,7 @@ namespace oscairn
                 posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
                 posix_spawn_file_actions_adddup2(&actions, pair[1], 3);
                 // The policy's memory limit also goes to the worker, which on Linux makes it an address-space backstop.
-                std::string fd = "3", limit = std::to_string(policyLimit); char* argv[]{program.data(), fd.data(), limit.data(), nullptr};
+                std::string fd = "3", limit = std::to_string(policyLimit), place = std::to_string(slot); char* argv[]{program.data(), fd.data(), limit.data(), place.data(), nullptr};
                 const int spawned = posix_spawn(&pid, program.c_str(), &actions, nullptr, argv, environ);
                 posix_spawn_file_actions_destroy(&actions);
                 close(pair[1]);
@@ -963,6 +966,7 @@ namespace oscairn
             bool eventsKept() const noexcept override { return extra_ ? playedKept_ : kept_; }
             bool oneBlockLate() const noexcept override { return extra_; }
             const void* lane() const noexcept override { return proc_; } // the worker process's audio thread, shared in a plugin host
+            long workerPid() const override { auto* p = process(); std::lock_guard control(p->control); return p->reaped ? 0 : long(p->pid); }
             double parameterValue(clap_id id) const noexcept override
             {
                 const auto i = index_.find(id);
@@ -2123,23 +2127,67 @@ namespace oscairn
             }
             // The host for one more instance: a new one while there are fewer than the policy's, else the
             // one that costs least (then holds fewest nodes); null when every one is restarting or given up.
-            std::shared_ptr<Process> pick(const std::string& program, double rate, uint32_t frames, uint64_t limit, uint32_t count)
+            // RFC 0045's plugin groups: each group's process, while it holds the group's plugins.
+            std::map<std::string, std::weak_ptr<Process>> groups;
+            std::shared_ptr<Process> grouped(const PlacementGroup& group, const std::string& program, double rate, uint32_t frames, uint64_t limit) // under mutex
+            {
+                if(group.key.empty()) return nullptr;
+                std::erase_if(groups, [](const auto& g) { return g.second.expired(); });
+                const auto g = groups.find(group.key);
+                auto p = g == groups.end() ? nullptr : g->second.lock();
+                return p && !p->failed.load() && !p->gaveUp.load() && p->program == program && p->frames == frames && p->policyLimit == limit && p->currentRate.load() == rate ? p : nullptr;
+            }
+            // `chain`: the group's own process, made for its first plugin and gone with its last.
+            std::shared_ptr<Process> chain(const PlacementGroup& group, const std::string& program, double rate, uint32_t frames, uint64_t limit)
+            {
+                std::unique_lock lock(mutex);
+                if(auto p = grouped(group, program, rate, frames, limit)) return p;
+                auto p = std::make_shared<Process>(program, rate, frames, ProcessingMode::Realtime, limit);
+                p->pooled = true; p->slot = Process::slots.fetch_add(1);
+                std::unique_lock control(p->control);
+                groups[group.key] = p;
+                lock.unlock();
+                try { p->start(); }
+                catch(...) { p->failed.store(true); control.unlock(); std::lock_guard again(mutex); groups.erase(group.key); throw; }
+                control.unlock();
+                p->supervisor = ServiceThread([q = p.get()] { q->supervise(); });
+                track(p);
+                return p;
+            }
+            std::shared_ptr<Process> pick(const std::string& program, double rate, uint32_t frames, uint64_t limit, uint32_t count, const PlacementGroup& group = {})
             {
                 std::unique_lock lock(mutex);
                 std::erase_if(hosts, [](const auto& p) { return p->gaveUp.load(); }); // its nodes keep it; a new host takes its place
+                if(auto p = grouped(group, program, rate, frames, limit)) return p; // a group is never split over hosts
+                // A group placed alone takes a new host while there are fewer than the policy's; the others pass over such a
+                // host while one not alone is there.
+                // Hosts stay when their plugins go: an empty one holds no group, alone or not.
+                auto size = [](Process& p) { std::lock_guard nodes(p.nodesMutex); return p.nodes.size(); };
+                for(const auto& p : hosts) if(!size(*p)) p->alone = false;
                 std::shared_ptr<Process> best; double least = 0; size_t fewest = 0, matching = 0;
+                auto usable = [&](const Process& p) { return p.program == program && p.frames == frames && p.policyLimit == limit && p.currentRate.load() == rate; };
+                bool others = false;
+                for(size_t k = 0, seen = 0; k < hosts.size() && seen < count; ++k) if(usable(*hosts[k])) { ++seen; others = others || (!hosts[k]->alone && !hosts[k]->failed.load()); }
                 for(const auto& p : hosts)
                 {
-                    if(p->program != program || p->frames != frames || p->policyLimit != limit || p->currentRate.load() != rate) continue;
+                    if(!usable(*p) || matching >= count) continue; // past the policy's count (a policy changed while hosts stay): unused
                     ++matching;
-                    if(p->failed.load()) continue;
+                    if(p->failed.load() || (!group.alone && others && p->alone)) continue;
                     const double c = cost(*p);
-                    const size_t n = [&] { std::lock_guard nodes(p->nodesMutex); return p->nodes.size(); }();
-                    if(!best || c < least || (c == least && n < fewest)) { best = p; least = c; fewest = n; }
+                    const size_t n = size(*p);
+                    // Alone: an empty host first, then the cheapest; the others: the cheapest.
+                    const bool better = !best || (group.alone && (n == 0) != (fewest == 0) ? n == 0 : c < least || (c == least && n < fewest));
+                    if(better) { best = p; least = c; fewest = n; }
                 }
-                if(matching >= count) return best;
+                if(matching >= count)
+                {
+                    if(best && group.alone && !fewest && others) best->alone = true; // empty and others left for the rest
+                    if(best && !group.key.empty()) groups[group.key] = best;
+                    return best;
+                }
                 auto p = std::make_shared<Process>(program, rate, frames, ProcessingMode::Realtime, limit);
-                p->pooled = true;
+                p->pooled = true; p->alone = group.alone; p->slot = Process::slots.fetch_add(1);
+                if(!group.key.empty()) groups[group.key] = p;
                 // Listed before it starts, and started without the pool's lock (a process start, its first reply): a pick
                 // meanwhile may choose it, and waits for the start on its control.
                 std::unique_lock control(p->control);
@@ -2213,8 +2261,10 @@ namespace oscairn
     {
         // RFC 0045: in real time, with plugin hosts, into the pool's host that costs least.
         std::shared_ptr<Process> process;
-        if(const auto& policy = placementPolicy(); mode == ProcessingMode::Realtime && policy.hosts && !pool().own(id, policy))
-            process = pool().pick(program, sampleRate, maxFrames, memoryLimit, policy.hosts);
+        // With `chain` (RFC 0045's plugin groups), into its placement group's own process.
+        if(const auto& policy = placementPolicy(); mode == ProcessingMode::Realtime && (policy.hosts || policy.chain) && !pool().own(id, policy))
+            process = policy.hosts ? pool().pick(program, sampleRate, maxFrames, memoryLimit, policy.hosts, placementGroup())
+                    : placementGroup().key.empty() ? nullptr : pool().chain(placementGroup(), program, sampleRate, maxFrames, memoryLimit);
         if(process && [&] { std::lock_guard lock(process->control); return process->failed.load(); }())
             process = nullptr; // a host that failed since it was picked: a worker of its own instead
         const bool pooled = process != nullptr;

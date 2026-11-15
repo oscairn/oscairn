@@ -82,6 +82,23 @@
           "minimum": 0,
           "maximum": 64
         },
+        "workers": {
+          "type": "string",
+          "enum": ["plugin", "chain", "pool"],
+          "description": "how plugins share worker processes (RFC 0045's plugin groups): plugin, a worker per plugin instance; chain, a worker per group (a part's instrument alone, its inserts together, each bus and the master their own), each group rendered in one round trip; pool, the groups packed into pluginHosts processes (3 if absent) by measured cost, never split, a part's instrument alone while there are hosts enough; omitted: as pluginHosts says. ownHost wins over every one"
+        },
+        "engineAudioCores": {
+          "type": "array",
+          "description": "the cores the engine's audio thread and its helpers keep to, in place of audioThreadCores",
+          "items": { "type": "integer", "minimum": 0, "maximum": 63 },
+          "maxItems": 64
+        },
+        "workerAudioCores": {
+          "type": "array",
+          "description": "the cores workers' audio threads keep to, in place of audioThreadCores; with workers chain or pool, each worker process one of them, round-robin",
+          "items": { "type": "integer", "minimum": 0, "maximum": 63 },
+          "maxItems": 64
+        },
         "ownHost": {
           "type": "array",
           "description": "plugin IDs given a worker of their own with plugin hosts all the same, or publishers by an entry ending in .* (com.example.*: every ID starting com.example.) (RFC 0045)",

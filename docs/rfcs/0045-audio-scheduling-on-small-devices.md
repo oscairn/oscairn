@@ -65,8 +65,10 @@ Checked when built and tested; the sections below say how.
 - [ ] 13. Plugin groups: a worker carries one or more plugins, the profile decides how many processes ([plugin groups](#plugin-groups-2026-11-15))
   - [x] 13a. Nodes of one worker process whose audio flows between them rendered there in one round trip, any routing, sample for sample as apart
   - [x] 13b. A publisher on the own-host list (`com.example.*`): its plugins always in workers of their own
-  - [ ] 13c. `compute.workers` `chain`: a part's chain placed in one process as it loads
-  - [ ] 13d. Pool placement by chain (a heavy instrument alone), so the spin applies; measured on the unit
+  - [x] 13c. `compute.workers` `chain`: a part's chain placed in one process as it loads
+  - [x] 13d. Pool placement by group (a part's instrument alone while hosts allow, a group never split); `pool` 1 tested
+  - [x] 13e. The engine's audio thread and the workers' their own core lists; with `chain` or `pool` a core per process
+  - [ ] 13f. Measured on the unit (Sick tines under each policy and core layout)
 
 ## Problem
 
@@ -1474,9 +1476,75 @@ silence): a worker each 401 to 913 / 448 to 682 us; one plugin host with groups 
 to 409 us (21 of 22 nodes in one round trip), without 644 to 698 / 703 to 773 us; three hosts 670
 to 741 us either way, as cost placement scattered every chain over them and no group formed.
 
-Not built: placing a part's chain in one process as it loads (`chain`), and pool placement by
-chain; without them groups form only where placement happened to put a chain together (three
-hosts by cost: none).
+#### Placement by group (2026-11-15)
+
+Groups form only where their nodes share a process, so placement decides them. The unit of
+placement is the group, decided before anything loads: as a Session opens a Performance
+(`addNodes`), `placementGroups` reads the document's audio wires by the same rule the plan
+compiler groups by (a node no plugin's audio reaches is alone: a part's instrument or a shared
+instance; one whose audio all comes from one group that is not alone joins it; any other heads
+its own: a part's first insert, a bus, the master) and each plugin loads under its group
+(`PlacementScope`). A Performance's open time did not change (`control-performance-switch-workers`,
+the cold open 22 to 25 ms on main and on this branch, 23 to 30 with `chain`, two runs each, in the
+container). Instances reused from the Performance playing or kept warm stay where they are.
+
+The policy, `compute.workers` (`OSCAIRN_WORKERS`), engine-independent of the device:
+
+- `plugin` (the default where the profile says nothing, and `compute.pluginHosts` 0): a worker per
+  plugin instance, as before; nothing groups.
+- `chain`: a worker per group, made with its first plugin and gone with its last. A part's
+  instrument alone, its inserts one process and one round trip, each bus and the master their own;
+  parts stay isolated from each other and instruments from effects. Sick tines: 7 processes and 3
+  waves in place of 22 workers.
+- `pool` with `compute.pluginHosts` N (3 if absent; `pluginHosts` alone still means `pool`): at most
+  N hosts, a group never split over them, placed by measured cost, a group placed alone (an
+  instrument) taking a host of its own while there are hosts enough.
+- `pool` 1: every plugin of the Performance in one process, for the smallest devices. Its whole
+  graph becomes as few round trips as the rule allows (Sick tines and the 22-plugin shape: one after
+  the first node's). What a device gives up: no parallel rendering over cores (one audio thread
+  renders everything), one crash silences every part until the host restarts (each plugin restored),
+  and one slow plugin delays all. Hosting plugins in the engine's process (no worker,
+  `OSCAIRN_PLUGIN_WORKER` empty) would save the last round trip and the host's memory on a
+  single-core device, but a plugin's crash then ends the engine and its hang stalls the audio
+  thread with nothing to give up on it: against the owner's isolation rule, so not a profile choice.
+
+The own-host list (`compute.ownHost`, by ID or publisher) wins over every policy. With
+`compute.engineAudioCores` and `compute.workerAudioCores` (`OSCAIRN_ENGINE_AUDIO_CORES`,
+`OSCAIRN_WORKER_AUDIO_CORES`; each in place of `audioThreadCores` for its side) the engine's audio
+thread and helpers keep to one list and workers to the other, and with `chain` or `pool` each worker
+process takes one core of its list, round-robin, so groups of different parts land on different
+cores (the unit, unpinned, piled nine workers on two cores and left one nearly empty).
+
+Two parts using the same effect:
+
+1. Each part its own insert of one plugin (its own settings): two instances, each in its part's
+   group, so under `chain` each in its part's process, run in its part's round trip; code pages are
+   shared by the system, each instance's state is its own as before.
+2. One effect as a send or bus fed by several parts: one instance, the head of its own group (its
+   audio comes from several groups), its own process under `chain`, one round trip a block.
+3. Effect contexts (`oscairn.effect-contexts`, RFC 0007: several logical effects on one engine,
+   each with its own parameters, state and history; of the shipped plugins only the Delay offers
+   it): a Session makes one only when a document saved one (`engine` naming another node) or on
+   `effects.create`; inserts of different parts never share one instance on their own. Nodes on one
+   engine never render in one wave (the compiler's existing rule), so five chains each holding a
+   context of one instance would break at it: the contexts in five waves one after another, each
+   chain's nodes after its context a group of their own. In one process the worker renders serially
+   anyway, so a later step can let a group take a context of an engine all of whose nodes are in
+   that process; not built. For the five-chain shape, separate instances keep five processes and
+   five parallel round trips, one wave; one multi-context instance forces the five chains into one
+   process and five waves. The memory saved is the instance's overhead only (each context keeps its
+   history: the Delay's two seconds of stereo float, 768 KiB, either way), and each block touches the
+   same per-context state. So the default stays an instance per insert; contexts where a document
+   asks for them.
+
+Tested (`plugin-groups-rest-*`, with the Basic Synth): under `chain`, `pool` 3 and `pool` 1, Sick
+tines' shape (a shared Basic Synth over five buses, five four-deep chains, each tail into the master
+with its level, pan and two sends summed per channel, as a Session compiles the three wires), two
+instruments sharing an effect bus and the 22-plugin shape render sample for sample as under
+`plugin`; which nodes share a process (`lane`) and a round trip (`grouped`) is checked for each;
+`pool` 1 with the instruments on the own-host list keeps them apart and the rest in one process;
+under `chain` one part's process killed while a note is held silences that part alone and it comes
+back (as under `plugin`, with KILL_PLUGIN set); the core lists' parsing.
 
 ## The device A/B plan
 

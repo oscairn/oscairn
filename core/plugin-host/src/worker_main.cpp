@@ -2,6 +2,7 @@
 // oscairn-plugin-worker FD [MEMORY_LIMIT]: hosts one plugin for an engine connected on socket FD (RFC 0010).
 #include "Worker.h"
 #include "oscairn/plugin_host.h"
+#include "oscairn/realtime.h"
 #include <algorithm>
 #include <cstdio>
 #include <csignal>
@@ -18,7 +19,8 @@
 int main(int argc, char** argv)
 {
     oscairn::ignoreTickSignal();
-    if(argc != 2 && argc != 3) return 2;
+    if(argc < 2 || argc > 4) return 2;
+    oscairn::worker::setWorkerSlot(argc == 4 ? std::atoi(argv[3]) : -1); // RFC 0045: its slot over the workers' audio cores
     std::signal(SIGPIPE, SIG_IGN);
 #if defined(__linux__) && !defined(OSCAIRN_SANITIZED)
     // The engine's supervisor enforces the memory limit on resident memory; Linux also enforces

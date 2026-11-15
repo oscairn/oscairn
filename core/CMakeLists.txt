@@ -645,7 +645,7 @@ foreach(rest IN ITEMS disabled all 0)
     if(NOT rest STREQUAL "disabled")
         set(groups_env "KICK_FIXTURE_EFFECT_SLEEP=1;OSCAIRN_WORKER_REST=${rest}")
     endif()
-    add_test(NAME plugin-groups-rest-${rest} COMMAND oscairn-plugin-groups-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>)
+    add_test(NAME plugin-groups-rest-${rest} COMMAND oscairn-plugin-groups-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>)
     set_tests_properties(plugin-groups-rest-${rest} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE ENVIRONMENT "${groups_env}")
 endforeach()
 

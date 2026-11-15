@@ -1618,11 +1618,23 @@ std::map<std::string,NodeId> Session::addNodes(const json_value_s* document,cons
             std::none_of(outs.begin(),outs.end(),[&](V p){return integer(field(p,"id"))==integer(field(w,"fromPort")) && (integer(field(p,"flags"))&CLAP_AUDIO_PORT_IS_MAIN);}))return true;
         return false;};
     auto unique=[&](const std::string& name){return name.empty()?name:nextFree(name,[&](const std::string& n){return std::any_of(nodes_.begin(),nodes_.end(),[&](const auto& x){return x.second==n;});});};
+    // RFC 0045's plugin groups: each plugin placed with those its audio would be rendered with, decided from the document
+    // before any loads (a part's instrument alone, its inserts together, each bus and the master their own), so a
+    // policy grouping them (compute.workers) puts them in one process; each load of a document its own groups.
+    std::map<std::string,PlacementGroup> placed;
+    {
+        static std::atomic<uint64_t> loads{0};
+        std::vector<std::string> keys;std::vector<std::pair<std::string,std::string>> audio;
+        for(auto node:nodes)keys.push_back(text(field(node,"key")));
+        for(auto w:wireList)if(text(field(w,"kind"))=="audio")audio.emplace_back(text(field(w,"from")),text(field(w,"to")));
+        placed=placementGroups(keys,audio,"load-"+std::to_string(++loads)+"/");
+    }
     try{
         for(bool siblings:{false,true})for(auto node:nodes){
             if(!wanted(node))continue;
             fields(node,{"key","name","plugin","engine","inputs","outputs","noteInputs","noteOutputs","assets","enabled","role","sound"});
             const auto key=text(field(node,"key")),engine=text(field(node,"engine"));if((key!=engine)!=siblings)continue;
+            const PlacementScope placement(placed[key]);
             if(key.size()<6 || key.size()>12 || key.substr(0,5)!="node-" || ids.count(key))bad("invalid or duplicate node key");
             const auto plugin=field(node,"plugin");fields(plugin,{"format","id","version","pathHint"});
             const auto id=text(field(plugin,"id")),name=text(field(node,"name"));

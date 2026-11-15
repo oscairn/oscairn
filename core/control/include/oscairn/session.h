@@ -314,7 +314,8 @@ namespace oscairn
         /// The same for a device panel's own control, by identity ("fader:1"), from any thread but
         /// the audio thread (a device's reader, devices/); false when it played nothing. The
         /// transport's buttons come by their function's name: "play" pressed starts the transport,
-        /// "stop" pressed stops it.
+        /// "stop" pressed stops it (a take recording goes on), "record" pressed starts a take, or
+        /// ends the one recording, as the apps' record button.
         bool controllerControl( const std::string& control, ControlInput input ) noexcept;
         /// The same, for a control the device's map gives a list navigation: with the screen showing
         /// lists (ControlView::lists) it navigates and plays nothing; otherwise it plays what it is
@@ -892,6 +893,7 @@ namespace oscairn
         mutable uint32_t nextFound_ = 1u << 24; // apart from this run's own numbers
         Transport::ClockSource following_ = Transport::ClockSource::Internal;
         std::atomic<bool> playing_{ false };
+        std::atomic<bool> recordPressed_{ false }; // a "record" press since the last service: toggle a take
         std::atomic<bool> stopped_{ false }; // setPlaying(false) since the last service: note effects to stop
         StopNoteEffects stopPolicy_ = StopNoteEffects::Release;
         void stopNoteEffects();

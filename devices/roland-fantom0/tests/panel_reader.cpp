@@ -140,6 +140,7 @@ namespace
             check(nav({0xA2, 62, 0, 0})->action == Navigation::Action::Confirm && nav({0xA2, 62, 0, 0})->pane == -1 && nav({0xA2, 55, 0, 0})->action == Navigation::Action::Cancel, "ENTER confirms and EXIT cancels");
             check(nav({0xA2, 58, 0, 0})->steps == 1 && nav({0xA2, 59, 0, 0})->steps == -1 && !nav({0x81, 58, 0, 0}) && !nav({0x81, 62, 0, 0}), "INC and DEC move by one a press, a release does nothing");
             check(!nav({0xA2, 60, 0, 0}) && !nav({0xA2, 17, 0, 0}), "CURSOR LEFT and PLAY have none");
+            check(decode(fantom, {0xA2, 18, 0, 0}).control == "record", "the FANTOM's REC button is the record function");
         }
         // Another device: different names and counts, one jog dial and two buttons, four knobs for four panes, an OK and a BACK.
         // Nothing in the app names a control; this map is all a device needs.
@@ -154,13 +155,15 @@ namespace
                 {"kind": "switch", "id": 21, "control": "down", "navigate": {"action": "move", "steps": 4}},
                 {"kind": "switch", "id": 22, "control": "ok", "navigate": {"action": "confirm"}},
                 {"kind": "switch", "id": 23, "control": "back", "navigate": {"action": "cancel"}},
-                {"kind": "switch", "id": 24, "control": "pad:1"})"));
+                {"kind": "switch", "id": 24, "control": "pad:1"},
+                {"kind": "switch", "id": 25, "control": "record"})"));
             auto nav = [&](std::array<uint8_t, 4> m) { return decode(other, m).navigation; };
             check(nav({0x80, 1, 0x7F, 0}) && nav({0x80, 1, 0x7F, 0})->steps == -1 && nav({0x80, 1, 5, 0})->steps == 5 && nav({0x80, 1, 5, 0})->pane == -1, "a jog dial's turns move the focused list");
             check(nav({0x80, 13, 2, 0})->pane == 3 && nav({0x80, 12, 2, 0})->pane == 2 && nav({0x80, 10, 1, 0})->pane == 0, "four knobs, four panes");
             check(nav({0x80, 11, 3, 0})->steps == -3, "a knob that turns the wrong way has a negative step, in the map");
             check(nav({0x82, 20, 0, 0})->steps == -1 && nav({0x82, 21, 0, 0})->steps == 4, "buttons that move by the steps the map gives");
             check(nav({0x82, 22, 0, 0})->action == Navigation::Action::Confirm && nav({0x82, 23, 0, 0})->action == Navigation::Action::Cancel && !nav({0x82, 24, 0, 0}), "OK confirms, BACK cancels");
+            check(decode(other, {0x82, 25, 0, 0}).control == "record", "any button can be the record button: the map names it");
             check(refused(mapJson(R"({"kind": "analog", "id": 1, "control": "slider:1", "navigate": {"action": "move"}})")), "an absolute control cannot navigate");
             check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "confirm"}})")), "an encoder only moves");
             check(refused(mapJson(R"({"kind": "encoder", "id": 1, "control": "jog", "navigate": {"action": "move", "steps": 2}})")), "steps are a switch's");

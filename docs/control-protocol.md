@@ -1134,6 +1134,9 @@ clock reading before 2026-11-01), by a take number the device never gives twice 
   `-32007` `memory` and the buffer there is kept; `busy` while a take recording reads it.
 - `record.stop` takes `{take}` and returns `{"accepted":true}`; the take ends at the next block
   and its files close after. `-32602` for a take that is not recording.
+  A device's record button (a panel control whose map function is `record`) does the same as the
+  apps' button: a press starts a take with `record.start`'s defaults, or ends the one recording.
+  The transport's stop never ends a take. `record.get`'s `recording` is the state a UI reads.
 - `record.takes` (`{}`) returns `{takes}`, this engine run's takes and the closed ones found in
   `recordings/` (numbered as found), oldest first by folder name, each
   `{take,state,folder,files,start,frames,sampleRate,overruns,droppedNotes,behind,playing,error}`.

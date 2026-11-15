@@ -113,6 +113,36 @@ namespace
         return true;
     }
 
+    // The panel's record button (a control named "record"): a press starts a take as the apps' button does, STOP in
+    // between leaves it recording, the next press ends it, and a release does nothing.
+    void recordButton(const char* synth)
+    {
+        Session s(48000, 256);
+        const auto node = s.add("synth", synth);
+        s.insertIntoPart(s.addPart("Lead"), 0, node);
+        s.commit();
+        Render render(s, false);
+        using Kind = ControlInput::Kind;
+        render.block(64);
+        check(s.recorder().recording() == 0, "no take at start");
+        check(s.controllerControl("record", {Kind::Switch, 1}), "REC pressed is played");
+        check(s.recorder().recording() == 0, "the take starts on the control thread, not on the press");
+        render.block(64);
+        const auto take = s.recorder().recording();
+        check(take != 0, "REC pressed starts a take");
+        check(!s.controllerControl("record", {Kind::Switch, 0}), "its release plays nothing");
+        render.block(64);
+        check(s.recorder().recording() == take, "and its release leaves the take recording");
+        s.controllerControl("play", {Kind::Switch, 1});
+        s.controllerControl("stop", {Kind::Switch, 1});
+        render.block(64);
+        check(!s.transportState().playing && s.recorder().recording() == take, "STOP stops the transport and the take goes on");
+        s.controllerControl("record", {Kind::Switch, 1});
+        render.block(64);
+        check(s.recorder().recording() == 0, "REC pressed again ends the take");
+        finish(s, take, false);
+    }
+
     // Step 1 gate: a take of Main matches the render sample for sample, whatever the block sizes.
     void mainMatchesRender(const char* synth, uint32_t maxFrames, std::vector<uint32_t> sizes)
     {
@@ -630,6 +660,7 @@ int main(int argc, char** argv)
     {
         mainMatchesRender(argv[1], 256, {256, 37, 128, 1, 200});
         mainMatchesRender(argv[1], 32, {32, 5, 17});
+        recordButton(argv[1]);
         stalledWriter(argv[1]);
         diskFull(argv[1]);
         partsAndNotes(argv[1]);

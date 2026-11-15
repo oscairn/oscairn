@@ -1228,7 +1228,7 @@ still gives the full path and `--plugins /usr/lib/clap`.
 analog message's ID where it is not where `id` is. `kinds` gives the kind field's value for each
 of the four kinds. `controls` lists each
 control's `kind` (`encoder`, `analog`, or `switch` for both switch kinds), `id` and `control`:
-an identity above, or a fixed control's function from the profile (`enter`, `play`). An analog
+an identity above, or a fixed control's function from the profile (`enter`, `play`, `record`). An analog
 value is divided by `max` (or the layout's `analogMax`) for 0 to 1; an encoder's delta is
 multiplied by `step` (or `encoderStep`). A control may also have a `navigate`: what it does in
 the app's lists, whatever the device ([The panel in lists](#the-panel-in-lists)): an `action`
@@ -1371,9 +1371,10 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   in the dump, and WRITE, MENU and TEMPO reach the engine from `gpio-keys`, but the engine has
   nothing to give most of them to: the controller layer plays assignable controls only. PLAY and
   STOP drive the transport, and the controls the map gives a `navigate` move the app's lists
-  ([The panel in lists](#the-panel-in-lists)). REC, TR-REC, PATTERN, SONG and the rest of that
-  cluster play nothing: a recording starts and stops only from an app (`record.start`,
-  `record.stop`), apart from the transport.
+  ([The panel in lists](#the-panel-in-lists)). REC (the map's `record`) starts a take on a press,
+  with the same default taps and name as the Recordings app's record button, and ends the take
+  recording on the next press; STOP does not end a take. The REC button's lamp is not driven. TR-REC, PATTERN, SONG and
+  the rest of that cluster play nothing.
 - **STOP ends arpeggios:** each press, whether the transport was playing or not, also sends every
   note effect of the Performance (its arpeggiators) MIDI CC 123, All Notes Off, straight to the
   plugin: it stops and its notes ring out through their release; Hold stays on. Before, the

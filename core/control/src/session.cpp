@@ -695,11 +695,17 @@ namespace oscairn
             if( press ) setPlaying( control == "play" );
             return press;
         }
+        if( control == "record" ) // the press toggles a take (service() does it, on the control thread); a release does nothing
+        {
+            const bool press = input.kind == ControlInput::Kind::Switch && input.value >= .5;
+            if( press ) recordPressed_.store( true, std::memory_order_release );
+            return press;
+        }
         return controllers_->control( control, input );
     }
     bool Session::controllerControl( const std::string& control, ControlInput input, const Navigation& navigation ) noexcept
     {
-        if( control == "play" || control == "stop" ) return controllerControl( control, input );
+        if( control == "play" || control == "stop" || control == "record" ) return controllerControl( control, input );
         return controllers_->control( control, input, navigation );
     }
     void Session::setControllerWake( std::function<void()> wake ) { controllers_->setWake( std::move( wake ) ); }
@@ -709,6 +715,9 @@ namespace oscairn
     {
         controllers_->service(); // first: what the controls played reaches the model before anything reads it
         if( stopped_.exchange( false, std::memory_order_acquire ) ) stopNoteEffects();
+        if( recordPressed_.exchange( false, std::memory_order_acquire ) ) // as the Recordings app's button: a take of the default taps, or the one recording ends
+            try { if( const auto take = recorder_.recording() ) recordStop( take ); else recordStart(); }
+            catch( const std::exception& e ) { std::fprintf( stderr, "oscairn: the record button: %s\n", e.what() ); }
         graph_.service();
         tendResidents(); // instances kept warm: serviced once a second, let go when stale or when memory runs short
         if( prepared_ ) prepared_->next->service(); // its plugins' main-thread callbacks while it waits

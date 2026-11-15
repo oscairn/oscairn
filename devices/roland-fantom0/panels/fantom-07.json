@@ -102,7 +102,7 @@
     { "kind": "switch", "id": 30, "control": "rhythmPattern" },
     { "kind": "switch", "id": 16, "control": "stop" },
     { "kind": "switch", "id": 17, "control": "play" },
-    { "kind": "switch", "id": 18, "control": "rec" },
+    { "kind": "switch", "id": 18, "control": "record" },
     { "kind": "switch", "id": 0, "control": "tone1" },
     { "kind": "switch", "id": 1, "control": "tone2" },
     { "kind": "switch", "id": 2, "control": "tone3" },

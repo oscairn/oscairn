@@ -90,6 +90,13 @@ fail() { say "$*"; exit 1; }
 # Runs a step, or under --dry-run prints it.
 run() { if [ -n "$dry" ]; then say "would run: $*"; else "$@"; fi; }
 nap() { sleep 0.1 2>/dev/null || sleep 1; }
+# The waits on a handover, short so the end of one is seen within 20 ms of its coming.
+fnap() { sleep 0.02 2>/dev/null || sleep 1; }
+# Wall-clock milliseconds (GNU date's %N; whole seconds where date has no %N), and a log line
+# with them, the time since the handover was asked for, for a device run to lay beside the JUCE
+# app's and the shell's own "oscairn-timing" lines (var/oscairn/log/oscairn-app.log, oscairn-ui.log).
+now_ms() { n=$(date +%s%N 2>/dev/null); case $n in ""|*[!0-9]*) echo $(($(date +%s) * 1000)) ;; *) echo $((n / 1000000)) ;; esac; }
+lap() { m=$(now_ms); say "timing $1: ms=$m (+$((m - ${t_req:-$m})) ms)"; }
 # Processes by name, and processes holding a path open (through the bundle's /dev too).
 named() { for c in "$proc"/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = "$1" ] && { p=${c#"$proc"/}; echo "${p%%/*}"; }; done; }
 holding() {
@@ -283,7 +290,7 @@ display_up() { grep -q '@/tmp/.X11-unix/X0$' "$proc/net/unix" 2>/dev/null; }
 display_serves() {
 	"$root/start-chroot.sh" xwininfo -display :0 -root > /dev/null 2>&1 &
 	q=$! j=0
-	while kill -0 $q 2>/dev/null; do j=$((j + 1)); [ $j -le 50 ] || { kill $q; return 1; }; nap; done
+	while kill -0 $q 2>/dev/null; do j=$((j + 1)); [ $j -le 250 ] || { kill $q; return 1; }; fnap; done
 	wait $q
 }
 # Roland's Weston back, its Xwayland on :0 (it starts on the first client), as before Oscairn owned the display.
@@ -413,6 +420,8 @@ keep_ui() {
 	ours() { [ ! -e "$state/run/stopped" ] && read -r t < "$state/run/ui.keeper" && [ "$t" = "$token" ]; }
 	while ours; do
 		rm -f "$root/tmp/oscairn-handover"
+		[ -z "${after_handover:-}" ] || lap "shell started (the display is free, the touch rule back)"
+		after_handover=
 		t0=$(date +%s)
 		"$root/start-chroot.sh" env HOME=/root XKB_CONFIG_ROOT=/usr/share/X11/xkb SLINT_BACKEND=linuxkms-software SLINT_KMS_ROTATION="$rotation" \
 			/usr/bin/oscairn-ui --profile "$OSCAIRN_PROFILE" --socket /run/oscairn/engine.sock --handover /tmp/oscairn-handover \
@@ -420,30 +429,39 @@ keep_ui() {
 		status=$?
 		ours || exit 0
 		if [ $status = 3 ] && handed_over; then
+			t_req=$(now_ms)
+			lap "handover requested (the Rust UI ended, status 3)"
 			say "the Rust UI hands the display to the JUCE app for $app"
 			touch_rule off
 			"$root/start-chroot.sh" /usr/bin/Xorg :0 vt7 -novtswitch -nolisten tcp -noreset -nocursor -logfile /var/oscairn/log/Xorg.log < /dev/null &
 			xserver=$!
-			i=0
+			# Up to 10 seconds, the condition polled every 20 ms (the probe itself takes longer).
 			until display_up && display_serves; do
-				i=$((i + 1))
-				[ $i -le 100 ] && kill -0 $xserver 2>/dev/null || break
-				nap
+				[ $(($(now_ms) - t_req)) -le 10000 ] && kill -0 $xserver 2>/dev/null || break
+				fnap
 			done
 			if display_up; then
+				lap "X ready"
 				say "the X server serves :0: starting the JUCE app for $app"
+				lap "app started"
 				"$root/start-chroot.sh" env DISPLAY=:0 HOME=/root OSCAIRN_HOME_QUITS=1 \
 					/usr/bin/Oscairn --profile "$OSCAIRN_PROFILE" --connect /run/oscairn/engine.sock --plugins /usr/lib/clap --app "$app" \
 					< /dev/null >> "$state/log/oscairn-app.log" 2>&1
-				say "the JUCE app ended (status $?): the display back to the Rust UI"
+				app_status=$?
+				lap "app exited"
+				say "the JUCE app ended (status $app_status): the display back to the Rust UI"
 			else
 				say "the X server did not come up for $app (var/oscairn/log/Xorg.log): back to the Rust UI"
 			fi
-			xorg=$(xorg_ours)
+			# start-chroot.sh execs the X server, so $xserver is its pid: signaled at once, with no
+			# walk through /proc; the walk only when that pid is not an X server of ours.
+			if [ "$(cat "$proc/$xserver/comm" 2>/dev/null)" = Xorg ]; then xorg=$xserver; else xorg=$(xorg_ours); fi
 			[ -z "$xorg" ] || kill $xorg 2>/dev/null
 			wait $xserver 2>/dev/null
+			lap "X gone"
 			touch_rule
 			fails=0
+			after_handover=1
 			continue
 		fi
 		[ $(($(date +%s) - t0)) -lt 60 ] || fails=0

@@ -46,6 +46,13 @@ How (a) works:
   0.1 s; Xorg serving a client, about 1 s by the start script's own polling; the JUCE app's
   first paint, 0.2 to 0.3 s in the prototype's container on a fast CPU, taken as 1 to 2 s on the
   unit); back, under a second (Xorg ending, the shell starting, about 0.15 s in the container).
+  Measured on a FANTOM-07 from the logs: back took about 3.3 s, 2.5 s of it from the app's exit
+  to Xorg being gone. Each phase is now logged with wall-clock milliseconds: the keeper's
+  `timing` lines in `var/oscairn/log/oscairn-fantom.log` (handover requested, X ready, app
+  started, app exited, X gone, shell started, each with the time since the request), and
+  `oscairn-timing:` lines in `oscairn-app.log` (app started, engine connected, first frame, quit
+  requested, shut down) and `oscairn-ui.log` (shell started, shell first frame). The keeper
+  polls the X server every 20 ms and signals it by its own pid, with no scan of `/proc`.
   The device run measures both.
 - **What the musician sees:** Home looks the same with the screen either app draws; a tile of a
   JUCE screen opens after a dark screen of 2 to 3 seconds, and its Home button comes back to the

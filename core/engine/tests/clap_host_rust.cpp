@@ -167,7 +167,11 @@ namespace
         };
         list(n + "sounds");
         std::vector<oscairn_sound_parameter_t> values;
-        for(size_t i = 0; i < ids.size() && values.size() < 2; ++i) if(!(flags[i] & CLAP_PARAM_IS_READONLY)) values.push_back({ids[i], minimum[i]});
+        for(size_t i = 0; i < ids.size() && values.size() < 2; ++i) if(!(flags[i] & CLAP_PARAM_IS_READONLY))
+        {
+            oscairn_sound_parameter_t v; std::memset(&v, 0, sizeof v); v.id = ids[i]; v.value = minimum[i]; // zeroed whole: the recorder hashes the struct's padding too, which a braced push_back leaves as stack bytes
+            values.push_back(v);
+        }
         a.setAssets(h, &store);
         uint32_t sound = 0;
         uint32_t patched = 0;

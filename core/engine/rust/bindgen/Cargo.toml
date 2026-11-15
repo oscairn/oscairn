@@ -1,0 +1,9 @@
+[package]
+name = "oscairn-engine-core-bindgen"
+license = "AGPL-3.0-or-later"
+publish = false
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bindgen = { version = "=0.72.1", default-features = false, features = ["runtime"] }

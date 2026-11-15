@@ -4,26 +4,17 @@
 //! (the external input, then each step's inputs and outputs), every connection in one array in run
 //! order with where it reads resolved when the plan is built, the steps in one array of small records.
 
+use crate::bindings::{oscairn_audio_route as Connection, oscairn_audio_step as StepIn};
 use crate::budget::Activity;
 use crate::{Buffers, Channels, Shared};
-use std::ffi::c_void;
 use std::ops::Range;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 /// A node's meter (Graph::meterChannels floats, as atomics).
 pub type Peaks = [AtomicU32; 16];
 const OUTPUT_BOUND: f32 = 1e6; // Graph::outputBound: +120 dBFS
 
-/// oscairn_audio_route: channel `from` of step `source`'s outputs (-1: the external input) into channel `to`.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Connection {
-    pub source: i32,
-    pub from: u32,
-    pub to: u32,
-    pub gain: f32,
-    pub live: [u8; 4],
-}
 /// oscairn_bus, as it is kept.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -32,20 +23,6 @@ pub struct Bus {
     pub channels: u32,
     pub peaks: Option<Shared<Peaks>>,
     pub activity: Option<Shared<Activity>>,
-}
-/// oscairn_audio_step (its arrays read through lib.rs's `routes` and `buses`).
-#[repr(C)]
-pub struct StepIn {
-    pub host: *const c_void,
-    pub inputs: u32,
-    pub outputs: u32,
-    pub metered: u32,
-    pub peaks: Option<Shared<Peaks>>,
-    pub activity: Option<Shared<Activity>>,
-    pub routes: *const Connection,
-    pub route_count: u32,
-    pub buses: *const Bus,
-    pub bus_count: u32,
 }
 
 /// A connection, the buffer it reads (`at`), whether it is the first into its channel, and the ramp
@@ -129,8 +106,8 @@ impl Audio {
                     output,
                     outputs: s.outputs,
                     metered: s.metered,
-                    peaks: s.peaks,
-                    activity: s.activity,
+                    peaks: NonNull::new(s.peaks).map(Shared),
+                    activity: NonNull::new(s.activity).map(Shared),
                     routes: r,
                     silent: quiet,
                     buses: (buses.len() - s.buses().len()) as u32..buses.len() as u32,

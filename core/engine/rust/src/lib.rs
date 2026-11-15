@@ -4,18 +4,20 @@
 //! holds this to. All unsafe code is in this file, at that boundary.
 
 mod audio;
+#[rustfmt::skip]
+mod bindings;
 mod budget;
 mod event;
 mod notes;
 mod route;
 mod run;
 
-use audio::{Audio, Bus, Connection, StepIn};
-use budget::Activity;
+use audio::{Audio, Bus};
+use bindings::*;
 use event::Event;
 use notes::{Key, Notes, Rendered, SoundContext, Source, Step, Timing, VoiceNote};
 use route::{NoteRoute, Zones};
-use run::{Block, Control, Curve, HarmonySource, LaneRoute, Midi, Param, Run, Tap, VoiceContext};
+use run::{Block, Control, HarmonySource, Run, Tap};
 use std::ffi::c_void;
 use std::ops::{Deref, Index, IndexMut};
 use std::ptr::NonNull;
@@ -133,8 +135,8 @@ impl Channels<'_> {
     }
 }
 
-impl StepIn {
-    pub fn routes(&self) -> &[Connection] {
+impl oscairn_audio_step {
+    pub fn routes(&self) -> &[oscairn_audio_route] {
         // SAFETY: the caller's array, readable during audio_new (engine_core.h).
         unsafe { slice(self.routes, self.route_count) }
     }
@@ -144,7 +146,7 @@ impl StepIn {
     }
 }
 
-type Emit = Option<unsafe extern "C" fn(*mut c_void, *const Event) -> bool>;
+type Emit = oscairn_emit;
 
 /// The caller's emit callback as a closure.
 fn emitter(emit: Emit, context: *mut c_void) -> impl FnMut(&Event) -> bool {
@@ -176,62 +178,6 @@ unsafe fn slice_mut<'a, T>(p: *mut T, n: u32) -> &'a mut [T] {
         // SAFETY: the caller's contract.
         unsafe { std::slice::from_raw_parts_mut(p, n as usize) }
     }
-}
-
-#[repr(C)]
-pub struct CSource {
-    route: *mut NoteRoute,
-    zones: *const Zones,
-    peers: *const *mut NoteRoute,
-    peer_count: u32,
-    channel: i16,
-    draining: bool,
-    from: i32,
-}
-#[repr(C)]
-pub struct CContext {
-    channel: i16,
-    activity: *mut Activity,
-    id: u32,
-}
-#[repr(C)]
-pub struct CLink {
-    step: u32,
-    gain: f32,
-}
-#[repr(C)]
-pub struct CStep {
-    activity: *mut Activity,
-    sources: *const CSource,
-    source_count: u32,
-    contexts: *const CContext,
-    context_count: u32,
-    lane: u32,
-    in_process: bool,
-    late_lane: bool,
-    next: *const CLink,
-    next_count: u32,
-    host: *const c_void,
-    id: u32,
-    harmony: i32,
-    lane_routes: *const LaneRoute,
-    lane_route_count: u32,
-    lanes_in: bool,
-}
-#[repr(C)]
-pub struct CFinish {
-    took: f32,
-    processed: bool,
-    reset: bool,
-    missed: bool,
-    own_voices: bool,
-    honors_volume: bool,
-    voices: u32,
-    voice_cost: f64,
-    notes: *const VoiceNote,
-    note_count: u32,
-    sent: *const Event,
-    sent_count: u32,
 }
 
 #[no_mangle]
@@ -316,7 +262,7 @@ pub unsafe extern "C" fn rust_core_route_events(
 /// `steps` holds `count` steps as engine_core.h describes, every pointer in them live for the
 /// notes' life; `budgeted` holds `count` bools.
 #[no_mangle]
-pub unsafe extern "C" fn rust_core_notes_new(steps: *const CStep, count: u32, lanes: u32, budgeted: *mut bool) -> *mut Notes {
+pub unsafe extern "C" fn rust_core_notes_new(steps: *const oscairn_step, count: u32, lanes: u32, budgeted: *mut bool) -> *mut Notes {
     let handle = |p: *mut NoteRoute| NonNull::new(p).map(Route);
     let mut steps_out = Vec::new();
     // SAFETY: the caller's contract: `count` steps, each array in them holding its count, every
@@ -397,7 +343,7 @@ pub unsafe extern "C" fn rust_core_notes_route(
 /// # Safety
 /// `notes` is live and used by no other call; `finish` and its arrays are readable.
 #[no_mangle]
-pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, finish: *const CFinish) {
+pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, finish: *const oscairn_finish) {
     // SAFETY: the caller's contract: live notes used by nothing else, a readable finish and arrays.
     let (notes, f, voice_notes, sent) =
         unsafe { (&mut *notes, &*finish, slice((*finish).notes, (*finish).note_count), slice((*finish).sent, (*finish).sent_count)) };
@@ -436,9 +382,9 @@ pub unsafe extern "C" fn rust_core_notes_end(notes: *mut Notes, slack: f32) {
 /// `steps` and `outputs` are readable arrays of `count` and `output_count`, their arrays readable too.
 #[no_mangle]
 pub unsafe extern "C" fn rust_core_audio_new(
-    steps: *const StepIn,
+    steps: *const oscairn_audio_step,
     count: u32,
-    outputs: *const Connection,
+    outputs: *const oscairn_audio_route,
     output_count: u32,
     inputs: u32,
     channels: u32,
@@ -503,173 +449,69 @@ pub unsafe extern "C" fn rust_core_audio_finish(audio: *mut Audio, step: u32, fr
     unsafe { &mut *audio }.finish(step as usize, frames as usize, processed, asleep, fade);
 }
 
-/// oscairn_plugins: the C++ plugin hosts' calls for the run (engine_core.h). Every call is safe to make
-/// with any step of the plan; what a call returns lives until that step renders again.
-#[repr(C)]
-pub struct Plugins {
-    context: *mut c_void,
-    sent: extern "C" fn(*mut c_void, u32, *mut u32) -> *const Event,
-    start: extern "C" fn(*mut c_void, u32, *const Event, u32) -> bool,
-    render: extern "C" fn(*mut c_void, u32, *const Event, u32) -> bool,
-    finish: extern "C" fn(*mut c_void, u32) -> bool,
-    late: extern "C" fn(*mut c_void, u32) -> bool,
-    panic: extern "C" fn(*mut c_void, u32),
-    kept: extern "C" fn(*mut c_void, u32) -> bool,
-    was_reset: extern "C" fn(*mut c_void, u32) -> bool,
-    asleep: extern "C" fn(*mut c_void, u32) -> bool,
-    own_voices: extern "C" fn(*mut c_void, u32) -> bool,
-    honors_volume: extern "C" fn(*mut c_void, u32) -> bool,
-    missed: extern "C" fn(*mut c_void, u32) -> u64,
-    took: extern "C" fn(*mut c_void, u32) -> f64,
-    voices: extern "C" fn(*mut c_void, u32, *mut f64, *mut *const VoiceNote, *mut u32) -> u32,
-    set_limits: extern "C" fn(*mut c_void, u32, u32, *const VoiceContext, u32),
-    sound: extern "C" fn(*mut c_void, u32, u32) -> u32,
-    parameters: extern "C" fn(*mut c_void, u32, u32, Emit, *mut c_void),
-    listen: extern "C" fn(*mut c_void, u32, *const Event, u32, bool),
-    now: extern "C" fn(*mut c_void) -> i64,
-    deadline: extern "C" fn(*mut c_void, i64, bool),
-    helpers: extern "C" fn(*mut c_void, u32, extern "C" fn(*mut c_void, u32), *mut c_void),
+// oscairn_plugins: the C++ plugin hosts' calls for the run (engine_core.h), every one set. What a call
+// returns lives until that step renders again.
+macro_rules! calls {
+    ($($name:ident($($a:ident: $t:ty),*) -> $r:ty;)*) => {
+        impl oscairn_plugins {
+            $(pub fn $name(&self, s: usize $(, $a: $t)*) -> $r {
+                // SAFETY: the C++'s callback (engine_core.h), called with its context and a step of the plan.
+                unsafe { (self.$name.expect(stringify!($name)))(self.context, s as u32 $(, $a)*) }
+            })*
+        }
+    };
 }
-impl Plugins {
+calls! {
+    finish() -> bool; late() -> bool; panic() -> (); kept() -> bool; was_reset() -> bool; asleep() -> bool;
+    own_voices() -> bool; honors_volume() -> bool; missed() -> u64; took() -> f64; sound(c: u32) -> u32;
+    set_limits(limit: u32, parts: *const oscairn_voice_budget_context_t, n: u32) -> ();
+    start(e: *const Event, n: u32) -> bool; render(e: *const Event, n: u32) -> bool;
+}
+impl oscairn_plugins {
     pub fn sent(&self, s: usize) -> &[Event] {
         let mut n = 0;
-        let p = (self.sent)(self.context, s as u32, &mut n);
-        // SAFETY: the host's events, `n` of them, alive until the step renders again (above).
-        unsafe { slice(p, n) }
-    }
-    pub fn start(&self, s: usize, e: &[Event]) -> bool {
-        (self.start)(self.context, s as u32, e.as_ptr(), e.len() as u32)
-    }
-    pub fn render(&self, s: usize, e: &[Event]) -> bool {
-        (self.render)(self.context, s as u32, e.as_ptr(), e.len() as u32)
-    }
-    pub fn finish(&self, s: usize) -> bool {
-        (self.finish)(self.context, s as u32)
-    }
-    pub fn late(&self, s: usize) -> bool {
-        (self.late)(self.context, s as u32)
-    }
-    pub fn panic(&self, s: usize) {
-        (self.panic)(self.context, s as u32)
-    }
-    pub fn kept(&self, s: usize) -> bool {
-        (self.kept)(self.context, s as u32)
-    }
-    pub fn was_reset(&self, s: usize) -> bool {
-        (self.was_reset)(self.context, s as u32)
-    }
-    pub fn asleep(&self, s: usize) -> bool {
-        (self.asleep)(self.context, s as u32)
-    }
-    pub fn own_voices(&self, s: usize) -> bool {
-        (self.own_voices)(self.context, s as u32)
-    }
-    pub fn honors_volume(&self, s: usize) -> bool {
-        (self.honors_volume)(self.context, s as u32)
-    }
-    pub fn missed(&self, s: usize) -> u64 {
-        (self.missed)(self.context, s as u32)
-    }
-    pub fn took(&self, s: usize) -> f64 {
-        (self.took)(self.context, s as u32)
+        // SAFETY: as calls!; the host's events, `n` of them, alive until the step renders again.
+        unsafe { slice((self.sent.expect("sent"))(self.context, s as u32, &mut n), n) }
     }
     /// Its voices sounding, its cost per voice and its notes (oscairn.voice-budget's report).
     pub fn voices(&self, s: usize) -> (u32, f64, &[VoiceNote]) {
         let (mut cost, mut notes, mut n) = (0.0, std::ptr::null(), 0);
-        let voices = (self.voices)(self.context, s as u32, &mut cost, &mut notes, &mut n);
         // SAFETY: as `sent`.
-        (voices, cost, unsafe { slice(notes, n) })
-    }
-    pub fn set_limits(&self, s: usize, limit: u32, parts: &[VoiceContext]) {
-        (self.set_limits)(self.context, s as u32, limit, parts.as_ptr(), parts.len() as u32)
-    }
-    pub fn sound(&self, s: usize, c: usize) -> u32 {
-        (self.sound)(self.context, s as u32, c as u32)
+        unsafe { ((self.voices.expect("voices"))(self.context, s as u32, &mut cost, &mut notes, &mut n), cost, slice(notes, n)) }
     }
     /// A shared engine's context `c`'s parameters set since its last block, each to `emit`.
-    pub fn parameters(&self, s: usize, c: usize, emit: &mut dyn FnMut(&Event) -> bool) {
-        extern "C" fn call(context: *mut c_void, e: *const Event) -> bool {
+    pub fn parameters(&self, s: usize, c: usize, mut emit: &mut dyn FnMut(&Event) -> bool) {
+        unsafe extern "C" fn call(context: *mut c_void, e: *const Event) -> bool {
             // SAFETY: the closure passed below, for this call; an event the host lends for the call.
             unsafe { (*context.cast::<&mut dyn FnMut(&Event) -> bool>())(&*e) }
         }
-        let mut emit = emit;
-        (self.parameters)(self.context, s as u32, c as u32, Some(call), std::ptr::from_mut(&mut emit).cast());
+        // SAFETY: as calls!; `emit` outlives the call.
+        unsafe { (self.parameters.expect("parameters"))(self.context, s as u32, c as u32, Some(call), std::ptr::from_mut(&mut emit).cast()) }
     }
     pub fn listen(&self, node: u32, e: &[Event], sent: bool) {
-        (self.listen)(self.context, node, e.as_ptr(), e.len() as u32, sent)
+        // SAFETY: as calls!.
+        unsafe { (self.listen.expect("listen"))(self.context, node, e.as_ptr(), e.len() as u32, sent) }
     }
     pub fn now(&self) -> i64 {
-        (self.now)(self.context)
+        // SAFETY: as calls!.
+        unsafe { (self.now.expect("now"))(self.context) }
     }
     pub fn deadline(&self, at: i64, only: bool) {
-        (self.deadline)(self.context, at, only)
+        // SAFETY: as calls!.
+        unsafe { (self.deadline.expect("deadline"))(self.context, at, only) }
     }
     /// The wave's `count` local steps rendered on the audio helpers and here (Run::render_local).
     pub fn helpers(&self, run: &Run, count: usize) {
-        struct Job<'a>(&'a Run, &'a Plugins);
-        extern "C" fn job(context: *mut c_void, k: u32) {
+        struct Job<'a>(&'a Run, &'a oscairn_plugins);
+        unsafe extern "C" fn job(context: *mut c_void, k: u32) {
             // SAFETY: the Job below, alive and only read (atomics aside) while the helpers run.
             let Job(run, plugins) = unsafe { &*context.cast::<Job>() };
             run.render_local(plugins, k as usize);
         }
         let j = Job(run, self);
-        (self.helpers)(self.context, count as u32, job, std::ptr::from_ref(&j).cast_mut().cast());
+        // SAFETY: as calls!; the job and its context outlive the call.
+        unsafe { (self.helpers.expect("helpers"))(self.context, count as u32, Some(job), std::ptr::from_ref(&j).cast_mut().cast()) }
     }
-}
-
-/// oscairn_harmony_source, oscairn_tap, oscairn_control and oscairn_run_block as the C++ lays them out.
-#[repr(C)]
-pub struct CHarmony {
-    route: *mut NoteRoute,
-    zones: *const Zones,
-    input: bool,
-    root: u8,
-    scale: u16,
-    last: *mut run::Harmony,
-}
-#[repr(C)]
-pub struct CTap {
-    step: i32,
-    route: *mut NoteRoute,
-    zones: *const Zones,
-    ports: u64,
-    channel: u8,
-}
-#[repr(C)]
-pub struct CControl {
-    path: *const Curve,
-    count: u32,
-    origin: f64,
-    modulate: bool,
-}
-#[repr(C)]
-pub struct CBlock {
-    inputs: *const *const f32,
-    ni: u32,
-    outputs: *const *mut f32,
-    no: u32,
-    frames: u32,
-    fade: u32,
-    events: *const Event,
-    count: u32,
-    tags: *const u8,
-    params: *const Param,
-    param_count: u32,
-    beat: *const Event,
-    panic_input: bool,
-    panic_notes: bool,
-    listening: bool,
-    parallel: bool,
-    deadlines: bool,
-    timing: Timing,
-    deadline: i64,
-    worth: f32,
-    live_from: *const f32,
-    live_to: *const f32,
-    next_id: *mut u32,
-    drops: *mut u64,
-    midi: *mut Midi,
-    midi_count: *mut u32,
 }
 
 /// # Safety
@@ -680,16 +522,16 @@ pub struct CBlock {
 pub unsafe extern "C" fn rust_core_run_new(
     notes: *mut Notes,
     audio: *mut Audio,
-    steps: *const CStep,
+    steps: *const oscairn_step,
     budgeted: *const bool,
     count: u32,
     waves: *const u32,
     wave_count: u32,
-    harmonies: *const CHarmony,
+    harmonies: *const oscairn_harmony_source,
     harmony_count: u32,
-    taps: *const CTap,
+    taps: *const oscairn_tap,
     tap_count: u32,
-    controls: *const CControl,
+    controls: *const oscairn_control,
     control_count: u32,
 ) -> *mut Run {
     // SAFETY: the caller's contract, for each array and pointer.
@@ -746,7 +588,7 @@ pub unsafe extern "C" fn rust_core_run_adopt(
     current: *mut Run,
     ramp: bool,
     ramp_frames: u32,
-    midi: *mut Midi,
+    midi: *mut oscairn_midi,
     midi_count: *mut u32,
     drops: *mut u64,
 ) {
@@ -763,7 +605,7 @@ pub unsafe extern "C" fn rust_core_run_adopt(
 /// # Safety
 /// A live run, its notes and audio used by nothing else; `block` and `plugins` as engine_core.h says.
 #[no_mangle]
-pub unsafe extern "C" fn rust_core_run_block(run: *mut Run, block: *const CBlock, plugins: *const Plugins) -> bool {
+pub unsafe extern "C" fn rust_core_run_block(run: *mut Run, block: *const oscairn_run_block, plugins: *const oscairn_plugins) -> bool {
     // SAFETY: the caller's contract, for each pointer and array.
     unsafe {
         let (run, b, plugins) = (&mut *run, &*block, &*plugins);
@@ -799,6 +641,7 @@ pub unsafe extern "C" fn rust_core_run_block(run: *mut Run, block: *const CBlock
 #[cfg(test)]
 mod tests {
     use super::*;
+    use budget::Activity;
     use route::UNTAGGED;
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;
@@ -815,6 +658,14 @@ mod tests {
         assert_eq!(size_of::<Zones>(), 8 * 72 + 8);
         assert_eq!(size_of::<VoiceNote>(), 20);
         assert_eq!(size_of::<Key>(), 24);
+    }
+
+    // bindings.rs was generated from these headers as they are (core/engine/rust/bindgen regenerates it).
+    #[test]
+    fn engine_core_h_unchanged() {
+        let fnv = |b: &[u8]| b.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
+        let now = [fnv(include_bytes!("../../src/engine_core.h")), fnv(include_bytes!("../../../clap-ext/include/oscairn-clap/voice-budget.h"))];
+        assert_eq!(now, bindings::MADE_FROM, "engine_core.h or voice-budget.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
     }
 
     /// Counts the allocations this thread makes while `COUNTING` is set.
@@ -849,8 +700,9 @@ mod tests {
         activity.seed_note.set(40.0);
         let zones = Zones::default();
         let routes = [rust_core_route_new(1, 1, 64), rust_core_route_new(1, 1, 0)];
-        let sources = routes.map(|route| CSource { route, zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: -1, draining: false, from: -1 });
-        let step = CStep {
+        let sources =
+            routes.map(|route| oscairn_source { route, zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: -1, draining: false, from: -1 });
+        let step = oscairn_step {
             activity: std::ptr::from_ref(&activity).cast_mut(),
             sources: sources.as_ptr(),
             source_count: 2,
@@ -890,7 +742,7 @@ mod tests {
                 after_notes: false,
             });
             let mut overflow = false;
-            let finish = CFinish {
+            let finish = oscairn_finish {
                 took: 500.0,
                 processed: true,
                 reset: b % 97 == 0,
@@ -916,16 +768,18 @@ mod tests {
         assert!(budgeted && activity.stolen.load(Relaxed) + activity.hard_chokes.load(Relaxed) > 0, "notes were given up");
         assert!(activity.faded_for_loss.load(Relaxed) > 0 && activity.faded_for_deadline.load(Relaxed) > 0, "for lost blocks and the deadline too");
         // A plan's audio too: mixes with live gains and a played change's ramp, a bad block faded, meters, activity.
-        let connections =
-            [Connection { source: 0, from: 0, to: 0, gain: 0.5, live: [1, 2, 0, 0] }, Connection { source: 0, from: 1, to: 0, gain: 1.0, live: [0; 4] }];
+        let connections = [
+            oscairn_audio_route { source: 0, from: 0, to: 0, gain: 0.5, live: [1, 2, 0, 0] },
+            oscairn_audio_route { source: 0, from: 1, to: 0, gain: 1.0, live: [0; 4] },
+        ];
         let mut peaks = [0u32; 16];
-        let steps = [0u32, 1].map(|s| StepIn {
+        let steps = [0u32, 1].map(|s| oscairn_audio_step {
             host: std::ptr::null::<u8>().wrapping_add(s as usize + 1).cast(),
             inputs: 2 * s,
             outputs: 2,
             metered: 2,
-            peaks: NonNull::new(std::ptr::from_mut(&mut peaks).cast()).map(Shared),
-            activity: NonNull::new(std::ptr::from_ref(&activity).cast_mut()).map(Shared),
+            peaks: std::ptr::from_mut(&mut peaks).cast(),
+            activity: std::ptr::from_ref(&activity).cast_mut(),
             routes: if s == 1 { connections.as_ptr() } else { std::ptr::null() },
             route_count: 2 * s,
             buses: std::ptr::null(),

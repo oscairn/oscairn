@@ -5,11 +5,14 @@
 //! sent is read where it lies, keys point at events, the merged block is what the plugin is handed.
 
 use crate::audio::Audio;
+use crate::bindings::{
+    oscairn_curve as Curve, oscairn_lane_route as LaneRoute, oscairn_midi as Midi, oscairn_param as Param, oscairn_voice_budget_context_t as VoiceContext,
+};
 use crate::budget::F32;
 use crate::event::*;
 use crate::notes::{Key, Notes, Rendered, Timing};
 use crate::route::{self, Zones, UNTAGGED};
-use crate::{Channels, Mut, Plugins, Route, Routes, Shared};
+use crate::{oscairn_plugins as Plugins, Channels, Mut, Route, Routes, Shared};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 
@@ -21,32 +24,6 @@ const HARMONY_SPACE: u16 = 1002; // Host::harmonySpace; OSCAIRN_EVENT_HARMONY is
 const MAX_CONTEXTS: usize = 16; // OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS
 const SELECTED: u32 = u32::MAX; // OSCAIRN_VOICE_BUDGET_SELECTED
 
-/// oscairn_lane_route.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct LaneRoute {
-    lane: u32,
-    target: i32,
-    param: u32,
-    minimum: f64,
-    maximum: f64,
-    stepped: bool,
-    notes: i16,
-    channel: i16,
-    control: i32,
-}
-/// oscairn_curve (Graph::ControlCurve).
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Curve {
-    kind: u8,
-    start: f64,
-    end: f64,
-    shift: f64,
-    low: f64,
-    high: f64,
-    exponent: f64,
-}
 /// oscairn_harmony_t (oscairn-clap/harmony.h).
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -59,31 +36,8 @@ pub struct Harmony {
     reserved: u16,
     held: [u64; 2],
 }
-/// oscairn_voice_budget_context_t.
-#[repr(C)]
-#[derive(Clone, Copy, Default, PartialEq)]
-pub struct VoiceContext {
-    context: u32,
-    limit: u32,
-    reserve: u32,
-    priority: u8,
-    flags: u8,
-}
-/// oscairn_midi (Graph::MidiMessage).
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct Midi {
-    time: u32,
-    ports: u64,
-    size: u8,
-    bytes: [u8; 3],
-}
-/// oscairn_param.
-#[repr(C)]
-pub struct Param {
-    node: u32,
-    event: Event,
-}
+const NO_LIMITS: VoiceContext = VoiceContext { context: 0, limit: 0, reserve: 0, priority: 0, flags: 0 };
+const NO_MIDI: Midi = Midi { time: 0, ports: 0, size: 0, bytes: [0; 3] };
 
 /// One block (oscairn_run_block), its arrays as slices.
 pub struct Block<'a> {
@@ -244,7 +198,7 @@ fn to_midi(e: &Event, channel: u8) -> Option<Midi> {
     }
     let on = |own: i32| if channel != 0 { channel - 1 } else { own.clamp(0, 15) as u8 };
     let seven = |v: f64| (v.clamp(0.0, 1.0) * 127.0).round() as u8;
-    let m = |bytes: [u8; 3], size| Some(Midi { size, bytes, ..Midi::default() });
+    let m = |bytes: [u8; 3], size| Some(Midi { size, bytes, ..NO_MIDI });
     match e.kind() {
         NOTE_ON | NOTE_OFF | NOTE_CHOKE if e.size() == NOTE_SIZE => {
             let (_, _, ch, key) = e.address(NOTE_ID);
@@ -342,7 +296,7 @@ impl Run {
                 started: false,
                 handed: 0,
                 missed: 0,
-                voice_limits: [VoiceContext::default(); MAX_CONTEXTS],
+                voice_limits: [NO_LIMITS; MAX_CONTEXTS],
                 voice_limit: 0,
                 voice_contexts: 0,
             })
@@ -482,7 +436,8 @@ impl Run {
             for s in 0..self.steps.len() {
                 self.prepare(s, rs, notes, audio, b, p);
                 self.limit_voices(s, rs, notes, p);
-                let processed = p.render(s, self.steps[s].merged());
+                let m = self.steps[s].merged();
+                let processed = p.render(s, m.as_ptr(), m.len() as u32);
                 self.steps[s].processed.store(processed, Relaxed);
                 ok &= self.finish(s, rs, notes, audio, b, p, budgeting);
             }
@@ -500,7 +455,8 @@ impl Run {
                     self.prepare(s, rs, notes, audio, b, p);
                     self.limit_voices(s, rs, notes, p);
                     self.steps[s].handed = p.now();
-                    self.steps[s].started = p.start(s, self.steps[s].merged());
+                    let m = self.steps[s].merged();
+                    self.steps[s].started = p.start(s, m.as_ptr(), m.len() as u32);
                     if !self.steps[s].started {
                         self.local[locals] = s as u32;
                         locals += 1;
@@ -577,7 +533,7 @@ impl Run {
         let s = self.local[k] as usize;
         let step = &self.steps[s];
         let began = p.now();
-        step.processed.store(p.render(s, step.merged()), Relaxed);
+        step.processed.store(p.render(s, step.merged().as_ptr(), step.merged_count as u32), Relaxed);
         step.cost.set(micros_since(p, began));
     }
 
@@ -671,17 +627,17 @@ impl Run {
         let Some(activity) = n.activity.filter(|a| step.budgeted && a.own_voices.load(Relaxed)) else { return };
         let (voices, _, _) = p.voices(s);
         // One entry for the selected contexts, or each of a shared engine's contexts' own, under the sound its channel selects.
-        let mut parts = [VoiceContext::default(); MAX_CONTEXTS];
+        let mut parts = [NO_LIMITS; MAX_CONTEXTS];
         let part = |channel: i16, context: u32| {
             let zone = n.sources.iter().filter(|x| x.channel == channel && !x.draining).find_map(|x| x.zones.first());
-            VoiceContext { context, reserve: zone.map_or(0, |z| u32::from(z.reserve)), priority: zone.map_or(0, |z| z.priority), ..VoiceContext::default() }
+            VoiceContext { context, reserve: zone.map_or(0, |z| u32::from(z.reserve)), priority: zone.map_or(0, |z| z.priority), ..NO_LIMITS }
         };
         let entries = if n.contexts.is_empty() {
             parts[0] = part(-1, SELECTED);
             1
         } else {
             for (c, context) in n.contexts.iter().enumerate().take(MAX_CONTEXTS) {
-                parts[c] = part(context.channel, p.sound(s, c));
+                parts[c] = part(context.channel, p.sound(s, c as u32));
             }
             n.contexts.len().min(MAX_CONTEXTS)
         };
@@ -697,7 +653,7 @@ impl Run {
         }
         (step.voice_limit, step.voice_limits, step.voice_contexts) = (limit, parts, entries);
         activity.voice_limit.store(limit, Relaxed);
-        p.set_limits(s, limit, &parts[..entries]);
+        p.set_limits(s, limit, parts.as_ptr(), entries as u32);
     }
 
     /// After a step's plugin rendered: the listener, its audio's guard and meters, its notes' bookkeeping, its lanes passed on.
@@ -830,6 +786,7 @@ fn micros_since(p: &Plugins, began: i64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::budget::Activity;
     use crate::tests::{ALLOCATIONS, COUNTING};
     use crate::*;
     use std::cell::Cell;
@@ -883,8 +840,9 @@ mod tests {
         w.clock.get()
     }
     extern "C" fn deadline(_: *mut c_void, _: i64, _: bool) {}
-    extern "C" fn helpers(_: *mut c_void, n: u32, job: extern "C" fn(*mut c_void, u32), context: *mut c_void) {
-        (0..n).for_each(|i| job(context, i));
+    extern "C" fn helpers(_: *mut c_void, n: u32, job: oscairn_job, context: *mut c_void) {
+        // SAFETY: the run's job and its context, for this call.
+        (0..n).for_each(|i| unsafe { job.expect("job")(context, i) });
     }
 
     // A block allocates nothing: two waves (a worker's step and one rendered here, on the helpers), events
@@ -902,14 +860,14 @@ mod tests {
         let routes = [rust_core_route_new(1, 1, 64), rust_core_route_new(1, 0, 0), rust_core_route_new(16, 0, 0), rust_core_route_new(16, 0, 0)];
         let a = |i: usize| std::ptr::from_ref(&activity[i]).cast_mut();
         let sources = [
-            CSource { route: routes[0], zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: -1, draining: false, from: -1 },
-            CSource { route: routes[1], zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: 1, draining: false, from: 0 },
+            oscairn_source { route: routes[0], zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: -1, draining: false, from: -1 },
+            oscairn_source { route: routes[1], zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: 1, draining: false, from: 0 },
         ];
-        let contexts = [CContext { channel: 0, activity: a(1), id: 10 }, CContext { channel: 1, activity: a(2), id: 11 }];
+        let contexts = [oscairn_context { channel: 0, activity: a(1), id: 10 }, oscairn_context { channel: 1, activity: a(2), id: 11 }];
         let curve = Curve { kind: 3, start: 0.1, end: 0.9, shift: 0.0, low: -60.0, high: 0.0, exponent: 2.0 };
-        let control = CControl { path: &curve, count: 1, origin: 0.5, modulate: false };
+        let control = oscairn_control { path: &curve, count: 1, origin: 0.5, modulate: false };
         let lane_route = LaneRoute { lane: 0, target: 1, param: 3, minimum: 0.0, maximum: 10.0, stepped: false, notes: 0, channel: -1, control: 0 };
-        let step = |s: usize| CStep {
+        let step = |s: usize| oscairn_step {
             activity: a(0),
             sources: &sources[s],
             source_count: 1,
@@ -929,47 +887,47 @@ mod tests {
         };
         let steps = [step(0), step(1)];
         let mut last = Harmony::default();
-        let harmony = CHarmony { route: routes[2], zones: &zones, input: true, root: 0, scale: 0xAB5, last: &mut last };
-        let tap = CTap { step: 0, route: routes[3], zones: &zones, ports: 1, channel: 0 };
-        let outs = [crate::audio::Connection { source: 1, from: 0, to: 0, gain: 0.5, live: [1, 0, 0, 0] }];
-        let audio_steps = [0usize, 1].map(|s| crate::audio::StepIn {
+        let harmony = oscairn_harmony_source { route: routes[2], zones: &zones, input: true, root: 0, scale: 0xAB5, last: &mut last };
+        let tap = oscairn_tap { step: 0, route: routes[3], zones: &zones, ports: 1, channel: 0 };
+        let outs = [oscairn_audio_route { source: 1, from: 0, to: 0, gain: 0.5, live: [1, 0, 0, 0] }];
+        let audio_steps = [0usize, 1].map(|s| oscairn_audio_step {
             host: std::ptr::null::<u8>().wrapping_add(s + 1).cast(),
             inputs: 0,
             outputs: 2,
             metered: 2,
-            peaks: None,
-            activity: None,
+            peaks: std::ptr::null_mut(),
+            activity: std::ptr::null_mut(),
             routes: std::ptr::null(),
             route_count: 0,
             buses: std::ptr::null(),
             bus_count: 0,
         });
-        let plugins = Plugins {
+        let plugins = oscairn_plugins {
             context: std::ptr::from_ref(&w).cast_mut().cast(),
-            sent,
-            start: play,
-            render: play,
-            finish: yes,
-            late: yes,
-            panic: nothing,
-            kept: yes,
-            was_reset: yes,
-            asleep: yes,
-            own_voices: yes,
-            honors_volume: yes,
-            missed: zero,
-            took,
-            voices,
-            set_limits: limits,
-            sound,
-            parameters,
-            listen,
-            now,
-            deadline,
-            helpers,
+            sent: Some(sent),
+            start: Some(play),
+            render: Some(play),
+            finish: Some(yes),
+            late: Some(yes),
+            panic: Some(nothing),
+            kept: Some(yes),
+            was_reset: Some(yes),
+            asleep: Some(yes),
+            own_voices: Some(yes),
+            honors_volume: Some(yes),
+            missed: Some(zero),
+            took: Some(took),
+            voices: Some(voices),
+            set_limits: Some(limits),
+            sound: Some(sound),
+            parameters: Some(parameters),
+            listen: Some(listen),
+            now: Some(now),
+            deadline: Some(deadline),
+            helpers: Some(helpers),
         };
         let (beat, live, mut out) = (Event::header(40, 0, 1001, 0, 0), [1f32; 256], [0f32; 256]);
-        let (mut next_id, mut drops, mut midi) = (0u32, 0u64, [Midi::default(); 1024]);
+        let (mut next_id, mut drops, mut midi) = (0u32, 0u64, [NO_MIDI; 1024]);
         let mut midi_count: u32;
         let input = [Event::note(true, 64, 0.5, 3, 0, 0), Event::midi(0xb0, 64, 127, 0), Event::note(false, 64, 0.0, 60, 0, 0)];
         let make = |budgeted: &mut [bool; 2]| {
@@ -989,7 +947,7 @@ mod tests {
         COUNTING.with(|c| c.set(true));
         for b in 0..300u32 {
             midi_count = 0;
-            let block = CBlock {
+            let block = oscairn_run_block {
                 inputs: std::ptr::null(),
                 ni: 0,
                 outputs: outputs.as_ptr(),

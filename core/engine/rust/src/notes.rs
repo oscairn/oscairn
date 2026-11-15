@@ -191,6 +191,10 @@ impl Notes {
                     reserve: zone.map_or(0, |z| z.reserve),
                     priority: zone.map_or(0, |z| z.priority),
                     cap: 0,
+                    ceiling: 0,
+                    calm: 0,
+                    probes: 0,
+                    cost_at: 0.0,
                 });
                 step.budgeted = true;
             }
@@ -484,8 +488,9 @@ impl Notes {
                 self.budget.deadline(rs);
             }
         }
+        let low_now = self.lost_now || slack <= self.timing.low_slack;
         self.lost_now = false;
-        self.budget.calm(rs);
+        self.budget.recover(rs, low_now);
         for step in &self.steps {
             if let (Some(a), Some(lane)) = (&step.activity, self.budget.lanes.get(step.lane)) {
                 a.lane_limit.set(lane.limit);

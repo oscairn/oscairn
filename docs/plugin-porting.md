@@ -234,8 +234,10 @@ each with the part's reserve and priority. The limit can change before any block
 voices of the notes the host has given the plugin and not taken back (a chord from silence is never
 cut by the host's estimate), plus the room the lane has left at the plugin's cost per voice; it falls
 below that only when the lane is measured over its limit, at most a quarter a block. When blocks are
-lost or the callback runs out of time, the host lowers the limit by a voice, and holds it there until
-the plugin's notes are all let go, rather than fading a note: the plugin chooses which voice goes.
+lost or the callback runs out of time, the host lowers the limit by a voice rather than fading a note:
+the plugin chooses which voice goes. The limit can also rise again while the plugin is playing, with
+its notes still held: a voice back every few milliseconds up to just under where the trouble came,
+then a voice every two seconds or more past it, so be ready to sound more voices at any block.
 The host fades a note from outside only as the backstop, when the plugin is not within its limit
 by the block after it came in, or its limit is already 1, so keep within it at once. Parts sharing an
 instance each get their own limit (their notes' voices and a share of the room); the host reads

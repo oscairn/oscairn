@@ -16,8 +16,8 @@
 //     its own, the host's notes untouched; one that ignores its limit has notes faded from outside after it.
 //   starved: two parts giving up their own voices, each well within its own lane, sending to a bus effect in a worker
 //     of its own that loses blocks (load not of their making): voices go within a few blocks of the first loss,
-//     off the parts' limits, and keep going while losses go on; a limit lowered stays down while the notes are held
-//     (the time the voices given up free does not raise it again, to bring the losses back).
+//     off the parts' limits, and keep going while losses go on; a limit lowered does not grow straight back with the
+//     time the voices given up free, to bring the losses back (RFC 0045, 12k).
 //   deadline: instruments in the engine's process, each well within its lane, while the callback reaches its deadline
 //     after each block (load from outside the audio): notes give way across the lanes; with a heavy but healthy block
 //     (little left, the default threshold 0) or the whole time to spare, none; with a profile's threshold of 900 us

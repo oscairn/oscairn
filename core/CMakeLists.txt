@@ -312,6 +312,11 @@ set_tests_properties(note-routing PROPERTIES TIMEOUT 30)
 add_executable(oscairn-core-diff-test engine/tests/core_diff.cpp)
 target_link_libraries(oscairn-core-diff-test PRIVATE oscairn_engine)
 add_test(NAME engine-core-diff COMMAND oscairn-core-diff-test)
+if(OSCAIRN_ENGINE_CORE STREQUAL "rust") # 12k is the Rust core's alone
+    add_executable(oscairn-core-recovery-test engine/tests/core_recovery.cpp)
+    target_link_libraries(oscairn-core-recovery-test PRIVATE oscairn_engine)
+    add_test(NAME engine-core-recovery COMMAND oscairn-core-recovery-test)
+endif()
 set_tests_properties(engine-core-diff PROPERTIES TIMEOUT 300)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
     ${SAMPLEPACK_CARGO} test --release --locked --offline --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")

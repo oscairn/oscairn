@@ -58,6 +58,7 @@ Checked when built and tested; the sections below say how.
   - [x] 12h. A chord from silence sounds whole: a voice-budget limit never below the voices admitted on the estimate alone
   - [x] 12i. Limit first: lost blocks and the deadline lower a voice-budget plugin's limit, a fade only as the backstop
   - [x] 12j. Each sound context of a shared instance its own limit
+  - [x] 12k. A lowered limit comes back while notes are held: fast below its ceiling, probing above it, the ceiling aging out
 
 ## Problem
 
@@ -893,10 +894,9 @@ to, which has rule 12a and none after it). Its rules, as built:
 - 12i. Limit first, fade as the backstop (2026-11-15). For a plugin giving up its own voices, 12b and
   12d lower its limit by one voice instead of fading a note; it picks the voice (its layers and
   levels are its to know). The host fades a note from outside only where the plugin is not within its
-  limit by the block after the limit came in, or its limit is 1 already. A lowered limit is held
-  at one below the limit then in force until the plugin's notes are all let go: the room the voices
-  given up free would otherwise raise it again and bring the losses back (Sick tines' losses grew
-  step by step after shedding began). Found on the FANTOM-07 with ST Final under UI load: 557 blocks
+  limit by the block after the limit came in, or its limit is 1 already. A lowered limit does not
+  grow straight back with the room the voices given up free (that brought Sick tines' losses back
+  step by step after shedding began); how it comes back is 12k. Found on the FANTOM-07 with ST Final under UI load: 557 blocks
   lost, `fadedForLoss` 0, `fadedForDeadline` 3; its instruments give up their own voices and 12b and
   12d skipped any plugin within its limit, so nothing was shed. Now 12b sheds on every lane marked
   (two lost in its last eight blocks, one this block), a voice each and then two blocks (the fade)
@@ -909,13 +909,37 @@ to, which has rule 12a and none after it). Its rules, as built:
   the effect's level at 0.2, before, nothing given up and 271 blocks lost from block 500 to 800;
   after, 16 voices given up within 10 blocks of the first loss and none lost late. The case now runs
   the effect at 0.4, where the limit used to grow back: 10 blocks lost late with voices taken off the
-  regrowing limit, 2 with the limit held (single runs).
+  regrowing limit, 2 with 12k (single runs).
 - 12j. Each sound its own limit. Parts sharing one instance (sound contexts) each get a limit: the
   voices of that context's admitted notes and its share of the instance's room (or of its excess),
   0 for a context holding no notes; so one sound's tails are not given up for another's notes while
   the instance keeps within its own. The host reads `active_voices` for the instance as a whole, not
   per context; each context's admitted voices come from the host's own note ledger. Covered by the
   differential test (the two cores give the same per-context limits); not yet by a graph-level case.
+- 12k. A lowered limit's way back (2026-11-15). A first version held a lowered limit until every
+  note was let go; the owner rejected it, since a pedal held through a long passage would keep a part
+  at reduced polyphony for minutes after one moment of overload. Now, as flow control does: remember
+  where it hurt, come back fast below that, probe slowly above it. Each voice given up for 12b or 12d
+  (the plugin's limit lowered, or the backstop's fade for such a plugin) is trouble: the ceiling is set
+  at the limit in force, the limit capped one under it. A block is healthy where its lane lost no
+  block in its last eight, took no more than its soft limit (85 %), and the callback's slack did not
+  run low and no block was lost anywhere. Each healthy block in a row counts; any other starts the
+  count again. Below the ceiling less one, a voice comes back each 8 healthy blocks (21 ms); at or
+  above it, a voice each 750 (2 s), the probe. Trouble after a probe's wait at or past the ceiling is a
+  failed probe: the ceiling is reset to the limit then, the limit falls at once, and the wait for the
+  next probe doubles, at most twice (8 s). The ceiling is forgotten after 3,750 healthy blocks (10 s),
+  or once the plugin's cost per voice moves by a quarter from when it was set; the cap then comes back
+  at the fast rate and goes once it no longer holds. All of it goes at once when the plugin holds no
+  note. A sound context's limit is its share of the instance's, so it follows. It is the Rust core's
+  alone, as 12b-12d are: the C++ reference has none of it. A lane measured over its own limit is not
+  trouble for it (the C++ reference's rule there, which the differential test holds the Rust to, is
+  unchanged). Tested by `engine-core-recovery`, the core driven through its interface with the plugin
+  a function of its voices (20 us and 50 us a voice; blocks lost while an overload is on and more
+  voices sound than fit), sixteen keys held, one struck again every 4 blocks: an overload of 10
+  voices from block 300 to 500: voices fall to 9 in it, the limit is at 9 or more from its end, past
+  10 by probing 1,322 blocks after it, all voices back by block 5,000 and nothing lost after it; a
+  permanent overload of 8 voices for 16 s: 18 blocks lost in its first second, 4 in the 15 s after,
+  never more than 9 voices, 7 at the end. And `guard` (starved), above.
 
 ## Core placement
 

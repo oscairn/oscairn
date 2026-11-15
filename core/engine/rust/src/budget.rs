@@ -90,7 +90,10 @@ impl Activity {
 
 /// A note connection into a plugin taking CLAP notes: its route, its node's cost, its part's group
 /// (the first entry of its part, else itself), whether it counts its node at rest, its lane, and its
-/// part's reserve and priority; cap, the most voices the guard leaves its node (a plugin giving up its own), 0 for none.
+/// part's reserve and priority. For a plugin giving up its own voices, after the guard lowered its limit (12k): cap,
+/// the most voices it leaves the node (0 for none); ceiling, the limit in force when the trouble came (0 once
+/// forgotten); calm, the healthy blocks since; probes, the probes above the ceiling that failed (each doubles the
+/// wait for the next); cost_at, its cost per voice when the ceiling was set.
 pub struct Entry {
     pub route: Route,
     pub cost: Shared<Activity>,
@@ -102,6 +105,28 @@ pub struct Entry {
     pub reserve: u16,
     pub priority: u8,
     pub cap: u32,
+    pub ceiling: u32,
+    pub calm: u32,
+    pub probes: u8,
+    pub cost_at: f32,
+}
+
+impl Entry {
+    /// Trouble with its plugin giving up its own voices (a voice given up for lost blocks or the deadline): the ceiling set at the limit in force, the cap one under it, the way back
+    /// started again; trouble at or past the ceiling is a failed probe.
+    fn trouble(&mut self) {
+        let limit = self.cost.voice_limit.load(Relaxed);
+        if !self.cost.own_voices.load(Relaxed) || limit == 0 {
+            return;
+        }
+        // A probe fails where the trouble comes after a probe's wait healthy, at or past the ceiling (not the blocks
+        // a fall takes, its limit a block behind).
+        if self.ceiling != 0 && self.calm >= PROBE_BLOCKS && limit >= self.ceiling {
+            self.probes = (self.probes + 1).min(MOST_PROBE_DOUBLINGS);
+        }
+        (self.ceiling, self.cost_at, self.calm) = (limit, self.cost.note_now(), 0);
+        self.cap = (limit - 1).max(1);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -153,6 +178,14 @@ const SOFT: f32 = 0.85; // stealing starts here, so fades have time
 const DEVICE_HOLD_BLOCKS: u32 = 8;
 /// After a voice goes for a lane's lost blocks, the blocks before the next: its fade (5 ms).
 const LOSS_HOLD_BLOCKS: u8 = 2;
+/// A lowered limit's way back (12k), in healthy blocks: below its ceiling less one, a voice back each 8 (21 ms);
+/// at or above it, a voice each 750 (2 s), doubled for each probe that failed, at most twice; the ceiling forgotten
+/// after 3,750 (10 s) or once the cost per voice moved by a quarter.
+const RECOVER_BLOCKS: u32 = 8;
+const PROBE_BLOCKS: u32 = 750;
+const MOST_PROBE_DOUBLINGS: u8 = 2;
+const FORGET_BLOCKS: u32 = 3750;
+const COST_DRIFT: f32 = 0.25;
 
 impl Budget {
     pub fn new(entries: Vec<Entry>, lanes: usize) -> Budget {
@@ -391,11 +424,9 @@ impl Budget {
     /// Its node's activity, for the count.
     fn give_up(&mut self, rs: &mut Routes, (k, i): (usize, usize)) -> Option<&Activity> {
         let e = self.entries.get_mut(k)?;
-        let a = &e.cost;
-        if a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) > 1 && a.over_limit.load(Relaxed) <= BACKSTOP_BLOCKS {
-            // One fewer than the limit in force, and held there: notes that keep arriving do not raise it again.
-            e.cap = a.voice_limit.load(Relaxed) - 1;
-        } else {
+        let backstop = !e.cost.own_voices.load(Relaxed) || e.cost.voice_limit.load(Relaxed) <= 1 || e.cost.over_limit.load(Relaxed) > BACKSTOP_BLOCKS;
+        e.trouble();
+        if backstop {
             rs[e.route].steal(i, 0);
         }
         Some(&e.cost)
@@ -427,12 +458,37 @@ impl Budget {
             a.faded_for_deadline.fetch_add(1, Relaxed);
         }
     }
-    /// A plugin's limit is let go once it holds no note (the player let go): while notes are held, giving
-    /// voices back would only bring the losses back.
-    pub fn calm(&mut self, rs: &Routes) {
+    /// After each block, the lowered limits' way back (12k): all let go once the plugin holds no note; else on a
+    /// healthy block (no loss on its lane in its last eight, the lane within its soft limit, the callback's slack
+    /// fine) a voice back each RECOVER_BLOCKS below the ceiling less one, each PROBE_BLOCKS (doubled per failed
+    /// probe) above it, the ceiling forgotten after FORGET_BLOCKS or once the cost per voice moved by COST_DRIFT.
+    /// `slack_low`: the callback's slack ran low this block, or a block was lost.
+    pub fn recover(&mut self, rs: &Routes, slack_low: bool) {
         for e in &mut self.entries {
+            if e.cap == 0 {
+                continue;
+            }
             if !rs[e.route].used.any() {
-                e.cap = 0;
+                (e.cap, e.ceiling, e.calm, e.probes) = (0, 0, 0, 0);
+                continue;
+            }
+            let l = self.lanes.get(e.lane).copied().unwrap_or_default();
+            let limit = e.cost.voice_limit.load(Relaxed);
+            if slack_low || l.losses != 0 || (l.limit > 0.0 && l.took > SOFT * l.limit) {
+                e.calm = 0;
+                continue;
+            }
+            e.calm += 1;
+            let cost = e.cost.note_now();
+            if e.ceiling != 0 && (e.calm >= FORGET_BLOCKS || (cost - e.cost_at).abs() > COST_DRIFT * e.cost_at) {
+                (e.ceiling, e.probes) = (0, 0);
+            }
+            let every = if e.ceiling == 0 || e.cap + 1 < e.ceiling { RECOVER_BLOCKS } else { PROBE_BLOCKS << e.probes };
+            if e.calm % every == 0 {
+                e.cap += 1;
+            }
+            if e.ceiling == 0 && e.cap > limit + 1 {
+                e.cap = 0; // no longer what holds it
             }
         }
     }

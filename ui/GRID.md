@@ -135,3 +135,14 @@ yet meet the rule; not refactored now, to be scheduled:
 - The theme is applied to the window's Theme global (theme.rs) and the profile read in main.rs:
   passed in at start, but not per screen.
 - ui/src/tests.rs sets OSCAIRN_* environment variables process-wide (tests only).
+
+## Debts found while theming
+
+- Waveform icons: the plugin data carries no per-value icon hint (`ui.h` and `params.list` have `widget`, `group`,
+  `view`... and nothing for icons), and the JUCE grid draws none. `grid::wave_icon` recognizes well-known waveform
+  names (Saw, Sawtooth, Square, Sqr, Pulse, Sine, Sin, Triangle, Tri, Noise) on split buttons and dropdowns and
+  `grid.slint`'s `WaveIcon` draws them as paths. A per-value icon hint in the plugin data would be the proper
+  source; this rule should go when it exists.
+- The switch tile: the JUCE grid draws a toggle `TextButton` at most 110 wide, left in the control row
+  (ParameterGrid.cpp:1544). The Rust grid fills the control row's width instead, on the owner's remark that a pill
+  floating in the tile looked wrong; a divergence from the reference to settle in both UIs.

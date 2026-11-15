@@ -2607,7 +2607,19 @@ unsafe fn render(
             // Never leave a stuck gate after an event overflow. Reset is an audio-thread operation and covers every note
             // channel and port.
             ((*p).reset.unwrap())(p);
-            total = 0;
+            // The block's parameter changes outlive the reset, which ends notes, not values: one dropped here stays
+            // lost, the caller holding it as set (a restarted worker's restored value, its first block late).
+            let mut kept = 0;
+            for i in 0..total {
+                let h = (*s).ordered[i].event.header();
+                if h.space_id == CLAP_CORE_EVENT_SPACE_ID
+                    && (h.type_ == CLAP_EVENT_PARAM_VALUE || h.type_ == CLAP_EVENT_PARAM_MOD || h.type_ == CLAP_EVENT_PARAM_GESTURE_BEGIN || h.type_ == CLAP_EVENT_PARAM_GESTURE_END)
+                {
+                    (*s).ordered[kept] = (*s).ordered[i];
+                    kept += 1;
+                }
+            }
+            total = kept;
             c.timing = 0;
             (*s).reset_in_process = true;
             (*s).sleeping.store(false, SeqCst);

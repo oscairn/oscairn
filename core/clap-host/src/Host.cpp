@@ -1480,7 +1480,14 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         if (s.panic.exchange(false)) {
             // Never leave a stuck gate after an event overflow. Reset is an
             // audio-thread operation and covers every note channel and port.
-            s.plugin->reset(s.plugin); total = timing = 0; s.resetInProcess = true; s.sleeping = false; s.haveHarmony = false; // the harmony comes again next block
+            s.plugin->reset(s.plugin); s.resetInProcess = true; s.sleeping = false; s.haveHarmony = false; // the harmony comes again next block
+            // The block's parameter changes outlive the reset, which ends notes, not values: one dropped here stays
+            // lost, the caller holding it as set (a restarted worker's restored value, its first block late).
+            uint32_t kept = 0;
+            for (uint32_t i = 0; i < total; ++i) if (const auto* h = s.ordered[i].event.header(); h->space_id == CLAP_CORE_EVENT_SPACE_ID &&
+                (h->type == CLAP_EVENT_PARAM_VALUE || h->type == CLAP_EVENT_PARAM_MOD || h->type == CLAP_EVENT_PARAM_GESTURE_BEGIN || h->type == CLAP_EVENT_PARAM_GESTURE_END))
+                s.ordered[kept++] = s.ordered[i];
+            total = kept; timing = 0;
         }
         std::sort(s.ordered.begin(), s.ordered.begin() + total, [](const Impl::TimedEvent& a, const Impl::TimedEvent& b) {
             return a.event.header()->time < b.event.header()->time ||

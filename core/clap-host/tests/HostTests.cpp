@@ -225,6 +225,11 @@ int main(int argc, char** argv) {
     audio.join();
     check(left[0] == .25f, "restored synth audible");
     second.panic(); check(render(second, out, 128) && left[0] == 0.f, "panic kills held notes");
+    // A parameter change waiting when a panic comes is still applied: the reset ends notes, not values.
+    check(second.setParameter(7, .5), "queue a parameter before a panic");
+    second.panic(); check(render(second, out, 128) && left[0] == 0.f, "the panic's block");
+    check(second.enqueue(Event::note(true, 60, .8)) && render(second, out, 128) && left[0] == .5f, "a parameter queued before a panic is kept");
+    check(second.enqueue(Event::note(false, 60, 0)) && render(second, out, 128), "the note ended");
     check(second.loadState(saved), "restore on activated plugin");
     check(second.reconfigure(44100, 256), "sample-rate and buffer reconfiguration");
 

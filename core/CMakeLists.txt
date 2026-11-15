@@ -545,7 +545,12 @@ add_test(NAME worker-miss COMMAND oscairn-worker-miss-test $<TARGET_FILE:oscairn
 set_tests_properties(worker-miss PROPERTIES TIMEOUT 60)
 add_executable(oscairn-worker-sleep-test engine/tests/worker_sleep.cpp)
 target_link_libraries(oscairn-worker-sleep-test PRIVATE oscairn_engine)
-add_test(NAME worker-sleep COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>)
+# oscairn-clap's sound-snapshots example, copied: sound contexts, ring-out, and SLEEP when idle.
+add_library(oscairn-sound-snapshots-fixture MODULE engine/tests/sound_snapshots_fixture.cpp)
+target_link_libraries(oscairn-sound-snapshots-fixture PRIVATE oscairn_clap_headers)
+set_target_properties(oscairn-sound-snapshots-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
+add_test(NAME worker-sleep COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:oscairn-sound-snapshots-fixture>)
 set_tests_properties(worker-sleep PROPERTIES TIMEOUT 60)
 add_executable(oscairn-worker-reader-test engine/tests/worker_reader.cpp)
 target_include_directories(oscairn-worker-reader-test PRIVATE plugin-host/src)

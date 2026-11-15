@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // RFC 0045, sleeping plugins: a plugin in a worker that says it is asleep (CLAP_PROCESS_SLEEP) is not
 // called while nothing comes for it, and is called on the very block something does: a note, a host
-// command, a panic. engine.timing's counts (calledBlocks, restedBlocks) say which blocks were which, and
-// its steady time goes on through the blocks it slept.
-//   oscairn-worker-sleep-test WORKER FIXTURE
+// command, a panic; with native sound contexts (oscairn-clap's sound-snapshots example), a select and a
+// choke_retiring. engine.timing's counts (calledBlocks, restedBlocks) say which blocks were which, and its
+// steady time goes on through the blocks it slept.
+//   oscairn-worker-sleep-test WORKER FIXTURE SOUND-SNAPSHOTS-FIXTURE
 #include <oscairn/graph.h>
 #include <oscairn/plugin_host.h>
 #include <clap/clap.h>
@@ -22,7 +23,7 @@ void check(bool ok, const std::string& what)
 
 int main(int argc, char** argv)
 {
-    if(argc < 3) { std::fprintf(stderr, "usage: %s WORKER FIXTURE\n", argv[0]); return 2; }
+    if(argc < 4) { std::fprintf(stderr, "usage: %s WORKER FIXTURE SOUND-SNAPSHOTS-FIXTURE\n", argv[0]); return 2; }
     constexpr uint32_t frames = 64;
     constexpr double rate = 48000;
     try
@@ -65,6 +66,33 @@ int main(int argc, char** argv)
         check(s.idleBlocks >= s.restedBlocks, "the blocks slept through count as the plugin's idle blocks: " + std::to_string(s.idleBlocks) + " of " + std::to_string(s.restedBlocks));
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
-    if(!failures) std::printf("worker sleep: not called while asleep, called on the block a note, a command or a panic comes\n");
+    // A select (an accepted one) and a queued choke_retiring reaching a plugin asleep wake it for the next block.
+    try
+    {
+        auto host = oscairn::loadPluginInWorker(argv[1], argv[3], "org.oscairn.example.sound-snapshots", rate, frames, oscairn::ProcessingMode::Offline);
+        check(host->soundContextCapacity() > 0 && host->ringsOut(), "the example has sound contexts and ring-out");
+        const auto a = host->prepareSound("A", {}), b = host->prepareSound("B", {});
+        check(host->selectSound(a), "A selected");
+        oscairn::Graph g(rate, frames);
+        const auto n = g.add(host);
+        g.connectNotes(oscairn::graphInput, n); g.connectAudio(n, oscairn::graphOutput); g.commit();
+        std::vector<float> l(frames), r(frames); float* out[]{l.data(), r.data()};
+        auto block = [&] {
+            const auto before = host->statistics();
+            g.process(out, frames, nullptr, nullptr, 0);
+            const auto after = host->statistics();
+            return std::pair{after.calledBlocks - before.calledBlocks, after.restedBlocks - before.restedBlocks};
+        };
+        for(int i = 0; i < 3; ++i) block();
+        check(host->asleep() && block().second == 1, "idle, the example sleeps and is not called");
+        check(host->selectSound(b), "B selected");
+        check(block().first == 1, "a select wakes it on the next block");
+        check(block().second == 1, "then it sleeps again");
+        check(host->chokeRetiring(), "choke_retiring queued");
+        check(block().first == 1, "a choke_retiring wakes it on the next block");
+        check(block().second == 1, "and it sleeps again");
+    }
+    catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
+    if(!failures) std::printf("worker sleep: not called while asleep, called on the block a note, a command, a panic, a select or a choke_retiring comes\n");
     return failures ? 1 : 0;
 }

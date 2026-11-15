@@ -888,7 +888,8 @@ namespace oscairn
             for(auto& c:step.contexts)contexts[i].push_back({c.channel,coreActivity(c.activity.get()),c.id});
             const bool late=step.host && std::all_of(plan->steps.begin(),plan->steps.end(),[&](const Plan::Step& o){return !o.host || o.lane!=step.lane || o.host->oneBlockLate();});
             steps.push_back({coreActivity(step.activity.get()),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),step.lane,step.inProcess,late,
-                             next[i].data(),uint32_t(next[i].size()),step.host.get(),step.id,step.harmony,step.routes.data(),uint32_t(step.routes.size()),step.lanesIn});
+                             next[i].data(),uint32_t(next[i].size()),step.host.get(),step.id,step.harmony,step.routes.data(),uint32_t(step.routes.size()),step.lanesIn,
+                             step.host && (worker::workerRest()==worker::WorkerRest::all || (worker::workerRest()==worker::WorkerRest::disabled && !step.playable))});
         }
         const auto budgeted=std::make_unique<bool[]>(steps.size());
         plan->notes.reset(OSCAIRN_CORE(notes_new)(steps.data(),uint32_t(steps.size()),uint32_t(lanes.size()),budgeted.get()));
@@ -1090,7 +1091,7 @@ namespace oscairn
             [](void*){return int64_t(std::chrono::steady_clock::now().time_since_epoch().count());},
             [](void*,int64_t at,bool only){worker::workerDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));worker::workerDeadlineOnly=only;},
             [](void* c,uint32_t n,oscairn_job job,void* context){C::of(c).helpers->run(n,reinterpret_cast<AudioHelpers::Job>(job),context);},
-            [](void* c,uint32_t s,uint32_t frames){return (worker::workerRest()==worker::WorkerRest::all || !C::step(c,s).playable) && C::host(c,s).rest(frames);}};
+            [](void* c,uint32_t s,uint32_t frames){return C::host(c,s).rest(frames);}};
         static_assert(std::is_same_v<std::chrono::steady_clock::duration,std::chrono::nanoseconds>);
         oscairn_plugins plugins=table;plugins.context=&calls;
         const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);

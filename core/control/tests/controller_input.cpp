@@ -299,8 +299,9 @@ namespace
     {
         char home[] = "/tmp/oscairn-panel-pedal-XXXXXX"; // the session's revisions there, never the real data folder
         if(!::mkdtemp(home)) { check(false, "a data folder for the test"); return; }
+        const char* kept = std::getenv("OSCAIRN_DATA_HOME"); const std::string was = kept ? kept : ""; // the folder the test started with
         ::setenv("OSCAIRN_DATA_HOME", home, 1);
-        struct Gone { const char* path; ~Gone() { ::unsetenv("OSCAIRN_DATA_HOME"); std::error_code e; std::filesystem::remove_all(path, e); } } gone{home};
+        struct Gone { const char* path; const std::string& was; ~Gone() { ::setenv("OSCAIRN_DATA_HOME", was.c_str(), 1); std::error_code e; std::filesystem::remove_all(path, e); } } gone{home, was};
         Session s(48000, frames);
         const auto synth = s.add("synth", fixture, "org.kick.test.midi"); s.setParameter(synth, 7, .5);
         const auto part = s.addPart("Part"); s.insertIntoPart(part, 0, synth); s.commit();

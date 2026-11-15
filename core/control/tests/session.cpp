@@ -348,6 +348,7 @@ namespace
     {
         const auto home = std::filesystem::temp_directory_path() / ( "oscairn-session-revisions-" + std::to_string( getpid() ) );
         std::filesystem::create_directories( home );
+        const char* kept_ = std::getenv("OSCAIRN_DATA_HOME"); const std::string was_ = kept_ ? kept_ : ""; // the folder this test started with
         setenv( "OSCAIRN_DATA_HOME", home.c_str(), 1 );
         const uint64_t ahead = uint64_t( 1 ) << 52; // the clock's microseconds reach it in 2112: as if the clock went back since
         std::ofstream( home / "parameter-revision" ) << ahead << "\n";
@@ -363,7 +364,7 @@ namespace
             const auto id = instrument( session, synth );
             check( session.graphState().parameterRevisions.at( id ) > first, "and the next engine's past the last one's" );
         }
-        unsetenv( "OSCAIRN_DATA_HOME" );
+        setenv( "OSCAIRN_DATA_HOME", was_.c_str(), 1 );
         std::filesystem::remove_all( home );
     }
 
@@ -375,6 +376,7 @@ namespace
         const auto home = fs::temp_directory_path() / ( "oscairn-session-reopen-" + std::to_string( getpid() ) );
         fs::remove_all( home );
         fs::create_directories( home );
+        const char* kept_ = std::getenv("OSCAIRN_DATA_HOME"); const std::string was_ = kept_ ? kept_ : ""; // the folder this test started with
         setenv( "OSCAIRN_DATA_HOME", home.c_str(), 1 );
         const auto last = home / "library" / "last.json", saved = home / "Saved", other = home / "Other";
         auto read = []( const fs::path& file ) { std::ifstream in( file ); return std::string( std::istreambuf_iterator<char>( in ), {} ); };
@@ -441,7 +443,7 @@ namespace
             session.loadPerformance( missing.string() );
             check( nodes( session ).size() == 1, "while opening it by hand still gives its stand-in (RFC 0006)" );
         }
-        unsetenv( "OSCAIRN_DATA_HOME" );
+        setenv( "OSCAIRN_DATA_HOME", was_.c_str(), 1 );
         fs::remove_all( home );
     }
 }
@@ -585,6 +587,7 @@ namespace
 
         const auto home = fs::temp_directory_path() / ( "oscairn-session-timing-" + std::to_string( getpid() ) );
         fs::remove_all( home );
+        const char* kept_ = std::getenv("OSCAIRN_DATA_HOME"); const std::string was_ = kept_ ? kept_ : ""; // the folder this test started with
         setenv( "OSCAIRN_DATA_HOME", home.c_str(), 1 );
         run( n, 100'000, 0 );
         session.savePerformance( ( home / "Saved" ).string() );
@@ -593,7 +596,7 @@ namespace
         run( 2, 100'000, 0 );
         t = session.engineTiming( false );
         check( t.callback.startup.count() == 2 && t.callback.steady.count() == 0, "a Performance load warms up again" );
-        unsetenv( "OSCAIRN_DATA_HOME" );
+        setenv( "OSCAIRN_DATA_HOME", was_.c_str(), 1 );
         fs::remove_all( home );
     }
 }

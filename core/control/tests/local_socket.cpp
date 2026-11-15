@@ -228,6 +228,7 @@ namespace
     // the host's stays trusted.
     void permissions(const char* plugin)
     {
+        const char* kept_ = std::getenv("OSCAIRN_DATA_HOME"); const std::string was_ = kept_ ? kept_ : ""; // the folder this test started with
         TemporaryDirectory home; ::setenv("OSCAIRN_DATA_HOME", home.path, 1); // a library of its own
         Fixture f(plugin);
         auto fd = pair(); f.server.adopt(fd[0]);
@@ -271,7 +272,7 @@ namespace
             check(has(host.call("engine.timing", R"({"reset":true})"), R"("warmupBlocks":512,"bucketBounds":[16,32,64,)") && has(host.call("engine.timing", R"({"reset":1})"), "-32602") &&
                   has(host.call("engine.timing", R"({"clear":true})"), "-32602"), "the host reads and resets it; its parameter checked");
         });
-        ::unsetenv("OSCAIRN_DATA_HOME");
+        ::setenv("OSCAIRN_DATA_HOME", was_.c_str(), 1);
     }
     // A managed engine's lifetime: it may stop once every UI that keeps it has quit normally;
     // one that leaves without releasing (a crash) keeps it until a UI attaches again, and a

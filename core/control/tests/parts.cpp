@@ -1441,6 +1441,28 @@ namespace
             s.controller(64, 0); x.run(s); x.run(s);
             check(near(x.l[0], 0), "pedal up: both silent: " + std::to_string(x.l[0]));
         }
+        else if(which == "live") // the receive switch set on a playing part (parts.input): it takes effect at once
+        {
+            Session s(48000, frames);
+            const auto a = s.add("a", fixture, "org.kick.test.midi");
+            s.setParameter(a, 7, .5);
+            const auto bass = s.addPart("Bass"); s.insertIntoPart(bass, 0, a); s.commit();
+            Audio x;
+            s.note(true, 48, 1); x.run(s); x.run(s);
+            PartInput deaf = s.parts()[0].input; deaf.pedals = withPedalReceive(0, Pedal::Sustain, PedalReceive::None);
+            s.setPartInput(bass, deaf); s.commit(); // as parts.input commits
+            s.controller(64, 127); x.run(s); x.run(s);
+            s.note(false, 48, 0); x.run(s); x.run(s);
+            check(near(x.l[0], 0), "set to take no sustain while playing: key up with the pedal down lets go: " + std::to_string(x.l[0]));
+            s.controller(64, 0); x.run(s);
+            // Set while the pedal is down: the pedal's release still reaches the part, which lets go.
+            PartInput all = deaf; all.pedals = 0; s.setPartInput(bass, all); s.commit(); x.run(s);
+            s.controller(64, 127); s.note(true, 50, 1); x.run(s); x.run(s);
+            s.setPartInput(bass, deaf); s.commit(); x.run(s);
+            s.note(false, 50, 0); x.run(s); x.run(s);
+            s.controller(64, 0); x.run(s); x.run(s);
+            check(near(x.l[0], 0), "set to take no sustain with the pedal down: its release lets go: " + std::to_string(x.l[0]));
+        }
         else check(false, "no pending pedal test " + which);
     }
 

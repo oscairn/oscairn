@@ -170,6 +170,7 @@ pub struct NoteRoute {
     pub held_keys: [u64; 2],
     held_count: [u16; 128],
     pedals_by: [[[u8; MAX_SOURCES as usize + 1]; 16]; 3], // each pedal's last value from each source by channel (untagged last)
+    pedals_sent: [[u8; 16]; 3], // each pedal's value last sent on by channel
 }
 
 /// What a routed event may touch besides its route: its zones, where it entered the graph, whether
@@ -199,6 +200,7 @@ impl NoteRoute {
             held_keys: [0; 2],
             held_count: [0; 128],
             pedals_by: [[[0; MAX_SOURCES as usize + 1]; 16]; 3],
+            pedals_sent: [[0; 16]; 3],
         }
     }
     pub fn slot(&self, i: usize) -> &Slot {
@@ -220,6 +222,7 @@ impl NoteRoute {
         self.held_keys = [0; 2];
         self.held_count = [0; 128];
         self.pedals_by = [[[0; MAX_SOURCES as usize + 1]; 16]; 3];
+        self.pedals_sent = [[0; 16]; 3];
     }
     fn hold(&mut self, i: usize) {
         self.held.set(i);
@@ -447,22 +450,29 @@ pub fn route(rs: &mut Routes, me: Route, e: &Event, next_id: &mut u32, emit: &mu
         let mut value = d[2];
         match (cx.zones.filter(|z| z.count != 0), pedal) {
             // A pedal reaches a part by its receive setting, whichever device its notes come from (a pedal-down
-            // only on its zones' channels); it goes on as the largest of the sources taken, when that changes.
+            // only on its zones' channels); it goes on as the largest of the sources taken, when that differs from
+            // what went on last. A pedal-up from any source counts: a receive edited while a pedal is down lets go of
+            // it with that pedal's release.
             (Some(z), Some(p)) => {
-                if !z.takes_pedal(p, cx.source) || (!release && !z.takes_channel(channel)) {
+                if d[2] >= 64 && (!z.takes_pedal(p, cx.source) || !z.takes_channel(channel)) {
                     return true;
                 }
                 let by = &mut r.pedals_by[p][usize::from(channel)];
-                let most = |by: &[u8; MAX_SOURCES as usize + 1]| by.iter().enumerate().filter(|&(s, _)| z.pedal_from(p, s)).map(|(_, &v)| v).max().unwrap_or(0);
-                let was = most(by);
                 by[usize::from(cx.source.min(MAX_SOURCES))] = d[2];
-                value = most(by);
-                if value == was {
+                value = by.iter().enumerate().filter(|&(s, _)| z.pedal_from(p, s)).map(|(_, &v)| v).max().unwrap_or(0);
+                let sent = &mut r.pedals_sent[p][usize::from(channel)];
+                if value == *sent {
                     return true;
                 }
+                *sent = value;
                 e.0[20] = value;
             }
             (Some(z), None) if (0x80..0xf0).contains(&kind) && !release && !z.passes(channel, cx.source) => return true, // another zone's channel or device
+            // No zones: it goes on as it came, kept for zones set later.
+            (None, Some(p)) => {
+                r.pedals_by[p][usize::from(channel)][usize::from(cx.source.min(MAX_SOURCES))] = d[2];
+                r.pedals_sent[p][usize::from(channel)] = d[2];
+            }
             _ => {}
         }
         let (port16, channel16) = (port as i16, i16::from(channel));

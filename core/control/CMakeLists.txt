@@ -244,7 +244,7 @@ add_test(NAME control-parts COMMAND oscairn-parts-test
 set_tests_properties(control-parts PROPERTIES TIMEOUT 60)
 # How two devices' pedals reach parts (every pedal by default, "own", two pedals together, "none"), as the
 # engine core's note router delivers them by each part's receive setting.
-foreach(pending other-device own two-pedals none)
+foreach(pending other-device own two-pedals none live)
     add_test(NAME control-parts-pedals-${pending} COMMAND oscairn-parts-test
         $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-audio-fixture> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn_splitters> $<TARGET_FILE:oscairn_transpose> $<TARGET_FILE:oscairn-follower-fixture> $<TARGET_FILE:oscairn-voice-fixture> --pending-pedals ${pending})
     set_tests_properties(control-parts-pedals-${pending} PROPERTIES TIMEOUT 60)

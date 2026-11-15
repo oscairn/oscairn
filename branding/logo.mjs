@@ -34,4 +34,7 @@ for (const [name, mark] of Object.entries(marks)) {
   // The macOS app icon grid: an 824 px square (corner radius about 185) centered in 1024, so the
   // icon sits at the size of the system's own; the mark keeps its place within the square.
   writeFileSync(`${base}-app-icon.svg`, svg(`<rect x="9.77" y="9.77" width="80.47" height="80.47" rx="18.1" fill="${dark}"/><g transform="translate(20.23 20.23) scale(.5955)">${paths(mark, light, accent)}</g>`, 1024));
+  // The avatar: the mark on black filling the whole square, for places that crop to a circle
+  // themselves (GitHub, Patreon); at 60% the mark's box stays inside that circle.
+  writeFileSync(`${base}-avatar.svg`, svg(`<rect width="100" height="100" fill="#000"/><g transform="translate(20 20) scale(.6)">${paths(mark, light, accent)}</g>`, 1024));
 }

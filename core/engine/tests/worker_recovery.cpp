@@ -203,6 +203,26 @@ namespace
         return equal && energy > 0;
     }
 
+    // The sustain pedal held when the worker is killed, a panic reaching the restarted node before its first block: the pedal is
+    // still down after it, as without the panic (a key struck and released keeps sounding). The restart is waited for without
+    // blocks, so the first one after it is the one the panic meets.
+    void panicAfterRestart(const char* plugin, bool panic)
+    {
+        const std::string what = panic ? "a panic before the restarted worker's first block" : "no panic";
+        Player p(plugin);
+        auto& host = p.host();
+        p.play({Event::midi(0xb0, 64, 127)}); p.play();
+        killWorkers();
+        for(int i = 0; i < 1500 && host.statistics().restarts < 1; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); p.graph.service(); }
+        check(host.statistics().restarts >= 1, what + ": restarted");
+        if(panic) host.panic();
+        p.play(); // the first block: the pedal replayed in it
+        for(int i = 0; i < 10; ++i) p.play(); // past the fade-in
+        p.play({Event::note(true, 60, 1)}); p.play({Event::note(false, 60, 0)});
+        float heard = 0; for(int i = 0; i < 4; ++i) { p.play(); heard = std::max(heard, std::abs(p.last())); }
+        check(heard > .1f, what + ": the pedal is still down after the restart, so the released key sounds on (" + std::to_string(heard) + ")");
+    }
+
     void natives(const char* synth, const char* sampler, const char* delay, const std::filesystem::path& directory)
     {
         { // Basic Synth: two prepared sounds on two channels.
@@ -334,6 +354,8 @@ int main(int argc, char** argv)
     {
         recovers(argv[2], directory);
         lostReply(argv[2], directory);
+        panicAfterRestart(argv[2], false);
+        panicAfterRestart(argv[2], true);
         givesUp(argv[3]);
         natives(argv[4], argv[5], argv[6], directory / "natives");
         placement(argv[4]);

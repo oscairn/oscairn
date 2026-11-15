@@ -905,6 +905,7 @@ namespace oscairn
                 if(process()->failed.load()) return;
                 if(missed_.load(std::memory_order_relaxed)) missPanics_.fetch_add(1, std::memory_order_relaxed);
                 if(extra_) panicLater_.store(true, std::memory_order_release); else shared_->panic.store(1, std::memory_order_release);
+                if(replayUnconfirmed_.load(std::memory_order_relaxed)) replayAgain_.store(true, std::memory_order_relaxed); // it may have dropped the replay
             }
             bool inWorker() const noexcept override { return true; }
             bool reset() override { return request(Op::Reset).u8() != 0; }
@@ -1221,6 +1222,7 @@ namespace oscairn
                     for(uint32_t i = 0; i < count; ++i) if(!carry(events[i], true)) kept_ = false;
                     return silence();
                 }
+                replayUnconfirmed_.store(false, std::memory_order_relaxed); // the block with the replay is done: a panic since did not reach it
                 workerTimes(s, std::chrono::steady_clock::now()); // a block the engine gave up on, done since
                 // Its sound is gone, its output events come now, at this block's start; one the worker's host did not
                 // render (a control silence there) lost its events, so the plugin is reset before this block.
@@ -1245,7 +1247,9 @@ namespace oscairn
                     else std::fill_n(audioIn(c), frames, 0.f);
                 }
                 uint32_t kept = 0;
-                if(replay_) { track(nullptr, 0); kept = replay(s.events, 0, maxEvents - count); replay_ = false; }
+                if(replayAgain_.exchange(false, std::memory_order_relaxed)) replay_ = true;
+                // A panic drops a block's controllers, the replay with them: one reaching this block (or the block it was in) has it sent again.
+                if(replay_) { track(nullptr, 0); kept = replay(s.events, 0, maxEvents - count); replay_ = s.panic.load(std::memory_order_acquire) != 0; replayUnconfirmed_.store(true, std::memory_order_relaxed); }
                 if(auto* pool = s.inputBytes()) pool->used = 0;
                 for(uint32_t i = 0; i < count; ++i)
                 {
@@ -1725,6 +1729,7 @@ namespace oscairn
             std::vector<clap_id> sentIds_; // the parameters' IDs by index: the audio thread's own copy
             std::array<std::atomic<uint32_t>, 17> selections_{}; std::array<uint32_t, 17> selectionsSeen_{}; // slot 0: all channels
             bool replay_ = false;
+            std::atomic<bool> replayUnconfirmed_{false}, replayAgain_{false}; // the replay's block not yet seen done; a panic met it
             void forgetSent(uint32_t slot) noexcept { for(size_t i = slot; i < sentKinds_.size(); i += 17) sentKinds_[i] = 0; }
             void track(const kick::clap::Event* events, uint32_t count) noexcept
             {

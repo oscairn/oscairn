@@ -22,9 +22,18 @@ pub fn fs_error(call: &str, e: &std::io::Error, paths: &[&Path]) -> Failure {
         let quoted: String = paths.iter().map(|p| format!(" [\"{}\"]", p.display())).collect();
         format!("filesystem error: in {call}: {what}{quoted}")
     } else {
-        // shortcut: libstdc++'s wording, unchecked on Linux yet.
-        let bracketed: String = paths.iter().map(|p| format!(" [{}]", p.display())).collect();
-        format!("filesystem error: {call}: {what}{bracketed}")
+        // libstdc++ names each failed call in words (canonical and file_size as clap-host-rust sees them on Linux; the others as its
+        // filesystem sources word them), and shows only the paths a call was given, none empty.
+        let words = match call {
+            "canonical" => "cannot make canonical path",
+            "file_size" => "cannot get file size",
+            "create_directories" => "cannot create directories",
+            "create_directory" => "cannot create directory",
+            "rename" => "cannot rename",
+            other => other,
+        };
+        let bracketed: String = paths.iter().filter(|p| !p.as_os_str().is_empty()).map(|p| format!(" [{}]", p.display())).collect();
+        format!("filesystem error: {words}: {what}{bracketed}")
     };
     Failure::runtime(message)
 }

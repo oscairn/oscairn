@@ -120,8 +120,7 @@ fn canonical_error(path: &str, e: &std::io::Error) -> String {
     if cfg!(target_os = "macos") {
         format!("filesystem error: in canonical: {what} [\"{path}\"] [\"\"]")
     } else {
-        format!("filesystem error: cannot make canonical path: {what} [{path}]")
-        // shortcut: libstdc++'s wording, unchecked on Linux yet
+        format!("filesystem error: cannot make canonical path: {what} [{path}]") // libstdc++'s, as clap-host-rust sees it on Linux
     }
 }
 extern "C" {

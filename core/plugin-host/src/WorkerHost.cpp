@@ -456,7 +456,8 @@ namespace oscairn
                 for(auto n = r.u32(); n--;) descriptor_.features.push_back(r.str());
                 for(auto n = std::min(r.u32(), 64u); n--;) { const auto lane = r.u32(); descriptor_.lanes.emplace_back(lane, r.str()); }
                 parameters_ = readParameters(r);
-                for(uint32_t i = 0; i < parameters_.size(); ++i) index_[parameters_[i].id] = i;
+                for(uint32_t i = 0; i < parameters_.size(); ++i) { index_[parameters_[i].id] = i; sentIds_.push_back(parameters_[i].id); }
+                sentValues_.assign(parameters_.size() * 17, 0); sentModulation_.assign(sentValues_.size(), 0); sentKinds_.assign(sentValues_.size(), 0);
                 inputs_ = readPorts(r); outputs_ = readPorts(r);
                 noteInputs_ = r.u32(); noteOutputs_ = r.u32();
                 for(uint32_t i = 0; i < noteInputs_; ++i) clapNotes_.push_back(r.u8());
@@ -579,8 +580,12 @@ namespace oscairn
                 // Only values that differ from what the new worker published, to stay within its event queue.
                 // None after a snapshot prepared beside: the values then published follow the selections
                 // (the outgoing sound's, or a channel's), and as edits they would overwrite every selected sound.
-                // shortcut: edits made between that switch and a crash are lost; record them apart if that matters.
-                if(!besideRecord_) for(size_t i = 0; i < values_.size(); ++i)
+                // Nor where the channels select different sounds (parts sharing the instance): the values published are
+                // one sound's, and as edits to all they would overwrite the others'; what was sent to each channel is replayed instead.
+                // shortcut: edits through setParameter (to all channels) made after such a switch, or before the instance came to be
+                // shared, are lost; channel-addressed ones are replayed (start). Record them per sound if that matters.
+                const bool oneSound = !contexts_ || std::all_of(selected_.begin(), selected_.end(), [&](uint32_t id) { return id == selected_[0]; });
+                if(!besideRecord_ && oneSound) for(size_t i = 0; i < values_.size(); ++i)
                     if(!(parameters_[i].flags & CLAP_PARAM_IS_READONLY) && shared_->parameterValues[i].load() != values_[i])
                         process()->exchange(header(Op::SetParameter).u32(parameters_[i].id).f64(values_[i]).data);
                 // The plugin's window, as the engine last asked; one that will not open does not stop the restart.
@@ -663,6 +668,7 @@ namespace oscairn
                 // Its declaration stays known: a re-activation's Reserve replaces it, and a load refused
                 // before one leaves the plugin as it was (RFC 0025).
                 process()->exchange(header(Op::LoadState).str(directory).data);
+                selections_[0].fetch_add(1, std::memory_order_release); // the state holds the values now
                 record(Op::SaveState);
                 process()->fitLimit();
             }
@@ -679,6 +685,7 @@ namespace oscairn
             {
                 auto lock = controlFor();
                 process()->exchange(header(Op::LoadPreset).str(uri).data);
+                selections_[0].fetch_add(1, std::memory_order_release);
                 record(Op::SaveState);
             }
             // Only on a host nothing plays (not yet, or no longer: RFC 0021), so the record can be saved at once.
@@ -688,6 +695,7 @@ namespace oscairn
                 // Its declaration stays known: a re-activation's Reserve replaces it, and a load refused
                 // before one leaves the plugin as it was (RFC 0025).
                 process()->exchange(header(Op::LoadSnapshot).str(directory).data);
+                selections_[0].fetch_add(1, std::memory_order_release);
                 if(contexts_)
                 {
                     // The snapshot's sounds have fresh IDs.
@@ -775,6 +783,7 @@ namespace oscairn
                 if(contexts_ && i == ids_.end()) { if(channel < -1 || channel > 15) throw std::invalid_argument("Invalid sound channel"); return false; }
                 if(!process()->exchange(header(Op::SelectSound).u32(contexts_ ? i->second : id).u32(uint32_t(channel)).data).u8()) return false;
                 if(channel < 0) selected_.fill(id); else selected_[size_t(channel)] = id;
+                selections_[size_t(channel + 1)].fetch_add(1, std::memory_order_release); // what was sent to the channel was for its old sound
                 return true;
             }
             bool discardSound(uint32_t id, bool cutTail) override
@@ -1169,9 +1178,10 @@ namespace oscairn
                 // While busy (until finish), a restart waits; it sets failed first, so a block that starts later sees it.
                 busy_.store(true);
                 auto& s = *shared_;
+                if(events && count <= maxEvents) track(events, count); // also while it is down: the restart replays them
                 if(process()->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0; return silence(); }
                 process()->follow(frames);
-                if(const auto g = process()->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process()->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); noGrace_ = !process()->restartGrace.load(); } // restarted: the shared block holds the old worker's stamps
+                if(const auto g = process()->generation.load(); g != generation_) { generation_ = g; fadeFrames_ = uint32_t(process()->rate * .01); faded_ = 0; consecutiveMisses_ = 0; limitsWaiting_ = voiceBudget_; timed_ = sequence_; abandoned_ = false; timing_.warmUp(); noGrace_ = !process()->restartGrace.load(); replay_ = true; } // restarted: the shared block holds the old worker's stamps
                 // Loaded, restarted, or taken over by a Performance being opened (each a warmUp): its first two seconds' late
                 // blocks are its start's (samples read, pages touched), silenced as any, but none counts toward "too slow",
                 // so lateness while loading never restarts it. A hang is still a hang. Not every restart within a minute:
@@ -1210,6 +1220,7 @@ namespace oscairn
                     else std::fill_n(audioIn(c), frames, 0.f);
                 }
                 uint32_t kept = 0;
+                if(replay_) { track(nullptr, 0); kept = replay(s.events, 0, maxEvents - count); replay_ = false; }
                 if(auto* pool = s.inputBytes()) pool->used = 0;
                 for(uint32_t i = 0; i < count; ++i)
                 {
@@ -1667,6 +1678,108 @@ namespace oscairn
             // sound IDs), and the worker's last report, bounded. Voices past maxVoices are not credible.
             static constexpr uint32_t maxVoices = 1u << 16;
             bool limitsWaiting_ = false;
+            // What a plugin keeps only in memory, lost with its worker, as it crossed on the way in (audio thread;
+            // selections_ is the control thread's count): each channel's last controllers, pitch bend, channel
+            // pressure and channel-wide note expressions, and each parameter's last value and modulation sent to a
+            // channel (or to all, slot 0) since that channel selected a sound or a state was loaded. Replayed at the
+            // start of the first block after a restart, behind the restored sounds and selections the plugin applies
+            // first, so each lands on the sound its channel selects. Notes are not replayed: a sounding note is lost.
+            static constexpr std::array<uint8_t, 7> keptControllers_{1, 2, 4, 11, 64, 66, 67}; // wheel, breath, foot, expression, the pedals
+            struct Channel { std::array<int16_t, 7> cc{-1, -1, -1, -1, -1, -1, -1}; int32_t bend = -1; int16_t pressure = -1; std::array<double, 7> expression{}; uint8_t expressed = 0; };
+            std::array<Channel, 16> channels_{};
+            std::vector<double> sentValues_, sentModulation_; std::vector<uint8_t> sentKinds_; // parameter index × 17 slots: 1 a value, 2 a modulation
+            std::vector<clap_id> sentIds_; // the parameters' IDs by index: the audio thread's own copy
+            std::array<std::atomic<uint32_t>, 17> selections_{}; std::array<uint32_t, 17> selectionsSeen_{}; // slot 0: all channels
+            bool replay_ = false;
+            void forgetSent(uint32_t slot) noexcept { for(size_t i = slot; i < sentKinds_.size(); i += 17) sentKinds_[i] = 0; }
+            void track(const kick::clap::Event* events, uint32_t count) noexcept
+            {
+                for(uint32_t slot = 0; slot < 17; ++slot)
+                    if(const auto n = selections_[slot].load(std::memory_order_acquire); n != selectionsSeen_[slot])
+                    {
+                        selectionsSeen_[slot] = n;
+                        if(slot) forgetSent(slot); else for(uint32_t all = 0; all < 17; ++all) forgetSent(all);
+                    }
+                for(uint32_t i = 0; i < count; ++i) track(events[i]);
+            }
+            void track(const kick::clap::Event& event) noexcept
+            {
+                const auto* h = event.header();
+                if(h->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
+                if(h->type == CLAP_EVENT_MIDI)
+                {
+                    const auto& m = *reinterpret_cast<const clap_event_midi_t*>(h);
+                    if(m.port_index) return;
+                    auto& c = channels_[m.data[0] & 15];
+                    switch(m.data[0] & 0xf0)
+                    {
+                        case 0xb0: for(size_t i = 0; i < keptControllers_.size(); ++i) if(m.data[1] == keptControllers_[i]) c.cc[i] = int16_t(m.data[2] & 127); break;
+                        case 0xd0: c.pressure = int16_t(m.data[1] & 127); break;
+                        case 0xe0: c.bend = int32_t((m.data[2] & 127) << 7 | (m.data[1] & 127)); break;
+                    }
+                }
+                else if(h->type == CLAP_EVENT_NOTE_EXPRESSION)
+                {
+                    const auto& x = *reinterpret_cast<const clap_event_note_expression_t*>(h);
+                    if(x.note_id != -1 || x.key != -1 || x.channel < 0 || x.channel > 15 || x.expression_id < 0 || x.expression_id > 6) return;
+                    auto& c = channels_[size_t(x.channel)];
+                    c.expression[size_t(x.expression_id)] = x.value; c.expressed |= uint8_t(1u << x.expression_id);
+                }
+                else if(h->type == CLAP_EVENT_PARAM_VALUE || h->type == CLAP_EVENT_PARAM_MOD)
+                {
+                    const bool value = h->type == CLAP_EVENT_PARAM_VALUE;
+                    const auto& v = *reinterpret_cast<const clap_event_param_value_t*>(h);
+                    const auto& m = *reinterpret_cast<const clap_event_param_mod_t*>(h);
+                    const auto id = value ? v.param_id : m.param_id;
+                    const int note = value ? v.note_id : m.note_id, key = value ? v.key : m.key, channel = value ? v.channel : m.channel;
+                    if(note != -1 || key != -1 || channel < -1 || channel > 15) return;
+                    const auto i = index_.find(id);
+                    if(i == index_.end()) return;
+                    const auto at = size_t(i->second) * 17 + size_t(channel + 1);
+                    if(at >= sentKinds_.size()) return;
+                    if(value) { sentValues_[at] = v.value; sentKinds_[at] |= 1; }
+                    else { sentModulation_[at] = m.amount; sentKinds_[at] |= 2; }
+                }
+            }
+            // The replay after a restart, into `out` from `at`; returns the new count, at most `capacity`.
+            // shortcut: what does not fit the block's events after its own is dropped; carry it to the next block if a plugin ever keeps that much.
+            uint32_t replay(kick::clap::Event* out, uint32_t at, uint32_t capacity) noexcept
+            {
+                auto put = [&](const kick::clap::Event& e) { if(at < capacity) out[at++] = e; };
+                for(uint8_t ch = 0; ch < 16; ++ch)
+                {
+                    const auto& c = channels_[ch];
+                    for(size_t i = 0; i < keptControllers_.size(); ++i) if(c.cc[i] >= 0) put(kick::clap::Event::midi(uint8_t(0xb0 | ch), keptControllers_[i], uint8_t(c.cc[i])));
+                    if(c.bend >= 0) put(kick::clap::Event::midi(uint8_t(0xe0 | ch), uint8_t(c.bend & 127), uint8_t(c.bend >> 7)));
+                    if(c.pressure >= 0) put(kick::clap::Event::midi(uint8_t(0xd0 | ch), uint8_t(c.pressure), 0));
+                    for(int16_t x = 0; x < 7; ++x) if(c.expressed >> x & 1)
+                    {
+                        clap_event_note_expression_t e{};
+                        e.header = {sizeof(e), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION, 0};
+                        e.expression_id = x; e.note_id = -1; e.port_index = -1; e.channel = int16_t(ch); e.key = -1; e.value = c.expression[size_t(x)];
+                        put(kick::clap::Event::from(e));
+                    }
+                }
+                for(size_t at2 = 0; at2 < sentKinds_.size(); ++at2)
+                {
+                    const auto id = sentIds_[at2 / 17]; const auto channel = int16_t(int(at2 % 17) - 1);
+                    if(sentKinds_[at2] & 1)
+                    {
+                        clap_event_param_value_t v{};
+                        v.header = {sizeof(v), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0};
+                        v.param_id = id; v.note_id = -1; v.port_index = -1; v.channel = channel; v.key = -1; v.value = sentValues_[at2];
+                        put(kick::clap::Event::from(v));
+                    }
+                    if((sentKinds_[at2] & 2) && sentModulation_[at2] != 0)
+                    {
+                        clap_event_param_mod_t m{};
+                        m.header = {sizeof(m), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD, 0};
+                        m.param_id = id; m.note_id = -1; m.port_index = -1; m.channel = channel; m.key = -1; m.amount = sentModulation_[at2];
+                        put(kick::clap::Event::from(m));
+                    }
+                }
+                return at;
+            }
             uint32_t voiceLimit_ = 0, voiceContextCount_ = 0, activeVoices_ = 0, voiceNoteCount_ = 0;
             std::array<oscairn_voice_budget_context_t, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceContexts_{};
             double voiceCost_ = 0;

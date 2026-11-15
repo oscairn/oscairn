@@ -98,6 +98,24 @@ namespace
         s.insertIntoPart(parts[2].id, 1, s.add("insert", fixture, "org.kick.test.effect"));
         s.commit(); block(s); block(s);
     }
+#ifndef _WIN32
+    // The Session's plugin workers killed, then restarted; the blocks with one down render nothing and go unchecked.
+    void restart(Session& s)
+    {
+        int killed = 0;
+        if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
+        {
+            char line[32];
+            while(std::fgets(line, sizeof line, list)) if(::kill(std::atoi(line), SIGKILL) == 0) ++killed;
+            pclose(list);
+        }
+        check(killed > 0, "a worker to kill");
+        auto wait = [&] { std::this_thread::sleep_for(std::chrono::milliseconds(10)); std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()}; s.service(); s.process(out, frames, {}); };
+        for(int i = 0; i < 500 && s.sessionStatus().failures.empty(); ++i) wait(); // the crash reported
+        for(int i = 0; i < 1000 && !s.sessionStatus().failures.empty(); ++i) wait(); // the restart over
+        quiet(s);
+    }
+#endif
     double difference(const std::vector<float>& a, const std::vector<float>& b)
     {
         if(a.size() != b.size()) return 1e9;
@@ -459,31 +477,37 @@ int main(int argc, char** argv)
             Session s(48000, frames); build(s, asked); dress(s, fixture);
             check(engines(s) == 1 && s.graphState().shared.size() == 3, "added on one instance");
             same(added, heard(s), asked ? "shared on request" : "added sharing");
-#ifndef _WIN32
-            // Its worker killed and restarted: the instance told its sounds' buses again.
-            if(!asked && !placementPolicy().worker.empty())
-            {
-                int killed = 0;
-                if(FILE* list = popen(("pgrep -P " + std::to_string(::getpid()) + " -f oscairn-plugin-worker").c_str(), "r"))
-                {
-                    char line[32];
-                    while(std::fgets(line, sizeof line, list)) if(::kill(std::atoi(line), SIGKILL) == 0) ++killed;
-                    pclose(list);
-                }
-                check(killed > 0, "a worker to kill");
-                // The crash reported, then the restart over; blocks with the worker down render nothing.
-                auto wait = [&] { std::this_thread::sleep_for(std::chrono::milliseconds(10)); std::array<float, frames> l{}, r{}; float* out[2]{l.data(), r.data()}; s.service(); s.process(out, frames, {}); };
-                for(int i = 0; i < 500 && s.sessionStatus().failures.empty(); ++i) wait();
-                for(int i = 0; i < 1000 && !s.sessionStatus().failures.empty(); ++i) wait();
-                quiet(s);
-                // Each sound on its own part, the first's no more than its own. Not the same levels: a restart
-                // gives the sounds other values today (the instance's last values reapplied), apart from this.
-                auto after = heard(s);
-                check(std::abs(after["Part 0"] - added["Part 0"]) < 1e-6 && after["Part 1"] > 1e-3 && after["Part 2"] > 1e-3,
-                      "added sharing, after its worker restarts: each sound on its own part: " + std::to_string(after["Part 0"]) + " " + std::to_string(after["Part 1"]) + " " + std::to_string(after["Part 2"]));
-            }
-#endif
         }
+#ifndef _WIN32
+        // A shared instance whose worker restarts sounds as it did before, notes apart: every sound
+        // prepared, selected on its channel, on its bus, with its current values (a joiner's level edited
+        // since it was made, a control's value on one joiner and its modulation of the other) and the mod
+        // wheel where it was. Opened from a saved Performance, built by adding parts, and taken over by a
+        // Performance change.
+        if(!placementPolicy().worker.empty())
+        {
+            auto restored = [&](Session& s, const std::string& what) {
+                check(engines(s) == 1 && s.graphState().shared.size() == 3, what + ": one instance");
+                const auto one = s.parts()[1].chain.front(), two = s.parts()[2].chain.front();
+                check(s.setParameter(one, 2, .6), what + ": a joiner's level edited");
+                // A control setting one joiner's Brightness and modulating the other's, and the mod wheel up.
+                const auto knob = s.addMacro("Knob");
+                s.setMacroTargets(knob, {MacroTarget{.node = one, .param = 1, .start = .2, .end = .8}, MacroTarget{.node = two, .param = 1, .start = .1, .end = .9, .relative = true}});
+                s.setMacro(knob, .2); s.commit();
+                const auto wheel = kick::clap::Event::midi(0xb0, 1, 100);
+                block(s, nullptr, {&wheel, 1}); quiet(s);
+                const auto before = heard(s);                quiet(s); restart(s);
+                same(before, heard(s), what + ", after its worker restarts");
+            };
+            { Session s(48000, frames); s.loadPerformance(dressed.string()); block(s); restored(s, "opened"); }
+            { Session s(48000, frames); build(s, false); dress(s, fixture); restored(s, "added"); }
+            {
+                Session s(48000, frames); s.loadPerformance(separate.string()); block(s); play(s); quiet(s);
+                s.loadPerformance(dressed.string()); gone(s);
+                restored(s, "taken over");
+            }
+        }
+#endif
     }
 
     // RFC 0045: the same layout on every load, whatever played before and whatever is loaded already.

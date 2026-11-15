@@ -118,25 +118,16 @@ namespace
             p.graph.connectAudio(oscairn::AudioConnection{{fx, 0, 0}, {oscairn::graphOutput, 1, 0}, 2});
             p.graph.commit();
         };
-        // A block a host delivered late (a shared runner holding it up) is silence in the hosted run and so not what the engine played; a run with
-        // one says nothing of the hosts' sound, and is run again (three times). A run without any that differs is the hosts' fault.
-        for(int attempt = 0;; ++attempt)
+        Player hosted, engine;
+        build(hosted, 2); build(engine, 0);
+        bool same = true; double energy = 0;
+        for(uint32_t block = 0; block < 400; ++block)
         {
-            Player hosted, engine;
-            build(hosted, 2); build(engine, 0);
-            bool same = true; double energy = 0;
-            for(uint32_t block = 0; block < 400; ++block)
-            {
-                hosted.play(notes(block)); engine.play(notes(block));
-                same = same && hosted.buffer == engine.buffer;
-                for(float x : engine.buffer) energy += double(x) * x;
-            }
-            uint64_t late = 0;
-            for(const auto& node : hosted.graph.describe().nodes) { const auto s = hosted.graph.host(node.id).statistics(); late += s.lateBlocks + s.silentBlocks; }
-            if(!same && late && attempt < 2) continue;
-            check(energy > 0 && same, "three instruments and an effect in plugin hosts sound as in the engine");
-            break;
+            hosted.play(notes(block)); engine.play(notes(block));
+            same = same && hosted.buffer == engine.buffer;
+            for(float x : engine.buffer) energy += double(x) * x;
         }
+        check(energy > 0 && same, "three instruments and an effect in plugin hosts sound as in the engine");
     }
 
     // The owner's question: a host killed while it plays. The other host plays on, every block on time

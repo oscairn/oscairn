@@ -404,8 +404,7 @@ component EnvelopePanel inherits Section {
         y: 0;
         width: root.width;
         height: root.height;
-        viewbox-width: root.width / 1px;
-        viewbox-height: root.height / 1px;
+        fit: preserve; // the commands are in pixels of this panel: no scaling, no stroke inset
         fill: Theme.accent.with-alpha(Theme.wash-light);
         stroke: transparent; // the same stroke width as the line, so both are placed alike
         stroke-width: Theme.cursor-width;
@@ -416,8 +415,7 @@ component EnvelopePanel inherits Section {
         y: 0;
         width: root.width;
         height: root.height;
-        viewbox-width: root.width / 1px;
-        viewbox-height: root.height / 1px;
+        fit: preserve;
         stroke: Theme.accent;
         stroke-width: Theme.cursor-width;
         commands: data.line;

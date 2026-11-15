@@ -229,3 +229,8 @@ colors, button styles and corner rounding, spacing, all that stuff". Checklist a
   desktop-theme passes. Home's tile grows with the padding and the Setlist is shown again when its view size changes.
 - Not done: `wires` and `splash` are loaded and carried, drawn by nothing (no routing view or splash in the Rust UI);
   the desktop type scale (12/14/13/18); list rows as the reference's `drawListRow` bands; (the `fontScale` bound quirk, 0.8 and 1.4 refused, is fixed in both readers.)
+- Envelope nodes off their line (owner, 2026-11-15): the line and fill Paths in slint/grid.slint used Slint's default fit, which
+  scales the commands into the item's width less the stroke and offsets them by half of it, while the nodes are placed in plain
+  pixels; both Paths are now `fit: preserve`. Pixel test (src/tests/envelope.rs): nodes' centroids against the fitted
+  segments' meeting point, at 1280x720 and 1920x1080, scale 1 and 2: worst 7.68 px before, 0.50 px after. The reference's
+  envelope (ParameterGrid.cpp `Envelope`) has a handle per timed stage end only, none at the start or the sustain's end; the same here.

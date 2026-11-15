@@ -30,7 +30,7 @@ fn param(id: u32, name: &str, module: &str, max: f64, stepped: bool, widget: &st
 }
 
 /// A page with every control kind the data selects, and an envelope.
-fn every_kind() -> serde_json::Value {
+pub(super) fn every_kind() -> serde_json::Value {
     let mut p = vec![
         param(0, "Cutoff", "Voice", 1., false, "knob", 1),
         param(1, "Resonance", "Voice", 1., false, "knob", 2),
@@ -120,7 +120,7 @@ fn answer(p: &mut crate::params::Screen) -> Vec<(&'static str, serde_json::Value
     rest
 }
 
-fn open(s: &mut Screen, list: serde_json::Value, values: &[(u32, f64)]) -> crate::params::Screen {
+pub(super) fn open(s: &mut Screen, list: serde_json::Value, values: &[(u32, f64)]) -> crate::params::Screen {
     s.ui.set_screen(7);
     let mut p = crate::params::Screen::new(&s.ui);
     p.open(2, "Synth");

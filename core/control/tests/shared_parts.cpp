@@ -193,6 +193,9 @@ int main(int argc, char** argv)
     const char* fixture = argc == 3 ? argv[2] : nullptr;
     state_files::TemporaryDirectory temp, home;
     ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1); // a library of its own, for the Sounds
+    // Performances are compared sample for sample, which tests rendering, not load; on a machine too slow for real time (a sanitizer build,
+    // a shared runner) the load guard gives notes up unevenly.
+    ::setenv("OSCAIRN_LOAD_GUARD", "off", 1);
     const auto separate = temp.path / "separate", shared = temp.path / "shared", again = temp.path / "again", nine = temp.path / "nine";
 
     // Saved with an instance per part, and what those instances play.

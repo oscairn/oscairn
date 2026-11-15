@@ -37,7 +37,17 @@
 // Every malloc this process makes while `counting`: the Rust host's (the System allocator) and C++'s alike.
 static thread_local bool counting = false;
 static thread_local size_t allocations = 0;
-#ifdef __APPLE__
+// A sanitizer owns malloc (its runtime calls it before this program's code can run): there the count is not made, and the Rust blocks' not allocating is
+// checked by the builds without one.
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+#define OSCAIRN_NO_MALLOC_COUNT 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+#define OSCAIRN_NO_MALLOC_COUNT 1
+#endif
+#endif
+#ifdef OSCAIRN_NO_MALLOC_COUNT
+#elif defined(__APPLE__)
 extern "C" void* malloc(size_t n) { if(counting) ++allocations; return malloc_zone_malloc(malloc_default_zone(), n); }
 extern "C" void* calloc(size_t c, size_t n) { if(counting) ++allocations; return malloc_zone_calloc(malloc_default_zone(), c, n); }
 extern "C" void* realloc(void* p, size_t n) { if(counting) ++allocations; return malloc_zone_realloc(malloc_default_zone(), p, n); }

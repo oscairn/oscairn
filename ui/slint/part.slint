@@ -3,8 +3,7 @@
 // the left (each its name and value; a cursor is a focus border, a value being changed with the
 // dial an accent one), what the part is made of on the right, read only.
 
-import { Theme } from "theme.slint";
-import { Button } from "setlist.slint";
+import { Theme, Section, Button, Cursor } from "theme.slint";
 
 export struct SettingData {
     label: string,
@@ -39,20 +38,22 @@ export global PartState {
     callback back();
 }
 
-component Row inherits Rectangle {
+component Row inherits Section {
     in property <SettingData> data;
     callback tapped();
     callback step(int);
-    // A switch (kind 1) is drawn as one, left of its value text's end.
-    property <length> buttons: data.kind == 0 ? 2 * Theme.touch + 4px : data.kind == 1 && data.switch ? 56px : 0px;
-    background: data.editing ? Theme.accent.transparentize(0.83) : Theme.surface;
-    border-radius: Theme.radius;
+    // A switch (kind 1) is drawn as one, left of its value text's end; its parts' sizes.
+    property <length> switch-width: 38px;
+    property <length> switch-height: 24px;
+    property <length> switch-room: 56px;
+    property <length> buttons: data.kind == 0 ? 2 * Theme.touch + Theme.pad-tight : data.kind == 1 && data.switch ? root.switch-room : 0px;
+    fill: data.editing ? Theme.accent.with-alpha(Theme.wash-light) : Theme.surface;
     TouchArea {
         clicked => { root.tapped(); }
     }
     Text {
-        x: 10px;
-        width: parent.width * 0.4 - 10px;
+        x: Theme.pad;
+        width: parent.width * 0.4 - Theme.pad;
         height: parent.height;
         text: data.label;
         color: Theme.text;
@@ -62,7 +63,7 @@ component Row inherits Rectangle {
     }
     Text {
         x: parent.width * 0.4;
-        width: parent.width * 0.6 - 10px - root.buttons;
+        width: parent.width * 0.6 - Theme.pad - root.buttons;
         height: parent.height;
         text: data.value;
         color: data.editing || data.on ? Theme.accent : Theme.text;
@@ -73,23 +74,24 @@ component Row inherits Rectangle {
         vertical-alignment: center;
     }
     if data.kind == 1 && data.switch: Rectangle {
-        x: parent.width - 48px;
-        y: (parent.height - 24px) / 2;
-        width: 38px;
-        height: 24px;
-        border-radius: 12px;
+        x: parent.width - root.switch-width - Theme.pad;
+        y: (parent.height - root.switch-height) / 2;
+        width: root.switch-width;
+        height: root.switch-height;
+        border-radius: self.height / 2;
         background: data.on ? Theme.accent : Theme.raised;
         Rectangle {
-            x: data.on ? parent.width - 22px : 2px;
-            y: 2px;
-            width: 20px;
-            height: 20px;
-            border-radius: 10px;
-            background: data.on ? Theme.background : Theme.muted;
+            property <length> inset: Theme.hair * 2;
+            x: data.on ? parent.width - self.width - self.inset : self.inset;
+            y: self.inset;
+            width: parent.height - 2 * self.inset;
+            height: self.width;
+            border-radius: self.height / 2;
+            background: data.on ? Theme.on-accent : Theme.muted;
         }
     }
     if data.kind == 0: Button {
-        x: parent.width - 2 * Theme.touch - 4px;
+        x: parent.width - 2 * Theme.touch - Theme.pad-tight;
         width: Theme.touch;
         height: parent.height;
         text: "−";
@@ -102,22 +104,23 @@ component Row inherits Rectangle {
         text: "+";
         clicked => { root.step(1); }
     }
-    Rectangle {
-        border-radius: Theme.radius;
-        border-width: data.cursor ? 2px : 0px;
-        border-color: data.editing ? Theme.accent : Theme.focus;
+    Cursor {
+        shown: data.cursor;
+        editing: data.cursor && data.editing;
     }
 }
 
 export component Part inherits Rectangle {
+    // The sections' gap (none in a theme whose sections join); the read-only panel's line gap.
+    property <length> gap: Theme.gap-between(Theme.gap);
     property <length> header: Theme.touch;
     property <length> footer: Theme.touch;
     property <length> list-width: (self.width - 3 * Theme.margin) * 0.58;
     property <length> list-y: Theme.margin + header + Theme.gap;
     property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
-    property <int> per-view: max(1, floor((list-height + Theme.gap) / (Theme.touch + Theme.gap)));
-    property <length> line: Theme.body + 6px;
-    property <int> info-lines: max(1, floor((list-height - 16px) / line));
+    property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
+    property <length> line: Theme.body + Theme.margin;
+    property <int> info-lines: max(1, floor((list-height - 2 * Theme.pad-narrow) / line));
     changed per-view => { PartState.rows-per-view = per-view; }
     changed info-lines => { PartState.info-per-view = info-lines; }
     init => {
@@ -128,15 +131,15 @@ export component Part inherits Rectangle {
     Button {
         x: Theme.margin;
         y: Theme.margin;
-        width: 110px;
+        width: Theme.button-width;
         height: root.header;
         text: "Back";
         clicked => { PartState.back(); }
     }
     Text {
-        x: Theme.margin + 110px + 2 * Theme.gap;
+        x: Theme.margin + Theme.button-width + 2 * Theme.gap;
         y: Theme.margin;
-        width: root.width - 110px - 2 * Theme.margin - 2 * Theme.gap;
+        width: root.width - Theme.button-width - 2 * Theme.margin - 2 * Theme.gap;
         height: root.header;
         text: PartState.title == "" ? PartState.name : PartState.name + " · " + PartState.title;
         color: Theme.text;
@@ -147,25 +150,23 @@ export component Part inherits Rectangle {
     }
     for row[i] in PartState.rows: Row {
         x: Theme.margin;
-        y: root.list-y + i * (Theme.touch + Theme.gap);
+        y: root.list-y + i * (Theme.touch + root.gap);
         width: root.list-width;
         height: Theme.touch;
         data: row;
         tapped => { PartState.tapped(i); }
         step(by) => { PartState.step(i, by); }
     }
-    Rectangle {
+    Section {
         x: 2 * Theme.margin + root.list-width;
         y: root.list-y;
         width: root.width - self.x - Theme.margin;
         height: root.list-height;
-        background: Theme.surface;
-        border-radius: Theme.radius;
         clip: true;
         for line[i] in PartState.info: Text {
-            x: 10px;
-            y: 8px + i * root.line;
-            width: parent.width - 20px;
+            x: Theme.pad;
+            y: Theme.pad-narrow + i * root.line;
+            width: parent.width - 2 * Theme.pad;
             text: line.text;
             color: line.head ? Theme.muted : Theme.text;
             font-size: line.head ? Theme.small : Theme.body;
@@ -173,16 +174,16 @@ export component Part inherits Rectangle {
             overflow: elide;
         }
         if PartState.info-more: Button {
-            x: parent.width - 2 * Theme.touch - 8px;
-            y: parent.height - Theme.touch - 4px;
+            x: parent.width - 2 * Theme.touch - Theme.pad-narrow;
+            y: parent.height - Theme.touch - Theme.pad-tight;
             width: Theme.touch;
             height: Theme.touch;
             text: "▲";
             clicked => { PartState.info-scroll(-1); }
         }
         if PartState.info-more: Button {
-            x: parent.width - Theme.touch - 4px;
-            y: parent.height - Theme.touch - 4px;
+            x: parent.width - Theme.touch - Theme.pad-tight;
+            y: parent.height - Theme.touch - Theme.pad-tight;
             width: Theme.touch;
             height: Theme.touch;
             text: "▼";

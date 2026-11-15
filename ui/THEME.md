@@ -19,6 +19,7 @@ audit made at 3a97dd63 (before the work) and, further down, what the work did.
 | `font.bold` | path | none | as above | bold text | yes | with the family | every bold Text |
 | `font.license` | path | required | file in the folder | none (checked to exist) | no | no | none |
 | `fontScale` | number | 1 | 0.8 to 1.4 | type sizes | yes (refused out of range) | `font-scale` | `Theme.small/body/button/title` everywhere; Play's Edit button width |
+| `spacing` | number | 1 | 0.6 to 1.6 | paddings and gaps (a scale) | yes (refused out of range) | `spacing` | `Theme.gap`, `margin`, `pad*`, `section_gap`, the envelope's plot top |
 | `radius` | number | 6 | 0 to 16 | corners | yes (refused out of range) | `radius` | every rounded Rectangle |
 | `colors.background` | #RRGGBB | #15181D | required | window, wells, text on accent | yes | yes | all screens |
 | `colors.surface` | #RRGGBB | #20252D | required | cards, tiles, fields | yes | yes | all screens |
@@ -100,15 +101,15 @@ No other Rust file draws.
 Every property above is read by `ui/src/theme.rs` (`ThemeData::parse`, `load_folder`, `chosen`:
 the reference's `parse`, `load`, `inside`, `reload` and `defaultId`, with its words) and set on the
 window's `Theme` global by `theme::apply`: 11 colors (the nine and `warning`, `focus`), `radius`,
-`fontScale`, the eight `style` choices (Slint enums), the six `wires`, `splash` (its two colors, and
-its image when the theme's folder has one) and the font files. All 34 properties the reference
-stores or checks (`version`, `id`, `name`, `font` x3, `fontScale`, `radius`, 9 colors, 8 style, 6
+`fontScale`, `spacing`, the eight `style` choices (Slint enums), the six `wires`, `splash` (its two colors, and
+its image when the theme's folder has one) and the font files. All 35 properties the reference
+stores or checks (`version`, `id`, `name`, `font` x3, `fontScale`, `spacing`, `radius`, 9 colors, 8 style, 6
 wires, 3 splash) are loaded and checked, and the two optional colors the reference accepts without
 storing (`warning`, `focus`) are used.
 
 Used: colors by every screen; `radius` through `Theme.section-radius` (radius + 2, 0 joined),
 `button-radius`, `field-radius`, `mark-radius` (the reference's `buttonRadius`, `fieldRadius`, mark
-corner); `fontScale` in the four type sizes; `style.buttons` Button, text keyboard keys, Part's
+corner); `fontScale` in the four type sizes; `spacing` (see "Spacing" below); `style.buttons` Button, text keyboard keys, Part's
 step buttons, the grid's switch and split buttons, Home's icon chip, Back/Previous/Next; `edges`
 every Section, Button, Field, key; `depth` the 1 px shadow under buttons, keys, split buttons,
 thumbs, knob discs and the lifted tab; `sliders` the grid's sliders and range thumbs, the knob's disc
@@ -125,8 +126,7 @@ no splash in the Rust UI).
 No .slint file but `theme.slint` has a color, a corner radius or a font size as a literal
 (`no_screen_hardcodes_what_the_theme_sets` fails the test run otherwise). Left as named
 constants in `theme.slint` (the `Theme` global), listed here as "no theme property": touch target 44
-and bar height 48 (RFC 0019), the dense gap 4 and margin 6 (Theme.h), inner paddings 10, 12, 8, 4,
-a small button's width 110, the dropdown 420 and pages column 180, cursor 2 px, key cursor 3 px,
+and bar height 48 (RFC 0019), a small button's width 110, the dropdown 420 and pages column 180, cursor 2 px, key cursor 3 px,
 hairline 1 px, mark 6 px, thumb 16 px, knob arc 6 px, the alphas of theme colors (wash .25 and .17
 and .4, track .35, hairline .6, slider track .55, dim .45, disabled .4), the piano key corner 4, the
 type scale 13/16/15/20 (the touch scale; the desktop scale 12/14/13/18 is not in this UI yet). A
@@ -134,8 +134,38 @@ screen's own layout rule stays a named property at the top of its component (Hom
 icon chip, a strip's meters, a switch 38 x 24, the heading 28, a knob at most 76, a drag of 150, the
 envelope point 12, a band 4 high). `shell.slint`'s 1280 x 720 is a preferred window size. In
 `grid.rs`, `SECTION_GAP` (6), tile 84, knob extra 36, heading 30, envelope 180 are ParameterGrid's
-rules; the gap passed to `layout` is `theme::section_gap`. The format has no spacing property, so
-"wide spacing" is only what `sections: joined` removes.
+rules; the gap passed to `layout` is `theme::section_gap`. The dense gap 4 and margin 6 (Theme.h) and the
+inner paddings 10, 12, 8, 4 were in this list; they are now scaled by `spacing`.
+
+### Spacing
+
+One optional number, `spacing`: a scale on the interface's paddings and gaps, 1 when omitted, 0.6 to 1.6
+with both ends in, refused outside it ("Theme metric is out of range", "Theme metric must be a number"
+for a non-number, as `fontScale`). Not a per-widget key and not a choice (the reference has no
+tight/normal/roomy choice anywhere: its dense and touch gaps follow the device, RFC 0019, so a scale on
+top is the one shape that fits). Both readers refuse and default identically; the tests pin the same
+values: 0.6 and 1.6 in, 0.59 and 1.61 out, a string, null and a boolean refused (the JUCE test adds 0, -1, 100 out and 1 in). Joined sections still have no gap.
+
+Rust UI: `Theme.spacing`; times it, `Theme.gap` (4), `margin` (6), `pad` (10), `pad-wide` (12),
+`pad-narrow` (8), `pad-tight` (4), `theme::section_gap` (the grid's 6, so the grid lays out again when
+only the spacing changes), the envelope plot's room under its title (`grid::envelope_top`) and Home's
+tile height (120 plus twice the padding's growth, so the chip, name and line keep their room). Kept
+fixed, as sizes of things and not space: touch target 44, bar height 48, button width 110, dropdown 420,
+pages column 180, cursor and hairline widths, mark 6, thumb 16, knob arc 6, a knob at most 76, a drag of
+150, the switch 38 x 24, the heading 28, a strip's meters 7 and pitch 10, the top bar's columns (they
+follow the type), a Setlist slot row 56, list width 280, the piano's bands, the grid's tile 84, knob
+extra 36, heading 30 and envelope 180. A screen that counts how many rows or strips a view holds
+reads it when it is shown; the Setlist is shown again when that count changes (`SetlistState.resized`),
+the grid's `resized` as before; Part, Chain, Sounds and Play are not (a window resize has the same
+gap), so a live theme switch on one of those screens keeps its old row count until it is shown again.
+
+JUCE app: `spaced(px)` in Theme.cpp scales a padding by the theme's `spacing`. Applied to `sectionGap`
+(so the gaps between sections in PlayView, PartsView and the parameter grid) and Play's outer
+padding and the space between its controls. Not applied: `denseGap` and `denseMargin` used elsewhere,
+every other literal padding, row height and inset in the JUCE app (it is being replaced), and anything
+that does not go through those; the JUCE views do not lay out again by themselves on a live switch.
+Checked in renders only on the Rust side (the odd themes: "Odd" spacing 1.6, "Odd joined" 0.6, in
+`ui/target/theme-shots`); the JUCE layout was compiled, not looked at.
 
 ### Where the reference's behavior is not (yet) matched
 

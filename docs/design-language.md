@@ -77,7 +77,7 @@ folders and the same `appearance.txt`, so a theme chosen in either shows in both
 | --- | --- | --- |
 | `colors` (the nine roles) | all | all |
 | `colors.warning`, `colors.focus` (optional, added 2026-11-14) | accepted, not used | a meter past 75% (absent: `#E8C547`, the JUCE meters' yellow); the cursor's border (absent: `accent`) |
-| `radius`, `fontScale` | all | all |
+| `radius`, `fontScale`, `spacing` | all | all (the JUCE app applies `spacing` to the gaps between sections and Play's padding only; ui/THEME.md lists what each does) |
 | `font.regular`, `font.bold` | all | all (registered at run time) |
 | `style`, `wires`, `splash` | all | not yet: no Rust screen draws them |
 
@@ -185,6 +185,7 @@ fonts, so text never depends on what a device has installed.
 | `name` | Display name, 1–80 characters |
 | `font` | `regular` and optional `bold` font files (`.ttf`/`.otf`, ≤ 4 MiB each) and the fonts' `license` text (≤ 64 KiB), as relative paths inside the folder |
 | `fontScale` | Optional number, 0.8–1.4; default 1 |
+| `spacing` | Optional number, 0.6–1.6; default 1. A scale on the interface's paddings and gaps (not on the size of a control, a touch target or a line's width): 0.6 is tight, 1.6 roomy. A value outside the range refuses the theme, as `fontScale` does |
 | `radius` | Optional number, 0–16; default 6 |
 | `colors` | All nine semantic colors below, opaque `#RRGGBB` |
 | `style` | How controls are drawn: one choice for each of the eight below |

@@ -512,9 +512,9 @@ fn seconds_at(s: &[f64], n: f64) -> f64 {
 }
 
 /// Where an envelope's plot starts in its panel: under the title (6 from the top, a line of the small type at
-/// `scale`) with room for a node's radius above the highest level.
-pub fn envelope_top(scale: f32) -> f32 {
-    6. + 13. * scale * 1.3 + NODE_RADIUS + 4.
+/// `scale`) with room for a node's radius above the highest level and 4 more; the paddings times `spacing`.
+pub fn envelope_top(scale: f32, spacing: f32) -> f32 {
+    6. * spacing + 13. * scale * 1.3 + NODE_RADIUS + 4. * spacing
 }
 
 /// An envelope node's radius (the widget draws 12 across).
@@ -693,10 +693,10 @@ mod tests {
         let named = envelope_of_names(&["attack", "Decay", "Sustain", "Release"]);
         let params: Vec<Param> = (0..4).map(|i| p(i, "P", "", 1., false)).collect();
         let refs: Vec<&Param> = params.iter().collect();
-        let (line, fill, points) = envelope_curve(&named, &refs, &|i| [0., 0.5, 0.5, 1.][i], 400., 180., envelope_top(1.));
+        let (line, fill, points) = envelope_curve(&named, &refs, &|i| [0., 0.5, 0.5, 1.][i], 400., 180., envelope_top(1., 1.));
         assert!(line.starts_with("M 14.0 170.0") && fill.ends_with('Z'), "{line}");
         assert_eq!(points.len(), 3);
-        assert!((points[0].1 - envelope_top(1.)).abs() < 0.01, "the attack reaches the top");
+        assert!((points[0].1 - envelope_top(1., 1.)).abs() < 0.01, "the attack reaches the top");
         assert!(points[1].1 > 28. && points[1].1 < 170., "the sustain level halfway");
         assert_eq!(arc(0., 0.), "");
         assert!(arc(0., 1.).contains(" 1 1 "), "past 180 degrees: the large arc");
@@ -721,7 +721,7 @@ mod curve_and_icon_tests {
         let refs: Vec<&Param> = params.iter().collect();
         let shape = envelope_of_fields(&["attack", "decay", "sustain", "release"]);
         for (w, scale) in [(240., 1.), (900., 1.), (300., 1.4)] {
-            let top = envelope_top(scale);
+            let top = envelope_top(scale, 1.);
             let (line, fill, nodes) = envelope_curve(&shape, &refs, &|_| 0.5, w, 180., top);
             assert!(fill.starts_with(&line), "the fill begins with the line");
             let (l, f) = (vertices(&line), vertices(&fill));

@@ -21,7 +21,8 @@ export component Home inherits Rectangle {
     out property <int> columns: clamp(floor((self.width - 2 * Theme.margin) / 200px), 1, max(1, HomeState.tiles.length));
     property <length> tile-width: (self.width - 2 * Theme.margin - (columns - 1) * gap) / columns;
     // Launcher.cpp's tile: about 200 wide, 120 tall, an icon chip 48 square with its 24 glyph, a 18 line under the name.
-    property <length> tile-height: 120px;
+    // The paddings grow the tile with the theme's spacing, so the chip, the name and the line keep their room.
+    property <length> tile-height: 120px + 24px * (Theme.spacing - 1);
     property <length> icon-chip: 48px;
     property <length> icon: 24px;
     property <length> line: 18px;

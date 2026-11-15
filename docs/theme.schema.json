@@ -48,6 +48,11 @@
       "minimum": 0.8,
       "maximum": 1.4
     },
+    "spacing": {
+      "type": "number",
+      "minimum": 0.6,
+      "maximum": 1.6
+    },
     "radius": {
       "type": "number",
       "minimum": 0,

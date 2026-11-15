@@ -221,5 +221,11 @@ colors, button styles and corner rounding, spacing, all that stuff". Checklist a
 - [x] Tests: 84 pass (76 before; new: loading every built-in file with its values, defaults, refusals, folder rules,
   the choice, row fill, apply sets every property, no literal color/radius/font size in a .slint file, the grid's
   gap per theme). Every screen under the four built-in themes and two odd ones: ui/target/theme-shots/ (ignored).
+- [x] Task A, spacing (branch `rust-theme-spacing`, from `rust-theme` 112157a5; baseline 86 tests, clippy clean): one optional
+  `spacing` (0.6 to 1.6, default 1) in the format, docs/theme.schema.json, docs/design-language.md, Theme.cpp and theme.rs
+  with the same rules; scales the Rust UI's gaps, margins and paddings (ui/THEME.md "Spacing") and in JUCE `sectionGap` and
+  Play's padding; the odd themes are roomy (1.6) and tight (0.6) and every screen was rendered and looked at in both
+  (ui/target/theme-shots). Tests: 87 pass (a layout test that a larger spacing grows the gaps), clippy clean;
+  desktop-theme passes. Home's tile grows with the padding and the Setlist is shown again when its view size changes.
 - Not done: `wires` and `splash` are loaded and carried, drawn by nothing (no routing view or splash in the Rust UI);
   the desktop type scale (12/14/13/18); list rows as the reference's `drawListRow` bands; (the `fontScale` bound quirk, 0.8 and 1.4 refused, is fixed in both readers.)

@@ -438,6 +438,8 @@ fn part_draws_in_every_theme() {
     for t in &loaded {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);
+        part.shown(); // the rows a view holds depend on the paddings
+        s.frame();
         s.save(&format!("part-{}", t.id));
         png(&s, &format!("part-{}", t.id));
         shot(&s, &format!("part-{}", t.id));

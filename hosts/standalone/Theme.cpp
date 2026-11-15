@@ -56,7 +56,8 @@ void write(const juce::File& destination,const juce::String& text) {
 const ThemeData& themeData(){return current;}
 juce::Colour ink(Ink role){return current.colors[static_cast<size_t>(role)];}
 const juce::Drawable* splashImage(){return currentSplash.get();}
-int sectionGap(int separate){return current.style.sections==ThemeStyle::Sections::Joined?0:separate;}
+int spaced(int pixels){return juce::roundToInt(float(pixels)*current.spacing);}
+int sectionGap(int separate){return current.style.sections==ThemeStyle::Sections::Joined?0:spaced(separate);}
 void drawSection(juce::Graphics& g,juce::Rectangle<int> r,juce::Colour fill) {
     if(current.style.sections==ThemeStyle::Sections::Joined) {
         g.setColour(fill);g.fillRect(r);
@@ -200,7 +201,7 @@ ThemeData ThemeData::parse(const juce::String& json) {
     require(json.getNumBytesAsUTF8()<=maxThemeBytes,"Theme exceeds 16 KiB");
     juce::var value;require(juce::JSON::parse(json,value).wasOk(),"Invalid theme JSON");
     const auto* object=value.getDynamicObject();require(object,"Theme must be an object");
-    fields(*object,{"version","id","name","font","fontScale","radius","colors","style","wires","splash"});
+    fields(*object,{"version","id","name","font","fontScale","spacing","radius","colors","style","wires","splash"});
     require(value["version"].isInt() && int(value["version"])==7,"Unsupported theme version");
     ThemeData t;t.id=value["id"].toString();t.name=value["name"].toString();
     require(value["id"].isString() && validId(t.id),"Theme ID must contain lowercase letters, digits or hyphens");
@@ -213,7 +214,7 @@ ThemeData ThemeData::parse(const juce::String& json) {
         require(v.isInt() || v.isDouble(),"Theme metric must be a number");const double n=v;
         require(std::isfinite(n) && n>=low && n<=high,"Theme metric is out of range");return static_cast<float>(n);
     };
-    t.fontScale=number("fontScale",1,.8,1.4);t.radius=number("radius",6,0,16);
+    t.fontScale=number("fontScale",1,.8,1.4);t.spacing=number("spacing",1,.6,1.6);t.radius=number("radius",6,0,16);
     const auto* colors=value["colors"].getDynamicObject();require(colors,"Theme needs semantic colors");
     juce::StringArray allowed;for(const auto& name:names)allowed.add(name);allowed.add("warning");allowed.add("focus");fields(*colors,allowed); // the last two: optional, the Rust UI's
     for(const char* key:{"warning","focus"})if(colors->hasProperty(key)){const auto v=colors->getProperty(key).toString();require(v.length()==7 && v[0]=='#' && v.substring(1).containsOnly("0123456789abcdefABCDEF"),"Theme colors must be #RRGGBB");}

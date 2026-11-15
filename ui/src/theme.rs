@@ -7,9 +7,9 @@
 //! Read live: a new choice is seen within a second and repaints the window once.
 //!
 //! Everything a theme file can set is read: the nine colors (and the optional `warning` and
-//! `focus`), `radius`, `fontScale`, the eight `style` choices, the six `wires` colors, the
+//! `focus`), `radius`, `fontScale`, `spacing`, the eight `style` choices, the six `wires` colors, the
 //! `splash`, and the font files. A file is accepted or refused whole, as the reference does:
-//! only `fontScale`, `radius`, `colors.warning`, `colors.focus`, `font.bold` and `splash` may be
+//! only `fontScale`, `spacing`, `radius`, `colors.warning`, `colors.focus`, `font.bold` and `splash` may be
 //! absent (their defaults below); anything else missing, unknown, mistyped or out of range, text
 //! contrast under 4.5:1, a folder not named after its id or a font the reference would not take
 //! refuses the theme, which then shows the default theme, else the emergency one, as `reload`
@@ -97,6 +97,8 @@ pub struct ThemeData {
     pub name: String,
     pub font: FontFiles,
     pub font_scale: f32,
+    /// A scale on the paddings and gaps (0.6 to 1.6).
+    pub spacing: f32,
     pub radius: f32,
     /// By `INKS`.
     pub colors: [Color; 9],
@@ -119,6 +121,7 @@ impl Default for ThemeData {
             name: "Oscairn Dark".into(),
             font: FontFiles::default(),
             font_scale: 1.,
+            spacing: 1.,
             radius: 6.,
             colors: [0x15181d, 0x20252d, 0x2c333d, 0x526070, 0xedf1f5, 0xa3aebb, 0xffa45b, 0x5ad9a4, 0xff8d87].map(rgb),
             warning: None,
@@ -189,7 +192,7 @@ impl ThemeData {
         require(text.len() as u64 <= MAX_THEME_BYTES, "Theme exceeds 16 KiB")?;
         let value: Value = serde_json::from_str(text).map_err(|_| "Invalid theme JSON")?;
         let object = value.as_object().ok_or("Theme must be an object")?;
-        fields(object, &["version", "id", "name", "font", "fontScale", "radius", "colors", "style", "wires", "splash"])?;
+        fields(object, &["version", "id", "name", "font", "fontScale", "spacing", "radius", "colors", "style", "wires", "splash"])?;
         require(object.get("version").is_some_and(|v| v.as_i64() == Some(7)), "Unsupported theme version")?;
         let string = |key: &str| object.get(key).and_then(Value::as_str);
         let id = string("id").unwrap_or_default().to_string();
@@ -213,6 +216,7 @@ impl ThemeData {
             Ok(n as f32)
         };
         let font_scale = number("fontScale", 1., 0.8, 1.4)?;
+        let spacing = number("spacing", 1., 0.6, 1.6)?;
         let radius = number("radius", 6., 0., 16.)?;
         let colors = object.get("colors").and_then(Value::as_object).ok_or("Theme needs semantic colors")?;
         let mut allowed = INKS.to_vec();
@@ -270,7 +274,7 @@ impl ThemeData {
             let (ink_color, behind) = (splash.ink.unwrap_or(ink[4]), splash.background.unwrap_or(ink[0]));
             require(contrast(ink_color, behind) >= 4.5, "Theme splash text contrast must be at least 4.5:1")?;
         }
-        Ok(ThemeData { id, name, font, font_scale, radius, colors: ink, warning, focus, style, wires, splash })
+        Ok(ThemeData { id, name, font, font_scale, spacing, radius, colors: ink, warning, focus, style, wires, splash })
     }
 
     fn ink(&self, name: &str) -> Color {
@@ -487,12 +491,14 @@ fn contrasting(c: Color) -> Color {
     }
 }
 
-/// What a screen laying out in pixels needs: the gap between sections, `separate` unless they join.
+/// What a screen laying out in pixels needs: the gap between sections, `separate` times the theme's
+/// spacing unless they join.
 pub fn section_gap(window: &Shell, separate: f32) -> f32 {
-    if window.global::<Theme>().get_sections() == SectionStyle::Joined {
+    let theme = window.global::<Theme>();
+    if theme.get_sections() == SectionStyle::Joined {
         0.
     } else {
-        separate
+        separate * theme.get_spacing()
     }
 }
 
@@ -521,6 +527,7 @@ pub fn apply(window: &Shell, theme: &Loaded) {
     g.set_key_dark(if brighter(text, surface) { surface } else { text });
     g.set_radius(d.radius);
     g.set_font_scale(d.font_scale);
+    g.set_spacing(d.spacing);
     let s = d.style;
     g.set_buttons(s.buttons);
     g.set_edges(s.edges);

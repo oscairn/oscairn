@@ -241,6 +241,8 @@ fn pages_draw_in_every_theme() {
     for t in &loaded {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);
+        c.shown(); // the rows a view holds depend on the paddings
+        s.frame();
         png(&s, &format!("chain-{}", t.id));
         shot(&s, &format!("chain-{}", t.id));
     }

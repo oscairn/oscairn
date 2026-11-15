@@ -169,7 +169,7 @@ fn resource_section_has_a_fixed_width() {
     fixed_width(Screen::new(), "topbar");
 }
 
-// The same with a theme of extreme colors and the largest font scale.
+// The same with a theme of extreme colors, the largest font scale and the roomiest spacing.
 #[test]
 fn resource_section_has_a_fixed_width_with_a_larger_font() {
     let s = Screen::new();
@@ -194,7 +194,8 @@ fn fixed_width(mut s: Screen, pictures: &str) {
             }
             assert!(seen.windows(2).all(|w| w[0] == w[1]), "{cpu:?}/{ram:?}: {seen:?}");
             assert_eq!(seen[0].1 == 0., cpu == Show::None && ram == Show::None, "{cpu:?}/{ram:?}: no room only when it shows nothing");
-            assert_eq!(seen[0].0 + seen[0].1 + 10., W as f32, "{cpu:?}/{ram:?}: at the right edge");
+            let right = 10. * s.ui.global::<crate::Theme>().get_spacing(); // the bar's right padding
+            assert!((seen[0].0 + seen[0].1 + right - W as f32).abs() < 0.01, "{cpu:?}/{ram:?}: at the right edge");
             s.save(&format!("{pictures}-{cpu:?}-{ram:?}").to_lowercase());
         }
     }
@@ -370,10 +371,10 @@ fn theme_of(doc: serde_json::Value) -> theme::Loaded {
 
 /// A deliberately odd theme that is still a valid one: clashing colors, pill buttons, the largest
 /// radius and nearly the largest type, outlined edges, soft shadows, cap sliders, folder tabs,
-/// round marks, a filled row color. (The format has no spacing property: `joined_theme` is the other
-/// extreme of what it has, sections with no gap.)
+/// round marks, a filled row color, and the roomiest spacing (`joined_theme` is the other extreme:
+/// sections with no gap, the tightest spacing).
 pub fn odd_theme() -> theme::Loaded {
-    theme_of(json!({"version": 7, "id": "odd", "name": "Odd", "fontScale": 1.39, "radius": 16,
+    theme_of(json!({"version": 7, "id": "odd", "name": "Odd", "fontScale": 1.39, "spacing": 1.6, "radius": 16,
         "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
         "colors": {"background": "#000000", "surface": "#7A0070", "raised": "#006B6B", "border": "#FF8800", "text": "#FFFFFF", "muted": "#00FFFF", "accent": "#FFFF00",
                    "positive": "#FF00FF", "danger": "#00FF00", "warning": "#FF0000", "focus": "#0000FF"},
@@ -384,7 +385,7 @@ pub fn odd_theme() -> theme::Loaded {
 /// The other extreme: square buttons, no radius, no edge, flat, filled sliders, segmented tabs,
 /// sections joined edge to edge, the row color as a dot, a light theme with the smallest accepted type.
 pub fn joined_theme() -> theme::Loaded {
-    theme_of(json!({"version": 7, "id": "odd-joined", "name": "Odd joined", "fontScale": 0.9, "radius": 0,
+    theme_of(json!({"version": 7, "id": "odd-joined", "name": "Odd joined", "fontScale": 0.9, "spacing": 0.6, "radius": 0,
         "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
         "colors": {"background": "#F0E8D0", "surface": "#FFF8E0", "raised": "#E0D0A0", "border": "#806000", "text": "#201000", "muted": "#504020", "accent": "#0040C0",
                    "positive": "#006000", "danger": "#C00000"},
@@ -422,7 +423,7 @@ fn themes_switch_live_and_repaint_once() {
         shot(s, &format!("home-{}", t.id));
     }
     let g = s.ui.global::<crate::Theme>();
-    assert_eq!((g.get_font_scale(), g.get_radius()), (0.9, 0.), "the last theme applied");
+    assert_eq!((g.get_font_scale(), g.get_spacing(), g.get_radius()), (0.9, 0.6, 0.), "the last theme applied");
     assert_eq!(g.get_focus(), slint::Color::from_rgb_u8(0x00, 0x40, 0xc0), "focus: the accent when the theme has none");
 }
 
@@ -976,6 +977,8 @@ fn play_draws_in_every_theme() {
     for t in &loaded {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);
+        play.shown(); // the strips a view holds depend on the paddings
+        s.frame();
         s.save(&format!("play-{}", t.id));
         png(&s, &format!("play-{}", t.id));
         shot(&s, &format!("play-{}", t.id));
@@ -1004,7 +1007,8 @@ fn applying_a_theme_sets_every_property() {
         let colors = [g.get_background(), g.get_surface(), g.get_raised(), g.get_border(), g.get_text(), g.get_muted(), g.get_accent(), g.get_positive(), g.get_danger()];
         assert_eq!(colors, d.colors, "{}", t.id);
         assert_eq!((g.get_warning(), g.get_focus()), (d.warning.unwrap_or(slint::Color::from_rgb_u8(0xe8, 0xc5, 0x47)), d.focus.unwrap_or(d.colors[6])), "{}", t.id);
-        assert_eq!((g.get_radius(), g.get_font_scale()), (d.radius, d.font_scale), "{}", t.id);
+        assert_eq!((g.get_radius(), g.get_font_scale(), g.get_spacing()), (d.radius, d.font_scale, d.spacing), "{}", t.id);
+        assert_eq!((g.get_gap(), g.get_margin(), g.get_pad(), g.get_pad_wide(), g.get_pad_narrow(), g.get_pad_tight()), (4. * d.spacing, 6. * d.spacing, 10. * d.spacing, 12. * d.spacing, 8. * d.spacing, 4. * d.spacing), "{}: paddings and gaps scale", t.id);
         let st = d.style;
         assert_eq!((g.get_buttons(), g.get_edges(), g.get_depth(), g.get_sliders()), (st.buttons, st.edges, st.depth, st.sliders), "{}", t.id);
         assert_eq!((g.get_tabs(), g.get_marks(), g.get_sections(), g.get_rows()), (st.tabs, st.marks, st.sections, st.rows), "{}", t.id);
@@ -1014,7 +1018,7 @@ fn applying_a_theme_sets_every_property() {
         assert_eq!(g.get_dark(), t.id != "oscairn-light" && t.id != "odd-joined", "{}: a dark background", t.id);
         let light_accent = t.id == "oscairn-dark" || t.id == "oscairn-classic" || t.id == "oscairn-block" || t.id == "odd";
         assert_eq!(g.get_on_accent(), if light_accent { slint::Color::from_rgb_u8(0, 0, 0) } else { slint::Color::from_rgb_u8(255, 255, 255) }, "{}: black on a bright accent", t.id);
-        assert_eq!(theme::section_gap(&s.ui, 6.), if t.data.style.sections == crate::SectionStyle::Joined { 0. } else { 6. }, "{}", t.id);
+        assert_eq!(theme::section_gap(&s.ui, 6.), if t.data.style.sections == crate::SectionStyle::Joined { 0. } else { 6. * d.spacing }, "{}", t.id);
     }
     // Held per window: the other one still has what it had.
     assert_eq!(other.ui.global::<crate::Theme>().get_radius(), 6., "a theme applied to one window is not another's");

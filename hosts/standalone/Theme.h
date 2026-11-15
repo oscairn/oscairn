@@ -18,7 +18,8 @@ struct ThemeStyle {
     enum class Sections { Separate, Joined } sections=Sections::Separate; // gaps between cards, or edge to edge with a line
     enum class Rows { Left, Right, Dot, Fill } rows=Rows::Left;           // where an item's color goes in a list row (theme format 6)
 };
-int sectionGap(int separate);                    // the gap between sections: `separate`, or 0 when they join
+int spaced(int pixels);                          // a padding or gap times the theme's spacing, rounded
+int sectionGap(int separate);                    // the gap between sections: `separate` spaced, or 0 when they join
 // A section (a card, a tile, a mixer strip): rounded with its edge when sections are separate;
 // square when they join, its edge on the shared pixel so neighbors draw one line between them.
 void drawSection(juce::Graphics&, juce::Rectangle<int>, juce::Colour fill);
@@ -98,7 +99,7 @@ struct ThemeData {
     juce::String id="oscairn-dark",name="Oscairn Dark";
     ThemeFont font;
     std::array<juce::Colour,9> colors{{juce::Colour(0xff15181d),juce::Colour(0xff20252d),juce::Colour(0xff2c333d),juce::Colour(0xff526070),juce::Colour(0xffedf1f5),juce::Colour(0xffa3aebb),juce::Colour(0xffffa45b),juce::Colour(0xff5ad9a4),juce::Colour(0xffff8d87)}};
-    float fontScale=1,radius=6;
+    float fontScale=1,spacing=1,radius=6; // spacing scales the UI's paddings and gaps (0.6 to 1.6)
     ThemeStyle style;
     ThemeWires wires;
     ThemeSplash splash;

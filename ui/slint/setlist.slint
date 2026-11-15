@@ -43,6 +43,7 @@ export global SetlistState {
     callback tapped-setlist(int);
     callback step(int);
     callback play(); // open Play
+    callback resized(); // the views' sizes changed (the window, or the theme's paddings): shown again
 }
 
 export component Setlist inherits Rectangle {
@@ -63,9 +64,9 @@ export component Setlist inherits Rectangle {
     property <length> cell-width: (slots-width - (across - 1) * gap) / across;
     property <length> cell-height: SetlistState.grid ? (slots-height - (down - 1) * gap) / down : slot-row;
     // The sizes setlist.rs pages by: settled whenever the screen's size or the setlist's display changes.
-    changed down => { SetlistState.slots-per-view = across * down; }
-    changed across => { SetlistState.slots-per-view = across * down; }
-    changed height => { SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + gap) / (row-height + gap))); }
+    changed down => { SetlistState.slots-per-view = across * down; SetlistState.resized(); }
+    changed across => { SetlistState.slots-per-view = across * down; SetlistState.resized(); }
+    changed height => { SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + gap) / (row-height + gap))); SetlistState.resized(); }
     init => {
         SetlistState.slots-per-view = across * down;
         SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + gap) / (row-height + gap)));

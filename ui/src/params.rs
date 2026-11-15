@@ -379,8 +379,11 @@ impl Screen {
     fn panel_data(&self, panel: &grid::Panel) -> GridPanel {
         let refs: Vec<&Param> = panel.params.iter().map(|&i| &self.params[i]).collect();
         let norm = |k: usize| refs[k].norm(self.value(refs[k]));
-        let scale = self.ui.upgrade().map_or(1., |ui| ui.global::<crate::Theme>().get_font_scale());
-        let (line, fill, points) = grid::envelope_curve(&panel.envelope, &refs, &norm, panel.rect.w, panel.rect.h, grid::envelope_top(scale));
+        let (scale, spacing) = self.ui.upgrade().map_or((1., 1.), |ui| {
+            let theme = ui.global::<crate::Theme>();
+            (theme.get_font_scale(), theme.get_spacing())
+        });
+        let (line, fill, points) = grid::envelope_curve(&panel.envelope, &refs, &norm, panel.rect.w, panel.rect.h, grid::envelope_top(scale, spacing));
         let points: Vec<GridPoint> = points.into_iter().map(|(x, y)| GridPoint { x, y }).collect();
         GridPanel { x: panel.rect.x, y: panel.rect.y, w: panel.rect.w, h: panel.rect.h, title: panel.title.as_str().into(), line: line.into(), fill: fill.into(), points: ModelRc::new(VecModel::from(points)) }
     }

@@ -479,7 +479,7 @@ namespace oscairn::standalone
     void PlayView::resized()
     {
         const bool touch = mode() == 2, tight = dense(*this); // tight: a device's screen (RFC 0019)
-        const int gap = sectionGap(tight ? denseGap : touch ? 10 : 8), pad = tight ? denseMargin : touch ? 14 : 12, between = tight ? denseGap : touch ? 12 : 10;
+        const int gap = sectionGap(tight ? denseGap : touch ? 10 : 8), pad = spaced(tight ? denseMargin : touch ? 14 : 12), between = spaced(tight ? denseGap : touch ? 12 : 10);
         auto area = getLocalBounds().reduced(pad);
         // The scenes, with Previous and Next at the ends when the Performance is from the setlist.
         auto row = area.removeFromTop(tight ? 44 : touch ? 56 : 46);

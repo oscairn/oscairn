@@ -51,7 +51,7 @@ fn every_built_in_theme_loads_with_its_file_values() {
         assert_eq!(embedded, loaded.data, "{id}: the built-in text and the folder agree");
     }
     let d = find(&places, "oscairn-dark").unwrap().data;
-    assert_eq!((d.name.as_str(), d.font_scale, d.radius), ("Oscairn Dark", 1., 6.));
+    assert_eq!((d.name.as_str(), d.font_scale, d.spacing, d.radius), ("Oscairn Dark", 1., 1., 6.));
     assert_eq!(d.colors, [0x111317, 0x1d2127, 0x2d333b, 0x4a535e, 0xf6f8fa, 0xb4bdc8, 0xff9a45, 0x5ad9a4, 0xff6b63].map(c));
     assert_eq!(d.style, Style::default(), "the dark theme's style is the reference's default: pill, hairline, soft, line, segmented, square, separate, left");
     assert_eq!((d.wires.audio, d.wires.control), (c(0x8cc2ff), c(0x6fe0a8)));
@@ -85,35 +85,36 @@ fn every_built_in_theme_loads_with_its_file_values() {
     assert!(!dark(l.colors[0]) && dark(d.colors[0]), "darkTheme: the light theme is not, the dark one is");
 }
 
-// What the reference lets a file leave out has its default: `fontScale` 1, `radius` 6, no
+// What the reference lets a file leave out has its default: `fontScale` 1, `spacing` 1, `radius` 6, no
 // `warning` or `focus`, no bold font, no splash. Everything else is required.
 #[test]
 fn what_a_file_may_leave_out_has_the_references_default() {
     let mut doc = dark_doc();
     let o = doc.as_object_mut().unwrap();
-    for key in ["fontScale", "radius"] {
+    for key in ["fontScale", "spacing", "radius"] {
         o.remove(key);
     }
     o["font"].as_object_mut().unwrap().remove("bold");
     let t = parse(&doc).unwrap();
-    assert_eq!((t.font_scale, t.radius, t.font.bold.as_str(), t.warning, t.focus, &t.splash), (1., 6., "", None, None, &Splash::default()));
+    assert_eq!((t.font_scale, t.spacing, t.radius, t.font.bold.as_str(), t.warning, t.focus, &t.splash), (1., 1., 6., "", None, None, &Splash::default()));
     // A bold font given as null reads as absent, as the reference's JSON reads it.
     doc["font"]["bold"] = Value::Null;
     assert_eq!(parse(&doc).unwrap().font.bold, "");
     // And given, they are taken.
     doc["fontScale"] = json!(1.2);
+    doc["spacing"] = json!(0.75);
     doc["radius"] = json!(11.5);
     doc["colors"]["warning"] = json!("#112233");
     doc["colors"]["focus"] = json!("#AABBCC");
     doc["splash"] = json!({"image": "splash.png", "background": "#000000", "ink": "#FFFFFF"});
     let t = parse(&doc).unwrap();
-    assert_eq!((t.font_scale, t.radius, t.warning, t.focus), (1.2, 11.5, Some(c(0x112233)), Some(c(0xaabbcc))));
+    assert_eq!((t.font_scale, t.spacing, t.radius, t.warning, t.focus), (1.2, 0.75, 11.5, Some(c(0x112233)), Some(c(0xaabbcc))));
     assert_eq!((t.splash.image.as_str(), t.splash.background, t.splash.ink), ("splash.png", Some(c(0)), Some(c(0xffffff))));
     // The splash may give one of its colors; the other is the theme's (contrast checked with it).
     doc["splash"] = json!({"ink": "#FFFFFF"});
     assert_eq!(parse(&doc).unwrap().splash.ink, Some(c(0xffffff)));
-    // The range ends are in the range (docs/theme.schema.json: minimum and maximum): radius 0 and 16, font scale 0.8 and 1.4.
-    for (key, ok, bad) in [("radius", [0., 16.], [-0.1, 16.1]), ("fontScale", [0.8, 1.4], [0.79, 1.41])] {
+    // The range ends are in the range (docs/theme.schema.json: minimum and maximum): radius 0 and 16, font scale 0.8 and 1.4, spacing 0.6 and 1.6.
+    for (key, ok, bad) in [("radius", [0., 16.], [-0.1, 16.1]), ("fontScale", [0.8, 1.4], [0.79, 1.41]), ("spacing", [0.6, 1.6], [0.59, 1.61])] {
         let mut doc = dark_doc();
         for v in ok {
             doc[key] = json!(v);
@@ -165,6 +166,7 @@ fn a_bad_file_is_refused_as_the_reference_refuses_it() {
     assert_eq!(edit(&|d| d["font"]["bold"] = json!(4)), Err("Theme font paths must be strings"));
     for v in [json!("1"), json!(null), json!(true)] {
         assert_eq!(edit(&|d| d["fontScale"] = v.clone()), Err("Theme metric must be a number"), "{v}");
+        assert_eq!(edit(&|d| d["spacing"] = v.clone()), Err("Theme metric must be a number"), "{v}");
         assert_eq!(edit(&|d| d["radius"] = v.clone()), Err("Theme metric must be a number"), "{v}");
     }
     assert_eq!(edit(&|d| {

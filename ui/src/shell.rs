@@ -217,6 +217,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     lists.on_tapped_setlist(|i| with_app(|a| a.on_setlist(|s| s.tap_setlist(i.max(0) as usize))));
     lists.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
     lists.on_play(|| with_app(|a| a.go(Screen::Play)));
+    lists.on_resized(|| with_app(|a| a.on_setlist(setlist::Screen::shown)));
     let play = ui.global::<PlayState>();
     play.on_scene_tapped(|i| with_app(|a| a.on_play(|p| p.tap_scene(i))));
     play.on_mute_tapped(|i| with_app(|a| a.on_play(|p| p.tap_mute(i))));

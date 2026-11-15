@@ -46,6 +46,13 @@ int main(int argc,char** argv){try{
     // The ends of a range are in it: fontScale 0.8 and 1.4, radius 0 and 16.
     for(const char* ok:{"0.8","1.4"})check(ThemeData::parse(json.replace("\"fontScale\": 1.0","\"fontScale\": "+juce::String(ok))).fontScale==std::stof(ok),"fontScale at its bounds accepted");
     for(auto ok:{json.replace("\"radius\": 8","\"radius\": 0"),json.replace("\"radius\": 8","\"radius\": 16")})check(ThemeData::parse(ok).radius>=0,"radius at its bounds accepted");
+    // spacing: optional, 1 when omitted, 0.6 to 1.6 with the ends in, refused outside as fontScale is.
+    check(theme.spacing==1.f,"spacing defaults to 1");
+    check(ThemeData::parse(json.replace("\"fontScale\": 1.0","\"fontScale\": 1.0, \"spacing\": 0.75")).spacing==0.75f,"spacing parsed");
+    for(const char* ok:{"0.6","1.6","1"})check(ThemeData::parse(json.replace("\"fontScale\": 1.0","\"fontScale\": 1.0, \"spacing\": "+juce::String(ok))).spacing==std::stof(ok),"spacing at its bounds accepted");
+    for(const char* bad:{"0.59","1.61","0","-1","100","\"1\"","null","true"}){
+        bool rejected=false;try{ThemeData::parse(json.replace("\"fontScale\": 1.0","\"fontScale\": 1.0, \"spacing\": "+juce::String(bad)));}catch(const std::exception&){rejected=true;}check(rejected,"spacing out of range or not a number rejected");
+    }
     for(auto broken:{json.replace("\"fontScale\": 1.0","\"fontScale\": 0.79"),json.replace("\"fontScale\": 1.0","\"fontScale\": 1.41")}){
         bool rejected=false;try{ThemeData::parse(broken);}catch(const std::exception&){rejected=true;}check(rejected,"fontScale just outside its bounds rejected");
     }

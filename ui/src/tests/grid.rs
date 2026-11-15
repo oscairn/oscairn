@@ -410,11 +410,12 @@ fn the_grid_draws_in_every_theme() {
     p.act(Action::Move { pane: None, by: 2 });
     for t in &all_themes() {
         theme::apply(&s.ui, t);
+        s.frame(); // the area's width changes with the paddings: the grid is told on this frame
         p.shown();
         let tiles = tiles(&s.ui);
         let gap = tiles[3].x - (tiles[2].x + tiles[2].w);
         let joined = t.data.style.sections == crate::SectionStyle::Joined;
-        assert_eq!(gap, if joined { 0. } else { crate::grid::SECTION_GAP }, "{}: the gap between neighbors", t.id);
+        assert!((gap - if joined { 0. } else { crate::grid::SECTION_GAP * t.data.spacing }).abs() < 0.01, "{}: the gap between neighbors", t.id);
         add_upright_widgets(&s.ui);
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         shot(&s, &format!("grid-{}", t.id));
@@ -426,4 +427,29 @@ fn the_grid_draws_in_every_theme() {
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         shot(&s, &format!("grid-dropdown-{}", t.id));
     }
+}
+
+// Spacing alone grows the gap between tiles, and the grid is laid out again for it: the same theme at
+// 0.6, 1 and 1.6 differs in nothing else.
+#[test]
+fn a_larger_spacing_grows_the_gaps_between_tiles() {
+    fit_to_window();
+    let mut s = Screen::new();
+    let mut p = open(&mut s, every_kind(), &every_kind_values());
+    let base = all_themes().into_iter().find(|t| t.data.style.sections == crate::SectionStyle::Separate).unwrap();
+    let mut seen = vec![];
+    for spacing in [1., 0.6, 1.6, 1.] {
+        let mut t = base.clone();
+        t.data.spacing = spacing;
+        theme::apply(&s.ui, &t);
+        s.frame();
+        p.shown();
+        let tiles = tiles(&s.ui);
+        seen.push((tiles[3].x - (tiles[2].x + tiles[2].w), tiles.iter().map(|t| t.y).fold(0., f32::max)));
+    }
+    for (got, spacing) in [(seen[0].0, 1.), (seen[1].0, 0.6), (seen[2].0, 1.6)] {
+        assert!((got - crate::grid::SECTION_GAP * spacing).abs() < 0.01, "at {spacing} the gap is {got}");
+    }
+    assert!(seen[1].1 < seen[0].1 && seen[0].1 < seen[2].1, "rows are farther apart as the spacing grows: {seen:?}");
+    assert_eq!(seen[3], seen[0], "and back");
 }

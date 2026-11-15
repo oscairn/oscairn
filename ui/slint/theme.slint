@@ -64,6 +64,8 @@ export global Theme {
     // Metrics and the font.
     in property <length> radius: 6px;
     in property <float> font-scale: 1;
+    // A scale on the paddings and gaps below (the theme's `spacing`).
+    in property <float> spacing: 1;
     in property <string> font-family: "Inter";
     // How controls are drawn.
     in property <ButtonStyle> buttons: ButtonStyle.pill;
@@ -83,16 +85,17 @@ export global Theme {
     out property <length> body: 16px * font-scale;
     out property <length> button: 15px * font-scale;
     out property <length> title: 20px * font-scale;
-    // Sizes with no theme property: touch targets (RFC 0019), the dense gap and margin (Theme.h).
+    // Sizes with no theme property: touch targets (RFC 0019).
     out property <length> bar-height: 48px;
     out property <length> touch: 44px;
-    out property <length> gap: 4px;
-    out property <length> margin: 6px;
-    // Insides: text from an edge, a card's padding, a control's inset, a tight inset.
-    out property <length> pad: 10px;
-    out property <length> pad-wide: 12px;
-    out property <length> pad-narrow: 8px;
-    out property <length> pad-tight: 4px;
+    // Paddings and gaps, times the theme's spacing: the dense gap and margin (Theme.h), then the
+    // insides: text from an edge, a card's padding, a control's inset, a tight inset.
+    out property <length> gap: 4px * spacing;
+    out property <length> margin: 6px * spacing;
+    out property <length> pad: 10px * spacing;
+    out property <length> pad-wide: 12px * spacing;
+    out property <length> pad-narrow: 8px * spacing;
+    out property <length> pad-tight: 4px * spacing;
     // A small button's width ("Back", "Previous"), the dropdown overlay's width, the pages column.
     out property <length> button-width: 110px;
     out property <length> overlay-width: 420px;

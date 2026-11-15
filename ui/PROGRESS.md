@@ -88,4 +88,35 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   the desktop build under Xvfb showing Home with no engine, after 10 s: RSS 17.9 MB, PSS 15.2 MB
   (anon 2.3 MB), 4 threads. Not measured: the KMS build's memory (no display in the container).
   trail check: no conflicts, 7 worth a look (word matches with unrelated engine learnings).
+- Branch `rust-ui-setup` from `main` (8a9fb79c): the two gaps keeping the shell from being the
+  default on the keyboard, and the unit run's findings.
+- Handover (unit finding 1): the shell writes the handover file as a whole line; the keeper reads
+  one without a newline too (`handed_over`). fantom_start.sh in a Debian container: 94 ok, none
+  failing (3 new); the Rust test checks the newline. Commit 0df9f11b.
+- Stale `oscairn.settings` (finding 3): a real gap. The JUCE app's launches (`memory.launch`) were
+  never let go when it was killed; now a connection's admitted launches go with it after the 3 s
+  grace, unless another open connection launched them or the app has its own. control-local-stream
+  extended, passed. Commit e3de668f.
+- Session setup (finding 2): everything the JUCE app sends at start and on reconnecting is listed
+  in docs/rust-ui.md "Session setup" with file:line. Budget, memory classes, always-available
+  apps, repositories and capture moved to `setUpSession` (hosts/standalone/SessionSetup.cpp),
+  applied by the engine at start with `--device-profile` and by the JUCE app to the engine it
+  starts. The UI's resident memory, before part of `budget.set`'s `system`, is now `memory.shell`,
+  sent by each UI; the Rust shell sends it on connecting. `session_setup_matches_the_juce_app`
+  (ui-rust): real engine twice, Rust path vs the real JUCE app (`--connect --snapshot`, offscreen,
+  plus the `record.retro` a snapshot leaves out); equal, and equal to the unit's figures. Passed on
+  the Mac. Commit adafc7eb.
+- Packaging: `BR2_PACKAGE_OSCAIRN_UI` and the `oscairn-ui-crates` package (531 crates from
+  crates.io as Buildroot extra downloads against Cargo.lock's checksums: 87 MB downloaded, 699 MB
+  unpacked, 1.2 GB cargo target dir). Built in Docker in my own volume `oscairn-os-rustui` (a copy
+  of `oscairn-os-w15`, 9 min to copy): the whole bundle, `oscairn-dirclean` and the crates' dirclean
+  then `all`, 7 min 37 s with ccache, oscairn-ui's cargo build 3 min 49 s of it. The binary: 9.7 MB,
+  NEEDED libxkbcommon.so.0 (the bundle's own now), libudev.so.1, libinput.so.10,
+  libfontconfig.so.1, glibc symbols up to 2.43 (the bundle's). Two fixes on the way: the linker
+  as a rustflag (same host and target triple on arm64), the Theme dedupe dropped (desktop-theme
+  builds Theme.cpp alone). Commits ddd73628, 0eb50431 (the vendored backend's one warning).
+  Not run on a unit: the bundle `build-os/oscairn-fantom-bundle-0eb50431.tar.gz` (sha256 e07f8e10...).
+- Checks: ui-rust 31 passed; `cargo clippy --all-targets` clean (desktop); the kms build in the
+  bundle has no warning. Full suite (build, `-j3`, excluding audio devices, window order, MIDI
+  monitor): 236/236 passed, 1 skipped (desktop-phase3b-engines), first run.
 </content>

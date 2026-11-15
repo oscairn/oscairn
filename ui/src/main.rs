@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Oscairn's UI in Rust (docs/rust-ui.md):
-//!   oscairn-ui [--profile ID|FILE] [--socket PATH] [--handover FILE]
+//!   oscairn-ui [--profile ID|FILE] [--socket PATH] [--handover FILE] [--plugins DIR]
 //! The profile: a built-in's id or a file (else OSCAIRN_PROFILE; else this computer's). The
 //! engine's control socket: PATH, else /run/oscairn/engine.sock (a device's engine-only start).
 //! With --handover, a screen not yet ported ends the program with status 3 and its name (the
 //! JUCE app's --app) in FILE, for the start script to give the display to the JUCE app.
 //! It never ends because the engine is slow or gone: it says so and waits.
 
+mod browser;
+mod chain;
 mod client;
 mod home;
 mod keyboard;
 mod nav;
+mod params;
 mod part;
 mod play;
 mod profile;
+mod scan;
+mod sounds;
 mod setlist;
 mod settings;
 mod shell;
@@ -53,6 +58,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let post = move |event| {
         let _ = weak.upgrade_in_event_loop(move |_| shell::dispatch(event));
     };
+    shell::set_plugin_dir(arg("--plugins"));
     let handover = arg("--handover");
     shell::start(&ui, socket.into(), &profile, handover.is_some(), post).map_err(|e| slint::PlatformError::Other(e.to_string()))?;
     ui.run()?;

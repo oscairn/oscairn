@@ -157,3 +157,12 @@ helper process, not an engine call).
   pages F; scenes A2..A4; knob row and Learn A9..A11; Save A15; undo/redo J1; Controls G, Mixer H,
   Routing I, Parts list B; then step 5 (remove Play's Edit entry in play.slint:328 and play.rs
   handover, update docs). Not done: all of those.
+
+Checkpoint (c): Play's and the Part screen's live edits (level, solo, master, pan) now commit, as the
+JUCE setters do (scenes.select commits itself). New: `browser.rs` (the shared list), `chain.rs`,
+`params.rs`, `sounds.rs`, `scan.rs` (the plugin scanner helper, `--plugins DIR`), shell glue, rows
+"Sound" and "Insert effects" on the Part screen. Tests: `sh ui/target/test.sh test` (OSCAIRN_DATA_HOME
+and OSCAIRN_CONFIG_HOME inside the worktree) 58 passed, clippy --all-targets clean. Ticked in the
+inventory: C15, D1-D5, D12, E2-E5, F1-F4, F8, F9. NEXT: K2 playing keyboard; D6-D11 splits and
+lanes, E1 tags and favorites, E6 presets, C16 replace, F5-F7; scenes A2-A4; knob row and Learn
+A9-A11; Save A15; undo/redo J1; B, G, H, I; then step 5.

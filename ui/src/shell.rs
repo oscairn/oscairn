@@ -14,8 +14,11 @@
 use crate::client::{Client, Error, Event, BUSY};
 use crate::home::{self, Home};
 use crate::nav::{self, Action};
+use crate::chain;
 use crate::keyboard;
+use crate::params;
 use crate::part;
+use crate::sounds;
 use crate::play;
 use crate::profile::Profile;
 use crate::setlist;
@@ -46,6 +49,9 @@ pub enum Request {
     Setlist(setlist::Request),
     Play(play::Request),
     Part(part::Request),
+    Chain(chain::Request),
+    Sounds(sounds::Request),
+    Params(params::Request),
 }
 
 impl Request {
@@ -85,6 +91,12 @@ pub enum Screen {
     Play = 3,
     /// One part's settings (part.rs), opened from Play.
     Part = 4,
+    /// A part's insert chain (chain.rs), opened from the Part screen.
+    Chain = 5,
+    /// The sound chooser (sounds.rs), opened from the Part screen.
+    Sounds = 6,
+    /// A plugin's parameter pages (params.rs), opened from the chain.
+    Params = 7,
 }
 
 pub struct App {
@@ -110,6 +122,11 @@ pub struct App {
     setlist: setlist::Screen,
     play: play::Screen,
     part: part::Screen,
+    chain: chain::Screen,
+    sounds: sounds::Screen,
+    params: params::Screen,
+    /// Whether the plugin scanner has been started (the first time the chain is opened).
+    scan_started: bool,
     /// The on-screen keyboard, open for the screen that asked for text.
     keyboard: Option<(Screen, keyboard::Keyboard)>,
     /// The profile's textEntry is onScreen: the keyboard shows its keys.
@@ -190,10 +207,10 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
         })
     });
     let part = ui.global::<PartState>();
-    part.on_tapped(|i| with_app(|a| a.part_act(|p| p.tap(i))));
-    part.on_step(|i, by| with_app(|a| a.on_part(|p| p.step_row(i, by))));
-    part.on_info_scroll(|by| with_app(|a| a.on_part(|p| p.scroll_info(by))));
-    part.on_back(|| with_app(|a| a.go(Screen::Play)));
+    part.on_tapped(|i| with_app(|a| a.list_tap(i)));
+    part.on_step(|i, by| with_app(|a| a.list_step(i, by)));
+    part.on_info_scroll(|by| with_app(|a| a.list_scroll(by)));
+    part.on_back(|| with_app(|a| a.back()));
     let keys = ui.global::<KeyboardState>();
     keys.on_pressed(|i| with_app(|a| a.keyboard_press(i)));
     keys.on_released(|| with_app(|a| a.repeat.stop()));
@@ -219,6 +236,10 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             setlist: setlist::Screen::new(ui, state),
             play: play::Screen::new(ui),
             part: part::Screen::new(ui),
+            chain: chain::Screen::new(ui),
+            sounds: sounds::Screen::new(ui),
+            params: params::Screen::new(ui),
+            scan_started: false,
             keyboard: None,
             text_on_screen: profile.text_on_screen,
             repeat: slint::Timer::default(),
@@ -351,6 +372,9 @@ impl App {
             Event::Notification { method, params } => match method.as_str() {
                 "status" => self.status(&params),
                 "graph.changed" => self.ask_performance(),
+                "params.changed" => {
+                    self.on_params(|p| p.changed(&params));
+                }
                 "controls.changed" => {
                     self.on_play(|p| p.controls(&params));
                     self.on_part(|p| p.controls(&params));
@@ -404,6 +428,24 @@ impl App {
                 }
                 return;
             }
+            Request::Chain(r) => {
+                if self.on_chain(|c| c.reply(r, result)) {
+                    self.ask_performance();
+                }
+                return;
+            }
+            Request::Sounds(r) => {
+                if self.on_sounds(|c| c.reply(r, result)) {
+                    self.ask_performance();
+                }
+                return;
+            }
+            Request::Params(r) => {
+                if self.on_params(|c| c.reply(r, result)) {
+                    self.ask_performance();
+                }
+                return;
+            }
             other => other,
         };
         let r = match result {
@@ -429,6 +471,8 @@ impl App {
             Request::Graph => {
                 self.on_play(|p| p.graph(&r));
                 self.on_part(|p| p.graph(&r));
+                self.on_chain(|c| c.graph(&r));
+                self.on_sounds(|c| c.graph(&r));
                 self.show(|s| s.scene = topbar::scene(&r))
             }
             Request::Transport => self.show(|s| s.tempo = topbar::tempo(&r)),
@@ -445,7 +489,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) | Request::Play(_) | Request::Part(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) => {}
         }
     }
 
@@ -551,6 +595,9 @@ impl App {
                 }
             }
             (Screen::Part, _) => self.part_act(|p| p.act(action)),
+            (Screen::Chain, _) => self.chain_act(|c| c.act(action)),
+            (Screen::Sounds, _) => self.sounds_act(|c| c.act(action)),
+            (Screen::Params, _) => self.params_act(|c| c.act(action)),
             (Screen::Setlist, _) => {
                 let mut back = false;
                 self.on_setlist(|s| back = s.act(action) == setlist::Outcome::Back);
@@ -610,8 +657,122 @@ impl App {
         match self.on_part(f) {
             part::Outcome::Back => self.go(Screen::Play),
             part::Outcome::Prompt(title, text) => self.open_keyboard(Screen::Part, &title, &text),
+            part::Outcome::Chain => {
+                self.chain.open(self.part.id());
+                self.start_scan();
+                self.go(Screen::Chain);
+            }
+            part::Outcome::Sound => {
+                self.sounds.open(self.part.id());
+                self.go(Screen::Sounds);
+            }
             part::Outcome::Stay => {}
         }
+    }
+
+    /// Something for the chain, then what it asks the engine sent.
+    fn on_chain<R>(&mut self, f: impl FnOnce(&mut chain::Screen) -> R) -> R {
+        let r = f(&mut self.chain);
+        for (request, method, params) in std::mem::take(&mut self.chain.out) {
+            self.send(Request::Chain(request), method, params);
+        }
+        r
+    }
+
+    fn on_sounds<R>(&mut self, f: impl FnOnce(&mut sounds::Screen) -> R) -> R {
+        let r = f(&mut self.sounds);
+        for (request, method, params) in std::mem::take(&mut self.sounds.out) {
+            self.send(Request::Sounds(request), method, params);
+        }
+        r
+    }
+
+    fn on_params<R>(&mut self, f: impl FnOnce(&mut params::Screen) -> R) -> R {
+        let r = f(&mut self.params);
+        for (request, method, params) in std::mem::take(&mut self.params.out) {
+            self.send(Request::Params(request), method, params);
+        }
+        r
+    }
+
+    fn chain_act(&mut self, f: impl FnOnce(&mut chain::Screen) -> chain::Outcome) {
+        match self.on_chain(f) {
+            chain::Outcome::Back => self.go(Screen::Part),
+            chain::Outcome::Params(node, name) => {
+                self.params.open(node, &name);
+                self.go(Screen::Params);
+            }
+            chain::Outcome::Stay => {}
+        }
+    }
+
+    fn sounds_act(&mut self, f: impl FnOnce(&mut sounds::Screen) -> sounds::Outcome) {
+        match self.on_sounds(f) {
+            sounds::Outcome::Back => self.go(Screen::Part),
+            sounds::Outcome::Prompt(title, text) => self.open_keyboard(Screen::Sounds, &title, &text),
+            sounds::Outcome::Stay => {}
+        }
+    }
+
+    fn params_act(&mut self, f: impl FnOnce(&mut params::Screen) -> params::Outcome) {
+        if self.on_params(f) == params::Outcome::Back {
+            self.go(Screen::Chain);
+        }
+    }
+
+    /// Back at the top of the list screens: one screen up.
+    fn back(&mut self) {
+        match self.screen {
+            Screen::Part => self.go(Screen::Play),
+            Screen::Chain | Screen::Sounds => self.go(Screen::Part),
+            Screen::Params => self.go(Screen::Chain),
+            _ => {}
+        }
+    }
+
+    fn list_tap(&mut self, i: i32) {
+        match self.screen {
+            Screen::Part => self.part_act(|p| p.tap(i)),
+            Screen::Chain => self.chain_act(|c| c.tap(i)),
+            Screen::Sounds => self.sounds_act(|c| c.tap(i)),
+            Screen::Params => self.params_act(|c| c.tap(i)),
+            _ => {}
+        }
+    }
+
+    fn list_step(&mut self, i: i32, by: i32) {
+        match self.screen {
+            Screen::Part => self.on_part(|p| p.step_row(i, by)),
+            Screen::Chain => self.on_chain(|c| c.step_row(i, by)),
+            Screen::Sounds => self.on_sounds(|c| c.step_row(i, by)),
+            Screen::Params => self.on_params(|c| c.step_row(i, by)),
+            _ => {}
+        }
+    }
+
+    fn list_scroll(&mut self, by: i32) {
+        match self.screen {
+            Screen::Part => self.on_part(|p| p.scroll_info(by)),
+            Screen::Chain => self.on_chain(|c| c.scroll_info(by)),
+            Screen::Sounds => self.on_sounds(|c| c.scroll_info(by)),
+            Screen::Params => self.on_params(|c| c.scroll_info(by)),
+            _ => {}
+        }
+    }
+
+    /// The plugin scanner, started the first time the chain is opened (it runs the helper on every
+    /// plugin file, off the UI thread), its answer handed to the chain.
+    fn start_scan(&mut self) {
+        if self.scan_started {
+            return;
+        }
+        self.scan_started = true;
+        let weak = self.ui.clone();
+        let (dir, helper) = (crate::scan::plugin_dir(PLUGIN_DIR.with(|d| d.borrow().clone()).as_deref()), crate::scan::scanner());
+        std::thread::spawn(move || {
+            let found = crate::scan::scan(&dir, &helper, crate::scan::TIMEOUT);
+            let _ = weak.upgrade_in_event_loop(move |_| with_app(|a| a.on_chain(|c| c.plugins(found))));
+        });
     }
 
     /// The on-screen keyboard over `screen`, which asked for text.
@@ -654,11 +815,12 @@ impl App {
         let Some((screen, k)) = self.keyboard.take() else { return };
         self.repeat.stop();
         k.close();
-        if screen == Screen::Part {
-            match typed {
-                Some(text) => self.on_part(|p| p.entered(&text)),
-                None => self.on_part(part::Screen::not_entered),
-            }
+        match (screen, typed) {
+            (Screen::Part, Some(text)) => self.on_part(|p| p.entered(&text)),
+            (Screen::Part, None) => self.on_part(part::Screen::not_entered),
+            (Screen::Sounds, Some(text)) => self.on_sounds(|p| p.entered(&text)),
+            (Screen::Sounds, None) => self.on_sounds(sounds::Screen::not_entered),
+            _ => {}
         }
     }
 
@@ -685,6 +847,7 @@ impl App {
         if let Some((_, k)) = self.keyboard.take() {
             k.close();
             self.on_part(part::Screen::not_entered);
+            self.on_sounds(sounds::Screen::not_entered);
         }
         if self.screen != screen {
             // A cursor drops when its screen goes, as on focus loss in the JUCE lists.
@@ -699,6 +862,16 @@ impl App {
             }
             if self.screen == Screen::Part {
                 self.on_part(part::Screen::hidden);
+            }
+            if self.screen == Screen::Chain {
+                self.on_chain(chain::Screen::hidden);
+            }
+            if self.screen == Screen::Sounds {
+                self.on_sounds(sounds::Screen::hidden);
+            }
+            if self.screen == Screen::Params {
+                self.on_params(params::Screen::hidden);
+                self.send(Request::Subscribe, "unsubscribe", json!({"topics": ["params.changed"]}));
             }
             if live(self.screen) && !live(screen) {
                 self.send(Request::Subscribe, "unsubscribe", json!({"topics": ["controls.changed"]}));
@@ -720,6 +893,9 @@ impl App {
                 Screen::Setlist => "Setlist".into(),
                 Screen::Play => "Play".into(),
                 Screen::Part => "Part".into(),
+                Screen::Chain => "Insert effects".into(),
+                Screen::Sounds => "Sound".into(),
+                Screen::Params => "Parameters".into(),
                 Screen::Opening => ui.get_opening(),
             });
             bar.set_home_button(screen != Screen::Home);
@@ -730,6 +906,19 @@ impl App {
         if !live(was) && live(screen) {
             // The first controls.changed after subscribing carries every level and mute.
             self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
+        }
+        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params) {
+            self.ask_performance();
+        }
+        if screen == Screen::Chain {
+            self.on_chain(chain::Screen::shown);
+        }
+        if screen == Screen::Sounds {
+            self.on_sounds(sounds::Screen::shown);
+        }
+        if screen == Screen::Params {
+            self.send(Request::Subscribe, "subscribe", json!({"topics": ["params.changed"]}));
+            self.on_params(params::Screen::shown);
         }
         if screen == Screen::Part {
             self.ask_performance();
@@ -775,4 +964,14 @@ impl App {
 #[cfg(test)]
 pub fn set_text_on_screen(on: bool) {
     with_app(|a| a.text_on_screen = on)
+}
+
+thread_local! {
+    /// `--plugins DIR`, where the plugin scanner looks (else beside the program, as the JUCE app).
+    static PLUGIN_DIR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// The plugin folder the command line gave.
+pub fn set_plugin_dir(dir: Option<String>) {
+    PLUGIN_DIR.with(|d| *d.borrow_mut() = dir);
 }

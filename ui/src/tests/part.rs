@@ -5,7 +5,7 @@
 use super::*;
 use crate::part::Outcome::{Back, Stay};
 
-fn part_graph() -> serde_json::Value {
+pub fn part_graph() -> serde_json::Value {
     json!({
         "nodes": [
             {"id": 1, "name": "Rhodes", "plugin": {"name": "Surge XT"}, "audioInputs": [], "audioOutputs": [{"channels": 2}], "noteInputs": 1, "noteOutputs": 0, "enabled": true},
@@ -79,7 +79,7 @@ fn part_cursor_edits_and_requests() {
     let list: Vec<(&str, &str)> = list.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     assert_eq!(
         list,
-        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Input channel", "Any channel"), ("Lowest velocity", "0"), ("Highest velocity", "127"), ("Notes at once", "Any"), ("Reserved notes", "None"), ("Priority", "0 (gives way first)"), ("Plays to", "Main"), ("MIDI out", "Off ›"), ("MIDI out channel", "Own channels"), ("Send to Reverb", "−6.0 dB"), ("Name", "Keys ›"), ("Remove part", "Press twice")]
+        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Input channel", "Any channel"), ("Lowest velocity", "0"), ("Highest velocity", "127"), ("Notes at once", "Any"), ("Reserved notes", "None"), ("Priority", "0 (gives way first)"), ("Plays to", "Main"), ("MIDI out", "Off ›"), ("MIDI out channel", "Own channels"), ("Send to Reverb", "−6.0 dB"), ("Sound", "Rhodes ›"), ("Insert effects", "›"), ("Name", "Keys ›"), ("Remove part", "Press twice")]
     );
     assert_eq!(
         info_lines(ui),
@@ -97,7 +97,7 @@ fn part_cursor_edits_and_requests() {
     part.act(Action::Arrow { dx: 0, dy: -1 });
     assert_eq!(cursor_at(ui), Some(1));
     part.act(Action::End(1));
-    assert_eq!(cursor_at(ui), Some(22), "End: the last");
+    assert_eq!(cursor_at(ui), Some(24), "End: the last");
     part.act(Action::End(-1));
     assert_eq!(cursor_at(ui), Some(0));
     assert!(edits(&mut part).is_empty(), "moving the cursor sends nothing");
@@ -218,19 +218,19 @@ fn part_cursor_edits_and_requests() {
     part.not_entered();
     part.act(Action::Move { pane: None, by: 1 });
     assert_eq!(part.act(Action::Confirm(None)), Stay);
-    assert_eq!(rows(ui)[22].1, "Press again to remove");
+    assert_eq!(rows(ui)[24].1, "Press again to remove");
     part.act(Action::Move { pane: None, by: -1 });
     part.act(Action::Move { pane: None, by: 1 });
-    assert_eq!(rows(ui)[22].1, "Press twice", "moving away undoes the first press");
+    assert_eq!(rows(ui)[24].1, "Press twice", "moving away undoes the first press");
     assert!(requests(&mut part).is_empty());
     // A bus has the fader's settings and where it plays to; an audio part no keys.
     let _bus = part_screen(&s, &part_graph(), 12);
-    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "Name", "Remove part"]);
+    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "Sound", "Insert effects", "Name", "Remove part"]);
     assert_eq!(info_lines(ui), ["Sound", "No instrument", "Plays to", "Main", "Sends", "None", "Insert effects", "Hall"]);
     let mut audio = part_graph();
     audio["parts"][1]["input"] = json!({"kind": "audio", "port": 0});
     let _audio = part_screen(&s, &audio, 11);
-    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "MIDI out", "MIDI out channel", "Send to Reverb", "Name", "Remove part"]);
+    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "MIDI out", "MIDI out channel", "Send to Reverb", "Sound", "Insert effects", "Name", "Remove part"]);
     assert_eq!(info_lines(ui)[5], "Reverb", "plays through a bus");
 }
 
@@ -383,7 +383,7 @@ fn part_on_the_shell() {
     assert_eq!(rows(&ui).len(), 11);
     shell::act(Action::End(1));
     shell::act(Action::End(1));
-    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Remove part", true)], "the cursor turned the view");
+    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Insert effects", false), ("Name", false), ("Remove part", true)], "the cursor turned the view");
     // Rename from the shell: a press on Name opens the keyboard over the list; typing goes to it
     // alone (End finds Done), Done sends parts.name and the commit; Cancel closes it with nothing sent.
     shell::act(Action::Move { pane: None, by: -1 });

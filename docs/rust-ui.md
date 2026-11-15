@@ -299,8 +299,44 @@ Play; Play's Cancel still goes to where Play was opened from.
   engine only stages, so those edits were not compiled until something else committed. Level,
   pan, mute and solo are live and are not committed.
 - **Still handed over:** nothing in this screen: the handover row is gone. Not yet built here (the
-  checklist is ui/PERFORMANCE-APP.md): choosing the sound, the chain's plugins and splits, and the
-  parameter pages; Play's "Edit" entry still hands over until those are.
+  checklist is ui/PERFORMANCE-APP.md): splits and lanes, scenes editing, the knob row and Learn,
+  Save, undo and redo, the Parts list, Controls, Mixer and Routing; Play's "Edit" entry still hands
+  over until those are built.
+
+### Insert chain, parameter pages and the sound chooser
+
+Three screens opened from the Part screen's "Insert effects", "Sound" rows and a plugin's
+"Parameters" action, sharing the Part component through `browser.rs` (the list, its cursor and the
+panel; `Nav` turns an action into a press, a dial step, the right knob or back). Their tests are
+`src/tests/pages.rs` and `shellpages.rs`.
+
+- **Chain** (`chain.rs`): the plugins in order with "+ Insert plugin here" before each and after
+  the last; a press on a plugin lists its actions: Parameters, Turn off or on (`graph.enable`),
+  Move earlier or later (`parts.move`), Remove (`parts.removeNode`, then `graph.remove` with
+  `userWires: reconnect`, as `removeBox`), and, where `window.info` says the plugin has a window of its
+  own, a disabled "Plugin view: not available in this shell yet" (the only part of the Performance app not
+  ported: a plugin's own view is drawn into a surface the shell hands it, a separate project). Inserting
+  lists the plugins the scanner found and sends `graph.add` (named "Basic Synth", "Basic Synth 2"), then
+  `parts.insert`, taking the node out again with `graph.remove` if the insert is refused. Every edit is
+  followed by `graph.commit`. Splits and lanes are listed read only (D7 to D9 are not built).
+- **The plugin scanner** (`scan.rs`): as the JUCE app finds plugins, the helper `oscairn-plugin-scan`
+  beside the program run once per plugin file (`--worker FILE`, 5 s, 4 MiB) over `--plugins DIR`
+  (else `plugins` beside the program, else `../lib/clap`), CLAP then LV2, started the first time the
+  chain is opened, its wire format read with every length checked. It is a helper process, not an
+  engine call: no control request. Not as the C++ one: a timed-out helper is killed, not its process group.
+- **Parameter pages** (`params.rs`): host-drawn, the JUCE ParameterGrid's pages (a page per top-level
+  module, numbered pages together, modules from the leading words of names for a plugin of more than
+  24 parameters without paths, tabs on a page of more than 24, tiles in `oscairn.ui` priority order,
+  hidden parameters left out, read-only ones show a value only, two values a switch). `params.list`,
+  `params.get`, `params.text`, `params.set` and `params.gesture` (begin on a press, end on a press or
+  Cancel; a switch and a touch -/+ in a gesture of their own); `params.changed` is subscribed while
+  they show. Left knob or dial: the tiles; right knob (or the panel's arrows): the pages, listed in the
+  panel. Not yet: the rich views (envelopes, key and velocity maps, FM operators, LFOs, filters, each of
+  whose parameters is a tile meanwhile), joined groups, the search, the knob row's use of a page.
+- **Sound chooser** (`sounds.rs`): `library.query` of kind `sound` (a search typed on the keyboard
+  narrows it), and for the one pressed `parts.loadSound`, `parts.fromSound`, `audition.start` and
+  `audition.stop`, and `parts.saveSound` (over its Sound, or new with a name typed). The engine's refusals
+  (staged edits, the library busy) are said. Tags, favorites and the sources are not shown.
 
 ### Text entry
 

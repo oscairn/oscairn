@@ -62,7 +62,7 @@ export component Shell inherits Window {
         y: Theme.bar-height;
         width: parent.width;
         height: parent.height - Theme.bar-height;
-        visible: root.screen == 4;
+        visible: root.screen >= 4 && root.screen <= 7;
     }
     if root.screen == 2: Text {
         y: Theme.bar-height;

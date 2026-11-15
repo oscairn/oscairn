@@ -51,6 +51,9 @@ pub enum Outcome {
     Stay,
     /// Cancel with nothing to drop: back to Play.
     Back,
+    /// The insert chain, and the sound chooser.
+    Chain,
+    Sound,
     /// A press on the name: the on-screen keyboard, with this title and text; `entered` takes the result.
     Prompt(String, String),
 }
@@ -58,6 +61,8 @@ pub enum Outcome {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Item {
     Name,
+    Sound,
+    Effects,
     Level,
     Pan,
     Mute,
@@ -144,6 +149,8 @@ pub struct Screen {
     removing: bool,
     /// The name's keyboard is open.
     asking: bool,
+    /// This is the screen shown: the chain, sounds and parameter screens share the window's list.
+    active: bool,
     /// The read-only panel's own cursor: its view turns a page at a time.
     info_cursor: Cursor,
     rows: Rc<VecModel<SettingData>>,
@@ -159,12 +166,13 @@ impl Screen {
         let state = window.global::<PartState>();
         state.set_rows(ModelRc::from(rows.clone()));
         state.set_info(ModelRc::from(info.clone()));
-        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], outputs: vec![], removing: false, asking: false, cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, out: vec![] }
+        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], outputs: vec![], removing: false, asking: false, active: false, cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, out: vec![] }
     }
 
     /// The part to show, from the graph already read.
     pub fn open(&mut self, id: u32) {
         self.id = id as u64;
+        self.active = true;
         self.cursor = Cursor::new(0, 1);
         self.editing = false;
         self.menu = None;
@@ -264,7 +272,7 @@ impl Screen {
             items.extend([Item::MidiOut, Item::MidiChannel]);
         }
         items.extend(self.buses().into_iter().map(|(id, _)| Item::Send(id)));
-        items.extend([Item::Name, Item::Remove]);
+        items.extend([Item::Sound, Item::Effects, Item::Name, Item::Remove]);
         items
     }
 
@@ -428,9 +436,23 @@ impl Screen {
                 let name = self.buses().into_iter().find(|b| b.0 == bus).map(|b| b.1).unwrap_or_default();
                 (format!("Send to {name}"), db(self.send_level_of(bus)), 0, false)
             }
+            Item::Sound => ("Sound".into(), self.sound_name() + " ›", 2, false),
+            Item::Effects => ("Insert effects".into(), "›".into(), 2, false),
             Item::Remove => ("Remove part".into(), if self.removing { "Press again to remove" } else { "Press twice" }.into(), 2, self.removing),
         };
         SettingData { label: label.into(), value: value.into(), kind, on, cursor: false, editing: false }
+    }
+
+    /// The part's sound as the panel names it: the first instrument.
+    fn sound_name(&self) -> String {
+        let nodes: HashMap<u64, &Value> = self.graph["nodes"].as_array().into_iter().flatten().filter_map(|n| Some((n["id"].as_u64()?, n))).collect();
+        let mut flat = Vec::new();
+        chain_nodes(&self.part["chain"], &self.part["splits"], 0, &mut flat);
+        flat.iter().find_map(|n| nodes.get(n).filter(|n| is_instrument(n)).and_then(|n| n["name"].as_str())).unwrap_or("No instrument").to_string()
+    }
+
+    pub fn id(&self) -> u32 {
+        self.id as u32
     }
 
     /// "Off" for no outputs, else the outputs by name, "(not connected)" when none of the rules finds one.
@@ -486,7 +508,7 @@ impl Screen {
 
     /// Cursors and the view's size, then the window's view of it, each row set only when it changed.
     fn show(&mut self) {
-        let Some(ui) = self.ui.upgrade() else { return };
+        let Some(ui) = self.ui.upgrade().filter(|_| self.active) else { return };
         let state = ui.global::<PartState>();
         let per_view = state.get_rows_per_view().max(1) as usize;
         let items = self.items();
@@ -694,7 +716,7 @@ impl Screen {
                     self.edit("parts.send", params);
                 }
             }
-            Item::Mute | Item::Solo | Item::Devices | Item::MidiOut | Item::Name | Item::Remove => {}
+            Item::Mute | Item::Solo | Item::Devices | Item::MidiOut | Item::Name | Item::Remove | Item::Sound | Item::Effects => {}
         }
     }
 
@@ -726,12 +748,10 @@ impl Screen {
                 self.part["input"]["priority"] = json!(to);
                 self.send_input();
             }
-            Item::MidiChannel => {
-                // Disabled while no output is chosen, as the JUCE menu is.
-                if !self.rules(Menu::MidiOut).is_empty() {
-                    self.part["midiOut"]["channel"] = json!(to);
-                    self.send_midi_out();
-                }
+            // Disabled while no output is chosen, as the JUCE menu is.
+            Item::MidiChannel if !self.rules(Menu::MidiOut).is_empty() => {
+                self.part["midiOut"]["channel"] = json!(to);
+                self.send_midi_out();
             }
             Item::Output => {
                 self.part["bus"] = json!(to);
@@ -798,6 +818,8 @@ impl Screen {
                 self.asking = true;
                 return Outcome::Prompt("Name of the part".into(), self.part["name"].as_str().unwrap_or_default().into());
             }
+            Item::Sound => return Outcome::Sound,
+            Item::Effects => return Outcome::Chain,
             Item::Remove if !self.removing => self.removing = true,
             Item::Remove => {
                 self.removing = false;
@@ -928,11 +950,17 @@ impl Screen {
         self.editing = false;
         self.menu = None;
         self.removing = false;
-        self.show();
+        self.active = false;
     }
 
     /// Shown: the view's size may have changed while it was not.
     pub fn shown(&mut self) {
+        self.active = true;
+        if let Some(ui) = self.ui.upgrade() {
+            let state = ui.global::<PartState>();
+            state.set_rows(ModelRc::from(self.rows.clone()));
+            state.set_info(ModelRc::from(self.info.clone()));
+        }
         self.show();
     }
 }

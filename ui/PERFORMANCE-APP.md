@@ -95,7 +95,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | C12 | Sends per bus (level, 0 removes) | `parts.send` | - | press then dial | [x] |
 | C13 | MIDI out (devices list: Off, connected outputs, rules not connected) and MIDI out channel (own, 1..16) | `parts.midiOut`, `session.status` (`midiOutputs`) | - | list, press ticks | [x] |
 | C14 | Open the on-screen playing keyboard (K2) of the input that plays the part | `notes.send` (K2) | - | action on the part | [ ] (with K2; hidden when the profile's onScreenKeyboard is false) |
-| C15 | Sound: choose from the library (D1/E) | see E | - | action | [ ] |
+| C15 | Sound: choose from the library (D1/E) | see E | - | action | [x] |
 | C16 | Engine (the instrument's plugin) shown; replace instrument | `graph.get`; replace: `graph.replace` | - | action | [ ] |
 | C17 | Part controls (a part's own macros) listed with targets | `graph.get` (`controls`) | - | see G | [ ] |
 | C18 | Remove part | `parts.remove` | - | action, confirm | [x] |
@@ -106,28 +106,28 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| D1 | The plugin chooser for Insert (instrument or effect, from the scanner, names without the vendor prefix, sorted) | none (helper process, see above) | helper | list, press | [ ] |
-| D2 | Insert a plugin at a position (a new node named uniquely: "Basic Synth", "Basic Synth 2"), in a lane | `graph.add`, `parts.insert`, `graph.commit` (removes the node when insert fails) | - | cursor on the position, press, choose | [ ] |
-| D3 | Move left / right in the chain | `parts.move` | - | action | [ ] |
-| D4 | Remove a box (keeps user wires reconnected) | `parts.removeNode` | - | action | [ ] |
-| D5 | Turn a plugin off / on | `graph.enable` | - | action | [ ] |
-| D6 | Show the chain: IN, boxes, OUT, "Dry" lane, role colors (instrument, effect), failed and off marks | `graph.get` | - | cursor along the chain | [ ] |
+| D1 | The plugin chooser for Insert (instrument or effect, from the scanner, names without the vendor prefix, sorted) | none (helper process, see above) | helper | list, press | [x] |
+| D2 | Insert a plugin at a position (a new node named uniquely: "Basic Synth", "Basic Synth 2"), in a lane | `graph.add`, `parts.insert`, `graph.commit` (removes the node when insert fails) | - | cursor on the position, press, choose | [x] |
+| D3 | Move left / right in the chain | `parts.move` | - | action | [x] |
+| D4 | Remove a box (keeps user wires reconnected) | `parts.removeNode` | - | action | [x] |
+| D5 | Turn a plugin off / on | `graph.enable` | - | action | [x] |
+| D6 | Show the chain (plugins in order, with their role and off marks, built in chain.rs; splits listed read only; failed marks and role colors not yet): IN, boxes, OUT, "Dry" lane, role colors (instrument, effect), failed and off marks | `graph.get` | - | cursor along the chain | [ ] |
 | D7 | Insert a split (copy, mid/side, left/right, bands) with its Split/Join plugins | `parts.addSplit`, `graph.add` | - | action | [ ] |
 | D8 | Add lane / band, remove lane (with its plugins), remove split (keeps the first lane) | `parts.addLane`, `parts.removeLane`, `parts.removeSplit`, `graph.remove` | - | action | [ ] |
 | D9 | Lane settings: keys (zone editor), level, pan, mute, solo, crossovers | `parts.lane` | - | press then dial | [ ] |
 | D10 | Scene controls of a plugin ("Scene controls...": which plugin parameters a scene touches) | `scenes.untouched` | - | action | [ ] |
 | D11 | Routing... on a box (opens I) | - | - | action | [ ] |
-| D12 | A box's plugin parameters (host-drawn pages, F) | see F | - | press | [ ] |
+| D12 | A box's plugin parameters (host-drawn pages, F) | see F | - | press | [x] |
 
 ## E. Sound chooser
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
 | E1 | Library sounds list (query, search, tags, favorites) | `library.query` | - | list, press | [ ] |
-| E2 | Load a sound into the part | `parts.loadSound` | - | press | [ ] |
-| E3 | New part from a sound | `parts.fromSound` | - | action | [ ] |
-| E4 | Save the part as a sound (name, as new) | `parts.saveSound` | - | action, keyboard | [ ] |
-| E5 | Audition a sound | `audition.start`, `audition.stop`, `audition.get` | - | action | [ ] |
+| E2 | Load a sound into the part | `parts.loadSound` | - | press | [x] |
+| E3 | New part from a sound | `parts.fromSound` | - | action | [x] |
+| E4 | Save the part as a sound (name, as new) | `parts.saveSound` | - | action, keyboard | [x] |
+| E5 | Audition a sound | `audition.start`, `audition.stop`, `audition.get` | - | action | [x] |
 | E6 | Preset of the plugin / reload with a preset | `presets.list`, `graph.replace` | - | list | [ ] |
 
 (Request names checked against docs/control-protocol.md "Sounds", "Library" and `RemoteControl`.)
@@ -136,15 +136,15 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| F1 | Read the plugin's parameters (`params.list`), hide hidden ones, read-only ones show the value only | `params.list` | - | - | [ ] |
-| F2 | Pages: one per top-level module path ("Main" when none), numbered pages together; modules from the leading words of names when more than 24 parameters have no paths | derived | - | page list pane | [ ] |
-| F3 | Tabs for the second level on a page of more than 24; a heading per module below | derived | - | tab list | [ ] |
-| F4 | Tiles by priority (oscairn.ui `priority`), each with name, value text, a control: slider, two values a switch, a few values a list of them | `params.get`, `params.set`, `params.text`, `params.gesture` | - | cursor, press, dial; each step sent between a gesture begin and end | [ ] |
+| F1 | Read the plugin's parameters (`params.list`), hide hidden ones, read-only ones show the value only | `params.list` | - | - | [x] |
+| F2 | Pages: one per top-level module path ("Main" when none), numbered pages together; modules from the leading words of names when more than 24 parameters have no paths | derived | - | page list pane | [x] |
+| F3 | Tabs for the second level on a page of more than 24; a heading per module below | derived | - | tab list | [x] |
+| F4 | Tiles by priority (oscairn.ui `priority`), each with name, value text, a control: slider, two values a switch, a few values a list of them | `params.get`, `params.set`, `params.text`, `params.gesture` | - | cursor, press, dial; each step sent between a gesture begin and end | [x] |
 | F5 | Search a parameter by name or module on any page | derived | - | keyboard (K1) | [ ] |
 | F6 | The selected row/column of tiles is what the device's knobs play ("row:N" knobs); on the page, the screen knobs play the page by priority | `controllers.view` (screen page), `params.set` | - | the knob row (A9) | [ ] |
 | F7 | Rich views by field roles: envelopes (ADSR by name, DX7 rates/levels, FM-X), key and velocity maps, FM operator views and algorithm diagrams, LFOs, filters (response drawn) | `params.*` | - | the same tiles are always reachable; the rich view is drawn beside | [ ] |
-| F8 | Values follow the engine as they change (`params.changed`/`controls.changed`) | notifications | - | - | [ ] |
-| F9 | The plugin's own view | `window.info`, `window.show` | window | **disabled entry: not available in this shell yet (the only item allowed to stay unported)** | [ ] |
+| F8 | Values follow the engine as they change (`params.changed`/`controls.changed`) | notifications | - | - | [x] |
+| F9 | The plugin's own view | `window.info`, `window.show` | window | **disabled entry: not available in this shell yet (the only item allowed to stay unported)** | [x] |
 
 ## G. Controls (macros) and scene mapping (PartsView controlsPage)
 

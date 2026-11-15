@@ -219,7 +219,8 @@ impl Audio {
     /// Every input sample of a step zero.
     pub fn quiet(&self, step: usize, frames: usize) -> bool {
         let s = &self.steps[step];
-        (s.input..s.output).all(|b| self.buffers.get(b as usize, frames).iter().all(|&x| x == 0.0))
+        // One pass without an exit (it vectorizes; an early exit would run the whole block for silence, the common case): sign bits dropped, so -0.0 is zero.
+        (s.input..s.output).all(|b| self.buffers.get(b as usize, frames).iter().fold(0u32, |m, x| m | x.to_bits() << 1) == 0)
     }
     /// A step's outputs zeroed: a block its plugin slept through.
     pub fn silence(&mut self, step: usize, frames: usize) {

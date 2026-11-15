@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -198,7 +199,11 @@ void cpp_core_audio_finish(oscairn_audio* audio,uint32_t s,uint32_t frames,bool 
 bool cpp_core_audio_quiet(const oscairn_audio* audio,uint32_t s,uint32_t frames)
 {
     const auto& step=audio->steps[s];
-    for(uint32_t c=0;c<step.audioInputs;++c)for(uint32_t i=0;i<frames;++i)if(step.in[c][i]!=0.f)return false;
+    for(uint32_t c=0;c<step.audioInputs;++c)
+    {
+        uint32_t any=0;for(uint32_t i=0;i<frames;++i)any|=std::bit_cast<uint32_t>(step.in[c][i])<<1; // as the Rust twin: no exit, sign dropped
+        if(any)return false;
+    }
     return true;
 }
 

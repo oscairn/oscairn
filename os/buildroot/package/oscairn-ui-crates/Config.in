@@ -1,0 +1,7 @@
+config BR2_PACKAGE_OSCAIRN_UI_CRATES
+	bool
+	help
+	  The crates the Rust UI (oscairn-ui) builds with, from
+	  crates.io at the download step, checked against its
+	  Cargo.lock, for the oscairn package to build it offline.
+	  Nothing is installed on the target.

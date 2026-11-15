@@ -48,10 +48,10 @@ def accelerators(p):
 FEATURES = [
     Feature("display", lambda p: bool(screens(p)),
             options=["BR2_PACKAGE_OSCAIRN_STANDALONE"],
-            packages=["BR2_PACKAGE_XORG7", "BR2_PACKAGE_XSERVER_XORG_SERVER"],
+            packages=["BR2_PACKAGE_XORG7", "BR2_PACKAGE_XSERVER_XORG_SERVER", "BR2_PACKAGE_OSCAIRN_UI"],
             kernel_on=["CONFIG_DRM", "CONFIG_DRM_FBDEV_EMULATION", "CONFIG_FB_DEVICE"],
             kernel_off=["CONFIG_DRM", "CONFIG_FB"],
-            files=["usr/bin/Oscairn", "usr/bin/Xorg", "usr/lib/libX11.so*", "usr/share/oscairn/themes"],
+            files=["usr/bin/Oscairn", "usr/bin/Xorg", "usr/lib/libX11.so*", "usr/share/oscairn/themes", "usr/bin/oscairn-ui"],
             libraries=["libX11.so"]),
     Feature("touch", lambda p: any(s.get("touch") for s in screens(p)),
             kernel_on=["CONFIG_INPUT_TOUCHSCREEN"], kernel_off=["CONFIG_INPUT_TOUCHSCREEN"]),

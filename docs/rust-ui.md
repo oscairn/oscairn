@@ -70,12 +70,20 @@ How (a) works:
   as the JUCE options are, because cargo downloads its crates on the first build. The device
   build (`OSCAIRN_ROLAND_FANTOM0`) takes the `kms` feature. ctest's `ui-rust` runs its tests, with
   the engine this build made when there is one.
-- The device bundle: `/usr/bin/oscairn-ui`, beside the JUCE app, with `libxkbcommon` (which the
-  bundle does not have yet) and `libinput` and `libudev` (which it has); no more
-  `/opt/rust-setlist`. Not done: the bundle's Buildroot package building it (cargo would need its
-  crates vendored for an offline build, and linking against the bundle's own libraries); until
-  then the device binary is built in an Ubuntu 24.04 arm64 container, as the prototype's was, and
-  copied in (the device run recipe below).
+- The device bundle: `/usr/bin/oscairn-ui`, beside the JUCE app, built by the bundle's Buildroot
+  `oscairn` package with `BR2_PACKAGE_OSCAIRN_UI` (on in `oscairn_fantom_bundle_defconfig`). It
+  links the bundle's own `libxkbcommon` (Buildroot's package, MIT/X11, new to the bundle, which
+  the option selects), `libinput` (MIT), `libudev` (eudev, LGPL-2.1+) and `fontconfig` (the
+  fontconfig license), already in the bundle for X, and nothing of a GPU.
+  Its crates are the `oscairn-ui-crates` package: every crate `ui/Cargo.lock` names (531, about
+  90 MB to download, 700 MB unpacked), each a Buildroot extra download from crates.io checked
+  against the lock's own checksum in the package's `.hash`, unpacked as a cargo directory source;
+  cargo then runs `--offline` (`OSCAIRN_UI_VENDOR`). Buildroot's own cargo vendoring needs a
+  downloaded source archive, which `ui/` in this tree is not. The list and hashes come from
+  `os/scripts/ui-crates.py`, run again whenever `Cargo.lock` changes; ctest's `ui-crates` fails
+  until it is. Cross-built for the target with the toolchain's compiler as the linker and
+  Buildroot's pkg-config. The crates' licenses are in that package's licenses (MIT or Apache-2.0
+  mostly; Slint GPL-3.0-only as chosen above).
 
 ### 3. The shape of the code
 
@@ -231,12 +239,9 @@ which needs Play in Rust).
 
 ## On a device: the run recipe (not yet run on a unit)
 
-1. Build the device binary: in an Ubuntu 24.04 arm64 container with Rust 1.95, `libudev-dev
-   libinput-dev libxkbcommon-dev libfontconfig-dev`: `cargo build --release --locked
-   --no-default-features --features kms` in `ui/`.
-2. Into the unpacked bundle: the binary as `usr/bin/oscairn-ui`, and the container's
-   `libxkbcommon.so.0` into `usr/lib/` (the bundle lacks it); this branch's `oscairn-fantom-start`,
-   `oscairn-fantom-stop` and its rebuilt JUCE app (`OSCAIRN_HOME_QUITS`) for the handover.
+1. Build the bundle (`os/fantom-bundle.sh`): it carries `usr/bin/oscairn-ui` and its libraries,
+   with the start and stop scripts and the JUCE app of the same tree.
+2. Unpack it as any bundle; nothing is copied in by hand.
 3. Start: `OSCAIRN_UI=rust ./oscairn-fantom-start` (the profile still says JUCE); stop with
    `./oscairn-fantom-stop`. `SLINT_KMS_FRAME_STATS=1` in `etc/default/oscairn-engine` is not passed
    on; for frame statistics run `oscairn-ui` by hand through `start-chroot.sh` with it set.

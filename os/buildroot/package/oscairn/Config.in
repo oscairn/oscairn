@@ -52,6 +52,26 @@ config BR2_PACKAGE_OSCAIRN_STANDALONE
 	  with JUCE. Needs an X11 display. It is the only part of the
 	  image that uses JUCE or X11.
 
+config BR2_PACKAGE_OSCAIRN_UI
+	bool "Rust UI (oscairn-ui, Slint, straight to the display)"
+	depends on BR2_PACKAGE_HAS_UDEV # libinput
+	depends on BR2_TOOLCHAIN_USES_GLIBC
+	select BR2_PACKAGE_OSCAIRN_UI_CRATES
+	select BR2_PACKAGE_LIBINPUT
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_FONTCONFIG
+	help
+	  oscairn-ui, the UI in Rust replacing the app's screens one
+	  by one (docs/rust-ui.md): draws on the display through
+	  KMS with Slint's software renderer, no X server and no GPU
+	  library; touch and keys through libinput. Its crates come
+	  from the oscairn-ui-crates package, so cargo runs offline.
+	  A profile's screen chooses it ("ui": "rust"); the app stays
+	  the default.
+
+comment "the Rust UI needs udev and a glibc toolchain"
+	depends on !BR2_PACKAGE_HAS_UDEV || !BR2_TOOLCHAIN_USES_GLIBC
+
 comment "the desktop app needs X.org and a glibc toolchain"
 	depends on !BR2_PACKAGE_XORG7 || !BR2_TOOLCHAIN_USES_GLIBC
 

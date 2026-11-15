@@ -10,7 +10,8 @@ OSCAIRN_SITE = $(BR2_EXTERNAL_OSCAIRN_PATH)/../..
 OSCAIRN_SITE_METHOD = local
 OSCAIRN_OVERRIDE_SRCDIR_RSYNC_EXCLUSIONS = --exclude '/build*' --exclude '/demo'
 OSCAIRN_LICENSE = AGPL-3.0-or-later, MIT (CLAP), MIT (oscairn-clap headers), MIT (miniz), BSD-2-Clause or CC0-1.0 (Monocypher), \
-	Unlicense (json.h), MIT (samplepack, in the oscairn-samplepack package's licenses)
+	Unlicense (json.h), MIT (samplepack, in the oscairn-samplepack package's licenses), \
+	the Rust UI's crates (in the oscairn-ui-crates package's licenses)
 OSCAIRN_LICENSE_FILES = LICENSE core/clap-host/third_party/clap/LICENSE core/clap-ext/LICENSE \
 	core/control/third_party/miniz/LICENSE core/control/third_party/monocypher/LICENCE.md \
 	core/control/third_party/sheredom/json.h
@@ -70,6 +71,16 @@ OSCAIRN_DEPENDENCIES += freetype fontconfig \
 	xlib_libX11 xlib_libXext xlib_libXinerama xlib_libXrandr \
 	xlib_libXcursor xlib_libXrender
 OSCAIRN_CONF_OPTS += -DOSCAIRN_STANDALONE=ON
+endif
+
+# The Rust UI (ui/, docs/rust-ui.md), built by cargo at the release above from the crates the
+# oscairn-ui-crates package downloaded, offline; linked against the image's libudev, libinput,
+# libxkbcommon and fontconfig. Installed as /usr/bin/oscairn-ui.
+ifeq ($(BR2_PACKAGE_OSCAIRN_UI),y)
+OSCAIRN_DEPENDENCIES += oscairn-ui-crates udev libinput libxkbcommon fontconfig
+OSCAIRN_CONF_OPTS += -DOSCAIRN_UI=ON -DOSCAIRN_UI_VENDOR=$(OSCAIRN_UI_CRATES_SRCDIR)/vendor
+else
+OSCAIRN_CONF_OPTS += -DOSCAIRN_UI=OFF
 endif
 
 # The kernel follows the options (RFC 0035). REALTIME_KERNEL makes it real-time (step 2; nothing

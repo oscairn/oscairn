@@ -184,7 +184,7 @@ build, so a mismatch fails the build. For each feature, from the profile:
 
 | Feature | Declared by | Declared: the image must have | Not declared: the image must not have |
 | --- | --- | --- | --- |
-| Display | `screens` | `BR2_PACKAGE_OSCAIRN_STANDALONE`; DRM, fbdev emulation, `/dev/fb` | that option, X.org; DRM, framebuffers; `Oscairn`, `Xorg`, `libX11`, the themes, any file naming `libX11.so` |
+| Display | `screens` | `BR2_PACKAGE_OSCAIRN_STANDALONE`; DRM, fbdev emulation, `/dev/fb` | that option, X.org, the Rust UI (`BR2_PACKAGE_OSCAIRN_UI`); DRM, framebuffers; `Oscairn`, `Xorg`, `libX11`, the themes, `oscairn-ui`, any file naming `libX11.so` |
 | Touch | a screen's `touch` | `CONFIG_INPUT_TOUCHSCREEN` | the same |
 | Bluetooth | `bluetooth` (RFC 0036) | `BR2_PACKAGE_OSCAIRN_BLUETOOTH` (not built yet), `CONFIG_BT` | BlueZ, BlueALSA; `CONFIG_BT`; `bluetoothd`, BlueALSA's files, `libbluetooth`, Bluetooth firmware, any file naming `libbluetooth.so` |
 | Wi-Fi | `network.wifi` | `CONFIG_CFG80211` | `wpa_supplicant`, iwd, hostapd, iw, wireless tools, the regulatory database; `cfg80211`, `mac80211`; their files and Wi-Fi firmware |

@@ -55,6 +55,9 @@ Checked when built and tested; the sections below say how.
   - [x] 12e. Effects at their cost awake, and a part's buses on its chain at admission
   - [ ] 12f. Bursts at note-on: a note's start cost counted when it starts (not done)
   - [ ] 12g. Step 5 above: "too slow" never restarts a worker making progress (not done)
+  - [x] 12h. A chord from silence sounds whole: a voice-budget limit never below the voices admitted on the estimate alone
+  - [x] 12i. Limit first: lost blocks and the deadline lower a voice-budget plugin's limit, a fade only as the backstop
+  - [x] 12j. Each sound context of a shared instance its own limit
 
 ## Problem
 
@@ -832,7 +835,8 @@ to, which has rule 12a and none after it). Its rules, as built:
   instrument, a bus's senders), each with the largest gain on the way. On a lane marked in two of
   its last eight blocks, this one among them, one note fades: from the marked lane where it frees the
   most time (cost per note times that gain), quietest released first; then three blocks (the fade
-  and a block to see it) before the next. Notes whose cost was never measured go too: losses are the
+  and a block to see it) before the next (as first built; 12i makes it every marked lane, two blocks
+  apart, a limit lowered first). Notes whose cost was never measured go too: losses are the
   evidence. Never choked for this signal. `engine.timing`'s guard counts them (`fadedForLoss`) and
   the lane's lost blocks (`lost`). Tested by `guard` (losses): an instrument of eight notes, within
   its own lane, into an effect in its own worker whose block grows with its input past its
@@ -876,6 +880,42 @@ to, which has rule 12a and none after it). Its rules, as built:
   before, the instrument's limit 1,811 us; after, 773 us; and by `control-admission`: a part of one
   effect at 40 % sending at 40 % to a bus of one at 40 %: before, longest 40 % and it fits; after,
   80 % and refused (single runs).
+- 12h. A chord from silence sounds whole (2026-11-15). A plugin giving up its own voices
+  (`oscairn.voice-budget`) was held to at most `max(1, ¾ of its voices, voices + room)`, its voices
+  those it sounded a block before: eight notes in one block on an idle lane got a limit of 2. Its limit
+  is now the voices of the notes the host has admitted for it (its notes not given up, times its
+  voices per note) plus the room the lane's soft limit leaves at its cost per voice, never fewer than
+  those admitted on the estimate alone; fewer only where the lane is measured over its limit, and then
+  at most a quarter fewer than it sounds a block. Plugins without the extension were never capped by
+  it. Tested by `guard` (burst), in the engine's process, its cost per voice seeded at 150 us: eight
+  notes in a block, before 2 voices, after 8; spaced a block apart, 8; with the fixture really at
+  300 us a voice, its limit falls to 6; without the extension, 8 notes sound, none given up.
+- 12i. Limit first, fade as the backstop (2026-11-15). For a plugin giving up its own voices, 12b and
+  12d lower its limit by one voice instead of fading a note; it picks the voice (its layers and
+  levels are its to know). The host fades a note from outside only where the plugin is not within its
+  limit by the block after the limit came in, or its limit is 1 already. A lowered limit is held
+  at one below the limit then in force until the plugin's notes are all let go: the room the voices
+  given up free would otherwise raise it again and bring the losses back (Sick tines' losses grew
+  step by step after shedding began). Found on the FANTOM-07 with ST Final under UI load: 557 blocks
+  lost, `fadedForLoss` 0, `fadedForDeadline` 3; its instruments give up their own voices and 12b and
+  12d skipped any plugin within its limit, so nothing was shed. Now 12b sheds on every lane marked
+  (two lost in its last eight blocks, one this block), a voice each and then two blocks (the fade)
+  before that lane's next, and a block lost anywhere counts as the deadline reached for 12d (with
+  waits cut wave by wave under step 6 the callback ends before its deadline and its slack never
+  reaches 0). Tested by `guard` (limit-first): the losses case with an instrument giving up its own
+  voices: its limit falls and it sounds fewer voices than the host holds notes, at least 6 notes
+  kept; one that ignores its limit has notes faded from outside, at least 4 more than the first. By
+  `guard` (starved): two such parts, each well within its lane, into a bus effect losing blocks: with
+  the effect's level at 0.2, before, nothing given up and 271 blocks lost from block 500 to 800;
+  after, 16 voices given up within 10 blocks of the first loss and none lost late. The case now runs
+  the effect at 0.4, where the limit used to grow back: 10 blocks lost late with voices taken off the
+  regrowing limit, 2 with the limit held (single runs).
+- 12j. Each sound its own limit. Parts sharing one instance (sound contexts) each get a limit: the
+  voices of that context's admitted notes and its share of the instance's room (or of its excess),
+  0 for a context holding no notes; so one sound's tails are not given up for another's notes while
+  the instance keeps within its own. The host reads `active_voices` for the instance as a whole, not
+  per context; each context's admitted voices come from the host's own note ledger. Covered by the
+  differential test (the two cores give the same per-context limits); not yet by a graph-level case.
 
 ## Core placement
 

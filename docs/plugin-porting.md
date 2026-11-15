@@ -230,7 +230,16 @@ deadline), and a part's chain at admission counts the buses it sends to. An effe
 cheaply but costs much once woken should say so in its package estimate. A plugin with it gives up its own voices within a limit
 the host sets between blocks; an instance one part plays alone gets one entry, for the selected
 contexts (a plugin without sound contexts reads that entry), and parts sharing an instance get one
-each with the part's reserve and priority. The host supports it in the engine's process and in a
+each with the part's reserve and priority. The limit can change before any block: it is at least the
+voices of the notes the host has given the plugin and not taken back (a chord from silence is never
+cut by the host's estimate), plus the room the lane has left at the plugin's cost per voice; it falls
+below that only when the lane is measured over its limit, at most a quarter a block. When blocks are
+lost or the callback runs out of time, the host lowers the limit by a voice, and holds it there until
+the plugin's notes are all let go, rather than fading a note: the plugin chooses which voice goes.
+The host fades a note from outside only as the backstop, when the plugin is not within its limit
+by the block after it came in, or its limit is already 1, so keep within it at once. Parts sharing an
+instance each get their own limit (their notes' voices and a share of the room); the host reads
+`active_voices` for the instance as a whole. The host supports it in the engine's process and in a
 worker alike. The calls and the order to give voices up in:
 [voice-budget](https://github.com/oscairn/oscairn-clap/blob/main/docs/voice-budget.md).
 

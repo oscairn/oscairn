@@ -283,6 +283,7 @@ fn the_top_bar_follows_the_engine() {
     f.answer("library.query", json!({"items": [], "total": 0})); // and Performances
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null"}})));
     f.pump();
+    f.answer("record.takes", json!({"takes": []}));
     f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
     f.answer("transport.get", json!({"tempo": 96.5, "playing": false}));
     let bar = f.screen.ui.global::<Bar>();
@@ -301,6 +302,59 @@ fn the_top_bar_follows_the_engine() {
     f.pump();
     f.pump();
     assert!(f.screen.ui.get_engine().starts_with("lost"));
+}
+
+// A take recording is said in the top bar (every screen) and on Play, with the time it has run,
+// as the JUCE record buttons say it: learned by reading record.takes with the status notifications
+// at most every 250 ms (the JUCE poll's period), and gone when the take ends or the engine is lost.
+#[test]
+fn a_take_recording_is_shown_in_the_top_bar_and_on_play() {
+    let mut f = Fixture::new("record");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.serve(10, &json!({}));
+    let status = |f: &mut Fixture| {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.1}})));
+        f.pump();
+    };
+    let state = |f: &Fixture| {
+        let bar = f.screen.ui.global::<Bar>();
+        (bar.get_recording(), bar.get_recording_time().to_string(), bar.get_recording_behind())
+    };
+    assert_eq!(state(&f), (false, String::new(), false), "nothing recording until the engine says so");
+    status(&mut f);
+    f.answer("record.takes", json!({"takes": [{"take": 1, "state": "done", "frames": 96000, "sampleRate": 48000}, {"take": 2, "state": "recording", "frames": 48000 * 67, "sampleRate": 48000, "behind": false}]}));
+    f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
+    f.answer("transport.get", json!({"tempo": 120, "playing": false}));
+    assert_eq!(state(&f), (true, "1:07".into(), false));
+    f.screen.frame();
+    f.screen.save("topbar-recording");
+    png(&f.screen, "topbar-recording");
+    // Within 250 ms of the last read nothing is asked; after it the take's time moves.
+    status(&mut f);
+    std::thread::sleep(std::time::Duration::from_millis(260));
+    status(&mut f);
+    f.answer("record.takes", json!({"takes": [{"take": 2, "state": "recording", "frames": 48000 * 68, "sampleRate": 48000, "behind": true}]}));
+    assert_eq!(state(&f), (true, "1:08".into(), true));
+    // On Play, in the footer as well.
+    f.screen.ui.global::<HomeState>().invoke_tapped(0);
+    assert_eq!(f.screen.ui.get_screen(), 3);
+    f.screen.frame();
+    png(&f.screen, "play-recording");
+    shot(&f.screen, "play-recording");
+    // The take ends: the mark goes.
+    std::thread::sleep(std::time::Duration::from_millis(260));
+    status(&mut f);
+    loop {
+        let r = f.engine.request();
+        let take = r["method"] == "record.takes";
+        let result = if take { json!({"takes": [{"take": 2, "state": "done", "frames": 48000 * 70, "sampleRate": 48000}]}) } else { json!({}) };
+        f.reply(&r, json!({"result": result}));
+        if take {
+            break;
+        }
+    }
+    assert_eq!(state(&f), (false, String::new(), false));
 }
 
 /// Home's tile `n` in the window, as home.slint lays it out (margin 6, gap 4, 120 tall).
@@ -973,6 +1027,13 @@ fn play_draws_in_every_theme() {
     play.graph(&play_graph());
     s.ui.set_screen(3);
     play.meters(&json!({"meters": [{"part": 10, "peak": 0.5, "channels": [0.5, 1.0]}, {"part": 11, "peak": 2.0, "channels": [2.0]}]}));
+    // A take recording, slow, so every theme draws the top bar's mark and Play's.
+    let bar = s.ui.global::<Bar>();
+    bar.set_recording(true);
+    bar.set_recording_time("12:07".into());
+    bar.set_recording_behind(true);
+    bar.set_performance("Grand Piano".into());
+    bar.set_scene("Chorus".into());
     let loaded = all_themes();
     for t in &loaded {
         theme::apply(&s.ui, t);

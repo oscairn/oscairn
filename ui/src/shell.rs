@@ -7,7 +7,8 @@
 //! engine's, docs/rust-ui.md "Session setup"), `performance.reopen` (the Performance last open, as the JUCE app asks at its
 //! start), `performance.info` and `graph.get`. Each `status` (at most 4 a second) moves the
 //! meters at most twice a second and then asks `memory.state` and `transport.get`; each
-//! `graph.changed` asks `performance.info` and `graph.get` again. Nothing else wakes it at rest.
+//! `graph.changed` asks `performance.info` and `graph.get` again; a status also asks `record.takes`
+//! (at most every 250 ms, the JUCE record buttons' poll) for the top bar's recording mark. Nothing else wakes it at rest.
 //! While Play is shown it also subscribes to `controls.changed` and asks `parts.meters` every
 //! 100 ms (one at a time); leaving Play ends both.
 
@@ -43,6 +44,8 @@ pub enum Request {
     Graph,
     Transport,
     Memory,
+    /// record.takes: whether a take is recording, and for how long.
+    Record,
     /// library.query's total of Performances (false) or Sounds (true), for Home's Library line.
     Library(bool),
     /// controllers.view: whether lists are on screen, so the panel's navigate controls navigate.
@@ -71,6 +74,9 @@ impl Request {
 }
 
 const METER_INTERVAL: Duration = Duration::from_millis(500);
+/// How often the takes are read: the JUCE record buttons' poll (Engine::takes, 250 ms), here
+/// carried by the status notifications, so a shell at rest wakes for nothing more.
+const RECORD_INTERVAL: Duration = Duration::from_millis(250);
 
 /// What the top bar shows now, so only a change reaches the window.
 #[derive(Clone, Default, PartialEq)]
@@ -80,6 +86,7 @@ struct Shown {
     tempo: String,
     cpu: Meter,
     ram: Meter,
+    recording: Option<topbar::Recording>,
     audio_device: String,
     performances: Option<u64>,
     sounds: Option<u64>,
@@ -110,6 +117,7 @@ pub struct App {
     device_memory: u64,
     shown: Shown,
     last_meters: Option<Instant>,
+    last_record: Option<Instant>,
     /// performance.info and graph.get refused while the engine was busy: asked again at the next meters.
     stale: bool,
     watchdog: slint::Timer,
@@ -264,6 +272,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             device_memory: profile.memory,
             shown: Shown::default(),
             last_meters: None,
+            last_record: None,
             stale: false,
             watchdog: slint::Timer::default(),
             screen: Screen::Home,
@@ -391,6 +400,7 @@ impl App {
                     ui.set_engine(SharedString::new());
                 }
                 self.last_meters = None;
+                self.last_record = None;
                 self.totals.forget();
                 self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed", "controllers"]}));
                 self.send_view();
@@ -409,6 +419,7 @@ impl App {
                 }
             }
             Event::Lost(why) => {
+                self.show(|s| s.recording = None); // what the engine is doing is not known now
                 if let Some(ui) = self.ui() {
                     ui.set_engine(format!("lost: {why}").into());
                 }
@@ -449,6 +460,10 @@ impl App {
             self.close_piano(); // its input was unplugged
         }
         let now = Instant::now();
+        if self.last_record.is_none_or(|t| now.duration_since(t) >= RECORD_INTERVAL) {
+            self.last_record = Some(now);
+            self.ask(Request::Record, "record.takes");
+        }
         if self.last_meters.is_some_and(|t| now.duration_since(t) < METER_INTERVAL) {
             return;
         }
@@ -530,6 +545,7 @@ impl App {
                 self.show(|s| s.scene = topbar::scene(&r))
             }
             Request::Transport => self.show(|s| s.tempo = topbar::tempo(&r)),
+            Request::Record => self.show(|s| s.recording = topbar::recording(&r)),
             Request::Memory => {
                 let ram = topbar::ram(&r, self.device_memory);
                 self.show(|s| s.ram = ram)
@@ -567,6 +583,12 @@ impl App {
             bar.set_cpu(next.cpu.0.unwrap_or(0).into());
             bar.set_cpu_known(next.cpu.0.is_some());
             bar.set_cpu_level(level(next.cpu));
+        }
+        if next.recording != was.recording {
+            let rec = next.recording.clone().unwrap_or_default();
+            bar.set_recording(next.recording.is_some());
+            bar.set_recording_time(rec.time.as_str().into());
+            bar.set_recording_behind(rec.behind);
         }
         if next.ram != was.ram {
             bar.set_ram(next.ram.0.unwrap_or(0).into());

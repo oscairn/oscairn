@@ -110,6 +110,26 @@ pub fn scene(graph: &Value) -> String {
     graph["scenes"].as_array().and_then(|s| s.iter().find(|s| &s["id"] == id)).and_then(|s| s["name"].as_str()).unwrap_or_default().into()
 }
 
+/// A take being recorded, as the JUCE record buttons (Recording.cpp, RecordButtons) show it: the
+/// time the first take waiting for its start or recording has run, "m:ss", and whether its writer
+/// is behind (`behind`: the disk is slow).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Recording {
+    pub time: String,
+    pub behind: bool,
+}
+
+/// record.takes' answer: the first take `waiting` or `recording` (Engine::recordingTake), its time
+/// from the frames written and the sample rate (a take with no rate is 0:00); None for no take.
+pub fn recording(takes: &Value) -> Option<Recording> {
+    let take = takes["takes"].as_array()?.iter().find(|t| matches!(t["state"].as_str(), Some("recording" | "waiting")))?;
+    let seconds = match (take["frames"].as_f64(), take["sampleRate"].as_f64()) {
+        (Some(frames), Some(rate)) if rate > 0. => (frames / rate).floor().max(0.) as u64,
+        _ => 0,
+    };
+    Some(Recording { time: format!("{}:{:02}", seconds / 60, seconds % 60), behind: take["behind"].as_bool().unwrap_or(false) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +162,18 @@ mod tests {
         assert_eq!((performance(&json!({"name": ""})), performance(&json!({"name": "Strings"}))), ("Untitled".into(), "Strings".into()));
         let graph = json!({"scene": 2, "scenes": [{"id": 1, "name": "Verse"}, {"id": 2, "name": "Chorus"}]});
         assert_eq!((scene(&graph), scene(&json!({"scene": 9}))), ("Chorus".into(), String::new()));
+    }
+
+    #[test]
+    fn a_take_recording_is_its_time_and_whether_the_disk_is_slow() {
+        let takes = json!({"takes": [
+            {"take": 1, "state": "done", "frames": 480000, "sampleRate": 48000},
+            {"take": 2, "state": "recording", "frames": 48000 * 75 + 100, "sampleRate": 48000, "behind": true},
+        ]});
+        assert_eq!(recording(&takes), Some(Recording { time: "1:15".into(), behind: true }));
+        assert_eq!(recording(&json!({"takes": [{"take": 3, "state": "waiting"}]})), Some(Recording { time: "0:00".into(), behind: false }));
+        assert_eq!(recording(&json!({"takes": [{"take": 1, "state": "finishing", "frames": 5}, {"take": 2, "state": "failed"}]})), None, "a take finishing is not recording");
+        assert_eq!((recording(&json!({"takes": []})), recording(&json!({}))), (None, None));
     }
 
     #[test]

@@ -183,6 +183,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | J1 | Undo / Redo with the edit's name on the button | `edit.undo`, `edit.redo`, `edit.history` | - | top bar actions | [ ] |
 | J2 | The refusal of an edit said on the screen | error replies | - | - | [x] |
 | J3 | The shell opens the Performance app everywhere (Home tile, Setlist's Play, Play's part press), the handover entries and "Oscairn app" rows for this app gone | - | - | - | [ ] |
+| J4 | Recording indicator (owner, 2026-11-15): a take running and its time, on every screen's top bar and on Play: a filled dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger color. Learned as the JUCE RecordButtons learn it (`Engine::takes`): `record.takes` polled every 250 ms (here with the `status` notifications, so nothing wakes at rest); the first take `waiting` or `recording`, its frames over its sample rate. Not built: the Record and Capture buttons themselves (the hardware REC button starts and ends a take in the engine) | `record.takes` | - | shown only | [x] |
 
 ## K. Text entry
 

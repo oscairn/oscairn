@@ -17,6 +17,8 @@ global Columns {
     out property <length> meter: 6px; // a meter bar's thickness
     out property <length> icon: 24px; // the Home glyph
     out property <length> pill: 36px; // the Performance field's height
+    out property <length> rec-text: round(Theme.small * 5.4 / 1px) * 1px; // "REC 99:59", fixed so the seconds never move it
+    out property <length> rec-slow: round(Theme.small * 6 / 1px) * 1px; // "disk slow"
 }
 
 // A whole percent in fixed cells, a digit each ("  7%", " 42%", "100%"): tabular, whatever the font.
@@ -86,8 +88,45 @@ component Meter inherits Rectangle {
     }
 }
 
+// A take is recording (the JUCE record buttons' message, Recording.cpp): a filled dot and "REC m:ss"
+// in the danger color, and "disk slow" when the writer is behind. Fixed widths, so the seconds
+// changing repaint their own cells only. Shown by the top bar and on Play.
+export component RecordingMark inherits Rectangle {
+    out property <length> dot: Theme.small * 0.7;
+    width: Bar.recording-width;
+    Rectangle {
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        width: root.dot;
+        height: root.dot;
+        border-radius: root.dot / 2;
+        background: Theme.danger;
+    }
+    Text {
+        x: Theme.small;
+        width: Columns.rec-text;
+        vertical-alignment: center;
+        font-size: Theme.small;
+        font-weight: 700;
+        color: Theme.danger;
+        text: "REC " + Bar.recording-time;
+    }
+    if Bar.recording-behind: Text {
+        x: Theme.small + Columns.rec-text + Theme.pad-narrow;
+        width: Columns.rec-slow;
+        vertical-alignment: center;
+        font-size: Theme.small;
+        color: Theme.danger;
+        text: "disk slow";
+    }
+}
+
 // What the top bar shows, set by shell.rs.
 export global Bar {
+    in property <bool> recording; // a take is recording
+    in property <string> recording-time; // "m:ss"
+    in property <bool> recording-behind; // its writer is behind: the disk is slow
+    out property <length> recording-width: !recording ? 0px : Theme.small + Columns.rec-text + (recording-behind ? Theme.pad-narrow + Columns.rec-slow : 0px);
     in property <string> where: "Home";
     in property <bool> home-button;
     in property <string> performance;
@@ -160,6 +199,7 @@ export component TopBar inherits Rectangle {
                 }
             }
         }
+        if Bar.recording: RecordingMark {}
         tempo := Text {
             width: round(Theme.small * 6.5 / 1px) * 1px;
             horizontal-alignment: right;

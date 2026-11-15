@@ -812,9 +812,21 @@ What changes for the plugin:
   limit the worker is stopped like a crash. On Linux the worker also sets `RLIMIT_AS` to four times the flat limit, and with `OSCAIRN_CGROUP` the
   limit is the worker's cgroup `memory.max`.
 - **Restart:** after a crash, hang, too many misses or too much memory, the worker is
-  restarted. Each plugin gets back its state as last loaded, the sounds prepared since and
-  their selections, and its current parameter values, and its output fades in. Held notes and
-  tails are lost. After three restarts within a minute it stays silent.
+  restarted. Each plugin gets back, in this order: its state as last loaded (with native sounds,
+  a snapshot of the whole instance taken when sounds were last prepared beside the playing ones),
+  the sounds prepared since and those discarded since, each channel's selection, its parameter
+  values as last published (only where every channel selects the same sound: on an instance
+  parts share they are one sound's), its active output ports and its voice limits. Then, at the
+  start of its first block, before that block's own events, it gets again what it keeps only in
+  memory: on each channel the last mod wheel, breath, foot, expression, sustain, sostenuto and soft
+  controllers, pitch bend, channel pressure and channel-wide note expressions, and every
+  parameter value and non-zero modulation sent to a channel (or to all) since that channel last
+  selected a sound or a state was loaded: a shared sound's bus event, edits, values and
+  modulation from controls. So apply queued selections before the block's events, and a
+  channel-addressed event to the sound that channel selects then. Its output fades in. Held notes
+  and tails are lost and notes are not played again: a note restarted from its attack would be
+  heard as a wrong note, where the controllers keep the next notes as they were. After three
+  restarts within a minute it stays silent.
 - **Sharing a process (plugin hosts):** with `OSCAIRN_PLUGIN_HOSTS` (a device profile's
   `compute.pluginHosts`; 3 on the FANTOM-07) several instances, of any plugins, share one worker
   process, a plugin host ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#plugin-hosts-and-resident-instances)).

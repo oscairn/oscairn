@@ -335,6 +335,8 @@ namespace
                 a.service(h);
             }
             if(block == blocks / 4) { const auto e = kick::clap::Event::note(true, 64, 0.5, 0, 0, 0, 999); t.put(n + "send", a.send(h, &e)); }
+            // A parameter queued, then a panic: the block's parameter events survive the reset, delivered after it (notes and controllers do not).
+            if(block == 3 * blocks / 4 && writable < ids.size()) t.put(n + "set before panic", a.set(h, ids[writable], maximum[writable]));
             if(block == 3 * blocks / 4) a.panic(h);
             if(block > 300 && block < 340 && a.restful(h)) { a.rested(h, frames, 1); t.put(n + "rested", block); transport.advance(frames); continue; }
             const auto now = transport.current();

@@ -111,7 +111,7 @@ component Knob inherits Rectangle {
         height: 100%;
         viewbox-width: 100;
         viewbox-height: 100;
-        stroke: root.lit ? Theme.accent : Theme.accent.with-alpha(0.75);
+        stroke: root.lit ? Theme.accent : Theme.accent-dim;
         stroke-width: Theme.arc;
         commands: root.arc == "" ? "M 50 50" : root.arc;
     }
@@ -131,7 +131,7 @@ component Knob inherits Rectangle {
         border-radius: root.disc / 2;
         background: Theme.knob-disc;
         border-width: Theme.hair;
-        border-color: Theme.border.with-alpha(0.8);
+        border-color: Theme.thumb-edge;
     }
     // The pointer.
     Path {
@@ -257,31 +257,32 @@ component Tile inherits Rectangle {
             border-radius: Theme.button-radius(parent.height);
             background: Theme.shadow;
         }
-        Rectangle {
-            border-radius: Theme.button-radius(parent.height);
-            clip: true;
-            background: Theme.raised;
-            for c[k] in data.choices: Rectangle {
-                x: k * parent.width / data.choices.length;
-                width: parent.width / data.choices.length;
-                background: k == data.chosen ? Theme.accent : Theme.raised;
-                if k > 0: Rectangle {
-                    width: Theme.hair;
-                    background: Theme.rule;
-                }
-                TouchArea {
-                    clicked => { GridState.tap(root.index, k); }
-                }
-                Text {
-                    x: Theme.pad-tight;
-                    width: parent.width - 2 * Theme.pad-tight;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    text: c;
-                    color: k == data.chosen ? Theme.on-accent : Theme.text;
-                    font-size: Theme.button;
-                    overflow: elide;
-                }
+        // The stops, the outer ends rounded as a button's are.
+        for c[k] in data.choices: Rectangle {
+            property <length> corner: Theme.button-radius(parent.height);
+            x: k * parent.width / data.choices.length;
+            width: parent.width / data.choices.length;
+            background: k == data.chosen ? Theme.accent : Theme.raised;
+            border-top-left-radius: k == 0 ? self.corner : 0px;
+            border-bottom-left-radius: k == 0 ? self.corner : 0px;
+            border-top-right-radius: k + 1 == data.choices.length ? self.corner : 0px;
+            border-bottom-right-radius: k + 1 == data.choices.length ? self.corner : 0px;
+            if k > 0: Rectangle {
+                width: Theme.hair;
+                background: Theme.rule;
+            }
+            TouchArea {
+                clicked => { GridState.tap(root.index, k); }
+            }
+            Text {
+                x: Theme.pad-tight;
+                width: parent.width - 2 * Theme.pad-tight;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                text: c;
+                color: k == data.chosen ? Theme.on-accent : Theme.text;
+                font-size: Theme.button;
+                overflow: elide;
             }
         }
         Rectangle {
@@ -527,7 +528,7 @@ export component Grid inherits Rectangle {
         property <int> per: max(1, floor((root.height - root.top - 2 * Theme.margin - Theme.touch) / (Theme.touch + root.gap)));
         init => { GridState.list-per-view = self.per; }
         changed per => { GridState.list-per-view = self.per; }
-        background: Theme.background.with-alpha(0.7);
+        background: Theme.scrim;
         TouchArea {
             clicked => { GridState.choose(-1); }
         }

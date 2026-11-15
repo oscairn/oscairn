@@ -80,6 +80,8 @@ pub struct Screen {
     texts: HashMap<(u32, u64), String>,
     laid: Laid,
     width: f32,
+    /// The gap between sections the layout was made with (the theme's: none where sections join).
+    gap: f32,
     cursor: Option<usize>,
     edit: Edit,
     scroll: f32,
@@ -118,6 +120,7 @@ impl Screen {
             texts: HashMap::new(),
             laid: Laid::default(),
             width: 0.,
+            gap: grid::SECTION_GAP,
             cursor: None,
             edit: Edit::None,
             scroll: 0.,
@@ -173,9 +176,7 @@ impl Screen {
 
     fn relayout(&mut self) {
         let groups = self.groups();
-        // Sections join in some themes: no gap between tiles then.
-        let gap = self.ui.upgrade().map_or(grid::SECTION_GAP, |ui| crate::theme::section_gap(&ui, grid::SECTION_GAP));
-        self.laid = grid::layout(&self.params, &groups, self.width, gap, &|i| self.control(i));
+        self.laid = grid::layout(&self.params, &groups, self.width, self.gap, &|i| self.control(i));
         if self.cursor.is_some_and(|c| c >= self.laid.tiles.len()) {
             self.cursor = None;
         }
@@ -394,8 +395,12 @@ impl Screen {
         let Some(ui) = self.ui.upgrade() else { return };
         let g = ui.global::<GridState>();
         let width = g.get_view_width();
-        if (width - self.width).abs() > 0.5 {
+        // Laid out again when the area's width changed, or the theme's gap between sections (a theme
+        // whose sections join has none).
+        let gap = crate::theme::section_gap(&ui, grid::SECTION_GAP);
+        if (width - self.width).abs() > 0.5 || gap != self.gap {
             self.width = width;
+            self.gap = gap;
             self.relayout();
         }
         self.follow(g.get_view_height());

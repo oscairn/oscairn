@@ -231,7 +231,7 @@ export component Play inherits Rectangle {
         border-color: scene.on ? Theme.accent : scene.filled ? Theme.edge-color : Theme.track;
         Text {
             x: Theme.pad-narrow;
-            y: Theme.pad-tight - 1px;
+            y: Theme.pad-tight - Theme.hair;
             text: scene.number;
             color: Theme.muted;
             font-size: Theme.small;

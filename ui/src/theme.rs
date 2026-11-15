@@ -548,6 +548,8 @@ pub fn apply(window: &Shell, theme: &Loaded) {
         register_font(bold);
     }
     g.set_font_family(family.unwrap_or("Inter".into()).into());
+    // A screen laid out in pixels (the grid's gap is the theme's) lays out again.
+    window.global::<crate::GridState>().invoke_resized();
 }
 
 /// Watches the user's choice, once a second (a file read; nothing is drawn unless it changed),

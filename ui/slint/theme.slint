@@ -127,6 +127,9 @@ export global Theme {
     out property <color> wash-color: accent.with-alpha(wash);
     out property <color> track: border.with-alpha(track-alpha);
     out property <color> rule: border.with-alpha(0.6);
+    out property <color> accent-dim: accent.with-alpha(0.75); // a fill when not under the cursor
+    out property <color> thumb-edge: border.with-alpha(0.8);
+    out property <color> scrim: background.with-alpha(0.7); // behind an open list
     // A rotary's disc and its pointer by the slider style (drawRotarySlider).
     out property <color> knob-disc: sliders == SliderStyle.filled ? raised : #ffffff;
     out property <color> knob-pointer: sliders == SliderStyle.filled ? text : background;
@@ -140,6 +143,10 @@ export global Theme {
     out property <color> shadow: dark ? #000000.with-alpha(0.35) : #000000.with-alpha(0.12);
     out property <color> thumb-shadow: dark ? #000000.with-alpha(0.45) : #000000.with-alpha(0.18);
     out property <length> shadow-offset: depth == DepthStyle.soft ? 1px : 0px;
+    // A list row's background: alternate rows lighter (drawListRow).
+    pure public function row-base(base: color, odd: bool) -> color {
+        return odd ? base.mix(raised, 0.65) : base;
+    }
     // The gap between sections: `separate`, or none when they join (sectionGap).
     pure public function gap-between(separate: length) -> length {
         return sections == SectionStyle.joined ? 0px : separate;
@@ -158,7 +165,8 @@ export global Theme {
 }
 
 // A section: a card, a tile, a strip (drawSection). Separate: rounded, with the theme's edge.
-// Joined: square, its line on the pixel it shares with the neighbors.
+// Joined: square, its line on the pixel it shares with the neighbors (the reference draws its top
+// and left one pixel outside; here its right and bottom, so the outer ones stay inside the area).
 export component Section inherits Rectangle {
     in property <color> fill: Theme.surface;
     background: root.fill;
@@ -166,10 +174,9 @@ export component Section inherits Rectangle {
     border-width: Theme.sections == SectionStyle.joined ? 0px : Theme.edge-width;
     border-color: Theme.edge-color;
     if Theme.sections == SectionStyle.joined: Rectangle {
-        x: -1px;
-        y: -1px;
-        width: parent.width + 1px;
-        height: parent.height + 1px;
+        // One pixel past the right and bottom: the neighbor's first pixel, so two sections draw one line.
+        width: parent.width + Theme.hair;
+        height: parent.height + Theme.hair;
         border-width: Theme.hair;
         border-color: Theme.joined-edge;
     }
@@ -283,7 +290,7 @@ export component Thumb inherits Rectangle {
         border-radius: root.corner;
         background: Theme.sliders == SliderStyle.filled ? Theme.accent : #ffffff;
         border-width: Theme.sliders == SliderStyle.filled ? 0px : Theme.hair;
-        border-color: Theme.border.with-alpha(0.8);
+        border-color: Theme.thumb-edge;
     }
 }
 
@@ -427,7 +434,7 @@ export component SliderBar inherits Rectangle {
         width: upright ? root.thick : (root.b - root.a) * root.along;
         height: upright ? (root.b - root.a) * root.along : root.thick;
         border-radius: root.thick / 2;
-        background: root.lit ? Theme.accent : Theme.accent.with-alpha(0.75);
+        background: root.lit ? Theme.accent : Theme.accent-dim;
     }
     // A centered range's middle.
     if root.bipolar && root.high < 0: Rectangle {

@@ -844,8 +844,8 @@ namespace oscairn
                 grown_ = grown_ - free + uint32_t(fresh.size());
                 process()->fitLimit();
                 std::sort(fresh.begin(), fresh.end());
-                std::map<uint32_t, uint32_t> engine; std::vector<uint32_t> base;
-                for(const auto w : fresh) { const auto id = allocate(w); ids_[id] = w; engine[w] = id; base.push_back(id); }
+                std::map<uint32_t, uint32_t> engine;
+                for(const auto w : fresh) { const auto id = allocate(w); ids_[id] = w; engine[w] = id; }
                 publishIds();
                 std::array<uint32_t, 16> selected{};
                 for(size_t ch = 0; ch < 16; ++ch)
@@ -854,19 +854,18 @@ namespace oscairn
                     if(e == engine.end()) throw std::runtime_error("the worker's prepared snapshot selects a sound it did not prepare");
                     selected[ch] = e->second;
                 }
-                // The recovery record becomes a copy of this snapshot: a restart restores the incoming
-                // sounds, and the outgoing ones are lost with their voices. If the copy fails, the old record stays.
-                try
+                // The recovery record becomes the whole instance as it is now, the sounds already playing
+                // and the incoming ones: on a shared instance the others' sounds stay, so a copy of this
+                // snapshot alone would restore one node's sounds on every channel. The selections and each
+                // shared sound's values are replayed after it. If the save fails, the old record stays.
+                const auto was = record_;
+                record(Op::SaveSnapshot);
+                if(record_ != was)
                 {
-                    const auto next = process()->records / std::to_string(++process()->saves);
-                    std::filesystem::create_directories(next);
-                    std::filesystem::copy(directory, next, std::filesystem::copy_options::recursive);
-                    std::error_code ignored;
-                    if(!record_.empty()) std::filesystem::remove_all(record_, ignored);
-                    record_ = next; snapshotRecord_ = true; base_ = std::move(base); prepared_.clear(); discarded_.clear();
+                    base_.clear(); prepared_.clear(); discarded_.clear();
+                    for(const auto& c : contexts()) for(const auto& [engine, worker] : ids_) if(worker == c.id) { base_.push_back(engine); break; }
                     besideRecord_ = true;
                 }
-                catch(const std::exception&) {}
                 return selected;
             }
             void setAssets(kick::clap::AssetResolver* assets) noexcept override { process()->assets.store(assets); }

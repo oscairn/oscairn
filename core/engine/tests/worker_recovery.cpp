@@ -219,8 +219,9 @@ namespace
             const auto later = host.prepareSound("Later", {{4, 0}});
             check(later != warm && later != bright && later != 0, "Basic Synth: a sound prepared after the restart gets a new ID");
         }
-        { // Basic Synth: a snapshot's sounds prepared beside the playing ones (RFC 0021) become the
-          // recovery record, so a restart brings them back, without the outgoing ones.
+        { // Basic Synth: a snapshot's sounds prepared beside the playing ones (RFC 0021) go into the
+          // recovery record with the instance's other sounds, so a restart brings back every sound it
+          // had then, the outgoing one discarded since excepted.
             Player reference(synth, "");
             const auto w = reference.host().prepareSound("Warm", {{4, 1}}), b = reference.host().prepareSound("Bright", {{4, 2}, {6, 18}, {7, 70}});
             reference.host().selectSound(w, 0); reference.host().selectSound(b, 1);
@@ -233,11 +234,11 @@ namespace
             for(int16_t ch = 0; ch < 16; ++ch) host.selectSound(selected[size_t(ch)], ch);
             p.play();
             check(host.discardSound(old), "Basic Synth: the outgoing sound goes once idle");
-            auto prepared = sounds(host); std::erase_if(prepared, [](const auto& s) { return s.first == 0; }); // the Default it had stays until a restart
-            check(prepared.size() == 3, "Basic Synth: the snapshot's three sounds prepared beside");
+            const auto had = sounds(host);
+            check(std::count_if(had.begin(), had.end(), [](const auto& s) { return s.first != 0; }) == 3, "Basic Synth: the snapshot's three sounds prepared beside the Default");
             killWorkers();
             awaitRestart(p, [&] { return host.statistics().restarts >= 1; });
-            check(sounds(host) == prepared, "Basic Synth: the sounds prepared beside come back with their IDs and names");
+            check(sounds(host) == had, "Basic Synth: the sounds prepared beside and the Default come back with their IDs and names");
             // shortcut: no sample comparison with a reference here: an instance given the snapshot by a
             // load and one given the same sounds by prepare already differ on channel 1, restart or not
             // (seen 2026-11-05, not explained); compare against a load once that is understood.

@@ -1,15 +1,17 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* The engine thread's core: note routing (NoteRoute), the voice budget (VoiceBudget, RFC 0018 and
- * 0045) and the budget's per-block bookkeeping, behind one C interface with two implementations:
+ * 0045), the budget's per-block bookkeeping and the plan's audio (buffers, mixing, the output guard,
+ * meters), behind one C interface with two implementations:
  * Rust (core/engine/rust, names rust_core_*) and C++ (core_cpp.cpp around NoteRoute.h, cpp_core_*).
  * graph.cpp calls the one OSCAIRN_ENGINE_CORE selects through OSCAIRN_CORE(name); the differential
  * test (core/engine/tests/core_diff.cpp) runs both on the same streams and compares every result.
  *
- * Threads: *_new and *_free on the control thread; everything else on the audio thread, one call at
+ * Threads: *_new and *_free on the control thread, audio_buffers on either; everything else on the audio thread, one call at
  * a time. The caller keeps every route and activity a plan names alive until that plan's notes are
  * freed, and never hands one route to two calls at once. Nothing here allocates, locks or logs after
  * *_new. Calls per block: begin and end once; route and finish once per step; voice_limit once per
- * step whose plugin gives up its own voices; route_events once per harmony and per MIDI tap. */
+ * step whose plugin gives up its own voices; route_events once per harmony and per MIDI tap;
+ * audio_begin once, audio_mix once per step and once for the outputs, audio_finish once per step. */
 #pragma once
 #include <oscairn-clap/voice-budget.h>
 #include <stdbool.h>
@@ -132,7 +134,39 @@ typedef struct
     uint32_t sent_count;
 } oscairn_finish;
 
+/* A plan's audio (oscairn_audio): its buffers, the audio connections into its steps and the graph's
+ * outputs, the output guard, meters and the activity counters a step's sound keeps. A connection
+ * reads channel `from` of step `source`'s outputs (-1: the external input) into channel `to`, at
+ * `gain`, scaled by the live gains its slots name (0: none; Graph::setLiveGain). */
+typedef struct { int32_t source; uint32_t from, to; float gain; uint8_t live[4]; } oscairn_audio_route;
+typedef uint32_t oscairn_peaks[16]; /* a node's meter: Graph::meterChannels floats, as atomics */
+/* A shared engine's sound context: its bus (channels from offset), its meter and its activity. */
+typedef struct { uint32_t offset, channels; oscairn_peaks* peaks; oscairn_activity* activity; } oscairn_bus;
+/* A step, in plan order: its plugin (an identity: a played change's gains ramp between plans), its
+ * channels in and out, how many of those out its own meter shows (from the first), its meter and
+ * activity (either may be null), the connections into it and its sound contexts' buses. */
+typedef struct
+{
+    const void* host;
+    uint32_t inputs, outputs, metered;
+    oscairn_peaks* peaks;
+    oscairn_activity* activity;
+    const oscairn_audio_route* routes;
+    uint32_t route_count;
+    const oscairn_bus* buses;
+    uint32_t bus_count;
+} oscairn_audio_step;
+typedef struct oscairn_audio oscairn_audio;
+
 #define OSCAIRN_CORE_API(p) \
+    oscairn_audio* p##audio_new(const oscairn_audio_step* steps, uint32_t count, const oscairn_audio_route* outputs, uint32_t output_count, \
+                                uint32_t inputs, uint32_t channels, uint32_t max_frames); \
+    void p##audio_free(oscairn_audio* audio); \
+    float* const* p##audio_buffers(oscairn_audio* audio, int32_t step, bool outputs); \
+    void p##audio_carry(oscairn_audio* next, const oscairn_audio* current, uint32_t ramp); \
+    void p##audio_begin(oscairn_audio* audio, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames); \
+    void p##audio_mix(oscairn_audio* audio, uint32_t step, float* const* outputs, uint32_t frames, const float* live_from, const float* live_to); \
+    void p##audio_finish(oscairn_audio* audio, uint32_t step, uint32_t frames, bool processed, bool asleep, uint32_t fade); \
     oscairn_route* p##route_new(uint32_t ports, uint16_t clap_ports, uint32_t fade_frames); \
     void p##route_free(oscairn_route* route); \
     uint32_t p##route_live(const oscairn_route* route); \
@@ -176,7 +210,19 @@ typedef struct
  *   voices and its share of the instance's room, 0 for one holding none.
  * notes_end: the block is done: the lanes judged against their limits, the timing report kept; slack,
  *   the microseconds left before the callback's deadline once the block was collected (NaN: unknown),
- *   which the Rust core gives notes up for when it runs low. */
+ *   which the Rust core gives notes up for when it runs low.
+ * audio_new: a plan's audio, every buffer max_frames long: `inputs` external input channels, each
+ *   step's; the graph's own `channels` out are the caller's. Connections to one channel add up, in order.
+ * audio_buffers: a step's input or output channels (the plugin's buffers), or with step -1 the external input.
+ * audio_carry: a played change: a connection in both plans (same plugins, same channels) ramps over
+ *   `ramp` frames from the gain it has in `current` to its gain in `next`.
+ * audio_begin: a block starts: the external input copied in (a channel missing: silence), the graph's
+ *   outputs no connection reaches and those past its own silenced.
+ * audio_mix: a step's inputs mixed from its connections, or with step == count the graph's outputs
+ *   from theirs into `outputs`; live_from and live_to, the live gains at the block's start and end.
+ * audio_finish: after the step's plugin rendered: the output guard, when it rendered (a sample not
+ *   finite or past Graph::outputBound fades the block from the last good samples over `fade` frames,
+ *   counted as bad output); its meters; and its and its contexts' quiet, asleep and age. */
 OSCAIRN_CORE_API(rust_core_)
 OSCAIRN_CORE_API(cpp_core_)
 

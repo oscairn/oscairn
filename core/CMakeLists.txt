@@ -100,6 +100,7 @@ set_target_properties(oscairn_engine_core PROPERTIES IMPORTED_LOCATION "${engine
 add_dependencies(oscairn_engine_core oscairn_engine_core_build)
 
 add_library(oscairn_engine STATIC
+    engine/src/audio_cpp.cpp
     engine/src/chain.cpp
     engine/src/core_cpp.cpp
     engine/src/graph.cpp
@@ -115,7 +116,7 @@ target_include_directories(oscairn_engine PUBLIC engine/include)
 target_link_libraries(oscairn_engine PUBLIC oscairn_plugin_host oscairn_engine_core)
 target_compile_options(oscairn_engine PRIVATE -Wall -Wextra)
 # Rust never fuses a multiply and an add; nor does the C++ core, so the two agree bit for bit.
-set_source_files_properties(engine/src/core_cpp.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
+set_source_files_properties(engine/src/core_cpp.cpp engine/src/audio_cpp.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
 if(OSCAIRN_ENGINE_CORE STREQUAL "rust")
     target_compile_definitions(oscairn_engine PRIVATE OSCAIRN_ENGINE_CORE_RUST=1)
 elseif(NOT OSCAIRN_ENGINE_CORE STREQUAL "cpp")
@@ -318,6 +319,11 @@ if(OSCAIRN_ENGINE_CORE STREQUAL "rust") # 12k is the Rust core's alone
     add_test(NAME engine-core-recovery COMMAND oscairn-core-recovery-test)
 endif()
 set_tests_properties(engine-core-diff PROPERTIES TIMEOUT 300)
+# The plan's audio (buffers, mixing, output guard, meters) the same way; `bench cpp|rust` times each.
+add_executable(oscairn-audio-diff-test engine/tests/audio_diff.cpp)
+target_link_libraries(oscairn-audio-diff-test PRIVATE oscairn_engine)
+add_test(NAME engine-audio-diff COMMAND oscairn-audio-diff-test)
+set_tests_properties(engine-audio-diff PROPERTIES TIMEOUT 300)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
     ${SAMPLEPACK_CARGO} test --release --locked --offline --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
 set_tests_properties(engine-core-cargo PROPERTIES TIMEOUT 300)

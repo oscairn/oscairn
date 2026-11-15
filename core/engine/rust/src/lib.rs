@@ -1,13 +1,15 @@
-//! The engine thread's core in Rust: note routing, the voice budget and the budget's per-block
-//! bookkeeping, behind the C interface in core/engine/src/engine_core.h (names rust_core_*). The
+//! The engine thread's core in Rust: note routing, the voice budget, the budget's per-block
+//! bookkeeping and the plan's audio (buffers, mixing, the output guard, meters), behind the C interface in core/engine/src/engine_core.h (names rust_core_*). The
 //! C++ implementation of the same interface (core_cpp.cpp) is the reference the differential test
 //! holds this to. All unsafe code is in this file, at that boundary.
 
+mod audio;
 mod budget;
 mod event;
 mod notes;
 mod route;
 
+use audio::{Audio, Bus, Connection, StepIn};
 use budget::Activity;
 use event::{Event, CORE_SPACE, NOTE_END};
 use notes::{Key, Notes, Rendered, SoundContext, Source, Step, Timing, VoiceNote};
@@ -52,6 +54,74 @@ impl IndexMut<Route> for Routes {
     fn index_mut(&mut self, r: Route) -> &mut NoteRoute {
         // SAFETY: a live route nothing else touches during the call; `&mut self` lends out one at a time.
         unsafe { &mut *r.0.as_ptr() }
+    }
+}
+
+/// A plan's audio buffers (audio.rs): one allocation, buffer k at k * stride. The C++ plugin hosts
+/// write them through pointers between calls into the core (engine_core.h: one call at a time on
+/// the audio thread), so they are only ever reached through the raw pointer, never a lasting borrow.
+pub struct Buffers {
+    base: NonNull<f32>,
+    count: usize,
+    stride: usize,
+}
+impl Buffers {
+    pub fn new(count: usize, stride: usize) -> Buffers {
+        let all = Box::into_raw(vec![0f32; count * stride].into_boxed_slice());
+        Buffers { base: NonNull::new(all.cast()).expect("a Box is never null"), count, stride }
+    }
+    pub fn pointer(&self, k: usize) -> *mut f32 {
+        self.base.as_ptr().wrapping_add(k * self.stride)
+    }
+    /// Buffer k's first n samples.
+    pub fn get(&self, k: usize, n: usize) -> &[f32] {
+        assert!(k < self.count && n <= self.stride);
+        // SAFETY: inside the allocation (asserted); nothing writes it while `self` is borrowed (the contract above).
+        unsafe { std::slice::from_raw_parts(self.pointer(k), n) }
+    }
+    pub fn get_mut(&mut self, k: usize, n: usize) -> &mut [f32] {
+        assert!(k < self.count && n <= self.stride);
+        // SAFETY: as `get`, and `&mut self` lends out one at a time.
+        unsafe { std::slice::from_raw_parts_mut(self.pointer(k), n) }
+    }
+    /// Buffer `from` to read and buffer `to` to write, two different ones.
+    pub fn pair(&mut self, from: usize, to: usize, n: usize) -> (&[f32], &mut [f32]) {
+        assert!(from != to && from.max(to) < self.count && n <= self.stride);
+        // SAFETY: two different buffers inside the allocation (asserted) do not overlap; as `get_mut`.
+        unsafe { (std::slice::from_raw_parts(self.pointer(from), n), std::slice::from_raw_parts_mut(self.pointer(to), n)) }
+    }
+}
+impl Drop for Buffers {
+    fn drop(&mut self) {
+        // SAFETY: the allocation `new` made, freed once.
+        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(self.base.as_ptr(), self.count * self.stride)) });
+    }
+}
+
+/// The caller's channels for one call (the graph's outputs, or the external input), any of them null.
+pub struct Channels<'a>(&'a [*mut f32]);
+impl Channels<'_> {
+    pub fn count(&self) -> usize {
+        self.0.len()
+    }
+    pub fn get(&self, c: usize, frames: usize) -> Option<&[f32]> {
+        // SAFETY: null, or `frames` samples the caller lends for the call (engine_core.h).
+        self.0.get(c).filter(|p| !p.is_null()).map(|&p| unsafe { std::slice::from_raw_parts(p, frames) })
+    }
+    pub fn get_mut(&mut self, c: usize, frames: usize) -> Option<&mut [f32]> {
+        // SAFETY: as `get`, writable and aliased by nothing else; `&mut self` lends out one at a time.
+        self.0.get(c).filter(|p| !p.is_null()).map(|&p| unsafe { std::slice::from_raw_parts_mut(p, frames) })
+    }
+}
+
+impl StepIn {
+    pub fn routes(&self) -> &[Connection] {
+        // SAFETY: the caller's array, readable during audio_new (engine_core.h).
+        unsafe { slice(self.routes, self.route_count) }
+    }
+    pub fn buses(&self) -> &[Bus] {
+        // SAFETY: as `routes`.
+        unsafe { slice(self.buses, self.bus_count) }
     }
 }
 
@@ -346,6 +416,77 @@ pub unsafe extern "C" fn rust_core_notes_end(notes: *mut Notes, slack: f32) {
     unsafe { &mut *notes }.end(&mut Routes(()), slack);
 }
 
+/// # Safety
+/// `steps` and `outputs` are readable arrays of `count` and `output_count`, their arrays readable too.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_new(
+    steps: *const StepIn,
+    count: u32,
+    outputs: *const Connection,
+    output_count: u32,
+    inputs: u32,
+    channels: u32,
+    max_frames: u32,
+) -> *mut Audio {
+    // SAFETY: the caller's arrays (above).
+    let (steps, outputs) = unsafe { (slice(steps, count), slice(outputs, output_count)) };
+    Box::into_raw(Box::new(Audio::new(steps, outputs, inputs, channels, max_frames)))
+}
+
+/// # Safety
+/// `audio` came from rust_core_audio_new and is freed once.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_free(audio: *mut Audio) {
+    // SAFETY: the caller's contract.
+    drop(unsafe { Box::from_raw(audio) });
+}
+
+/// # Safety
+/// `audio` is live; `step` is -1 or one of its steps.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_buffers(audio: *mut Audio, step: i32, outputs: bool) -> *const *mut f32 {
+    // SAFETY: live audio (the caller's contract).
+    unsafe { &*audio }.pointers(usize::try_from(step).ok(), outputs).as_ptr()
+}
+
+/// # Safety
+/// `next` and `current` are live, different, and used by no other call.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_carry(next: *mut Audio, current: *const Audio, ramp: u32) {
+    // SAFETY: the caller's contract.
+    unsafe { (*next).carry(&*current, ramp) }
+}
+
+/// # Safety
+/// `audio` is live and used by no other call; `inputs` and `outputs` hold `ni` and `no` channels (each
+/// null or `frames` samples, outputs writable), and `frames` is at most the plan's max_frames.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_begin(audio: *mut Audio, inputs: *const *const f32, ni: u32, outputs: *const *mut f32, no: u32, frames: u32) {
+    // SAFETY: the caller's contract.
+    let (audio, inputs, mut outputs) = unsafe { (&mut *audio, Channels(slice(inputs.cast(), ni)), Channels(slice(outputs, no))) };
+    audio.begin(&inputs, &mut outputs, frames as usize);
+}
+
+/// # Safety
+/// As rust_core_audio_begin, for the graph's outputs (step == its count) at least as many as it has; live_from
+/// and live_to hold Graph::liveGains gains each.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_mix(audio: *mut Audio, step: u32, outputs: *const *mut f32, frames: u32, live_from: *const f32, live_to: *const f32) {
+    // SAFETY: the caller's contract.
+    let (audio, live_from, live_to) = unsafe { (&mut *audio, slice(live_from, 256), slice(live_to, 256)) };
+    // SAFETY: as many outputs as the graph has, for the outputs' mix alone.
+    let mut outputs = Channels(unsafe { slice(outputs, if outputs.is_null() { 0 } else { audio.output_channels() }) });
+    audio.mix(step as usize, &mut outputs, frames as usize, live_from, live_to);
+}
+
+/// # Safety
+/// `audio` is live and used by no other call; `step` is one of its steps; `frames` as in rust_core_audio_begin.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_finish(audio: *mut Audio, step: u32, frames: u32, processed: bool, asleep: bool, fade: u32) {
+    // SAFETY: the caller's contract.
+    unsafe { &mut *audio }.finish(step as usize, frames as usize, processed, asleep, fade);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,6 +599,46 @@ mod tests {
         COUNTING.with(|c| c.set(false));
         assert!(budgeted && activity.stolen.load(Relaxed) + activity.hard_chokes.load(Relaxed) > 0, "notes were given up");
         assert!(activity.faded_for_loss.load(Relaxed) > 0 && activity.faded_for_deadline.load(Relaxed) > 0, "for lost blocks and the deadline too");
+        // A plan's audio too: mixes with live gains and a played change's ramp, a bad block faded, meters, activity.
+        let connections =
+            [Connection { source: 0, from: 0, to: 0, gain: 0.5, live: [1, 2, 0, 0] }, Connection { source: 0, from: 1, to: 0, gain: 1.0, live: [0; 4] }];
+        let mut peaks = [0u32; 16];
+        let steps = [0u32, 1].map(|s| StepIn {
+            host: std::ptr::null::<u8>().wrapping_add(s as usize + 1).cast(),
+            inputs: 2 * s,
+            outputs: 2,
+            metered: 2,
+            peaks: NonNull::new(std::ptr::from_mut(&mut peaks).cast()).map(Shared),
+            activity: NonNull::new(std::ptr::from_ref(&activity).cast_mut()).map(Shared),
+            routes: if s == 1 { connections.as_ptr() } else { std::ptr::null() },
+            route_count: 2 * s,
+            buses: std::ptr::null(),
+            bus_count: 0,
+        });
+        // SAFETY: arrays that outlive the calls; the audio freed once.
+        unsafe {
+            let (was, audio) = (
+                rust_core_audio_new(steps.as_ptr(), 2, connections.as_ptr(), 2, 0, 2, 128),
+                rust_core_audio_new(steps.as_ptr(), 2, connections.as_ptr(), 2, 0, 2, 128),
+            );
+            let (mut out, live_from, live_to) = ([0f32; 256], [0.5f32; 256], [1f32; 256]);
+            let outs = [out.as_mut_ptr(), out.as_mut_ptr().add(128)];
+            COUNTING.with(|c| c.set(true));
+            rust_core_audio_carry(audio, was, 64);
+            for b in 0..200u32 {
+                rust_core_audio_begin(audio, std::ptr::null(), 0, outs.as_ptr(), 2, 128);
+                for s in 0..2 {
+                    rust_core_audio_mix(audio, s, std::ptr::null(), 128, live_from.as_ptr(), live_to.as_ptr());
+                    *(*rust_core_audio_buffers(audio, s as i32, true)).add(5) = if b % 7 == 0 { f32::NAN } else { 0.25 };
+                    rust_core_audio_finish(audio, s, 128, true, false, 48);
+                }
+                rust_core_audio_mix(audio, 2, outs.as_ptr(), 128, live_from.as_ptr(), live_to.as_ptr());
+            }
+            COUNTING.with(|c| c.set(false));
+            assert!(activity.bad_output.load(Relaxed) > 0 && peaks[0] == 0.25f32.to_bits() && out[5] != 0.0);
+            rust_core_audio_free(was);
+            rust_core_audio_free(audio);
+        }
         assert_eq!(ALLOCATIONS.load(Relaxed), 0);
         // SAFETY: made above, freed once.
         unsafe {

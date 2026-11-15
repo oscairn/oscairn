@@ -323,7 +323,7 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   beside the program run once per plugin file (`--worker FILE`, 5 s, 4 MiB) over `--plugins DIR`
   (else `plugins` beside the program, else `../lib/clap`), CLAP then LV2, started the first time the
   chain is opened, its wire format read with every length checked. It is a helper process, not an
-  engine call: no control request. Not as the C++ one: a timed-out helper is killed, not its process group.
+  engine call: no control request. A timed-out helper is killed with its process group, as the C++ one does.
 - **Parameter pages** (`params.rs`): host-drawn, the JUCE ParameterGrid's pages (a page per top-level
   module, numbered pages together, modules from the leading words of names for a plugin of more than
   24 parameters without paths, tabs on a page of more than 24, tiles in `oscairn.ui` priority order,

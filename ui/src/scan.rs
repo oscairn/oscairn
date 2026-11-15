@@ -10,6 +10,7 @@
 
 use std::collections::BTreeSet;
 use std::io::Read;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -98,7 +99,7 @@ fn find_binaries(root: &Path, extension: &str) -> BTreeSet<PathBuf> {
 
 /// The helper on one file: its stdout, or why not (it ended badly, took more than `timeout`, or said more than 4 MiB).
 fn run_helper(helper: &Path, binary: &Path, timeout: Duration) -> Result<Vec<u8>, String> {
-    let mut child = Command::new(helper).arg("--worker").arg(binary).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| format!("Cannot launch the scanner helper: {e}"))?;
+    let mut child = Command::new(helper).arg("--worker").arg(binary).process_group(0).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| format!("Cannot launch the scanner helper: {e}"))?;
     // The write end of its stdin stays here: the helper ends itself if this process dies.
     let _life = child.stdin.take();
     let mut out = child.stdout.take().ok_or("no pipe")?;
@@ -112,10 +113,12 @@ fn run_helper(helper: &Path, binary: &Path, timeout: Duration) -> Result<Vec<u8>
         match child.try_wait() {
             Ok(Some(s)) => break Ok(s),
             Ok(None) if start.elapsed() > timeout => {
-                // shortcut: the helper is killed, not its process group as the C++ scanner does; a
-                // grandchild holding the pipe is left to end by itself (the reader is not waited for).
+                // The helper's process group, as the C++ scanner kills it: whatever it started goes too.
+                // SAFETY: kill(2) on the group of a child this function started and still holds.
+                unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
                 let _ = child.kill();
                 let _ = child.wait();
+                let _ = reader.join();
                 return Err("Plugin scan timed out".into());
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),

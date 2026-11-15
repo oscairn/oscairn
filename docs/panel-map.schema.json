@@ -40,7 +40,7 @@
       "maxItems": 1024,
       "items": {
         "type": "object",
-        "description": "A control: its message kind and ID, and its identity (knob:N, fader:N, wheel:N, screen:N, button:N as overrides name them, RFC 0024), a pad of the Performance's pad map (pad:N, from 1) or a fixed control's profile function. Without an id it is not mapped yet and is skipped. No two entries of one kind share an id",
+        "description": "A control: its message kind and ID, and its identity (knob:N, fader:N, wheel:N, screen:N, button:N as overrides name them, RFC 0024), a pad of the Performance's pad map (pad:N, from 1) or a fixed control's profile function (enter, play, stop, record: a press of record starts a take, or ends the one recording). Without an id it is not mapped yet and is skipped. No two entries of one kind share an id",
         "properties": {
           "kind": { "enum": ["encoder", "analog", "switch"], "description": "switch: both switch kinds, on and off" },
           "id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },

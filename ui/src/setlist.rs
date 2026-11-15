@@ -171,7 +171,7 @@ fn color(hex: &str) -> Option<Color> {
 }
 
 /// Sets a model's rows to `want`, each row only if it changed: a cursor move sets two.
-fn update<T: Clone + PartialEq + 'static>(model: &VecModel<T>, want: Vec<T>) {
+pub fn update<T: Clone + PartialEq + 'static>(model: &VecModel<T>, want: Vec<T>) {
     if model.row_count() != want.len() {
         model.set_vec(want);
         return;
@@ -525,6 +525,11 @@ impl Screen {
 
     pub fn step_by(&mut self, by: i64) {
         self.step(by);
+    }
+
+    /// The Performance's library ID in the slot playing, as the JUCE Setlist sends it to Play.
+    pub fn playing(&self) -> Option<&str> {
+        self.setlist.as_ref()?.slot(self.current?).map(|s| s.id.as_str()).filter(|id| !id.is_empty())
     }
 
     /// The cursors drop when the screen goes, as on focus loss in the JUCE lists.

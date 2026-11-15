@@ -3,7 +3,7 @@
 The owner decided on November 14, 2026 that Oscairn's UI moves to Rust ("Rust direction: yes on
 ui and readers") and that the Rust UI replaces the JUCE app screen by screen, as each is ready
 ("yes want rust to replace juce as each one is ready"). The first screens are the stage ones:
-the shell with its top bar, Home, then Setlist; Play comes next. Its toolkit is Slint 1.18.1 with
+the shell with its top bar, Home, Setlist and Play. Its toolkit is Slint 1.18.1 with
 its software renderer, chosen by the Setlist prototype (branch `experiment/rust-setlist`, its
 README has the measurements and the toolkit comparison).
 
@@ -35,7 +35,8 @@ How (a) works:
   Today the JUCE app starts and owns its engine; on the Rust path it only connects to it.
 - **The Rust shell** (`oscairn-ui`) draws on the display with Slint's `linuxkms` backend and is
   a trusted client of `/run/oscairn/engine.sock`.
-- **A screen not yet ported** (Performance, Library, Groovebox, Recordings, Settings today):
+- **A screen not yet ported** (Library, Groovebox, Recordings, Settings, and the Performance's
+  Edit, today; the Performance tile itself opens Play, in Rust):
   confirming its tile shows "Opening Settings..." for one frame, writes the app's name to the
   handover file and ends the shell (exit status 3). The start script's UI keeper then starts the
   bundle's Xorg and `Oscairn --connect /run/oscairn/engine.sock --app settings` with
@@ -209,8 +210,47 @@ again as the next; the next slot is prepared (`performance.prepare`). Left, Righ
 Page Down are Previous and Next, as in the JUCE Setlist (page turners send them); Up and Down move
 the cursor. The setlist open and the slot playing are kept in the JUCE Setlist app's own state
 file (the data folder's `AppData/oscairn.setlist/state.json`), so either opens where the other
-left off. Not yet: editing, the setlist's own Previous/Next asked from Play (`oscairn.step.setlist`,
-which needs Play in Rust).
+left off. Play's Previous and Next step it (`step_by`, as the JUCE Play asks the Setlist app to).
+Its Play button opens Play. Not yet: editing.
+
+## Play
+
+`play.rs` and `slint/play.slint`: the JUCE Performance app's first view (PlayView.cpp) for the stage.
+Home's Performance tile and the Setlist's Play button open it (Cancel goes back to where it was
+opened from); Edit is the handover.
+
+- **Shows:** the open Performance's name and scene in the top bar as everywhere; eight scene tiles
+  along the top (the one playing filled in the accent with an accent border); below them a strip per
+  part, then per bus, each with its name, its sound (the first Instrument in its chain, "No
+  instrument" otherwise) and where it plays from (`Any device · C2–C7 · −12`, `Audio in 1`, `Its own
+  notes`; a bus: `Bus · its first plugin`) as PartsModel.cpp's `readParts` words them, a level
+  fader (the JUCE faders' skew: a quarter of the way up is half the travel), a meter of one or two
+  bars (the first channel, and the loudest of the others) along -60 to +6 dB in the three zones,
+  mute (M) and solo (S); a strip is dimmed while its part is muted or another part's solo
+  silences it. The master (Performance level) is pinned at the right. Previous and Next show at the
+  ends of the scene row while the open Performance is the Setlist's slot playing (`performance.info`'s
+  `id` against the Setlist's `current`), as the JUCE Play shows them. The strips show as many at a
+  time as fit (as many as the screen holds at 110 px each); the cursor past them turns a whole view.
+- **Without touch:** pane 0 (the left knob, E1) moves a border cursor over the scenes, pane 1 (E6)
+  over the parts, the dial the pane last touched; a press (ENTER) on a scene selects it
+  (`scenes.select`), on a part toggles its mute (`parts.level`); EXIT drops the cursors, then goes
+  back. Keys: Left and Right move along the pane last touched, Up goes to the scenes, Down to the
+  parts, Home and End the first and last, Page Up and Down are Previous and Next (as in the
+  Setlist), Return confirms, Escape cancels. Touch: a scene tile selects, M and S toggle, a fader
+  is touched or dragged (`parts.level`, `master.set`, sent each time it moves a hundredth).
+- **From the engine:** `graph.get` (the shell already asks it on each `graph.changed`; Play adds
+  no request to it), `controls.changed` for levels and mutes moved live (subscribed on opening Play
+  and ended on leaving, because it comes up to 60 times a second), and `parts.meters`, asked by a
+  100 ms timer that runs only while Play is shown, one request at a time (a slow engine never gets
+  a second). The shell at rest still wakes for nothing. No new engine request.
+- **Still handed over to the JUCE app**, from the "Edit, knob banks, Learn: Oscairn app" entry
+  (the display goes to the Performance app, which opens on its own Play): the knob row and its
+  banks (the Performance's controls or a part's, resolved through the panel's layers), Learn, the
+  Performance/part switch and bank button, selecting a part, Edit itself (the part pages, effects,
+  routing, saving), adding a scene (the "+ Scene" tile), the "No MIDI device" line with the
+  on-screen keyboard, and Save. Not ported either: a part's pan and sends have no control in
+  Play (the JUCE Play has none), and meters past two channels show two bars.
+- **Not measured:** the 100 ms meter poll's cost on a unit, and its look at the FANTOM-07's scale.
 
 ## Adding a screen
 

@@ -8,14 +8,17 @@
 //! start), `performance.info` and `graph.get`. Each `status` (at most 4 a second) moves the
 //! meters at most twice a second and then asks `memory.state` and `transport.get`; each
 //! `graph.changed` asks `performance.info` and `graph.get` again. Nothing else wakes it at rest.
+//! While Play is shown it also subscribes to `controls.changed` and asks `parts.meters` every
+//! 100 ms (one at a time); leaving Play ends both.
 
 use crate::client::{Client, Error, Event, BUSY};
 use crate::home::{self, Home};
 use crate::nav::{self, Action};
+use crate::play;
 use crate::profile::Profile;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, HomeState, SetlistState, Shell, TileData};
+use crate::{Bar, HomeState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -39,6 +42,7 @@ pub enum Request {
     /// controllers.view: whether lists are on screen, so the panel's navigate controls navigate.
     View,
     Setlist(setlist::Request),
+    Play(play::Request),
 }
 
 impl Request {
@@ -74,6 +78,8 @@ pub enum Screen {
     Setlist = 1,
     /// A JUCE screen asked for: the display is being handed over (docs/rust-ui.md).
     Opening = 2,
+    /// The Performance's scenes, parts and meters (play.rs).
+    Play = 3,
 }
 
 pub struct App {
@@ -97,6 +103,13 @@ pub struct App {
     /// The panel's navigation totals as last read.
     totals: nav::Totals,
     setlist: setlist::Screen,
+    play: play::Screen,
+    /// Where Play was opened from, which Cancel goes back to.
+    play_from: Screen,
+    /// Asks for the meters while Play is shown, and only then.
+    meters: slint::Timer,
+    /// The open Performance's library ID (performance.info), which the setlist's slot playing is compared with.
+    performance_id: String,
 }
 
 thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
@@ -141,6 +154,15 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     lists.on_tapped_slot(|i| with_app(|a| a.on_setlist(|s| s.tap_slot(i.max(0) as usize))));
     lists.on_tapped_setlist(|i| with_app(|a| a.on_setlist(|s| s.tap_setlist(i.max(0) as usize))));
     lists.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
+    lists.on_play(|| with_app(|a| a.go(Screen::Play)));
+    let play = ui.global::<PlayState>();
+    play.on_scene_tapped(|i| with_app(|a| a.on_play(|p| p.tap_scene(i))));
+    play.on_mute_tapped(|i| with_app(|a| a.on_play(|p| p.tap_mute(i))));
+    play.on_solo_tapped(|i| with_app(|a| a.on_play(|p| p.tap_solo(i))));
+    play.on_level(|i, f| with_app(|a| a.on_play(|p| p.level(i, f))));
+    play.on_held(|i, down| with_app(|a| a.on_play(|p| p.hold(i, down))));
+    play.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
+    play.on_edit(|| with_app(|a| a.hand_over(&home::APPS[0])));
     // The JUCE Setlist app's own state file, so either opens where the other left off.
     let state = crate::settings::data_dir().map(|d| d.join("AppData/oscairn.setlist/state.json"));
     APP.with(|a| {
@@ -160,6 +182,10 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             leave: slint::Timer::default(),
             totals: nav::Totals::default(),
             setlist: setlist::Screen::new(ui, state),
+            play: play::Screen::new(ui),
+            play_from: Screen::Home,
+            meters: slint::Timer::default(),
+            performance_id: String::new(),
         };
         app.show_home();
         *a.borrow_mut() = Some(app);
@@ -267,6 +293,9 @@ impl App {
                 self.send(Request::Library(false), "library.query", json!({"kind": "performance", "limit": 1}));
                 self.send(Request::Library(true), "library.query", json!({"kind": "sound", "limit": 1}));
                 self.on_setlist(setlist::Screen::connected);
+                if self.screen == Screen::Play {
+                    self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
+                }
             }
             Event::Lost(why) => {
                 if let Some(ui) = self.ui() {
@@ -276,6 +305,7 @@ impl App {
             Event::Notification { method, params } => match method.as_str() {
                 "status" => self.status(&params),
                 "graph.changed" => self.ask_performance(),
+                "controls.changed" => self.on_play(|p| p.controls(&params)),
                 // Read always, so the totals stay current; acted on only by the screen shown, and
                 // by none while the display goes to the JUCE app (act drops them then).
                 "controllers" => {
@@ -317,6 +347,7 @@ impl App {
     fn reply(&mut self, request: Request, result: Result<Value, Error>) {
         let request = match request {
             Request::Setlist(r) => return self.on_setlist(|s| s.reply(r, result)),
+            Request::Play(r) => return self.on_play(|p| p.reply(r, result)),
             other => other,
         };
         let r = match result {
@@ -334,8 +365,15 @@ impl App {
             }
         };
         match request {
-            Request::Info => self.show(|s| s.performance = topbar::performance(&r)),
-            Request::Graph => self.show(|s| s.scene = topbar::scene(&r)),
+            Request::Info => {
+                self.performance_id = r["id"].as_str().unwrap_or_default().to_string();
+                self.follow();
+                self.show(|s| s.performance = topbar::performance(&r))
+            }
+            Request::Graph => {
+                self.on_play(|p| p.graph(&r));
+                self.show(|s| s.scene = topbar::scene(&r))
+            }
             Request::Transport => self.show(|s| s.tempo = topbar::tempo(&r)),
             Request::Memory => {
                 let ram = topbar::ram(&r, self.device_memory);
@@ -350,7 +388,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Setlist(_) | Request::Play(_) => {}
         }
     }
 
@@ -430,6 +468,18 @@ impl App {
                     self.open(app);
                 }
             }
+            (Screen::Play, _) => {
+                let mut outcome = play::Outcome::Stay;
+                self.on_play(|p| outcome = p.act(action));
+                match outcome {
+                    play::Outcome::Back => {
+                        let from = self.play_from;
+                        self.go(from);
+                    }
+                    play::Outcome::Step(by) => self.on_setlist(|s| s.step_by(by)),
+                    play::Outcome::Stay => {}
+                }
+            }
             (Screen::Setlist, _) => {
                 let mut back = false;
                 self.on_setlist(|s| back = s.act(action) == setlist::Outcome::Back);
@@ -464,6 +514,28 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.setlist.out) {
             self.send(Request::Setlist(request), method, params);
         }
+        self.follow();
+    }
+
+    /// Something for Play, then what it asks the engine sent.
+    fn on_play(&mut self, f: impl FnOnce(&mut play::Screen)) {
+        f(&mut self.play);
+        for (request, method, params) in std::mem::take(&mut self.play.out) {
+            self.send(Request::Play(request), method, params);
+        }
+    }
+
+    /// Previous and Next show on Play while the Performance open is the setlist's slot playing.
+    fn follow(&mut self) {
+        let on = !self.performance_id.is_empty() && self.setlist.playing() == Some(self.performance_id.as_str());
+        self.play.follow(on);
+    }
+
+    /// The meters, asked unless the last answer is still out: a slow engine never piles them up.
+    fn poll_meters(&mut self) {
+        if self.client.waiting(|r| matches!(r, Request::Play(play::Request::Meters))).is_none() {
+            self.send(Request::Play(play::Request::Meters), "parts.meters", json!({}));
+        }
     }
 
     fn go(&mut self, screen: Screen) {
@@ -473,6 +545,14 @@ impl App {
             self.show_home();
             if self.screen == Screen::Setlist {
                 self.on_setlist(setlist::Screen::hidden);
+            }
+            if self.screen == Screen::Play {
+                self.play.hidden();
+                self.meters.stop();
+                self.send(Request::Subscribe, "unsubscribe", json!({"topics": ["controls.changed"]}));
+            }
+            if screen == Screen::Play {
+                self.play_from = self.screen;
             }
         }
         let was = self.screen;
@@ -486,6 +566,7 @@ impl App {
             bar.set_where(match screen {
                 Screen::Home => "Home".into(),
                 Screen::Setlist => "Setlist".into(),
+                Screen::Play => "Play".into(),
                 Screen::Opening => ui.get_opening(),
             });
             bar.set_home_button(screen != Screen::Home);
@@ -493,27 +574,39 @@ impl App {
         if screen == Screen::Setlist {
             self.on_setlist(setlist::Screen::shown);
         }
+        if was != Screen::Play && screen == Screen::Play {
+            // The first controls.changed after subscribing carries every level and mute.
+            self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
+            self.ask_performance();
+            self.follow();
+            self.play.shown();
+            self.meters.start(slint::TimerMode::Repeated, play::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+        }
     }
 
     /// An app's tile confirmed: a Rust screen shows; a JUCE one gets the display (docs/rust-ui.md).
     fn open(&mut self, app: &'static home::App) {
         match app.id {
             "oscairn.setlist" => self.go(Screen::Setlist),
-            id => {
-                if let Some(ui) = self.ui() {
-                    ui.set_opening(app.name.into());
-                    ui.set_hands_over(self.hands_over);
-                }
-                self.go(Screen::Opening);
-                if self.hands_over {
-                    self.handover = id.strip_prefix("oscairn.");
-                    // After the frame that says so: the program ends and the start script gives the
-                    // display to X and the JUCE app (docs/rust-ui.md).
-                    self.leave.start(slint::TimerMode::SingleShot, Duration::from_millis(100), || {
-                        let _ = slint::quit_event_loop();
-                    });
-                }
-            }
+            "oscairn.performance" => self.go(Screen::Play),
+            _ => self.hand_over(app),
+        }
+    }
+
+    /// A JUCE screen asked for: it shows "Opening X...", and the display goes to the JUCE app.
+    fn hand_over(&mut self, app: &'static home::App) {
+        if let Some(ui) = self.ui() {
+            ui.set_opening(app.name.into());
+            ui.set_hands_over(self.hands_over);
+        }
+        self.go(Screen::Opening);
+        if self.hands_over {
+            self.handover = app.id.strip_prefix("oscairn.");
+            // After the frame that says so: the program ends and the start script gives the
+            // display to X and the JUCE app (docs/rust-ui.md).
+            self.leave.start(slint::TimerMode::SingleShot, Duration::from_millis(100), || {
+                let _ = slint::quit_event_loop();
+            });
         }
     }
 }

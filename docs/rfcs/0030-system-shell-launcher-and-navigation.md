@@ -267,7 +267,7 @@ A profile (RFC 0024) adds:
 
 The owner decided the UI moves to Rust ("Rust direction: yes on ui and readers"), replacing the
 JUCE app screen by screen as each is ready. The shell this RFC describes (top bar, Home) and the
-Setlist are the first, as `oscairn-ui` ([rust-ui.md](../rust-ui.md)): on a device it draws
+Setlist, then Play (the Performance's scenes, parts and meters; Edit and its knob banks still hand over), are the first, as `oscairn-ui` ([rust-ui.md](../rust-ui.md)): on a device it draws
 without an X server, which the audio needs (0 misses scrolling against about 650 under X on a
 FANTOM-07), and hands the display to X and the JUCE app for a screen not yet ported, taking it
 back when that screen's Home is pressed. The top bar gains a resource section of fixed width: the

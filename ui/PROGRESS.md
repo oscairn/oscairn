@@ -120,3 +120,13 @@ Appended after every step and commit (branch `rust-ui`). Times are the Mac's (MS
   bundle has no warning. Full suite (build, `-j3`, excluding audio devices, window order, MIDI
   monitor): 236/236 passed, 1 skipped (desktop-phase3b-engines), first run.
 </content>
+
+Branch `rust-play` from `main` (8a96bc0e): Play in the Rust shell, so a Performance is played without
+leaving it (the owner: switching to a JUCE screen takes several seconds).
+- Play (`src/play.rs`, `slint/play.slint`, docs/rust-ui.md "Play"): scenes, a strip per part and bus
+  (name, sound, input, fader, meter, M, S), the master, Previous/Next with the setlist; panes 0 and 1
+  with border cursors, a press selects a scene or mutes a part; touch on tiles, M, S and faders.
+  Home's Performance tile and the Setlist's new Play button open it; Edit hands over to JUCE. Data:
+  `graph.get` as before, `controls.changed` while shown, `parts.meters` every 100 ms while shown. No
+  new engine request. Tests (headless, fake engine): panes, touch, live levels, meters, back, handover,
+  themes; pictures in ui/target/screens.

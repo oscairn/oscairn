@@ -1,0 +1,324 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The Play screen (src/play.rs), the JUCE Performance app's first view (hosts/standalone/PlayView.cpp)
+// for the stage: the Performance's scenes along the top (Previous and Next at the ends when it came
+// from the setlist), a strip per part and bus below (name and sound, level fader, a meter per
+// channel, mute and solo), the master pinned at the right. A cursor is a focus border; the scene
+// playing is an accent fill and edge.
+
+import { Theme } from "theme.slint";
+import { Button } from "setlist.slint";
+
+export struct SceneData {
+    number: int,
+    name: string,
+    filled: bool,
+    on: bool,
+    cursor: bool,
+}
+
+export struct StripData {
+    name: string,
+    detail: string,
+    fraction: float, // the fader's place, 0..1 (the level through the JUCE faders' skew)
+    mute: bool,
+    solo: bool,
+    dim: bool, // muted, or silenced by another part's solo
+    cursor: bool,
+    channels: int, // meter bars: 0 none (the master), 1 or 2
+    peak-a: float, // each 0..1 along -60..+6 dB
+    peak-b: float,
+}
+
+export global PlayState {
+    in property <[SceneData]> scenes;
+    in property <[StripData]> strips;
+    in property <StripData> master;
+    in property <bool> has-master;
+    in property <bool> can-step; // the Performance is the setlist's: Previous and Next
+    in property <string> view; // which parts show: "1–5 of 9"
+    in property <string> message;
+    // How many part strips the screen holds besides the master: set by the screen.
+    in-out property <int> strips-per-view: 1;
+    callback scene-tapped(int);
+    callback mute-tapped(int);
+    callback solo-tapped(int);
+    callback level(int, float); // a strip's row (-1 the master) and the fader's new place
+    callback held(int, bool); // a finger on a fader or off it
+    callback step(int);
+    callback edit();
+}
+
+component Meter inherits Rectangle {
+    in property <float> value;
+    // -12 dB and -3 dB on the -60..+6 dB scale: where the zones turn yellow and red.
+    property <float> yellow: 0.7273;
+    property <float> red: 0.8636;
+    background: Theme.border.transparentize(0.65);
+    border-radius: self.width / 2;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: parent.width;
+        height: parent.height * min(root.value, root.yellow);
+        y: parent.height - self.height;
+        background: Theme.positive;
+    }
+    Rectangle {
+        x: 0;
+        width: parent.width;
+        height: parent.height * max(0, min(root.value, root.red) - root.yellow);
+        y: parent.height * (1 - min(root.value, root.red));
+        background: Theme.warning;
+    }
+    Rectangle {
+        x: 0;
+        width: parent.width;
+        height: parent.height * max(0, root.value - root.red);
+        y: parent.height * (1 - root.value);
+        background: Theme.danger;
+    }
+}
+
+component Mark inherits Rectangle {
+    in property <string> letter;
+    in property <bool> on;
+    in property <color> tint;
+    callback clicked();
+    border-radius: Theme.radius;
+    background: on ? tint : Theme.raised;
+    Text {
+        text: root.letter;
+        color: root.on ? Theme.background : Theme.text;
+        font-size: Theme.button;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component Strip inherits Rectangle {
+    in property <StripData> data;
+    in property <bool> is-master;
+    callback mute-tapped();
+    callback solo-tapped();
+    callback level(float);
+    callback held(bool);
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    property <length> fader-width: Theme.touch;
+    property <length> top: 8px + Theme.body + Theme.small + 20px;
+    property <length> bottom: root.is-master ? 10px : Theme.touch + 18px;
+    property <length> pair-width: root.fader-width + 12px + 2 * 7px + 3px;
+    Rectangle {
+        opacity: data.dim ? 0.45 : 1;
+        Text {
+            x: 10px;
+            y: 8px;
+            width: parent.width - 20px;
+            text: data.name;
+            color: Theme.text;
+            font-size: Theme.body;
+            font-weight: 700;
+            overflow: elide;
+        }
+        Text {
+            x: 10px;
+            y: 8px + Theme.body + 6px;
+            width: parent.width - 20px;
+            text: data.detail;
+            color: Theme.muted;
+            font-size: Theme.small;
+            overflow: elide;
+        }
+        // The fader and its meters as a pair, centered above the marks.
+        fader := Rectangle {
+            x: (root.width - root.pair-width) / 2;
+            y: root.top;
+            width: root.fader-width;
+            height: root.height - root.top - root.bottom;
+            background: Theme.border.transparentize(0.65);
+            border-radius: Theme.radius;
+            Rectangle {
+                width: parent.width;
+                height: parent.height * data.fraction;
+                y: parent.height - self.height;
+                background: Theme.accent.transparentize(0.35);
+                border-radius: Theme.radius;
+            }
+            touch := TouchArea {
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down) { root.held(true); }
+                    if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) { root.held(false); }
+                }
+                moved => { root.level(max(0, min(1, 1 - touch.mouse-y / fader.height))); }
+                clicked => { root.level(max(0, min(1, 1 - touch.mouse-y / fader.height))); }
+            }
+        }
+        if data.channels > 0: Meter {
+            x: fader.x + fader.width + 12px;
+            y: fader.y + 8px;
+            width: 7px;
+            height: fader.height - 16px;
+            value: data.peak-a;
+        }
+        if data.channels > 1: Meter {
+            x: fader.x + fader.width + 12px + 10px;
+            y: fader.y + 8px;
+            width: 7px;
+            height: fader.height - 16px;
+            value: data.peak-b;
+        }
+        if !root.is-master: Mark {
+            x: root.width / 2 - Theme.touch - 4px;
+            y: root.height - Theme.touch - 8px;
+            width: Theme.touch;
+            height: Theme.touch;
+            letter: "M";
+            tint: Theme.danger;
+            on: data.mute;
+            clicked => { root.mute-tapped(); }
+        }
+        if !root.is-master: Mark {
+            x: root.width / 2 + 4px;
+            y: root.height - Theme.touch - 8px;
+            width: Theme.touch;
+            height: Theme.touch;
+            letter: "S";
+            tint: Theme.accent;
+            on: data.solo;
+            clicked => { root.solo-tapped(); }
+        }
+    }
+    Rectangle {
+        border-radius: Theme.radius;
+        border-width: data.cursor ? 2px : 0px;
+        border-color: Theme.focus;
+    }
+}
+
+export component Play inherits Rectangle {
+    property <length> scenes-height: Theme.touch;
+    property <length> footer: Theme.touch;
+    property <length> strip-min: 110px;
+    property <length> strips-x: Theme.margin;
+    property <length> strips-width: self.width - 2 * Theme.margin;
+    // Strips across, the master's among them; the cell is the same whatever the parts shown.
+    property <int> across: max(2, floor((strips-width + Theme.gap) / (strip-min + Theme.gap)));
+    property <length> cell: (strips-width - (across - 1) * Theme.gap) / across;
+    property <length> strips-y: Theme.margin + scenes-height + Theme.gap;
+    property <length> strips-height: self.height - strips-y - footer - Theme.margin - Theme.gap;
+    property <length> step-width: PlayState.can-step ? 110px + Theme.gap : 0px;
+    property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * Theme.gap) / 8;
+    changed across => { PlayState.strips-per-view = across - 1; }
+    init => { PlayState.strips-per-view = across - 1; }
+
+    if PlayState.can-step: Button {
+        x: Theme.margin;
+        y: Theme.margin;
+        width: 110px;
+        height: root.scenes-height;
+        text: "Previous";
+        clicked => { PlayState.step(-1); }
+    }
+    if PlayState.can-step: Button {
+        x: root.width - Theme.margin - 110px;
+        y: Theme.margin;
+        width: 110px;
+        height: root.scenes-height;
+        text: "Next";
+        clicked => { PlayState.step(1); }
+    }
+    for scene[i] in PlayState.scenes: Rectangle {
+        x: Theme.margin + root.step-width + i * (root.scene-width + Theme.gap);
+        y: Theme.margin;
+        width: root.scene-width;
+        height: root.scenes-height;
+        border-radius: Theme.radius;
+        background: scene.on ? Theme.accent.transparentize(0.83) : scene.filled ? Theme.surface : Theme.background;
+        border-width: scene.on ? 2px : scene.filled ? 0px : 1px;
+        border-color: scene.on ? Theme.accent : Theme.border.transparentize(0.65);
+        Text {
+            x: 8px;
+            y: 3px;
+            text: scene.number;
+            color: Theme.muted;
+            font-size: Theme.small;
+        }
+        Text {
+            x: 8px;
+            width: parent.width - 16px;
+            height: parent.height;
+            text: scene.name;
+            color: scene.on ? Theme.accent : Theme.text;
+            font-size: Theme.button;
+            font-weight: 700;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            border-radius: Theme.radius;
+            border-width: scene.cursor ? 2px : 0px;
+            border-color: Theme.focus;
+        }
+        if scene.filled: TouchArea {
+            clicked => { PlayState.scene-tapped(i); }
+        }
+    }
+
+    for strip[i] in PlayState.strips: Strip {
+        x: root.strips-x + i * (root.cell + Theme.gap);
+        y: root.strips-y;
+        width: root.cell;
+        height: root.strips-height;
+        data: strip;
+        mute-tapped => { PlayState.mute-tapped(i); }
+        solo-tapped => { PlayState.solo-tapped(i); }
+        level(f) => { PlayState.level(i, f); }
+        held(down) => { PlayState.held(i, down); }
+    }
+    if PlayState.has-master: Strip {
+        x: root.strips-x + (root.across - 1) * (root.cell + Theme.gap);
+        y: root.strips-y;
+        width: root.cell;
+        height: root.strips-height;
+        is-master: true;
+        data: PlayState.master;
+        level(f) => { PlayState.level(-1, f); }
+        held(down) => { PlayState.held(-1, down); }
+    }
+    if !PlayState.has-master: Text {
+        x: Theme.margin;
+        y: root.strips-y;
+        width: root.width - 2 * Theme.margin;
+        height: root.strips-height;
+        text: "No parts yet. Edit adds them.";
+        color: Theme.muted;
+        font-size: Theme.body;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: Theme.margin;
+        y: root.height - Theme.margin - root.footer;
+        width: (root.width - 2 * Theme.margin) / 2;
+        height: root.footer;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: Theme.small;
+        color: Theme.muted;
+        text: PlayState.message == "" ? PlayState.view : PlayState.message + "   " + PlayState.view;
+    }
+    Button {
+        x: root.width - Theme.margin - 300px * Theme.font-scale;
+        y: root.height - Theme.margin - root.footer;
+        width: 300px * Theme.font-scale;
+        height: root.footer;
+        text: "Edit, knob banks, Learn: Oscairn app";
+        clicked => { PlayState.edit(); }
+    }
+}

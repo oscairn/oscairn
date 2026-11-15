@@ -6,7 +6,8 @@ import { Theme } from "theme.slint";
 import { Bar, TopBar } from "topbar.slint";
 import { Home, HomeState, TileData } from "home.slint";
 import { Setlist, SetlistState, SlotData, ListRow } from "setlist.slint";
-export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow }
+import { Play, PlayState, SceneData, StripData } from "play.slint";
+export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -16,7 +17,7 @@ export component Shell inherits Window {
     default-font-family: Theme.font-family;
     // Empty while the engine answers; else what is wrong ("busy 3.2 s", "lost: ...").
     in property <string> engine;
-    // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening (`opening` names it).
+    // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening; 3 Play (`opening` names it).
     in property <int> screen;
     in property <string> opening;
     in property <bool> hands-over; // false: this shell cannot hand the display over (a computer)
@@ -48,6 +49,12 @@ export component Shell inherits Window {
         width: parent.width;
         height: parent.height - Theme.bar-height;
         visible: root.screen == 1;
+    }
+    Play {
+        y: Theme.bar-height;
+        width: parent.width;
+        height: parent.height - Theme.bar-height;
+        visible: root.screen == 3;
     }
     if root.screen == 2: Text {
         y: Theme.bar-height;

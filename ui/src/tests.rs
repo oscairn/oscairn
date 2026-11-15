@@ -627,3 +627,249 @@ fn session_setup_matches_the_juce_app() {
         "the FANTOM-07's, as measured on a unit after a JUCE-path start"
     );
 }
+
+fn play_graph() -> serde_json::Value {
+    json!({
+        "nodes": [
+            {"id": 1, "name": "Rhodes", "audioInputs": [], "audioOutputs": [{"channels": 2}], "noteInputs": 1, "noteOutputs": 0},
+            {"id": 3, "name": "Hall", "audioInputs": [{"channels": 2}], "audioOutputs": [{"channels": 2}], "noteInputs": 0, "noteOutputs": 0},
+            {"id": 4, "name": "Bass", "audioInputs": [], "audioOutputs": [{"channels": 1}], "noteInputs": 1, "noteOutputs": 0},
+        ],
+        "parts": [
+            {"id": 10, "name": "Keys", "level": 0.5, "mute": false, "solo": false, "chain": [1],
+             "input": {"kind": "notes", "devices": [], "zones": [{"keys": [36, 96], "transpose": 0}]}},
+            {"id": 11, "name": "Bass", "level": 1.0, "mute": false, "solo": false, "chain": [4],
+             "input": {"kind": "notes", "devices": [], "zones": [{"keys": [0, 59], "transpose": 0}]}},
+            {"id": 12, "name": "Reverb", "level": 0.8, "mute": false, "solo": false, "chain": [3], "input": {"kind": "bus"}},
+        ],
+        "wires": [],
+        "scenes": [{"id": 1, "name": "Verse"}, {"id": 2, "name": "Chorus"}], "scene": 2,
+        "master": {"level": 1.0, "pan": 0.0},
+    })
+}
+
+/// A viewable copy of the picture in target/screens/NAME.png: a PNG made by hand (stored zlib
+/// blocks, no image crate).
+fn png(s: &Screen, name: &str) {
+    use std::io::Write;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/screens");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut raw = Vec::new();
+    for y in 0..H {
+        raw.push(0u8);
+        raw.extend(s.pixels[y * W..(y + 1) * W].iter().flat_map(|p| [p.r, p.g, p.b]));
+    }
+    let mut z = vec![0x78, 0x01];
+    let mut chunks = raw.chunks(65535).peekable();
+    while let Some(c) = chunks.next() {
+        z.push(u8::from(chunks.peek().is_none()));
+        z.extend((c.len() as u16).to_le_bytes());
+        z.extend((!(c.len() as u16)).to_le_bytes());
+        z.extend(c);
+    }
+    let (mut a, mut b) = (1u32, 0u32);
+    for &x in &raw {
+        a = (a + x as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    z.extend(((b << 16) | a).to_be_bytes());
+    let crc = |data: &[u8]| {
+        let mut crc = !0u32;
+        for &x in data {
+            crc ^= x as u32;
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        !crc
+    };
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8], data: &[u8]| {
+        out.extend((data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend(data);
+        out.extend(&body);
+        out.extend(crc(&body).to_be_bytes());
+    };
+    let mut head = Vec::new();
+    head.extend((W as u32).to_be_bytes());
+    head.extend((H as u32).to_be_bytes());
+    head.extend([8, 2, 0, 0, 0]);
+    chunk(b"IHDR", &head);
+    chunk(b"IDAT", &z);
+    chunk(b"IEND", &[]);
+    std::fs::File::create(dir.join(format!("{name}.png"))).unwrap().write_all(&out).unwrap();
+}
+
+/// The next request that is not a meter poll (the timer may fire between a test's steps), polls answered.
+fn next_edit(f: &mut Fixture) -> serde_json::Value {
+    loop {
+        let r = f.engine.request();
+        if r["method"] != "parts.meters" {
+            return r;
+        }
+        f.reply(&r, json!({"result": {"meters": []}}));
+    }
+}
+
+// Play on the shell: the Performance's scenes, parts and master from graph.get; the left knob
+// (pane 0) through the scenes and the right (pane 1) through the parts, a press selecting a scene
+// or muting a part; touch on the scene tiles, M, S and the faders; levels moved live by
+// controls.changed; the meters asked only while Play is shown; Cancel drops the cursors, then goes
+// back; Edit hands the display to the JUCE app.
+#[test]
+fn play_by_panes_touch_and_meters() {
+    let mut f = Fixture::new("play");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play, no handover
+    assert_eq!(f.screen.ui.get_screen(), 3);
+    // The shell's ten on connecting, then Play's controls.changed subscription.
+    let mut methods = vec![];
+    for _ in 0..11 {
+        let request = f.engine.request();
+        let method = request["method"].as_str().unwrap().to_string();
+        let result = match method.as_str() {
+            "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
+            "graph.get" => play_graph(),
+            "library.query" => json!({"items": [], "total": 0}),
+            _ => json!({}),
+        };
+        methods.push(method);
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
+        f.pump();
+    }
+    assert_eq!(methods.iter().filter(|m| *m == "graph.get").count(), 1, "graph.get asked once, not again by Play: {methods:?}");
+    assert_eq!(methods.iter().filter(|m| *m == "subscribe").count(), 2, "{methods:?}");
+    let ui = f.screen.ui.clone_strong();
+    let play = ui.global::<crate::PlayState>();
+    let strips = |f: &Fixture| f.screen.ui.global::<crate::PlayState>().get_strips().iter().collect::<Vec<_>>();
+    let scenes = |f: &Fixture| f.screen.ui.global::<crate::PlayState>().get_scenes().iter().collect::<Vec<_>>();
+    assert_eq!(f.screen.ui.global::<Bar>().get_where().as_str(), "Play");
+    let names: Vec<_> = strips(&f).iter().map(|s| (s.name.to_string(), s.detail.to_string())).collect();
+    assert_eq!(names, [("Keys".into(), "Rhodes · Any device · C2–C7".into()), ("Bass".into(), "Bass · Any device · C-1–B3".into()), ("Reverb".into(), "Bus · Hall".into())]);
+    assert!(play.get_has_master() && (play.get_master().fraction - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "the master's level 1 of 0..2");
+    assert!((strips(&f)[0].fraction - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);
+    let scene_state: Vec<_> = scenes(&f).iter().map(|s| (s.filled, s.on)).collect();
+    assert_eq!(scene_state, [(true, false), (true, true), (false, false), (false, false), (false, false), (false, false), (false, false), (false, false)]);
+    assert!(!play.get_can_step(), "not the setlist's Performance");
+    f.screen.frame();
+    f.screen.save("play");
+    png(&f.screen, "play");
+    assert_eq!(f.screen.frame(), None, "at rest");
+    // The panel: a baseline, then E1 (pane 0) once: the cursor on the first scene; press: it plays.
+    let mut total = std::collections::BTreeMap::<&str, i64>::new();
+    let mut nav = |f: &mut Fixture, key: &'static str, by: i64| {
+        *total.entry(key).or_default() += by;
+        f.navigation(json!(total.clone()));
+    };
+    nav(&mut f, "move:0", 0);
+    nav(&mut f, "move:0", 1);
+    assert_eq!(scenes(&f).iter().position(|s| s.cursor), Some(0));
+    let repainted = f.screen.frame().unwrap();
+    assert!(repainted.1 >= 48 && repainted.1 + repainted.3 <= 48 + 6 + 44 + 2, "a scene cursor repaints the scene row only: {repainted:?}");
+    nav(&mut f, "confirm:0", 1);
+    let select = next_edit(&mut f);
+    assert_eq!((select["method"].as_str(), select["params"]["scene"].as_u64()), (Some("scenes.select"), Some(1)));
+    assert_eq!(scenes(&f).iter().position(|s| s.on), Some(0), "shown at once");
+    f.reply(&select, json!({"result": {"accepted": true}}));
+    // E6 (pane 1) twice: the cursor on the first part, then the second; press: it is muted.
+    nav(&mut f, "move:1", 1);
+    nav(&mut f, "move:1", 1);
+    assert_eq!(strips(&f).iter().position(|s| s.cursor), Some(1));
+    nav(&mut f, "confirm:1", 1);
+    let mute = next_edit(&mut f);
+    assert_eq!((mute["method"].as_str(), mute["params"].clone()), (Some("parts.level"), json!({"part": 11, "level": 1.0, "mute": true})));
+    f.reply(&mute, json!({"result": {"accepted": true}}));
+    assert!(strips(&f)[1].mute && strips(&f)[1].dim);
+    // Touch: M on the first part, S on the second, a fader to its middle (a quarter of the level).
+    play.invoke_mute_tapped(0);
+    let r = next_edit(&mut f);
+    assert_eq!((r["method"].as_str(), r["params"]["part"].as_u64(), r["params"]["mute"].as_bool()), (Some("parts.level"), Some(10), Some(true)));
+    f.reply(&r, json!({"result": {}}));
+    play.invoke_solo_tapped(1);
+    let r = next_edit(&mut f);
+    assert_eq!((r["method"].as_str(), r["params"].clone()), (Some("parts.solo"), json!({"part": 11, "solo": true})));
+    f.reply(&r, json!({"result": {}}));
+    play.invoke_level(2, 0.5);
+    let r = next_edit(&mut f);
+    assert_eq!((r["method"].as_str(), r["params"]["part"].as_u64(), r["params"]["level"].as_f64()), (Some("parts.level"), Some(12), Some(0.25)));
+    f.reply(&r, json!({"result": {}}));
+    play.invoke_level(-1, 0.5);
+    let r = next_edit(&mut f);
+    assert_eq!((r["method"].as_str(), r["params"]["level"].as_f64()), (Some("master.set"), Some(0.5)));
+    f.reply(&r, json!({"result": {}}));
+    // A level moved live; a finger on a fader keeps the engine's value from it. (The fake engine
+    // does not push controls.changed by itself: the notification is sent by hand.)
+    let live = |f: &mut Fixture, level: f64| {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "controls.changed", "params": {"parts": [{"part": 10, "level": level, "mute": false}], "master": {"level": 0.5, "pan": 0.0}}})));
+        f.pump();
+    };
+    live(&mut f, 0.81);
+    assert!((strips(&f)[0].fraction - 0.9).abs() < 1e-6, "the level moved live");
+    play.invoke_held(0, true);
+    live(&mut f, 0.25);
+    assert!((strips(&f)[0].fraction - 0.9).abs() < 1e-6, "held: the engine's value waits");
+    play.invoke_held(0, false);
+    live(&mut f, 0.25);
+    assert!((strips(&f)[0].fraction - 0.5).abs() < 1e-6);
+    // The meters: asked on a timer while Play is shown, one at a time; only the strip's own area repaints.
+    f.screen.frame();
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    f.screen.frame();
+    let r = f.engine.request();
+    assert_eq!(r["method"], "parts.meters");
+    f.reply(&r, json!({"result": {"meters": [{"part": 10, "peak": 0.5, "channels": [0.5, 1.0], "stolen": 0, "hardChokes": 0}]}}));
+    assert_eq!((strips(&f)[0].channels, strips(&f)[0].peak_a, strips(&f)[0].peak_b), (2, 0.82, 0.91));
+    let repainted = f.screen.frame().unwrap();
+    assert!(repainted.2 < 200, "a meter repaints its strip, not the screen: {repainted:?}");
+    f.screen.save("play-meters");
+    png(&f.screen, "play-meters");
+    // Cancel: the cursors go; Cancel again: back to Home, the subscription ended, no more meters.
+    nav(&mut f, "cancel", 1);
+    assert_eq!((strips(&f).iter().any(|s| s.cursor), f.screen.ui.get_screen()), (false, 3));
+    nav(&mut f, "cancel", 1);
+    assert_eq!(f.screen.ui.get_screen(), 0);
+    let r = next_edit(&mut f);
+    assert_eq!((r["method"].as_str(), r["params"]["topics"][0].as_str()), (Some("unsubscribe"), Some("controls.changed")));
+    f.reply(&r, json!({"result": {}}));
+    // Open Play again, and Edit: the display goes to the JUCE app's Performance.
+    f.screen.ui.global::<HomeState>().invoke_tapped(0);
+    assert_eq!(f.screen.ui.get_screen(), 3);
+    play.invoke_edit();
+    assert_eq!((f.screen.ui.get_screen(), shell::handover()), (2, Some("performance")));
+}
+
+// Previous and Next on Play, the page keys, only while the Performance is the setlist's.
+#[test]
+fn play_steps_through_the_setlist_only_when_it_follows_it() {
+    let mut s = Screen::new();
+    let mut play = crate::play::Screen::new(&s.ui);
+    assert_eq!(play.act(Action::Page(1)), crate::play::Outcome::Stay);
+    play.follow(true);
+    assert!(s.ui.global::<crate::PlayState>().get_can_step());
+    assert_eq!(play.act(Action::Page(-1)), crate::play::Outcome::Step(-1));
+    play.follow(false);
+    assert!(!s.ui.global::<crate::PlayState>().get_can_step());
+    assert_eq!(play.act(Action::Cancel(None)), crate::play::Outcome::Back);
+    s.frame();
+}
+
+// Play draws in the built-in themes and an odd one (large type, extreme colors).
+#[test]
+fn play_draws_in_every_theme() {
+    let mut s = Screen::new();
+    let mut play = crate::play::Screen::new(&s.ui);
+    play.graph(&play_graph());
+    s.ui.set_screen(3);
+    play.meters(&json!({"meters": [{"part": 10, "peak": 0.5, "channels": [0.5, 1.0]}, {"part": 11, "peak": 2.0, "channels": [2.0]}]}));
+    let places = theme::Places::default();
+    let mut loaded: Vec<theme::Loaded> = ["oscairn-dark", "oscairn-light"].iter().map(|id| theme::chosen(&places, id, "")).collect();
+    loaded.push(odd_theme());
+    for t in &loaded {
+        theme::apply(&s.ui, t);
+        assert!(s.frame().is_some(), "{}: drawn", t.id);
+        s.save(&format!("play-{}", t.id));
+        png(&s, &format!("play-{}", t.id));
+    }
+}

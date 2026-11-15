@@ -42,9 +42,10 @@ export global SetlistState {
     callback tapped-slot(int);
     callback tapped-setlist(int);
     callback step(int);
+    callback play(); // open Play
 }
 
-component Button inherits Rectangle {
+export component Button inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
     callback clicked();
@@ -204,6 +205,10 @@ export component Setlist inherits Rectangle {
             text: "Next";
             enabled: SetlistState.can-next;
             clicked => { SetlistState.step(1); }
+        }
+        Button {
+            text: "Play";
+            clicked => { SetlistState.play(); }
         }
     }
 }

@@ -3,10 +3,9 @@
 // for the stage: the Performance's scenes along the top (Previous and Next at the ends when it came
 // from the setlist), a strip per part and bus below (name and sound, level fader, a meter per
 // channel, mute and solo), the master pinned at the right. A cursor is a focus border; the scene
-// playing is an accent fill and edge.
+// playing is an accent fill and edge. Colors, corners, edges, sliders and marks are the theme's.
 
-import { Theme } from "theme.slint";
-import { Button } from "setlist.slint";
+import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle } from "theme.slint";
 
 export struct SceneData {
     number: int,
@@ -51,10 +50,10 @@ export global PlayState {
 
 component Meter inherits Rectangle {
     in property <float> value;
-    // -12 dB and -3 dB on the -60..+6 dB scale: where the zones turn yellow and red.
+    // -12 dB and -3 dB on the -60..+6 dB scale (the JUCE meters'): where the zones turn yellow and red.
     property <float> yellow: 0.7273;
     property <float> red: 0.8636;
-    background: Theme.border.transparentize(0.65);
+    background: Theme.track;
     border-radius: self.width / 2;
     clip: true;
     Rectangle {
@@ -80,27 +79,7 @@ component Meter inherits Rectangle {
     }
 }
 
-component Mark inherits Rectangle {
-    in property <string> letter;
-    in property <bool> on;
-    in property <color> tint;
-    callback clicked();
-    border-radius: Theme.radius;
-    background: on ? tint : Theme.raised;
-    Text {
-        text: root.letter;
-        color: root.on ? Theme.background : Theme.text;
-        font-size: Theme.button;
-        font-weight: 700;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
-
-component Strip inherits Rectangle {
+component Strip inherits Section {
     in property <StripData> data;
     in property <bool> is-master;
     callback open-tapped();
@@ -108,18 +87,21 @@ component Strip inherits Rectangle {
     callback solo-tapped();
     callback level(float);
     callback held(bool);
-    background: Theme.surface;
-    border-radius: Theme.radius;
+    // The strip's insides: the fader beside its meters (each a thin bar), the marks under them.
     property <length> fader-width: Theme.touch;
-    property <length> top: 8px + Theme.body + Theme.small + 20px;
-    property <length> bottom: root.is-master ? 10px : Theme.touch + 18px;
-    property <length> pair-width: root.fader-width + 12px + 2 * 7px + 3px;
+    property <length> meter-width: 7px;
+    property <length> meter-pitch: 10px; // from one meter to the next
+    property <length> meter-gap: Theme.pad-wide; // fader to meters
+    property <length> meter-inset: Theme.pad-narrow; // the meters' ends from the fader's
+    property <length> top: Theme.pad-narrow + Theme.body + Theme.small + 2 * Theme.pad;
+    property <length> bottom: root.is-master ? Theme.pad : Theme.touch + Theme.pad-narrow + Theme.pad;
+    property <length> pair-width: root.fader-width + root.meter-gap + root.meter-pitch + root.meter-width;
     Rectangle {
-        opacity: data.dim ? 0.45 : 1;
+        opacity: data.dim ? Theme.dim : 1;
         Text {
-            x: 10px;
-            y: 8px;
-            width: parent.width - 20px;
+            x: Theme.pad;
+            y: Theme.pad-narrow;
+            width: parent.width - 2 * Theme.pad;
             text: data.name;
             color: Theme.text;
             font-size: Theme.body;
@@ -127,16 +109,16 @@ component Strip inherits Rectangle {
             overflow: elide;
         }
         Text {
-            x: 10px;
-            y: 8px + Theme.body + 6px;
-            width: parent.width - 20px;
+            x: Theme.pad;
+            y: Theme.pad-narrow + Theme.body + Theme.pad-tight;
+            width: parent.width - 2 * Theme.pad;
             text: data.detail;
             color: Theme.muted;
             font-size: Theme.small;
             overflow: elide;
         }
         if !root.is-master: TouchArea {
-            height: root.top - 4px;
+            height: root.top - Theme.pad-tight;
             clicked => { root.open-tapped(); }
         }
         // The fader and its meters as a pair, centered above the marks.
@@ -145,41 +127,41 @@ component Strip inherits Rectangle {
             y: root.top;
             width: root.fader-width;
             height: root.height - root.top - root.bottom;
-            background: Theme.border.transparentize(0.65);
-            border-radius: Theme.radius;
-            Rectangle {
+            SliderBar {
+                x: 0;
+                y: Theme.thumb / 2;
                 width: parent.width;
-                height: parent.height * data.fraction;
-                y: parent.height - self.height;
-                background: Theme.accent.transparentize(0.35);
-                border-radius: Theme.radius;
+                height: parent.height - Theme.thumb;
+                norm: data.fraction;
+                upright: true;
+                lit: data.cursor;
             }
             touch := TouchArea {
                 pointer-event(e) => {
                     if (e.kind == PointerEventKind.down) { root.held(true); }
                     if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) { root.held(false); }
                 }
-                moved => { root.level(max(0, min(1, 1 - touch.mouse-y / fader.height))); }
-                clicked => { root.level(max(0, min(1, 1 - touch.mouse-y / fader.height))); }
+                moved => { root.level(max(0, min(1, 1 - (touch.mouse-y - Theme.thumb / 2) / (fader.height - Theme.thumb)))); }
+                clicked => { root.level(max(0, min(1, 1 - (touch.mouse-y - Theme.thumb / 2) / (fader.height - Theme.thumb)))); }
             }
         }
         if data.channels > 0: Meter {
-            x: fader.x + fader.width + 12px;
-            y: fader.y + 8px;
-            width: 7px;
-            height: fader.height - 16px;
+            x: fader.x + fader.width + root.meter-gap;
+            y: fader.y + root.meter-inset;
+            width: root.meter-width;
+            height: fader.height - 2 * root.meter-inset;
             value: data.peak-a;
         }
         if data.channels > 1: Meter {
-            x: fader.x + fader.width + 12px + 10px;
-            y: fader.y + 8px;
-            width: 7px;
-            height: fader.height - 16px;
+            x: fader.x + fader.width + root.meter-gap + root.meter-pitch;
+            y: fader.y + root.meter-inset;
+            width: root.meter-width;
+            height: fader.height - 2 * root.meter-inset;
             value: data.peak-b;
         }
         if !root.is-master: Mark {
-            x: root.width / 2 - Theme.touch - 4px;
-            y: root.height - Theme.touch - 8px;
+            x: root.width / 2 - Theme.touch - Theme.pad-tight;
+            y: root.height - Theme.touch - Theme.pad-narrow;
             width: Theme.touch;
             height: Theme.touch;
             letter: "M";
@@ -188,8 +170,8 @@ component Strip inherits Rectangle {
             clicked => { root.mute-tapped(); }
         }
         if !root.is-master: Mark {
-            x: root.width / 2 + 4px;
-            y: root.height - Theme.touch - 8px;
+            x: root.width / 2 + Theme.pad-tight;
+            y: root.height - Theme.touch - Theme.pad-narrow;
             width: Theme.touch;
             height: Theme.touch;
             letter: "S";
@@ -198,64 +180,65 @@ component Strip inherits Rectangle {
             clicked => { root.solo-tapped(); }
         }
     }
-    Rectangle {
-        border-radius: Theme.radius;
-        border-width: data.cursor ? 2px : 0px;
-        border-color: Theme.focus;
+    Cursor {
+        shown: data.cursor;
     }
 }
 
 export component Play inherits Rectangle {
+    // The sections' gap (none in a theme whose sections join).
+    property <length> gap: Theme.gap-between(Theme.gap);
     property <length> scenes-height: Theme.touch;
     property <length> footer: Theme.touch;
-    property <length> strip-min: 110px;
+    property <length> strip-min: Theme.button-width;
+    property <length> edit-width: 300px * Theme.font-scale;
     property <length> strips-x: Theme.margin;
     property <length> strips-width: self.width - 2 * Theme.margin;
     // Strips across, the master's among them; the cell is the same whatever the parts shown.
-    property <int> across: max(2, floor((strips-width + Theme.gap) / (strip-min + Theme.gap)));
-    property <length> cell: (strips-width - (across - 1) * Theme.gap) / across;
+    property <int> across: max(2, floor((strips-width + gap) / (strip-min + gap)));
+    property <length> cell: (strips-width - (across - 1) * gap) / across;
     property <length> strips-y: Theme.margin + scenes-height + Theme.gap;
     property <length> strips-height: self.height - strips-y - footer - Theme.margin - Theme.gap;
-    property <length> step-width: PlayState.can-step ? 110px + Theme.gap : 0px;
-    property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * Theme.gap) / 8;
+    property <length> step-width: PlayState.can-step ? Theme.button-width + Theme.gap : 0px;
+    property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * gap) / 8;
     changed across => { PlayState.strips-per-view = across - 1; }
     init => { PlayState.strips-per-view = across - 1; }
 
     if PlayState.can-step: Button {
         x: Theme.margin;
         y: Theme.margin;
-        width: 110px;
+        width: Theme.button-width;
         height: root.scenes-height;
         text: "Previous";
         clicked => { PlayState.step(-1); }
     }
     if PlayState.can-step: Button {
-        x: root.width - Theme.margin - 110px;
+        x: root.width - Theme.margin - Theme.button-width;
         y: Theme.margin;
-        width: 110px;
+        width: Theme.button-width;
         height: root.scenes-height;
         text: "Next";
         clicked => { PlayState.step(1); }
     }
-    for scene[i] in PlayState.scenes: Rectangle {
-        x: Theme.margin + root.step-width + i * (root.scene-width + Theme.gap);
+    // The scenes: the one playing an accent wash and edge, a filled one a section, an empty one an outline.
+    for scene[i] in PlayState.scenes: Section {
+        x: Theme.margin + root.step-width + i * (root.scene-width + root.gap);
         y: Theme.margin;
         width: root.scene-width;
         height: root.scenes-height;
-        border-radius: Theme.radius;
-        background: scene.on ? Theme.accent.transparentize(0.83) : scene.filled ? Theme.surface : Theme.background;
-        border-width: scene.on ? 2px : scene.filled ? 0px : 1px;
-        border-color: scene.on ? Theme.accent : Theme.border.transparentize(0.65);
+        fill: scene.on ? Theme.accent.with-alpha(Theme.wash-light) : scene.filled ? Theme.surface : transparent;
+        border-width: scene.on ? Theme.cursor-width : scene.filled ? (Theme.sections == SectionStyle.joined ? 0px : Theme.edge-width) : Theme.hair;
+        border-color: scene.on ? Theme.accent : scene.filled ? Theme.edge-color : Theme.track;
         Text {
-            x: 8px;
-            y: 3px;
+            x: Theme.pad-narrow;
+            y: Theme.pad-tight - 1px;
             text: scene.number;
             color: Theme.muted;
             font-size: Theme.small;
         }
         Text {
-            x: 8px;
-            width: parent.width - 16px;
+            x: Theme.pad-narrow;
+            width: parent.width - 2 * Theme.pad-narrow;
             height: parent.height;
             text: scene.name;
             color: scene.on ? Theme.accent : Theme.text;
@@ -265,10 +248,8 @@ export component Play inherits Rectangle {
             horizontal-alignment: center;
             vertical-alignment: center;
         }
-        Rectangle {
-            border-radius: Theme.radius;
-            border-width: scene.cursor ? 2px : 0px;
-            border-color: Theme.focus;
+        Cursor {
+            shown: scene.cursor;
         }
         if scene.filled: TouchArea {
             clicked => { PlayState.scene-tapped(i); }
@@ -276,7 +257,7 @@ export component Play inherits Rectangle {
     }
 
     for strip[i] in PlayState.strips: Strip {
-        x: root.strips-x + i * (root.cell + Theme.gap);
+        x: root.strips-x + i * (root.cell + root.gap);
         y: root.strips-y;
         width: root.cell;
         height: root.strips-height;
@@ -288,7 +269,7 @@ export component Play inherits Rectangle {
         held(down) => { PlayState.held(i, down); }
     }
     if PlayState.has-master: Strip {
-        x: root.strips-x + (root.across - 1) * (root.cell + Theme.gap);
+        x: root.strips-x + (root.across - 1) * (root.cell + root.gap);
         y: root.strips-y;
         width: root.cell;
         height: root.strips-height;
@@ -321,9 +302,9 @@ export component Play inherits Rectangle {
         text: PlayState.message == "" ? PlayState.view : PlayState.message + "   " + PlayState.view;
     }
     Button {
-        x: root.width - Theme.margin - 300px * Theme.font-scale;
+        x: root.width - Theme.margin - root.edit-width;
         y: root.height - Theme.margin - root.footer;
-        width: 300px * Theme.font-scale;
+        width: root.edit-width;
         height: root.footer;
         text: "Edit, knob banks, Learn: Oscairn app";
         clicked => { PlayState.edit(); }

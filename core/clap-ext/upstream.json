@@ -1,5 +1,5 @@
 {
   "repository": "https://github.com/oscairn/oscairn-clap",
-  "commit": "a057ae6fbd79552a85b86b7da4c15d4aa5fcbeff",
+  "commit": "c2119dbe992ce7551f49fb5efa49fe48e93cfe34",
   "note": "Vendored include/ and LICENSE only (MIT); the reference docs and examples stay upstream. tools/check-clap-ext.py checks this copy against the commit."
 }

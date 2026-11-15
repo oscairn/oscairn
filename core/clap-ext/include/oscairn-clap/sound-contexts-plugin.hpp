@@ -57,6 +57,13 @@
 //   double voiceCost()             microseconds a voice costs a block (default: 0, no estimate)
 //   static constexpr bool volumeExpressions = true;   when render multiplies by amplitude()
 //
+// It may provide bool asleep() const (default: false): true when it makes no sound and will make
+// none until an event arrives (for example, no voice or tail is sounding). process returns
+// CLAP_PROCESS_SLEEP after a block that ends asleep, and for a block with no input events when it
+// already is, clearing the outputs without rendering. While asleep the host does not call process,
+// and process->steady_time keeps counting the skipped frames, so derive free-running phases (an LFO,
+// a chorus) from steady_time, not from a count of rendered frames.
+//
 // MIDI pitch bend and the mod wheel (CC 1) are kept per channel; each voice follows its
 // channel's values smoothly in VoiceBase::bend and modWheel once render calls followControls(v)
 // every sample. The plugin chooses what they do (its bend range, the wheel's target).
@@ -248,6 +255,7 @@ namespace oscairn::contexts
         double loudness(const Voice& v) const { return v.velocity * amplitude(v, 0); }
         bool mono(const Context&) const { return false; }
         double voiceCost() const { return 0; }
+        bool asleep() const { return false; }
         static constexpr bool volumeExpressions = false;
         static bool honorsVolume(const clap_plugin_t*) { return Derived::volumeExpressions; }
         static void setLimits(const clap_plugin_t* p, uint32_t limit, const oscairn_voice_budget_context_t* list, uint32_t count)
@@ -376,6 +384,15 @@ namespace oscairn::contexts
             s.keepWithinLimits();
             const uint32_t frames = process->frames_count;
             const uint32_t count = process->in_events->size(process->in_events);
+            if(!count && s.derived().asleep())
+            {
+                for(uint32_t o = 0; o < process->audio_outputs_count; ++o)
+                {
+                    const auto& out = process->audio_outputs[o];
+                    for(uint32_t c = 0; out.data32 && c < out.channel_count; ++c) if(out.data32[c]) std::fill_n(out.data32[c], frames, 0.f);
+                }
+                return CLAP_PROCESS_SLEEP;
+            }
             uint32_t done = 0;
             for(uint32_t e = 0; e < count; ++e)
             {
@@ -397,7 +414,7 @@ namespace oscairn::contexts
                     s.applyExpression(*reinterpret_cast<const clap_event_note_expression_t*>(header));
             }
             s.renderSegment(process, done, frames);
-            return CLAP_PROCESS_CONTINUE;
+            return s.derived().asleep() ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
         }
 
         // oscairn.sound-snapshots draft 3: the ring-out buffer for the next process(), or none.

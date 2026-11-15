@@ -1029,6 +1029,11 @@ namespace oscairn
                 return s;
             }
 
+            InputEvents inputEvents(bool reset) noexcept override
+            {
+                return {events_.load(std::memory_order_relaxed), reset ? mostEvents_.exchange(0, std::memory_order_relaxed) : mostEvents_.load(std::memory_order_relaxed)};
+            }
+
             bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
                          const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override
             {
@@ -1325,6 +1330,8 @@ namespace oscairn
                 s.frames = frames; s.eventCount = kept; s.hasTransport = transport != nullptr;
                 if(restedBlocks_ || restedSent_) { s.restedBlocks = restedBlocks_; s.restedFrames = restedFrames_; restedSent_ = restedBlocks_ != 0; restedBlocks_ = restedFrames_ = 0; } // written only while there is something to tell
                 called_.store(called_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); // one writer: no locked add
+                events_.store(events_.load(std::memory_order_relaxed) + kept, std::memory_order_relaxed); // one writer
+                for(auto most = mostEvents_.load(std::memory_order_relaxed); kept > most && !mostEvents_.compare_exchange_weak(most, kept, std::memory_order_relaxed);) {} // the reader's reset may race: lock-free, never waits
                 s.setLimits = limitsWaiting_ && shareLimits(s);
                 if(s.setLimits) limitsWaiting_ = false;
                 s.ringOut = s.ringOutChannels && no >= outChannels_;
@@ -1735,6 +1742,9 @@ namespace oscairn
             // Blocks handed to the worker, and those its plugin slept through uncalled (rest), for the timing report; and
             // those since the last handed, with their frames, which the next request tells the worker. Audio thread.
             std::atomic<uint64_t> called_{0}, rested_{0};
+            // The events handed to the worker in those blocks (replayed and carried ones too): their total, and the most in one
+            // block since the last read that reset it (inputEvents). Audio thread writes.
+            std::atomic<uint64_t> events_{0}, mostEvents_{0};
             uint32_t restedBlocks_ = 0, restedFrames_ = 0; bool restedSent_ = false;
             // Audio thread: the blocks in a row it could have rested, called while fewer than restHold (holding_: this one
             // was).

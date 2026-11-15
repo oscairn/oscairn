@@ -15,6 +15,7 @@
 #include <oscairn/json_rpc.h>
 #include <oscairn/session.h>
 #include <chrono>
+#include <span>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -127,6 +128,37 @@ int main(int argc, char** argv)
         }
         const auto json = oscairn::JsonRpc(shared).dispatch(R"({"jsonrpc":"2.0","id":1,"method":"engine.timing"})").value_or("");
         check(json.find(R"("parts":["Alpha","Beta"])") != std::string::npos, "engine.timing gives the parts: " + json.substr(0, 200));
+    }
+    // The events handed to the plugin: the notes of one block, counted in total and as the most in a block, from the last reset.
+    {
+        oscairn::Session keyed(rate, frames);
+        oscairn::PartInput keys; keys.zones = {oscairn::NoteZone{0, 127}};
+        keyed.insertIntoPart(keyed.addPart("Keys", keys), 0, keyed.add("Synth", argv[3])); keyed.commit();
+        auto run = [&](int blocks, std::vector<kick::clap::Event> events = {}) {
+            for(int i = 0; i < blocks; ++i) { keyed.service(); keyed.process(out, frames, i ? std::span<const kick::clap::Event>() : std::span<const kick::clap::Event>(events)); }
+        };
+        run(40);
+        keyed.engineTiming(true);
+        run(20);
+        const auto quiet = keyed.engineTiming(true); // what the host sends on its own (and the read that starts a new window)
+        run(1, {kick::clap::Event::note(true, 60, .8), kick::clap::Event::note(true, 64, .8), kick::clap::Event::note(true, 67, .8)});
+        run(20);
+        const auto played = keyed.engineTiming(false);
+        const auto json = oscairn::JsonRpc(keyed).dispatch(R"({"jsonrpc":"2.0","id":1,"method":"engine.timing","params":{"reset":true}})").value_or("");
+        run(20);
+        const auto later = keyed.engineTiming(false);
+        check(quiet.workers.size() == 1 && played.workers.size() == 1 && later.workers.size() == 1, "the keyed synth's worker is in engine.timing");
+        if(quiet.workers.size() == 1 && played.workers.size() == 1 && later.workers.size() == 1)
+        {
+            const auto& q = quiet.workers[0]; const auto& p = played.workers[0]; const auto& l = later.workers[0];
+            std::printf("events handed: quiet %llu in all, most %llu in a block; three notes %llu in all, most %llu; after the reset %llu, most %llu\n", (unsigned long long)q.events, (unsigned long long)q.mostEvents,
+                        (unsigned long long)p.events, (unsigned long long)p.mostEvents, (unsigned long long)l.events, (unsigned long long)l.mostEvents);
+            // A worker whose plugin asked for neither the beat nor the harmony is sent no event of the host's own: an idle part is handed none (it was two a block before a worker said what its plugin asked for); the notes are all there is.
+            check(q.mostEvents == 0 && q.events == 0, "an idle part is handed no events: " + std::to_string(q.events) + " in 20 blocks, most " + std::to_string(q.mostEvents));
+            check(p.mostEvents == 3 && p.events == 3, "three notes in one block are three events, in that block alone: " + std::to_string(p.events) + " in all, most " + std::to_string(p.mostEvents) + " in one");
+            check(l.events == 0 && l.mostEvents == 0, "counted from the reset: " + std::to_string(l.events) + ", most " + std::to_string(l.mostEvents));
+            check(json.find("\"events\":" + std::to_string(p.events) + ",\"mostEvents\":" + std::to_string(p.mostEvents)) != std::string::npos, "engine.timing gives each worker's events and mostEvents: " + json.substr(0, 200));
+        }
     }
     // RFC 0045's sharing bias: with OSCAIRN_SHARING=cpu a second Basic Synth added gets an instance, and a worker, of its own.
     for(const char* bias : {"", "cpu"})

@@ -605,7 +605,8 @@ namespace oscairn
         case Kind::Exponential: return ( std::exp( 4 * x ) - 1 ) / ( std::exp( 4.0 ) - 1 );
         case Kind::Logarithmic: return std::log1p( ( std::exp( 4.0 ) - 1 ) * x ) / 4;
         case Kind::SCurve: return x * x * ( 3 - 2 * x );
-        case Kind::Db: return x > 0 ? std::pow( 10.0, ( low + ( high - low ) * x ) / 20 ) : 0;
+        // The base is opaque so the optimizer keeps pow (it would turn pow( 10, y ) into exp10, which rounds differently, at -O1 and up only); the Rust run does the same.
+        case Kind::Db: { static volatile double ten = 10.0; return x > 0 ? std::pow( ten, std::fma( high - low, x, low ) / 20 ) : 0; }
         case Kind::Power: return std::pow( x, exponent );
         }
         return x;

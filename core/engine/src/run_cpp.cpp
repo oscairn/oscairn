@@ -414,7 +414,7 @@ bool cpp_core_run_block(oscairn_run* run,const oscairn_run_block* b,const oscair
                         v.port_index = e.port_index;
                         v.channel    = route->channel >= 0 ? route->channel : e.channel;
                         v.key        = e.key;
-                        v.value      = route->minimum + ( control ? follow( x ) : std::clamp( e.value, 0.0, 1.0 ) ) * range;
+                        v.value      = std::fma( control ? follow( x ) : std::clamp( e.value, 0.0, 1.0 ), range, route->minimum );
                         if( route->stepped )
                             v.value = std::round( v.value );
                         place( Event::from( v ) );

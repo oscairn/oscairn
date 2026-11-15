@@ -116,9 +116,9 @@ add_library(oscairn_engine STATIC
 target_include_directories(oscairn_engine PUBLIC engine/include)
 target_link_libraries(oscairn_engine PUBLIC oscairn_plugin_host oscairn_engine_core)
 target_compile_options(oscairn_engine PRIVATE -Wall -Wextra)
-# Rust never fuses a multiply and an add; nor does the C++ core, so the two agree bit for bit. Nor does the
+# Rust never fuses a multiply and an add unless it says mul_add; nor does the C++ core (run_cpp.cpp says std::fma at those same spots), so the two agree bit for bit. Nor does the
 # recorder, whose taps redo the graph's mix of a connection (live gains ramped) and must sum to what plays exactly.
-set_source_files_properties(engine/src/core_cpp.cpp engine/src/audio_cpp.cpp engine/src/recorder.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
+set_source_files_properties(engine/src/core_cpp.cpp engine/src/audio_cpp.cpp engine/src/run_cpp.cpp engine/src/recorder.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
 if(OSCAIRN_ENGINE_CORE STREQUAL "rust")
     target_compile_definitions(oscairn_engine PRIVATE OSCAIRN_ENGINE_CORE_RUST=1)
 elseif(NOT OSCAIRN_ENGINE_CORE STREQUAL "cpp")

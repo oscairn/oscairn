@@ -1228,7 +1228,7 @@ namespace oscairn
     // middle is no change. Absolute: how far that point is from the base, so alone it sets the value.
     double MacroTarget::offset(double value) const
     {
-        const double point = start + (end - start) * shape(value);
+        const double point = curveOf(*this, 0).point(value);
         return point - (relative ? .5 : base);
     }
 
@@ -1263,7 +1263,7 @@ namespace oscairn
         case MacroTarget::Kind::Morph: throw std::invalid_argument("a morph's ends are its scenes");
         }
         now = std::clamp(now, 0.0, 1.0);
-        auto point = [](const MacroTarget& o, double x) { return o.start + (o.end - o.start) * o.shape(x); };
+        auto point = [](const MacroTarget& o, double x) { return curveOf(o, 0).point(x); };
         // Read from the parameter: a client's copy of the controls does not carry their delivery.
         auto modulates = [&](const MacroTarget& o) { return o.relative && o.kind == MacroTarget::Kind::Parameter && (c.parameterInfo(o.node, o.param).flags & CLAP_PARAM_IS_MODULATABLE); };
         const bool own = modulates(t);
@@ -1474,7 +1474,7 @@ namespace oscairn
                         else
                         {
                             // What this target adds, at its control's value now: a relative one its offset, an absolute one its point.
-                            const double own = t.relative ? t.offset(m.value) : t.start + (t.end - t.start) * t.shape(m.value);
+                            const double own = t.relative ? t.offset(m.value) : curveOf(t, 0).point(m.value);
                             const double rest = contributions(macros, mappingScene, t, 0, 0).at(t.base) - own;
                             full.push_back(curveOf(t, rest - (t.relative ? .5 : 0)));
                         }
@@ -1594,7 +1594,7 @@ namespace oscairn
                 if(o.sameDestination(t) && !modulated(o) && !(mappingScene && std::find(o.offIn.begin(), o.offIn.end(), mappingScene) != o.offIn.end()))
                 {
                     const double v = m.id == macro ? value : m.value;
-                    sum.fixed += o.relative ? o.offset(v) : o.start + (o.end - o.start) * o.shape(v);
+                    sum.fixed += o.relative ? o.offset(v) : curveOf(o, 0).point(v);
                     sum.absolute += !o.relative;
                 }
         return sum;

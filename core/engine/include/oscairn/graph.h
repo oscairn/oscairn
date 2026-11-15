@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -273,7 +274,7 @@ namespace oscairn
             enum class Kind : uint8_t { Linear, Exponential, Logarithmic, SCurve, Db, Power } kind = Kind::Linear;
             double start = 0, end = 1, shift = 0, low = -96, high = 0, exponent = 2;
             double shape( double x ) const noexcept; // the curve, 0..1 to 0..1
-            double point( double x ) const noexcept { return start + ( end - start ) * shape( x ); }
+            double point( double x ) const noexcept { return std::fma( end - start, shape( x ), start ); } // fused by name: the Rust run's mul_add, whatever the compiler does
             double next( double x ) const noexcept { return std::clamp( shift + point( x ), 0.0, 1.0 ); }
             bool operator==( const ControlCurve& ) const = default;
         };

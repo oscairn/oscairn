@@ -244,15 +244,15 @@ fn midi_out(midi: &mut [Midi], count: &mut u32, drops: &AtomicU64, m: Midi) {
 }
 
 impl Curve {
-    /// Graph::ControlCurve::shape, point and next; mul_add where the C++ (clang and g++, contracting
-    /// by default) fuses a multiply-add, so the values are the old build's.
+    /// Graph::ControlCurve::shape, point and next; mul_add where the C++ says std::fma (graph.h point,
+    /// graph.cpp Db, run_cpp.cpp's minimum + x * range), so the values are the same at every optimization level.
     fn shape(&self, value: f64) -> f64 {
         let x = value.clamp(0.0, 1.0);
         match self.kind {
             1 => ((4.0 * x).exp() - 1.0) / (4f64.exp() - 1.0),
             2 => ((4f64.exp() - 1.0) * x).ln_1p() / 4.0,
             3 => x * x * (3.0 - 2.0 * x), // 2x is exact: fused or not, the same
-            4 if x > 0.0 => 10f64.powf((self.high - self.low).mul_add(x, self.low) / 20.0),
+            4 if x > 0.0 => std::hint::black_box(10f64).powf((self.high - self.low).mul_add(x, self.low) / 20.0),
             4 => 0.0,
             5 => x.powf(self.exponent),
             _ => x,

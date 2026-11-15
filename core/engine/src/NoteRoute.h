@@ -345,9 +345,10 @@ struct NoteRoute
             for(auto& slot:active())if(from(slot,source) && matches(slot,expression.note_id,expression.port_index,expression.channel,expression.key)) {
                 if(volume && slot.stolen)continue; // its fade owns its volume
                 if(volume)slot.volume=expression.value;
-                auto copy=expression;copy.note_id=clap[slot.address.port_index]?slot.id:-1;
+                auto out=e;auto& copy=*reinterpret_cast<clap_event_note_expression_t*>(out.bytes.data()); // the event's own bytes: a struct copy leaves its padding indeterminate
+                copy.note_id=clap[slot.address.port_index]?slot.id:-1;
                 copy.port_index=slot.address.port_index;copy.channel=slot.address.channel;copy.key=slot.key;
-                ok=emit(Event::from(copy)) && ok;
+                ok=emit(out) && ok;
             }
             return ok;
         }
@@ -358,9 +359,10 @@ struct NoteRoute
                 if(parameter.note_id<0 && parameter.key<0)return emit(e);
                 bool ok=true;
                 for(const auto& slot:active())if(matches(slot,parameter.note_id,parameter.port_index,parameter.channel,parameter.key)) {
-                    auto copy=parameter;copy.note_id=clap[slot.address.port_index]?slot.id:-1;
+                    auto out=e;auto& copy=*reinterpret_cast<T*>(out.bytes.data()); // as above: no struct copy, whose padding is indeterminate
+                    copy.note_id=clap[slot.address.port_index]?slot.id:-1;
                     copy.port_index=slot.address.port_index;copy.channel=slot.address.channel;copy.key=slot.key;
-                    ok=emit(Event::from(copy)) && ok;
+                    ok=emit(out) && ok;
                 }
                 return ok;
             };

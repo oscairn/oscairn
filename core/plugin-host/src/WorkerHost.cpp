@@ -954,7 +954,7 @@ namespace oscairn
                     return false;
                 if(restful_ < restHold) { ++restful_; holding_ = true; return false; }
                 outputCount_ = 0; if(sysexOutput_) sysexOutput_->used = 0; reset_ = false; kept_ = playedKept_ = true;
-                ++restedBlocks_; restedFrames_ += frames; rested_.fetch_add(1, std::memory_order_relaxed);
+                ++restedBlocks_; restedFrames_ += frames; rested_.store(rested_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); // one writer: no locked add
                 return true;
             }
             bool wasReset() const noexcept override { return reset_; }
@@ -1259,7 +1259,8 @@ namespace oscairn
                 }
                 carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0;
                 s.frames = frames; s.eventCount = kept; s.hasTransport = transport != nullptr;
-                s.restedBlocks = restedBlocks_; s.restedFrames = restedFrames_; restedBlocks_ = restedFrames_ = 0; called_.fetch_add(1, std::memory_order_relaxed);
+                if(restedBlocks_ || restedSent_) { s.restedBlocks = restedBlocks_; s.restedFrames = restedFrames_; restedSent_ = restedBlocks_ != 0; restedBlocks_ = restedFrames_ = 0; } // written only while there is something to tell
+                called_.store(called_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); // one writer: no locked add
                 s.setLimits = limitsWaiting_ && shareLimits(s);
                 if(s.setLimits) limitsWaiting_ = false;
                 s.ringOut = s.ringOutChannels && no >= outChannels_;
@@ -1669,7 +1670,7 @@ namespace oscairn
             // Blocks handed to the worker, and those its plugin slept through uncalled (rest), for the timing report; and
             // those since the last handed, with their frames, which the next request tells the worker. Audio thread.
             std::atomic<uint64_t> called_{0}, rested_{0};
-            uint32_t restedBlocks_ = 0, restedFrames_ = 0;
+            uint32_t restedBlocks_ = 0, restedFrames_ = 0; bool restedSent_ = false;
             // Audio thread: the blocks in a row it could have rested, called while fewer than restHold (holding_: this one
             // was).
             static constexpr uint32_t restHold = 192; // 0.5 s at 128 frames and 48 kHz

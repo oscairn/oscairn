@@ -24,7 +24,7 @@ use crate::play;
 use crate::profile::Profile;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, HomeState, KeyboardState, PartState, PianoState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, GridState, HomeState, KeyboardState, PartState, PianoState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -239,6 +239,17 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     part.on_step(|i, by| with_app(|a| a.list_step(i, by)));
     part.on_info_scroll(|by| with_app(|a| a.list_scroll(by)));
     part.on_back(|| with_app(|a| a.back()));
+    let grid = ui.global::<GridState>();
+    grid.on_grab(|t, part| with_app(|a| a.on_params(|p| p.grab(t, part))));
+    grid.on_drag(|t, part, n| with_app(|a| a.on_params(|p| p.drag(t, part, n))));
+    grid.on_release(|t| with_app(|a| a.on_params(|p| p.release(t))));
+    grid.on_tap(|t, stop| with_app(|a| a.on_params(|p| p.tap(t, stop))));
+    grid.on_choose(|k| with_app(|a| a.on_params(|p| p.choose(k))));
+    grid.on_show_page(|k| with_app(|a| a.on_params(|p| p.show_page(k))));
+    grid.on_show_tab(|k| with_app(|a| a.on_params(|p| p.show_tab(k))));
+    grid.on_scrolled(|by| with_app(|a| a.on_params(|p| p.scrolled(by))));
+    grid.on_back(|| with_app(|a| a.back()));
+    grid.on_resized(|| with_app(|a| a.on_params(crate::params::Screen::shown)));
     let keys = ui.global::<KeyboardState>();
     keys.on_pressed(|i| with_app(|a| a.keyboard_press(i)));
     keys.on_released(|| with_app(|a| a.repeat.stop()));
@@ -838,7 +849,6 @@ impl App {
             Screen::Part => self.part_act(|p| p.tap(i)),
             Screen::Chain => self.chain_act(|c| c.tap(i)),
             Screen::Sounds => self.sounds_act(|c| c.tap(i)),
-            Screen::Params => self.params_act(|c| c.tap(i)),
             _ => {}
         }
     }
@@ -848,7 +858,6 @@ impl App {
             Screen::Part => self.on_part(|p| p.step_row(i, by)),
             Screen::Chain => self.on_chain(|c| c.step_row(i, by)),
             Screen::Sounds => self.on_sounds(|c| c.step_row(i, by)),
-            Screen::Params => self.on_params(|c| c.step_row(i, by)),
             _ => {}
         }
     }
@@ -858,7 +867,6 @@ impl App {
             Screen::Part => self.on_part(|p| p.scroll_info(by)),
             Screen::Chain => self.on_chain(|c| c.scroll_info(by)),
             Screen::Sounds => self.on_sounds(|c| c.scroll_info(by)),
-            Screen::Params => self.on_params(|c| c.scroll_info(by)),
             _ => {}
         }
     }

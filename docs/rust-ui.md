@@ -324,15 +324,16 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   (else `plugins` beside the program, else `../lib/clap`), CLAP then LV2, started the first time the
   chain is opened, its wire format read with every length checked. It is a helper process, not an
   engine call: no control request. A timed-out helper is killed with its process group, as the C++ one does.
-- **Parameter pages** (`params.rs`): host-drawn, the JUCE ParameterGrid's pages (a page per top-level
-  module, numbered pages together, modules from the leading words of names for a plugin of more than
-  24 parameters without paths, tabs on a page of more than 24, tiles in `oscairn.ui` priority order,
-  hidden parameters left out, read-only ones show a value only, two values a switch). `params.list`,
-  `params.get`, `params.text`, `params.set` and `params.gesture` (begin on a press, end on a press or
-  Cancel; a switch and a touch -/+ in a gesture of their own); `params.changed` is subscribed while
-  they show. Left knob or dial: the tiles; right knob (or the panel's arrows): the pages, listed in the
-  panel. Not yet: the rich views (envelopes, key and velocity maps, FM operators, LFOs, filters, each of
-  whose parameters is a tile meanwhile), joined groups, the search, the knob row's use of a page.
+- **Parameter pages** (`params.rs` on the grid, `grid.rs`, `slint/grid.slint`; ui/GRID.md): host-drawn
+  from the plugin's own layout data in `params.list` (widget, priority, group, range, views), as the
+  JUCE ParameterGrid: a page per top-level module, tabs on a page of more than 24, headings, tiles in
+  priority order in two to six columns for the width given, linked runs on one card, an envelope's
+  curve above its stages; knobs, sliders, switches, dropdowns, split buttons, ranges and values, each
+  with the plugin's own text (`params.text`). `params.get`, `params.set` inside `params.gesture`;
+  `params.changed` while shown; the page shown is published with `controllers.view` `screen` for the
+  device's screen knobs and withdrawn on leaving. Without touch: dial in reading order (past the end
+  the page turns), left knob columns, right knob rows, press selects, dial changes, Cancel backs out.
+  Not yet: key maps, FM operators, LFO and filter views, dragging the envelope, the search.
 - **Sound chooser** (`sounds.rs`): `library.query` of kind `sound` (a search typed on the keyboard
   narrows it), and for the one pressed `parts.loadSound`, `parts.fromSound`, `audition.start` and
   `audition.stop`, and `parts.saveSound` (over its Sound, or new with a name typed). The engine's refusals

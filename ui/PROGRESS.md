@@ -173,3 +173,36 @@ NEXT, FIRST: the owner's design correction (end of ui/PERFORMANCE-APP.md): the g
 Known small issue: the scene tile's number overlaps its name at scale 1.55 (play@1.55.png).
 
 HOW TO RESUME (context ran low before c2): read ui/PERFORMANCE-APP.md (39 of 94 ticked) and this file. Patterns: a list screen = Browser (ui/src/browser.rs) + a module like chain.rs/sounds.rs with Request/Out/Outcome, shell glue in shell.rs (on_X, X_act, Screen enum, go(), list_tap/step/scroll, keyboard owner), tests in ui/src/tests/pages.rs and shellpages.rs (fake engine). Run tests: sh ui/target/test.sh test (and clippy --all-targets); ui/target/*.py are scratch (target is ignored); scripts must be written with the Write tool, bash refuses compound commands with heredocs and sed -i. Every staged edit is followed by graph.commit. Order still to do: K2 playing keyboard (read hosts/standalone/KeyboardWindow.cpp, profile onScreenKeyboard; notes.send), A2-A4 scenes add/store/rename/remove/scope/transition (scenes.*; PartsView.cpp sceneEditMenu line 1140), A9-A11 knob row/banks/Learn (PlayView.cpp, controllers.view, assignments.get/set), A12 no-MIDI hint, A13, A14, A15 Save (LibraryPane.cpp savePerformance: library.save, name on keyboard if no id), A16, J1 undo/redo (edit.undo/redo/history), B parts list, G controls, H mixer, I routing, D6-D11 splits and lanes, E1 tags/favorites, E6 presets, C16 replace (graph.replace), F5-F7, C14/C20, then step 5 (remove Play's Edit entry: ui/slint/play.slint:328 and play.rs handover, Home/Setlist already open Play; update docs/rust-ui.md).
+
+Branch `rust-grid` (from rust-performance-2 56231a34): the grid framework, the owner's design correction.
+- ui/GRID.md: the design read once (params.list carries every hint, no engine code needed; ui.h has no
+  spans: the layout is ParameterGrid's rules; screen knobs play the published page engine side), the
+  checklist, the state, and the universal UI debts.
+- src/grid.rs + slint/grid.slint: tiles laid out from the plugin's data (columns 2 to 6 from the width
+  the grid is given, runs kept together, views first), widgets: knob, slider across and upright,
+  drawbar, switch, dropdown with its list, split buttons, two-sided range, value; envelope view.
+  Cursor in two dimensions (dial reading order, pane 0 columns, pane 1 rows, arrows), press selects,
+  dial changes, Cancel backs out a layer; touch drags and taps. Relayout when the area resizes
+  (`GridState.resized`).
+- src/params.rs rebuilt on the grid (the row version is gone); publishes `controllers.view` `screen`.
+- Tests: `sh ui/target/test.sh test --offline` 76 passed (11 new: tests/grid.rs and grid.rs units),
+  `cargo clippy --all-targets` clean. ui/target/test.sh (ignored, rewrite it on another machine) runs
+  cargo with OSCAIRN_DATA_HOME and OSCAIRN_CONFIG_HOME in ui/target/home, wiped each run; the test
+  harness now keeps those when given. Test windows can be any size (`Screen::sized`).
+- Pictures (looked at): ui/target/screens/grid-*.png, copied to agent-notes/screens/: every kind at 1
+  and 1.55, the dropdown, the Basic Synth's Main and Envelope pages at 1 and 1.55, desktop 700x700,
+  1100x700 at 1 and 2, 1600x900, devices 800x480 and 1920x1080 at 2. The upright slider and drawbar
+  are added to the picture by hand (no data selects them yet).
+
+HOW TO RESUME (after rust-grid): read ui/GRID.md (state, checklist, debts) and the end of
+ui/PERFORMANCE-APP.md (the owner's requirements received 2026-11-15). Next, in order:
+1. The text keyboard as an overlay over about the lower half of the screen on hardware devices, as
+   hosts/standalone/TextKeyboard.cpp positions it, the edited field kept in view (moved up if
+   covered); keep cursor, knob and touch behavior and tests; render at 800x480, 1280x720@1.55 and
+   1920x1080@2. Its own commit.
+2. Play's knob row and banks on grid tiles (A9-A11: PlayView.cpp, `controllers.view`,
+   `assignments.get/set`), then the mixer strips' faders as the grid's upright slider (H).
+3. The other grid views (key map, FM operators, filter, LFO), dragging envelope points, search (F5).
+4. The rest of the inventory as listed in the previous HOW TO RESUME, then step 5 (no handover).
+Known: the scene tile number overlaps its name on Play at 1.55 (not fixed); the pages column stays
+180 px on narrow windows.

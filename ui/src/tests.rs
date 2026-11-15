@@ -41,25 +41,36 @@ pub struct Screen {
     pub ui: Shell,
     window: Rc<MinimalSoftwareWindow>,
     pub pixels: Vec<Rgb8Pixel>,
+    /// The window's size in physical pixels.
+    pub w: usize,
+    pub h: usize,
 }
 
 impl Screen {
     pub fn new() -> Screen {
+        Screen::sized(W, H)
+    }
+
+    /// A window of `w` x `h` physical pixels (a desktop window's, say).
+    pub fn sized(w: usize, h: usize) -> Screen {
         // The data and configuration folders of the tests' own, never the user's: the shell
         // keeps the Setlist's state and reads the user's choices there. Set once, before any
         // test reads them.
         static FOLDERS: std::sync::Once = std::sync::Once::new();
         FOLDERS.call_once(|| {
-            let root = std::env::temp_dir().join(format!("oscairn-ui-tests-{}", std::process::id()));
-            std::env::set_var("OSCAIRN_DATA_HOME", root.join("data"));
-            std::env::set_var("OSCAIRN_CONFIG_HOME", root.join("config"));
+            // Folders already given (ui/target/test.sh gives the worktree's own) are kept.
+            if std::env::var_os("OSCAIRN_DATA_HOME").is_none() || std::env::var_os("OSCAIRN_CONFIG_HOME").is_none() {
+                let root = std::env::temp_dir().join(format!("oscairn-ui-tests-{}", std::process::id()));
+                std::env::set_var("OSCAIRN_DATA_HOME", root.join("data"));
+                std::env::set_var("OSCAIRN_CONFIG_HOME", root.join("config"));
+            }
         });
         let _ = slint::platform::set_platform(Box::new(Headless)); // once per test thread
         let ui = Shell::new().unwrap();
         let window = WINDOW.with(|w| w.borrow_mut().take()).unwrap();
-        window.set_size(PhysicalSize::new(W as u32, H as u32));
+        window.set_size(PhysicalSize::new(w as u32, h as u32));
         ui.show().unwrap();
-        Screen { ui, window, pixels: vec![Rgb8Pixel::default(); W * H] }
+        Screen { ui, window, pixels: vec![Rgb8Pixel::default(); w * h], w, h }
     }
 
     /// Renders what changed since the last frame: the bounding box of what was repainted, None for nothing.
@@ -67,7 +78,7 @@ impl Screen {
         slint::platform::update_timers_and_animations();
         let mut repainted = None;
         self.window.draw_if_needed(|renderer| {
-            let region = renderer.render(&mut self.pixels, W);
+            let region = renderer.render(&mut self.pixels, self.w);
             let (o, s) = (region.bounding_box_origin(), region.bounding_box_size());
             repainted = (s.width > 0 && s.height > 0).then_some((o.x, o.y, s.width as i32, s.height as i32));
         });
@@ -78,7 +89,7 @@ impl Screen {
     pub fn save(&self, name: &str) {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/screens");
         std::fs::create_dir_all(&dir).unwrap();
-        let mut ppm = format!("P6 {W} {H} 255\n").into_bytes();
+        let mut ppm = format!("P6 {} {} 255\n", self.w, self.h).into_bytes();
         ppm.extend(self.pixels.iter().flat_map(|p| [p.r, p.g, p.b]));
         std::fs::write(dir.join(format!("{name}.ppm")), ppm).unwrap();
     }
@@ -123,7 +134,7 @@ pub fn at_fantom_scale(s: &mut Screen, name: &str, refresh: impl FnOnce()) {
 impl Screen {
     pub fn set_scale(&mut self, scale: f32) {
         self.ui.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
-        self.window.set_size(PhysicalSize::new(W as u32, H as u32));
+        self.window.set_size(PhysicalSize::new(self.w as u32, self.h as u32));
     }
 }
 
@@ -692,9 +703,10 @@ fn png(s: &Screen, name: &str) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/screens");
     std::fs::create_dir_all(&dir).unwrap();
     let mut raw = Vec::new();
-    for y in 0..H {
+    let (w, h) = (s.w, s.h);
+    for y in 0..h {
         raw.push(0u8);
-        raw.extend(s.pixels[y * W..(y + 1) * W].iter().flat_map(|p| [p.r, p.g, p.b]));
+        raw.extend(s.pixels[y * w..(y + 1) * w].iter().flat_map(|p| [p.r, p.g, p.b]));
     }
     let mut z = vec![0x78, 0x01];
     let mut chunks = raw.chunks(65535).peekable();
@@ -729,8 +741,8 @@ fn png(s: &Screen, name: &str) {
         out.extend(crc(&body).to_be_bytes());
     };
     let mut head = Vec::new();
-    head.extend((W as u32).to_be_bytes());
-    head.extend((H as u32).to_be_bytes());
+    head.extend((w as u32).to_be_bytes());
+    head.extend((h as u32).to_be_bytes());
     head.extend([8, 2, 0, 0, 0]);
     chunk(b"IHDR", &head);
     chunk(b"IDAT", &z);
@@ -934,3 +946,4 @@ mod keyboard;
 mod pages;
 mod piano;
 mod shellpages;
+mod grid;

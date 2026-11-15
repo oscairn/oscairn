@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The chain, parameter-page and sound-chooser screens' tests (chain.rs, params.rs, sounds.rs),
+//! The chain and sound-chooser screens' tests (chain.rs, sounds.rs; the parameter pages are tests/grid.rs),
 //! on their own against the engine's words: each action's requests (and the commit after each edit),
 //! the refusals, the cursor without touch, and the drawing in the themes.
 
@@ -157,97 +157,6 @@ pub fn param_list() -> serde_json::Value {
     ]})
 }
 
-fn params_screen(s: &Screen) -> crate::params::Screen {
-    tall(&s.ui);
-    let mut p = crate::params::Screen::new(&s.ui);
-    p.open(2, "Chorus");
-    p.shown();
-    p
-}
-
-fn list_and_values(p: &mut crate::params::Screen) {
-    assert_eq!(sent(&mut p.out), [("params.list", json!({"node": 2}))]);
-    p.reply(crate::params::Request::List, Ok(param_list()));
-    let asked = sent(&mut p.out);
-    assert_eq!(asked[0].0, "params.get");
-    p.reply(
-        crate::params::Request::Values,
-        Ok(json!({"values": [{"node": 2, "param": 1, "value": 0.25}, {"node": 2, "param": 0, "value": 0.5}, {"node": 2, "param": 2, "value": 2.0}, {"node": 2, "param": 3, "value": 0.0}]})),
-    );
-}
-
-// The pages of a plugin's parameters: one per top-level module, hidden parameters left out, the tiles
-// by priority (numbered first), a read-only one only shows; the right knob steps the pages, listed in
-// the panel; a press on a value begins a gesture, the dial sets each step, Cancel ends it; a switch
-// flips in a gesture of its own; the engine's changes show except the value being changed.
-#[test]
-fn parameter_pages_by_knobs() {
-    let s = Screen::new();
-    let ui = &s.ui;
-    let mut p = params_screen(&s);
-    list_and_values(&mut p);
-    assert_eq!(labels(ui), ["Resonance", "Cutoff", "Type", "Bypass"], "Secret is hidden; by priority, then the plugin's order");
-    let r = rows(ui);
-    assert_eq!((r[2].2, r[3].2), (0, 1), "a stepped one with more values is a value, one of two a switch");
-    assert_eq!(info(ui), [(true, "Pages: right knob".into()), (true, "● Filter".into()), (false, "Output".into())]);
-    // The texts are asked for as the values arrive, shown when they come.
-    let asked = sent(&mut p.out);
-    assert!(asked.iter().any(|a| a.0 == "params.text" && a.1["param"] == 1 && a.1["value"] == 0.25));
-    assert_eq!(rows(ui)[0].1, "0.25", "the number until the plugin's text arrives");
-    p.reply(crate::params::Request::Text(1, 0.25f64.to_bits()), Ok(json!({"text": "25 %"})));
-    assert_eq!(rows(ui)[0].1, "25 %");
-    // A press on Resonance: a gesture begins; the dial sets, a hundredth of the range a step.
-    p.act(Action::Move { pane: None, by: 1 });
-    p.act(Action::Confirm(None));
-    assert!(rows(ui)[0].4, "being changed");
-    p.act(Action::Move { pane: None, by: 3 });
-    let out = sent(&mut p.out);
-    assert_eq!(out[0], ("params.gesture", json!({"node": 2, "param": 1, "begin": true})));
-    assert_eq!(out[1], ("params.set", json!({"values": [{"node": 2, "param": 1, "value": 0.28}]})));
-    // The engine's own change of it waits; another parameter's shows.
-    p.changed(&json!({"changes": [{"node": 2, "param": 1, "kind": "value", "value": 0.9}, {"node": 2, "param": 0, "kind": "value", "value": 0.75}]}));
-    assert_eq!(rows(ui)[0].1, "0.28");
-    assert_eq!(rows(ui)[1].1, "0.75");
-    p.act(Action::Cancel(None));
-    assert_eq!(sent(&mut p.out).iter().filter(|a| a.0 == "params.gesture").map(|a| a.1["begin"].clone()).collect::<Vec<_>>(), [json!(false)], "Cancel ends the gesture");
-    // The stepped value: one value a step, to its end.
-    p.act(Action::Move { pane: None, by: 2 });
-    p.act(Action::Confirm(None));
-    p.act(Action::Move { pane: None, by: 5 });
-    let sets: Vec<_> = sent(&mut p.out).into_iter().filter(|a| a.0 == "params.set").collect();
-    assert_eq!(sets.len(), 1, "no further than its last value");
-    assert_eq!(sets[0].1["values"][0]["value"], json!(3.0));
-    p.act(Action::Cancel(None));
-    sent(&mut p.out);
-    // The switch: a press flips it, in a gesture.
-    p.act(Action::Move { pane: None, by: 1 });
-    p.act(Action::Confirm(None));
-    let out = sent(&mut p.out);
-    assert_eq!((out[0].0, out[1].0, out[2].0), ("params.gesture", "params.set", "params.text"));
-    assert_eq!(out[1].1["values"][0], json!({"node": 2, "param": 3, "value": 1.0}));
-    assert_eq!(out[3].0, "params.gesture");
-    assert_eq!(rows(ui)[3].1, "1", "shown at once");
-    // The right knob: the next page, its values asked; the page list follows.
-    p.act(Action::Move { pane: Some(1), by: 1 });
-    assert_eq!(labels(ui), ["Level"]);
-    assert_eq!(rows(ui)[0].2, 4, "read only: its value only");
-    assert_eq!(info(ui)[2], (true, "● Output".into()));
-    assert_eq!(sent(&mut p.out)[0].0, "params.get");
-    // By touch, - and + step a value in a gesture of its own, and the panel's arrows turn the page.
-    p.scroll_info(-1);
-    assert_eq!(labels(ui)[0], "Resonance");
-    sent(&mut p.out);
-    p.step_row(1, 1);
-    let out = sent(&mut p.out);
-    assert_eq!((out[0].0, out[1].0, out[3].0), ("params.gesture", "params.set", "params.gesture"));
-    // A refusal is said.
-    assert!(p.reply(crate::params::Request::Set, Err(Error { code: -32602, message: "no such parameter".into() })));
-    assert_eq!(ui.global::<crate::PartState>().get_message().as_str(), "The engine refused: no such parameter");
-    // Cancel with nothing to drop goes back.
-    p.act(Action::Cancel(None));
-    assert_eq!(p.act(Action::Cancel(None)), crate::params::Outcome::Back);
-}
-
 fn sounds_screen(s: &Screen) -> crate::sounds::Screen {
     tall(&s.ui);
     let mut c = crate::sounds::Screen::new(&s.ui);
@@ -337,23 +246,4 @@ fn pages_draw_in_every_theme() {
         png(&s, &format!("chain-{}", t.id));
     }
     at_fantom_scale(&mut s, "chain", || c.graph(&graph()));
-    let mut p = params_screen(&s);
-    list_and_values(&mut p);
-    // The plugin's own text for each value, as the engine answers params.text.
-    for (_, m, a) in std::mem::take(&mut p.out) {
-        if m == "params.text" {
-            let v = a["value"].as_f64().unwrap_or(0.);
-            let text = if v == 0. { "Off".to_string() } else if v == 1. { "On".into() } else { format!("{:.0} %", v * 100.) };
-            p.reply(crate::params::Request::Text(a["param"].as_u64().unwrap_or(0) as u32, v.to_bits()), Ok(json!({"text": text})));
-        }
-    }
-    p.act(Action::Move { pane: None, by: 1 });
-    p.act(Action::Confirm(None));
-    s.ui.set_screen(7);
-    for t in &loaded {
-        theme::apply(&s.ui, t);
-        assert!(s.frame().is_some(), "{}: drawn", t.id);
-        png(&s, &format!("params-{}", t.id));
-    }
-    at_fantom_scale(&mut s, "params", || p.shown());
 }

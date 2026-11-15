@@ -76,11 +76,6 @@ impl Browser {
         self.editing = false;
     }
 
-    /// How many lines of the panel fit.
-    pub fn per_info(&self) -> usize {
-        self.ui.upgrade().map_or(1, |ui| ui.global::<PartState>().get_info_per_view().max(1) as usize)
-    }
-
     /// Row `row` of the view as an index of the whole list.
     pub fn index(&self, row: i32) -> usize {
         self.cursor.first + row.max(0) as usize

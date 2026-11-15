@@ -10,6 +10,7 @@
 mod browser;
 mod chain;
 mod client;
+mod grid;
 mod home;
 mod keyboard;
 mod nav;

@@ -1,35 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! A plugin's parameter pages, host-drawn (the JUCE ParameterGrid, hosts/standalone/ParameterGrid.cpp,
-//! RFC 0019's generated editor): this is how most plugins are edited. The parameters (`params.list`)
-//! without the hidden ones become pages, one per top-level CLAP module path ("Main" for parameters with
-//! none; numbered pages of one kind together, Operator 1 to 8); a plugin of more than 24 parameters
-//! that gives no module paths gets modules from its names' leading words; a page of more than 24 has a
-//! tab per second-level module. The tiles of a page (or tab) are in the plugin's priority order
-//! (`oscairn.ui`: numbered first, then the rest in its order), each with its name and its value as the
-//! plugin writes it (`params.text`); a read-only parameter shows its value only, one of two values is a
-//! switch, any other a value the dial changes.
+//! A plugin's parameter pages, host-drawn on the grid (grid.rs, slint/grid.slint; the JUCE
+//! ParameterGrid, RFC 0019's generated editor): this is how most plugins are edited. The parameters
+//! (`params.list`, with the plugin's `oscairn.ui` layout data) without the hidden ones become pages,
+//! one per top-level CLAP module path ("Main" for parameters with none; numbered pages of one kind
+//! together); a plugin of more than 24 parameters without module paths gets modules from its names'
+//! leading words; a page of more than 24 has a tab per second-level module. A page's tiles are laid
+//! out by grid.rs: views first, linked runs kept together, by priority, each tile the control the
+//! plugin asks for (or its values suggest) and its value as the plugin writes it (`params.text`).
 //!
-//! Without touch, two panes: the left (the left knob, or the dial) is the tiles' list: a press on a
-//! value starts changing it (a gesture begins), the dial then sets it, each step sent (`params.set`),
-//! and a press or Cancel ends the change (the gesture ends); a press on a switch flips it. The right
-//! knob (pane 1) steps through the pages, tabs included, listed in the panel; its arrows do on touch.
-//! Values follow the engine (`params.changed`, subscribed while this screen is shown), except the
-//! one being changed.
-//!
-//! Not here yet: the rich views (envelopes, key and velocity maps, FM operators, LFOs, filters: every
-//! one of their parameters is a tile), joined groups, the search, a plugin's own view (a disabled entry
-//! in the Chain screen's actions says it is not available in this shell yet).
+//! Without touch: the cursor moves over the tiles in reading order (the dial), by columns (pane 0,
+//! the left knob) and rows (pane 1, the right knob), or by the arrows; past the last tile it turns to
+//! the next page, before the first to the one before; Page turns pages. A press selects the tile: a
+//! knob or slider then takes the dial (a gesture begins, each step is sent, a press or Cancel ends
+//! it), a range takes its low end then on a second press its high end, split buttons step their
+//! stops, a dropdown opens its list (dial, press chooses, Cancel closes), a switch flips. Cancel backs
+//! out one layer, then goes back. Touch: drag knobs and sliders, tap switches, stops and dropdowns,
+//! the pages and tabs; a drag on the background scrolls. The shown tiles are published by priority
+//! (`controllers.view` `screen`), which the device's screen knobs play (engine side, RFC 0011).
+//! Values follow the engine (`params.changed`) except the one being changed.
 
-use crate::browser::{Browser, Nav};
+use crate::grid::{self, by_priority, Control, Laid, Param, FLAG_HIDDEN};
 use crate::nav::Action;
-use crate::{InfoLine, SettingData, Shell};
+use crate::{GridCard, GridHeading, GridPanel, GridPoint, GridState, GridTile, Shell};
 use serde_json::{json, Value};
+use slint::{ComponentHandle, ModelRc, VecModel};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// A page with more parameters than this has tabs.
 const TABBED_ABOVE: usize = 24;
-const FLAG_HIDDEN: u64 = 1 << 2;
-const FLAG_READONLY: u64 = 1 << 3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
@@ -40,6 +39,8 @@ pub enum Request {
     Gesture,
     /// params.text for this parameter and value.
     Text(u32, u64),
+    /// controllers.view: the page shown, for the screen knobs.
+    View,
 }
 
 pub type Out = (Request, &'static str, Value);
@@ -50,34 +51,658 @@ pub enum Outcome {
     Back,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Param {
-    pub id: u32,
-    pub name: String,
-    pub module: String,
-    pub min: f64,
-    pub max: f64,
-    pub stepped: bool,
-    pub flags: u64,
-    pub priority: u64,
+/// What the dial and a press do now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Edit {
+    None,
+    /// A tile takes the dial; for a range, its end (0 low, 1 high).
+    Value(usize, usize),
+    /// A tile's dropdown is open.
+    List(usize),
 }
 
-fn parse(list: &Value) -> Vec<Param> {
-    list["parameters"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|p| Param {
-            id: p["id"].as_u64().unwrap_or(0) as u32,
-            name: p["name"].as_str().unwrap_or_default().into(),
-            module: p["module"].as_str().unwrap_or_default().into(),
-            min: p["minimum"].as_f64().unwrap_or(0.),
-            max: p["maximum"].as_f64().unwrap_or(1.),
-            stepped: p["stepped"].as_bool().unwrap_or(false),
-            flags: p["flags"].as_u64().unwrap_or(0),
-            priority: p["priority"].as_u64().unwrap_or(0),
-        })
-        .collect()
+/// The path below a module path's first n levels.
+fn after(module: &str, n: usize) -> String {
+    module.split('/').skip(n).collect::<Vec<_>>().join("/")
+}
+
+pub struct Screen {
+    ui: slint::Weak<Shell>,
+    node: u64,
+    name: String,
+    params: Vec<Param>,
+    pages: Vec<(String, Vec<usize>)>,
+    /// What the pages step through: a page, or a tab of one.
+    entries: Vec<(usize, Option<String>)>,
+    entry: usize,
+    values: HashMap<u32, f64>,
+    /// The plugin's text for a parameter's value, by value's bits.
+    texts: HashMap<(u32, u64), String>,
+    laid: Laid,
+    width: f32,
+    cursor: Option<usize>,
+    edit: Edit,
+    scroll: f32,
+    list_cursor: usize,
+    list_first: usize,
+    /// The parameters whose gestures are open.
+    gestures: Vec<u32>,
+    message: String,
+    /// The page last published to the screen knobs.
+    published: Value,
+    pub out: Vec<Out>,
+}
+
+impl Screen {
+    pub fn new(ui: &Shell) -> Screen {
+        Screen { ui: ui.as_weak(), ..Screen::new_detached() }
+    }
+
+    pub fn open(&mut self, node: u64, name: &str) {
+        let ui = self.ui.clone();
+        *self = Screen { ui, node, name: name.into(), ..Screen::new_detached() };
+        self.out.push((Request::List, "params.list", json!({"node": node})));
+        self.show();
+    }
+
+    fn new_detached() -> Screen {
+        Screen {
+            ui: slint::Weak::default(),
+            node: 0,
+            name: String::new(),
+            params: vec![],
+            pages: vec![],
+            entries: vec![],
+            entry: 0,
+            values: HashMap::new(),
+            texts: HashMap::new(),
+            laid: Laid::default(),
+            width: 0.,
+            cursor: None,
+            edit: Edit::None,
+            scroll: 0.,
+            list_cursor: 0,
+            list_first: 0,
+            gestures: vec![],
+            message: String::new(),
+            published: Value::Null,
+            out: vec![],
+        }
+    }
+
+    /// The headings and parameters of the page (or tab) shown.
+    fn groups(&self) -> Vec<(String, Vec<usize>)> {
+        let Some((page, tab)) = self.entries.get(self.entry) else { return vec![] };
+        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+        for &i in &self.pages[*page].1 {
+            let m = &self.params[i].module;
+            let heading = match tab {
+                None => after(m, 1),
+                Some(t) if level(m, 1) == t => after(m, 2),
+                Some(_) => continue,
+            };
+            match groups.iter_mut().find(|g| g.0 == heading) {
+                Some(g) => g.1.push(i),
+                None => groups.push((heading, vec![i])),
+            }
+        }
+        groups
+    }
+
+    /// The value texts of a stepped parameter's values: the plugin's where known, else the numbers;
+    /// and whether all are the plugin's.
+    fn labels(&self, p: &Param) -> (Vec<String>, bool) {
+        let mut all = true;
+        let labels = (0..p.values().min(64))
+            .map(|k| {
+                let v = p.min + k as f64;
+                self.texts.get(&(p.id, v.to_bits())).cloned().unwrap_or_else(|| {
+                    all = false;
+                    tidy(v)
+                })
+            })
+            .collect();
+        (labels, all)
+    }
+
+    fn control(&self, i: usize) -> Control {
+        let p = &self.params[i];
+        let (labels, known) = self.labels(p);
+        grid::control(p, if known { &labels } else { &[] }, &self.params)
+    }
+
+    fn relayout(&mut self) {
+        let groups = self.groups();
+        self.laid = grid::layout(&self.params, &groups, self.width, &|i| self.control(i));
+        if self.cursor.is_some_and(|c| c >= self.laid.tiles.len()) {
+            self.cursor = None;
+        }
+        self.publish();
+    }
+
+    /// The tiles shown, by priority, for the device's screen knobs (as ParameterGrid::publishScreen).
+    fn publish(&mut self) {
+        if self.params.is_empty() {
+            return;
+        }
+        let mut shown: Vec<usize> = self.laid.tiles.iter().map(|t| t.param).collect();
+        by_priority(&self.params, &mut shown);
+        let name = self.entries.get(self.entry).map(|(p, _)| self.pages[*p].0.clone()).unwrap_or_default();
+        let params: Vec<Value> = shown.iter().take(64).map(|&i| json!({"kind": "parameter", "node": self.node, "param": self.params[i].id})).collect();
+        let screen = json!({"name": name, "params": params});
+        if screen != self.published {
+            self.published = screen.clone();
+            self.out.push((Request::View, "controllers.view", json!({"screen": screen})));
+        }
+    }
+
+    /// The parameters of the page shown and a range's high ends: their values asked for, and the
+    /// texts of every value of a stepped one of up to 64.
+    fn ask_values(&mut self) {
+        let mut ids: Vec<u32> = Vec::new();
+        for (_, members) in self.groups() {
+            for i in members {
+                let p = self.params[i].clone();
+                ids.push(p.id);
+                if p.stepped && p.values() <= 64 && !p.readonly() {
+                    for k in 0..p.values() {
+                        self.ask_text(p.id, p.min + k as f64);
+                    }
+                }
+            }
+        }
+        if !ids.is_empty() {
+            let values: Vec<Value> = ids.iter().map(|id| json!({"node": self.node, "param": id})).collect();
+            self.out.push((Request::Values, "params.get", json!({"values": values})));
+        }
+    }
+
+    /// params.list's answer: the pages, and the values of the first.
+    fn listed(&mut self, list: &Value) {
+        self.params = editor_parameters(grid::parse(list));
+        self.pages = editor_pages(&self.params);
+        self.entries = self
+            .pages
+            .iter()
+            .enumerate()
+            .flat_map(|(i, (_, members))| {
+                let tabs = tabs_for(&self.params, members);
+                if tabs.is_empty() {
+                    vec![(i, None)]
+                } else {
+                    tabs.into_iter().map(|t| (i, Some(t))).collect()
+                }
+            })
+            .collect();
+        self.entry = 0;
+        self.relayout();
+        self.ask_values();
+    }
+
+    pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) -> bool {
+        match (request, result) {
+            (Request::List, Ok(r)) => self.listed(&r),
+            (Request::Values, Ok(r)) => {
+                for v in r["values"].as_array().into_iter().flatten() {
+                    if let (Some(p), Some(x)) = (v["param"].as_u64(), v["value"].as_f64()) {
+                        self.value_arrived(p as u32, x);
+                    }
+                }
+            }
+            (Request::Text(p, bits), Ok(r)) => {
+                if let Some(t) = r["text"].as_str() {
+                    self.texts.insert((p, bits), t.to_string());
+                    // Off and On told apart from two buttons only once the texts are in.
+                    if self.params.iter().any(|q| q.id == p && q.values() == 2) {
+                        self.relayout();
+                    }
+                }
+            }
+            (Request::Set | Request::List, Err(e)) if e.code != 0 => {
+                self.message = format!("The engine refused: {}", e.message);
+                self.show();
+                return true;
+            }
+            _ => {}
+        }
+        self.show();
+        false
+    }
+
+    /// A value read or pushed: kept, its text asked for when not known, but not over one being changed.
+    fn value_arrived(&mut self, param: u32, value: f64) {
+        if self.gestures.contains(&param) {
+            return;
+        }
+        self.values.insert(param, value);
+        self.ask_text(param, value);
+    }
+
+    fn ask_text(&mut self, param: u32, value: f64) {
+        let key = (param, value.to_bits());
+        if !self.texts.contains_key(&key) && !self.out.iter().any(|o| o.0 == Request::Text(param, value.to_bits())) {
+            self.out.push((Request::Text(param, value.to_bits()), "params.text", json!({"node": self.node, "param": param, "value": value})));
+        }
+    }
+
+    /// params.changed: the values that moved, for this plugin.
+    pub fn changed(&mut self, params: &Value) {
+        for c in params["changes"].as_array().into_iter().flatten() {
+            if c["node"].as_u64() == Some(self.node) && c["kind"] == "value" {
+                if let (Some(p), Some(v)) = (c["param"].as_u64(), c["value"].as_f64()) {
+                    self.value_arrived(p as u32, v);
+                }
+            }
+        }
+        self.show();
+    }
+
+    fn value(&self, p: &Param) -> f64 {
+        self.values.get(&p.id).copied().unwrap_or(p.default.clamp(p.min.min(p.max), p.max.max(p.min)))
+    }
+
+    fn value_text(&self, p: &Param) -> String {
+        match self.values.get(&p.id) {
+            Some(v) => self.texts.get(&(p.id, v.to_bits())).cloned().unwrap_or_else(|| tidy(*v)),
+            None => String::new(),
+        }
+    }
+
+    fn high(&self, p: &Param) -> Option<&Param> {
+        p.range_high.and_then(|h| self.params.iter().find(|q| q.id == h))
+    }
+
+    /// The parameter a tile's part sets: a range's high end for part 1.
+    fn param_of(&self, tile: usize, part: usize) -> Option<Param> {
+        let t = self.laid.tiles.get(tile)?;
+        let p = &self.params[t.param];
+        Some(if part == 1 && t.control == Control::Range { self.high(p)?.clone() } else { p.clone() })
+    }
+
+    fn tile_data(&self, k: usize) -> GridTile {
+        let t = &self.laid.tiles[k];
+        let p = &self.params[t.param];
+        let v = self.value(p);
+        let norm = p.norm(v);
+        let mut value = self.value_text(p);
+        let mut high = 0.;
+        if t.control == Control::Range {
+            if let Some(h) = self.high(p) {
+                high = h.norm(self.value(h)) as f32;
+                value = format!("{} – {}", value, self.value_text(h));
+            }
+        }
+        if t.control == Control::Switch {
+            value = match value.as_str() {
+                "1" => "On".into(),
+                "0" | "" => "Off".into(),
+                _ => value,
+            };
+        }
+        let choices: Vec<slint::SharedString> = if t.control == Control::Buttons { self.labels(p).0.into_iter().map(Into::into).collect() } else { vec![] };
+        let (editing, part) = match self.edit {
+            Edit::Value(e, part) if e == k => (true, part as i32),
+            Edit::List(e) if e == k => (true, 0),
+            _ => (false, 0),
+        };
+        let from = if p.bipolar() { 0.5 } else { 0. };
+        GridTile {
+            x: t.rect.x,
+            y: t.rect.y,
+            w: t.rect.w,
+            h: t.rect.h,
+            kind: t.control as i32,
+            name: p.name.as_str().into(),
+            value: value.into(),
+            norm: norm as f32,
+            high,
+            bipolar: p.bipolar(),
+            arc: grid::arc(from, norm).into(),
+            choices: ModelRc::new(VecModel::from(choices)),
+            chosen: (v - p.min).round() as i32,
+            on: v > p.min,
+            cursor: self.cursor == Some(k),
+            editing,
+            part,
+            linked: t.linked,
+        }
+    }
+
+    fn panel_data(&self, panel: &grid::Panel) -> GridPanel {
+        let refs: Vec<&Param> = panel.params.iter().map(|&i| &self.params[i]).collect();
+        let norm = |k: usize| refs[k].norm(self.value(refs[k]));
+        let (line, fill, points) = grid::envelope_curve(&panel.envelope, &refs, &norm, panel.rect.w, panel.rect.h);
+        let points: Vec<GridPoint> = points.into_iter().map(|(x, y)| GridPoint { x, y }).collect();
+        GridPanel { x: panel.rect.x, y: panel.rect.y, w: panel.rect.w, h: panel.rect.h, title: panel.title.as_str().into(), line: line.into(), fill: fill.into(), points: ModelRc::new(VecModel::from(points)) }
+    }
+
+    /// Keeps the cursor's tile in view.
+    fn follow(&mut self, view: f32) {
+        if let Some(t) = self.cursor.and_then(|c| self.laid.tiles.get(c)) {
+            if t.rect.y < self.scroll {
+                self.scroll = t.rect.y;
+            } else if t.rect.y + t.rect.h > self.scroll + view {
+                self.scroll = t.rect.y + t.rect.h - view;
+            }
+        }
+        self.scroll = self.scroll.clamp(0., (self.laid.height - view).max(0.));
+    }
+
+    fn show(&mut self) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let g = ui.global::<GridState>();
+        let width = g.get_view_width();
+        if (width - self.width).abs() > 0.5 {
+            self.width = width;
+            self.relayout();
+        }
+        self.follow(g.get_view_height());
+        g.set_name(self.name.as_str().into());
+        let page = self.entries.get(self.entry).map_or(0, |e| e.0);
+        let pages: Vec<slint::SharedString> = self.pages.iter().map(|p| p.0.as_str().into()).collect();
+        let tabs: Vec<slint::SharedString> = self.entries.iter().filter(|e| e.0 == page).filter_map(|e| e.1.as_deref().map(Into::into)).collect();
+        let tab = self.entries.iter().filter(|e| e.0 == page).position(|e| *e == self.entries[self.entry]).unwrap_or(0);
+        g.set_pages(ModelRc::new(VecModel::from(pages)));
+        g.set_page(page as i32);
+        g.set_tabs(ModelRc::new(VecModel::from(tabs)));
+        g.set_tab(tab as i32);
+        let tiles: Vec<GridTile> = (0..self.laid.tiles.len()).map(|k| self.tile_data(k)).collect();
+        g.set_tiles(Rc::new(VecModel::from(tiles)).into());
+        let cards: Vec<GridCard> = self.laid.cards.iter().map(|c| GridCard { x: c.x, y: c.y, w: c.w, h: c.h }).collect();
+        g.set_cards(Rc::new(VecModel::from(cards)).into());
+        let headings: Vec<GridHeading> = self.laid.headings.iter().map(|(y, t)| GridHeading { y: *y, text: t.as_str().into() }).collect();
+        g.set_headings(Rc::new(VecModel::from(headings)).into());
+        let panels: Vec<GridPanel> = self.laid.panels.iter().map(|p| self.panel_data(p)).collect();
+        g.set_panels(Rc::new(VecModel::from(panels)).into());
+        g.set_scroll(self.scroll);
+        let message = if self.params.is_empty() && self.entries.is_empty() && self.message.is_empty() { "Reading the parameters...".to_string() } else { self.message.clone() };
+        g.set_message(message.into());
+        match self.edit {
+            Edit::List(k) => {
+                let p = &self.params[self.laid.tiles[k].param];
+                let per = (g.get_list_per_view().max(1)) as usize;
+                if self.list_cursor < self.list_first {
+                    self.list_first = self.list_cursor;
+                } else if self.list_cursor >= self.list_first + per {
+                    self.list_first = self.list_cursor + 1 - per;
+                }
+                let list: Vec<slint::SharedString> = self.labels(p).0.into_iter().map(Into::into).collect();
+                g.set_list(ModelRc::new(VecModel::from(list)));
+                g.set_list_title(p.name.as_str().into());
+                g.set_list_cursor(self.list_cursor as i32);
+                g.set_list_first(self.list_first as i32);
+                g.set_list_open(true);
+            }
+            _ => g.set_list_open(false),
+        }
+    }
+
+    fn begin(&mut self, id: u32) {
+        if !self.gestures.contains(&id) {
+            self.gestures.push(id);
+            self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": id, "begin": true})));
+        }
+    }
+
+    fn end_gestures(&mut self) {
+        for id in std::mem::take(&mut self.gestures) {
+            self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": id, "begin": false})));
+        }
+    }
+
+    fn set(&mut self, p: &Param, to: f64) {
+        self.values.insert(p.id, to);
+        self.message.clear();
+        self.out.push((Request::Set, "params.set", json!({"values": [{"node": self.node, "param": p.id, "value": to}]})));
+        self.ask_text(p.id, to);
+    }
+
+    /// A change in a gesture of its own (a tap, a flip, a choice).
+    fn set_once(&mut self, p: &Param, to: f64) {
+        self.begin(p.id);
+        self.set(p, to);
+        self.end_gestures();
+    }
+
+    /// The value of a tile's part stepped `by`: a stepped value's step, else a hundredth of the range.
+    fn dial(&mut self, tile: usize, part: usize, by: i32) {
+        let Some(p) = self.param_of(tile, part) else { return };
+        let now = self.value(&p);
+        let step = if p.stepped { 1. } else { (p.max - p.min) / 100. };
+        let mut to = (now + step * by as f64).clamp(p.min.min(p.max), p.max.max(p.min));
+        if p.stepped {
+            to = to.round();
+        }
+        // A range's ends do not cross.
+        if self.laid.tiles[tile].control == Control::Range {
+            let low = self.params[self.laid.tiles[tile].param].clone();
+            if let Some(h) = self.high(&low).cloned() {
+                to = if part == 0 { to.min(self.value(&h)) } else { to.max(self.value(&low)) };
+            }
+        }
+        if to != now {
+            self.set(&p, to);
+        }
+    }
+
+    /// A press on the cursor's tile.
+    fn press(&mut self, k: usize) {
+        let Some(t) = self.laid.tiles.get(k).cloned() else { return };
+        let p = self.params[t.param].clone();
+        match t.control {
+            Control::Value => {}
+            Control::Switch => {
+                let to = if self.value(&p) > p.min { p.min } else { p.max };
+                self.set_once(&p, to);
+            }
+            Control::List => {
+                self.edit = Edit::List(k);
+                self.list_cursor = (self.value(&p) - p.min).round().max(0.) as usize;
+                self.list_first = self.list_cursor;
+            }
+            _ => {
+                self.edit = Edit::Value(k, 0);
+                self.begin(p.id);
+            }
+        }
+    }
+
+    fn turn_page(&mut self, by: i32) -> bool {
+        let to = (self.entry as i32 + by).clamp(0, self.entries.len() as i32 - 1) as usize;
+        if self.entries.is_empty() || to == self.entry {
+            return false;
+        }
+        self.end_gestures();
+        self.edit = Edit::None;
+        self.entry = to;
+        self.scroll = 0.;
+        self.cursor = None;
+        self.relayout();
+        self.ask_values();
+        true
+    }
+
+    /// The cursor moved by `by` in reading order; past either end the page turns.
+    fn step(&mut self, by: i32) {
+        let n = self.laid.tiles.len() as i32;
+        let Some(c) = self.cursor else {
+            if n > 0 {
+                self.cursor = Some(if by > 0 { 0 } else { n as usize - 1 });
+            }
+            return;
+        };
+        let to = c as i32 + by;
+        if to >= n {
+            if self.turn_page(1) {
+                self.cursor = (!self.laid.tiles.is_empty()).then_some(0);
+            }
+        } else if to < 0 {
+            if self.turn_page(-1) {
+                self.cursor = self.laid.tiles.len().checked_sub(1);
+            }
+        } else {
+            self.cursor = Some(to as usize);
+        }
+    }
+
+    /// The cursor across (dx) or up and down (dy); past the last row down the page turns, past the first up.
+    fn arrow(&mut self, dx: i32, dy: i32) {
+        let Some(c) = self.cursor else {
+            self.cursor = (!self.laid.tiles.is_empty()).then_some(0);
+            return;
+        };
+        let mut c = c;
+        for _ in 0..(dx.abs() + dy.abs()) {
+            match grid::arrow(&self.laid.tiles, c, dx.signum(), dy.signum()) {
+                Some(to) => c = to,
+                None if dy != 0 => {
+                    if self.turn_page(dy.signum()) {
+                        self.cursor = (!self.laid.tiles.is_empty()).then_some(if dy > 0 { 0 } else { self.laid.tiles.len() - 1 });
+                    }
+                    return;
+                }
+                None => break,
+            }
+        }
+        self.cursor = Some(c);
+    }
+
+    pub fn act(&mut self, action: Action) -> Outcome {
+        let outcome = self.handle(action);
+        self.show();
+        outcome
+    }
+
+    fn handle(&mut self, action: Action) -> Outcome {
+        match (self.edit, action) {
+            (Edit::List(k), Action::Move { by, .. } | Action::Arrow { dy: by, dx: 0 }) => {
+                let n = self.params[self.laid.tiles[k].param].values().min(64) as i32;
+                self.list_cursor = (self.list_cursor as i32 + by).clamp(0, (n - 1).max(0)) as usize;
+            }
+            (Edit::List(k), Action::Confirm(_)) => {
+                let p = self.params[self.laid.tiles[k].param].clone();
+                self.set_once(&p, p.min + self.list_cursor as f64);
+                self.edit = Edit::None;
+            }
+            (Edit::List(_), Action::Cancel(_)) => self.edit = Edit::None,
+            (Edit::Value(k, part), Action::Move { by, .. }) => self.dial(k, part, by),
+            (Edit::Value(k, part), Action::Arrow { dx, dy }) => self.dial(k, part, dx - dy),
+            (Edit::Value(k, 0), Action::Confirm(_)) if self.laid.tiles[k].control == Control::Range => {
+                if let Some(h) = self.param_of(k, 1) {
+                    self.begin(h.id);
+                }
+                self.edit = Edit::Value(k, 1);
+            }
+            (Edit::Value(..), Action::Confirm(_) | Action::Cancel(_)) => {
+                self.end_gestures();
+                self.edit = Edit::None;
+            }
+            (Edit::None, Action::Move { pane: Some(0), by }) => self.arrow(by, 0),
+            (Edit::None, Action::Move { pane: Some(1), by }) => self.arrow(0, by),
+            (Edit::None, Action::Move { by, .. }) => self.step(by),
+            (Edit::None, Action::Arrow { dx, dy }) => self.arrow(dx, dy),
+            (_, Action::Page(by)) => {
+                self.turn_page(by);
+            }
+            (Edit::None, Action::End(by)) => self.cursor = self.laid.tiles.len().checked_sub(1).map(|last| if by < 0 { 0 } else { last }),
+            (Edit::None, Action::Confirm(_)) => match self.cursor {
+                Some(c) => self.press(c),
+                None => self.cursor = (!self.laid.tiles.is_empty()).then_some(0),
+            },
+            (Edit::None, Action::Cancel(_)) if self.cursor.take().is_none() => return Outcome::Back,
+            _ => {}
+        }
+        Outcome::Stay
+    }
+
+    // Touch.
+
+    /// A drag begins on a tile's part.
+    pub fn grab(&mut self, tile: i32, part: i32) {
+        let Some(p) = self.param_of(tile as usize, part as usize) else { return };
+        self.end_gestures();
+        self.edit = Edit::None;
+        self.cursor = Some(tile as usize);
+        self.begin(p.id);
+        self.show();
+    }
+
+    pub fn drag(&mut self, tile: i32, part: i32, norm: f32) {
+        let Some(p) = self.param_of(tile as usize, part as usize) else { return };
+        let to = p.denorm(norm as f64);
+        if to != self.value(&p) {
+            self.set(&p, to);
+            self.show();
+        }
+    }
+
+    pub fn release(&mut self, _tile: i32) {
+        self.end_gestures();
+        self.show();
+    }
+
+    /// A tap on a switch or a dropdown (`stop` -1), or on split buttons' stop.
+    pub fn tap(&mut self, tile: i32, stop: i32) {
+        let k = tile as usize;
+        let Some(t) = self.laid.tiles.get(k).cloned() else { return };
+        self.end_gestures();
+        self.edit = Edit::None;
+        self.cursor = Some(k);
+        let p = self.params[t.param].clone();
+        if t.control == Control::Buttons && stop >= 0 {
+            self.set_once(&p, p.min + stop as f64);
+        } else {
+            self.press(k);
+        }
+        self.show();
+    }
+
+    /// A dropdown's value tapped, or -1: closed.
+    pub fn choose(&mut self, k: i32) {
+        if let (Edit::List(tile), true) = (self.edit, k >= 0) {
+            let p = self.params[self.laid.tiles[tile].param].clone();
+            self.set_once(&p, p.min + k as f64);
+        }
+        self.edit = Edit::None;
+        self.show();
+    }
+
+    pub fn show_page(&mut self, page: i32) {
+        if let Some(e) = self.entries.iter().position(|e| e.0 == page as usize) {
+            self.turn_page(e as i32 - self.entry as i32);
+        }
+        self.show();
+    }
+
+    pub fn show_tab(&mut self, tab: i32) {
+        let page = self.entries.get(self.entry).map_or(0, |e| e.0);
+        if let Some(e) = self.entries.iter().enumerate().filter(|e| e.1 .0 == page).nth(tab as usize).map(|e| e.0) {
+            self.turn_page(e as i32 - self.entry as i32);
+        }
+        self.show();
+    }
+
+    pub fn scrolled(&mut self, by: f32) {
+        self.scroll += by;
+        let view = self.ui.upgrade().map_or(400., |ui| ui.global::<GridState>().get_view_height());
+        self.scroll = self.scroll.clamp(0., (self.laid.height - view).max(0.));
+        self.show();
+    }
+
+    pub fn hidden(&mut self) {
+        self.end_gestures();
+        self.edit = Edit::None;
+        // The screen knobs go back to what they play without a page.
+        self.published = Value::Null;
+        self.out.push((Request::View, "controllers.view", json!({"screen": {"name": "", "params": []}})));
+    }
+
+    pub fn shown(&mut self) {
+        if !self.laid.tiles.is_empty() {
+            self.publish();
+        }
+        self.show();
+    }
 }
 
 /// The nth level of a module path, or "".
@@ -194,333 +819,12 @@ fn tabs_for(params: &[Param], page: &[usize]) -> Vec<String> {
     names
 }
 
-/// The plugin's priority order: numbered first, then the rest in its order.
-pub fn by_priority(params: &[Param], indices: &mut [usize]) {
-    indices.sort_by_key(|&i| if params[i].priority == 0 { u64::MAX } else { params[i].priority });
-}
-
 /// A value without trailing zeros ("0.0100000" is "0.01"), as the JUCE tidyNumber.
 fn tidy(v: f64) -> String {
     let s = format!("{v:.4}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-pub struct Screen {
-    b: Browser,
-    node: u64,
-    name: String,
-    params: Vec<Param>,
-    pages: Vec<(String, Vec<usize>)>,
-    /// What the right knob steps through: a page, or a tab of one.
-    entries: Vec<(usize, Option<String>)>,
-    entry: usize,
-    values: HashMap<u32, f64>,
-    /// The plugin's text for a parameter's value, by value's bits.
-    texts: HashMap<(u32, u64), String>,
-    /// The parameter whose gesture is open (the dial has it).
-    gesture: Option<u32>,
-    pub out: Vec<Out>,
-}
-
-impl Screen {
-    pub fn new(ui: &Shell) -> Screen {
-        Screen { b: Browser::new(ui), node: 0, name: String::new(), params: vec![], pages: vec![], entries: vec![], entry: 0, values: HashMap::new(), texts: HashMap::new(), gesture: None, out: vec![] }
-    }
-
-    pub fn open(&mut self, node: u64, name: &str) {
-        self.node = node;
-        self.name = name.into();
-        self.params.clear();
-        self.pages.clear();
-        self.entries.clear();
-        self.entry = 0;
-        self.values.clear();
-        self.texts.clear();
-        self.gesture = None;
-        self.b.reset();
-        self.b.say("");
-        self.out.push((Request::List, "params.list", json!({"node": node})));
-        self.show();
-    }
-
-    fn tiles(&self) -> Vec<usize> {
-        let Some((page, tab)) = self.entries.get(self.entry) else { return vec![] };
-        let mut tiles: Vec<usize> = self.pages[*page].1.iter().copied().filter(|&i| tab.as_ref().is_none_or(|t| level(&self.params[i].module, 1) == t)).collect();
-        by_priority(&self.params, &mut tiles);
-        tiles
-    }
-
-    fn ask_values(&mut self) {
-        let values: Vec<Value> = self.tiles().iter().map(|&i| json!({"node": self.node, "param": self.params[i].id})).collect();
-        if !values.is_empty() {
-            self.out.push((Request::Values, "params.get", json!({"values": values})));
-        }
-    }
-
-    /// params.list's answer: the pages, and the values of the first.
-    fn listed(&mut self, list: &Value) {
-        self.params = editor_parameters(parse(list));
-        self.pages = editor_pages(&self.params);
-        self.entries = self
-            .pages
-            .iter()
-            .enumerate()
-            .flat_map(|(i, (_, members))| {
-                let tabs = tabs_for(&self.params, members);
-                if tabs.is_empty() {
-                    vec![(i, None)]
-                } else {
-                    tabs.into_iter().map(|t| (i, Some(t))).collect()
-                }
-            })
-            .collect();
-        self.entry = 0;
-        self.ask_values();
-    }
-
-    pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) -> bool {
-        match (request, result) {
-            (Request::List, Ok(r)) => self.listed(&r),
-            (Request::Values, Ok(r)) => {
-                for v in r["values"].as_array().into_iter().flatten() {
-                    if let (Some(p), Some(x)) = (v["param"].as_u64(), v["value"].as_f64()) {
-                        self.value_arrived(p as u32, x);
-                    }
-                }
-            }
-            (Request::Text(p, bits), Ok(r)) => {
-                if let Some(t) = r["text"].as_str() {
-                    self.texts.insert((p, bits), t.to_string());
-                }
-            }
-            (Request::Set | Request::List, Err(e)) if e.code != 0 => {
-                self.b.say(&format!("The engine refused: {}", e.message));
-                self.show();
-                return true;
-            }
-            _ => {}
-        }
-        self.show();
-        false
-    }
-
-    /// A value read or pushed: kept, its text asked for when not known, but not over the one the dial has.
-    fn value_arrived(&mut self, param: u32, value: f64) {
-        if self.gesture == Some(param) {
-            return;
-        }
-        self.values.insert(param, value);
-        self.ask_text(param, value);
-    }
-
-    fn ask_text(&mut self, param: u32, value: f64) {
-        let key = (param, value.to_bits());
-        if !self.texts.contains_key(&key) {
-            self.out.push((Request::Text(param, value.to_bits()), "params.text", json!({"node": self.node, "param": param, "value": value})));
-        }
-    }
-
-    /// params.changed: the values that moved, for this plugin.
-    pub fn changed(&mut self, params: &Value) {
-        for c in params["changes"].as_array().into_iter().flatten() {
-            if c["node"].as_u64() == Some(self.node) && c["kind"] == "value" {
-                if let (Some(p), Some(v)) = (c["param"].as_u64(), c["value"].as_f64()) {
-                    self.value_arrived(p as u32, v);
-                }
-            }
-        }
-        self.show();
-    }
-
-    fn value_text(&self, p: &Param) -> String {
-        let v = self.values.get(&p.id).copied();
-        match v {
-            Some(v) => self.texts.get(&(p.id, v.to_bits())).cloned().unwrap_or_else(|| tidy(v)),
-            None => String::new(),
-        }
-    }
-
-    fn readonly(p: &Param) -> bool {
-        p.flags & FLAG_READONLY != 0
-    }
-
-    /// Two values only: a switch.
-    fn switch(p: &Param) -> bool {
-        p.stepped && (p.max - p.min - 1.).abs() < 1e-9
-    }
-
-    fn rows(&self) -> Vec<SettingData> {
-        self.tiles()
-            .into_iter()
-            .map(|i| {
-                let p = &self.params[i];
-                let kind = if Self::readonly(p) {
-                    4
-                } else if Self::switch(p) {
-                    1
-                } else {
-                    0
-                };
-                let on = self.values.get(&p.id).is_some_and(|v| *v > p.min);
-                SettingData { label: p.name.as_str().into(), value: self.value_text(p).into(), kind, on: kind == 1 && on, switch: kind == 1, ..Default::default() }
-            })
-            .collect()
-    }
-
-    fn info(&self) -> Vec<InfoLine> {
-        if self.entries.is_empty() {
-            return vec![InfoLine { head: true, text: "Pages".into() }, InfoLine { head: false, text: if self.params.is_empty() { "Reading the parameters..." } else { "No parameters" }.into() }];
-        }
-        let mut lines = vec![InfoLine { head: true, text: "Pages: right knob".into() }];
-        for (i, (page, tab)) in self.entries.iter().enumerate() {
-            let name = match tab {
-                Some(t) => format!("{} › {}", self.pages[*page].0, if t.is_empty() { "General" } else { t }),
-                None => self.pages[*page].0.clone(),
-            };
-            lines.push(InfoLine { head: i == self.entry, text: if i == self.entry { format!("● {name}") } else { name }.into() });
-        }
-        lines
-    }
-
-    fn show(&mut self) {
-        let rows = self.rows();
-        let info = self.info();
-        // The panel follows the page chosen.
-        self.b.info_cursor.at = None;
-        let per = self.b.per_info();
-        self.b.info_cursor.first = (self.entry + 1) / per.max(1) * per.max(1);
-        self.b.show(&self.name, "Parameters", "Parameters", rows, info);
-    }
-
-    fn end_gesture(&mut self) {
-        if let Some(p) = self.gesture.take() {
-            self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": p, "begin": false})));
-        }
-        self.b.editing = false;
-    }
-
-    /// The value under the cursor stepped `by`: a step of the stepped values, or of a hundredth of the range.
-    fn dial(&mut self, at: usize, by: i64) {
-        let Some(&i) = self.tiles().get(at) else { return };
-        let p = self.params[i].clone();
-        let now = self.values.get(&p.id).copied().unwrap_or(p.min);
-        let step = if p.stepped { 1. } else { (p.max - p.min) / 100. };
-        let to = (now + step * by as f64).clamp(p.min, p.max);
-        let to = if p.stepped { to.round() } else { to };
-        if to == now {
-            return;
-        }
-        self.set(&p, to);
-    }
-
-    fn set(&mut self, p: &Param, to: f64) {
-        self.values.insert(p.id, to);
-        self.b.say("");
-        self.out.push((Request::Set, "params.set", json!({"values": [{"node": self.node, "param": p.id, "value": to}]})));
-        self.ask_text(p.id, to);
-    }
-
-    fn press(&mut self, at: usize) {
-        let Some(&i) = self.tiles().get(at) else { return };
-        let p = self.params[i].clone();
-        if Self::readonly(&p) {
-            return;
-        }
-        if Self::switch(&p) {
-            // One gesture around the flip.
-            let now = self.values.get(&p.id).copied().unwrap_or(p.min);
-            let to = if now > p.min { p.min } else { p.max };
-            self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": p.id, "begin": true})));
-            self.set(&p, to);
-            self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": p.id, "begin": false})));
-        } else if self.b.editing {
-            self.end_gesture();
-        } else {
-            self.b.editing = true;
-            self.gesture = Some(p.id);
-            self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": p.id, "begin": true})));
-        }
-    }
-
-    fn page(&mut self, by: i64) {
-        if self.entries.is_empty() {
-            return;
-        }
-        self.end_gesture();
-        self.entry = (self.entry as i64 + by).clamp(0, self.entries.len() as i64 - 1) as usize;
-        self.b.reset_cursor();
-        self.ask_values();
-    }
-
-    fn handle(&mut self, nav: Nav) -> Outcome {
-        let outcome = match nav {
-            Nav::Press(at) => {
-                self.press(at);
-                Outcome::Stay
-            }
-            Nav::Dial(at, by) => {
-                self.dial(at, by);
-                Outcome::Stay
-            }
-            Nav::Pane(by) => {
-                self.page(by.signum());
-                Outcome::Stay
-            }
-            Nav::Back => Outcome::Back,
-            Nav::None => {
-                // Cancel ended a change: the gesture with it.
-                if !self.b.editing {
-                    self.end_gesture();
-                }
-                Outcome::Stay
-            }
-        };
-        self.show();
-        outcome
-    }
-
-    pub fn act(&mut self, action: Action) -> Outcome {
-        let nav = self.b.nav(action);
-        self.handle(nav)
-    }
-
-    pub fn tap(&mut self, row: i32) -> Outcome {
-        let nav = self.b.tap(row);
-        self.handle(nav)
-    }
-
-    /// The panel's up or down button: the page before or after.
-    pub fn scroll_info(&mut self, by: i32) {
-        self.page(by as i64);
-        self.show();
-    }
-
-    /// - or + on a row: that value stepped, in a gesture of its own.
-    pub fn step_row(&mut self, row: i32, by: i32) {
-        let at = self.b.index(row);
-        self.b.cursor = self.b.cursor.to(at);
-        if let Some(&i) = self.tiles().get(at) {
-            let p = self.params[i].clone();
-            if !Self::readonly(&p) && !Self::switch(&p) {
-                self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": p.id, "begin": true})));
-                self.dial(at, by as i64);
-                self.out.push((Request::Gesture, "params.gesture", json!({"node": self.node, "param": p.id, "begin": false})));
-            }
-        }
-        self.show();
-    }
-
-    pub fn hidden(&mut self) {
-        self.end_gesture();
-        self.b.hidden();
-        self.show();
-    }
-
-    pub fn shown(&mut self) {
-        self.b.install();
-        self.show();
-    }
-}
 
 #[cfg(test)]
 mod tests {

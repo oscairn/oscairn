@@ -6,6 +6,10 @@
 
 use super::*;
 
+fn tiles(ui: &Shell) -> Vec<(String, String)> {
+    ui.global::<crate::GridState>().get_tiles().iter().map(|t| (t.name.to_string(), t.value.to_string())).collect()
+}
+
 fn rows(ui: &Shell) -> Vec<(String, String)> {
     ui.global::<crate::PartState>().get_rows().iter().map(|r| (r.label.to_string(), r.value.to_string())).collect()
 }
@@ -39,6 +43,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
             "graph.get" => graph.clone(),
             "session.status" => json!({"midiInputs": []}),
             "params.text" => json!({"text": "t"}),
+            "controllers.view" => json!({"accepted": true}),
             "unsubscribe" | "subscribe" => json!({}),
             _ => return r,
         };
@@ -69,13 +74,13 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     f.reply(&r, json!({"result": super::pages::param_list()}));
     let r = next(&mut f, "params.get");
     f.reply(&r, json!({"result": {"values": [{"node": 2, "param": 1, "value": 0.25}]}}));
-    assert_eq!(rows(&ui)[0].0, "Resonance");
+    assert_eq!(tiles(&ui)[0].0, "Resonance");
     // A change from the engine shows (the shell subscribed to params.changed on opening).
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "params.changed", "params": {"changes": [{"node": 2, "param": 1, "kind": "value", "value": 0.5}]}})));
     f.pump();
-    assert_eq!(rows(&ui)[0].1, "0.5");
+    assert_eq!(tiles(&ui)[0].1, "0.5");
     // Cancel: back to the chain, and params.changed let go.
-    shell::act(Action::Cancel(None)); // the cursor was never put on a row: back at once
+    shell::act(Action::Cancel(None)); // the cursor was never put on a tile: back at once
     assert_eq!(ui.get_screen(), 5);
     let r = next(&mut f, "unsubscribe");
     assert_eq!((r["method"].as_str(), r["params"]["topics"][0].as_str()), (Some("unsubscribe"), Some("params.changed")));

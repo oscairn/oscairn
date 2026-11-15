@@ -139,10 +139,10 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | F1 | Read the plugin's parameters (`params.list`), hide hidden ones, read-only ones show the value only | `params.list` | - | - | [x] |
 | F2 | Pages: one per top-level module path ("Main" when none), numbered pages together; modules from the leading words of names when more than 24 parameters have no paths | derived | - | page list pane | [x] |
 | F3 | Tabs for the second level on a page of more than 24; a heading per module below | derived | - | tab list | [x] |
-| F4 | Tiles by priority (oscairn.ui `priority`), each with name, value text, a control: slider, two values a switch, a few values a list of them | `params.get`, `params.set`, `params.text`, `params.gesture` | - | cursor, press, dial; each step sent between a gesture begin and end | [x] |
+| F4 | Tiles by priority (oscairn.ui `priority`), each with name, value text, a control: slider, two values a switch, a few values a list of them | `params.get`, `params.set`, `params.text`, `params.gesture` | - | on the grid (ui/GRID.md, branch rust-grid): knob, slider, switch, dropdown, split buttons, range, value; cursor in two dimensions, press, dial; each step sent between a gesture begin and end | [x] |
 | F5 | Search a parameter by name or module on any page | derived | - | keyboard (K1) | [ ] |
-| F6 | The selected row/column of tiles is what the device's knobs play ("row:N" knobs); on the page, the screen knobs play the page by priority | `controllers.view` (screen page), `params.set` | - | the knob row (A9) | [ ] |
-| F7 | Rich views by field roles: envelopes (ADSR by name, DX7 rates/levels, FM-X), key and velocity maps, FM operator views and algorithm diagrams, LFOs, filters (response drawn) | `params.*` | - | the same tiles are always reachable; the rich view is drawn beside | [ ] |
+| F6 | The selected row/column of tiles is what the device's knobs play ("row:N" knobs); on the page, the screen knobs play the page by priority | `controllers.view` (screen page), `params.set` | - | the knob row (A9). Done on rust-grid: the screen page published by priority, withdrawn on leaving. Not done: `row:N` (no device profile has such knobs) | [ ] |
+| F7 | Rich views by field roles: envelopes (ADSR by name, DX7 rates/levels, FM-X), key and velocity maps, FM operator views and algorithm diagrams, LFOs, filters (response drawn) | `params.*` | - | the same tiles are always reachable; the rich view is drawn beside. Done on rust-grid: envelopes (fields and ADSR names), drawn, not dragged. Not done: maps, FM operators, LFOs, filters | [ ] |
 | F8 | Values follow the engine as they change (`params.changed`/`controls.changed`) | notifications | - | - | [x] |
 | F9 | The plugin's own view | `window.info`, `window.show` | window | **disabled entry: not available in this shell yet (the only item allowed to stay unported)** | [x] |
 
@@ -208,3 +208,22 @@ a layout; RFC 0019 is the source of the JUCE behavior. K2 keeps the JUCE Keyboar
 ## Design correction (owner, after the first pictures): the grid framework comes first
 
 The owner: "the grid of tiles and proper sliders is a part of the design that we need to keep ... one of the options for plugin control is a layout framework that the plugin can control through data with knobs, sliders, graphs, dropdowns, split buttons etc in a grid". The row-list parameter pages (params.rs) are therefore NOT acceptable as the design and F4/F7 are to be redone (their [x] stands for the row version only). To do, before the rest of the list: (1) read RFC 0011, 0019, 0042, oscairn-clap/include/oscairn-clap/ui.h and docs, and ParameterGrid.cpp end to end, and list every control kind and layout rule here as checklist items; (2) a grid module of its own (tiles with spans; knob, vertical and horizontal slider, drawbar, switch, dropdown, split button, value display, envelope and other graph views; the plugin's own value text; cursor over tiles in two dimensions, press selects, dial changes, a dropdown opens a list, split-button halves are stops; the device's knobs control the visible row or bank as ParameterGrid and the profile say); (3) parameter pages, the Play knob row and banks, and the mixer strips rebuilt on it, each compared with the JUCE layout; (4) tests per widget and per navigation, PNGs at scale 1 and 1.55 of a page with every control kind (the harness has `at_fantom_scale` and `fit_to_window` in src/tests.rs).
+
+### Status of the correction (branch rust-grid, 2026-11-15)
+
+Done: (1) ui/GRID.md; (2) the grid module (src/grid.rs, slint/grid.slint); (3) the parameter pages on
+it (F4 redone; F7 partly: envelopes). Not done: the Play knob row and banks on grid tiles (A9-A11),
+the mixer strips' faders as the grid's upright slider (H), the other views.
+
+### Owner requirements received during rust-grid (2026-11-15), binding on every screen
+
+- The grid of tiles with real controls (knobs, sliders, drawbars, dropdowns, split buttons, graphs)
+  is the design; the plugin controls its layout through data (`params.list`'s hints).
+- One universal UI: the keyboard's shell, a desktop app with resizable, responsive windows (OS
+  scaling 1x, 2x, fractional; separate windows where the JUCE app opens them; plan in
+  agent-notes/desktop-ui.md, `surface.rs` not built), later a DAW plugin's window: screens assume
+  no window size, scale factor or process-wide globals (the debts are listed in ui/GRID.md).
+- Smaller and larger device screens (800x480 at 1, 1920x1080 at 2): screens reflow, touch sizes kept.
+- The text keyboard on a hardware device overlays about the lower half of the screen as
+  hosts/standalone/TextKeyboard.cpp does, the field being edited kept in view: not started.
+- The whole Performance app moves to the shell; no handover for a half-ported app.

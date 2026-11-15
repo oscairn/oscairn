@@ -517,9 +517,15 @@ namespace oscairn
                 guard.faded += c.stolen; guard.fadedForTotal += c.stolenForDevice; guard.choked += c.hardChokes; guard.fadedForLoss += c.stolenForLoss; guard.lost += c.lostBlocks; guard.fadedForDeadline += c.stolenForDeadline; guard.unfit += c.unfitBlocks;
             }
             t.workers.back().called = since(st.calledBlocks, base.calledBlocks); t.workers.back().rested = since(st.restedBlocks, base.restedBlocks); t.workers.back().asleep = host->asleep();
+            {
+                const auto e = host->inputEvents(reset);
+                t.workers.back().events = since(e.total, eventsBase_.count(host) ? eventsBase_[host] : 0); t.workers.back().mostEvents = e.largest;
+                if(reset) eventsBase_[host] = e.total;
+            }
             if(reset) { r->reset(); timingBase_[host] = st; }
         }
         // A worker gone may leave its address to a new one: its counts go with it.
+        std::erase_if(eventsBase_, [&](const auto& b) { return std::none_of(workers.begin(), workers.end(), [&](const auto& w) { return w.first == b.first; }); });
         std::erase_if(timingBase_, [&](const auto& b) { return std::none_of(workers.begin(), workers.end(), [&](const auto& w) { return w.first == b.first; }); });
         if(reset) { callbackTiming_.reset(); latenessTiming_.reset(); }
         // Each instance once: a node's workers (its own, its prepared instances, its shared engine's), else the node's

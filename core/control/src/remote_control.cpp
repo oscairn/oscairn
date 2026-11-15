@@ -579,7 +579,7 @@ namespace oscairn
             snapshot(field(w,"collect")),snapshot(field(w,"wake")),snapshot(field(w,"run")),uint64_t(integer(field(w,"busy"))),uint64_t(integer(field(w,"missPanics"))),uint64_t(integer(field(w,"minorFaults"))),uint64_t(integer(field(w,"majorFaults"))),snapshot(field(w,"cpu")),uint64_t(integer(field(w,"involuntarySwitches"))),{}});
             for(auto p:array(field(w,"parts")))t.workers.back().parts.push_back(string(p));
             const auto g=field(w,"guard");t.workers.back().guard={number(field(g,"limit")),number(field(g,"took")),uint64_t(integer(field(g,"faded"))),uint64_t(integer(field(g,"fadedForTotal"))),uint64_t(integer(field(g,"choked"))),uint64_t(integer(field(g,"fadedForLoss"))),uint64_t(integer(field(g,"lost"))),uint64_t(integer(field(g,"fadedForDeadline"))),uint64_t(integer(field(g,"unfit")))};
-            t.workers.back().called=uint64_t(integer(field(w,"called")));t.workers.back().rested=uint64_t(integer(field(w,"rested")));t.workers.back().asleep=boolean(field(w,"asleep"));}
+            t.workers.back().called=uint64_t(integer(field(w,"called")));t.workers.back().rested=uint64_t(integer(field(w,"rested")));t.workers.back().events=uint64_t(integer(field(w,"events")));t.workers.back().mostEvents=uint64_t(integer(field(w,"mostEvents")));t.workers.back().asleep=boolean(field(w,"asleep"));}
         for(auto i:array(field(r,"instances"))){t.instances.push_back({string(field(i,"plugin")),uint64_t(integer(field(i,"memory"))),boolean(field(i,"inUse")),number(field(i,"idle")),{},{},string(field(i,"worker"))});
             for(auto n:array(field(i,"nodes")))t.instances.back().nodes.push_back(string(n));
             for(auto p:array(field(i,"parts")))t.instances.back().parts.push_back(string(p));}

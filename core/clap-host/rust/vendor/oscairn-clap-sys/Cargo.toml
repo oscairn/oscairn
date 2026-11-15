@@ -1,0 +1,10 @@
+# oscairn-clap's oscairn-clap-sys (vendor/README.md), its manifest without the bindgen feature, clap-sys taken from beside it.
+[package]
+name = "oscairn-clap-sys"
+description = "Raw FFI bindings for the Oscairn CLAP extension headers, generated with bindgen"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+clap-sys = { path = "../clap-sys-0.5.0" }

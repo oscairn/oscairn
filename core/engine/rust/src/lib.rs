@@ -22,6 +22,8 @@ use std::ffi::c_void;
 use std::ops::{Deref, Index, IndexMut};
 use std::ptr::NonNull;
 use std::sync::atomic::AtomicU64;
+// The CLAP host (core/clap-host/rust): its rust_clap_* functions go out in this crate's static library, the one the engine links.
+use oscairn_clap_host as _;
 
 /// An object the C++ owns and keeps alive, unmoved, for as long as the plan or call naming it
 /// (engine_core.h's contract); shared with other threads only through atomics.
@@ -685,9 +687,8 @@ mod tests {
             fnv(include_bytes!("../../src/engine_core.h")),
             fnv(include_bytes!("../../../clap-ext/include/oscairn-clap/voice-budget.h")),
             fnv(include_bytes!("../../../plugin-host/src/worker_shared.h")),
-            fnv(include_bytes!("../../../plugin-host/src/clap_host.h")),
         ];
-        assert_eq!(now, bindings::MADE_FROM, "engine_core.h, voice-budget.h, worker_shared.h or clap_host.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
+        assert_eq!(now, bindings::MADE_FROM, "engine_core.h, voice-budget.h or worker_shared.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
     }
 
     /// Counts the allocations this thread makes while `COUNTING` is set.

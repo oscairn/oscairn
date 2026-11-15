@@ -1,0 +1,15 @@
+# The engine's Rust: the engine core (engine/rust) and the CLAP host (clap-host/rust), one lock (Cargo.lock) and one
+# set of vendored crates (clap-host/rust/vendor), built offline. The engine core's static library carries the host.
+[workspace]
+resolver = "2"
+members = ["engine/rust", "clap-host/rust"]
+exclude = ["engine/rust/bindgen", "clap-host/rust/vendor"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = 1
+
+[profile.dev]
+panic = "abort"

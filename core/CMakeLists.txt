@@ -4,7 +4,7 @@ find_package(Threads REQUIRED)
 add_library(oscairn_plugin_host STATIC plugin-host/src/plugin_host.cpp plugin-host/src/clap_host_cpp.cpp plugin-host/src/unavailable_plugin.cpp plugin-host/src/discovery.cpp plugin-host/src/assets.cpp
     plugin-host/src/samples.cpp plugin-host/src/Worker.cpp plugin-host/src/WorkerHost.cpp)
 target_include_directories(oscairn_plugin_host PUBLIC plugin-host/include)
-target_link_libraries(oscairn_plugin_host PUBLIC kick_clap_host samplepack::samplepack PRIVATE Threads::Threads)
+target_link_libraries(oscairn_plugin_host PUBLIC kick_clap_host samplepack::samplepack oscairn_engine_core PRIVATE Threads::Threads) # oscairn_engine_core: the Rust CLAP host (clap-host/rust) too
 target_compile_options(oscairn_plugin_host PRIVATE -Wall -Wextra)
 if(OSCAIRN_LV2)
     find_package(PkgConfig REQUIRED)
@@ -78,7 +78,7 @@ set(engine_core_flags "--remap-path-prefix${engine_core_us}${engine_core_crate}=
 foreach(flag IN LISTS SAMPLEPACK_RUSTFLAGS) # the target's CPU flags, as samplepack takes them
     string(APPEND engine_core_flags "${engine_core_us}${flag}")
 endforeach()
-set(engine_core_env CARGO_ENCODED_RUSTFLAGS=${engine_core_flags} RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION})
+set(engine_core_env CARGO_ENCODED_RUSTFLAGS=${engine_core_flags} RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION} OSCAIRN_RELEASE=${OSCAIRN_RELEASE}) # the release the Rust CLAP host tells plugins, as kick_clap_host does
 set(engine_core_cmds)
 set(engine_core_libs)
 foreach(triple IN LISTS _sp_triples)
@@ -139,6 +139,18 @@ target_link_libraries(oscairn-clap-host-c-test PRIVATE oscairn_engine)
 add_test(NAME clap-host-c COMMAND oscairn-clap-host-c-test $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn_basic_synth>
     $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay>)
 set_tests_properties(clap-host-c PROPERTIES TIMEOUT 60)
+
+# The Rust CLAP host (clap-host/rust) against its C++ reference, through clap_host.h.
+# Its recording fixture shows each host what it was given.
+add_library(oscairn-recording-fixture MODULE engine/tests/recording_fixture.cpp)
+target_link_libraries(oscairn-recording-fixture PRIVATE oscairn_clap_headers)
+set_target_properties(oscairn-recording-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
+add_executable(oscairn-clap-host-rust-test engine/tests/clap_host_rust.cpp)
+target_link_libraries(oscairn-clap-host-rust-test PRIVATE oscairn_engine)
+add_dependencies(oscairn-clap-host-rust-test oscairn-recording-fixture oscairn-voice-fixture)
+add_test(NAME clap-host-rust COMMAND oscairn-clap-host-rust-test $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(clap-host-rust PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1") # the voice fixture offering oscairn.voice-budget
 
 add_executable(oscairn-sequencer-timing-test engine/tests/sequencer_timing.cpp)
 target_link_libraries(oscairn-sequencer-timing-test PRIVATE oscairn_engine)
@@ -339,7 +351,7 @@ target_link_libraries(oscairn-run-diff-test PRIVATE oscairn_engine)
 add_test(NAME engine-run-diff COMMAND oscairn-run-diff-test)
 set_tests_properties(engine-run-diff PROPERTIES TIMEOUT 300)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
-    ${SAMPLEPACK_CARGO} test --release --locked --offline --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
+    ${SAMPLEPACK_CARGO} test --release --locked --offline --workspace --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
 set_tests_properties(engine-core-cargo PROPERTIES TIMEOUT 300)
 
 add_executable(oscairn-write-failure-test engine/tests/write_failure.cpp)

@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* The CLAP host behind one C interface: one plugin instance, loaded from its library, with what ClapHost
  * (plugin_host.cpp, the PluginHost the engine and the plugin worker use) asks of it. Implementations:
- * cpp_clap_* (clap_host_cpp.cpp, around kick::clap::Host, the reference) and, from the next stage, Rust's.
+ * cpp_clap_* (clap_host_cpp.cpp, around kick::clap::Host, the reference) and rust_clap_* (core/clap-host/rust).
  * plugin_host.cpp calls the one picked through OSCAIRN_CLAP(name). Rust's types are generated from this file
- * into core/engine/rust/src/bindings.rs (its test engine_core_h_unchanged fails when this file moves).
+ * into core/clap-host/rust/src/bindings.rs (its test clap_host_h_unchanged fails when this file moves).
  *
  * Threads, as kick::clap::Host's (Host.h): control calls on one main thread; process and the calls named
  * audio thread on one audio thread; enqueue (send_event), statistics and the counters on any. Nothing an audio
@@ -182,6 +182,7 @@ typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
  * wrote for a native engine, prepared beside the playing sounds, the sound each MIDI channel selects into ids.
  * save_sound: one sound as such a snapshot. parameter_text: the text, given once. */
 OSCAIRN_CLAP_API(cpp_)
+OSCAIRN_CLAP_API(rust_) /* being written: the ones core/clap-host/rust defines so far, which clap-host-rust compares */
 
 #ifdef __cplusplus
 }

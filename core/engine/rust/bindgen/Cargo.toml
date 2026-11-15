@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 bindgen = { version = "=0.72.1", default-features = false, features = ["runtime"] }
+
+# Its own lock and dependencies, apart from the engine workspace (core/Cargo.toml).
+[workspace]

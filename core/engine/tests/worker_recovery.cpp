@@ -81,18 +81,21 @@ namespace
         check(steady, "the other sounds played on unchanged while it was down");
         std::printf("restarted after %d blocks\n", blocks);
 
+        // A restarted worker is back when its state is restored, which takes the time a machine gives it, not a number of blocks: ten blocks, then as many
+        // more as it takes (1500 at most) for the sound to reach its level.
+        auto settle = [&] { for(int i = 0; i < 10 || (i < 1500 && std::abs(p.last() - 1.35f) >= 1e-5f); ++i) p.play(); };
         // The restarted sound plays with its prepared value again, faded in.
         p.play({Event::note(true, 62, 1, 0, 1, 0, 5)});
         // The fade (10 ms, under four blocks) starts when the worker is back, at most a block before this note.
         check(p.l[0] < 1.349f && p.last() > p.l[0], "the restarted sound fades in: " + std::to_string(p.l[0]) + " to " + std::to_string(p.last()));
-        for(int i = 0; i < 10; ++i) p.play();
+        settle();
         check(std::abs(p.last() - 1.35f) < 1e-5f, "the restarted sound keeps its parameter value: " + std::to_string(p.last()));
 
         // The sound prepared from state comes back with it too.
         p.play({Event::note(true, 0, 1, 0, 2, 0, 6)});
         for(blocks = 0; blocks < 1500 && restarts() < 2; ++blocks) p.play();
         p.play({Event::note(true, 62, 1, 0, 2, 0, 7)});
-        for(int i = 0; i < 10; ++i) p.play();
+        settle();
         check(std::abs(p.last() - 1.35f) < 1e-5f, "the sound prepared from state comes back with it: " + std::to_string(p.last()));
         check(host.failure().empty(), "no failure reported once recovered: " + host.failure());
     }

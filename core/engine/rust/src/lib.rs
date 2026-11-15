@@ -8,15 +8,18 @@ mod budget;
 mod event;
 mod notes;
 mod route;
+mod run;
 
 use audio::{Audio, Bus, Connection, StepIn};
 use budget::Activity;
-use event::{Event, CORE_SPACE, NOTE_END};
+use event::Event;
 use notes::{Key, Notes, Rendered, SoundContext, Source, Step, Timing, VoiceNote};
-use route::{Context, NoteRoute, Zones, UNTAGGED};
+use route::{NoteRoute, Zones};
+use run::{Block, Control, Curve, HarmonySource, LaneRoute, Midi, Param, Run, Tap, VoiceContext};
 use std::ffi::c_void;
 use std::ops::{Deref, Index, IndexMut};
 use std::ptr::NonNull;
+use std::sync::atomic::AtomicU64;
 
 /// An object the C++ owns and keeps alive, unmoved, for as long as the plan or call naming it
 /// (engine_core.h's contract); shared with other threads only through atomics.
@@ -98,9 +101,25 @@ impl Drop for Buffers {
     }
 }
 
+/// An object the C++ owns that the core writes on the audio thread (a harmony's last value), one call at a time.
+pub struct Mut<T>(NonNull<T>);
+impl<T: Copy> Mut<T> {
+    pub fn get(&self) -> T {
+        // SAFETY: alive and unmoved while named (as Shared); touched by nothing else during the call.
+        unsafe { *self.0.as_ptr() }
+    }
+    pub fn set(&mut self, v: T) {
+        // SAFETY: as `get`.
+        unsafe { *self.0.as_ptr() = v }
+    }
+}
+
 /// The caller's channels for one call (the graph's outputs, or the external input), any of them null.
 pub struct Channels<'a>(&'a [*mut f32]);
 impl Channels<'_> {
+    pub fn none() -> Channels<'static> {
+        Channels(&[])
+    }
     pub fn count(&self) -> usize {
         self.0.len()
     }
@@ -167,11 +186,13 @@ pub struct CSource {
     peer_count: u32,
     channel: i16,
     draining: bool,
+    from: i32,
 }
 #[repr(C)]
 pub struct CContext {
     channel: i16,
     activity: *mut Activity,
+    id: u32,
 }
 #[repr(C)]
 pub struct CLink {
@@ -190,6 +211,12 @@ pub struct CStep {
     late_lane: bool,
     next: *const CLink,
     next_count: u32,
+    host: *const c_void,
+    id: u32,
+    harmony: i32,
+    lane_routes: *const LaneRoute,
+    lane_route_count: u32,
+    lanes_in: bool,
 }
 #[repr(C)]
 pub struct CFinish {
@@ -282,18 +309,7 @@ pub unsafe extern "C" fn rust_core_route_events(
     // SAFETY: the caller's contract, for each pointer as documented above.
     let (zones, events, tags, held, next_id) = unsafe { (&*zones, slice(events, count), slice(tags, count), slice_mut(held, count), &mut *next_id) };
     let Some(route) = NonNull::new(route).map(Route) else { return };
-    let rs = &mut Routes(());
-    let mut emit = emitter(emit, context);
-    for (i, e) in events.iter().enumerate() {
-        if e.space() != CORE_SPACE || (skip_ends && e.kind() == NOTE_END) {
-            continue;
-        }
-        let mut cx = Context { zones: Some(zones), source: tags.get(i).copied().unwrap_or(UNTAGGED), draining: false, peers: &[], budget: None };
-        route::route(rs, route, e, next_id, &mut emit, &mut cx);
-        if let Some(h) = held.get_mut(i) {
-            *h = rs[route].held_keys;
-        }
-    }
+    route::route_events(&mut Routes(()), route, zones, events, tags, skip_ends, next_id, &mut emitter(emit, context), held);
 }
 
 /// # Safety
@@ -311,11 +327,11 @@ pub unsafe extern "C" fn rust_core_notes_new(steps: *const CStep, count: u32, la
             for c in slice(s.sources, s.source_count) {
                 let (Some(route), Some(&zones)) = (handle(c.route), c.zones.as_ref()) else { continue };
                 let peers = slice(c.peers, c.peer_count).iter().filter_map(|&p| handle(p)).collect();
-                sources.push(Source { route, zones, peers, channel: c.channel, draining: c.draining });
+                sources.push(Source { route, zones, peers, channel: c.channel, draining: c.draining, from: c.from });
             }
             let contexts = slice(s.contexts, s.context_count)
                 .iter()
-                .filter_map(|c| Some(SoundContext { channel: c.channel, activity: Shared(NonNull::new(c.activity)?) }));
+                .filter_map(|c| Some(SoundContext { channel: c.channel, activity: Shared(NonNull::new(c.activity)?), id: c.id }));
             let next = slice(s.next, s.next_count).iter().map(|l| (l.step as usize, l.gain)).collect();
             steps_out.push(Step::new(NonNull::new(s.activity).map(Shared), sources, contexts.collect(), s.lane as usize, s.in_process, s.late_lane, next));
         }
@@ -487,9 +503,303 @@ pub unsafe extern "C" fn rust_core_audio_finish(audio: *mut Audio, step: u32, fr
     unsafe { &mut *audio }.finish(step as usize, frames as usize, processed, asleep, fade);
 }
 
+/// oscairn_plugins: the C++ plugin hosts' calls for the run (engine_core.h). Every call is safe to make
+/// with any step of the plan; what a call returns lives until that step renders again.
+#[repr(C)]
+pub struct Plugins {
+    context: *mut c_void,
+    sent: extern "C" fn(*mut c_void, u32, *mut u32) -> *const Event,
+    start: extern "C" fn(*mut c_void, u32, *const Event, u32) -> bool,
+    render: extern "C" fn(*mut c_void, u32, *const Event, u32) -> bool,
+    finish: extern "C" fn(*mut c_void, u32) -> bool,
+    late: extern "C" fn(*mut c_void, u32) -> bool,
+    panic: extern "C" fn(*mut c_void, u32),
+    kept: extern "C" fn(*mut c_void, u32) -> bool,
+    was_reset: extern "C" fn(*mut c_void, u32) -> bool,
+    asleep: extern "C" fn(*mut c_void, u32) -> bool,
+    own_voices: extern "C" fn(*mut c_void, u32) -> bool,
+    honors_volume: extern "C" fn(*mut c_void, u32) -> bool,
+    missed: extern "C" fn(*mut c_void, u32) -> u64,
+    took: extern "C" fn(*mut c_void, u32) -> f64,
+    voices: extern "C" fn(*mut c_void, u32, *mut f64, *mut *const VoiceNote, *mut u32) -> u32,
+    set_limits: extern "C" fn(*mut c_void, u32, u32, *const VoiceContext, u32),
+    sound: extern "C" fn(*mut c_void, u32, u32) -> u32,
+    parameters: extern "C" fn(*mut c_void, u32, u32, Emit, *mut c_void),
+    listen: extern "C" fn(*mut c_void, u32, *const Event, u32, bool),
+    now: extern "C" fn(*mut c_void) -> i64,
+    deadline: extern "C" fn(*mut c_void, i64, bool),
+    helpers: extern "C" fn(*mut c_void, u32, extern "C" fn(*mut c_void, u32), *mut c_void),
+}
+impl Plugins {
+    pub fn sent(&self, s: usize) -> &[Event] {
+        let mut n = 0;
+        let p = (self.sent)(self.context, s as u32, &mut n);
+        // SAFETY: the host's events, `n` of them, alive until the step renders again (above).
+        unsafe { slice(p, n) }
+    }
+    pub fn start(&self, s: usize, e: &[Event]) -> bool {
+        (self.start)(self.context, s as u32, e.as_ptr(), e.len() as u32)
+    }
+    pub fn render(&self, s: usize, e: &[Event]) -> bool {
+        (self.render)(self.context, s as u32, e.as_ptr(), e.len() as u32)
+    }
+    pub fn finish(&self, s: usize) -> bool {
+        (self.finish)(self.context, s as u32)
+    }
+    pub fn late(&self, s: usize) -> bool {
+        (self.late)(self.context, s as u32)
+    }
+    pub fn panic(&self, s: usize) {
+        (self.panic)(self.context, s as u32)
+    }
+    pub fn kept(&self, s: usize) -> bool {
+        (self.kept)(self.context, s as u32)
+    }
+    pub fn was_reset(&self, s: usize) -> bool {
+        (self.was_reset)(self.context, s as u32)
+    }
+    pub fn asleep(&self, s: usize) -> bool {
+        (self.asleep)(self.context, s as u32)
+    }
+    pub fn own_voices(&self, s: usize) -> bool {
+        (self.own_voices)(self.context, s as u32)
+    }
+    pub fn honors_volume(&self, s: usize) -> bool {
+        (self.honors_volume)(self.context, s as u32)
+    }
+    pub fn missed(&self, s: usize) -> u64 {
+        (self.missed)(self.context, s as u32)
+    }
+    pub fn took(&self, s: usize) -> f64 {
+        (self.took)(self.context, s as u32)
+    }
+    /// Its voices sounding, its cost per voice and its notes (oscairn.voice-budget's report).
+    pub fn voices(&self, s: usize) -> (u32, f64, &[VoiceNote]) {
+        let (mut cost, mut notes, mut n) = (0.0, std::ptr::null(), 0);
+        let voices = (self.voices)(self.context, s as u32, &mut cost, &mut notes, &mut n);
+        // SAFETY: as `sent`.
+        (voices, cost, unsafe { slice(notes, n) })
+    }
+    pub fn set_limits(&self, s: usize, limit: u32, parts: &[VoiceContext]) {
+        (self.set_limits)(self.context, s as u32, limit, parts.as_ptr(), parts.len() as u32)
+    }
+    pub fn sound(&self, s: usize, c: usize) -> u32 {
+        (self.sound)(self.context, s as u32, c as u32)
+    }
+    /// A shared engine's context `c`'s parameters set since its last block, each to `emit`.
+    pub fn parameters(&self, s: usize, c: usize, emit: &mut dyn FnMut(&Event) -> bool) {
+        extern "C" fn call(context: *mut c_void, e: *const Event) -> bool {
+            // SAFETY: the closure passed below, for this call; an event the host lends for the call.
+            unsafe { (*context.cast::<&mut dyn FnMut(&Event) -> bool>())(&*e) }
+        }
+        let mut emit = emit;
+        (self.parameters)(self.context, s as u32, c as u32, Some(call), std::ptr::from_mut(&mut emit).cast());
+    }
+    pub fn listen(&self, node: u32, e: &[Event], sent: bool) {
+        (self.listen)(self.context, node, e.as_ptr(), e.len() as u32, sent)
+    }
+    pub fn now(&self) -> i64 {
+        (self.now)(self.context)
+    }
+    pub fn deadline(&self, at: i64, only: bool) {
+        (self.deadline)(self.context, at, only)
+    }
+    /// The wave's `count` local steps rendered on the audio helpers and here (Run::render_local).
+    pub fn helpers(&self, run: &Run, count: usize) {
+        struct Job<'a>(&'a Run, &'a Plugins);
+        extern "C" fn job(context: *mut c_void, k: u32) {
+            // SAFETY: the Job below, alive and only read (atomics aside) while the helpers run.
+            let Job(run, plugins) = unsafe { &*context.cast::<Job>() };
+            run.render_local(plugins, k as usize);
+        }
+        let j = Job(run, self);
+        (self.helpers)(self.context, count as u32, job, std::ptr::from_ref(&j).cast_mut().cast());
+    }
+}
+
+/// oscairn_harmony_source, oscairn_tap, oscairn_control and oscairn_run_block as the C++ lays them out.
+#[repr(C)]
+pub struct CHarmony {
+    route: *mut NoteRoute,
+    zones: *const Zones,
+    input: bool,
+    root: u8,
+    scale: u16,
+    last: *mut run::Harmony,
+}
+#[repr(C)]
+pub struct CTap {
+    step: i32,
+    route: *mut NoteRoute,
+    zones: *const Zones,
+    ports: u64,
+    channel: u8,
+}
+#[repr(C)]
+pub struct CControl {
+    path: *const Curve,
+    count: u32,
+    origin: f64,
+    modulate: bool,
+}
+#[repr(C)]
+pub struct CBlock {
+    inputs: *const *const f32,
+    ni: u32,
+    outputs: *const *mut f32,
+    no: u32,
+    frames: u32,
+    fade: u32,
+    events: *const Event,
+    count: u32,
+    tags: *const u8,
+    params: *const Param,
+    param_count: u32,
+    beat: *const Event,
+    panic_input: bool,
+    panic_notes: bool,
+    listening: bool,
+    parallel: bool,
+    deadlines: bool,
+    timing: Timing,
+    deadline: i64,
+    worth: f32,
+    live_from: *const f32,
+    live_to: *const f32,
+    next_id: *mut u32,
+    drops: *mut u64,
+    midi: *mut Midi,
+    midi_count: *mut u32,
+}
+
+/// # Safety
+/// As engine_core.h's run_new: `notes` and `audio` live and outliving the run, every array readable
+/// with its count, every route and zones live for the run's life (zones are copied).
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn rust_core_run_new(
+    notes: *mut Notes,
+    audio: *mut Audio,
+    steps: *const CStep,
+    budgeted: *const bool,
+    count: u32,
+    waves: *const u32,
+    wave_count: u32,
+    harmonies: *const CHarmony,
+    harmony_count: u32,
+    taps: *const CTap,
+    tap_count: u32,
+    controls: *const CControl,
+    control_count: u32,
+) -> *mut Run {
+    // SAFETY: the caller's contract, for each array and pointer.
+    unsafe {
+        let route = |p: *mut NoteRoute| Route(NonNull::new(p).expect("a route"));
+        let budgeted = slice(budgeted, count);
+        let steps_in = slice(steps, count)
+            .iter()
+            .zip(budgeted)
+            .map(|(s, &b)| run::StepIn {
+                host: s.host as usize,
+                id: s.id,
+                harmony: s.harmony,
+                routes: slice(s.lane_routes, s.lane_route_count).to_vec(),
+                lanes_in: s.lanes_in,
+                budgeted: b,
+            })
+            .collect();
+        let parts = slice(harmonies, harmony_count)
+            .iter()
+            .map(|h| HarmonySource {
+                route: route(h.route),
+                zones: *h.zones,
+                input: h.input,
+                root: h.root,
+                scale: h.scale,
+                last: Mut(NonNull::new(h.last).expect("a harmony")),
+            })
+            .collect();
+        let taps =
+            slice(taps, tap_count).iter().map(|t| Tap { step: t.step, route: route(t.route), zones: *t.zones, ports: t.ports, channel: t.channel }).collect();
+        let controls =
+            slice(controls, control_count).iter().map(|c| Control { path: slice(c.path, c.count).to_vec(), origin: c.origin, modulate: c.modulate }).collect();
+        let (notes, audio) = (NonNull::new(notes).expect("notes"), NonNull::new(audio).expect("audio"));
+        let contexts = |s: usize| slice(steps, count)[s].context_count as usize;
+        Box::into_raw(Box::new(Run::new(notes, audio, steps_in, slice(waves, wave_count), parts, taps, controls, contexts)))
+    }
+}
+
+/// # Safety
+/// `run` came from rust_core_run_new and is freed once.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_run_free(run: *mut Run) {
+    // SAFETY: the caller's contract.
+    drop(unsafe { Box::from_raw(run) });
+}
+
+/// # Safety
+/// Two live, different runs, on the audio thread, nothing else using them or their notes and audio;
+/// `midi` holds Graph::maxMidiOut messages; `drops` is an atomic.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_run_adopt(
+    next: *mut Run,
+    current: *mut Run,
+    ramp: bool,
+    ramp_frames: u32,
+    midi: *mut Midi,
+    midi_count: *mut u32,
+    drops: *mut u64,
+) {
+    // SAFETY: the caller's contract.
+    unsafe {
+        let (next, current) = (&mut *next, &*current);
+        next.adopt(current, &mut Routes(()), next.notes.as_ref(), current.notes.as_ref(), slice_mut(midi, 1024), &mut *midi_count, AtomicU64::from_ptr(drops));
+        if ramp {
+            (*next.audio.as_ptr()).carry(current.audio.as_ref(), ramp_frames);
+        }
+    }
+}
+
+/// # Safety
+/// A live run, its notes and audio used by nothing else; `block` and `plugins` as engine_core.h says.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_run_block(run: *mut Run, block: *const CBlock, plugins: *const Plugins) -> bool {
+    // SAFETY: the caller's contract, for each pointer and array.
+    unsafe {
+        let (run, b, plugins) = (&mut *run, &*block, &*plugins);
+        let (notes, audio) = (&mut *run.notes.as_ptr(), &mut *run.audio.as_ptr());
+        let mut block = Block {
+            inputs: Channels(slice(b.inputs.cast(), b.ni)),
+            outputs: Channels(slice(b.outputs, b.no)),
+            frames: b.frames,
+            fade: b.fade,
+            events: slice(b.events, b.count),
+            tags: (!b.tags.is_null()).then(|| slice(b.tags, b.count)),
+            params: slice(b.params, b.param_count),
+            beat: &*b.beat,
+            panic_input: b.panic_input,
+            panic_notes: b.panic_notes,
+            listening: b.listening,
+            parallel: b.parallel,
+            deadlines: b.deadlines,
+            timing: b.timing,
+            deadline: b.deadline,
+            worth: b.worth,
+            live_from: slice(b.live_from, 256),
+            live_to: slice(b.live_to, 256),
+            next_id: &mut *b.next_id,
+            drops: AtomicU64::from_ptr(b.drops),
+            midi: slice_mut(b.midi, 1024),
+            midi_count: &mut *b.midi_count,
+        };
+        run.block(&mut Routes(()), notes, audio, &mut block, plugins)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use route::UNTAGGED;
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;
     use std::mem::{offset_of, size_of};
@@ -509,8 +819,8 @@ mod tests {
 
     /// Counts the allocations this thread makes while `COUNTING` is set.
     struct Counting;
-    static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
-    thread_local!(static COUNTING: Cell<bool> = const { Cell::new(false) });
+    pub(crate) static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+    thread_local!(pub(crate) static COUNTING: Cell<bool> = const { Cell::new(false) });
     // SAFETY: System's allocator, unchanged; only counted.
     unsafe impl GlobalAlloc for Counting {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -539,7 +849,7 @@ mod tests {
         activity.seed_note.set(40.0);
         let zones = Zones::default();
         let routes = [rust_core_route_new(1, 1, 64), rust_core_route_new(1, 1, 0)];
-        let sources = routes.map(|route| CSource { route, zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: -1, draining: false });
+        let sources = routes.map(|route| CSource { route, zones: &zones, peers: std::ptr::null(), peer_count: 0, channel: -1, draining: false, from: -1 });
         let step = CStep {
             activity: std::ptr::from_ref(&activity).cast_mut(),
             sources: sources.as_ptr(),
@@ -551,6 +861,12 @@ mod tests {
             late_lane: false,
             next: std::ptr::null(),
             next_count: 0,
+            host: std::ptr::null(),
+            id: 0,
+            harmony: -1,
+            lane_routes: std::ptr::null(),
+            lane_route_count: 0,
+            lanes_in: false,
         };
         let mut budgeted = false;
         // SAFETY: one step whose arrays and pointers outlive the notes.

@@ -66,7 +66,8 @@ typedef struct
 
 /* A note connection into a step: its ledger, zones (copied), the routes sharing its part's note
  * limit (itself among them; none: it counts alone), the MIDI channel of the shared engine's context
- * it plays (else -1), and whether it is draining (RFC 0021). */
+ * it plays (else -1), whether it is draining (RFC 0021), and the step its events come from (-1: the
+ * graph's input). */
 typedef struct
 {
     oscairn_route* route;
@@ -75,8 +76,23 @@ typedef struct
     uint32_t peer_count;
     int16_t channel;
     bool draining;
+    int32_t from;
 } oscairn_source;
-typedef struct { int16_t channel; oscairn_activity* activity; } oscairn_context; /* a shared engine's sound context */
+typedef struct { int16_t channel; oscairn_activity* activity; uint32_t id; } oscairn_context; /* a shared engine's sound context, its node */
+/* Where one of a step's parameter-target lanes goes (Graph::mapParamTarget, setControlTargets): the
+ * target step and parameter and its range; the target's note connection from this step that per-note
+ * lane events address (-1: none); a shared engine's context's channel (-1: none); a control (an index
+ * into the run's controls, -1: a plain mapping). */
+typedef struct
+{
+    uint32_t lane;
+    int32_t target;
+    uint32_t param;
+    double minimum, maximum;
+    bool stepped;
+    int16_t notes, channel;
+    int32_t control;
+} oscairn_lane_route;
 typedef struct { uint32_t step; float gain; } oscairn_link; /* audio to a later step, the largest gain of its routes */
 /* A step of the plan, in plan order: its node's activity, its note connections and contexts, and its
  * budget lane: the thread it renders on; in_process: in the engine's process (the callback's time);
@@ -93,6 +109,14 @@ typedef struct
     bool in_process, late_lane;
     const oscairn_link* next;
     uint32_t next_count;
+    /* For the run alone: its plugin (an identity) and node; the part's harmony it gets (an index into
+     * the run's harmonies, -1: none); its lanes' routes; whether lanes reach it. */
+    const void* host;
+    uint32_t id;
+    int32_t harmony;
+    const oscairn_lane_route* lane_routes;
+    uint32_t lane_route_count;
+    bool lanes_in;
 } oscairn_step;
 
 /* One block's timing, microseconds: budget as Graph::setVoiceBudget (0 none, below 0 the load
@@ -158,6 +182,79 @@ typedef struct
 } oscairn_audio_step;
 typedef struct oscairn_audio oscairn_audio;
 
+/* A plan's block (oscairn_run, Graph::process): around its notes and audio, the steps in plan order
+ * wave by wave, each step's events merged and routed, its plugin called, what it sent passed on
+ * (parameter-target lanes, MIDI taps, listeners), the parts' harmonies. */
+typedef struct oscairn_run oscairn_run;
+/* Graph::ControlCurve and ControlTarget, field for field (the path's curves, from the control down). */
+typedef struct { uint8_t kind; double start, end, shift, low, high, exponent; } oscairn_curve;
+typedef struct { const oscairn_curve* path; uint32_t count; double origin; bool modulate; } oscairn_control;
+/* A part's harmony (Graph::setHarmonies): its keys' ledger and zones, whether its input's notes
+ * play into it, the key and scale, and the last harmony sent (the caller's, kept across plans). */
+typedef struct { oscairn_route* route; const oscairn_zones* zones; bool input; uint8_t root; uint16_t scale; struct oscairn_harmony* last; } oscairn_harmony_source;
+/* A MIDI tap (Graph::setMidiTaps): from a step's notes (-1: the input), its ledger and zones, ports and channel. */
+typedef struct { int32_t step; oscairn_route* route; const oscairn_zones* zones; uint64_t ports; uint8_t channel; } oscairn_tap;
+typedef struct { uint32_t time; uint64_t ports; uint8_t size; uint8_t bytes[3]; } oscairn_midi; /* Graph::MidiMessage */
+typedef struct { uint32_t node; oscairn_event event; } oscairn_param; /* a queued parameter's event for a node */
+typedef void (*oscairn_job)(void* context, uint32_t index);
+/* The plugins, for the run: each call names a step; `context` is passed back. Graph::process's calls
+ * on PluginHost, a SoundContext and the Listener, one each, the clock (steady_clock nanoseconds), the
+ * worker deadline (realtime.h), and the audio helpers (render runs on them; nothing else does). */
+typedef struct
+{
+    void* context;
+    const oscairn_event* (*sent)(void* context, uint32_t step, uint32_t* count);
+    bool (*start)(void* context, uint32_t step, const oscairn_event* events, uint32_t count);
+    bool (*render)(void* context, uint32_t step, const oscairn_event* events, uint32_t count);
+    bool (*finish)(void* context, uint32_t step);
+    bool (*late)(void* context, uint32_t step);
+    void (*panic)(void* context, uint32_t step);
+    bool (*kept)(void* context, uint32_t step);
+    bool (*was_reset)(void* context, uint32_t step);
+    bool (*asleep)(void* context, uint32_t step);
+    bool (*own_voices)(void* context, uint32_t step);
+    bool (*honors_volume)(void* context, uint32_t step);
+    uint64_t (*missed)(void* context, uint32_t step);
+    double (*took)(void* context, uint32_t step);
+    uint32_t (*voices)(void* context, uint32_t step, double* cost, const oscairn_voice_budget_note_t** notes, uint32_t* count);
+    void (*set_limits)(void* context, uint32_t step, uint32_t limit, const oscairn_voice_budget_context_t* contexts, uint32_t count);
+    uint32_t (*sound)(void* context, uint32_t step, uint32_t context_index);
+    void (*parameters)(void* context, uint32_t step, uint32_t context_index, oscairn_emit emit, void* emit_context);
+    void (*listen)(void* context, uint32_t node, const oscairn_event* events, uint32_t count, bool sent);
+    int64_t (*now)(void* context);
+    void (*deadline)(void* context, int64_t at, bool only);
+    void (*helpers)(void* context, uint32_t count, oscairn_job job, void* job_context);
+} oscairn_plugins;
+/* One block for the run: the graph's audio in and out, frames, and the output guard's fade (frames); its events (each's tag in tags, which may be
+ * null) and the queued parameters; the beat event; recovery asked for the input's notes or all; whether
+ * a listener listens and the plan renders wave by wave (else step by step on this thread); the budget's
+ * timing; the callback's deadline (nanoseconds, 0: none) and whether waves wait to it (RFC 0045 step
+ * 6); what the helpers must be saved to be worth waking; the live gains; the graph's note IDs, event
+ * drops (an atomic) and MIDI out (count in and out). */
+typedef struct
+{
+    const float* const* inputs;
+    uint32_t ni;
+    float* const* outputs;
+    uint32_t no, frames, fade;
+    const oscairn_event* events;
+    uint32_t count;
+    const uint8_t* tags;
+    const oscairn_param* params;
+    uint32_t param_count;
+    const oscairn_event* beat;
+    bool panic_input, panic_notes, listening, parallel, deadlines;
+    oscairn_block timing;
+    int64_t deadline;
+    float worth;
+    const float* live_from;
+    const float* live_to;
+    uint32_t* next_id;
+    uint64_t* drops;
+    oscairn_midi* midi;
+    uint32_t* midi_count;
+} oscairn_run_block;
+
 #define OSCAIRN_CORE_API(p) \
     oscairn_audio* p##audio_new(const oscairn_audio_step* steps, uint32_t count, const oscairn_audio_route* outputs, uint32_t output_count, \
                                 uint32_t inputs, uint32_t channels, uint32_t max_frames); \
@@ -167,6 +264,13 @@ typedef struct oscairn_audio oscairn_audio;
     void p##audio_begin(oscairn_audio* audio, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames); \
     void p##audio_mix(oscairn_audio* audio, uint32_t step, float* const* outputs, uint32_t frames, const float* live_from, const float* live_to); \
     void p##audio_finish(oscairn_audio* audio, uint32_t step, uint32_t frames, bool processed, bool asleep, uint32_t fade); \
+    oscairn_run* p##run_new(oscairn_notes* notes, oscairn_audio* audio, const oscairn_step* steps, const bool* budgeted, uint32_t count, \
+                            const uint32_t* waves, uint32_t wave_count, \
+                            const oscairn_harmony_source* harmonies, uint32_t harmony_count, const oscairn_tap* taps, uint32_t tap_count, \
+                            const oscairn_control* controls, uint32_t control_count); \
+    void p##run_free(oscairn_run* run); \
+    void p##run_adopt(oscairn_run* next, oscairn_run* current, bool ramp, uint32_t ramp_frames, oscairn_midi* midi, uint32_t* midi_count, uint64_t* drops); \
+    bool p##run_block(oscairn_run* run, const oscairn_run_block* block, const oscairn_plugins* plugins); \
     oscairn_route* p##route_new(uint32_t ports, uint16_t clap_ports, uint32_t fade_frames); \
     void p##route_free(oscairn_route* route); \
     uint32_t p##route_live(const oscairn_route* route); \
@@ -222,7 +326,13 @@ typedef struct oscairn_audio oscairn_audio;
  *   from theirs into `outputs`; live_from and live_to, the live gains at the block's start and end.
  * audio_finish: after the step's plugin rendered: the output guard, when it rendered (a sample not
  *   finite or past Graph::outputBound fades the block from the last good samples over `fade` frames,
- *   counted as bad output); its meters; and its and its contexts' quiet, asleep and age. */
+ *   counted as bad output); its meters; and its and its contexts' quiet, asleep and age.
+ * run_new: a plan's block over its notes and audio (which outlive it), every array copied; budgeted:
+ *   notes_new's answer for each step; waves: where each wave of steps ends.
+ * run_adopt: `next` replaces `current` (Graph::beginBlock): the connections leaving the plan retired
+ *   into the next plan's steps' releases, plugins leaving it holding notes marked stranded and those
+ *   coming back choked, the taps gone let go into midi, and with `ramp` the gains carried.
+ * run_block: the block (Graph::process from the beat on); false where a plugin did not render. */
 OSCAIRN_CORE_API(rust_core_)
 OSCAIRN_CORE_API(cpp_core_)
 

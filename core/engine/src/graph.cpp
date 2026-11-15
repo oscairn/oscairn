@@ -52,12 +52,7 @@ namespace oscairn
     {
         uint64_t replacementSerial=0;
         bool rampGains=false; // see commit()
-        struct Harmony // see setHarmonies; events: this block's, at their times
-        {
-            std::shared_ptr<Graph::HeldKeys> held; NoteZones zones; bool input=false; uint8_t root=0; uint16_t scale=1;
-            std::array<kick::clap::Event,32> events; uint32_t count=0;
-            std::array<std::array<uint64_t,2>,kick::clap::Host::maxBlockEvents> keys{}; // the keys held after each input event
-        };
+        struct Harmony { std::shared_ptr<Graph::HeldKeys> held; NoteZones zones; bool input=false; uint8_t root=0; uint16_t scale=1; }; // see setHarmonies
         std::vector<Harmony> harmonies;
         std::vector<Graph::ControlTarget> controls; // see setControlTargets
         struct Step
@@ -73,39 +68,11 @@ namespace oscairn
             bool retiring=false;std::shared_ptr<Graph::Activity> activity; // see Graph::setRetiring
             int harmony=-1; // the part's harmony it gets, in Plan::harmonies
             std::vector<NoteSource> noteSources;
-            std::array<kick::clap::Event,kick::clap::Host::maxBlockEvents> releases;
-            uint32_t releaseCount=0;
-            bool releaseOverflow=false;
             float* const* in=nullptr; float* const* out=nullptr; // its buffers, in the engine core's audio
-
-            struct Route // where one of this step's param-target lanes goes
-            {
-                uint32_t lane;
-                int      target;
-                clap_id  param;
-                double   minimum, maximum;
-                bool     stepped;
-                int16_t notes=-1; // the target's note source from this step, which per-note lane events address
-                int16_t channel=-1; // a shared engine's context's channel
-                int control=-1; // a control's target (Plan::controls), else a plain mapping
-            };
-            std::vector<Route>             routes;
-            std::vector<int16_t> paramNotes; // each paramIn event's Route::notes
-            std::vector<kick::clap::Event> paramIn; // converted events waiting for this step this block
-            uint32_t                       paramCount = 0;
-            // This block's events in (RFC 0034: each step its own, as steps render at the same time),
-            // and how its rendering went.
-            std::vector<kick::clap::Event> merged;
-            uint32_t mergedCount = 0;
-            bool processed = false, started = false;
-            float cost = 0; // the microseconds its last rendering took in this process (whether a wave is worth the helpers), or its worker's round trip
-            std::chrono::steady_clock::time_point handed{}; // audio thread: when its worker was handed the block (cost)
-            bool budgeted = false; // its notes are in the shared budget (the engine core), which measures its cost per note
+            std::vector<oscairn_lane_route> routes; // where its param-target lanes go
+            bool lanesIn = false; // lanes reach it
             uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
             bool inProcess = false; // it renders in the engine's process (no PluginHost::lane): within the callback's time
-            uint64_t missed = 0; // audio thread: its host's missedBlocks at its last block
-            // audio thread: what set_limits last gave the plugin (oscairn.voice-budget), a context each
-            std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit = 0, voiceContexts = 0;
             // RFC 0021 slice 3: a shared engine's step renders its instance for every node playing one
             // of its sounds (a SoundContext): each node's notes come in on its channel, its parameters
             // too, and its output is the instance's bus `offset` on, with its own meter and activity.
@@ -116,59 +83,21 @@ namespace oscairn
                 std::shared_ptr<std::array<std::atomic<float>,Graph::meterChannels>> peaks; std::shared_ptr<Graph::Activity> activity;
             };
             std::vector<Context> contexts;
-            std::vector<kick::clap::Event> contextIn; // this block's parameter events for its contexts, on their channels
-            std::vector<int16_t> heardOn; // each merged event's channel as it came (-1: as sent), so a listener hears it so
         };
 
         struct Tap { int step; std::shared_ptr<NoteRoute> route; NoteZones zones; uint64_t ports; uint8_t channel; }; // see setMidiTaps; step -1: the input
         std::vector<Tap>               taps;
         std::vector<Step>              steps;
         std::vector<uint32_t> waves; // RFC 0034: where each wave of steps ends; a wave's steps render at the same time
-        std::vector<uint32_t> local; // audio thread: the wave's steps rendering in this process
-        std::vector<float> after; // audio thread, RFC 0045 step 6: each wave's reserve, what the waves after it took in the last block (microseconds)
-        std::vector<oscairn_key> keys; // a step's events this block, which the core orders by time, then by source and position
-        // Its note routing and shared budget (Graph::setVoiceBudget) in the engine core; last, so freed before what it names.
+        // Its note routing and shared budget (Graph::setVoiceBudget), its audio, and its block, in the engine core; last,
+        // so freed before what they name (the block first).
         struct FreeNotes { void operator()(oscairn_notes* n) const noexcept { OSCAIRN_CORE(notes_free)(n); } };
         std::unique_ptr<oscairn_notes,FreeNotes> notes;
-        // Its buffers, audio connections (a moved fader's gain ramps from the old plan's), output guard and meters, in the engine core.
         struct FreeAudio { void operator()(oscairn_audio* a) const noexcept { OSCAIRN_CORE(audio_free)(a); } };
         std::unique_ptr<oscairn_audio,FreeAudio> audio;
+        struct FreeRun { void operator()(oscairn_run* r) const noexcept { OSCAIRN_CORE(run_free)(r); } };
+        std::unique_ptr<oscairn_run,FreeRun> run;
     };
-
-    // A routed event as a MIDI 1.0 channel message on `channel` (1..16; 0: its own): notes,
-    // pressure, and MIDI events' own bytes. False for anything else.
-    static bool toMidi(const kick::clap::Event& e,uint8_t channel,Graph::MidiMessage& m) noexcept
-    {
-        const auto* h=e.header();
-        if(h->space_id!=CLAP_CORE_EVENT_SPACE_ID)return false;
-        auto on=[&](int own){return uint8_t(channel?channel-1:std::clamp(own,0,15));};
-        auto seven=[](double v){return uint8_t(std::lround(std::clamp(v,0.0,1.0)*127));};
-        if((h->type==CLAP_EVENT_NOTE_ON || h->type==CLAP_EVENT_NOTE_OFF || h->type==CLAP_EVENT_NOTE_CHOKE) && h->size==sizeof(clap_event_note_t))
-        {
-            const auto& n=*reinterpret_cast<const clap_event_note_t*>(h);
-            if(n.key<0 || n.key>127)return false;
-            const bool down=h->type==CLAP_EVENT_NOTE_ON;
-            m.bytes={uint8_t((down?0x90:0x80)|on(n.channel)),uint8_t(n.key),down?std::max<uint8_t>(seven(n.velocity),1):seven(n.velocity)};m.size=3;
-            return true;
-        }
-        if(h->type==CLAP_EVENT_NOTE_EXPRESSION && h->size==sizeof(clap_event_note_expression_t))
-        {
-            const auto& x=*reinterpret_cast<const clap_event_note_expression_t*>(h);
-            if(x.expression_id!=CLAP_NOTE_EXPRESSION_PRESSURE || x.key>127)return false;
-            if(x.key<0){m.bytes={uint8_t(0xd0|on(x.channel)),seven(x.value),0};m.size=2;}
-            else{m.bytes={uint8_t(0xa0|on(x.channel)),uint8_t(x.key),seven(x.value)};m.size=3;}
-            return true;
-        }
-        if(h->type==CLAP_EVENT_MIDI && h->size==sizeof(clap_event_midi_t))
-        {
-            const auto& x=*reinterpret_cast<const clap_event_midi_t*>(h);
-            const auto kind=x.data[0]&0xf0;
-            if(kind<0x80 || kind>=0xf0 || x.data[1]>127 || x.data[2]>127)return false;
-            m.bytes={uint8_t(kind|on(x.data[0]&15)),x.data[1],x.data[2]};m.size=kind==0xc0 || kind==0xd0?2:3;
-            return true;
-        }
-        return false;
-    }
 
     //==============================================================================
     void Graph::Retired::push( Plan* p ) noexcept
@@ -816,8 +745,6 @@ namespace oscairn
                     contextOf[other] = { int16_t( context->channel() ), offset };
                     stepOf[other] = int( plan->steps.size() );
                 }
-                step.contextIn.resize( kick::clap::Host::maxBlockEvents );
-                step.heardOn.resize( kick::clap::Host::maxProcessEvents );
             }
             // The ring-out buffer's four channels, after the node's own, while it is routed.
             step.ringOut      = std::any_of(audioRoutes_.begin(),audioRoutes_.end(),[&](const auto& r){return r.from.node==id && r.from.port==ringOutPort;});
@@ -859,29 +786,14 @@ namespace oscairn
         for(auto& step:plan->steps)if(step.host){step.inProcess=!step.host->lane();step.lane=lanes.emplace(step.host->lane(),uint32_t(lanes.size())).first->second;}
         // The engine core's view of the plan: each step's note connections, contexts and lane. A period only for a lane every
         // plugin of which is a block late: one on time beside them (a plugin host's) must be done within the allowance.
+        std::vector<std::vector<oscairn_source>> sources(plan->steps.size());
+        std::vector<std::vector<oscairn_context>> contexts(plan->steps.size());
+        std::vector<std::vector<oscairn_link>> next(plan->steps.size()); // where each step's audio goes, its largest gain there
+        for(size_t i=0;i<plan->steps.size();++i)for(const auto& r:audioSources[i])if(r.source>=0)
         {
-            std::vector<std::vector<oscairn_source>> sources(plan->steps.size());
-            std::vector<std::vector<oscairn_context>> contexts(plan->steps.size());
-            std::vector<std::vector<oscairn_link>> next(plan->steps.size()); // where each step's audio goes, its largest gain there
-            for(size_t i=0;i<plan->steps.size();++i)for(const auto& r:audioSources[i])if(r.source>=0)
-            {
-                auto& links=next[size_t(r.source)];
-                auto it=std::find_if(links.begin(),links.end(),[&](const oscairn_link& l){return l.step==i;});
-                if(it==links.end())links.push_back({uint32_t(i),std::abs(r.gain)});else it->gain=std::max(it->gain,std::abs(r.gain));
-            }
-            std::vector<oscairn_step> steps;
-            for(size_t i=0;i<plan->steps.size();++i)
-            {
-                auto& step=plan->steps[i];
-                for(auto& s:step.noteSources)sources[i].push_back({s.route->ledger,reinterpret_cast<const oscairn_zones*>(&s.zones),s.peers.data(),uint32_t(s.peers.size()),s.channel,s.draining});
-                for(auto& c:step.contexts)contexts[i].push_back({c.channel,coreActivity(c.activity.get())});
-                const bool late=step.host && std::all_of(plan->steps.begin(),plan->steps.end(),[&](const Plan::Step& o){return !o.host || o.lane!=step.lane || o.host->oneBlockLate();});
-                steps.push_back({coreActivity(step.activity.get()),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),step.lane,step.inProcess,late,
-                                 next[i].data(),uint32_t(next[i].size())});
-            }
-            const auto budgeted=std::make_unique<bool[]>(steps.size());
-            plan->notes.reset(OSCAIRN_CORE(notes_new)(steps.data(),uint32_t(steps.size()),uint32_t(lanes.size()),budgeted.get()));
-            for(size_t i=0;i<steps.size();++i)plan->steps[i].budgeted=budgeted[i];
+            auto& links=next[size_t(r.source)];
+            auto it=std::find_if(links.begin(),links.end(),[&](const oscairn_link& l){return l.step==i;});
+            if(it==links.end())links.push_back({uint32_t(i),std::abs(r.gain)});else it->gain=std::max(it->gain,std::abs(r.gain));
         }
 
         for(const auto& [tap,route]:taps_)
@@ -914,10 +826,9 @@ namespace oscairn
             auto& source = plan->steps[(size_t)stepOf[from.first]];
             auto& target = plan->steps[(size_t)stepOf[to.first]];
             const auto c = contextOf.find( to.first );
-            source.routes.push_back( { from.second, stepOf[to.first], to.second, p->minimum, p->maximum, ( p->flags & CLAP_PARAM_IS_STEPPED ) != 0, -1, c == contextOf.end() ? int16_t( -1 ) : c->second.first } );
+            source.routes.push_back( { from.second, stepOf[to.first], to.second, p->minimum, p->maximum, ( p->flags & CLAP_PARAM_IS_STEPPED ) != 0, -1, c == contextOf.end() ? int16_t( -1 ) : c->second.first, -1 } );
             source.routes.back().notes=noteSourceOf(target,{from.first,to.first});
-            target.paramIn.resize( kick::clap::Host::maxBlockEvents );
-            target.paramNotes.resize( kick::clap::Host::maxBlockEvents );
+            target.lanesIn = true;
         }
         for( const auto& [from, targets] : controlTargets_ )
             for( const auto& t : targets )
@@ -929,11 +840,10 @@ namespace oscairn
                 auto& source = plan->steps[(size_t)stepOf[from.first]];
                 auto& target = plan->steps[(size_t)stepOf[t.target]];
                 const auto c = contextOf.find( t.target );
-                source.routes.push_back( { from.second, stepOf[t.target], t.param, p->minimum, p->maximum, ( p->flags & CLAP_PARAM_IS_STEPPED ) != 0, -1, c == contextOf.end() ? int16_t( -1 ) : c->second.first, int( plan->controls.size() ) } );
+                source.routes.push_back( { from.second, stepOf[t.target], t.param, p->minimum, p->maximum, ( p->flags & CLAP_PARAM_IS_STEPPED ) != 0, -1, c == contextOf.end() ? int16_t( -1 ) : c->second.first, int32_t( plan->controls.size() ) } );
                 plan->controls.push_back( t );
                 source.routes.back().notes=noteSourceOf(target,{from.first,t.target});
-                target.paramIn.resize( kick::clap::Host::maxBlockEvents );
-                target.paramNotes.resize( kick::clap::Host::maxBlockEvents );
+                target.lanesIn = true;
             }
 
         {
@@ -953,11 +863,29 @@ namespace oscairn
         {
             auto& step=plan->steps[i];
             step.in=OSCAIRN_CORE(audio_buffers)(plan->audio.get(),int32_t(i),false);step.out=OSCAIRN_CORE(audio_buffers)(plan->audio.get(),int32_t(i),true);
-            step.merged.resize( kick::clap::Host::maxProcessEvents ); // maxBlockEvents notes, plus the beat and up to 32 harmony changes
         }
-        plan->keys.reserve( kick::clap::Host::maxProcessEvents ); // as many as merged holds (every other key is capped at its size): never reallocating
-        plan->local.resize( plan->steps.size() );
-        plan->after.resize( plan->waves.size() );
+        // The notes, then the block around them (the steps' parts only it reads besides).
+        std::vector<oscairn_step> steps;
+        for(size_t i=0;i<plan->steps.size();++i)
+        {
+            auto& step=plan->steps[i];
+            for(auto& s:step.noteSources)sources[i].push_back({s.route->ledger,reinterpret_cast<const oscairn_zones*>(&s.zones),s.peers.data(),uint32_t(s.peers.size()),s.channel,s.draining,s.step});
+            for(auto& c:step.contexts)contexts[i].push_back({c.channel,coreActivity(c.activity.get()),c.id});
+            const bool late=step.host && std::all_of(plan->steps.begin(),plan->steps.end(),[&](const Plan::Step& o){return !o.host || o.lane!=step.lane || o.host->oneBlockLate();});
+            steps.push_back({coreActivity(step.activity.get()),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),step.lane,step.inProcess,late,
+                             next[i].data(),uint32_t(next[i].size()),step.host.get(),step.id,step.harmony,step.routes.data(),uint32_t(step.routes.size()),step.lanesIn});
+        }
+        const auto budgeted=std::make_unique<bool[]>(steps.size());
+        plan->notes.reset(OSCAIRN_CORE(notes_new)(steps.data(),uint32_t(steps.size()),uint32_t(lanes.size()),budgeted.get()));
+        std::vector<oscairn_harmony_source> harmonies;
+        for(auto& h:plan->harmonies)harmonies.push_back({h.held->route.ledger,reinterpret_cast<const oscairn_zones*>(&h.zones),h.input,h.root,h.scale,&h.held->last});
+        std::vector<oscairn_tap> taps;
+        for(auto& t:plan->taps)taps.push_back({t.step,t.route->ledger,reinterpret_cast<const oscairn_zones*>(&t.zones),t.ports,t.channel});
+        std::vector<oscairn_control> controls;
+        static_assert(sizeof(ControlCurve)==sizeof(oscairn_curve) && offsetof(ControlCurve,start)==offsetof(oscairn_curve,start) && offsetof(ControlCurve,exponent)==offsetof(oscairn_curve,exponent));
+        for(auto& c:plan->controls)controls.push_back({reinterpret_cast<const oscairn_curve*>(c.path.data()),uint32_t(c.path.size()),c.origin,c.modulate});
+        plan->run.reset(OSCAIRN_CORE(run_new)(plan->notes.get(),plan->audio.get(),steps.data(),budgeted.get(),uint32_t(steps.size()),plan->waves.data(),uint32_t(plan->waves.size()),
+                                              harmonies.data(),uint32_t(harmonies.size()),taps.data(),uint32_t(taps.size()),controls.data(),uint32_t(controls.size())));
         return plan.release();
     }
 
@@ -1018,45 +946,9 @@ namespace oscairn
             {
                 const bool replacement=!current_?plan->replacementSerial!=0:current_->replacementSerial!=plan->replacementSerial;
                 if( current_ ) {
-                    for(auto& old:current_->steps)for(auto& next:plan->steps)if(old.host==next.host)
-                        for(auto& source:old.noteSources)
-                            if(std::none_of(next.noteSources.begin(),next.noteSources.end(),[&](const auto& s){return s.route==source.route;}))
-                            {
-                                // Its pedals go to what the routes staying hold.
-                                std::array<uint8_t,256> remaining{},pedals;
-                                for(const auto& r:next.noteSources){OSCAIRN_CORE(route_pedals)(r.route->ledger,pedals.data());for(size_t i=0;i<256;++i)remaining[i]=std::max(remaining[i],pedals[i]);}
-                                auto emit=[&](const kick::clap::Event& e){
-                                    if(next.releaseCount==next.releases.size())return false;
-                                    next.releases[next.releaseCount++]=onChannel(e,source.channel);return true;};
-                                next.releaseOverflow|=!OSCAIRN_CORE(route_retire)(source.route->ledger,remaining.data(),&emitTo<decltype(emit)>,&emit);
-                            }
-                    // A plugin the new plan no longer runs (removed, replaced) is sent no releases for the notes it
-                    // holds: its voices stop where they are. One an undo brings back chokes them first, in its first block.
-                    auto stranded=[](Plan::Step& step,bool set){
-                        bool was=false;
-                        if(step.contexts.empty())was=step.activity && step.activity->stranded.exchange(set,std::memory_order_relaxed);
-                        else for(auto& c:step.contexts)was|=c.activity->stranded.exchange(set,std::memory_order_relaxed); // the nodes' own: the engine's goes with them
-                        return was;};
-                    for(auto& old:current_->steps)
-                        if(std::none_of(plan->steps.begin(),plan->steps.end(),[&](const auto& s){return s.host==old.host;}) &&
-                           std::any_of(old.noteSources.begin(),old.noteSources.end(),[](const auto& s){return OSCAIRN_CORE(route_live)(s.route->ledger)!=0;}))
-                            stranded(old,true);
-                    for(auto& next:plan->steps)if(stranded(next,false)){
-                        if(next.releaseCount==next.releases.size()){next.releaseOverflow=true;continue;}
-                        auto choke=kick::clap::Event::note(false,-1,0,0,-1,-1);reinterpret_cast<clap_event_header_t*>(choke.bytes.data())->type=CLAP_EVENT_NOTE_CHOKE;
-                        next.releases[next.releaseCount++]=choke;}
-                    // A tap gone: note offs for the notes it holds, and its pedals released.
-                    for(auto& old:current_->taps)
-                        if(std::none_of(plan->taps.begin(),plan->taps.end(),[&](const auto& t){return t.route==old.route;}))
-                        {
-                            auto send=[&](const kick::clap::Event& e){
-                                MidiMessage m;if(!toMidi(e,old.channel,m))return true;
-                                if(midiOutCount_==maxMidiOut){eventDrops_.fetch_add(1,std::memory_order_relaxed);return true;}
-                                m.ports=old.ports;midiOut_[midiOutCount_++]=m;return true;};
-                            OSCAIRN_CORE(route_let_go)(old.route->ledger,&emitTo<decltype(send)>,&send);
-                        }
-                    // A played change (commit(true)): a route in both plans ramps from the gain it has now to its new one.
-                    if(plan->rampGains)OSCAIRN_CORE(audio_carry)(plan->audio.get(),current_->audio.get(),std::max<uint32_t>(1,uint32_t(sampleRate_*.005)));
+                    // Retired connections' releases, stranded plugins, taps gone, a played change's gains (the engine core).
+                    OSCAIRN_CORE(run_adopt)(plan->run.get(),current_->run.get(),plan->rampGains,std::max<uint32_t>(1,uint32_t(sampleRate_*.005)),
+                                            reinterpret_cast<oscairn_midi*>(midiOut_.data()),&midiOutCount_,reinterpret_cast<uint64_t*>(&eventDrops_));
                     retired_.push( current_ );
                 }
                 current_ = plan;
@@ -1136,7 +1028,6 @@ namespace oscairn
         }
         Plan* plan = current_;
         if(!plan){clear();return true;}
-        OSCAIRN_CORE(audio_begin)(plan->audio.get(),inputs,ni,outputs,no,frames);
         // RFC 0032: the free-running beat (oscairn-clap/beat.h), the same for every node this block.
         const double tempo=transport && (transport->flags&CLAP_TRANSPORT_HAS_TEMPO) && std::isfinite(transport->tempo) && transport->tempo>0?transport->tempo:120.0;
         oscairn_event_beat_t beat{};
@@ -1145,339 +1036,50 @@ namespace oscairn
         beat.tempo=tempo;
         const auto beatEvent=kick::clap::Event::from(beat);
         freeBeats_+=frames/sampleRate_*tempo/60.0;
-        // RFC 0033: each part's harmony at sample 0, then each change its input's keys make.
-        for(auto& h:plan->harmonies)
+        // The block in the engine core (engine_core.h's run_block); the plugins, a sound context's parameters, the
+        // listener, the clock, the worker deadline (realtime.h) and the audio helpers through these calls.
+        struct Calls
         {
-            auto& held=*h.held;
-            auto add=[&](uint32_t time,const std::array<uint64_t,2>& keys){
-                oscairn_harmony_t x{};x.key_root=h.root;x.scale=h.scale;
-                x.held[0]=keys[0];x.held[1]=keys[1];
-                recognizeChord(x);
-                if(h.count && !std::memcmp(&x,&held.last,sizeof x))return;
-                held.last=x;
-                oscairn_event_harmony_t e{};
-                e.header={sizeof(e),time,kick::clap::Host::harmonySpace,OSCAIRN_EVENT_HARMONY,0};
-                e.harmony=x;
-                // shortcut: past 32 changes in one block the last slot takes each later one, at its time; raise the capacity if played input ever needs more.
-                if(h.count==h.events.size())--h.count;
-                h.events[h.count++]=kick::clap::Event::from(e);};
-            h.count=0;
-            std::array<uint64_t,2> keys;OSCAIRN_CORE(route_held_keys)(held.route.ledger,keys.data());add(0,keys);
-            if(!h.input)continue;
-            OSCAIRN_CORE(route_events)(held.route.ledger,reinterpret_cast<const oscairn_zones*>(&h.zones),coreEvents(events),eventCount,sources,false,&nextNoteId_,nullptr,nullptr,h.keys[0].data());
-            for(uint32_t i=0;i<eventCount;++i)if(events[i].header()->space_id==CLAP_CORE_EVENT_SPACE_ID)add(std::min(events[i].header()->time,frames-1),h.keys[i]);
-        }
-        bool ok = true;
-        // A step in three parts (RFC 0034): its inputs, mixed and merged, and what it sent, routed
-        // on, stay on this thread in plan order; only the plugin's rendering moves.
-        auto prepare=[&](Plan::Step& step)
-        {
-            const bool inputRecovery=(panicNotes && !step.noteSources.empty()) || (panicInput && std::any_of(step.noteSources.begin(),step.noteSources.end(),[](const auto& s){return s.step<0;}));
-            OSCAIRN_CORE(audio_mix)(plan->audio.get(),uint32_t(&step-plan->steps.data()),nullptr,frames,liveFrom_.data(),liveTo_.data());
-
-            // Notes in: every source's events this block, merged in time order (by the engine core).
-            plan->keys.clear();
-            uint32_t order = 0;
-            auto key=[&](const kick::clap::Event& e,uint32_t time=0,int16_t source=-1,uint8_t tag=untaggedSource,bool afterNotes=false){
-                plan->keys.push_back({time,order++,coreEvents(&e),source,tag,afterNotes});};
-            key(beatEvent); // oscairn.beat, first at sample 0
-            if(step.harmony>=0) // the part's harmony, each before the notes at its sample
-            {
-                const auto& h=plan->harmonies[(size_t)step.harmony];
-                for(uint32_t i=0;i<h.count;++i)key(h.events[i],h.events[i].header()->time);
-            }
-            uint64_t totalEvents=step.paramCount+step.releaseCount;
-            bool overflow=step.releaseOverflow || inputRecovery;
-            // The beat and the part's harmony ride with the notes in their own room (see
-            // maxProcessEvents): a block that fills all maxBlockEvents note slots still fits.
-            for(uint32_t i=0;i<step.releaseCount;++i)key(step.releases[i]);
-            if(step.contexts.empty())for(uint32_t i=0;i<blockParameterCount_;++i)if(blockParameters_[i].first==step.id)
-            {
-                ++totalEvents;
-                if(plan->keys.size()<step.merged.size())key(blockParameters_[i].second);
-                else overflow=true;
-            }
-            // A shared engine's contexts: each one's parameters, queued or set, on its own channel.
-            uint32_t contextCount=0;
-            for(auto& context:step.contexts)
-            {
-                auto add=[&](const kick::clap::Event& e){
-                    ++totalEvents;
-                    if(contextCount<step.contextIn.size() && plan->keys.size()<step.merged.size()){step.contextIn[contextCount]=onChannel(e,context.channel);key(step.contextIn[contextCount++]);}
-                    else overflow=true;};
-                for(uint32_t i=0;i<blockParameterCount_;++i)if(blockParameters_[i].first==context.id)add(blockParameters_[i].second);
-                context.sound->takeParameters(add);
-            }
-            for( uint32_t i = 0; i < step.paramCount; ++i ) {
-                if(plan->keys.size()<step.merged.size())
-                    key(step.paramIn[i],step.paramIn[i].header()->time,step.paramNotes[i],untaggedSource,step.paramNotes[i]>=0);
-                else overflow=true;
-            }
-            for(int16_t c=0;c<int16_t(step.noteSources.size());++c)
-            {
-                const int source=step.noteSources[size_t(c)].step;
-                const kick::clap::Event* list  = events;
-                uint32_t                 count = eventCount;
-                if( source >= 0 )
-                    list = plan->steps[(size_t)source].host->outputEvents( count );
-                for( uint32_t i = 0; i < count; ++i )
-                    if( list[i].header()->space_id == CLAP_CORE_EVENT_SPACE_ID && list[i].header()->type != CLAP_EVENT_NOTE_END ) // note ends belong to their destination
-                    {
-                        ++totalEvents;
-                        if(plan->keys.size()<step.merged.size())
-                            key(list[i],list[i].header()->time,c,source<0 && sources?sources[i]:untaggedSource);
-                        else overflow=true;
-                    }
-            }
-            // Routed through its connections, with stolen notes' fade steps among them; a lost release must reset the
-            // destination in its own dialect (the core empties its ledgers).
-            step.mergedCount=OSCAIRN_CORE(notes_route)(plan->notes.get(),uint32_t(&step-plan->steps.data()),plan->keys.data(),uint32_t(plan->keys.size()),frames,&nextNoteId_,
-                reinterpret_cast<oscairn_event*>(step.merged.data()),uint32_t(step.merged.size()),step.heardOn.empty()?nullptr:step.heardOn.data(),&overflow);
-            if(overflow){eventDrops_.fetch_add(totalEvents,std::memory_order_relaxed);step.host->panic();}
-        };
-        // oscairn.voice-budget (RFC 0018 step 4): a plugin that gives up its own voices gets, between
-        // blocks, the voices the budget leaves it, with its part's reserve and priority for the
-        // contexts it plays (one entry, for the selected ones), when any of it changed.
-        auto limitVoices=[&](Plan::Step& step)
-        {
-            if(!step.budgeted || !step.activity->ownVoices)return;
-            double cost;const oscairn_voice_budget_note_t* notes;uint32_t count;
-            const uint32_t voices=step.host->voiceReport(cost,notes,count);
-            // One entry for the selected contexts, or a shared engine's: each of its contexts' own, with
-            // its part's reserve and priority, under the sound its channel selects (RFC 0021 slice 3).
-            std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> parts{};uint32_t entries=0;
-            auto part=[&](int16_t channel,uint32_t context){
-                auto& p=parts[entries++];p.context=context;
-                for(const auto& source:step.noteSources)if(source.channel==channel && !source.draining && source.zones.count){p.reserve=source.zones.zones[0].reserve;p.priority=source.zones.zones[0].priority;break;}};
-            if(step.contexts.empty())part(-1,OSCAIRN_VOICE_BUDGET_SELECTED);
-            else for(const auto& c:step.contexts)if(entries<parts.size())part(c.channel,c.sound->sound());
-            // Each sound context's own limit too: one sound's tails not given up for another's notes while the instance keeps within its own.
-            std::array<uint32_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> own{};
-            const uint32_t limit=OSCAIRN_CORE(notes_voice_limit)(plan->notes.get(),uint32_t(&step-plan->steps.data()),voices,own.data(),step.contexts.empty()?0:entries);
-            if(!step.contexts.empty())for(uint32_t i=0;i<entries;++i)parts[i].limit=own[i];
-            if(limit==step.voiceLimit && entries==step.voiceContexts && !std::memcmp(parts.data(),step.voiceLimits.data(),entries*sizeof parts[0]))return;
-            step.voiceLimit=limit;step.voiceLimits=parts;step.voiceContexts=entries;step.activity->voiceLimit=limit;
-            step.host->setVoiceLimits(limit,parts.data(),entries);
-        };
-        auto start=[&](Plan::Step& step){step.handed=std::chrono::steady_clock::now();return step.host->startProcess(step.in,step.audioInputs,step.out,step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
-        auto render=[&](Plan::Step& step){step.processed=step.host->process(step.in,step.audioInputs,step.out,step.audioOutputs,frames,step.merged.data(),step.mergedCount,transport);};
-        // The shared budget (RFC 0018): each lane's limit for this block, and what its plugins took.
-        // A lane may take the budget set (RFC 0025's share of an audio core) but never more than
-        // loadMargin of the time its blocks have before they are missed (RFC 0045's load guard): a
-        // worker's allowance, the deadline under step 6, a period for a lane whose plugins all render a block late, the
-        // callback's time in the engine's process. A lane's notes give way for its own limit only; the lanes
-        // together are held to the budget (with none, loadMargin of a block) on each audio core after the
-        // block (VoiceBudget::device), never by charging one lane for what another took.
-        // shortcut: the engine's process is one lane, its plugins' times summed, though the audio helpers render a wave's side by side; give each its own lane once those are measured to need it.
-        const float budget=voiceBudget_.load(std::memory_order_relaxed);
-        const bool budgeting=budget!=0;
-        {
-            const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);
-            const oscairn_block timing{budget,period,deadline,deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2,audioCores_,uint64_t(noteEndQuiet*sampleRate_),lowSlack_};
-            OSCAIRN_CORE(notes_begin)(plan->notes.get(),&timing);
-        }
-        auto finish=[&](Plan::Step& step)
-        {
-            if(listener && step.contexts.empty())listener->events(step.id,step.merged.data(),step.mergedCount,false);
-            else if(listener)for(const auto& c:step.contexts)for(uint32_t i=0;i<step.mergedCount;++i) // a shared engine's: each node what came on its channel, as it came
-                if(const int channel=channelOf(step.merged[i]);channel<0 || channel==c.channel)
-                {
-                    if(step.heardOn[i]<0){listener->events(c.id,&step.merged[i],1,false);continue;}
-                    const auto heard=onChannel(step.merged[i],step.heardOn[i]);listener->events(c.id,&heard,1,false);
-                }
-            const bool processed=step.processed;
-            // The output guard: a block with a sample not finite or past outputBound (+120 dBFS: no plugin's legitimate
-            // level, a live parameter's runaway is) is not heard: it fades from the last good samples over 1 ms, as a
-            // worker's missed block, and is counted on the node (outputGuard); the plugin plays on, unrestarted. One
-            // pass, branch-free and vectorized; a NaN fails the comparison.
-            // Then its meters, and its and its contexts' quiet, asleep and age.
-            OSCAIRN_CORE(audio_finish)(plan->audio.get(),uint32_t(&step-plan->steps.data()),frames,processed,processed && step.host->asleep(),std::max(1u,uint32_t(sampleRate_*.001)));
-            // A busy control gate can discard a release; reset when rendering resumes. A worker's late
-            // or busy block lost nothing (eventsKept), so its notes go on (RFC 0045). A host that
-            // reset the plugin on its own ended every note it was sent, with no NOTE_END: a shared
-            // engine's, every context's.
-            const bool lost=!processed && !step.host->eventsKept();
-            if(lost)step.host->panic();
-            const bool reset=lost || step.host->wasReset();
-            ok &= processed;
-            if(listener && processed){uint32_t sent=0;const auto* list=step.host->outputEvents(sent);listener->events(step.id,list,sent,true);}
-            // The engine core: its notes emptied if the plugin lost them; the notes sounding through it counted (for its
-            // cost per voice, RFC 0025); its block's time against its lane's limit and its cost per note measured, the
-            // plugin's own voice report when it gives up its own; its NOTE_ENDs; and the note-end watchdog.
-            oscairn_finish rendered{};rendered.took=budgeting?float(step.host->blockMicroseconds()):0.f;rendered.processed=processed;rendered.reset=reset;
-            // RFC 0045's guard: a block of its played late or silenced since its last (a worker past its allowance).
-            const uint64_t missed=step.host->missedBlocks();rendered.missed=missed>step.missed;step.missed=missed;
-            if(budgeting && step.budgeted && processed)
-            {
-                rendered.voices=step.host->voiceReport(rendered.voice_cost,rendered.notes,rendered.note_count);
-                rendered.own_voices=step.host->voiceBudget();rendered.honors_volume=step.host->honorsVolume();
-            }
-            rendered.sent=coreEvents(step.host->outputEvents(rendered.sent_count));
-            OSCAIRN_CORE(notes_finish)(plan->notes.get(),uint32_t(&step-plan->steps.data()),&rendered);
-            step.paramCount = 0;step.releaseCount=0;step.releaseOverflow=false;
-
-            // This step's param-target lane events become parameter events for their
-            // targets, which come later in this block.
-            if( !step.routes.empty() )
-            {
-                uint32_t    count  = 0;
-                const auto* output = step.host->outputEvents( count );
-                for( uint32_t i = 0; i < count; ++i )
-                {
-                    const auto* h = output[i].header();
-                    if( h->space_id != kick::clap::Host::paramTargetSpace || h->type != OSCAIRN_EVENT_PARAM_TARGET )
-                        continue;
-                    const auto& e     = *reinterpret_cast<const oscairn_event_param_target_t*>( h );
-                    for( const auto& r : step.routes ) // a lane may reach several parameters, through a control
-                    {
-                        if( r.lane != e.lane )
-                            continue;
-                        const auto* route = &r;
-                        auto& target = plan->steps[(size_t)route->target];
-                        // Per-note lane addresses belong to the source's corresponding note route.
-                        if(e.note_id>=0 && route->notes<0){eventDrops_.fetch_add(1,std::memory_order_relaxed);continue;}
-                        const int16_t notes = e.note_id>=0?route->notes:int16_t(-1);
-                        // A target's block full of lane points (maxBlockEvents): the newest replaces the last
-                        // one waiting for the same parameter, so its stream thins but ends at its latest
-                        // value; each point lost is counted, and the target is never reset for it.
-                        auto place = [&]( const kick::clap::Event& event ) {
-                            if( target.paramCount < target.paramIn.size() )
-                            {
-                                target.paramNotes[target.paramCount] = notes;
-                                target.paramIn[target.paramCount++] = event;
-                                return;
-                            }
-                            const auto& a = *reinterpret_cast<const clap_event_param_value_t*>( event.header() ); // a value and a modulation alike up to their number
-                            for( uint32_t k = target.paramCount; k-- > 0; )
-                            {
-                                const auto& b = *reinterpret_cast<const clap_event_param_value_t*>( target.paramIn[k].header() );
-                                if( b.header.type == a.header.type && b.param_id == a.param_id && b.note_id == a.note_id && b.port_index == a.port_index && b.channel == a.channel && b.key == a.key )
-                                {
-                                    target.paramIn[k] = event;
-                                    target.paramNotes[k] = notes;
-                                    break;
-                                }
-                            }
-                            eventDrops_.fetch_add( 1, std::memory_order_relaxed );
-                        };
-                        const double range = route->maximum - route->minimum;
-                        // Through a control: the path from the control's value to the parameter's fraction.
-                        const auto* control = route->control >= 0 ? &plan->controls[(size_t)route->control] : nullptr;
-                        auto follow = [&]( double x ) {
-                            const size_t n = control->path.size();
-                            for( size_t k = 0; k < n; ++k )
-                                x = control->modulate && k + 1 == n ? control->path[k].shift + control->path[k].point( x ) : control->path[k].next( x );
-                            return x;
-                        };
-                        // The control's value from the lane: a SET event's, or a MODULATE event's amount from where it is.
-                        const double x = !control ? 0 : std::clamp( e.mode == OSCAIRN_PARAM_TARGET_SET ? e.value : control->origin + std::clamp( e.value, -1.0, 1.0 ), 0.0, 1.0 );
-                        if( control ? !control->modulate : e.mode == OSCAIRN_PARAM_TARGET_SET )
-                        {
-                            clap_event_param_value_t v{};
-                            v.header     = { sizeof( v ), h->time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0 };
-                            v.param_id   = route->param;
-                            v.note_id    = e.note_id;
-                            v.port_index = e.port_index;
-                            v.channel    = route->channel >= 0 ? route->channel : e.channel;
-                            v.key        = e.key;
-                            v.value      = route->minimum + ( control ? follow( x ) : std::clamp( e.value, 0.0, 1.0 ) ) * range;
-                            if( route->stepped )
-                                v.value = std::round( v.value );
-                            place( kick::clap::Event::from( v ) );
-                        }
-                        else
-                        {
-                            clap_event_param_mod_t m{};
-                            m.header     = { sizeof( m ), h->time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_MOD, 0 };
-                            m.param_id   = route->param;
-                            m.note_id    = e.note_id;
-                            m.port_index = e.port_index;
-                            m.channel    = route->channel >= 0 ? route->channel : e.channel;
-                            m.key        = e.key;
-                            m.amount     = ( control ? follow( x ) : std::clamp( e.value, -1.0, 1.0 ) ) * range;
-                            place( kick::clap::Event::from( m ) );
-                        }
-                    }
-                }
-            }
-        };
-        // RFC 0045: no wait on a worker past the callback's deadline (realtime.h); with step 6, each wave's
-        // workers wait to it less what the waves after theirs took in the last block, the costliest of each.
+            Plan* plan; uint32_t frames; const clap_event_transport_t* transport; Listener* listener; AudioHelpers* helpers;
+            static Calls& of(void* c) { return *static_cast<Calls*>(c); }
+            static Plan::Step& step(void* c,uint32_t s) { return of(c).plan->steps[s]; }
+            static PluginHost& host(void* c,uint32_t s) { return *step(c,s).host; }
+            static const kick::clap::Event* events(const oscairn_event* e) { return reinterpret_cast<const kick::clap::Event*>(e); }
+        } calls{plan,frames,transport,listener,helpers_};
+        using C=Calls;
+        static const oscairn_plugins table{nullptr,
+            [](void* c,uint32_t s,uint32_t* n){return coreEvents(C::host(c,s).outputEvents(*n));},
+            [](void* c,uint32_t s,const oscairn_event* e,uint32_t n){auto& st=C::step(c,s);return st.host->startProcess(st.in,st.audioInputs,st.out,st.audioOutputs,C::of(c).frames,C::events(e),n,C::of(c).transport);},
+            [](void* c,uint32_t s,const oscairn_event* e,uint32_t n){auto& st=C::step(c,s);return st.host->process(st.in,st.audioInputs,st.out,st.audioOutputs,C::of(c).frames,C::events(e),n,C::of(c).transport);},
+            [](void* c,uint32_t s){return C::host(c,s).finishProcess();},
+            [](void* c,uint32_t s){return C::host(c,s).oneBlockLate();},
+            [](void* c,uint32_t s){C::host(c,s).panic();},
+            [](void* c,uint32_t s){return C::host(c,s).eventsKept();},
+            [](void* c,uint32_t s){return C::host(c,s).wasReset();},
+            [](void* c,uint32_t s){return C::host(c,s).asleep();},
+            [](void* c,uint32_t s){return C::host(c,s).voiceBudget();},
+            [](void* c,uint32_t s){return C::host(c,s).honorsVolume();},
+            [](void* c,uint32_t s){return C::host(c,s).missedBlocks();},
+            [](void* c,uint32_t s){return C::host(c,s).blockMicroseconds();},
+            [](void* c,uint32_t s,double* cost,const oscairn_voice_budget_note_t** notes,uint32_t* n){return C::host(c,s).voiceReport(*cost,*notes,*n);},
+            [](void* c,uint32_t s,uint32_t limit,const oscairn_voice_budget_context_t* parts,uint32_t n){C::host(c,s).setVoiceLimits(limit,parts,n);},
+            [](void* c,uint32_t s,uint32_t k){return C::step(c,s).contexts[k].sound->sound();},
+            [](void* c,uint32_t s,uint32_t k,oscairn_emit emit,void* e){C::step(c,s).contexts[k].sound->takeParameters([&](const kick::clap::Event& x){emit(e,coreEvents(&x));});},
+            [](void* c,uint32_t node,const oscairn_event* e,uint32_t n,bool sent){C::of(c).listener->events(node,C::events(e),n,sent);},
+            [](void*){return int64_t(std::chrono::steady_clock::now().time_since_epoch().count());},
+            [](void*,int64_t at,bool only){worker::workerDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));worker::workerDeadlineOnly=only;},
+            [](void* c,uint32_t n,oscairn_job job,void* context){C::of(c).helpers->run(n,reinterpret_cast<AudioHelpers::Job>(job),context);}};
+        static_assert(std::is_same_v<std::chrono::steady_clock::duration,std::chrono::nanoseconds>);
+        oscairn_plugins plugins=table;plugins.context=&calls;
+        const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);
         const auto callbackEnds=worker::callbackDeadline;
-        worker::workerDeadline=callbackEnds;
-        const bool deadlines=callbackEnds.time_since_epoch().count() && deadlines_;
-        worker::workerDeadlineOnly=deadlines;
-        // The reserves also bound the wait for a block a call late (RFC 0045's extra block), always. At most half a
-        // period: one long block in a later wave (a preemption) must not take every earlier wave's wait away.
-        if(float later=0;callbackEnds.time_since_epoch().count())
-            for(size_t w=plan->waves.size();w-->0;)
-            {
-                plan->after[w]=std::min(later,float(frames/sampleRate_*1e6)/2);
-                float most=0;
-                for(uint32_t i=w?plan->waves[w-1]:0;i<plan->waves[w];++i)most=std::max(most,plan->steps[i].cost);
-                later+=most;
-            }
-        if(!parallel_.load(std::memory_order_relaxed))
-            for(auto& step:plan->steps){prepare(step);limitVoices(step);render(step);finish(step);}
-        else for(uint32_t first=0,wave=0;const auto end:plan->waves)
-        {
-            // A wave: each plugin in a worker starts as soon as its inputs are ready; the others
-            // render meanwhile, here and on the audio helpers; then every one finishes, in plan order.
-            uint32_t locals=0;
-            if(deadlines)worker::workerDeadline=callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave]));
-            for(uint32_t i=first;i<end;++i){auto& step=plan->steps[i];prepare(step);limitVoices(step);step.started=start(step);if(!step.started)plan->local[locals++]=i;}
-            struct Job
-            {
-                Plan* plan;uint32_t frames;const clap_event_transport_t* transport;
-                static void render(void* context,uint32_t i) noexcept
-                {
-                    const auto& j=*static_cast<Job*>(context);auto& step=j.plan->steps[j.plan->local[i]];
-                    const auto began=std::chrono::steady_clock::now();
-                    step.processed=step.host->process(step.in,step.audioInputs,step.out,step.audioOutputs,j.frames,step.merged.data(),step.mergedCount,j.transport);
-                    step.cost=std::chrono::duration<float,std::micro>(std::chrono::steady_clock::now()-began).count();
-                }
-            } job{plan,frames,transport};
-            // The helpers only when, by the last block, the wave leaves enough besides its largest
-            // plugin to pay for waking them; otherwise all here.
-            float total=0,largest=0;
-            for(uint32_t k=0;k<locals;++k){const float c=plan->steps[plan->local[k]].cost;total+=c;largest=std::max(largest,c);}
-            if(total-largest>=helpers_->worth())helpers_->run(locals,&Job::render,&job);
-            else for(uint32_t k=0;k<locals;++k)Job::render(&job,k);
-            // RFC 0045: plugins a block late last, so waiting for their blocks in flight overlaps the wave's others, and
-            // only to the callback's deadline less what the waves after this one took in the last block: the plugins
-            // after them keep their time.
-            for(const bool late:{false,true})for(uint32_t i=first;i<end;++i)if(auto& step=plan->steps[i];step.started && step.host->oneBlockLate()==late)
-            {
-                if(late && callbackEnds.time_since_epoch().count())worker::workerDeadline=callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave]));
-                step.processed=step.host->finishProcess();
-                // A block given up on took the time it was allowed, not what the worker needs: the last kept. A block a call
-                // late costs the waves before it nothing: its wait for the block in flight is what their reserve bounds, and
-                // counted, a slow one would take the earlier waves' waits away, their blocks then missed (and so on).
-                if(step.processed)step.cost=late?0.f:std::chrono::duration<float,std::micro>(std::chrono::steady_clock::now()-step.handed).count();
-            }
-            if(callbackEnds.time_since_epoch().count())worker::workerDeadline=deadlines?callbackEnds-std::chrono::microseconds(int64_t(plan->after[wave])):callbackEnds;
-            for(uint32_t i=first;i<end;++i)finish(plan->steps[i]);
-            first=end;++wave;
-        }
-        worker::workerDeadline={};worker::workerDeadlineOnly=false;
-
-        // MIDI for external outputs (setMidiTaps), from the input or a node's note outputs.
-        for(auto& tap:plan->taps)
-        {
-            const kick::clap::Event* list=events;uint32_t count=eventCount;
-            if(tap.step>=0)list=plan->steps[(size_t)tap.step].host->outputEvents(count);
-            auto emit=[&](const kick::clap::Event& e){
-                MidiMessage m;if(!toMidi(e,tap.channel,m))return true;
-                if(midiOutCount_==maxMidiOut){eventDrops_.fetch_add(1,std::memory_order_relaxed);return true;}
-                m.time=std::min(e.header()->time,frames-1);m.ports=tap.ports;midiOut_[midiOutCount_++]=m;return true;};
-            OSCAIRN_CORE(route_events)(tap.route->ledger,reinterpret_cast<const oscairn_zones*>(&tap.zones),coreEvents(list),count,tap.step<0?sources:nullptr,true,&nextNoteId_,
-                                       &emitTo<decltype(emit)>,&emit,nullptr);
-        }
-        OSCAIRN_CORE(audio_mix)(plan->audio.get(),uint32_t(plan->steps.size()),outputs,frames,liveFrom_.data(),liveTo_.data());
-        // The lanes judged, the callback's time left once the block is collected (RFC 0045's guard), the timing report kept.
-        const float slack=callbackEnds.time_since_epoch().count()?std::chrono::duration<float,std::micro>(callbackEnds-std::chrono::steady_clock::now()).count():NAN;
-        OSCAIRN_CORE(notes_end)(plan->notes.get(),slack);
-        return ok;
+        const oscairn_run_block run{inputs,ni,outputs,no,frames,std::max(1u,uint32_t(sampleRate_*.001)),coreEvents(events),eventCount,sources,
+            reinterpret_cast<const oscairn_param*>(blockParameters_.data()),blockParameterCount_,coreEvents(&beatEvent),panicInput,panicNotes,listener!=nullptr,
+            parallel_.load(std::memory_order_relaxed),deadlines_,
+            {voiceBudget_.load(std::memory_order_relaxed),period,deadline,deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2,audioCores_,uint64_t(noteEndQuiet*sampleRate_),lowSlack_},
+            int64_t(callbackEnds.time_since_epoch().count()),helpers_->worth(),liveFrom_.data(),liveTo_.data(),&nextNoteId_,reinterpret_cast<uint64_t*>(&eventDrops_),
+            reinterpret_cast<oscairn_midi*>(midiOut_.data()),&midiOutCount_};
+        return OSCAIRN_CORE(run_block)(plan->run.get(),&run,&plugins);
     }
 
     const float* Graph::audioOutput(NodeId node,uint32_t channel) const noexcept

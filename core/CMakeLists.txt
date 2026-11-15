@@ -104,6 +104,7 @@ add_library(oscairn_engine STATIC
     engine/src/chain.cpp
     engine/src/core_cpp.cpp
     engine/src/graph.cpp
+    engine/src/run_cpp.cpp
     engine/src/sound_context.cpp
     engine/src/AudioHelpers.cpp
     engine/src/harmony.cpp
@@ -325,6 +326,11 @@ add_executable(oscairn-audio-diff-test engine/tests/audio_diff.cpp)
 target_link_libraries(oscairn-audio-diff-test PRIVATE oscairn_engine)
 add_test(NAME engine-audio-diff COMMAND oscairn-audio-diff-test)
 set_tests_properties(engine-audio-diff PROPERTIES TIMEOUT 300)
+# A plan's block (the step loop, events merged and passed on, harmonies, taps, the plugins' calls) the same way.
+add_executable(oscairn-run-diff-test engine/tests/run_diff.cpp)
+target_link_libraries(oscairn-run-diff-test PRIVATE oscairn_engine)
+add_test(NAME engine-run-diff COMMAND oscairn-run-diff-test)
+set_tests_properties(engine-run-diff PROPERTIES TIMEOUT 300)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
     ${SAMPLEPACK_CARGO} test --release --locked --offline --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")
 set_tests_properties(engine-core-cargo PROPERTIES TIMEOUT 300)

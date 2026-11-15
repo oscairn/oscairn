@@ -18,11 +18,13 @@ pub struct Source {
     pub peers: Vec<Route>,
     pub channel: i16,
     pub draining: bool,
+    pub from: i32, // the step its events come from, -1 the graph's input
 }
 
 pub struct SoundContext {
     pub channel: i16,
     pub activity: Shared<Activity>,
+    pub id: u32, // its node
 }
 
 pub struct Step {

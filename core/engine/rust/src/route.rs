@@ -426,6 +426,32 @@ impl NoteRoute {
 
 /// NoteRoute::route for route `me`: zones decide which notes pass and how they change; each zone that
 /// accepts a note plays its own copy.
+/// Events through a route's zones alone, no peers, no budget (engine_core.h's route_events): those in
+/// the core space, NOTE_END too unless skip_ends; `held`, where long enough, gets the keys held after each.
+#[allow(clippy::too_many_arguments)]
+pub fn route_events(
+    rs: &mut Routes,
+    me: Route,
+    zones: &Zones,
+    events: &[Event],
+    tags: &[u8],
+    skip_ends: bool,
+    next_id: &mut u32,
+    emit: &mut impl FnMut(&Event) -> bool,
+    held: &mut [[u64; 2]],
+) {
+    for (i, e) in events.iter().enumerate() {
+        if e.space() != CORE_SPACE || (skip_ends && e.kind() == NOTE_END) {
+            continue;
+        }
+        let mut cx = Context { zones: Some(zones), source: tags.get(i).copied().unwrap_or(UNTAGGED), draining: false, peers: &[], budget: None };
+        route(rs, me, e, next_id, emit, &mut cx);
+        if let Some(h) = held.get_mut(i) {
+            *h = rs[me].held_keys;
+        }
+    }
+}
+
 pub fn route(rs: &mut Routes, me: Route, e: &Event, next_id: &mut u32, emit: &mut impl FnMut(&Event) -> bool, cx: &mut Context) -> bool {
     if !e.valid() || e.space() != CORE_SPACE {
         return emit(e);

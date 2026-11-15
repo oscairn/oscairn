@@ -20,6 +20,9 @@ pub struct Profile {
     pub theme: String,
     /// screens[0].frameRate: the most frames a second the UI draws; None: the default.
     frame_rate: Option<u32>,
+    /// Pixels per design unit: the JUCE app's screen scale (hosts/standalone/Profile.h, RFC 0019), so
+    /// the Rust UI's sizes match; 0 where the profile does not say the screen's size.
+    pub scale: f64,
     /// screens[0].topBar: what the top bar's resource section shows.
     pub top_bar: MeterSettings,
     /// compute.memory in bytes; 0 when the profile does not say.
@@ -28,6 +31,16 @@ pub struct Profile {
     pub apps: Vec<String>,
     /// panel.map: the panel map's file name (beside the program, in share/oscairn/panels) or path.
     pub panel_map: String,
+}
+
+/// Profile.h's Screen::scale(): a touch target of 44 units at least 6.5 mm across, never below 1.
+fn screen_scale(screen: &Value) -> f64 {
+    let n = |k: &str| screen[k].as_f64().filter(|v| *v > 0.).unwrap_or(0.);
+    let diagonal = n("diagonal");
+    if diagonal == 0. {
+        return 0.;
+    }
+    (6.5 * n("width").hypot(n("height")) / diagonal / 44.).max(1.)
 }
 
 impl Profile {
@@ -52,6 +65,7 @@ impl Profile {
             on_device: doc["platform"]["runtime"].as_str().is_some_and(|r| !r.is_empty()),
             theme: screen["theme"].as_str().unwrap_or_default().into(),
             frame_rate: screen["frameRate"].as_u64().map(|f| f.min(1000) as u32),
+            scale: screen_scale(screen),
             top_bar: crate::settings::over(MeterSettings::default(), &screen["topBar"]),
             memory: doc["compute"]["memory"].as_u64().unwrap_or(0).min(1 << 24) << 20,
             apps: doc["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect(),
@@ -79,6 +93,13 @@ mod tests {
         assert_eq!((p.apps.len(), p.apps[3].as_str(), p.panel_map.as_str()), (5, "oscairn.setlist", "fantom-07.json"));
         assert_eq!(Profile::load(None).unwrap().frame_rate(), 0); // a computer: no cap
         assert!(Profile::load(Some("no-such-profile")).is_err());
+    }
+
+    #[test]
+    fn scale_is_the_juce_apps() {
+        let p = Profile::parse(r#"{"format":"oscairn.profile","screens":[{"width":1280,"height":720,"diagonal":140}]}"#).unwrap();
+        assert!((p.scale - 1.5496).abs() < 1e-3, "{}", p.scale); // the FANTOM-07's
+        assert_eq!(Profile::parse(r#"{"format":"oscairn.profile","screens":[{"width":1280,"height":720}]}"#).unwrap().scale, 0.);
     }
 
     #[test]

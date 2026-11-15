@@ -36,6 +36,10 @@ fn main() -> Result<(), slint::PlatformError> {
     if std::env::var_os("SLINT_KMS_MAX_FPS").is_none() && profile.frame_rate() > 0 {
         std::env::set_var("SLINT_KMS_MAX_FPS", profile.frame_rate().to_string());
     }
+    // The JUCE app's screen scale, which the KMS backend reads too (its own SLINT_SCALE_FACTOR wins).
+    if std::env::var_os("SLINT_SCALE_FACTOR").is_none() && profile.scale > 1. {
+        std::env::set_var("SLINT_SCALE_FACTOR", profile.scale.to_string());
+    }
     let ui = Shell::new()?;
     let places = theme::Places::found();
     theme::apply(&ui, &theme::chosen(&places, &settings::chosen_theme(), &profile.theme));

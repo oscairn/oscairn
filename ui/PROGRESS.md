@@ -222,5 +222,4 @@ colors, button styles and corner rounding, spacing, all that stuff". Checklist a
   the choice, row fill, apply sets every property, no literal color/radius/font size in a .slint file, the grid's
   gap per theme). Every screen under the four built-in themes and two odd ones: ui/target/theme-shots/ (ignored).
 - Not done: `wires` and `splash` are loaded and carried, drawn by nothing (no routing view or splash in the Rust UI);
-  the desktop type scale (12/14/13/18); list rows as the reference's `drawListRow` bands; the reference's exact
-  `fontScale` bounds are a float/double quirk (THEME.md section 2) that Theme.cpp should settle.
+  the desktop type scale (12/14/13/18); list rows as the reference's `drawListRow` bands; (the `fontScale` bound quirk, 0.8 and 1.4 refused, is fixed in both readers.)

@@ -112,8 +112,8 @@ fn what_a_file_may_leave_out_has_the_references_default() {
     // The splash may give one of its colors; the other is the theme's (contrast checked with it).
     doc["splash"] = json!({"ink": "#FFFFFF"});
     assert_eq!(parse(&doc).unwrap().splash.ink, Some(c(0xffffff)));
-    // The range ends the reference takes: radius 0 and 16; a font scale just inside 0.8 and 1.4.
-    for (key, ok, bad) in [("radius", [0., 16.], [-0.1, 16.1]), ("fontScale", [0.81, 1.39], [0.79, 1.41])] {
+    // The range ends are in the range (docs/theme.schema.json: minimum and maximum): radius 0 and 16, font scale 0.8 and 1.4.
+    for (key, ok, bad) in [("radius", [0., 16.], [-0.1, 16.1]), ("fontScale", [0.8, 1.4], [0.79, 1.41])] {
         let mut doc = dark_doc();
         for v in ok {
             doc[key] = json!(v);
@@ -123,12 +123,6 @@ fn what_a_file_may_leave_out_has_the_references_default() {
             doc[key] = json!(v);
             assert_eq!(parse(&doc), Err("Theme metric is out of range"), "{key} {v}");
         }
-    }
-    // The reference compares a double with float bounds: exactly 0.8 and 1.4 are out of range there, so here.
-    for v in [0.8, 1.4] {
-        let mut doc = dark_doc();
-        doc["fontScale"] = json!(v);
-        assert_eq!(parse(&doc), Err("Theme metric is out of range"), "fontScale {v}");
     }
 }
 

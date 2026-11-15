@@ -212,9 +212,7 @@ impl ThemeData {
             require(n.is_finite() && n >= low && n <= high, "Theme metric is out of range")?;
             Ok(n as f32)
         };
-        // The reference compares a double with its float bounds, so 0.8 and 1.4 themselves (as doubles
-        // just under and over the floats) are refused there: the same here.
-        let font_scale = number("fontScale", 1., f64::from(0.8f32), f64::from(1.4f32))?;
+        let font_scale = number("fontScale", 1., 0.8, 1.4)?;
         let radius = number("radius", 6., 0., 16.)?;
         let colors = object.get("colors").and_then(Value::as_object).ok_or("Theme needs semantic colors")?;
         let mut allowed = INKS.to_vec();

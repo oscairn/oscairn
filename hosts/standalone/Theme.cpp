@@ -208,12 +208,12 @@ ThemeData ThemeData::parse(const juce::String& json) {
     const auto* font=value["font"].getDynamicObject();require(font,"Theme needs its font files");fields(*font,{"regular","bold","license"});
     auto path=[&](const char* key,bool required){const auto v=font->getProperty(key);if(!required && v.isVoid())return juce::String();require(v.isString(),"Theme font paths must be strings");return v.toString();};
     t.font={path("regular",true),path("bold",false),path("license",true)};
-    auto number=[&](const char* key,float fallback,float low,float high) {
+    auto number=[&](const char* key,float fallback,double low,double high) { // doubles, ends included: as floats, 0.8 is a little above and 1.4 a little below
         if(!object->hasProperty(key))return fallback;const auto v=value[key];
         require(v.isInt() || v.isDouble(),"Theme metric must be a number");const double n=v;
         require(std::isfinite(n) && n>=low && n<=high,"Theme metric is out of range");return static_cast<float>(n);
     };
-    t.fontScale=number("fontScale",1,.8f,1.4f);t.radius=number("radius",6,0,16);
+    t.fontScale=number("fontScale",1,.8,1.4);t.radius=number("radius",6,0,16);
     const auto* colors=value["colors"].getDynamicObject();require(colors,"Theme needs semantic colors");
     juce::StringArray allowed;for(const auto& name:names)allowed.add(name);allowed.add("warning");allowed.add("focus");fields(*colors,allowed); // the last two: optional, the Rust UI's
     for(const char* key:{"warning","focus"})if(colors->hasProperty(key)){const auto v=colors->getProperty(key).toString();require(v.length()==7 && v[0]=='#' && v.substring(1).containsOnly("0123456789abcdefABCDEF"),"Theme colors must be #RRGGBB");}

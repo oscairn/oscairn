@@ -43,6 +43,12 @@ int main(int argc,char** argv){try{
           classic.style.sliders==ThemeStyle::Sliders::Filled && classic.style.tabs==ThemeStyle::Tabs::Folder && classic.style.marks==ThemeStyle::Marks::Round && classic.style.sections==ThemeStyle::Sections::Joined,"every style choice parsed");
     check(ThemeData::parse(json.replace("\"line\"","\"cap\"")).style.sliders==ThemeStyle::Sliders::Cap,"slider caps parsed");
     check(theme.style.rows==ThemeStyle::Rows::Dot && ThemeData::parse(json.replace("\"dot\"","\"fill\"")).style.rows==ThemeStyle::Rows::Fill,"row color placement parsed");
+    // The ends of a range are in it: fontScale 0.8 and 1.4, radius 0 and 16.
+    for(const char* ok:{"0.8","1.4"})check(ThemeData::parse(json.replace("\"fontScale\": 1.0","\"fontScale\": "+juce::String(ok))).fontScale==std::stof(ok),"fontScale at its bounds accepted");
+    for(auto ok:{json.replace("\"radius\": 8","\"radius\": 0"),json.replace("\"radius\": 8","\"radius\": 16")})check(ThemeData::parse(ok).radius>=0,"radius at its bounds accepted");
+    for(auto broken:{json.replace("\"fontScale\": 1.0","\"fontScale\": 0.79"),json.replace("\"fontScale\": 1.0","\"fontScale\": 1.41")}){
+        bool rejected=false;try{ThemeData::parse(broken);}catch(const std::exception&){rejected=true;}check(rejected,"fontScale just outside its bounds rejected");
+    }
     for(auto broken:{json.replace("\"midnight\"","\"../escape\""),json.replace("\"version\": 7","\"version\": 6"),json.replace("\"fontScale\": 1.0","\"fontScale\": 100"),
                      json.replace("#F0F5FC","#101724"),json.replace("#7CCEFF","red"),json.replace("\"radius\": 8","\"script\": \"evil\""),
                      json.replace("\"license\": \"fonts/OFL.txt\"","\"licenses\": \"fonts/OFL.txt\""),json.replace("\"regular\": \"fonts/Inter-Regular.ttf\",",""),

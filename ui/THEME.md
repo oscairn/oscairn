@@ -18,8 +18,8 @@ audit made at 3a97dd63 (before the work) and, further down, what the work did.
 | `font.regular` | path | required | .ttf/.otf in the folder | text | yes, registered with fontique | `font-family` | every Text (window default) |
 | `font.bold` | path | none | as above | bold text | yes | with the family | every bold Text |
 | `font.license` | path | required | file in the folder | none (checked to exist) | no | no | none |
-| `fontScale` | number | 1 | 0.8 to 1.4 | type sizes | yes (clamped, not refused) | `font-scale` | `Theme.small/body/button/title` everywhere; Play's Edit button width |
-| `radius` | number | 6 | 0 to 16 | corners | yes (clamped) | `radius` | every rounded Rectangle |
+| `fontScale` | number | 1 | 0.8 to 1.4 | type sizes | yes (refused out of range) | `font-scale` | `Theme.small/body/button/title` everywhere; Play's Edit button width |
+| `radius` | number | 6 | 0 to 16 | corners | yes (refused out of range) | `radius` | every rounded Rectangle |
 | `colors.background` | #RRGGBB | #15181D | required | window, wells, text on accent | yes | yes | all screens |
 | `colors.surface` | #RRGGBB | #20252D | required | cards, tiles, fields | yes | yes | all screens |
 | `colors.raised` | #RRGGBB | #2C333D | required | buttons, tracks | yes | yes | all screens |
@@ -139,10 +139,9 @@ rules; the gap passed to `layout` is `theme::section_gap`. The format has no spa
 
 ### Where the reference's behavior is not (yet) matched
 
-- `fontScale` 0.8 and 1.4 exactly are refused, as in the reference: it compares the double with float
-  bounds (`number("fontScale",1,.8f,1.4f)`), so only values strictly between 0.8000000119 and
-  1.3999999762 pass. Probably unintended there; the Rust loader repeats it (one format, no second
-  dialect) and a test pins it. Worth fixing in Theme.cpp, and then here.
+- `fontScale` 0.8 and 1.4 exactly were refused by both readers (the reference compared the double with
+  float bounds); fixed in both: the ends of a range are in it, as docs/theme.schema.json's `minimum` and
+  `maximum` say.
 - A partial file is refused whole, not merged over the default (the previous Rust loader merged and
   clamped; the reference does neither). What a file may omit is `fontScale`, `radius`,
   `colors.warning`, `colors.focus`, `font.bold` and `splash`.

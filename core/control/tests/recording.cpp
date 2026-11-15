@@ -267,8 +267,8 @@ namespace
         const auto main = readWav(folder / "Main.wav"), leadPost = readWav(folder / "Lead.wav"), padPost = readWav(folder / "Pad.wav"), leadPre = readWav(folder / "Lead pre-fader.wav");
         check(same(main.samples, render.main), "Main is the render");
         bool sums = leadPost.samples.size() == main.samples.size() && padPost.samples.size() == main.samples.size();
-        // Within one rounding: the graph's mix may fuse its multiply-adds.
-        for(size_t i = 0; sums && i < main.samples.size(); ++i) sums = std::abs(leadPost.samples[i] + padPost.samples[i] - main.samples[i]) <= std::abs(main.samples[i]) * 1.2e-7f + 1e-30f;
+        // Exactly: the recorder's taps and the graph's mix do the same arithmetic, neither fusing a multiply-add.
+        for(size_t i = 0; sums && i < main.samples.size(); ++i) sums = leadPost.samples[i] + padPost.samples[i] == main.samples[i];
         check(sums, "the post-fader taps of the parts playing to Main sum to Main, through a fader move, a pan move and a mute");
         bool muted = true; for(size_t i = 2 * 43 * block; i < padPost.samples.size(); ++i) muted = muted && padPost.samples[i] == 0; // the mute ramps across block 42
         check(muted, "a muted part records silence after its fader");

@@ -366,7 +366,12 @@ set_tests_properties(engine-audio-diff PROPERTIES TIMEOUT 300)
 # A plan's block (the step loop, events merged and passed on, harmonies, taps, the plugins' calls) the same way.
 add_executable(oscairn-run-diff-test engine/tests/run_diff.cpp)
 target_link_libraries(oscairn-run-diff-test PRIVATE oscairn_engine)
-add_test(NAME engine-run-diff COMMAND oscairn-run-diff-test)
+# Under a sanitizer its 150 plans of 1500 blocks take longer than the limit; the same plans, a third of the blocks (the rest of the matrix runs in the builds without one).
+set(run_diff_size)
+if(KICK_CLAP_SANITIZE OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    set(run_diff_size 150 500)
+endif()
+add_test(NAME engine-run-diff COMMAND oscairn-run-diff-test ${run_diff_size})
 set_tests_properties(engine-run-diff PROPERTIES TIMEOUT 300)
 add_test(NAME engine-core-cargo COMMAND ${CMAKE_COMMAND} -E env RUSTUP_TOOLCHAIN=${OSCAIRN_RUST_VERSION}
     ${SAMPLEPACK_CARGO} test --release --locked --offline --workspace --target-dir "${CMAKE_BINARY_DIR}/engine-core-cargo" WORKING_DIRECTORY "${engine_core_crate}")

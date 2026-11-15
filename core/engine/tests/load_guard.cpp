@@ -31,6 +31,19 @@
 using namespace oscairn;
 using kick::clap::Event;
 static void check(bool ok,const std::string& why){if(!ok)throw std::runtime_error(why);}
+// A shared CI runner (CI is set) or a sanitizer build slows what is timed: only there may a paced measurement be repeated.
+static bool relaxed()
+{
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+    return true;
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+    return true;
+#endif
+#endif
+    const char* ci=std::getenv("CI");
+    return ci && *ci;
+}
 
 namespace {
 constexpr uint32_t frames=128,blocks=600,settle=300; // misses counted from block `settle` on
@@ -150,9 +163,11 @@ int main(int argc,char** argv){try{
         return r;
     };
     // Another process on a shared runner can hold the worker up for real, which only adds to what the guard sees: a spike that gives a note up
-    // there is not the spike's doing, and a sustained overload may go unseen while the machine itself is the slow part. Each case is measured up to
-    // five times, and stands when one measurement shows what it should (a guard that always misjudged would show it in none).
-    auto spikedUntil=[&](const char* spike,auto good){uint32_t r=0;for(int attempt=0;attempt<5;++attempt)if(good(r=spiked(spike)))break;return r;};
+    // there is not the spike's doing, and a sustained overload may go unseen while the machine itself is the slow part. On a CI runner or in a
+    // sanitizer build each case is measured up to five times, and stands when one measurement shows what it should (a guard that always misjudged
+    // would show it in none); elsewhere it is measured once.
+    const int attempts=relaxed()?5:1;
+    auto spikedUntil=[&](const char* spike,auto good){uint32_t r=0;for(int attempt=0;attempt<attempts;++attempt)if(good(r=spiked(spike)))break;return r;};
     const auto once=spikedUntil("201:1:2500",[](uint32_t r){return r==UINT32_MAX;}),twice=spikedUntil("201:2:2500",[](uint32_t r){return r==UINT32_MAX;}), // block 200's call, it and the next,
                sustained=spikedUntil("201:1000:400",[&](uint32_t r){return timing?r>=spikeBlock && r<=spikeBlock+8:r!=UINT32_MAX;});                            // and from it on
     auto when=[](uint32_t b){return b==UINT32_MAX?std::string("none"):"block "+std::to_string(b);};
@@ -163,7 +178,7 @@ int main(int argc,char** argv){try{
     else check(sustained!=UINT32_MAX,"a sustained overload gives notes up: "+when(sustained));
     {
         Shared r;std::exception_ptr error;
-        for(int attempt=0;attempt<5;++attempt) // as the spikes above: a held-up runner adds losses, so one measurement that shows the rule stands
+        for(int attempt=0;attempt<attempts;++attempt) // as the spikes above: a held-up runner adds losses, so one measurement that shows the rule stands
         {
             error=nullptr;
             std::thread([&]{worker::makeRealtime(frames/48000.0*1e6);try{r=device(argv[1]);}catch(...){error=std::current_exception();}}).join();

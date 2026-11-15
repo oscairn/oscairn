@@ -24,6 +24,20 @@
 #include <thread>
 #include <vector>
 
+// A shared CI runner (CI is set) or a sanitizer build slows what is timed: only there may a paced measurement be repeated.
+bool relaxed()
+{
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+    return true;
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+    return true;
+#endif
+#endif
+    const char* ci=std::getenv("CI");
+    return ci && *ci;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 3) { std::fprintf(stderr, "usage: %s WORKER FIXTURE [CYCLES [REST [FRAMES [EFFECTS [off]]]]]\n", argv[0]); return 2; }
@@ -103,13 +117,10 @@ int main(int argc, char** argv)
             std::printf("  worker %zu: wake %.1f us waking, %.1f sounding; round trip %.1f waking, %.1f sounding\n",
                         k, wake[k] / cycles, steadyWake[k] / cycles, trip[k] / cycles, steadyTrip[k] / cycles);
         // A wake that cost a block would lose one every cycle, in every attempt; another process on a shared runner holding the engine up
-        // loses a stray block now and then, so a configuration is measured up to three times and stands when one run loses none.
-        // Real-time threads past the machine's cores (the engine's and each worker's) cannot all keep their period, whatever the code: then lost
-        // blocks are expected, and only the calls are checked.
-        const bool fits = hosts.size() + 1 <= std::max(1u, std::thread::hardware_concurrency());
-        if(lostBlocks && fits && attempt < 2) { std::printf("  %llu blocks lost: measured again\n", (unsigned long long)lostBlocks); continue; }
-        if(lostBlocks && !fits) std::printf("  %zu real-time threads on %u cores: lost blocks not held against it\n", hosts.size() + 1, std::thread::hardware_concurrency());
-        else if(lostBlocks) { std::fprintf(stderr, "FAIL: %llu blocks lost\n", (unsigned long long)lostBlocks); ++failures; }
+        // loses a stray block now and then, so on a CI runner or in a sanitizer build a configuration is measured up to three times and stands when one
+        // run loses none; elsewhere it is measured once.
+        if(lostBlocks && attempt < (relaxed() ? 2 : 0)) { std::printf("  %llu blocks lost: measured again\n", (unsigned long long)lostBlocks); continue; }
+        if(lostBlocks) { std::fprintf(stderr, "FAIL: %llu blocks lost\n", (unsigned long long)lostBlocks); ++failures; }
         // An idle worker that may rest called only for the hold; one that may not, every block.
         const uint64_t all = uint64_t(rest) * cycles * hosts.size();
         if(resting ? idleCalls > uint64_t(hold + 2) * cycles * hosts.size() || (rest > hold + 2 && idleCalls >= all) : idleCalls < all) { std::fprintf(stderr, "FAIL: %llu worker calls in idle blocks of %llu\n", (unsigned long long)idleCalls, (unsigned long long)all); ++failures; }

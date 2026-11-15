@@ -2,7 +2,7 @@
 // The on-screen text keyboard (src/keyboard.rs), the JUCE TextKeyboard's layout: the text with its
 // caret and Left, Right, Clear, Cancel and Done in the top row, then four rows of keys.
 
-import { Theme } from "theme.slint";
+import { Theme, Field, Cursor, DepthStyle } from "theme.slint";
 
 export struct KeyData {
     label: string,
@@ -50,19 +50,16 @@ export component Keyboard inherits Rectangle {
         overflow: elide;
         vertical-alignment: center;
     }
-    Rectangle {
+    Field {
         x: Theme.margin;
         y: Theme.margin + Theme.touch + root.gutter;
         width: KeyboardState.line * root.row-width - root.gutter;
         height: root.key-height;
-        background: Theme.background;
-        border-radius: Theme.radius;
-        border-width: 1px;
-        border-color: Theme.border;
+        fill: Theme.background;
         clip: true;
         Text {
-            x: 8px;
-            width: parent.width - 16px;
+            x: Theme.pad-narrow;
+            width: parent.width - 2 * Theme.pad-narrow;
             height: parent.height;
             text: KeyboardState.before + "|" + KeyboardState.after;
             color: Theme.text;
@@ -71,17 +68,27 @@ export component Keyboard inherits Rectangle {
             vertical-alignment: center;
         }
     }
+    // A key is a button as the theme draws them: its corners, edge and shadow.
     for key[i] in KeyboardState.keys: Rectangle {
         x: Theme.margin + key.x / key.total * root.row-width;
         y: Theme.margin + Theme.touch + root.gutter + (key.row == 0 ? 0px : (key.row) * (root.key-height + root.gutter));
         width: key.w / key.total * root.row-width - root.gutter;
         height: root.key-height;
-        border-radius: Theme.radius;
-        background: key.done ? Theme.accent : key.on ? Theme.accent.transparentize(0.6) : key.special ? Theme.raised : Theme.surface.brighter(0.15);
-        opacity: key.disabled ? 0.4 : 1;
+        opacity: key.disabled ? Theme.disabled : 1;
+        if Theme.depth == DepthStyle.soft: Rectangle {
+            y: Theme.shadow-offset;
+            border-radius: Theme.button-radius(parent.height);
+            background: Theme.shadow;
+        }
+        Rectangle {
+            border-radius: Theme.button-radius(parent.height);
+            background: key.done ? Theme.accent : key.on ? Theme.accent.with-alpha(Theme.wash-strong) : key.special ? Theme.raised : Theme.key-fill;
+            border-width: Theme.edge-width;
+            border-color: Theme.edge-color;
+        }
         Text {
             text: key.label;
-            color: key.done ? Theme.background : Theme.text;
+            color: key.done ? Theme.on-accent : Theme.text;
             font-size: Theme.button;
             font-weight: key.special ? 700 : 400;
             horizontal-alignment: center;
@@ -97,10 +104,9 @@ export component Keyboard inherits Rectangle {
                 }
             }
         }
-        Rectangle {
-            border-radius: Theme.radius;
-            border-width: key.cursor ? 2px : 0px;
-            border-color: Theme.focus;
+        Cursor {
+            shown: key.cursor;
+            corner: Theme.button-radius(parent.height);
         }
     }
 }

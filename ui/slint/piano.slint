@@ -3,7 +3,7 @@
 // two octaves and the next C (15 white keys, each at least a touch target wide), a band per part
 // the input plays above the keys, and a header with the octave, Fixed, Sustain and Close.
 
-import { Theme } from "theme.slint";
+import { Theme, Button, Cursor } from "theme.slint";
 
 export struct PianoKey {
     x: float, // in white-key units from the left
@@ -43,7 +43,13 @@ export global PianoState {
 
 export component Piano inherits Rectangle {
     property <length> white: (self.width - 2 * Theme.margin) / PianoState.whites;
-    property <length> board-y: Theme.margin + Theme.touch + 2 * Theme.gap + 6 * (4px + 2px) + Theme.gap;
+    // The bands above the keys: each row 4 high, 6 apart (a band per part the input plays).
+    property <length> band: 4px;
+    property <length> band-pitch: 6px;
+    property <length> board-y: Theme.margin + Theme.touch + 2 * Theme.gap + 6 * root.band-pitch + Theme.gap;
+    // The black keys' height as a share of the white ones'; a key's gap and its front edge.
+    property <float> black-share: 0.6;
+    property <length> key-gap: Theme.hair;
     background: Theme.surface;
     TouchArea { }
     Text {
@@ -69,36 +75,27 @@ export component Piano inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    for c[i] in PianoState.controls: Rectangle {
+    for c[i] in PianoState.controls: Button {
         // Octave down and up flank the range; the rest are to the right.
         x: i == 0 ? parent.width * 0.3 : i == 1 ? parent.width * 0.3 + Theme.touch * 3 + 2 * Theme.gap : parent.width - Theme.margin - (5 - i) * (Theme.touch * 2 + Theme.gap) + Theme.gap;
         y: Theme.margin;
         width: i < 2 ? Theme.touch : Theme.touch * 2;
         height: Theme.touch;
-        border-radius: Theme.radius;
-        background: c.on ? Theme.accent : Theme.raised;
-        Text {
-            text: c.label;
-            color: c.on ? Theme.background : Theme.text;
-            font-size: Theme.button;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        TouchArea {
-            clicked => { PianoState.control(i); }
-        }
-        Rectangle {
-            border-radius: Theme.radius;
-            border-width: c.cursor ? 2px : 0px;
-            border-color: Theme.focus;
+        text: c.label;
+        on: c.on;
+        bold: false;
+        clicked => { PianoState.control(i); }
+        Cursor {
+            shown: c.cursor;
+            corner: Theme.button-radius(parent.height);
         }
     }
     for b in PianoState.bands: Rectangle {
-        x: Theme.margin + b.x * root.white + 1px;
-        y: Theme.margin + Theme.touch + 2 * Theme.gap + b.row * 6px;
-        width: max(2px, b.w * root.white - 2px);
-        height: 4px;
-        border-radius: 2px;
+        x: Theme.margin + b.x * root.white + root.key-gap;
+        y: Theme.margin + Theme.touch + 2 * Theme.gap + b.row * root.band-pitch;
+        width: max(2 * root.key-gap, b.w * root.white - 2 * root.key-gap);
+        height: root.band;
+        border-radius: self.height / 2;
         background: Theme.accent;
     }
     // White keys first, black over them.
@@ -106,16 +103,16 @@ export component Piano inherits Rectangle {
         if !k.black: Rectangle {
             x: Theme.margin + k.x * root.white;
             y: root.board-y;
-            width: k.w * root.white - 1px;
+            width: k.w * root.white - root.key-gap;
             height: root.height - root.board-y - Theme.margin;
-            border-radius: Theme.radius;
-            background: k.held ? Theme.accent : k.lit ? Theme.accent.transparentize(0.5) : #f4f4f0;
+            border-radius: Theme.key-radius;
+            background: k.held ? Theme.accent : k.lit ? Theme.white-key-lit : Theme.white-key;
             Text {
                 y: parent.height - Theme.touch;
                 height: Theme.touch;
                 width: parent.width;
                 text: k.label;
-                color: #444;
+                color: Theme.key-label;
                 font-size: Theme.small;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -130,8 +127,8 @@ export component Piano inherits Rectangle {
                 }
             }
             Rectangle {
-                border-radius: Theme.radius;
-                border-width: k.cursor ? 3px : 0px;
+                border-radius: Theme.key-radius;
+                border-width: k.cursor ? Theme.key-cursor-width : 0px;
                 border-color: Theme.focus;
             }
         }
@@ -141,9 +138,9 @@ export component Piano inherits Rectangle {
             x: Theme.margin + k.x * root.white;
             y: root.board-y;
             width: k.w * root.white;
-            height: (root.height - root.board-y - Theme.margin) * 0.6;
-            border-radius: Theme.radius;
-            background: k.held ? Theme.accent : k.lit ? Theme.accent.darker(0.3) : #1b1b1d;
+            height: (root.height - root.board-y - Theme.margin) * root.black-share;
+            border-radius: Theme.key-radius;
+            background: k.held ? Theme.accent : k.lit ? Theme.black-key-lit : Theme.black-key;
             TouchArea {
                 pointer-event(e) => {
                     if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
@@ -154,8 +151,8 @@ export component Piano inherits Rectangle {
                 }
             }
             Rectangle {
-                border-radius: Theme.radius;
-                border-width: k.cursor ? 3px : 0px;
+                border-radius: Theme.key-radius;
+                border-width: k.cursor ? Theme.key-cursor-width : 0px;
                 border-color: Theme.focus;
             }
         }

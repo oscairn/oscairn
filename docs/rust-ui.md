@@ -338,6 +338,10 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   `audition.stop`, and `parts.saveSound` (over its Sound, or new with a name typed). The engine's refusals
   (staged edits, the library busy) are said. Tags, favorites and the sources are not shown.
 
+### Playing keyboard
+
+`src/piano.rs`, opened from the Part screen's "Keyboard" row (not shown where the profile's `onScreenKeyboard` is false). It plays as the input that plays the part (`notes.send` with `input`; the built-in keys when none), keeps the JUCE KeyboardWindow's behaviors (computer keys from middle C, Z and X, Fixed, Sustain, bands per part, the input's held keys lit from `status`'s `heldNotes`, closing with its input) and lays out two octaves and the next C for the touch screen. Without touch: left knob the octave, right knob or dial the cursor over keys then the header buttons, press plays or acts, Cancel drops the cursor then closes. Multi-touch chords on the real display are unverified.
+
 ### Text entry
 
 `keyboard.rs`, `slint/keyboard.slint`: the JUCE TextKeyboard (hosts/standalone/TextKeyboard.cpp)

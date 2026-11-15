@@ -90,6 +90,43 @@ impl Screen {
     }
 }
 
+thread_local! { static FIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+/// For a test that draws pictures: the lists keep the rows and panel lines the window really holds,
+/// as the shell shows them, instead of the whole list (what `tall` gives the logic tests).
+pub fn fit_to_window() {
+    FIT.with(|f| f.set(true));
+}
+
+/// A list screen's logic tests see every row at once; a picture test (`fit_to_window`) does not.
+pub fn tall(ui: &Shell) {
+    if !FIT.with(|f| f.get()) {
+        ui.global::<crate::PartState>().set_rows_per_view(30);
+        ui.global::<crate::PartState>().set_info_per_view(30);
+    }
+}
+
+/// The picture again at the FANTOM-07's scale (1.55, which the shell sets from the profile): the same
+/// window of 1280x720 pixels holds fewer, larger rows. Saved as NAME@1.55.png; the scale goes back.
+/// `refresh` shows the screen again, as the shell does when the window's size changes.
+pub fn at_fantom_scale(s: &mut Screen, name: &str, refresh: impl FnOnce()) {
+    s.set_scale(1.55);
+    let mut drawn = s.frame().is_some(); // the screen's own count of rows that fit follows the scale
+    refresh();
+    drawn |= s.frame().is_some();
+    assert!(drawn, "{name}: drawn at 1.55");
+    png(s, &format!("{name}@1.55"));
+    s.set_scale(1.0);
+    s.frame();
+}
+
+impl Screen {
+    pub fn set_scale(&mut self, scale: f32) {
+        self.ui.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+        self.window.set_size(PhysicalSize::new(W as u32, H as u32));
+    }
+}
+
 /// True when `inner` lies within `outer`.
 pub fn within(inner: Rect, outer: Rect) -> bool {
     inner.0 >= outer.0 && inner.1 >= outer.1 && inner.0 + inner.2 <= outer.0 + outer.2 && inner.1 + inner.3 <= outer.1 + outer.3
@@ -888,6 +925,7 @@ fn play_draws_in_every_theme() {
         s.save(&format!("play-{}", t.id));
         png(&s, &format!("play-{}", t.id));
     }
+    at_fantom_scale(&mut s, "play", || play.graph(&play_graph()));
 }
 
 #[cfg(test)]

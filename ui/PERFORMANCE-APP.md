@@ -94,7 +94,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | C11 | Plays to (Main or a bus) | `parts.output` | - | press then dial / list | [x] |
 | C12 | Sends per bus (level, 0 removes) | `parts.send` | - | press then dial | [x] |
 | C13 | MIDI out (devices list: Off, connected outputs, rules not connected) and MIDI out channel (own, 1..16) | `parts.midiOut`, `session.status` (`midiOutputs`) | - | list, press ticks | [x] |
-| C14 | Open the on-screen playing keyboard (K2) of the input that plays the part | `notes.send` (K2) | - | action on the part | [ ] (with K2; hidden when the profile's onScreenKeyboard is false) |
+| C14 | Open the on-screen playing keyboard (K2) of the input that plays the part | `notes.send` (K2) | - | action on the part | [x] (Part screen's "Keyboard" row; hidden when the profile's onScreenKeyboard is false) |
 | C15 | Sound: choose from the library (D1/E) | see E | - | action | [x] |
 | C16 | Engine (the instrument's plugin) shown; replace instrument | `graph.get`; replace: `graph.replace` | - | action | [ ] |
 | C17 | Part controls (a part's own macros) listed with targets | `graph.get` (`controls`) | - | see G | [ ] |
@@ -189,7 +189,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
 | K1 | On-screen text keyboard: a port of the JUCE TextKeyboard (every key, the symbols layer, Shift, Caps, caret, Clear, Cancel, Done, held repeat, the profile's `textEntry`), used by rename of parts, scenes, controls, Save, search | - | - | dial or left knob steps the cursor over the keys, right knob moves the caret, press types, Cancel closes, End finds Done | [x] (used by C5; scene, control, Save and search users come with their items) |
-| K2 | On-screen playing keyboard: a port of the JUCE KeyboardWindow (the keys that play when no MIDI keyboard is connected; Play's no-MIDI hint, A12, and each part's keyboard button, C14, lead to it; the profile's `onScreenKeyboard`), a range and key size that suit the 1280x720 touch screen, an octave shift on a knob | `notes.send` | - | knob for the octave, cursor over keys, press plays | [ ] not started |
+| K2 | On-screen playing keyboard: a port of the JUCE KeyboardWindow (the keys that play when no MIDI keyboard is connected; Play's no-MIDI hint, A12, and each part's keyboard button, C14, lead to it; the profile's `onScreenKeyboard`), a range and key size that suit the 1280x720 touch screen, an octave shift on a knob | `notes.send` | - | knob for the octave, cursor over keys, press plays | [x] src/piano.rs: two octaves and the next C, octave on the left knob, cursor on the right knob and dial; the Play no-MIDI hint (A12) still to add as a second way in |
 
 ## Counts
 
@@ -203,4 +203,8 @@ keys where `textEntry` is `keyboard`). Changed: keys up to twice a touch target 
 the first row's keys are proportions of the width, not fixed pixels; Cancel returns nothing to the
 caller (the JUCE one restores the editor's text, the same as nothing happening). Added for use
 without touch: the border cursor and the knobs. No owner rule was found in the JUCE comments for
-a layout; RFC 0019 is the source of the JUCE behavior. K2 (playing keyboard) is not yet read or ported.
+a layout; RFC 0019 is the source of the JUCE behavior. K2 keeps the JUCE KeyboardWindow's behaviors (typing keys from middle C, Z and X octaves at most 4, Fixed 100/127 else by finger height, Sustain held locally, bands per part, input's held keys lit, closes with its input) and changes the layout: two octaves C3-C5 (15 white keys, 85 px on the FANTOM-07 against the JUCE 56 px over three octaves), octave on the left knob.
+
+## Design correction (owner, after the first pictures): the grid framework comes first
+
+The owner: "the grid of tiles and proper sliders is a part of the design that we need to keep ... one of the options for plugin control is a layout framework that the plugin can control through data with knobs, sliders, graphs, dropdowns, split buttons etc in a grid". The row-list parameter pages (params.rs) are therefore NOT acceptable as the design and F4/F7 are to be redone (their [x] stands for the row version only). To do, before the rest of the list: (1) read RFC 0011, 0019, 0042, oscairn-clap/include/oscairn-clap/ui.h and docs, and ParameterGrid.cpp end to end, and list every control kind and layout rule here as checklist items; (2) a grid module of its own (tiles with spans; knob, vertical and horizontal slider, drawbar, switch, dropdown, split button, value display, envelope and other graph views; the plugin's own value text; cursor over tiles in two dimensions, press selects, dial changes, a dropdown opens a list, split-button halves are stops; the device's knobs control the visible row or bank as ParameterGrid and the profile say); (3) parameter pages, the Play knob row and banks, and the mixer strips rebuilt on it, each compared with the JUCE layout; (4) tests per widget and per navigation, PNGs at scale 1 and 1.55 of a page with every control kind (the harness has `at_fantom_scale` and `fit_to_window` in src/tests.rs).

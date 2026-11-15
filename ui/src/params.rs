@@ -362,7 +362,7 @@ impl Screen {
                     0
                 };
                 let on = self.values.get(&p.id).is_some_and(|v| *v > p.min);
-                SettingData { label: p.name.as_str().into(), value: self.value_text(p).into(), kind, on: kind == 1 && on, ..Default::default() }
+                SettingData { label: p.name.as_str().into(), value: self.value_text(p).into(), kind, on: kind == 1 && on, switch: kind == 1, ..Default::default() }
             })
             .collect()
     }

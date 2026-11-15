@@ -461,7 +461,7 @@ impl Screen {
             Item::Effects => ("Insert effects".into(), "›".into(), 2, false),
             Item::Remove => ("Remove part".into(), if self.removing { "Press again to remove" } else { "Press twice" }.into(), 2, self.removing),
         };
-        SettingData { label: label.into(), value: value.into(), kind, on, cursor: false, editing: false }
+        SettingData { label: label.into(), value: value.into(), kind, on, cursor: false, editing: false, switch: false }
     }
 
     /// The part's sound as the panel names it: the first instrument.

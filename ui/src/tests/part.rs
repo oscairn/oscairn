@@ -42,7 +42,7 @@ fn info_lines(ui: &Shell) -> Vec<String> {
 /// The part screen on its own, with `graph`, the whole list as one view.
 pub fn part_screen(s: &Screen, graph: &serde_json::Value, id: u32) -> crate::part::Screen {
     let mut part = crate::part::Screen::new(&s.ui);
-    s.ui.global::<crate::PartState>().set_rows_per_view(30);
+    tall(&s.ui);
     part.graph(graph);
     part.open(id);
     part
@@ -428,6 +428,7 @@ fn part_on_the_shell() {
 // being changed, and the devices list.
 #[test]
 fn part_draws_in_every_theme() {
+    fit_to_window();
     let mut s = Screen::new();
     let mut part = part_screen(&s, &part_graph(), 10);
     s.ui.set_screen(4);
@@ -442,6 +443,7 @@ fn part_draws_in_every_theme() {
         s.save(&format!("part-{}", t.id));
         png(&s, &format!("part-{}", t.id));
     }
+    at_fantom_scale(&mut s, "part", || part.graph(&part_graph()));
     part.act(Action::Cancel(None));
     mv(&mut part, 4);
     press(&mut part);

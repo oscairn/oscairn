@@ -199,4 +199,5 @@ fn piano_draws_in_every_theme() {
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         png(&s, &format!("piano-{}", t.id));
     }
+    at_fantom_scale(&mut s, "piano", || ());
 }

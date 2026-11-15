@@ -36,7 +36,7 @@ fn sent(out: &mut Vec<(impl Sized, &'static str, serde_json::Value)>) -> Vec<(&'
 }
 
 fn chain_screen(s: &Screen) -> crate::chain::Screen {
-    s.ui.global::<crate::PartState>().set_rows_per_view(30);
+    tall(&s.ui);
     let mut c = crate::chain::Screen::new(&s.ui);
     c.graph(&graph());
     c.open(10);
@@ -158,8 +158,7 @@ pub fn param_list() -> serde_json::Value {
 }
 
 fn params_screen(s: &Screen) -> crate::params::Screen {
-    s.ui.global::<crate::PartState>().set_rows_per_view(30);
-    s.ui.global::<crate::PartState>().set_info_per_view(30);
+    tall(&s.ui);
     let mut p = crate::params::Screen::new(&s.ui);
     p.open(2, "Chorus");
     p.shown();
@@ -250,7 +249,7 @@ fn parameter_pages_by_knobs() {
 }
 
 fn sounds_screen(s: &Screen) -> crate::sounds::Screen {
-    s.ui.global::<crate::PartState>().set_rows_per_view(30);
+    tall(&s.ui);
     let mut c = crate::sounds::Screen::new(&s.ui);
     c.graph(&graph());
     c.open(10);
@@ -323,6 +322,7 @@ fn sound_chooser() {
 // The three screens draw in the built-in themes and an odd one.
 #[test]
 fn pages_draw_in_every_theme() {
+    fit_to_window();
     let mut s = Screen::new();
     let mut c = chain_screen(&s);
     c.plugins(vec![plugin("Reverb", "org.verb", &["audio-effect"])]);
@@ -336,8 +336,17 @@ fn pages_draw_in_every_theme() {
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         png(&s, &format!("chain-{}", t.id));
     }
+    at_fantom_scale(&mut s, "chain", || c.graph(&graph()));
     let mut p = params_screen(&s);
     list_and_values(&mut p);
+    // The plugin's own text for each value, as the engine answers params.text.
+    for (_, m, a) in std::mem::take(&mut p.out) {
+        if m == "params.text" {
+            let v = a["value"].as_f64().unwrap_or(0.);
+            let text = if v == 0. { "Off".to_string() } else if v == 1. { "On".into() } else { format!("{:.0} %", v * 100.) };
+            p.reply(crate::params::Request::Text(a["param"].as_u64().unwrap_or(0) as u32, v.to_bits()), Ok(json!({"text": text})));
+        }
+    }
     p.act(Action::Move { pane: None, by: 1 });
     p.act(Action::Confirm(None));
     s.ui.set_screen(7);
@@ -346,4 +355,5 @@ fn pages_draw_in_every_theme() {
         assert!(s.frame().is_some(), "{}: drawn", t.id);
         png(&s, &format!("params-{}", t.id));
     }
+    at_fantom_scale(&mut s, "params", || p.shown());
 }

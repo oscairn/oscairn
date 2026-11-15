@@ -1029,7 +1029,8 @@ switches it; `OSCAIRN_UI=rust` in the start script's environment tries it once) 
   90 degrees, the one the bundle's `xorg.conf` gives the X server) and runs `udevadm trigger`. It is
   in `/run`, gone at the next power-on; `oscairn-fantom-stop` removes it. Not checked: that
   Roland's udev reads `/run/udev/rules.d` and that a tap lands where it is drawn.
-- **A screen not yet ported** (Performance, Library, Groovebox, Recordings, Settings): the Rust
+- **A screen not yet ported** (Library, Groovebox, Recordings, Settings, and the Performance's Edit;
+  the Performance tile opens Play, which is Rust): the Rust
   UI ends with status 3 and the app's name in the bundle's `tmp/oscairn-handover`; the UI keeper
   starts the bundle's Xorg and `Oscairn --connect /run/oscairn/engine.sock --app NAME` with
   `OSCAIRN_HOME_QUITS=1` (its Home and Back end it), stops Xorg when it ends and starts the Rust

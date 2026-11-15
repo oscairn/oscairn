@@ -50,7 +50,7 @@ How (a) works:
 - **What the musician sees:** Home looks the same with the screen either app draws; a tile of a
   JUCE screen opens after a dark screen of 2 to 3 seconds, and its Home button comes back to the
   Rust Home after a dark moment. Audio plays on throughout. That wait is acceptable for Settings,
-  the Library and the editors and never needed on stage, where Home, Setlist and (next) Play are
+  the Library and the editors and never needed on stage, where Home, Setlist and Play are
   Rust and draw without X. While a JUCE screen is open it has the X cost as today.
 - **One profile setting switches it:** a screen's `"ui": "rust"`; absent or `"juce"`, the start
   script starts the JUCE app as today. JUCE stays the default until the owner switches it.

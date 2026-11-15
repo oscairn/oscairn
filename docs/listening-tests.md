@@ -2,7 +2,7 @@
 
 Status: sections 1–3 listened to by Jacob on October 30, 2026; open items are marked below. Do not start
 playback until Jacob is available. Automated rendering does not count as audible acceptance.
-Before each grouped listening prompt, run `/Users/jacob/.codex/bin/prompt-ding` immediately
+Before each grouped listening prompt, send a notification to the listener immediately
 before the listening window. Report if the notification fails; command success does not
 prove it was heard.
 

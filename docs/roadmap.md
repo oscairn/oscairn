@@ -1,11 +1,10 @@
 # Roadmap
 
 How Oscairn gets from nothing to the [architecture](architecture.md): the smallest steps
-that each produce something that runs. Nobody has the target hardware yet, so everything
-early runs on a desktop.
+that each produce something that runs. The early phases ran on a desktop; a Roland FANTOM-07 is the one hardware
+target tried so far ([Phase 4](#phase-4-hardware-started)).
 
-Status as of November 1, 2026. Implementation status below includes the current branch;
-it does not mean every completed item has merged to `main`.
+The [RFCs](rfcs/README.md) and their Progress lists are the finer record of each step.
 
 A checked box is built and tested; an unchecked one is still to do, with what is already done
 said beside it. A box is checked in the change that builds it, together with the
@@ -640,10 +639,12 @@ drum module, a DJ unit, a Eurorack module, a DAW plugin). These are required of 
   its keys, and its panel mapped from captures. What exists: a profile (`--profile fantom-07`,
   estimates) and a panel reader built with `OSCAIRN_ROLAND_FANTOM0`, whose map has the layout and
   control IDs read from Roland's own programs, to confirm on the unit with `oscairn-panel-dump`;
-  a key reader that plays its keys, seen on the unit to arrive on `/dev/ttyGS0`, as a MIDI input
-  (not yet run on the unit); and a bundle to run Oscairn in a chroot on the
-  unit's stock Linux (`os/fantom-bundle.sh`), checked in Docker, not yet on the unit, which is
-  now here ([running on a FANTOM-0](fantom-0.md)).
+  a key reader that plays its keys, which arrive on `/dev/ttyGS0`, as a MIDI input; and a bundle to
+  run Oscairn in a chroot on the unit's stock Linux (`os/fantom-bundle.sh`). On November 12 and 13,
+  2026 the bundle ran on a FANTOM-07: the engine played through `hw:1,0`, the keys and panel were
+  read, the app filled the screen and the sliders set part levels. Not done: an image of Oscairn's
+  own, starting at power-on, the unit's audio inputs, MAIN OUT and SUB OUT
+  ([running on a FANTOM-0](fantom-0.md)).
 - [ ] A DJ deck, once Behringer publishes its details (it has been teased; nothing is public
   yet): several clocks with decks as the master, high-resolution jog input, a track player
   with key lock, track analysis, DJ mixer outputs and cue, waveform streams, and the three

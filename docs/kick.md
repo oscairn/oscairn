@@ -32,8 +32,8 @@ it on an emulator or an EVK, and what to expect, as of November 8, 2026.
 The app starts at **Home** ([RFC 0030](rfcs/0030-system-shell-launcher-and-navigation.md)): a top
 bar and the apps as tiles.
 
-- **Performance:** plays and edits the open Performance. For now it opens the parts editor
-  (parts, mixer, routing, controls); a live-controls view for playing comes later.
+- **Performance:** opens on Play, the live view (scenes, a strip per part with level, meter, mute and
+  solo, the master); Edit opens the parts editor (parts, mixer, routing, controls).
 - **Library:** Performances and Sounds, by source and tags, with audition.
 - **Setlist:** songs in order, for the stage.
 - **Groovebox:** the step sequencer (two tracks, A/B patterns, per-step locks).
@@ -55,8 +55,8 @@ sequencer through the Basic Synth and the Delay.
   128-frame blocks, the device may choose another size (the log says which), and the profile's
   `rates` are not applied (a profile's `audio.device` can name the device and force its rate,
   as the FANTOM-07's does; the KICK's does not yet).
-- **Live controls in the Performance app, the system shell's full top bar, quick settings and
-  the running-apps switcher:** designed in RFC 0030, not built.
+- **Most of the system shell's top bar, quick settings and the running-apps switcher:** designed in
+  RFC 0030, not built.
 - **Measured CPU and memory budgets on the KICK:** the budget comes from the profile's estimates.
 
 ## Running it

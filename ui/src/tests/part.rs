@@ -304,6 +304,7 @@ fn part_on_the_shell() {
             "graph.get" => graph.borrow().clone(),
             "session.status" => json!({"midiInputs": []}),
             "unsubscribe" | "subscribe" => json!({}),
+            "graph.commit" => json!({"revision": 1}),
             _ => return r,
         };
         f.reply(&r, json!({"result": result}));

@@ -537,16 +537,12 @@ impl Screen {
         state.set_view(if cursor.count == 0 { String::new() } else { format!("{what} {}–{} of {}", cursor.first + 1, end, cursor.count) }.into());
     }
 
-    /// An edit the engine stages: followed by `graph.commit`, as every JUCE setter commits.
+    /// An edit, followed by `graph.commit` as every JUCE setter does (what the engine stages is
+    /// compiled; after a live one, a fader or a pan, it compiles nothing).
     fn edit(&mut self, method: &'static str, params: Value) {
-        self.edit_live(method, params);
-        self.out.push((Request::Edit, "graph.commit", json!({})));
-    }
-
-    /// A live edit (a fader, a pan, solo): heard at once, no plan to compile.
-    fn edit_live(&mut self, method: &'static str, params: Value) {
         self.say(String::new());
         self.out.push((Request::Edit, method, params));
+        self.out.push((Request::Edit, "graph.commit", json!({})));
     }
 
     fn send_input(&mut self) {
@@ -561,7 +557,7 @@ impl Screen {
 
     fn send_level(&mut self) {
         let params = json!({"part": self.id, "level": self.part["level"].as_f64().unwrap_or(1.), "mute": self.part["mute"].as_bool().unwrap_or(false)});
-        self.edit_live("parts.level", params);
+        self.edit("parts.level", params);
     }
 
     /// A change to the first zone; a zone that passes everything is no zone, as the JUCE page's editZone has it.
@@ -636,7 +632,7 @@ impl Screen {
                 if pan != was {
                     self.part["pan"] = json!(pan);
                     let params = json!({"part": self.id, "pan": pan});
-                    self.edit_live("parts.pan", params);
+                    self.edit("parts.pan", params);
                 }
             }
             Item::LowKey | Item::HighKey | Item::Transpose => {
@@ -794,7 +790,7 @@ impl Screen {
                 let on = !self.part["solo"].as_bool().unwrap_or(false);
                 self.part["solo"] = json!(on);
                 let params = json!({"part": self.id, "solo": on});
-                self.edit_live("parts.solo", params);
+                self.edit("parts.solo", params);
             }
             Item::Devices => self.menu = Some((Menu::Devices, Cursor::new(0, 1))),
             Item::MidiOut => self.menu = Some((Menu::MidiOut, Cursor::new(0, 1))),

@@ -705,12 +705,19 @@ fn png(s: &Screen, name: &str) {
 fn next_edit(f: &mut Fixture) -> serde_json::Value {
     loop {
         let r = f.engine.request();
-        if r["method"] != "parts.meters" {
-            return r;
+        match r["method"].as_str() {
+            Some("parts.meters") => f.reply(&r, json!({"result": {"meters": []}})),
+            // The JUCE strip commits after a level, solo or master edit; counted, answered.
+            Some("graph.commit") => {
+                COMMITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                f.reply(&r, json!({"result": {"revision": 1}}));
+            }
+            _ => return r,
         }
-        f.reply(&r, json!({"result": {"meters": []}}));
     }
 }
+
+static COMMITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 // Play on the shell: the Performance's scenes, parts and master from graph.get; the left knob
 // (pane 0) through the scenes and the right (pane 1) through the parts, a press selecting a scene
@@ -817,8 +824,17 @@ fn play_by_panes_touch_and_meters() {
     f.screen.frame();
     std::thread::sleep(std::time::Duration::from_millis(150));
     f.screen.frame();
-    let r = f.engine.request();
+    let r = loop {
+        let r = f.engine.request();
+        if r["method"] != "graph.commit" {
+            break r;
+        }
+        COMMITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        f.reply(&r, json!({"result": {"revision": 1}}));
+    };
     assert_eq!(r["method"], "parts.meters");
+    // The scene select sent no commit (the engine does it); each mute, the solo, the level and the master did.
+    assert_eq!(COMMITS.load(std::sync::atomic::Ordering::SeqCst), 5);
     f.reply(&r, json!({"result": {"meters": [{"part": 10, "peak": 0.5, "channels": [0.5, 1.0], "stolen": 0, "hardChokes": 0}]}}));
     assert_eq!((strips(&f)[0].channels, strips(&f)[0].peak_a, strips(&f)[0].peak_b), (2, 0.82, 0.91));
     let repainted = f.screen.frame().unwrap();

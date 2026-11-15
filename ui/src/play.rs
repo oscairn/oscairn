@@ -365,6 +365,13 @@ impl Screen {
         self.out.push((Request::Edit, method, params));
     }
 
+    /// An edit the JUCE strip commits (`c.commit()` after setPartLevel, setPartSolo and setMaster);
+    /// the engine compiles nothing after a live one, but what is staged goes with it. scenes.select commits itself.
+    fn edit_committed(&mut self, method: &'static str, params: Value) {
+        self.edit(method, params);
+        self.edit("graph.commit", json!({}));
+    }
+
     fn select_scene(&mut self, i: usize) {
         if let Some((id, _)) = self.scenes.get(i).filter(|_| i < SCENES) {
             self.scene = *id; // shown now; graph.get confirms
@@ -377,7 +384,7 @@ impl Screen {
         if let Some(p) = self.parts.get_mut(i) {
             p.mute = !p.mute;
             let (id, level, mute) = (p.id, p.level, p.mute);
-            self.edit("parts.level", json!({"part": id, "level": level, "mute": mute}));
+            self.edit_committed("parts.level", json!({"part": id, "level": level, "mute": mute}));
         }
     }
 
@@ -385,7 +392,7 @@ impl Screen {
         if let Some(p) = self.parts.get_mut(i) {
             p.solo = !p.solo;
             let (id, solo) = (p.id, p.solo);
-            self.edit("parts.solo", json!({"part": id, "solo": solo}));
+            self.edit_committed("parts.solo", json!({"part": id, "solo": solo}));
         }
     }
 
@@ -472,7 +479,7 @@ impl Screen {
                 let want = level_at(place, 2.);
                 if (want - level).abs() >= 0.01 {
                     self.master = Some((want, pan));
-                    self.edit("master.set", json!({"level": want, "pan": pan}));
+                    self.edit_committed("master.set", json!({"level": want, "pan": pan}));
                 }
             }
         } else if let Some(p) = self.parts.get_mut(self.part_cursor.first + row as usize) {
@@ -480,7 +487,7 @@ impl Screen {
             if (want - p.level).abs() >= 0.01 {
                 p.level = want;
                 let (id, mute) = (p.id, p.mute);
-                self.edit("parts.level", json!({"part": id, "level": want, "mute": mute}));
+                self.edit_committed("parts.level", json!({"part": id, "level": want, "mute": mute}));
             }
         }
         self.show();

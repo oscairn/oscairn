@@ -256,6 +256,12 @@ int main(int argc,char** argv){try{
         d.setDraining(graphInput,s,false);d.commit();play({&other,1});check(held()==1,"undrained, it takes notes again");
     }
     {
+        // Removing a node takes its draining flags with it, as disconnecting does.
+        Graph d(48000,512);
+        const auto s=d.add(argv[1]);d.connectNotes(graphInput,s);d.setDraining(graphInput,s,true);d.remove(s);
+        check(d.describe().draining.empty(),"a removed node leaves no draining edge behind");
+    }
+    {
         // A retiring instrument that says it is asleep (CLAP_PROCESS_SLEEP) is idle as soon as its
         // notes end, without the silence window: through the prepared-instrument wrapper too.
         Graph g(48000,512);

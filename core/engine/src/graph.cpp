@@ -319,6 +319,7 @@ namespace oscairn
         auto touches = [&]( const std::pair<NodeId, NodeId>& e ) { return e.first == node || e.second == node; };
         std::erase_if(noteEdges_,[&](const auto& edge){return touches(edge.first);});
         std::erase_if(noteZones_,[&](const auto& edge){return touches(edge.first);});
+        std::erase_if(draining_,touches);
     }
 
     std::shared_ptr<PluginHost> Graph::release( NodeId node )

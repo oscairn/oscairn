@@ -3,7 +3,14 @@
 *Pronounced "OSS-cairn": **osc**illator + **cairn**, sound built up in layers.*
 
 Oscairn is an open instrument platform: one realtime host for synthesis engines, samplers,
-effects and sequencers, made for hardware instruments, the desktop and the DAW.
+effects and sequencers, made for hardware instruments, the desktop and the DAW. It is one
+person's own open-source, noncommercial project, licensed under the AGPL-3.0-or-later
+([License](#license)). It is not affiliated with Roland, Yamaha, Behringer or any other company,
+and this repository distributes no vendor firmware, samples or presets.
+
+Quick links: [build and run on a desktop](#try-it) · [the state of the hardware target](#the-hardware-target)
+· [where plugins and packages live](#where-plugins-and-packages-live) · [how to contribute](#contributing)
+· [license](#license).
 
 Until now musicians have had two choices.
 
@@ -68,8 +75,9 @@ Oscairn sets out to solve both. How, and how much of it is built today:
   tested in a DAW yet). VST3 and AU hosting, and Oscairn itself as a DAW plugin, are planned.
 
 Oscairn is an independent, unofficial project. It is not affiliated with or endorsed by
-Behringer, Klark Teknik or Music Tribe. KICK is a product of Klark Teknik; the name is used
-here only to describe compatibility.
+Roland, Yamaha, Behringer, Klark Teknik, Music Tribe or any other company. KICK is a product of
+Klark Teknik, and FANTOM, MODX, MONTAGE and ESP are names of Roland and Yamaha products; the names
+are used here only to describe compatibility or what the documents compare with.
 
 > **Status:** alpha, and moving quickly (November 2026). There is no release to download yet:
 > build it from source ([Try it](#try-it)). The desktop app is tested on macOS; Linux builds and
@@ -93,8 +101,9 @@ here only to describe compatibility.
 >   keyboard; and **device profiles** that make it a device's screen;
 > - a **Linux image** that boots into it, tested in QEMU ([`os/`](os/README.md)).
 >
-> Not yet: running on a real device's board (see [running on a KICK](docs/kick.md)), its
-> panel's physical controls, VST3 and AU hosting, and most of the system shell's top bar.
+> Not yet: an Oscairn image of its own for a keyboard, running on a KICK's board (see
+> [running on a KICK](docs/kick.md)), VST3 and AU hosting, and most of the system shell's top bar.
+> The one hardware target tried so far is described under [The hardware target](#the-hardware-target).
 
 See the [roadmap](docs/roadmap.md) for implementation status and planned work.
 For plugins, controllers and integrations, start with the [developer guide](docs/developer-guide.md)
@@ -103,8 +112,12 @@ and [documentation index](docs/README.md).
 ## Try it
 
 Needs CMake 3.21+, Ninja and a C++20 compiler (on macOS: Xcode command line tools, and
-`brew install cmake ninja`), and Rust 1.95.0 through rustup for the sample pack library
-(`tools/install-rust.sh` installs it; configuring says so when it is missing).
+`brew install cmake ninja`), and Rust 1.95.0 through rustup (`tools/install-rust.sh` installs it;
+configuring says so when it is missing). Every build needs Rust: the sample pack library and the
+engine core, which holds the engine thread's note routing and voice budget, the graph's audio
+(buffers, mixing, output guard, meters) and its run loop, are Rust by default. The engine core's
+C++ reference is built too; `-DOSCAIRN_ENGINE_CORE=cpp` makes the engine use it. The CLAP host
+and the plugin worker are C++.
 
 ### The desktop app
 
@@ -132,7 +145,7 @@ open build-app/hosts/standalone/oscairn_standalone_artefacts/RelWithDebInfo/Osca
 ```
 
 Options: `--app performance|library|setlist|groovebox|recordings|settings|plugins` (open an app,
-or the plugin browser, instead of Home), `--layout desktop|kick|kick-screen|ignite|keys49|file.json`,
+or the plugin browser, instead of Home), `--layout desktop|kick|kick-screen|ignite|keys49|modx-m-screen|file.json`,
 `--profile kick` (a device's screen: one window, full screen under any window manager, with
 everything else opening inside it, dense by design: touch-size controls with the least space
 between them, in the theme its profile names until you choose one; see [running on a
@@ -143,6 +156,16 @@ and the app is never the active one or in the Dock), and `--audio null` (the
 engine on a device that writes nowhere, with no MIDI device opened: for tests and scripted
 checks). Layouts are described in
 [hosts/standalone/layouts](hosts/standalone/layouts/README.md).
+
+### The Rust UI (optional)
+
+The UI is moving from JUCE to Rust, one screen at a time ([Rust UI](docs/rust-ui.md)). The Rust
+shell, `oscairn-ui`, has Home, the Setlist and Play; every other screen is the JUCE app, which
+stays the default unless a device profile says `"ui": "rust"`. To build the shell, add
+`-DOSCAIRN_UI=ON` (cargo downloads its crates on the first build), or run `cd ui && cargo build`;
+it connects to a running engine's socket, `oscairn-ui --socket PATH`. CI does not build it
+(only the owner's macOS builds have run it here), and a JUCE screen's tile on a computer says where
+that screen is instead of opening it. The `ui-rust` test is registered only with `-DOSCAIRN_UI=ON`.
 
 The display's sound picker prepares Basic Synth variations (or a loaded instrument's
 presets), switches new notes while preserving held notes, and retires unused sounds.
@@ -333,6 +356,44 @@ MIDI delay, with held-note ownership, expression/sustain and exact sample schedu
 State export, preset enumeration and typed patch properties are available through the
 [control API](docs/control-protocol.md#state-export-presets-and-patch-properties).
 
+## The hardware target
+
+The only hardware tried so far is a Roland FANTOM-07 (the FANTOM-06, -07 and -08 share one board and
+firmware). Oscairn first ran on one on November 12, 2026, as a bundle in a chroot beside the
+unit's own system: it stops the stock application, reads the panel and keys, and plays through
+the unit's audio device. The bundle does not replace or modify Roland's firmware, and there is no
+Oscairn image of its own for the FANTOM. What was tried on the unit and what has not been (the
+unit's audio inputs, MAIN OUT and SUB OUT, several controls, starting at power-on) is in
+[running on a FANTOM-0](docs/fantom-0.md); what is not listed there as tried is untested. Nothing
+has run on a KICK ([running on a KICK](docs/kick.md)).
+
+**Installing Oscairn on a keyboard is at your own risk.** It is alpha software and the project gives no warranty
+(see [`LICENSE`](LICENSE)). Read the FANTOM-0 page before you try it.
+
+## Where plugins and packages live
+
+- **In this repository** ([`plugins/`](plugins/README.md)): the reference plugins (Basic Synth, Step
+  Sequencer, Delay, LFO, Split and Join, MIDI effects) and the Modular wrapper.
+- **[oscairn/packages](https://github.com/oscairn/packages):** the package repository's submissions,
+  publishers and signed index, served at packages.oscairn.org ([the package repository](#the-package-repository)).
+- **[oscairn/oscairn-clap](https://github.com/oscairn/oscairn-clap):** Oscairn's CLAP extension
+  headers and SDK helpers (MIT), with the extensions' reference pages and example plugins.
+- **The engines' own repositories** (CLAP plugins): [fm](https://github.com/oscairn/fm),
+  [sampler](https://github.com/oscairn/sampler), [va](https://github.com/oscairn/va) and
+  [arpeggiator](https://github.com/oscairn/arpeggiator); the package list is
+  [`tools/preinstalled.txt`](tools/preinstalled.txt) and the packages repository. The sample pack format's reader is
+  [samplepack](https://github.com/oscairn/samplepack), which this build fetches. The
+  [legacy sampler](https://github.com/oscairn/legacy-sampler) is archived.
+
+## Contributing
+
+Report bugs and propose changes as issues and pull requests at
+[github.com/oscairn/oscairn](https://github.com/oscairn/oscairn). A change to public behavior comes
+with its owning document, its schema if it has one, and a test in the same change
+([documentation index](docs/README.md)). To write a plugin, start with the
+[developer guide](docs/developer-guide.md). Oscairn is in initial development: its own APIs and file
+formats have no compatibility guarantee yet ([policy](docs/developer-guide.md#initial-development-compatibility-policy)).
+
 ## Design in brief
 
 The design the code is built towards; parts of it are not built yet. In full:
@@ -364,7 +425,7 @@ The design the code is built towards; parts of it are not built yet. In full:
 | `core/` | Graph, transport and clock, event routing, plugin hosting, the control API and the Sounds and Performances library. A library. |
 | `hosts/` | Programs built on the core: headless (render to file, for CI), desktop, later device and plugin builds. |
 | `devices/` | Code for one device family's own hardware, outside the core: `roland-fantom0/` reads the Roland FANTOM-06, -07 and -08's panel and keys, built in only with `OSCAIRN_ROLAND_FANTOM0` ([running on a FANTOM-0](docs/fantom-0.md)). |
-| `plugins/` | First-party plugins: step sequencer, basic synth, delay, split and join, MIDI effects, the Modular wrapper; arpeggiator (not built yet). |
+| `plugins/` | First-party plugins: step sequencer, basic synth, delay, split and join, MIDI effects, the Modular wrapper; Oscairn's arpeggiator is a package built in its own repository (see [where plugins and packages live](#where-plugins-and-packages-live)). |
 | `tools/` | Developer tools: `oscairn-sign` (signing keys and plugin builds), the MIDI monitor and the worker hand-off bench ([developer guide](docs/developer-guide.md#tools)). |
 | `docs/` | [Architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and design decisions in [`rfcs/`](docs/rfcs/README.md). |
 

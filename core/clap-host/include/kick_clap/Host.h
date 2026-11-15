@@ -117,6 +117,19 @@ struct AssetResolver {
     virtual SampleLocation resolveSample(const std::string&) { throw std::runtime_error("this host has no sample store"); }
 };
 
+// Whether a transport moved other than by playing on since the last call: its flags, tempo or time
+// signature changed, it jumped, its loop or bar moved, or it came or went; the first call counts as moved.
+// What wakes a plugin asleep (CLAP_PROCESS_SLEEP), here and in a graph that leaves one asleep uncalled.
+class TransportWatch {
+public:
+    bool changed(const clap_event_transport_t* current, uint32_t frames, double sampleRate) noexcept;
+    void reset() noexcept { observed = false; }
+private:
+    bool observed = false, had = false;
+    clap_event_transport_t previous{};
+    uint32_t previousFrames = 0;
+};
+
 struct Statistics {
     uint64_t blocks = 0, droppedEvents = 0, processErrors = 0;
     double lastMicroseconds = 0, maximumMicroseconds = 0;
@@ -133,6 +146,8 @@ struct Statistics {
     // no events: only where events were lost, as a control silence in the worker); the page faults of the worker's audio thread (Linux; 0 elsewhere).
     // Also the worker's audio thread's involuntary context switches (Linux; 0 elsewhere).
     uint64_t busyBlocks = 0, missPanics = 0, minorFaults = 0, majorFaults = 0, involuntarySwitches = 0;
+    // Oscairn plugin workers: the blocks handed to the worker, and those its plugin slept through uncalled (PluginHost::rest).
+    uint64_t calledBlocks = 0, restedBlocks = 0;
     // Cumulative over `blocks`: the time the plugin's own blocks took, its process() in the engine's
     // process, and the CPU time of its worker's audio thread for a plugin in a worker (RFC 0025's cost).
     double cpuMicroseconds = 0;
@@ -315,6 +330,15 @@ public:
     // Audio thread: the plugin's last process() asked to sleep (CLAP_PROCESS_SLEEP): it makes no
     // sound until it gets input or events.
     bool asleep() const noexcept;
+    // Asleep with nothing waiting to wake it but audio, notes, parameters or the transport: no request_process
+    // or request_flush, host command, select, choke or panic pending, nothing carried, and it takes no beat or
+    // harmony (which come every block). Its caller may then leave it uncalled for a block it would sleep through.
+    bool restful() const noexcept;
+    // Blocks its caller left it asleep without calling it, and their frames: its steady time goes on by them.
+    void rested(uint32_t frames, uint32_t blocks) noexcept;
+    // `mirror` is set to 1 whenever something wakes the plugin (request_process, a command, a select, a choke, a
+    // panic) and to 0 when a block takes it, so a caller in another process can see a wake pending (RFC 0010 workers).
+    void mirrorWake(std::atomic<uint32_t>* mirror) noexcept;
     // Audio thread, after process(): it reset the plugin (a panic, or events it could not take),
     // ending every note it was sent, this call's too; CLAP's reset sends no NOTE_END for them.
     bool wasReset() const noexcept;

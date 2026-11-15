@@ -934,6 +934,21 @@ namespace oscairn
             static size_t sharing(Process& p) { std::lock_guard nodes(p.nodesMutex); return std::max<size_t>(1, p.nodes.size()); }
             // As the plugin said in its last block; a failed worker is silent, so asleep too.
             bool asleep() const noexcept override { return process()->failed.load() || shared_->asleep.load(std::memory_order_relaxed) != 0; }
+            // A block its plugin would sleep through, taken without the round trip (RFC 0045): asleep after its last
+            // block with nothing pending there (restful) and no wake since (a select, choke, command or request_process
+            // reaching it sets the wake word; a panic here waits in the shared block). Never a block a call late, or a
+            // worker down. The frames go to the worker with the next block, for its steady time.
+            bool rest(uint32_t frames) noexcept override
+            {
+                auto& s = *shared_;
+                if(extra_ || process()->failed.load() || busy_.load() || panicLater_.load(std::memory_order_relaxed) || carriedCount_ || replay_ ||
+                   s.done.load(std::memory_order_acquire) != sequence_ || !s.restful.load(std::memory_order_acquire) || s.wake.load(std::memory_order_acquire) ||
+                   s.panic.load(std::memory_order_acquire))
+                    return false;
+                outputCount_ = 0; if(sysexOutput_) sysexOutput_->used = 0; reset_ = false; kept_ = playedKept_ = true;
+                ++restedBlocks_; restedFrames_ += frames; rested_.fetch_add(1, std::memory_order_relaxed);
+                return true;
+            }
             bool wasReset() const noexcept override { return reset_; }
             // RFC 0045's miss policy: a block handed but not done in time, or not handed while the worker was busy
             // with its events carried, lost nothing; with the extra block, of the block played.
@@ -987,6 +1002,7 @@ namespace oscairn
                 s.involuntarySwitches = shared_->involuntarySwitches.load(std::memory_order_relaxed);
                 s.controlSilences = shared_->controlSilences.load(); s.idleBlocks = shared_->idleBlocks.load();
                 s.restarts = process()->restarted.load(std::memory_order_relaxed);
+                s.calledBlocks = called_.load(std::memory_order_relaxed); s.restedBlocks = rested_.load(std::memory_order_relaxed);
                 return s;
             }
 
@@ -1230,6 +1246,7 @@ namespace oscairn
                 }
                 carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0;
                 s.frames = frames; s.eventCount = kept; s.hasTransport = transport != nullptr;
+                s.restedBlocks = restedBlocks_; s.restedFrames = restedFrames_; restedBlocks_ = restedFrames_ = 0; called_.fetch_add(1, std::memory_order_relaxed);
                 s.setLimits = limitsWaiting_ && shareLimits(s);
                 if(s.setLimits) limitsWaiting_ = false;
                 s.ringOut = s.ringOutChannels && no >= outChannels_;
@@ -1636,6 +1653,10 @@ namespace oscairn
             // Blocks past the allowance: played late, or silenced (also those silenced at once while the worker was
             // still busy, which busyBlocks_ counts apart); panics sent right after a block not rendered (missed_).
             std::atomic<uint64_t> late_{0}, silent_{0}, busyBlocks_{0}, missPanics_{0};
+            // Blocks handed to the worker, and those its plugin slept through uncalled (rest), for the timing report; and
+            // those since the last handed, with their frames, which the next request tells the worker. Audio thread.
+            std::atomic<uint64_t> called_{0}, rested_{0};
+            uint32_t restedBlocks_ = 0, restedFrames_ = 0;
             std::atomic<bool> missed_{false};
             // RFC 0045's miss policy, audio thread: the events of blocks not handed (the worker still busy) for the
             // next block handed, and their SysEx bytes; the events the carry dropped, full; whether this call's

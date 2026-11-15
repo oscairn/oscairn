@@ -29,6 +29,11 @@ namespace oscairn::worker
         alignas(64) std::atomic<uint32_t> panic{0};
         std::atomic<uint32_t> crashed{0}; // the signal that is ending the worker, set as it dies
         std::atomic<uint32_t> asleep{0};  // the plugin said, in the last block, that it is asleep (CLAP_PROCESS_SLEEP)
+        // The worker's: asleep after its last block with nothing pending but input (PluginHost::restful), and a wake
+        // pending since (a request_process, command, select, choke or panic reached the plugin; PluginHost::mirrorWake).
+        // The engine's, with each request: the blocks it left the plugin asleep uncalled since the last, and their frames.
+        std::atomic<uint32_t> restful{0}, wake{0};
+        uint32_t restedBlocks = 0, restedFrames = 0;
         // The engine's: its thread is (about to be) asleep on done, so the worker wakes it; otherwise the
         // worker makes no system call to hand a block back (RFC 0045, plugin hosts).
         std::atomic<uint32_t> waiting{0};

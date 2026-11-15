@@ -266,9 +266,9 @@ struct Host::Impl {
     }
     std::atomic<bool> processing{false}; // read by service() without the gate
     std::atomic<uint32_t> pendingCommands{0}; // enqueued but not yet delivered to the plugin
-    bool transportObserved = false, hadTransport = false;
-    clap_event_transport_t previousTransport{};
-    uint32_t previousTransportFrames = 0;
+    TransportWatch transport;
+    std::atomic<uint32_t>* wakeMirror = nullptr; // see Host::mirrorWake
+    void wakeUp() noexcept { wake.store(true); if (wakeMirror) wakeMirror->store(1, std::memory_order_release); }
     std::atomic_flag gate = ATOMIC_FLAG_INIT;
     std::atomic<bool> loaded{false}, failed{false}, dirty{false};
     std::atomic<uint64_t> parameterReports{0};
@@ -325,8 +325,8 @@ struct Host::Impl {
     static bool CLAP_ABI isAudio(const clap_host_t* h) { return audioScope == &self(h); }
     static void CLAP_ABI requestRestart(const clap_host_t* h) { self(h).restart.store(true); }
     static void CLAP_ABI requestCallback(const clap_host_t* h) { self(h).callback.store(true); }
-    static void CLAP_ABI requestProcess(const clap_host_t* h) { self(h).wake.store(true); }
-    static void CLAP_ABI requestFlush(const clap_host_t* h) { self(h).flush.store(true); self(h).wake.store(true); }
+    static void CLAP_ABI requestProcess(const clap_host_t* h) { self(h).wakeUp(); }
+    static void CLAP_ABI requestFlush(const clap_host_t* h) { self(h).flush.store(true); self(h).wakeUp(); }
     static void CLAP_ABI rescanParams(const clap_host_t* h, clap_param_rescan_flags flags) { self(h).rescan.fetch_or(flags); }
     static void CLAP_ABI clearParams(const clap_host_t*, clap_id, clap_param_clear_flags) {}
     static void CLAP_ABI markDirty(const clap_host_t* h) { self(h).dirty.store(true); }
@@ -608,7 +608,7 @@ struct Host::Impl {
         failed.store(false); dirty.store(false); restart.store(false); callback.store(false);
         wake.store(false); flush.store(false); panic.store(false); rescan.store(0); latencyFrames.store(0);
         steadyTime = 0;
-        transportObserved = hadTransport = false;
+        transport.reset();
         carryCount = 0;
         ++metadataVersion;
     }
@@ -889,7 +889,7 @@ struct Host::Impl {
         appliedTold = false; applyOutputs(); // deactivated: told every port again
         if (!plugin->activate(plugin, sampleRate, 1, maxFrames)) throw std::runtime_error("Plugin activation failed");
         active = true;
-        transportObserved = false; haveHarmony = false;
+        transport.reset(); haveHarmony = false;
         latencyFrames.store(pluginLatency && pluginLatency->get ? pluginLatency->get(plugin) : 0);
         return true;
     }
@@ -994,33 +994,6 @@ struct Host::Impl {
                                    static_cast<uint16_t>(n.port_index));
         }
         return event;
-    }
-    bool transportChanged(const clap_event_transport_t* current, uint32_t frames) noexcept {
-        bool changed = !transportObserved || hadTransport != (current != nullptr);
-        if (current && hadTransport && transportObserved) {
-            const auto& old = previousTransport;
-            changed |= current->flags != old.flags;
-            if (current->flags & CLAP_TRANSPORT_HAS_TEMPO)
-                changed |= current->tempo != old.tempo || current->tempo_inc != old.tempo_inc;
-            if (current->flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE)
-                changed |= current->tsig_num != old.tsig_num || current->tsig_denom != old.tsig_denom;
-            const auto elapsed = (old.flags & CLAP_TRANSPORT_IS_PLAYING) ? previousTransportFrames / sampleRate : 0.;
-            if (current->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-                const auto expected = static_cast<long double>(old.song_pos_beats) +
-                    elapsed * old.tempo / 60. * CLAP_BEATTIME_FACTOR;
-                changed |= std::abs(static_cast<long double>(current->song_pos_beats) - expected) > 2.;
-                changed |= current->loop_start_beats != old.loop_start_beats || current->loop_end_beats != old.loop_end_beats ||
-                           current->bar_start != old.bar_start || current->bar_number != old.bar_number;
-            }
-            if (current->flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
-                const auto expected = static_cast<long double>(old.song_pos_seconds) + elapsed * CLAP_SECTIME_FACTOR;
-                changed |= std::abs(static_cast<long double>(current->song_pos_seconds) - expected) > 2.;
-                changed |= current->loop_start_seconds != old.loop_start_seconds || current->loop_end_seconds != old.loop_end_seconds;
-            }
-        }
-        if (current) previousTransport = *current;
-        hadTransport = current != nullptr; transportObserved = true; previousTransportFrames = frames;
-        return changed;
     }
     bool accepts(const Event& event) const noexcept {
         const auto* h = event.header();
@@ -1341,7 +1314,40 @@ bool Host::parameterGesture(clap_id id, bool begin) noexcept {
 bool Host::stateDirty() const noexcept { return impl->dirty.load(); }
 uint64_t Host::parameterReports() const noexcept { return impl->parameterReports.load(std::memory_order_acquire); }
 uint32_t Host::latency() const noexcept { return impl->latencyFrames.load(); }
+bool TransportWatch::changed(const clap_event_transport_t* current, uint32_t frames, double sampleRate) noexcept {
+    bool changed = !observed || had != (current != nullptr);
+    if (current && had && observed) {
+        const auto& old = previous;
+        changed |= current->flags != old.flags;
+        if (current->flags & CLAP_TRANSPORT_HAS_TEMPO)
+            changed |= current->tempo != old.tempo || current->tempo_inc != old.tempo_inc;
+        if (current->flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE)
+            changed |= current->tsig_num != old.tsig_num || current->tsig_denom != old.tsig_denom;
+        const auto elapsed = (old.flags & CLAP_TRANSPORT_IS_PLAYING) ? previousFrames / sampleRate : 0.;
+        if (current->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
+            const auto expected = static_cast<long double>(old.song_pos_beats) +
+                elapsed * old.tempo / 60. * CLAP_BEATTIME_FACTOR;
+            changed |= std::abs(static_cast<long double>(current->song_pos_beats) - expected) > 2.;
+            changed |= current->loop_start_beats != old.loop_start_beats || current->loop_end_beats != old.loop_end_beats ||
+                       current->bar_start != old.bar_start || current->bar_number != old.bar_number;
+        }
+        if (current->flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
+            const auto expected = static_cast<long double>(old.song_pos_seconds) + elapsed * CLAP_SECTIME_FACTOR;
+            changed |= std::abs(static_cast<long double>(current->song_pos_seconds) - expected) > 2.;
+            changed |= current->loop_start_seconds != old.loop_start_seconds || current->loop_end_seconds != old.loop_end_seconds;
+        }
+    }
+    if (current) previous = *current;
+    had = current != nullptr; observed = true; previousFrames = frames;
+    return changed;
+}
 bool Host::asleep() const noexcept { return impl->sleeping; }
+bool Host::restful() const noexcept {
+    const auto& s = *impl;
+    return s.sleeping && !s.wake.load() && !s.flush.load() && !s.panic.load() && !s.carryCount && !s.wantsBeat.load() && !s.wantsHarmony.load();
+}
+void Host::rested(uint32_t frames, uint32_t blocks) noexcept { impl->steadyTime += frames; impl->idleBlocks.fetch_add(blocks); }
+void Host::mirrorWake(std::atomic<uint32_t>* mirror) noexcept { impl->wakeMirror = mirror; if (mirror) mirror->store(impl->wake.load() ? 1 : 0); }
 bool Host::wasReset() const noexcept { return impl->resetInProcess; }
 Statistics Host::statistics() const noexcept { auto& s = *impl; Statistics r{s.blocks.load(), s.dropped.load(), s.errors.load(), s.lastUs.load(), s.maxUs.load(), s.deadlineMisses.load(), s.controlSilences.load(), s.idleBlocks.load()}; r.cpuMicroseconds = s.totalUs.load(); return r; }
 bool Host::enqueue(const Event& e) noexcept {
@@ -1349,7 +1355,7 @@ bool Host::enqueue(const Event& e) noexcept {
     if (!validEvent(e.header()) || e.header()->space_id != CLAP_CORE_EVENT_SPACE_ID || e.header()->type == CLAP_EVENT_MIDI_SYSEX) return false;
     // Count before publishing, so process() never takes an event it has not counted.
     s.pendingCommands.fetch_add(1);
-    if (s.commands.push(e)) { s.wake.store(true); return true; }
+    if (s.commands.push(e)) { s.wakeUp(); return true; }
     s.pendingCommands.fetch_sub(1);
     s.dropped.fetch_add(1);
     // Control callers can retain and retry refused parameter/gesture commands.
@@ -1363,7 +1369,7 @@ bool Host::enqueue(const Event& e) noexcept {
 bool Host::popOutput(Event& e) noexcept { return impl->emitted.pop(e); }
 uint64_t Host::outputEventDrops() const noexcept { return impl->outputDrops.load(); }
 const Event* Host::outputEvents(uint32_t& count) const noexcept { count = impl->publishedOutputCount; return impl->blockOutput.data(); }
-void Host::panic() noexcept { impl->panic.store(true); impl->wake.store(true); }
+void Host::panic() noexcept { impl->panic.store(true); impl->wakeUp(); }
 void Host::reset() { auto& s = *impl; if (!s.main() || !s.plugin) return; Gate guard(s.gate); AudioScope scope(&s); s.plugin->reset(s.plugin); s.sleeping = false; }
 
 bool Host::process(const float* const* input, uint32_t ni, float* const* output, uint32_t no, uint32_t frames,
@@ -1453,9 +1459,9 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         bool hasInput = false;
         if (input) for (uint32_t c = 0; c < ni && !hasInput; ++c) if (input[c])
             for (uint32_t i = 0; i < frames; ++i) if (input[c][i] != 0.f) { hasInput = true; break; }
-        const bool transportWake = s.transportChanged(transport, frames);
+        const bool transportWake = s.transport.changed(transport, frames, s.sampleRate);
         if (s.sleeping && !total && !hasInput && !transportWake && !s.wake.exchange(false) && !s.flush.load()) { s.idleBlocks.fetch_add(1); s.steadyTime += frames; silence(); return true; }
-        s.wake.store(false); s.sleeping = false;
+        s.wake.store(false); s.sleeping = false; if (s.wakeMirror) s.wakeMirror->store(0, std::memory_order_release);
         if (!s.processing) {
             if (!s.plugin->start_processing(s.plugin)) { s.failed.store(true); s.errors.fetch_add(1); silence(); return false; }
             s.processing = true;
@@ -1574,7 +1580,7 @@ bool Host::selectSound(uint32_t id,int16_t channel) {
     if(channel < -1 || channel>15)throw std::invalid_argument("Invalid sound channel");
     if(!impl->sounds)throw std::invalid_argument("Plugin has no native sound contexts");
     const bool accepted=impl->sounds->select(impl->plugin,id,channel);
-    if(accepted)impl->wake.store(true);
+    if(accepted)impl->wakeUp();
     return accepted;
 }
 bool Host::preparesSoundSnapshots() const noexcept {return impl->soundSnapshots!=nullptr;}
@@ -1600,7 +1606,7 @@ uint32_t Host::voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*&
 bool Host::chokeRetiringSounds() {
     if(!impl->ringOutChannels)return false;
     const bool queued=impl->soundSnapshots->choke_retiring(impl->plugin);
-    if(queued)impl->wake.store(true);
+    if(queued)impl->wakeUp();
     return queued;
 }
 std::array<uint32_t,16> Host::prepareSoundSnapshot(const std::vector<uint8_t>& bytes) {

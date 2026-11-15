@@ -611,6 +611,7 @@ namespace oscairn
         std::atomic<float> voiceBudget_{ 0 }; // see setVoiceBudget
         AudioHelpers* helpers_ = nullptr; // RFC 0034: renders a wave's plugins in this process
         double freeBeats_ = 0; // audio thread: oscairn.beat's position at the next block's start
+        kick::clap::TransportWatch transport_; // audio thread: whether the transport moved, which wakes a plugin asleep
         Plan*              current_ = nullptr; // audio thread only
         Retired            retired_;
         uint64_t plansCompiled_ = 0; // control thread

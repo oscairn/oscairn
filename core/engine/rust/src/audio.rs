@@ -216,6 +216,19 @@ impl Audio {
     }
 
     /// After a step's plugin rendered: the output guard, its meters, its and its buses' activity.
+    /// Every input sample of a step zero.
+    pub fn quiet(&self, step: usize, frames: usize) -> bool {
+        let s = &self.steps[step];
+        (s.input..s.output).all(|b| self.buffers.get(b as usize, frames).iter().all(|&x| x == 0.0))
+    }
+    /// A step's outputs zeroed: a block its plugin slept through.
+    pub fn silence(&mut self, step: usize, frames: usize) {
+        let s = &self.steps[step];
+        for b in s.output..s.output + s.outputs {
+            self.buffers.get_mut(b as usize, frames).fill(0.0);
+        }
+    }
+
     pub fn finish(&mut self, step: usize, frames: usize, processed: bool, asleep: bool, fade: u32) {
         let s = &mut self.steps[step];
         let outs = s.output as usize..(s.output + s.outputs) as usize;

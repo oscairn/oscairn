@@ -181,6 +181,9 @@ namespace oscairn
             const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { return host.outputEvents(count); }
             kick::clap::Statistics statistics() const noexcept override { return host.statistics(); }
             bool asleep() const noexcept override { return host.asleep(); }
+            bool restful() const noexcept override { return host.restful(); }
+            void rested(uint32_t frames, uint32_t blocks) noexcept override { host.rested(frames, blocks); }
+            void mirrorWake(std::atomic<uint32_t>* mirror) noexcept override { host.mirrorWake(mirror); }
             bool wasReset() const noexcept override { return host.wasReset(); }
             bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames, const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override { return host.process(inputs,ni,outputs,no,frames,events,count,transport); }
         };

@@ -261,7 +261,8 @@ const oscairn_plugins plugins{nullptr,
     [](void* c,uint32_t node,const Event* e,uint32_t n,bool sent){Model::log(c,18+sent,node,e,n*sizeof(Event));},
     [](void* c){return Model::side(c).clock;},
     [](void* c,int64_t at,bool only){Model::log(c,20+only,0,&at,8);},
-    [](void* c,uint32_t n,oscairn_job job,void* context){Model::log(c,22,n);for(uint32_t i=0;i<n;++i)job(context,i);}};
+    [](void* c,uint32_t n,oscairn_job job,void* context){Model::log(c,22,n);for(uint32_t i=0;i<n;++i)job(context,i);},
+    [](void* c,uint32_t s,uint32_t frames){Model::log(c,23,s,&frames,4);const bool slept=Model::rng(c,s,23).below(3)==0;if(slept)Model::side(c).sent[s].clear();return slept;}}; // a host taking the block sends nothing
 
 void input(Rng& rng,std::vector<Event>& out,std::vector<uint8_t>& tags)
 {
@@ -315,7 +316,7 @@ void run(uint64_t seed,uint32_t blocks)
         for(uint32_t i=0;i<paramCount;++i){const auto& st=plans.back()->steps[rng.below(uint32_t(plans.back()->steps.size()))];params[i]={rng.below(3)?100+st.host:1000+st.host*3+rng.below(2),param(0,rng.below(4),rng.unit())};}
         for(uint32_t slot=1;slot<4;++slot)if(!rng.below(5))live[slot]=float(rng.unit());
         const auto& p=*plans.back();
-        const bool panicInput=!rng.below(150),panicNotes=!rng.below(300),listening=rng.below(2),parallel=rng.below(4)!=0,hasDeadline=rng.below(2),deadlines=rng.below(2);
+        const bool panicInput=!rng.below(150),panicNotes=!rng.below(300),listening=rng.below(2),parallel=rng.below(4)!=0,hasDeadline=rng.below(2),deadlines=rng.below(2),transportWake=!rng.below(8);
         const float worth=rng.below(2)?0.f:30.f;
         const oscairn_block timing{p.budget,2666.67f,2266.67f,rng.below(2)?1333.33f:1000.f,1+float(rng.below(3)),uint64_t(rng.below(3)?96000:256),0};
         for(auto& s:sides)
@@ -323,7 +324,7 @@ void run(uint64_t seed,uint32_t blocks)
             s->block=b;
             float* outs[2]{s->out[0].data(),s->out[1].data()};
             // The callback's deadline a second away: its slack never runs low (the Rust core alone acts on that).
-            const oscairn_run_block run{nullptr,0,outs,2,frames,48,events.data(),uint32_t(events.size()),tags.data(),params.data(),paramCount,&beat,panicInput,panicNotes,listening,parallel,deadlines,
+            const oscairn_run_block run{nullptr,0,outs,2,frames,48,events.data(),uint32_t(events.size()),tags.data(),params.data(),paramCount,&beat,panicInput,panicNotes,listening,parallel,deadlines,transportWake,
                                         timing,hasDeadline?s->clock+1'000'000'000:0,worth,live.data(),live.data(),&s->nextId,&s->drops,s->midi.data(),&s->midiCount};
             oscairn_plugins calls=plugins;calls.context=s.get();
             s->log.push_back(s->api.block(s->now.run,&run,&calls));

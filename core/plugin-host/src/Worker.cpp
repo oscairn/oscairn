@@ -378,6 +378,7 @@ namespace oscairn::worker
             const auto woke = std::chrono::steady_clock::now();
             const auto cpuAtWake = threadCpuNanoseconds();
             if(s.panic.exchange(0, std::memory_order_acq_rel)) host.panic();
+            if(s.restedBlocks) host.rested(s.restedFrames, s.restedBlocks); // its steady time and idle blocks go on by them
             // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
             if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
             uint32_t events = 0; // SysEx pointed at this process's mapping of the pool
@@ -414,6 +415,7 @@ namespace oscairn::worker
             s.deadlineMisses.store(st.deadlineMisses); s.controlSilences.store(st.controlSilences); s.idleBlocks.store(st.idleBlocks);
             s.lastMicroseconds.store(st.lastMicroseconds); s.maximumMicroseconds.store(st.maximumMicroseconds);
             s.asleep.store(host.asleep() ? 1 : 0, std::memory_order_relaxed);
+            s.restful.store(host.restful() ? 1 : 0, std::memory_order_relaxed);
             s.reset = host.wasReset();
             {
                 double cost = 0; const oscairn_voice_budget_note_t* notes = nullptr; uint32_t noteCount = 0;
@@ -555,6 +557,7 @@ namespace oscairn::worker
                     if(at && (at < Shared::audioEnd(s.inputChannels, s.outputChannels, s.maxFrames) || at % 8 || size_t(at) + sizeof(kick::clap::SysexPool) > n->bytes))
                     { mapped[index].store(nullptr); munmap(memory, n->bytes); n->shared = nullptr; throw std::runtime_error("Shared memory's SysEx pools are out of place"); }
                 mapped[index].store(n->shared);
+                n->host->mirrorWake(&s.wake);
                 n->publish();
                 n->ids.resize(s.parameterCount);
                 for(uint32_t i = 0; i < s.parameterCount; ++i) n->ids[i] = n->host->parameters()[i].id;
@@ -580,15 +583,17 @@ namespace oscairn::worker
         // the blocks of one pass), then unloads it: the other nodes' audio goes on throughout.
         auto detach = [&](uint32_t index) {
             auto& n = *nodes[index];
+            void* memory = n.shared; const size_t bytes = n.bytes;
             if(n.shared)
             {
                 sound.live[index].store(nullptr, std::memory_order_seq_cst);
                 if(const auto pass = sound.passes.load(std::memory_order_seq_cst); pass & 1)
                     while(sound.passes.load(std::memory_order_acquire) == pass) std::this_thread::yield();
                 mapped[index].store(nullptr);
-                munmap(n.shared, n.bytes); n.shared = nullptr;
+                n.host->mirrorWake(nullptr); n.shared = nullptr;
             }
-            nodes[index].reset();
+            nodes[index].reset(); // the plugin unloaded first: none of its threads can set the wake word once unmapped
+            if(memory) munmap(memory, bytes);
         };
         auto stopAll = [&] {
             if(audioThread.joinable())

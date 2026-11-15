@@ -1068,14 +1068,15 @@ namespace oscairn
             [](void* c,uint32_t node,const oscairn_event* e,uint32_t n,bool sent){C::of(c).listener->events(node,C::events(e),n,sent);},
             [](void*){return int64_t(std::chrono::steady_clock::now().time_since_epoch().count());},
             [](void*,int64_t at,bool only){worker::workerDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));worker::workerDeadlineOnly=only;},
-            [](void* c,uint32_t n,oscairn_job job,void* context){C::of(c).helpers->run(n,reinterpret_cast<AudioHelpers::Job>(job),context);}};
+            [](void* c,uint32_t n,oscairn_job job,void* context){C::of(c).helpers->run(n,reinterpret_cast<AudioHelpers::Job>(job),context);},
+            [](void* c,uint32_t s,uint32_t frames){return C::host(c,s).rest(frames);}};
         static_assert(std::is_same_v<std::chrono::steady_clock::duration,std::chrono::nanoseconds>);
         oscairn_plugins plugins=table;plugins.context=&calls;
         const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);
         const auto callbackEnds=worker::callbackDeadline;
         const oscairn_run_block run{inputs,ni,outputs,no,frames,std::max(1u,uint32_t(sampleRate_*.001)),coreEvents(events),eventCount,sources,
             reinterpret_cast<const oscairn_param*>(blockParameters_.data()),blockParameterCount_,coreEvents(&beatEvent),panicInput,panicNotes,listener!=nullptr,
-            parallel_.load(std::memory_order_relaxed),deadlines_,
+            parallel_.load(std::memory_order_relaxed),deadlines_,transport_.changed(transport,frames,sampleRate_),
             {voiceBudget_.load(std::memory_order_relaxed),period,deadline,deadlines_?deadline:workerBudgetUs_>0?workerBudgetUs_:period/2,audioCores_,uint64_t(noteEndQuiet*sampleRate_),lowSlack_},
             int64_t(callbackEnds.time_since_epoch().count()),helpers_->worth(),liveFrom_.data(),liveTo_.data(),&nextNoteId_,reinterpret_cast<uint64_t*>(&eventDrops_),
             reinterpret_cast<oscairn_midi*>(midiOut_.data()),&midiOutCount_};

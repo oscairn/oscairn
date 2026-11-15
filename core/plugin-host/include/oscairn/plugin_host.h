@@ -166,6 +166,17 @@ namespace oscairn
         // Audio thread, after process(): the plugin said it makes no more sound until it gets
         // input (CLAP_PROCESS_SLEEP). False where a host cannot tell.
         virtual bool asleep() const noexcept { return false; }
+        // Sleeping plugins (RFC 0045). restful: asleep with nothing pending but audio, notes, parameters or the
+        // transport to wake it (kick::clap::Host::restful); rested: the blocks its caller left it uncalled since its
+        // last; mirrorWake: a word set while a wake is pending, read in another process (kick::clap::Host::mirrorWake).
+        virtual bool restful() const noexcept { return false; }
+        virtual void rested(uint32_t, uint32_t) noexcept {}
+        virtual void mirrorWake(std::atomic<uint32_t>*) noexcept {}
+        // Audio thread, in place of process() for a block with no events, silent input and the transport as it
+        // went: true when the plugin would sleep through it, taken without calling it (no output events, the
+        // caller's outputs silence); false: it must be called. Only a host for which a call costs (a worker's
+        // round trip) says true; the plugin sees nothing but not being called while asleep.
+        virtual bool rest(uint32_t) noexcept { return false; }
         // Audio thread, after process() (finishProcess): the host reset the plugin in it, on its own
         // (a panic, an event overflow), which ends every note it was sent, that call's too, with no
         // NOTE_END (CLAP's reset has no output events). False where it cannot tell.

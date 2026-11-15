@@ -54,6 +54,7 @@ pub struct Block<'a> {
     pub listening: bool,
     pub parallel: bool,
     pub deadlines: bool,
+    pub transport_wake: bool,
     pub timing: Timing,
     pub deadline: i64,
     pub worth: f32,
@@ -436,9 +437,11 @@ impl Run {
             for s in 0..self.steps.len() {
                 self.prepare(s, rs, notes, audio, b, p);
                 self.limit_voices(s, rs, notes, p);
-                let m = self.steps[s].merged();
-                let processed = p.render(s, m.as_ptr(), m.len() as u32);
-                self.steps[s].processed.store(processed, Relaxed);
+                if !Self::rest(&self.steps[s], s, audio, b, p) {
+                    let m = self.steps[s].merged();
+                    let processed = p.render(s, m.as_ptr(), m.len() as u32);
+                    self.steps[s].processed.store(processed, Relaxed);
+                }
                 ok &= self.finish(s, rs, notes, audio, b, p, budgeting);
             }
         } else {
@@ -454,6 +457,10 @@ impl Run {
                 for s in first_..end_ {
                     self.prepare(s, rs, notes, audio, b, p);
                     self.limit_voices(s, rs, notes, p);
+                    if Self::rest(&self.steps[s], s, audio, b, p) {
+                        self.steps[s].started = false;
+                        continue;
+                    }
                     self.steps[s].handed = p.now();
                     let m = self.steps[s].merged();
                     self.steps[s].started = p.start(s, m.as_ptr(), m.len() as u32);
@@ -526,6 +533,18 @@ impl Run {
         // The lanes judged, the callback's time left once the block is collected (RFC 0045's guard), the timing report kept.
         notes.end(rs, if ends != 0 { micros(ends - p.now()) } else { f32::NAN });
         ok
+    }
+
+    /// RFC 0045, sleeping plugins: a block its plugin would sleep through, not called (no core events for it, its
+    /// input quiet, the transport as it went, its host saying nothing else is pending): silence, rendered.
+    fn rest(step: &Step, s: usize, audio: &mut Audio, b: &Block, p: &Plugins) -> bool {
+        let frames = b.frames as usize;
+        if b.transport_wake || step.merged().iter().any(|e| e.space() == CORE_SPACE) || !audio.quiet(s, frames) || !p.rest(s, b.frames) {
+            return false;
+        }
+        audio.silence(s, frames);
+        step.processed.store(true, Relaxed);
+        true
     }
 
     /// A step rendered here or on a helper (`k`: its place among the wave's local steps).
@@ -840,6 +859,9 @@ mod tests {
         w.clock.get()
     }
     extern "C" fn deadline(_: *mut c_void, _: i64, _: bool) {}
+    extern "C" fn rest(_: *mut c_void, s: u32, _: u32) -> bool {
+        s == 1
+    }
     extern "C" fn helpers(_: *mut c_void, n: u32, job: oscairn_job, context: *mut c_void) {
         // SAFETY: the run's job and its context, for this call.
         (0..n).for_each(|i| unsafe { job.expect("job")(context, i) });
@@ -925,6 +947,7 @@ mod tests {
             now: Some(now),
             deadline: Some(deadline),
             helpers: Some(helpers),
+            rest: Some(rest),
         };
         let (beat, live, mut out) = (Event::header(40, 0, 1001, 0, 0), [1f32; 256], [0f32; 256]);
         let (mut next_id, mut drops, mut midi) = (0u32, 0u64, [NO_MIDI; 1024]);
@@ -965,6 +988,7 @@ mod tests {
                 listening: true,
                 parallel: b % 2 == 0,
                 deadlines: true,
+                transport_wake: b % 10 == 0,
                 timing: Timing { budget: 0.0, period: 2666.0, deadline: 2266.0, allowance: 1333.0, cores: 1.0, quiet_after: 256, low_slack: 0.0 },
                 deadline: 50_000_000,
                 worth: 0.0,

@@ -302,6 +302,13 @@ bool cpp_core_run_block(oscairn_run* run,const oscairn_run_block* b,const oscair
         step.voiceLimit=limit;step.voiceLimits=parts;step.voiceContexts=entries;step.activity->voiceLimit=limit;
         p->set_limits(cx,stepOf(step),limit,parts.data(),entries);
     };
+    // RFC 0045, sleeping plugins: a block its plugin would sleep through, not called (no core events for it, its input
+    // quiet, the transport as it went, its host saying nothing else is pending): silence, rendered.
+    auto rest=[&](oscairn_run::Step& step){
+        const bool events=std::any_of(step.merged.begin(),step.merged.begin()+step.mergedCount,[](const Event& e){return e.header()->space_id==CLAP_CORE_EVENT_SPACE_ID;});
+        if(b->transport_wake || events || !cpp_core_audio_quiet(plan->audio,stepOf(step),frames) || !p->rest(cx,stepOf(step),frames))return false;
+        cpp_core_audio_silence(plan->audio,stepOf(step),frames);step.processed=true;
+        return true;};
     auto start=[&](oscairn_run::Step& step){step.handed=p->now(cx);return p->start(cx,stepOf(step),core(step.merged.data()),step.mergedCount);};
     auto render=[&](oscairn_run::Step& step){step.processed=p->render(cx,stepOf(step),core(step.merged.data()),step.mergedCount);};
     const bool budgeting=b->timing.budget!=0;
@@ -446,14 +453,14 @@ bool cpp_core_run_block(oscairn_run* run,const oscairn_run_block* b,const oscair
         }
     auto micros=[&](int64_t ns){return float(ns)/1000.f;}; // as duration<float,std::micro> of steady_clock's nanoseconds
     if(!b->parallel)
-        for(auto& step:plan->steps){prepare(step);limitVoices(step);render(step);finish(step);}
+        for(auto& step:plan->steps){prepare(step);limitVoices(step);if(!rest(step))render(step);finish(step);}
     else for(uint32_t first=0,wave=0;const auto end:plan->waves)
     {
         // A wave: each plugin in a worker starts as soon as its inputs are ready; the others
         // render meanwhile, here and on the audio helpers; then every one finishes, in plan order.
         uint32_t locals=0;
         if(deadlines)p->deadline(cx,less(wave),true);
-        for(uint32_t i=first;i<end;++i){auto& step=plan->steps[i];prepare(step);limitVoices(step);step.started=start(step);if(!step.started)plan->local[locals++]=i;}
+        for(uint32_t i=first;i<end;++i){auto& step=plan->steps[i];prepare(step);limitVoices(step);if(rest(step)){step.started=false;continue;}step.started=start(step);if(!step.started)plan->local[locals++]=i;}
         struct Job
         {
             oscairn_run* plan;const oscairn_plugins* p;

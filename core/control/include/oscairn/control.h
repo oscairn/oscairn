@@ -281,6 +281,8 @@ namespace oscairn
                 // have been missed, faded for blocks lost on the lane or after it, and faded as the callback's time ran out
                 // (any lane's notes); and the nodes' own blocks lost.
                 struct Guard { double limit = 0, took = 0; uint64_t faded = 0, fadedForTotal = 0, choked = 0, fadedForLoss = 0, lost = 0, fadedForDeadline = 0, unfit = 0; } guard;
+                // Since the last reset: the blocks handed to the worker, and those its plugin slept through uncalled (RFC 0045).
+                uint64_t called = 0, rested = 0;
             };
             std::vector<Worker> workers;
             // Each plugin instance loaded (RFC 0045's resident instances), once however many nodes

@@ -442,6 +442,22 @@ pub unsafe extern "C" fn rust_core_audio_mix(audio: *mut Audio, step: u32, outpu
 }
 
 /// # Safety
+/// `audio` is live; `step` is one of its steps; `frames` as in rust_core_audio_begin.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_quiet(audio: *const Audio, step: u32, frames: u32) -> bool {
+    // SAFETY: the caller's contract.
+    unsafe { &*audio }.quiet(step as usize, frames as usize)
+}
+
+/// # Safety
+/// `audio` is live and used by no other call; `step` is one of its steps; `frames` as in rust_core_audio_begin.
+#[no_mangle]
+pub unsafe extern "C" fn rust_core_audio_silence(audio: *mut Audio, step: u32, frames: u32) {
+    // SAFETY: the caller's contract.
+    unsafe { &mut *audio }.silence(step as usize, frames as usize);
+}
+
+/// # Safety
 /// `audio` is live and used by no other call; `step` is one of its steps; `frames` as in rust_core_audio_begin.
 #[no_mangle]
 pub unsafe extern "C" fn rust_core_audio_finish(audio: *mut Audio, step: u32, frames: u32, processed: bool, asleep: bool, fade: u32) {
@@ -465,7 +481,7 @@ calls! {
     finish() -> bool; late() -> bool; panic() -> (); kept() -> bool; was_reset() -> bool; asleep() -> bool;
     own_voices() -> bool; honors_volume() -> bool; missed() -> u64; took() -> f64; sound(c: u32) -> u32;
     set_limits(limit: u32, parts: *const oscairn_voice_budget_context_t, n: u32) -> ();
-    start(e: *const Event, n: u32) -> bool; render(e: *const Event, n: u32) -> bool;
+    start(e: *const Event, n: u32) -> bool; render(e: *const Event, n: u32) -> bool; rest(frames: u32) -> bool;
 }
 impl oscairn_plugins {
     pub fn sent(&self, s: usize) -> &[Event] {
@@ -624,6 +640,7 @@ pub unsafe extern "C" fn rust_core_run_block(run: *mut Run, block: *const oscair
             listening: b.listening,
             parallel: b.parallel,
             deadlines: b.deadlines,
+            transport_wake: b.transport_wake,
             timing: b.timing,
             deadline: b.deadline,
             worth: b.worth,

@@ -195,4 +195,15 @@ void cpp_core_audio_finish(oscairn_audio* audio,uint32_t s,uint32_t frames,bool 
     for(auto& context:step.contexts){if(processed)meter(context.peaks,context.offset,context.channels);quiet(*context.activity,context.offset,context.channels);}
     if(step.activity)quiet(*step.activity,0,step.audioOutputs);
 }
+bool cpp_core_audio_quiet(const oscairn_audio* audio,uint32_t s,uint32_t frames)
+{
+    const auto& step=audio->steps[s];
+    for(uint32_t c=0;c<step.audioInputs;++c)for(uint32_t i=0;i<frames;++i)if(step.in[c][i]!=0.f)return false;
+    return true;
+}
+
+void cpp_core_audio_silence(oscairn_audio* audio,uint32_t s,uint32_t frames)
+{
+    for(auto* out:audio->steps[s].out)std::fill_n(out,frames,0.f);
+}
 }

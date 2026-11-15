@@ -224,13 +224,14 @@ typedef struct
     int64_t (*now)(void* context);
     void (*deadline)(void* context, int64_t at, bool only);
     void (*helpers)(void* context, uint32_t count, oscairn_job job, void* job_context);
+    bool (*rest)(void* context, uint32_t step, uint32_t frames); /* PluginHost::rest: slept through uncalled */
 } oscairn_plugins;
 /* One block for the run: the graph's audio in and out, frames, and the output guard's fade (frames); its events (each's tag in tags, which may be
  * null) and the queued parameters; the beat event; recovery asked for the input's notes or all; whether
  * a listener listens and the plan renders wave by wave (else step by step on this thread); the budget's
  * timing; the callback's deadline (nanoseconds, 0: none) and whether waves wait to it (RFC 0045 step
  * 6); what the helpers must be saved to be worth waking; the live gains; the graph's note IDs, event
- * drops (an atomic) and MIDI out (count in and out). */
+ * drops (an atomic) and MIDI out (count in and out); transport_wake: the transport moved (kick::clap::TransportWatch). */
 typedef struct
 {
     const float* const* inputs;
@@ -243,7 +244,7 @@ typedef struct
     const oscairn_param* params;
     uint32_t param_count;
     const oscairn_event* beat;
-    bool panic_input, panic_notes, listening, parallel, deadlines;
+    bool panic_input, panic_notes, listening, parallel, deadlines, transport_wake;
     oscairn_block timing;
     int64_t deadline;
     float worth;
@@ -264,6 +265,8 @@ typedef struct
     void p##audio_begin(oscairn_audio* audio, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames); \
     void p##audio_mix(oscairn_audio* audio, uint32_t step, float* const* outputs, uint32_t frames, const float* live_from, const float* live_to); \
     void p##audio_finish(oscairn_audio* audio, uint32_t step, uint32_t frames, bool processed, bool asleep, uint32_t fade); \
+    bool p##audio_quiet(const oscairn_audio* audio, uint32_t step, uint32_t frames); \
+    void p##audio_silence(oscairn_audio* audio, uint32_t step, uint32_t frames); \
     oscairn_run* p##run_new(oscairn_notes* notes, oscairn_audio* audio, const oscairn_step* steps, const bool* budgeted, uint32_t count, \
                             const uint32_t* waves, uint32_t wave_count, \
                             const oscairn_harmony_source* harmonies, uint32_t harmony_count, const oscairn_tap* taps, uint32_t tap_count, \
@@ -332,7 +335,10 @@ typedef struct
  * run_adopt: `next` replaces `current` (Graph::beginBlock): the connections leaving the plan retired
  *   into the next plan's steps' releases, plugins leaving it holding notes marked stranded and those
  *   coming back choked, the taps gone let go into midi, and with `ramp` the gains carried.
- * run_block: the block (Graph::process from the beat on); false where a plugin did not render. */
+ * audio_quiet: every input sample of the step zero. audio_silence: its outputs zeroed.
+ * run_block: the block (Graph::process from the beat on); false where a plugin did not render. A step whose
+ *   plugin may sleep through the block (no core events merged for it, its input quiet, the transport as it
+ *   went, and plugins.rest true) is not called: its outputs silence, rendered (RFC 0045, sleeping plugins). */
 OSCAIRN_CORE_API(rust_core_)
 OSCAIRN_CORE_API(cpp_core_)
 

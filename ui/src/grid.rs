@@ -511,10 +511,35 @@ fn seconds_at(s: &[f64], n: f64) -> f64 {
     }
 }
 
-/// The curve in a panel of `w` x `h` (its own pixels): the line's path commands, the filled area's,
-/// and each point's place. `params`: the envelope's parameters; `norm`: a parameter's value from 0 to 1.
-pub fn envelope_curve(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f64, w: f32, h: f32) -> (String, String, Vec<(f32, f32)>) {
-    let (left, top, right, bottom) = (14., 28., w - 14., h - 10.);
+/// Where an envelope's plot starts in its panel: under the title (6 from the top, a line of the small type at
+/// `scale`) with room for a node's radius above the highest level.
+pub fn envelope_top(scale: f32) -> f32 {
+    6. + 13. * scale * 1.3 + NODE_RADIUS + 4.
+}
+
+/// An envelope node's radius (the widget draws 12 across).
+pub const NODE_RADIUS: f32 = 6.;
+
+/// A waveform icon for a value's label, by the well-known names (any case): 1 saw, 2 square, 3 sine,
+/// 4 triangle, 5 noise, 6 pulse; 0 for any other name. The plugin data has no icon hint (GRID.md).
+pub fn wave_icon(name: &str) -> i32 {
+    match name.trim().to_lowercase().as_str() {
+        "saw" | "sawtooth" => 1,
+        "square" | "sqr" | "sq" => 2,
+        "sine" | "sin" => 3,
+        "triangle" | "tri" => 4,
+        "noise" => 5,
+        "pulse" => 6,
+        _ => 0,
+    }
+}
+
+/// The curve in a panel of `w` x `h` (its own pixels), its plot from `top` down: the line's path
+/// commands, the filled area's (the same points, closed down to the baseline under the first and last),
+/// and each point's place (the node's center, the same point). The widget draws all three in the panel's
+/// own pixels. `params`: the envelope's parameters; `norm`: a parameter's value from 0 to 1.
+pub fn envelope_curve(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f64, w: f32, h: f32, top: f32) -> (String, String, Vec<(f32, f32)>) {
+    let (left, right, bottom) = (14., w - 14., h - 10.);
     let (aw, ah) = (right - left, bottom - top);
     let hold = aw * 0.14;
     let segment = (aw - hold) / e.points.len().max(1) as f32;
@@ -668,12 +693,59 @@ mod tests {
         let named = envelope_of_names(&["attack", "Decay", "Sustain", "Release"]);
         let params: Vec<Param> = (0..4).map(|i| p(i, "P", "", 1., false)).collect();
         let refs: Vec<&Param> = params.iter().collect();
-        let (line, fill, points) = envelope_curve(&named, &refs, &|i| [0., 0.5, 0.5, 1.][i], 400., 180.);
+        let (line, fill, points) = envelope_curve(&named, &refs, &|i| [0., 0.5, 0.5, 1.][i], 400., 180., envelope_top(1.));
         assert!(line.starts_with("M 14.0 170.0") && fill.ends_with('Z'), "{line}");
         assert_eq!(points.len(), 3);
-        assert_eq!(points[0].1, 28., "the attack reaches the top");
+        assert!((points[0].1 - envelope_top(1.)).abs() < 0.01, "the attack reaches the top");
         assert!(points[1].1 > 28. && points[1].1 < 170., "the sustain level halfway");
         assert_eq!(arc(0., 0.), "");
         assert!(arc(0., 1.).contains(" 1 1 "), "past 180 degrees: the large arc");
+    }
+}
+
+#[cfg(test)]
+mod curve_and_icon_tests {
+    use super::*;
+
+    fn vertices(path: &str) -> Vec<(f32, f32)> {
+        let t: Vec<&str> = path.split_whitespace().filter(|t| !matches!(*t, "M" | "L" | "Z")).collect();
+        t.chunks(2).map(|c| (c[0].parse().unwrap(), c[1].parse().unwrap())).collect()
+    }
+
+    // One set of points drives the stroke, the fill and the nodes: the fill is the line closed down to the
+    // baseline under its first and last points, every node is a vertex of the line, and the plot stays
+    // under the title's room.
+    #[test]
+    fn the_envelope_line_fill_and_nodes_share_their_points() {
+        let params: Vec<Param> = ["Attack", "Decay", "Sustain", "Release"].iter().enumerate().map(|(i, n)| Param { id: i as u32, name: (*n).into(), max: 1., ..Default::default() }).collect();
+        let refs: Vec<&Param> = params.iter().collect();
+        let shape = envelope_of_fields(&["attack", "decay", "sustain", "release"]);
+        for (w, scale) in [(240., 1.), (900., 1.), (300., 1.4)] {
+            let top = envelope_top(scale);
+            let (line, fill, nodes) = envelope_curve(&shape, &refs, &|_| 0.5, w, 180., top);
+            assert!(fill.starts_with(&line), "the fill begins with the line");
+            let (l, f) = (vertices(&line), vertices(&fill));
+            assert_eq!(&f[..l.len()], &l[..]);
+            assert_eq!(f.len(), l.len() + 2, "and closes with two points");
+            let (first, last) = (l[0], *l.last().unwrap());
+            assert_eq!((f[l.len()], f[l.len() + 1]), ((last.0, 170.), (first.0, 170.)), "down to the baseline under the last and the first point");
+            assert_eq!(first.1, 170., "the line starts on the baseline");
+            for n in &nodes {
+                assert!(l.iter().any(|v| (v.0 - n.0).abs() < 0.06 && (v.1 - n.1).abs() < 0.06), "node {n:?} is a vertex of the line");
+                assert!(n.1 + 0.01 >= top, "a node stays below the title's room");
+            }
+            assert!(l.iter().all(|v| v.1 >= top), "the plot starts at {top}");
+        }
+    }
+
+    #[test]
+    fn waveform_names_map_to_icons() {
+        let all = [("Saw", 1), ("sawtooth", 1), ("SQUARE", 2), ("Sqr", 2), ("Sine", 3), (" sin ", 3), ("Triangle", 4), ("Tri", 4), ("Noise", 5), ("Pulse", 6)];
+        for (name, icon) in all {
+            assert_eq!(wave_icon(name), icon, "{name}");
+        }
+        for name in ["", "Wave", "Sawyer", "Mono", "Off", "Square wave 2"] {
+            assert_eq!(wave_icon(name), 0, "{name}: stays text");
+        }
     }
 }

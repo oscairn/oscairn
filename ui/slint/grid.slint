@@ -21,6 +21,8 @@ export struct GridTile {
     bipolar: bool, // filled from the middle
     arc: string, // a knob's value arc in a 100 x 100 box
     choices: [string],
+    icons: [int], // a waveform icon per choice (0 none), see src/grid.rs `wave_icon`
+    icon: int, // the same for a dropdown's value
     chosen: int,
     on: bool,
     cursor: bool,
@@ -73,6 +75,7 @@ export global GridState {
     in property <bool> list-open;
     in property <string> list-title;
     in property <[string]> list;
+    in property <[int]> list-icons;
     in property <int> list-cursor;
     in property <int> list-first; // the first value in view
     // The tiles' area, set by the screen: what grid.rs lays out for and scrolls within.
@@ -89,6 +92,62 @@ export global GridState {
     callback scrolled(length);
     callback resized(); // the tiles' area changed size: laid out again
     callback back();
+}
+
+// A waveform drawn as a path (a saw, square, sine, triangle, noise, pulse), in the text's color.
+component WaveIcon inherits Path {
+    in property <int> kind;
+    in property <color> ink: Theme.text;
+    viewbox-width: 24;
+    viewbox-height: 16;
+    stroke: root.ink;
+    stroke-width: Theme.hair * 1.5;
+    stroke-line-join: round;
+    stroke-line-cap: round;
+    commands: root.kind == 1 ? "M 2 13 L 10 3 L 10 13 L 18 3 L 18 13" : root.kind == 2 ? "M 2 13 L 2 3 L 9 3 L 9 13 L 16 13 L 16 3 L 22 3 L 22 13" : root.kind == 3 ? "M 2 8 C 5 0 9 0 12 8 C 15 16 19 16 22 8" : root.kind == 4 ? "M 2 8 L 7 3 L 17 13 L 22 8" : root.kind == 5 ? "M 2 8 L 4 3 L 6 12 L 8 5 L 10 13 L 12 4 L 14 11 L 16 3 L 18 12 L 20 6 L 22 9" : root.kind == 6 ? "M 2 13 L 2 3 L 6 3 L 6 13 L 14 13 L 14 3 L 18 3 L 18 13 L 22 13" : "M 0 0";
+}
+
+// A value's label with its waveform icon when it has one: both when they fit `room` wide, else the
+// icon alone; no icon, the label (shrunk to 80% where it would not fit, then cut).
+component Label inherits Rectangle {
+    in property <string> text;
+    in property <int> icon;
+    in property <color> ink: Theme.text;
+    in property <length> room: self.width;
+    in property <length> size: Theme.button;
+    in property <bool> bold;
+    in property <bool> left; // from the start, not centered
+    property <length> icon-width: self.size * 1.5;
+    property <bool> both: root.icon > 0 && measure.preferred-width + root.icon-width + Theme.pad-narrow <= root.room;
+    property <bool> shrink: measure.preferred-width > root.room;
+    property <length> text-width: min(measure.preferred-width, root.room);
+    property <length> content: root.icon > 0 ? (root.both ? root.icon-width + Theme.pad-narrow + root.text-width : root.icon-width) : root.text-width;
+    property <length> start: root.left ? 0px : (root.width - root.content) / 2;
+    measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: root.size;
+        font-weight: root.bold ? 700 : 400;
+    }
+    if root.icon > 0: WaveIcon {
+        x: root.start;
+        y: (root.height - root.size) / 2;
+        width: root.icon-width;
+        height: root.size;
+        kind: root.icon;
+        ink: root.ink;
+    }
+    if root.icon == 0 || root.both: Text {
+        x: root.start + (root.icon > 0 ? root.icon-width + Theme.pad-narrow : 0px);
+        width: root.text-width;
+        height: root.height;
+        text: root.text;
+        color: root.ink;
+        font-size: root.shrink ? root.size * 0.8 : root.size;
+        font-weight: root.bold ? 700 : 400;
+        overflow: elide;
+        vertical-alignment: center;
+    }
 }
 
 component Knob inherits Rectangle {
@@ -156,6 +215,8 @@ component Tile inherits Rectangle {
     property <length> drag-span: 150px;
     property <length> reach: Theme.thumb / 2; // a slider's thumb reaches past its ends
     property <bool> lit: data.editing || data.cursor;
+    // A split button of icons says the chosen one's name at the top right.
+    property <bool> says: data.kind == 2 && data.chosen >= 0 && data.chosen < data.icons.length && data.icons[data.chosen] > 0;
     // A tile alone is a section; one in a run is drawn by its card.
     if !data.linked: Section {
         width: parent.width;
@@ -164,7 +225,7 @@ component Tile inherits Rectangle {
     Text {
         x: root.pad;
         y: Theme.pad-narrow;
-        width: data.kind == 2 || data.kind == 3 || data.kind == 4 ? parent.width - 2 * root.pad : parent.width * 0.55 - root.pad;
+        width: (data.kind == 2 && !root.says) || data.kind == 3 || data.kind == 4 ? parent.width - 2 * root.pad : parent.width * 0.55 - root.pad;
         text: data.name;
         color: Theme.muted;
         font-size: Theme.small;
@@ -172,7 +233,7 @@ component Tile inherits Rectangle {
         overflow: elide;
     }
     // The value as the plugin writes it (the control says it for lists, switches and buttons).
-    if data.kind != 2 && data.kind != 3 && data.kind != 4: Text {
+    if (data.kind != 2 && data.kind != 3 && data.kind != 4) || root.says: Text {
         x: parent.width * 0.55;
         y: Theme.pad-narrow;
         width: parent.width * 0.45 - root.pad;
@@ -217,7 +278,7 @@ component Tile inherits Rectangle {
     if data.kind == 3: Button {
         x: root.pad;
         y: root.control-y;
-        width: min(parent.width - 2 * root.pad, Theme.button-width);
+        width: parent.width - 2 * root.pad;
         height: root.control-h;
         text: data.value;
         on: data.on;
@@ -227,15 +288,14 @@ component Tile inherits Rectangle {
         y: root.control-y;
         width: parent.width - 2 * root.pad;
         height: root.control-h;
-        Text {
+        Label {
             x: Theme.pad;
-            width: parent.width - Theme.pad - self.chevron;
+            width: parent.width - Theme.pad - parent.height;
+            height: parent.height;
             text: data.value;
-            color: Theme.text;
-            font-size: Theme.button;
-            overflow: elide;
-            vertical-alignment: center;
-            property <length> chevron: parent.height;
+            icon: data.icon;
+            room: self.width;
+            left: true;
         }
         Image {
             x: parent.width - parent.height;
@@ -246,49 +306,48 @@ component Tile inherits Rectangle {
             colorize: Theme.text;
         }
     }
-    // Split buttons (JoinedButtons): the stops side by side, the ends rounded as the buttons are, the chosen one lit.
-    if data.kind == 2: Rectangle {
+    // Split buttons (ParameterGrid's Choices): a raised track with the theme's button ends and edge, equal cells,
+    // the chosen one a lifted accent cell inside it; no dividers.
+    if data.kind == 2: split := Rectangle {
         x: root.pad;
         y: root.control-y;
         width: parent.width - 2 * root.pad;
         height: root.control-h;
+        property <length> corner: Theme.button-radius(self.height);
+        property <length> lift: Theme.cursor-width;
         if Theme.depth == DepthStyle.soft: Rectangle {
             y: Theme.shadow-offset;
-            border-radius: Theme.button-radius(parent.height);
+            border-radius: parent.corner;
             background: Theme.shadow;
         }
-        // The stops, the outer ends rounded as a button's are.
+        Rectangle {
+            border-radius: parent.corner;
+            background: Theme.raised;
+            border-width: Theme.edge-width;
+            border-color: Theme.edge-color;
+        }
         for c[k] in data.choices: Rectangle {
-            property <length> corner: Theme.button-radius(parent.height);
             x: k * parent.width / data.choices.length;
             width: parent.width / data.choices.length;
-            background: k == data.chosen ? Theme.accent : Theme.raised;
-            border-top-left-radius: k == 0 ? self.corner : 0px;
-            border-bottom-left-radius: k == 0 ? self.corner : 0px;
-            border-top-right-radius: k + 1 == data.choices.length ? self.corner : 0px;
-            border-bottom-right-radius: k + 1 == data.choices.length ? self.corner : 0px;
-            if k > 0: Rectangle {
-                width: Theme.hair;
-                background: Theme.rule;
+            if k == data.chosen: Rectangle {
+                x: split.lift;
+                y: split.lift;
+                width: parent.width - 2 * split.lift;
+                height: parent.height - 2 * split.lift;
+                border-radius: max(0px, split.corner - split.lift);
+                background: Theme.accent;
             }
             TouchArea {
                 clicked => { GridState.tap(root.index, k); }
             }
-            Text {
+            Label {
                 x: Theme.pad-tight;
                 width: parent.width - 2 * Theme.pad-tight;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                height: parent.height;
                 text: c;
-                color: k == data.chosen ? Theme.on-accent : Theme.text;
-                font-size: Theme.button;
-                overflow: elide;
+                icon: k < data.icons.length ? data.icons[k] : 0;
+                ink: k == data.chosen ? Theme.on-accent : Theme.muted;
             }
-        }
-        Rectangle {
-            border-radius: Theme.button-radius(parent.height);
-            border-width: Theme.edge-width;
-            border-color: Theme.edge-color;
         }
     }
     // Touch: drag on knobs and sliders (a range takes the nearer end), tap on switches and dropdowns.
@@ -348,6 +407,8 @@ component EnvelopePanel inherits Section {
         viewbox-width: root.width / 1px;
         viewbox-height: root.height / 1px;
         fill: Theme.accent.with-alpha(Theme.wash-light);
+        stroke: transparent; // the same stroke width as the line, so both are placed alike
+        stroke-width: Theme.cursor-width;
         commands: data.fill;
     }
     Path {
@@ -557,14 +618,14 @@ export component Grid inherits Rectangle {
                 TouchArea {
                     clicked => { GridState.choose(k); }
                 }
-                Text {
+                Label {
                     x: Theme.pad;
                     width: parent.width - 2 * Theme.pad;
-                    vertical-alignment: center;
+                    height: parent.height;
                     text: v;
-                    color: Theme.text;
-                    font-size: Theme.button;
-                    overflow: elide;
+                    icon: k < GridState.list-icons.length ? GridState.list-icons[k] : 0;
+                    room: self.width;
+                    left: true;
                 }
                 Cursor {
                     shown: k == GridState.list-cursor;

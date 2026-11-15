@@ -342,7 +342,10 @@ impl Screen {
                 _ => value,
             };
         }
-        let choices: Vec<slint::SharedString> = if t.control == Control::Buttons { self.labels(p).0.into_iter().map(Into::into).collect() } else { vec![] };
+        let labels: Vec<String> = if t.control == Control::Buttons { self.labels(p).0 } else { vec![] };
+        let icons: Vec<i32> = labels.iter().map(|l| grid::wave_icon(l)).collect();
+        let icon = if t.control == Control::List { grid::wave_icon(&value) } else { 0 };
+        let choices: Vec<slint::SharedString> = labels.into_iter().map(Into::into).collect();
         let (editing, part) = match self.edit {
             Edit::Value(e, part) if e == k => (true, part as i32),
             Edit::List(e) if e == k => (true, 0),
@@ -362,6 +365,8 @@ impl Screen {
             bipolar: p.bipolar(),
             arc: grid::arc(from, norm).into(),
             choices: ModelRc::new(VecModel::from(choices)),
+            icons: ModelRc::new(VecModel::from(icons)),
+            icon,
             chosen: (v - p.min).round() as i32,
             on: v > p.min,
             cursor: self.cursor == Some(k),
@@ -374,7 +379,8 @@ impl Screen {
     fn panel_data(&self, panel: &grid::Panel) -> GridPanel {
         let refs: Vec<&Param> = panel.params.iter().map(|&i| &self.params[i]).collect();
         let norm = |k: usize| refs[k].norm(self.value(refs[k]));
-        let (line, fill, points) = grid::envelope_curve(&panel.envelope, &refs, &norm, panel.rect.w, panel.rect.h);
+        let scale = self.ui.upgrade().map_or(1., |ui| ui.global::<crate::Theme>().get_font_scale());
+        let (line, fill, points) = grid::envelope_curve(&panel.envelope, &refs, &norm, panel.rect.w, panel.rect.h, grid::envelope_top(scale));
         let points: Vec<GridPoint> = points.into_iter().map(|(x, y)| GridPoint { x, y }).collect();
         GridPanel { x: panel.rect.x, y: panel.rect.y, w: panel.rect.w, h: panel.rect.h, title: panel.title.as_str().into(), line: line.into(), fill: fill.into(), points: ModelRc::new(VecModel::from(points)) }
     }
@@ -433,7 +439,9 @@ impl Screen {
                 } else if self.list_cursor >= self.list_first + per {
                     self.list_first = self.list_cursor + 1 - per;
                 }
-                let list: Vec<slint::SharedString> = self.labels(p).0.into_iter().map(Into::into).collect();
+                let labels = self.labels(p).0;
+                g.set_list_icons(ModelRc::new(VecModel::from(labels.iter().map(|l| grid::wave_icon(l)).collect::<Vec<_>>())));
+                let list: Vec<slint::SharedString> = labels.into_iter().map(Into::into).collect();
                 g.set_list(ModelRc::new(VecModel::from(list)));
                 g.set_list_title(p.name.as_str().into());
                 g.set_list_cursor(self.list_cursor as i32);

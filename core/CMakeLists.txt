@@ -6,6 +6,16 @@ add_library(oscairn_plugin_host STATIC plugin-host/src/plugin_host.cpp plugin-ho
 target_include_directories(oscairn_plugin_host PUBLIC plugin-host/include)
 target_link_libraries(oscairn_plugin_host PUBLIC kick_clap_host samplepack::samplepack oscairn_engine_core PRIVATE Threads::Threads) # oscairn_engine_core: the Rust CLAP host (clap-host/rust) too
 target_compile_options(oscairn_plugin_host PRIVATE -Wall -Wextra)
+# The CLAP host the engine and the plugin worker use (plugin-host/src/clap_host.h): the Rust one (clap-host/rust), or its
+# C++ reference (kick::clap::Host). Both are always built, for clap-host-rust; the reference stays the default until the
+# Rust host has played on a device.
+set(OSCAIRN_CLAP_HOST cpp CACHE STRING "The CLAP host plugins load in: cpp (kick::clap::Host), or rust (clap-host/rust)")
+set_property(CACHE OSCAIRN_CLAP_HOST PROPERTY STRINGS cpp rust)
+if(OSCAIRN_CLAP_HOST STREQUAL "rust")
+    target_compile_definitions(oscairn_plugin_host PRIVATE OSCAIRN_CLAP_HOST_RUST=1)
+elseif(NOT OSCAIRN_CLAP_HOST STREQUAL "cpp")
+    message(FATAL_ERROR "OSCAIRN_CLAP_HOST is cpp or rust, not ${OSCAIRN_CLAP_HOST}")
+endif()
 if(OSCAIRN_LV2)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LILV REQUIRED IMPORTED_TARGET lilv-0>=0.24)
@@ -151,6 +161,11 @@ add_dependencies(oscairn-clap-host-rust-test oscairn-recording-fixture oscairn-v
 add_test(NAME clap-host-rust COMMAND oscairn-clap-host-rust-test $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
 set_tests_properties(clap-host-rust PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1") # the voice fixture offering oscairn.voice-budget
+# The same check from a recording of the reference, as it will run once the C++ host is gone.
+add_test(NAME clap-host-rust-replay COMMAND sh -c "t=\"$0\" b=\"$1\"; shift; \"$b\" --record \"$t.transcript\" \"$@\" >/dev/null && \"$b\" --replay \"$t.transcript\" \"$@\""
+    "${CMAKE_CURRENT_BINARY_DIR}/clap-host" $<TARGET_FILE:oscairn-clap-host-rust-test> $<TARGET_FILE:oscairn-recording-fixture> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_delay> $<TARGET_FILE:oscairn-voice-fixture>)
+set_tests_properties(clap-host-rust-replay PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_FIXTURE_VOICE_BUDGET=1")
 
 add_executable(oscairn-sequencer-timing-test engine/tests/sequencer_timing.cpp)
 target_link_libraries(oscairn-sequencer-timing-test PRIVATE oscairn_engine)

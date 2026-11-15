@@ -6,7 +6,11 @@
 // description, flags, parameter texts, each block's audio bit for bit, its output events, parameter values and outputs,
 // sleep and reset, the counters, failures as kind and message. The two transcripts must be the same, item by item, and
 // the Rust host's blocks must allocate nothing (malloc and operator new counted while they run).
-//   oscairn-clap-host-rust-test PLUGIN.clap...
+// A transcript can be kept and replayed without the C++ host (for when the reference is deleted, the check surviving as
+// recorded vectors): --record FILE writes the reference's, --replay FILE compares the Rust host's with it. Paths in it
+// are written as $SCRATCH and $PLUGINS (the plugins' folder), so a recording replays from another checkout; its audio is
+// the fixtures' as built for one platform and compiler, so a recording is kept per target.
+//   oscairn-clap-host-rust-test [--record FILE | --replay FILE] PLUGIN.clap...
 #include "../../clap-host/tests/AllocationGuard.h"
 #include "../../plugin-host/src/clap_host.h"
 #include <kick_clap/Discovery.h>
@@ -15,6 +19,8 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <tuple>
 #include <oscairn-clap/beat.h>
@@ -399,15 +405,54 @@ namespace
     }
 }
 
+// The transcript with its machine's paths as placeholders: the scratch folder, and each plugin's folder.
+std::string portable(const std::string& transcript, int argc, char** argv)
+{
+    auto replace = [&](std::string& s, const std::string& from, const std::string& to) {
+        if(from.empty()) return;
+        for(size_t at = s.find(from); at != std::string::npos; at = s.find(from, at + to.size())) s.replace(at, from.size(), to);
+    };
+    Transcript t;
+    for(auto [label, value] : items(transcript))
+    {
+        for(auto* x : {&label, &value})
+        {
+            replace(*x, scratch, "$SCRATCH");
+            for(int i = 1; i < argc; ++i) replace(*x, std::filesystem::path(argv[i]).parent_path().string(), "$PLUGINS");
+        }
+        t.item(label, value.data(), value.size());
+    }
+    return t.out;
+}
+
 int main(int argc, char** argv)
 {
-    if(argc < 2) { std::fprintf(stderr, "usage: oscairn-clap-host-rust-test PLUGIN.clap...\n"); return 2; }
+    std::string record, replay;
+    while(argc > 2 && (!std::strcmp(argv[1], "--record") || !std::strcmp(argv[1], "--replay")))
+    {
+        (argv[1][2] == 'r' && argv[1][3] == 'e' && argv[1][4] == 'c' ? record : replay) = argv[2];
+        argv += 2; argc -= 2;
+    }
+    if(argc < 2) { std::fprintf(stderr, "usage: oscairn-clap-host-rust-test [--record FILE | --replay FILE] PLUGIN.clap...\n"); return 2; }
     bool cppAllocated = false, rustAllocated = false;
     scratch = (std::filesystem::temp_directory_path() / ("oscairn-clap-host-rust-" + std::to_string(getpid()))).string();
+    std::string cpp, rust;
+    if(!replay.empty()) { std::ifstream in(replay, std::ios::binary); cpp.assign(std::istreambuf_iterator<char>(in), {}); if(cpp.empty()) { std::fprintf(stderr, "FAIL: no recording in %s\n", replay.c_str()); return 1; } }
+    else
+    {
+        std::filesystem::create_directories(scratch);
+        cpp = portable(run(OSCAIRN_API(cpp_), argc, argv, cppAllocated), argc, argv);
+        std::filesystem::remove_all(scratch);
+        if(!record.empty())
+        {
+            std::ofstream out(record, std::ios::binary); out << cpp;
+            if(!out) { std::fprintf(stderr, "FAIL: cannot write %s\n", record.c_str()); return 1; }
+            std::printf("clap host: the C++ host's transcript recorded, %zu items\n", items(cpp).size());
+            return 0;
+        }
+    }
     std::filesystem::create_directories(scratch);
-    const auto cpp = run(OSCAIRN_API(cpp_), argc, argv, cppAllocated);
-    std::filesystem::remove_all(scratch); std::filesystem::create_directories(scratch);
-    const auto rust = run(OSCAIRN_API(rust_), argc, argv, rustAllocated);
+    rust = portable(run(OSCAIRN_API(rust_), argc, argv, rustAllocated), argc, argv);
     std::filesystem::remove_all(scratch);
     if(cpp.empty() || rust.empty()) return 1;
     const auto a = items(cpp), b = items(rust);

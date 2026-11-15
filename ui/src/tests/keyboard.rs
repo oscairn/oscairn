@@ -140,9 +140,7 @@ fn keyboard_draws_in_every_theme() {
     let mut s = Screen::new();
     let _k = Keyboard::open(&s.ui, "Name of the part", "Keys", true);
     s.ui.set_screen(4);
-    let places = theme::Places::default();
-    let mut loaded: Vec<theme::Loaded> = ["oscairn-dark", "oscairn-light"].iter().map(|id| theme::chosen(&places, id, "")).collect();
-    loaded.push(odd_theme());
+    let loaded = all_themes();
     for t in &loaded {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);

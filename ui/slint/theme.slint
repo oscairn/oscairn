@@ -1,20 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The theme the screens draw with, set by theme.rs from the chosen theme.json (docs/rust-ui.md,
-// "Themes"); the values here are only what shows before that, the JUCE app's default built-in
-// theme's. Sizes follow the theme's font scale; the type scale and the sizes are the JUCE app's on
-// a device's screen (hosts/standalone/Theme.cpp's textSize for touch, Launcher.h's top bar), kept
-// in step by hand.
+// The theme the screens draw with: everything a theme file can set (docs/theme.schema.json, the JUCE
+// app's hosts/standalone/Theme.cpp, ui/THEME.md), set by theme.rs from the chosen theme.json; the
+// values here are only what shows before that, the default built-in theme's. A screen draws
+// nothing from a literal color, corner, edge or stroke: it asks this file. The `Theme` global is
+// per window (every Shell has its own), never process-wide.
+//
+// What a theme has no property for lives here once, as named constants (sizes of touch targets and
+// gaps, the type scale, alphas): see "no theme property" in THEME.md.
+//
+// Shared pieces drawn by the theme's style choices: Section (a card, a tile), Button, Field (a
+// dropdown or value box), Mark (mute, solo), Thumb (sliders, knobs), TabStrip, RowMark (where an
+// item's color goes in a list row).
 
 // The built-in themes' font (Inter, SIL OFL 1.1: hosts/standalone/themes/*/fonts/OFL.txt), for
 // when the theme's own font files cannot be read.
 import "../../hosts/standalone/themes/oscairn-dark/fonts/Inter-Regular.ttf";
 import "../../hosts/standalone/themes/oscairn-dark/fonts/Inter-Bold.ttf";
 
+// The eight `style` choices, in the reference's order (ThemeStyle).
+export enum ButtonStyle { rounded, pill }
+export enum EdgeStyle { none, hairline, outlined }
+export enum DepthStyle { flat, soft }
+export enum SliderStyle { filled, line, cap }
+export enum TabStyle { folder, segmented }
+export enum MarkStyle { square, round }
+export enum SectionStyle { separate, joined }
+export enum RowStyle { left, right, dot, fill }
+
 export global Theme {
+    // Colors by role.
     in property <color> background: #111317;
-    in property <color> surface: #191C21;
-    in property <color> raised: #262B32;
-    in property <color> border: #3A414B;
+    in property <color> surface: #1D2127;
+    in property <color> raised: #2D333B;
+    in property <color> border: #4A535E;
     in property <color> text: #F6F8FA;
     in property <color> muted: #B4BDC8;
     in property <color> accent: #FF9A45;
@@ -24,16 +42,405 @@ export global Theme {
     in property <color> warning: #e8c547;
     // The cursor's border (the accent unless the theme says).
     in property <color> focus: accent;
+    // Text on the accent (JUCE's `contrasting`): black on a bright accent, white on a dark one.
+    in property <color> on-accent: #000000;
+    // A background of perceived brightness under one half (JUCE's `darkTheme`).
+    in property <bool> dark: true;
+    // The lighter and the darker of the text and surface colors (the piano keys' two inks).
+    in property <color> key-light: #F6F8FA;
+    in property <color> key-dark: #1D2127;
+    // The routing wires.
+    in property <color> wire-audio: #8CC2FF;
+    in property <color> wire-notes: #C29CFF;
+    in property <color> wire-disabled: #6B7480;
+    in property <color> wire-draining: #FF9A45;
+    in property <color> wire-unconnected: #FF6B63;
+    in property <color> wire-control: #6FE0A8;
+    // The splash: the theme's image if it has one, the colors behind it and of its text.
+    in property <color> splash-background: background;
+    in property <color> splash-ink: text;
+    in property <image> splash-image;
+    in property <bool> has-splash-image;
+    // Metrics and the font.
     in property <length> radius: 6px;
     in property <float> font-scale: 1;
     in property <string> font-family: "Inter";
+    // How controls are drawn.
+    in property <ButtonStyle> buttons: ButtonStyle.pill;
+    in property <EdgeStyle> edges: EdgeStyle.hairline;
+    in property <DepthStyle> depth: DepthStyle.soft;
+    in property <SliderStyle> sliders: SliderStyle.line;
+    in property <TabStyle> tabs: TabStyle.segmented;
+    in property <MarkStyle> marks: MarkStyle.square;
+    in property <SectionStyle> sections: SectionStyle.separate;
+    in property <RowStyle> rows: RowStyle.left;
+    // A list row's color blended into its background, as much as text still reads on it (theme.rs).
+    // Arguments: the row's own color, its background, the text's color, whether it is an odd row.
+    pure callback row-fill(color, color, color, bool) -> color;
+
+    // The type scale: the JUCE touch scale (Theme.cpp `textSize`) times the font scale.
     out property <length> small: 13px * font-scale;
     out property <length> body: 16px * font-scale;
     out property <length> button: 15px * font-scale;
     out property <length> title: 20px * font-scale;
+    // Sizes with no theme property: touch targets (RFC 0019), the dense gap and margin (Theme.h).
     out property <length> bar-height: 48px;
-    // The least a touch target is across (RFC 0019).
     out property <length> touch: 44px;
-    out property <length> gap: 4px; // Theme.h's denseGap
-    out property <length> margin: 6px; // Theme.h's denseMargin
+    out property <length> gap: 4px;
+    out property <length> margin: 6px;
+    // Insides: text from an edge, a card's padding, a control's inset, a tight inset.
+    out property <length> pad: 10px;
+    out property <length> pad-wide: 12px;
+    out property <length> pad-narrow: 8px;
+    out property <length> pad-tight: 4px;
+    // A small button's width ("Back", "Previous"), the dropdown overlay's width, the pages column.
+    out property <length> button-width: 110px;
+    out property <length> overlay-width: 420px;
+    out property <length> pages-width: 180px;
+    // A cursor's border and a cursor on the piano keys; the rule between neighbors.
+    out property <length> cursor-width: 2px;
+    out property <length> key-cursor-width: 3px;
+    out property <length> hair: 1px;
+    // A slider's thumb (JUCE: radius 8) and a knob's arc stroke.
+    out property <length> thumb: 16px;
+    out property <length> arc: 6px;
+    // A row's color mark (6 wide, rounded by half) and the playing mark's width.
+    out property <length> mark: 6px;
+    // Alphas of the theme's colors: a selected row's wash, a lit scene's, a track behind a fill, a dimmed part.
+    out property <float> wash: 0.25;
+    out property <float> wash-light: 0.17;
+    out property <float> wash-strong: 0.4; // a key held on, a stop on
+    out property <float> track-alpha: 0.35;
+    out property <float> dim: 0.45;
+    out property <float> disabled: 0.4;
+    // Derived as Theme.cpp does for the same things.
+    // The piano's keys (Panel.cpp's Board): the two inks blended, a white key lighter on a light theme.
+    out property <color> white-key: key-light.mix(key-dark, dark ? 0.74 : 0.94);
+    out property <color> black-key: key-light.mix(key-dark, 0.12);
+    out property <color> key-label: key-light.mix(key-dark, 0.35);
+    out property <color> white-key-lit: accent.with-alpha(0.5);
+    out property <color> black-key-lit: accent.darker(0.3);
+    // A text keyboard's key: the surface lifted a step.
+    out property <color> key-fill: surface.brighter(0.15);
+    out property <length> key-radius: 4px; // a piano key's corners (Panel.cpp: 4 white, 3 black)
+    out property <length> section-radius: sections == SectionStyle.joined ? 0px : radius + 2px; // drawSection
+    out property <color> wash-color: accent.with-alpha(wash);
+    out property <color> track: border.with-alpha(track-alpha);
+    out property <color> rule: border.with-alpha(0.6);
+    // A rotary's disc and its pointer by the slider style (drawRotarySlider).
+    out property <color> knob-disc: sliders == SliderStyle.filled ? raised : #ffffff;
+    out property <color> knob-pointer: sliders == SliderStyle.filled ? text : background;
+    out property <color> track-line: border.with-alpha(0.55); // a rotary's track, a line slider's
+    out property <color> slider-track: sliders == SliderStyle.filled ? border : track-line;
+    // drawEdge: nothing, a hairline (the border at 60%) or the border; a cursor is the accent, 2 px.
+    out property <length> edge-width: edges == EdgeStyle.none ? 0px : hair;
+    out property <color> edge-color: edges == EdgeStyle.outlined ? border : edges == EdgeStyle.hairline ? rule : transparent;
+    // A joined section's line is always drawn, in the hairline or the full border.
+    out property <color> joined-edge: edges == EdgeStyle.hairline ? rule : border;
+    out property <color> shadow: dark ? #000000.with-alpha(0.35) : #000000.with-alpha(0.12);
+    out property <color> thumb-shadow: dark ? #000000.with-alpha(0.45) : #000000.with-alpha(0.18);
+    out property <length> shadow-offset: depth == DepthStyle.soft ? 1px : 0px;
+    // The gap between sections: `separate`, or none when they join (sectionGap).
+    pure public function gap-between(separate: length) -> length {
+        return sections == SectionStyle.joined ? 0px : separate;
+    }
+    // buttonRadius and fieldRadius.
+    pure public function button-radius(height: length) -> length {
+        return buttons == ButtonStyle.pill ? height / 2 : radius;
+    }
+    pure public function field-radius(height: length) -> length {
+        return buttons != ButtonStyle.pill ? min(height / 2, radius) : height <= 56px ? height / 2 : radius + 3px;
+    }
+    // A mark's corner (mute, solo): round, or the radius (at most 6 px and .28 of the side).
+    pure public function mark-radius(side: length) -> length {
+        return marks == MarkStyle.round ? side / 2 : min(min(6px, side * 0.28), radius);
+    }
+}
+
+// A section: a card, a tile, a strip (drawSection). Separate: rounded, with the theme's edge.
+// Joined: square, its line on the pixel it shares with the neighbors.
+export component Section inherits Rectangle {
+    in property <color> fill: Theme.surface;
+    background: root.fill;
+    border-radius: Theme.section-radius;
+    border-width: Theme.sections == SectionStyle.joined ? 0px : Theme.edge-width;
+    border-color: Theme.edge-color;
+    if Theme.sections == SectionStyle.joined: Rectangle {
+        x: -1px;
+        y: -1px;
+        width: parent.width + 1px;
+        height: parent.height + 1px;
+        border-width: Theme.hair;
+        border-color: Theme.joined-edge;
+    }
+}
+
+// A cursor or a value being changed: the border round a control, in its own corners.
+export component Cursor inherits Rectangle {
+    in property <bool> shown;
+    in property <bool> editing;
+    in property <length> corner: Theme.section-radius;
+    in property <length> stroke: Theme.cursor-width;
+    border-radius: root.corner;
+    border-width: root.shown || root.editing ? root.stroke : 0px;
+    border-color: root.editing ? Theme.accent : Theme.focus;
+}
+
+// A button (drawButtonBackground): the theme's corners (pill or the radius), edge and shadow;
+// raised, or the tint when on; brighter under a finger.
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> on;
+    in property <color> tint: Theme.accent;
+    in property <color> ink: Theme.text;
+    in property <bool> bold: true;
+    in property <length> size: Theme.button;
+    callback clicked();
+    property <color> base: root.on ? root.tint : Theme.raised;
+    if Theme.depth == DepthStyle.soft && root.enabled: Rectangle {
+        y: Theme.shadow-offset;
+        border-radius: Theme.button-radius(root.height);
+        background: Theme.shadow;
+    }
+    Rectangle {
+        border-radius: Theme.button-radius(root.height);
+        background: !root.enabled ? root.base.with-alpha(Theme.disabled) : touch.pressed ? root.base.brighter(0.15) : touch.has-hover ? root.base.brighter(0.07) : root.base;
+        border-width: Theme.edge-width;
+        border-color: Theme.edge-color;
+    }
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: !root.enabled ? Theme.muted : root.on ? Theme.on-accent : root.ink;
+        font-size: root.size;
+        font-weight: root.bold ? 700 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A field (fieldRadius, drawEdge): a dropdown, a value box.
+export component Field inherits Rectangle {
+    in property <color> fill: Theme.surface;
+    background: root.fill;
+    border-radius: Theme.field-radius(root.height);
+    border-width: Theme.edge-width;
+    border-color: Theme.edge-color;
+}
+
+// Mute and solo (drawMark): a small square or round mark with its letter, filled in its color when on.
+export component Mark inherits Rectangle {
+    in property <string> letter;
+    in property <bool> on;
+    in property <color> tint;
+    callback clicked();
+    property <length> side: min(root.width, root.height);
+    Rectangle {
+        width: root.side;
+        height: root.side;
+        border-radius: Theme.mark-radius(root.side);
+        background: root.on ? root.tint : Theme.border.with-alpha(0.5);
+        Text {
+            text: root.letter;
+            color: root.on ? Theme.background : Theme.muted;
+            font-size: root.side * 0.55;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// A slider's thumb or a knob's disc by the slider style (drawLinearSlider, drawRotarySlider):
+// filled, an accent disc; line, a light disc; cap, a short bar across the track. `size` is the
+// thumb's diameter; `upright` turns a cap across a vertical track.
+export component Thumb inherits Rectangle {
+    in property <length> size: 16px;
+    in property <bool> upright;
+    in property <bool> bar-cap: true; // a cap thumb is a bar (sliders); a knob's disc stays round
+    property <bool> cap: Theme.sliders == SliderStyle.cap && root.bar-cap;
+    property <length> w: root.cap ? (root.upright ? root.size * 1.375 : root.size * 0.625) : root.size;
+    property <length> h: root.cap ? (root.upright ? root.size * 0.625 : root.size * 1.125) : root.size;
+    property <length> corner: root.cap ? min(2px, Theme.radius) : root.size / 2;
+    width: root.w;
+    height: root.h;
+    if Theme.depth == DepthStyle.soft && Theme.sliders != SliderStyle.filled: Rectangle {
+        y: 1px;
+        border-radius: root.corner;
+        background: Theme.thumb-shadow;
+    }
+    Rectangle {
+        border-radius: root.corner;
+        background: Theme.sliders == SliderStyle.filled ? Theme.accent : #ffffff;
+        border-width: Theme.sliders == SliderStyle.filled ? 0px : Theme.hair;
+        border-color: Theme.border.with-alpha(0.8);
+    }
+}
+
+// One tab (DesktopShell's TabStrip): segmented, the selected one lifted out of the track; folder,
+// rounded at the top and open at the bottom, an accent bar across its top.
+component TabItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+    property <bool> segmented: Theme.tabs == TabStyle.segmented;
+    min-width: label.preferred-width + 2 * Theme.pad-wide + Theme.pad-narrow;
+    if root.segmented && root.selected && Theme.depth == DepthStyle.soft: Rectangle {
+        y: 1px;
+        border-radius: Theme.radius + 1px;
+        background: Theme.shadow;
+    }
+    if root.segmented && root.selected: Rectangle {
+        border-radius: Theme.radius + 1px;
+        background: Theme.dark ? Theme.raised.brighter(0.25) : Theme.surface;
+    }
+    if !root.segmented && root.selected: Rectangle {
+        y: 0px;
+        height: parent.height + 2px;
+        border-top-left-radius: Theme.radius;
+        border-top-right-radius: Theme.radius;
+        background: Theme.background;
+        border-width: Theme.hair;
+        border-color: Theme.rule;
+    }
+    if !root.segmented && root.selected: Rectangle {
+        x: Theme.radius;
+        width: parent.width - 2 * Theme.radius;
+        height: 2px;
+        background: Theme.accent;
+    }
+    label := Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.selected ? Theme.text : Theme.muted;
+        font-size: Theme.button;
+        font-weight: root.selected ? 700 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component TabStrip inherits Rectangle {
+    in property <[string]> names;
+    in property <int> current;
+    in property <string> empty-name: "General";
+    callback picked(int);
+    property <bool> segmented: Theme.tabs == TabStyle.segmented;
+    if !root.segmented: Rectangle {
+        y: parent.height - Theme.hair;
+        height: Theme.hair;
+        background: Theme.rule;
+    }
+    HorizontalLayout {
+        alignment: start;
+        Rectangle {
+            border-radius: Theme.radius + 4px;
+            background: root.segmented ? Theme.raised : transparent;
+            HorizontalLayout {
+                padding: root.segmented ? 3px : 0px;
+                spacing: 2px;
+                for name[i] in root.names: TabItem {
+                    text: name == "" ? root.empty-name : name;
+                    selected: i == root.current;
+                    clicked => { root.picked(i); }
+                }
+            }
+        }
+    }
+}
+
+// Where an item's color goes in a list row (drawListRow): a mark at the left or right end, a dot,
+// or nothing here when the row itself is tinted (`Theme.row-fill`). `tint` is the item's color;
+// `shown` false draws nothing.
+export component RowMark inherits Rectangle {
+    in property <color> tint;
+    in property <bool> shown;
+    if root.shown && Theme.rows == RowStyle.left: Rectangle {
+        x: Theme.pad;
+        y: root.height * 0.22;
+        width: Theme.mark;
+        height: root.height * 0.56;
+        border-radius: Theme.mark / 2;
+        background: root.tint;
+    }
+    if root.shown && Theme.rows == RowStyle.right: Rectangle {
+        x: root.width - Theme.pad - Theme.mark;
+        y: root.height * 0.22;
+        width: Theme.mark;
+        height: root.height * 0.56;
+        border-radius: Theme.mark / 2;
+        background: root.tint;
+    }
+    if root.shown && Theme.rows == RowStyle.dot: Rectangle {
+        property <length> d: min(12px, root.height * 0.3);
+        x: 13px - self.d / 2;
+        y: (root.height - self.d) / 2;
+        width: self.d;
+        height: self.d;
+        border-radius: self.d / 2;
+        background: root.tint;
+    }
+}
+
+// A slider's track, fill and thumbs by the slider style (drawLinearSlider), across or upright; a
+// drawbar fills from the top. A range has two thumbs. Drawn over the whole of its box: the thumbs
+// reach half their size past the ends, so a screen insets the box by `Theme.thumb / 2` each end.
+export component SliderBar inherits Rectangle {
+    in property <float> norm;
+    in property <float> high: -1;
+    in property <bool> bipolar;
+    in property <bool> upright;
+    in property <bool> from-top;
+    in property <bool> lit;
+    property <length> cross: upright ? self.width : self.height;
+    // The track: 4 px (line), 3 (cap); filled, a quarter of the box's width, at most 6.
+    property <length> thick: Theme.sliders == SliderStyle.cap ? 3px : Theme.sliders == SliderStyle.line ? 4px : min(6px, self.cross * 0.25);
+    property <length> along: upright ? self.height : self.width;
+    property <float> a: high >= 0 ? norm : bipolar ? min(norm, 0.5) : from-top ? 1 - norm : 0;
+    property <float> b: high >= 0 ? high : bipolar ? max(norm, 0.5) : from-top ? 1 : norm;
+    Rectangle {
+        x: upright ? (parent.width - root.thick) / 2 : 0;
+        y: upright ? 0 : (parent.height - root.thick) / 2;
+        width: upright ? root.thick : parent.width;
+        height: upright ? parent.height : root.thick;
+        border-radius: root.thick / 2;
+        background: Theme.slider-track;
+    }
+    // The fill: across from the left, upright from the bottom (a drawbar from the top).
+    Rectangle {
+        x: upright ? (parent.width - root.thick) / 2 : root.a * root.along;
+        y: upright ? (1 - root.b) * root.along : (parent.height - root.thick) / 2;
+        width: upright ? root.thick : (root.b - root.a) * root.along;
+        height: upright ? (root.b - root.a) * root.along : root.thick;
+        border-radius: root.thick / 2;
+        background: root.lit ? Theme.accent : Theme.accent.with-alpha(0.75);
+    }
+    // A centered range's middle.
+    if root.bipolar && root.high < 0: Rectangle {
+        x: upright ? (parent.width - self.width) / 2 : (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: upright ? 2 * root.thick + 2px : Theme.hair;
+        height: upright ? Theme.hair : 2 * root.thick + 2px;
+        background: Theme.muted;
+    }
+    for v[i] in root.high >= 0 ? [root.norm, root.high] : [root.from-top ? 1 - root.norm : root.norm]: Thumb {
+        size: Theme.thumb;
+        upright: root.upright;
+        x: upright ? (parent.width - self.width) / 2 : v * root.along - self.width / 2;
+        y: upright ? (1 - v) * root.along - self.height / 2 : (parent.height - self.height) / 2;
+    }
 }

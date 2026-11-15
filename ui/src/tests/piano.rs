@@ -191,9 +191,7 @@ fn piano_draws_in_every_theme() {
     let mut p = open(&s, "Roland");
     p.touch(5, true, 0.5);
     p.act(Action::Move { pane: Some(1), by: 1 });
-    let places = theme::Places::default();
-    let mut loaded: Vec<theme::Loaded> = ["oscairn-dark", "oscairn-light"].iter().map(|id| theme::chosen(&places, id, "")).collect();
-    loaded.push(odd_theme());
+    let loaded = all_themes();
     for t in &loaded {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);

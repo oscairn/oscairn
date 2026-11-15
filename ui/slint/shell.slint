@@ -2,7 +2,7 @@
 // The shell's window: the top bar, the screen shown under it, and the engine's state when it is
 // busy or gone. Keys go to shell.rs, which makes navigation actions of them.
 
-import { Theme } from "theme.slint";
+import { Theme, Section, ButtonStyle, EdgeStyle, DepthStyle, SliderStyle, TabStyle, MarkStyle, SectionStyle, RowStyle } from "theme.slint";
 import { Bar, TopBar } from "topbar.slint";
 import { Home, HomeState, TileData } from "home.slint";
 import { Setlist, SetlistState, SlotData, ListRow } from "setlist.slint";
@@ -11,7 +11,7 @@ import { Part, PartState, SettingData, InfoLine } from "part.slint";
 import { Grid, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint } from "grid.slint";
 import { Keyboard, KeyboardState, KeyData } from "keyboard.slint";
 import { Piano, PianoState, PianoKey, PianoBand, PianoControl } from "piano.slint";
-export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, PartState, SettingData, InfoLine, KeyboardState, KeyData, PianoState, PianoKey, PianoBand, PianoControl, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint }
+export { Theme, ButtonStyle, EdgeStyle, DepthStyle, SliderStyle, TabStyle, MarkStyle, SectionStyle, RowStyle, Bar, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, PartState, SettingData, InfoLine, KeyboardState, KeyData, PianoState, PianoKey, PianoBand, PianoControl, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -96,16 +96,15 @@ export component Shell inherits Window {
         width: parent.width;
         height: parent.height - Theme.bar-height;
     }
-    if root.engine != "": Rectangle {
+    if root.engine != "": Section {
         x: Theme.margin;
         y: Theme.bar-height + Theme.gap;
         width: parent.width - 2 * Theme.margin;
         height: Theme.touch;
-        background: Theme.danger;
-        border-radius: Theme.radius;
+        fill: Theme.danger;
         Text {
-            x: 12px;
-            width: parent.width - 24px;
+            x: Theme.pad-wide;
+            width: parent.width - 2 * Theme.pad-wide;
             vertical-alignment: center;
             overflow: elide;
             font-size: Theme.body;

@@ -67,6 +67,7 @@ impl Screen {
         });
         let _ = slint::platform::set_platform(Box::new(Headless)); // once per test thread
         let ui = Shell::new().unwrap();
+        theme::attach(&ui);
         let window = WINDOW.with(|w| w.borrow_mut().take()).unwrap();
         window.set_size(PhysicalSize::new(w as u32, h as u32));
         ui.show().unwrap();
@@ -361,13 +362,42 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!(f.screen.ui.get_screen(), 2, "while the display goes to the JUCE app, nothing is taken");
 }
 
-/// A theme of extreme colors at the largest font scale, with keys missing (the default's then).
-fn odd_theme() -> theme::Loaded {
-    let doc = json!({"version": 7, "id": "odd", "fontScale": 1.4, "radius": 16,
-        "colors": {"background": "#000000", "surface": "#FF00FF", "text": "#FFFFFF", "muted": "#00FFFF", "accent": "#FFFF00", "border": "nonsense"}});
-    let places = theme::Places::default();
-    let base = theme::chosen(&places, "", "");
-    theme::Loaded { id: "odd".into(), doc: theme::merged(&base.doc, &doc), folder: None }
+/// A theme read from a document, as a file would be: refused (a panic here) if the reference would refuse it.
+fn theme_of(doc: serde_json::Value) -> theme::Loaded {
+    let data = theme::ThemeData::parse(&doc.to_string()).expect("a theme the reference accepts");
+    theme::Loaded { id: data.id.clone(), data, folder: None, regular: None, bold: None, refused: None }
+}
+
+/// A deliberately odd theme that is still a valid one: clashing colors, pill buttons, the largest
+/// radius and nearly the largest type, outlined edges, soft shadows, cap sliders, folder tabs,
+/// round marks, a filled row color. (The format has no spacing property: `joined_theme` is the other
+/// extreme of what it has, sections with no gap.)
+pub fn odd_theme() -> theme::Loaded {
+    theme_of(json!({"version": 7, "id": "odd", "name": "Odd", "fontScale": 1.39, "radius": 16,
+        "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
+        "colors": {"background": "#000000", "surface": "#7A0070", "raised": "#006B6B", "border": "#FF8800", "text": "#FFFFFF", "muted": "#00FFFF", "accent": "#FFFF00",
+                   "positive": "#FF00FF", "danger": "#00FF00", "warning": "#FF0000", "focus": "#0000FF"},
+        "style": {"buttons": "pill", "edges": "outlined", "depth": "soft", "sliders": "cap", "tabs": "folder", "marks": "round", "sections": "separate", "rows": "fill"},
+        "wires": {"audio": "#FF0000", "notes": "#00FF00", "disabled": "#FFFFFF", "draining": "#0000FF", "unconnected": "#FFFF00", "control": "#FF00FF"}}))
+}
+
+/// The other extreme: square buttons, no radius, no edge, flat, filled sliders, segmented tabs,
+/// sections joined edge to edge, the row color as a dot, a light theme with the smallest accepted type.
+pub fn joined_theme() -> theme::Loaded {
+    theme_of(json!({"version": 7, "id": "odd-joined", "name": "Odd joined", "fontScale": 0.9, "radius": 0,
+        "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
+        "colors": {"background": "#F0E8D0", "surface": "#FFF8E0", "raised": "#E0D0A0", "border": "#806000", "text": "#201000", "muted": "#504020", "accent": "#0040C0",
+                   "positive": "#006000", "danger": "#C00000"},
+        "style": {"buttons": "rounded", "edges": "none", "depth": "flat", "sliders": "filled", "tabs": "segmented", "marks": "square", "sections": "joined", "rows": "dot"},
+        "wires": {"audio": "#0000FF", "notes": "#00FF00", "disabled": "#808080", "draining": "#FF8800", "unconnected": "#FF0000", "control": "#00FFFF"}}))
+}
+
+/// The built-in themes and the two odd ones: what every screen is drawn in.
+pub fn all_themes() -> Vec<theme::Loaded> {
+    let mut loaded: Vec<theme::Loaded> = crate::profile::THEMES.iter().map(|(id, _)| theme::chosen(&theme::Places::default(), id, "")).collect();
+    loaded.push(odd_theme());
+    loaded.push(joined_theme());
+    loaded
 }
 
 // Every built-in theme and the odd one show the top bar and Home; a switch repaints once, then
@@ -384,18 +414,15 @@ fn themes_switch_live_and_repaint_once() {
     let s = &mut f.screen;
     meters(&s.ui, 42, 77);
     s.frame();
-    let mut loaded: Vec<theme::Loaded> = crate::profile::THEMES.iter().map(|(id, _)| theme::chosen(&theme::Places::default(), id, "")).collect();
-    loaded.push(odd_theme());
-    for t in &loaded {
+    for t in &all_themes() {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: repainted", t.id);
         assert_eq!(s.frame(), None, "{}: once", t.id);
         s.save(&format!("theme-{}", t.id));
     }
     let g = s.ui.global::<crate::Theme>();
-    assert_eq!((g.get_font_scale(), g.get_radius()), (1.4, 16.));
-    assert_eq!(g.get_border(), slint::Color::from_rgb_u8(0x3a, 0x41, 0x4b), "an unusable color: the default theme's");
-    assert_eq!(g.get_focus(), slint::Color::from_rgb_u8(0xff, 0xff, 0x00), "focus: the accent when the theme has none");
+    assert_eq!((g.get_font_scale(), g.get_radius()), (0.9, 0.), "the last theme applied");
+    assert_eq!(g.get_focus(), slint::Color::from_rgb_u8(0x00, 0x40, 0xc0), "focus: the accent when the theme has none");
 }
 
 impl Fixture {
@@ -928,9 +955,7 @@ fn play_draws_in_every_theme() {
     play.graph(&play_graph());
     s.ui.set_screen(3);
     play.meters(&json!({"meters": [{"part": 10, "peak": 0.5, "channels": [0.5, 1.0]}, {"part": 11, "peak": 2.0, "channels": [2.0]}]}));
-    let places = theme::Places::default();
-    let mut loaded: Vec<theme::Loaded> = ["oscairn-dark", "oscairn-light"].iter().map(|id| theme::chosen(&places, id, "")).collect();
-    loaded.push(odd_theme());
+    let loaded = all_themes();
     for t in &loaded {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);

@@ -434,9 +434,7 @@ fn part_draws_in_every_theme() {
     s.ui.set_screen(4);
     mv(&mut part, 1);
     press(&mut part);
-    let places = theme::Places::default();
-    let mut loaded: Vec<theme::Loaded> = ["oscairn-dark", "oscairn-light"].iter().map(|id| theme::chosen(&places, id, "")).collect();
-    loaded.push(odd_theme());
+    let loaded = all_themes();
     for t in &loaded {
         theme::apply(&s.ui, t);
         assert!(s.frame().is_some(), "{}: drawn", t.id);

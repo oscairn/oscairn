@@ -1,21 +1,284 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Themes (docs/design-language.md, docs/theme.schema.json): the same folders and the same
-//! choice the JUCE app reads, so a theme chosen in either UI shows in both. A theme folder is
-//! `<id>/theme.json` with its fonts; built-in ones are beside the program
-//! (`share/oscairn/themes`, the JUCE app's), installed ones in the configuration folder's
-//! `themes/`, and `appearance.txt` there names the one chosen. Read live: a new choice is seen
-//! within a second and repaints the window once.
+//! Themes (docs/design-language.md, docs/theme.schema.json): the same folders, the same files and
+//! the same rules as the JUCE app (hosts/standalone/Theme.cpp `ThemeData::parse`, `Theme::load`,
+//! `Theme::reload`), the same choice. A theme folder is `<id>/theme.json` with its fonts;
+//! built-in ones are beside the program (`share/oscairn/themes`, the JUCE app's), installed ones
+//! in the configuration folder's `themes/`, and `appearance.txt` there names the one chosen.
+//! Read live: a new choice is seen within a second and repaints the window once.
 //!
-//! What the Rust UI takes from a theme: the colors (the nine roles, and the optional `warning`
-//! and `focus`), `radius`, `fontScale` and the two font files. Any of them missing or unusable
-//! falls back to the default built-in theme's, key by key, so an odd theme never fails. `style`,
-//! `wires` and `splash` are for screens the Rust UI does not draw yet.
+//! Everything a theme file can set is read: the nine colors (and the optional `warning` and
+//! `focus`), `radius`, `fontScale`, the eight `style` choices, the six `wires` colors, the
+//! `splash`, and the font files. A file is accepted or refused whole, as the reference does:
+//! only `fontScale`, `radius`, `colors.warning`, `colors.focus`, `font.bold` and `splash` may be
+//! absent (their defaults below); anything else missing, unknown, mistyped or out of range, text
+//! contrast under 4.5:1, a folder not named after its id or a font the reference would not take
+//! refuses the theme, which then shows the default theme, else the emergency one, as `reload`
+//! does. Held per window: `apply` sets the window's `Theme` global, nothing is process-wide.
 
 use crate::profile::{DEFAULT_THEME, THEMES};
-use crate::{Shell, Theme};
-use serde_json::Value;
+use crate::{ButtonStyle, DepthStyle, EdgeStyle, MarkStyle, RowStyle, SectionStyle, Shell, SliderStyle, TabStyle, Theme};
+use serde_json::{Map, Value};
 use slint::{Color, ComponentHandle};
 use std::path::{Path, PathBuf};
+
+const MAX_THEME_BYTES: u64 = 16384;
+const MAX_FONT_BYTES: u64 = 4 << 20;
+const MAX_LICENSE_BYTES: u64 = 64 << 10;
+const MAX_SPLASH_BYTES: u64 = 1 << 20;
+
+/// The colors by role, in the reference's order (`Ink`).
+pub const INKS: [&str; 9] = ["background", "surface", "raised", "border", "text", "muted", "accent", "positive", "danger"];
+
+/// How controls are drawn (theme format 3): `ThemeStyle`, the reference's defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Style {
+    pub buttons: ButtonStyle,
+    pub edges: EdgeStyle,
+    pub depth: DepthStyle,
+    pub sliders: SliderStyle,
+    pub tabs: TabStyle,
+    pub marks: MarkStyle,
+    pub sections: SectionStyle,
+    pub rows: RowStyle,
+}
+
+impl Default for Style {
+    fn default() -> Style {
+        Style {
+            buttons: ButtonStyle::Pill,
+            edges: EdgeStyle::Hairline,
+            depth: DepthStyle::Soft,
+            sliders: SliderStyle::Line,
+            tabs: TabStyle::Segmented,
+            marks: MarkStyle::Square,
+            sections: SectionStyle::Separate,
+            rows: RowStyle::Left,
+        }
+    }
+}
+
+/// Wires in the routing views (theme format 4): `ThemeWires`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Wires {
+    pub audio: Color,
+    pub notes: Color,
+    pub disabled: Color,
+    pub draining: Color,
+    pub unconnected: Color,
+    pub control: Color,
+}
+
+impl Default for Wires {
+    fn default() -> Wires {
+        Wires { audio: rgb(0x8cc2ff), notes: rgb(0xc29cff), disabled: rgb(0x6b7480), draining: rgb(0xff9a45), unconnected: rgb(0xff6b63), control: rgb(0x6fe0a8) }
+    }
+}
+
+/// The splash screen (theme format 7), each part optional.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Splash {
+    pub image: String,
+    pub background: Option<Color>,
+    pub ink: Option<Color>,
+}
+
+/// Font files as paths relative to the theme's folder (empty only for the emergency theme).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FontFiles {
+    pub regular: String,
+    pub bold: String,
+    pub license: String,
+}
+
+/// A theme file as read: `ThemeData`, the reference's defaults where it has them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThemeData {
+    pub id: String,
+    pub name: String,
+    pub font: FontFiles,
+    pub font_scale: f32,
+    pub radius: f32,
+    /// By `INKS`.
+    pub colors: [Color; 9],
+    pub warning: Option<Color>,
+    pub focus: Option<Color>,
+    pub style: Style,
+    pub wires: Wires,
+    pub splash: Splash,
+}
+
+fn rgb(v: u32) -> Color {
+    Color::from_rgb_u8((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// The emergency theme (Theme.h's `ThemeData{}`), with no font files.
+impl Default for ThemeData {
+    fn default() -> ThemeData {
+        ThemeData {
+            id: "oscairn-dark".into(),
+            name: "Oscairn Dark".into(),
+            font: FontFiles::default(),
+            font_scale: 1.,
+            radius: 6.,
+            colors: [0x15181d, 0x20252d, 0x2c333d, 0x526070, 0xedf1f5, 0xa3aebb, 0xffa45b, 0x5ad9a4, 0xff8d87].map(rgb),
+            warning: None,
+            focus: None,
+            style: Style::default(),
+            wires: Wires::default(),
+            splash: Splash::default(),
+        }
+    }
+}
+
+type Refused = &'static str;
+
+fn require(condition: bool, message: Refused) -> Result<(), Refused> {
+    if condition {
+        Ok(())
+    } else {
+        Err(message)
+    }
+}
+
+fn fields(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), Refused> {
+    require(object.keys().all(|k| allowed.contains(&k.as_str())), "Unknown theme field")
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().count() <= 64 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// `#RRGGBB`, as the reference's `hex`.
+fn hex(v: Option<&Value>) -> Result<Color, Refused> {
+    let text = v.and_then(Value::as_str).unwrap_or_default();
+    require(text.len() == 7 && text.starts_with('#') && text[1..].bytes().all(|b| b.is_ascii_hexdigit()), "Theme colors must be #RRGGBB")?;
+    Ok(rgb(u32::from_str_radix(&text[1..], 16).unwrap_or_default()))
+}
+
+fn luminance(c: Color) -> f64 {
+    let linear = |v: u8| {
+        let v = f64::from(v) / 255.;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(c.red()) + 0.7152 * linear(c.green()) + 0.0722 * linear(c.blue())
+}
+
+fn contrast(x: Color, y: Color) -> f64 {
+    let (a, b) = (luminance(x), luminance(y));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// JUCE's `Colour::getPerceivedBrightness`.
+fn brightness(c: Color) -> f64 {
+    let f = |v: u8| f64::from(v) / 255.;
+    (f(c.red()).powi(2) * 0.241 + f(c.green()).powi(2) * 0.691 + f(c.blue()).powi(2) * 0.068).sqrt()
+}
+
+/// The reference's `darkTheme`: a background of perceived brightness under one half.
+fn dark(background: Color) -> bool {
+    brightness(background) < 0.5
+}
+
+impl ThemeData {
+    /// `ThemeData::parse`: the same checks in the same order, the same words.
+    pub fn parse(text: &str) -> Result<ThemeData, Refused> {
+        require(text.len() as u64 <= MAX_THEME_BYTES, "Theme exceeds 16 KiB")?;
+        let value: Value = serde_json::from_str(text).map_err(|_| "Invalid theme JSON")?;
+        let object = value.as_object().ok_or("Theme must be an object")?;
+        fields(object, &["version", "id", "name", "font", "fontScale", "radius", "colors", "style", "wires", "splash"])?;
+        require(object.get("version").is_some_and(|v| v.as_i64() == Some(7)), "Unsupported theme version")?;
+        let string = |key: &str| object.get(key).and_then(Value::as_str);
+        let id = string("id").unwrap_or_default().to_string();
+        let name = string("name").unwrap_or_default().to_string();
+        require(string("id").is_some() && valid_id(&id), "Theme ID must contain lowercase letters, digits or hyphens")?;
+        require(string("name").is_some() && !name.is_empty() && name.chars().count() <= 80, "Theme needs a short name")?;
+        let font = object.get("font").and_then(Value::as_object).ok_or("Theme needs its font files")?;
+        fields(font, &["regular", "bold", "license"])?;
+        let path = |key: &str, required: bool| -> Result<String, Refused> {
+            let v = font.get(key).filter(|v| !v.is_null()); // JUCE reads a null as absent
+            if !required && v.is_none() {
+                return Ok(String::new());
+            }
+            Ok(v.and_then(Value::as_str).ok_or("Theme font paths must be strings")?.to_string())
+        };
+        let font = FontFiles { regular: path("regular", true)?, bold: path("bold", false)?, license: path("license", true)? };
+        let number = |key: &str, fallback: f32, low: f64, high: f64| -> Result<f32, Refused> {
+            let Some(v) = object.get(key) else { return Ok(fallback) };
+            let n = v.as_f64().filter(|_| v.is_number()).ok_or("Theme metric must be a number")?;
+            require(n.is_finite() && n >= low && n <= high, "Theme metric is out of range")?;
+            Ok(n as f32)
+        };
+        // The reference compares a double with its float bounds, so 0.8 and 1.4 themselves (as doubles
+        // just under and over the floats) are refused there: the same here.
+        let font_scale = number("fontScale", 1., f64::from(0.8f32), f64::from(1.4f32))?;
+        let radius = number("radius", 6., 0., 16.)?;
+        let colors = object.get("colors").and_then(Value::as_object).ok_or("Theme needs semantic colors")?;
+        let mut allowed = INKS.to_vec();
+        allowed.extend(["warning", "focus"]);
+        fields(colors, &allowed)?;
+        let optional = |key: &str| -> Result<Option<Color>, Refused> { colors.get(key).map(|v| hex(Some(v))).transpose() };
+        let (warning, focus) = (optional("warning")?, optional("focus")?);
+        let mut ink = [Color::default(); 9];
+        for (i, key) in INKS.iter().enumerate() {
+            ink[i] = hex(colors.get(*key))?;
+        }
+        let wires = object.get("wires").and_then(Value::as_object).ok_or("Theme needs its wire colors")?;
+        fields(wires, &["audio", "notes", "disabled", "draining", "unconnected", "control"])?;
+        let wires = Wires {
+            audio: hex(wires.get("audio"))?,
+            notes: hex(wires.get("notes"))?,
+            disabled: hex(wires.get("disabled"))?,
+            draining: hex(wires.get("draining"))?,
+            unconnected: hex(wires.get("unconnected"))?,
+            control: hex(wires.get("control"))?,
+        };
+        let style = object.get("style").and_then(Value::as_object).ok_or("Theme needs a style")?;
+        fields(style, &["buttons", "edges", "depth", "sliders", "tabs", "marks", "sections", "rows"])?;
+        let choice = |key: &str, options: &[&str]| -> Result<usize, Refused> {
+            let v = style.get(key).and_then(Value::as_str);
+            v.and_then(|v| options.iter().position(|o| *o == v)).ok_or("Theme style choice is not one of its options")
+        };
+        let style = Style {
+            buttons: [ButtonStyle::Rounded, ButtonStyle::Pill][choice("buttons", &["rounded", "pill"])?],
+            edges: [EdgeStyle::None, EdgeStyle::Hairline, EdgeStyle::Outlined][choice("edges", &["none", "hairline", "outlined"])?],
+            depth: [DepthStyle::Flat, DepthStyle::Soft][choice("depth", &["flat", "soft"])?],
+            sliders: [SliderStyle::Filled, SliderStyle::Line, SliderStyle::Cap][choice("sliders", &["filled", "line", "cap"])?],
+            tabs: [TabStyle::Folder, TabStyle::Segmented][choice("tabs", &["folder", "segmented"])?],
+            marks: [MarkStyle::Square, MarkStyle::Round][choice("marks", &["square", "round"])?],
+            sections: [SectionStyle::Separate, SectionStyle::Joined][choice("sections", &["separate", "joined"])?],
+            rows: [RowStyle::Left, RowStyle::Right, RowStyle::Dot, RowStyle::Fill][choice("rows", &["left", "right", "dot", "fill"])?],
+        };
+        for background in &ink[..3] {
+            require(contrast(ink[4], *background) >= 4.5, "Theme text contrast must be at least 4.5:1")?;
+        }
+        let mut splash = Splash::default();
+        if let Some(s) = object.get("splash") {
+            let s = s.as_object().ok_or("Theme splash must be an object")?;
+            fields(s, &["image", "background", "ink"])?;
+            if let Some(image) = s.get("image") {
+                let image = image.as_str().filter(|i| i.ends_with(".svg") || i.ends_with(".png")).ok_or("Theme splash image must be an .svg or .png file")?;
+                splash.image = image.to_string();
+            }
+            if let Some(v) = s.get("background") {
+                splash.background = Some(hex(Some(v))?);
+            }
+            if let Some(v) = s.get("ink") {
+                splash.ink = Some(hex(Some(v))?);
+            }
+            let (ink_color, behind) = (splash.ink.unwrap_or(ink[4]), splash.background.unwrap_or(ink[0]));
+            require(contrast(ink_color, behind) >= 4.5, "Theme splash text contrast must be at least 4.5:1")?;
+        }
+        Ok(ThemeData { id, name, font, font_scale, radius, colors: ink, warning, focus, style, wires, splash })
+    }
+
+    fn ink(&self, name: &str) -> Color {
+        self.colors[INKS.iter().position(|n| *n == name).unwrap_or_default()]
+    }
+}
 
 /// Where themes are: the built-in folder (none: the built-in themes this program was built
 /// with, without their font files) and the installed one.
@@ -35,117 +298,255 @@ impl Places {
     }
 }
 
-/// A theme read: its theme.json over the default's, and its folder (none: built in, no fonts).
+/// A theme read and checked: the data, its folder (none: built in, no font files) and the font
+/// files' bytes. `refused` is why the theme asked for was not used (the reference's `error()`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Loaded {
     pub id: String,
-    pub doc: Value,
+    pub data: ThemeData,
     pub folder: Option<PathBuf>,
+    pub regular: Option<Vec<u8>>,
+    pub bold: Option<Vec<u8>>,
+    pub refused: Option<String>,
 }
 
-fn read(folder: &Path) -> Option<Value> {
-    let text = std::fs::read_to_string(folder.join("theme.json")).ok().filter(|t| t.len() <= 16 << 10)?;
-    serde_json::from_str::<Value>(&text).ok().filter(Value::is_object)
-}
-
-fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-}
-
-/// The theme `id` names: a built-in folder's, an installed one's (built-in IDs win, as in the
-/// JUCE app), else the one this program was built with.
-fn find(places: &Places, id: &str) -> Option<(Value, Option<PathBuf>)> {
-    if !valid_id(id) {
-        return None;
-    }
-    for dir in [&places.built_in, &places.installed].into_iter().flatten() {
-        let folder = dir.join(id);
-        if let Some(doc) = read(&folder) {
-            return Some((doc, Some(folder)));
+/// A file named by a theme: a relative path inside its folder, no links, within a size limit.
+fn inside(folder: &Path, relative: &str, limit: u64) -> Result<PathBuf, Refused> {
+    require(
+        !relative.is_empty() && relative.chars().count() <= 128 && relative.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/".contains(&b)),
+        "Theme file paths must be relative names inside the theme",
+    )?;
+    require(relative.split('/').all(|p| !p.is_empty() && p != "." && p != ".."), "Theme file paths must stay inside the theme")?;
+    let file = folder.join(relative);
+    let mut at = file.as_path();
+    while at != folder {
+        require(!std::fs::symlink_metadata(at).is_ok_and(|m| m.file_type().is_symlink()), "Theme files must not be links")?;
+        match at.parent() {
+            Some(p) if p != at => at = p,
+            _ => break,
         }
     }
-    THEMES.iter().find(|(t, _)| *t == id).and_then(|(_, text)| serde_json::from_str(text).ok()).map(|doc| (doc, None))
+    let meta = std::fs::metadata(&file).ok().filter(|m| m.is_file()).ok_or("Theme file is missing")?;
+    require(meta.len() <= limit, "Theme file is too large")?;
+    Ok(file)
 }
 
-/// `over` with every key `base` has and it lacks taken from `base`, object by object.
-pub fn merged(base: &Value, over: &Value) -> Value {
-    match (base, over) {
-        (Value::Object(b), Value::Object(o)) => {
-            let mut out = b.clone();
-            for (k, v) in o {
-                out.insert(k.clone(), merged(&b.get(k).cloned().unwrap_or(Value::Null), v));
+/// The reference's `fontContainer`: signature, a table directory inside the file and the tables
+/// a usable font needs. Not a full font validator.
+fn font_container(b: &[u8]) -> bool {
+    let u32_at = |at: usize| u32::from_be_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]]);
+    if b.len() < 12 {
+        return false;
+    }
+    if !matches!(u32_at(0), 0x0001_0000 | 0x7472_7565 | 0x4f54_544f) {
+        return false;
+    }
+    let tables = usize::from(b[4]) << 8 | usize::from(b[5]);
+    if !(1..=64).contains(&tables) || 12 + 16 * tables > b.len() {
+        return false;
+    }
+    let mut tags: Vec<&[u8]> = Vec::new();
+    for i in 0..tables {
+        let at = 12 + 16 * i;
+        if u64::from(u32_at(at + 8)) + u64::from(u32_at(at + 12)) > b.len() as u64 {
+            return false;
+        }
+        tags.push(&b[at..at + 4]);
+    }
+    let has = |t: &[u8]| tags.contains(&t);
+    ["cmap", "head", "hhea", "hmtx", "maxp", "name"].iter().all(|t| has(t.as_bytes())) && ((has(b"glyf") && has(b"loca")) || has(b"CFF ") || has(b"CFF2"))
+}
+
+fn typeface(file: &Path) -> Result<Vec<u8>, Refused> {
+    let ext = file.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    require(matches!(ext.as_deref(), Some("ttf" | "otf")), "Theme fonts must be .ttf or .otf files")?;
+    let data = std::fs::read(file).map_err(|_| "Cannot read theme font")?;
+    require(font_container(&data), "Theme font is not a TrueType or OpenType font")?;
+    Ok(data)
+}
+
+/// `Theme::load`: a theme folder, checked as the reference checks it.
+pub fn load_folder(folder: &Path) -> Result<Loaded, Refused> {
+    let file = inside(folder, "theme.json", MAX_THEME_BYTES)?;
+    let text = String::from_utf8_lossy(&std::fs::read(file).map_err(|_| "Theme file is missing")?).into_owned();
+    let data = ThemeData::parse(&text)?;
+    require(folder.file_name().and_then(|n| n.to_str()) == Some(data.id.as_str()), "Theme folder must be named after its ID")?;
+    let regular = typeface(&inside(folder, &data.font.regular, MAX_FONT_BYTES)?)?;
+    let bold = if data.font.bold.is_empty() { None } else { Some(typeface(&inside(folder, &data.font.bold, MAX_FONT_BYTES)?)?) };
+    inside(folder, &data.font.license, MAX_LICENSE_BYTES)?;
+    if !data.splash.image.is_empty() {
+        let image = inside(folder, &data.splash.image, MAX_SPLASH_BYTES)?;
+        // The reference decodes it; here its form is checked (a PNG's signature, an SVG's root), not its pixels.
+        let bytes = std::fs::read(image).map_err(|_| "Cannot read theme splash image")?;
+        let readable = if data.splash.image.ends_with(".png") { bytes.starts_with(b"\x89PNG\r\n\x1a\n") } else { String::from_utf8_lossy(&bytes).contains("<svg") };
+        require(readable, "Theme splash image cannot be read")?;
+    }
+    Ok(Loaded { id: data.id.clone(), data, folder: Some(folder.to_path_buf()), regular: Some(regular), bold, refused: None })
+}
+
+/// The theme `id` names: a built-in folder's if there is one (built-in IDs win, and a broken one is
+/// refused, not skipped), else an installed one's; with no built-in folder, the themes this
+/// program was built with.
+fn find(places: &Places, id: &str) -> Result<Loaded, Refused> {
+    require(valid_id(id), "Invalid theme ID")?;
+    match &places.built_in {
+        Some(dir) if dir.join(id).is_dir() => return load_folder(&dir.join(id)),
+        Some(_) => {}
+        None => {
+            if let Some((_, text)) = THEMES.iter().find(|(t, _)| *t == id) {
+                let data = ThemeData::parse(text)?;
+                return Ok(Loaded { id: data.id.clone(), data, folder: None, regular: None, bold: None, refused: None });
             }
-            Value::Object(out)
         }
-        (_, Value::Null) => base.clone(),
-        _ => over.clone(),
+    }
+    load_folder(&places.installed.as_deref().unwrap_or(Path::new("/nonexistent")).join(id))
+}
+
+fn exists(places: &Places, id: &str) -> bool {
+    let built_in = match &places.built_in {
+        Some(dir) => dir.join(id).is_dir(),
+        None => THEMES.iter().any(|(t, _)| *t == id),
+    };
+    built_in || places.installed.as_ref().is_some_and(|d| d.join(id).is_dir())
+}
+
+/// `Theme::defaultId`: the screen's theme if it exists, else `themes/default`'s, else Oscairn Dark.
+fn default_id(places: &Places, screen: &str) -> String {
+    if valid_id(screen) && exists(places, screen) {
+        return screen.into();
+    }
+    let id = match &places.built_in {
+        Some(dir) => std::fs::read_to_string(dir.join("default")).unwrap_or_default().trim().to_string(),
+        None => DEFAULT_THEME.to_string(),
+    };
+    let built_in = match &places.built_in {
+        Some(dir) => dir.join(&id).is_dir(),
+        None => THEMES.iter().any(|(t, _)| *t == id),
+    };
+    if valid_id(&id) && built_in {
+        id
+    } else {
+        "oscairn-dark".into()
     }
 }
 
-/// The theme to show: the user's choice, else `screen`'s (the profile's), else the built-in
-/// default (`themes/default`), else Oscairn Dark; over the default for anything it lacks.
+/// `Theme::reload`'s choice: the user's (empty: the default), and if that is refused the default,
+/// and if that is too the emergency theme. `screen` is the profile's theme (OSCAIRN_SCREEN_THEME).
 pub fn chosen(places: &Places, choice: &str, screen: &str) -> Loaded {
-    let default_id = places.built_in.as_ref().and_then(|d| std::fs::read_to_string(d.join("default")).ok()).map(|t| t.trim().to_string()).filter(|t| valid_id(t)).unwrap_or(DEFAULT_THEME.into());
-    let base = find(places, &default_id).or_else(|| find(places, "oscairn-dark")).map(|t| t.0).unwrap_or_default();
-    for id in [choice, screen, &default_id, "oscairn-dark"] {
-        if let Some((doc, folder)) = find(places, id) {
-            return Loaded { id: id.into(), doc: merged(&base, &doc), folder };
-        }
+    let default = default_id(places, screen);
+    let wanted = if choice.is_empty() { default.as_str() } else { choice };
+    let refused = match find(places, wanted) {
+        Ok(loaded) => return loaded,
+        Err(why) => why,
+    };
+    match find(places, &default) {
+        Ok(loaded) => Loaded { refused: Some(refused.into()), ..loaded },
+        Err(_) => Loaded { id: "oscairn-dark".into(), data: ThemeData::default(), folder: None, regular: None, bold: None, refused: Some(refused.into()) },
     }
-    Loaded { id: String::new(), doc: base, folder: None }
 }
 
-fn color(v: &Value) -> Option<Color> {
-    let hex = v.as_str()?.strip_prefix('#').filter(|h| h.len() == 6)?;
-    let v = u32::from_str_radix(hex, 16).ok()?;
-    Some(Color::from_rgb_u8((v >> 16) as u8, (v >> 8) as u8, v as u8))
-}
-
-/// A font file of the theme's folder, by the theme's relative path (never outside the folder),
-/// registered for Slint's renderers; its family's name.
+/// A font's bytes registered for Slint's renderers; its family's name.
 #[cfg(not(test))]
-fn register_font(folder: &Path, file: &Value) -> Option<String> {
+fn register_font(data: &[u8]) -> Option<String> {
     use slint::fontique_011::fontique;
-    let file = file.as_str().filter(|f| !f.contains("..") && !f.starts_with('/'))?;
-    let data = std::fs::read(folder.join(file)).ok().filter(|d| d.len() <= 4 << 20)?;
     let mut collection = slint::fontique_011::shared_collection();
-    let fonts = collection.register_fonts(fontique::Blob::new(std::sync::Arc::new(data)), None);
+    let fonts = collection.register_fonts(fontique::Blob::new(std::sync::Arc::new(data.to_vec())), None);
     let family = fonts.first()?.0;
     collection.family_name(family).map(String::from)
 }
 
 // Headless tests keep the built-in Inter: the renderer's fonts are shared by every test thread.
 #[cfg(test)]
-fn register_font(_: &Path, _: &Value) -> Option<String> {
+fn register_font(_: &[u8]) -> Option<String> {
     None
 }
 
-/// Puts the theme in the window's `Theme` global. Every key is set, so a switch leaves nothing of
-/// the theme before; one that cannot be read is the default theme's (`chosen` merged it in).
+/// `drawListRow`'s tinted row: the background blended toward the row's color, by .42 (.3 on an odd
+/// row) less .05 at a time while text on it would be under 4.5:1.
+fn row_fill(color: Color, base: Color, text: Color, odd: bool) -> Color {
+    let blend = |amount: f32| {
+        let mix = |a: u8, b: u8| (f32::from(a) * (1. - amount) + f32::from(b) * amount).round() as u8;
+        Color::from_rgb_u8(mix(base.red(), color.red()), mix(base.green(), color.green()), mix(base.blue(), color.blue()))
+    };
+    let mut amount: f32 = if odd { 0.3 } else { 0.42 };
+    while amount > 0.05 && contrast(text, blend(amount)) < 4.5 {
+        amount -= 0.05;
+    }
+    blend(amount)
+}
+
+/// Gives a window its theme's computed pieces; before the first `apply`.
+pub fn attach(window: &Shell) {
+    window.global::<Theme>().on_row_fill(row_fill);
+}
+
+/// JUCE's `Colour::contrasting`: black on a bright color, white on a dark one.
+fn contrasting(c: Color) -> Color {
+    if brightness(c) >= 0.5 {
+        Color::from_rgb_u8(0, 0, 0)
+    } else {
+        Color::from_rgb_u8(255, 255, 255)
+    }
+}
+
+/// What a screen laying out in pixels needs: the gap between sections, `separate` unless they join.
+pub fn section_gap(window: &Shell, separate: f32) -> f32 {
+    if window.global::<Theme>().get_sections() == SectionStyle::Joined {
+        0.
+    } else {
+        separate
+    }
+}
+
+/// Puts the theme in the window's `Theme` global. Every property is set, so a switch leaves
+/// nothing of the theme before.
 pub fn apply(window: &Shell, theme: &Loaded) {
     let g = window.global::<Theme>();
-    let c = &theme.doc["colors"];
-    let pick = |key: &str, or: Color| color(&c[key]).unwrap_or(or);
-    let accent = pick("accent", Color::from_rgb_u8(0xff, 0x9a, 0x45));
-    g.set_background(pick("background", Color::from_rgb_u8(0x11, 0x13, 0x17)));
-    g.set_surface(pick("surface", Color::from_rgb_u8(0x19, 0x1c, 0x21)));
-    g.set_raised(pick("raised", Color::from_rgb_u8(0x26, 0x2b, 0x32)));
-    g.set_border(pick("border", Color::from_rgb_u8(0x3a, 0x41, 0x4b)));
-    g.set_text(pick("text", Color::from_rgb_u8(0xf6, 0xf8, 0xfa)));
-    g.set_muted(pick("muted", Color::from_rgb_u8(0xb4, 0xbd, 0xc8)));
-    g.set_accent(accent);
-    g.set_positive(pick("positive", Color::from_rgb_u8(0x5a, 0xd9, 0xa4)));
-    g.set_danger(pick("danger", Color::from_rgb_u8(0xff, 0x6b, 0x63)));
-    g.set_warning(pick("warning", Color::from_rgb_u8(0xe8, 0xc5, 0x47))); // the JUCE meters' yellow
-    g.set_focus(pick("focus", accent));
-    // The JUCE app's ranges (Theme.cpp): a radius of 0 to 16, a font scale of 0.8 to 1.4.
-    g.set_radius(theme.doc["radius"].as_f64().filter(|r| r.is_finite()).unwrap_or(6.).clamp(0., 16.) as f32);
-    g.set_font_scale(theme.doc["fontScale"].as_f64().filter(|s| s.is_finite()).unwrap_or(1.).clamp(0.8, 1.4) as f32);
-    let family = theme.folder.as_deref().and_then(|f| {
-        let regular = register_font(f, &theme.doc["font"]["regular"]);
-        register_font(f, &theme.doc["font"]["bold"]);
-        regular
-    });
+    let d = &theme.data;
+    let c = |name: &str| d.ink(name);
+    g.set_background(c("background"));
+    g.set_surface(c("surface"));
+    g.set_raised(c("raised"));
+    g.set_border(c("border"));
+    g.set_text(c("text"));
+    g.set_muted(c("muted"));
+    g.set_accent(c("accent"));
+    g.set_positive(c("positive"));
+    g.set_danger(c("danger"));
+    g.set_warning(d.warning.unwrap_or(rgb(0xe8c547))); // the JUCE meters' yellow
+    g.set_focus(d.focus.unwrap_or(c("accent")));
+    g.set_dark(dark(c("background")));
+    g.set_on_accent(contrasting(c("accent")));
+    let (text, surface) = (c("text"), c("surface"));
+    let brighter = |a: Color, b: Color| brightness(a) > brightness(b);
+    g.set_key_light(if brighter(text, surface) { text } else { surface });
+    g.set_key_dark(if brighter(text, surface) { surface } else { text });
+    g.set_radius(d.radius);
+    g.set_font_scale(d.font_scale);
+    let s = d.style;
+    g.set_buttons(s.buttons);
+    g.set_edges(s.edges);
+    g.set_depth(s.depth);
+    g.set_sliders(s.sliders);
+    g.set_tabs(s.tabs);
+    g.set_marks(s.marks);
+    g.set_sections(s.sections);
+    g.set_rows(s.rows);
+    g.set_wire_audio(d.wires.audio);
+    g.set_wire_notes(d.wires.notes);
+    g.set_wire_disabled(d.wires.disabled);
+    g.set_wire_draining(d.wires.draining);
+    g.set_wire_unconnected(d.wires.unconnected);
+    g.set_wire_control(d.wires.control);
+    g.set_splash_background(d.splash.background.unwrap_or(c("background")));
+    g.set_splash_ink(d.splash.ink.unwrap_or(c("text")));
+    let image = theme.folder.as_deref().filter(|_| !d.splash.image.is_empty()).and_then(|f| slint::Image::load_from_path(&f.join(&d.splash.image)).ok());
+    g.set_has_splash_image(image.is_some());
+    g.set_splash_image(image.unwrap_or_default());
+    let family = theme.regular.as_deref().and_then(register_font);
+    if let Some(bold) = theme.bold.as_deref() {
+        register_font(bold);
+    }
     g.set_font_family(family.unwrap_or("Inter".into()).into());
 }
 
@@ -167,40 +568,4 @@ pub fn follow(window: &Shell, places: Places, screen: String, timer: &slint::Tim
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("oscairn-ui-themes-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    #[test]
-    fn chosen_as_the_juce_app_chooses() {
-        let built_in = Places::default(); // the ones built in
-        assert_eq!(chosen(&built_in, "", "oscairn-block").id, "oscairn-block");
-        assert_eq!(chosen(&built_in, "oscairn-light", "oscairn-block").id, "oscairn-light");
-        assert_eq!(chosen(&built_in, "Not An Id", "").id, DEFAULT_THEME);
-        assert_eq!(chosen(&built_in, "../etc", "").id, DEFAULT_THEME);
-    }
-
-    #[test]
-    fn installed_themes_and_missing_keys() {
-        let installed = temp("installed");
-        std::fs::create_dir_all(installed.join("odd")).unwrap();
-        std::fs::write(installed.join("odd/theme.json"), json!({"version": 7, "id": "odd", "colors": {"accent": "#00FF00", "text": "red"}, "fontScale": 9}).to_string()).unwrap();
-        let places = Places { built_in: None, installed: Some(installed.clone()) };
-        let t = chosen(&places, "odd", "");
-        assert_eq!((t.id.as_str(), t.folder.as_deref()), ("odd", Some(installed.join("odd").as_path())));
-        assert_eq!(t.doc["colors"]["accent"], "#00FF00");
-        let dark = chosen(&places, "", "");
-        assert_eq!(t.doc["colors"]["background"], dark.doc["colors"]["background"], "missing: the default's");
-        assert_eq!((color(&t.doc["colors"]["text"]), color(&json!("#FFF"))), (None, None)); // unusable: apply falls back
-        std::fs::write(installed.join("odd/theme.json"), "{ not json").unwrap();
-        assert_eq!(chosen(&places, "odd", "").id, DEFAULT_THEME);
-        let _ = std::fs::remove_dir_all(&installed);
-    }
-}
+mod tests;

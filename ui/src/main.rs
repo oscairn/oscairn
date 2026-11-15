@@ -52,6 +52,7 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     let ui = Shell::new()?;
     let places = theme::Places::found();
+    theme::attach(&ui);
     theme::apply(&ui, &theme::chosen(&places, &settings::chosen_theme(), &profile.theme));
     let watch = slint::Timer::default();
     theme::follow(&ui, places, profile.theme.clone(), &watch);

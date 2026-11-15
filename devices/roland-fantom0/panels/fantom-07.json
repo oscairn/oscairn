@@ -38,7 +38,7 @@
     { "kind": "analog", "id": 1, "control": "knob:10", "max": 1023 },
     { "kind": "analog", "id": 3, "control": "pedal:1" },
     { "kind": "analog", "id": 4, "control": "pedal:2" },
-    { "kind": "analog", "id": 2, "control": "footswitch:1" },
+    { "kind": "analog", "id": 2, "control": "footswitch:1", "max": 127 },
     { "kind": "encoder", "id": 0, "control": "screen:1", "navigate": { "action": "move", "pane": 0 } },
     { "kind": "encoder", "id": 1, "control": "screen:2" },
     { "kind": "encoder", "id": 2, "control": "screen:3" },

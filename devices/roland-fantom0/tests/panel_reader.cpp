@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <csignal>
@@ -98,7 +99,7 @@ namespace
         check(analog(16, 127).control == "fader:8" && near(analog(16, 127).input.value, 1) && near(analog(17, 64).input.value, 64 / 127.) && analog(17, 64).control == "knob:1",
               "slider 8 (analog 16) and knob 1 on 0 to 127");
         check(near(analog(7, 1023).input.value, 1) && near(analog(5, 512).input.value, 512 / 1023.) && analog(5, 512).control == "wheel:3", "the lever and WHEEL1 on 0 to 1023");
-        check(analog(2, 1023).control == "footswitch:1" && near(analog(2, 1023).input.value, 1) && near(analog(2, 512).input.value, 512 / 1023.), "the HOLD jack (analog 2) is footswitch:1, a position on 0 to 1023");
+        check(analog(2, 127).control == "footswitch:1" && near(analog(2, 127).input.value, 1) && near(analog(2, 64).input.value, 64 / 127.), "the HOLD jack (analog 2) is footswitch:1, a position on 0 to 127");
         check(analog(0, 1023).control == "knob:9" && near(analog(0, 1023).input.value, 1) && near(analog(1, 512).input.value, 512 / 1023.), "CUTOFF and RESONANCE on 0 to 1023");
         // The pads as the owner pressed them on November 12: from the bottom left, left to right,
         // row by row upward, switches 101, 103, 102, 100, then 98, 97, 96, 99, 92, 94, 95, 93, 91,
@@ -465,6 +466,54 @@ namespace
         ::close(fds[1]); ::close(fds[0]);
     }
 
+    // The HOLD jack as the unit sends it (analog 2, a ramp of 0 to 127 steps when pressed): the shipped FANTOM-07 map
+    // through a reader into a Session whose profile group makes it sustain. Its position reaches the parts as CC 64
+    // with the value (0 to 127, so a half-damper pedal passes as one): a part that receives sustain holds the released
+    // key while it is down; a part set to none does not.
+    void holdJack(const char* fixture, const char* shipped)
+    {
+        char home[] = "/tmp/oscairn-hold-jack-XXXXXX"; // the session's revisions there, never the real data folder
+        if(!::mkdtemp(home)) { check(false, "a data folder for the test"); return; }
+        const char* kept = std::getenv("OSCAIRN_DATA_HOME"); const std::string was = kept ? kept : "";
+        ::setenv("OSCAIRN_DATA_HOME", home, 1);
+        constexpr uint32_t frames = 64;
+        Session s(48000, frames);
+        auto render = [&] {
+            std::array<float, frames> l{}, r{};
+            float* out[2]{l.data(), r.data()};
+            check(s.process(nullptr, 0, out, 2, frames), "render");
+            return l[frames - 1];
+        };
+        const auto a = s.add("a", fixture, "org.kick.test.midi"), b = s.add("b", fixture, "org.kick.test.midi");
+        s.setParameter(a, 7, .5); s.setParameter(b, 7, .25);
+        const auto pa = s.addPart("A"), pb = s.addPart("B");
+        s.insertIntoPart(pa, 0, a); s.insertIntoPart(pb, 0, b); s.commit();
+        auto input = s.parts()[1].input; input.pedals = withPedalReceive(0, Pedal::Sustain, PedalReceive::None); s.setPartInput(pb, input); s.commit();
+        ControlGroup hold; hold.role = ControlGroup::Role::Assign; hold.kind = "footswitches"; hold.count = 1; hold.functions = {"sustain"};
+        s.setControllers({hold}, {}); s.service();
+        std::ifstream in(shipped); std::stringstream text; text << in.rdbuf();
+        int fds[2]; check(::pipe(fds) == 0, "a pipe");
+        Heard heard;
+        {
+            PanelReader reader(fds[0], PanelMap::parse(text.str()), [&](const PanelEvent& e) {
+                if(!e.control.empty()) s.controllerControl(e.control, e.input);
+                std::lock_guard g(heard.lock); heard.events.push_back(e);
+            }, {});
+            auto jack = [&](int value) { put(fds[1], std::array<uint8_t, 4>{0x84, 2, uint8_t((value >> 7) << 2), uint8_t(value & 0x7F)}); };
+            size_t sent = 0;
+            auto ramp = [&](const std::vector<int>& values) { for(const int v : values) { jack(v); ++sent; } check(heard.wait(sent), "the ramp heard"); s.service(); };
+            ramp({4, 8, 9, 12, 62, 79, 99, 113, 120, 123, 125, 126, 127}); // pressed, as dumped on the unit
+            s.note(true, 60, 1); render(); s.note(false, 60, 0); render(); render();
+            check(near(render(), .5), "the jack pressed holds the key on the part that takes sustain, not the one set to none: " + std::to_string(render()));
+            ramp({41, 21, 0});
+            render();
+            check(near(render(), 0), "the jack up lets it go: " + std::to_string(render()));
+        }
+        ::close(fds[1]); ::close(fds[0]);
+        ::setenv("OSCAIRN_DATA_HOME", was.c_str(), 1);
+        std::error_code e; std::filesystem::remove_all(home, e);
+    }
+
     // oscairn-panel-dump attached to a holder: each message on a line, with the control or "-",
     // then the table. Without a holder it refuses.
     void dump(const char* tool)
@@ -565,6 +614,7 @@ int main(int argc, char** argv)
     deadband();
     turnedAway();
     session(argv[1]);
+    holdJack(argv[1], argv[2]);
     if(failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("panel reader: ok");
     return 0;

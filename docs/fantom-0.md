@@ -1275,7 +1275,7 @@ showed. Roland numbers them the other way up, its pad 1 the top left (switch 91)
 is taken to be printed; the printed labels are not yet checked. The CTRL jacks' plug sensing is switches 35 and 36 (CTRL1 and
 CTRL2, Roland's "sense") and 37 and 38 (their ring contacts), as fixed controls nothing plays
 (`ctrl1Sense`, `ctrl2Sense`, `ctrl1Ring`, `ctrl2Ring`); Roland's app passes a CTRL jack's position
-on only while its sense switch is on. The HOLD jack is analog 2, `footswitch:1`: a position and not a switch, so a
+on only while its sense switch is on. The HOLD jack is analog 2, `footswitch:1`: a position on 0 to 127 (pressed is high) and not a switch, so a
 half-damper pedal reads as one; the CTRL jacks are `pedal:1` and `pedal:2` (analog 3 and 4).
 
 Not in the map, with Roland's numbers for them:
@@ -1384,19 +1384,12 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   ended a latched arpeggio. The arpeggiator 0.1.7 still cuts on CC 123 (it chokes, as on its own
   transport stop) until it treats CC 123 as a release ([plugin porting](plugin-porting.md)). Not
   yet tried on the unit.
-- **The HOLD jack's id and kind are unconfirmed (November 15: a pedal in the jack sent no CC 64
-  to the graph; injecting CC 64 sustains, so routing is fine).** Evidence in hand: Roland's test
-  tool names `HOLD` among the analog sources, and the map's analog 2 is the one id left in
-  0 to 24 once CUTOFF/RESONANCE (0, 1), the wheels (5, 6), the lever (7, 8), sliders (9 to 16)
-  and knobs (17 to 24) are placed; nothing read or measured ties HOLD to 2. The panel button HOLD
-  is switch 19. Whether the panel's processor or a BMC sends the HOLD jack is not established
-  (bmc-research `docs/fantom-panel-bus-behavior.md`, Open), and the app's sense gating is known
-  only for CTRL1 and CTRL2 (switches 35 to 38). The reader sends nothing to enable an analog
-  channel (the panel reports on its own once held), and no pedal-jack message has been seen. To
-  settle it, run `oscairn-panel-dump /usr/share/oscairn/panels/fantom-07.json` beside the engine
-  (it prints every message, unmapped ones with `-`, and a kind and id table at the end), plug the
-  pedal into HOLD, press and release it a few times; the engine's own log also lists unmapped
-  messages (at most ten a second). If nothing shows at all, the jack is not on the panel bus.
+- **The HOLD jack is confirmed as analog 2, range 0 to 127, pressed = high (November 15, on the
+  unit: the raw dump showed analog id 2 ramping 0 to 127 in 10 to 18 steps when a sustain pedal
+  was pressed, and back).** The map had given it no `max`, so it read on the layout's 1023 and a
+  full press was 127/1023, CC 16: below the 64 a plugin takes as down, so no sustain. Its entry
+  now says `"max": 127`. The panel button HOLD is switch 19. The CTRL jacks (analog 3 and 4) are
+  not yet measured, so they keep the layout's 1023.
 - **The pedals:** the HOLD jack is `footswitch:1` in the map (analog 2), whose profile function is
   sustain: with nothing assigned to it, its position goes to the parts as CC 64 (0 to 127, so a
   half-damper pedal passes as one) from the built-in source, as the keys' notes, and reaches every part,

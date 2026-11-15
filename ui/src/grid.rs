@@ -15,7 +15,8 @@ const MAX_CHOICES: usize = 4;
 /// More values than this get a slider.
 const MAX_LISTED: usize = 64;
 /// Sizes in the shell's logical pixels, the JUCE grid's in touch mode (RFC 0019: a control 44 high).
-const GAP: f32 = 6.;
+/// The gap between sections when they are apart; a theme whose sections join has none (`theme::section_gap`).
+pub const SECTION_GAP: f32 = 6.;
 const TILE: f32 = 84.;
 const KNOB_EXTRA: f32 = 36.;
 const HEADING: f32 = 30.;
@@ -217,10 +218,10 @@ pub fn by_priority(params: &[Param], indices: &mut [usize]) {
 /// The tiles, headings, cards and view panels of `groups` (each a heading and its parameters) at
 /// `width`, as `ParameterGrid::build`: views first across the row, then runs of linked tiles (a
 /// hint's group, an envelope's stages) kept together, the rest one tile each, by priority.
-pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, control_of: &dyn Fn(usize) -> Control) -> Laid {
+pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap: f32, control_of: &dyn Fn(usize) -> Control) -> Laid {
     let mut out = Laid::default();
     let cols = columns(width);
-    let tile_w = (width - GAP * (cols - 1) as f32) / cols as f32;
+    let tile_w = (width - gap * (cols - 1) as f32) / cols as f32;
     let groups: Vec<(String, Vec<usize>)> = groups
         .iter()
         .map(|(h, m)| {
@@ -249,7 +250,7 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, con
         }
         let panel = |out: &mut Laid, y: &mut f32, envelope: Envelope, list: Vec<usize>| {
             out.panels.push(Panel { rect: Rect { x: 0., y: *y, w: width, h: ENVELOPE }, title: "Envelope".into(), envelope, params: list });
-            *y += ENVELOPE + GAP;
+            *y += ENVELOPE + gap;
         };
         for (view, index) in keys {
             let list: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == index && is_envelope(&params[i].field)).collect();
@@ -311,19 +312,19 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, con
                     }
                 }
                 column = 0;
-                y += height + GAP;
+                y += height + gap;
             }
             let mut card: Option<Rect> = None;
             for (k, &param) in run.iter().enumerate() {
                 // A group wider than the screen goes on in the next row, its rows touching.
                 if column == cols {
                     column = 0;
-                    y += height + if group { 0. } else { GAP };
+                    y += height + if group { 0. } else { gap };
                 }
-                let mut cell = Rect { x: column as f32 * (tile_w + GAP), y, w: tile_w, h: height };
+                let mut cell = Rect { x: column as f32 * (tile_w + gap), y, w: tile_w, h: height };
                 if group {
                     if k + 1 < run.len() && column + 1 < cols {
-                        cell.w = tile_w + GAP; // touches the next
+                        cell.w = tile_w + gap; // touches the next
                     }
                     if k + 1 == run.len() && run.len() > cols {
                         cell.w = width - cell.x; // a clean rectangle; nothing after it in the row
@@ -339,7 +340,7 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, con
             }
         }
         if out.tiles.len() > start {
-            y += height + GAP + 6.;
+            y += height + gap + 6.;
         }
     }
     // A tile is linked when a card holds it (a single tile widened stays alone).
@@ -588,7 +589,7 @@ mod tests {
 
     fn simple(params: &[Param], width: f32) -> Laid {
         let all: Vec<usize> = (0..params.len()).collect();
-        layout(params, &[(String::new(), all)], width, &|i| control(&params[i], &[], params))
+        layout(params, &[(String::new(), all)], width, SECTION_GAP, &|i| control(&params[i], &[], params))
     }
 
     #[test]
@@ -603,8 +604,8 @@ mod tests {
         let r: Vec<Rect> = laid.tiles.iter().map(|t| t.rect).collect();
         assert_eq!((r[0].x, r[1].x, r[2].x), (0., 211.5, 423.));
         assert_eq!(r[2].w, 840. - 423., "the tile before the group widens to the row's end");
-        assert_eq!((r[3].x, r[3].y), (0., TILE + GAP), "the group starts the next row");
-        assert_eq!(r[3].w, 205.5 + GAP, "its tiles touch");
+        assert_eq!((r[3].x, r[3].y), (0., TILE + SECTION_GAP), "the group starts the next row");
+        assert_eq!(r[3].w, 205.5 + SECTION_GAP, "its tiles touch");
         assert_eq!(laid.cards.len(), 1);
         assert!(laid.tiles[3].linked && laid.tiles[5].linked && !laid.tiles[6].linked && !laid.tiles[2].linked);
         assert_eq!(r[6].x, 3. * 211.5, "the next tile follows the group in its row");
@@ -629,11 +630,11 @@ mod tests {
         let mut params = vec![p(0, "Attack", "", 1., false), p(1, "Decay", "", 1., false), p(2, "Sustain", "", 1., false), p(3, "Release", "", 1., false), p(4, "Low", "range", 1., false), p(5, "High", "", 1., false)];
         params[4].range_high = Some(5);
         let groups = vec![("Amp/Env".to_string(), vec![0, 1, 2, 3]), ("Keys".to_string(), vec![4, 5])];
-        let laid = layout(&params, &groups, 900., &|i| control(&params[i], &[], &params));
+        let laid = layout(&params, &groups, 900., SECTION_GAP, &|i| control(&params[i], &[], &params));
         assert_eq!(laid.headings[0], (0., "Amp › Env".to_string()));
         assert_eq!(laid.panels.len(), 1, "an ADSR by name");
         assert_eq!(laid.panels[0].rect.y, HEADING);
-        assert_eq!(laid.tiles[0].rect.y, HEADING + ENVELOPE + GAP, "the tiles under the view");
+        assert_eq!(laid.tiles[0].rect.y, HEADING + ENVELOPE + SECTION_GAP, "the tiles under the view");
         assert!(laid.tiles[..4].iter().all(|t| t.linked), "its stages are one run");
         assert_eq!(laid.tiles.iter().map(|t| t.param).collect::<Vec<_>>(), [0, 1, 2, 3, 4], "no tile for High");
         assert_eq!(laid.tiles[4].control, Control::Range);

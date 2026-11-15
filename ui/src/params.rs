@@ -173,7 +173,9 @@ impl Screen {
 
     fn relayout(&mut self) {
         let groups = self.groups();
-        self.laid = grid::layout(&self.params, &groups, self.width, &|i| self.control(i));
+        // Sections join in some themes: no gap between tiles then.
+        let gap = self.ui.upgrade().map_or(grid::SECTION_GAP, |ui| crate::theme::section_gap(&ui, grid::SECTION_GAP));
+        self.laid = grid::layout(&self.params, &groups, self.width, gap, &|i| self.control(i));
         if self.cursor.is_some_and(|c| c >= self.laid.tiles.len()) {
             self.cursor = None;
         }

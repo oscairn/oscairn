@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Generates core/engine/rust/src/bindings.rs from core/engine/src/engine_core.h and core/plugin-host/src/worker_shared.h,
+// Generates core/engine/rust/src/bindings.rs from core/engine/src/engine_core.h, core/plugin-host/src/worker_shared.h and
+// core/plugin-host/src/clap_host.h,
 // on a machine with libclang:
 //   LIBCLANG_PATH=<its folder> cargo run --manifest-path core/engine/rust/bindgen/Cargo.toml -- <repo root>
 // The output is checked in; the crate's test engine_core_h_unchanged fails when the headers move under it.
@@ -7,6 +8,7 @@ fn main() {
     let root = std::env::args().nth(1).expect("the repo root");
     let header = format!("{root}/core/engine/src/engine_core.h");
     let worker = format!("{root}/core/plugin-host/src/worker_shared.h"); // the engine-worker shared block
+    let clap = format!("{root}/core/plugin-host/src/clap_host.h"); // the CLAP host's C interface
     // Types the crate defines itself (methods, atomics, safety), with the same layout.
     let own = [
         ("oscairn_event", "crate::event::Event"),
@@ -26,15 +28,19 @@ fn main() {
         ("oscairn_atomic_u64", "core::sync::atomic::AtomicU64"),
         ("oscairn_atomic_f64", "core::sync::atomic::AtomicU64"), // a double's bits
         ("oscairn_worker_event", "crate::event::Event"),
+        ("oscairn_clap_event", "crate::event::Event"),
+        ("oscairn_clap_wake", "core::sync::atomic::AtomicU32"),
     ];
     let unused = ["oscairn_voice_budget_note", "oscairn_zone"]; // behind types the crate defines
     let mut b = bindgen::Builder::default()
         .header(&header)
         .header(&worker)
+        .header(&clap)
         .clang_arg(format!("-I{root}/core/clap-ext/include"))
         .clang_arg(format!("-I{root}/core/clap-host/third_party/clap/include"))
         .allowlist_file(&header)
         .allowlist_file(&worker)
+        .allowlist_file(&clap)
         .allowlist_type("oscairn_voice_budget_context_t")
         .blocklist_function(".*")
         .derive_default(false)
@@ -52,7 +58,7 @@ fn main() {
     }
     // What the bindings were made from, so a test notices engine_core.h or voice-budget.h changing under them.
     let fnv = |p: &str| std::fs::read(p).expect("header").iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
-    out += &format!("pub const MADE_FROM: [u64; 3] = [{:#x}, {:#x}, {:#x}];\n", fnv(&header), fnv(&format!("{root}/core/clap-ext/include/oscairn-clap/voice-budget.h")), fnv(&worker));
+    out += &format!("pub const MADE_FROM: [u64; 4] = [{:#x}, {:#x}, {:#x}, {:#x}];\n", fnv(&header), fnv(&format!("{root}/core/clap-ext/include/oscairn-clap/voice-budget.h")), fnv(&worker), fnv(&clap));
     let generated = b.generate().expect("bindgen").to_string();
     out += &generated;
     std::fs::write(format!("{root}/core/engine/rust/src/bindings.rs"), out).expect("write");

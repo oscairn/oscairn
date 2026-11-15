@@ -685,8 +685,9 @@ mod tests {
             fnv(include_bytes!("../../src/engine_core.h")),
             fnv(include_bytes!("../../../clap-ext/include/oscairn-clap/voice-budget.h")),
             fnv(include_bytes!("../../../plugin-host/src/worker_shared.h")),
+            fnv(include_bytes!("../../../plugin-host/src/clap_host.h")),
         ];
-        assert_eq!(now, bindings::MADE_FROM, "engine_core.h, voice-budget.h or worker_shared.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
+        assert_eq!(now, bindings::MADE_FROM, "engine_core.h, voice-budget.h, worker_shared.h or clap_host.h changed: regenerate src/bindings.rs with core/engine/rust/bindgen");
     }
 
     /// Counts the allocations this thread makes while `COUNTING` is set.

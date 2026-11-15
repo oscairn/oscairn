@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "oscairn/plugin_host.h"
 #include "StateFiles.h"
+#include "clap_host.h"
 #include <kick_clap/Discovery.h>
 #include <algorithm>
 #include <atomic>
@@ -38,6 +39,8 @@
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
+// The CLAP host (clap_host.h): its C++ reference; the Rust host joins it as the next stage's other choice.
+#define OSCAIRN_CLAP(name) cpp_clap_##name
 namespace oscairn
 {
 #ifdef OSCAIRN_LV2
@@ -74,118 +77,143 @@ namespace oscairn
             return p;
         }
 
+        // A failed clap_host.h call thrown as the exception ClapHost threw for it.
+        [[noreturn]] void fail()
+        {
+            int kind=0;const std::string message=OSCAIRN_CLAP(error)(&kind);
+            if(kind==OSCAIRN_CLAP_INVALID_ARGUMENT)throw std::invalid_argument(message);
+            if(kind==OSCAIRN_CLAP_LOGIC_ERROR)throw std::logic_error(message);
+            throw std::runtime_error(message);
+        }
+        template<class T> T checked(T result){if(!result)fail();return result;}
+        bool checked(int result){if(result<0)fail();return result;}
+        template<class T> void append(void* to,const T* item){static_cast<std::vector<T>*>(to)->push_back(*item);}
+
+        // The CLAP host (clap_host.h) as a PluginHost: its description kept in the C++ types, again whenever it changes.
         class ClapHost final : public PluginHost
         {
+            oscairn_clap_host* host;
+            kick::clap::Descriptor descriptor_;
+            std::vector<kick::clap::Parameter> parameters_;
+            std::vector<kick::clap::Port> inputs_, outputs_;
+            uint64_t revision_ = ~uint64_t(0);
+            // After each control call: a rescan or a restart changed the description.
+            void sync()
+            {
+                const auto revision=OSCAIRN_CLAP(revision)(host);if(revision==revision_)return;
+                descriptor_={};parameters_.clear();inputs_.clear();outputs_.clear();
+                const oscairn_clap_description to{this,
+                    [](void* c,const oscairn_clap_descriptor* d){static_cast<ClapHost*>(c)->descriptor_={d->path,d->id,d->name,d->vendor,d->version,d->description,{},d->preset_discovery,{},{}};},
+                    [](void* c,const char* f){static_cast<ClapHost*>(c)->descriptor_.features.emplace_back(f);},
+                    [](void* c,const oscairn_clap_preset* p){static_cast<ClapHost*>(c)->descriptor_.presets.push_back({p->name,p->kind,p->location,p->load_key});},
+                    [](void* c,uint32_t number,const char* name){static_cast<ClapHost*>(c)->descriptor_.lanes.emplace_back(number,name);},
+                    [](void* c,bool input,const oscairn_clap_port* p){auto& h=*static_cast<ClapHost*>(c);(input?h.inputs_:h.outputs_).push_back({p->id,p->name,p->channels,p->flags});},
+                    [](void* c,const oscairn_clap_parameter* p){static_cast<ClapHost*>(c)->parameters_.push_back({p->id,p->name,p->module,p->minimum,p->maximum,p->default_value,p->flags,
+                        p->widget,p->priority,p->range_high,p->group,p->role,p->view,p->field,p->index,{reinterpret_cast<const std::array<uint8_t,11>*>(p->algorithms),reinterpret_cast<const std::array<uint8_t,11>*>(p->algorithms)+p->algorithm_count},{p->seconds,p->seconds+p->second_count}});}};
+                OSCAIRN_CLAP(describe)(host,&to);
+                revision_=revision;
+            }
+            // A control call that can rescan or restart the plugin: the description brought up to date, then its failure thrown.
+            void control(bool ok){sync();checked(ok);}
         public:
-            kick::clap::Host host;
-            std::shared_ptr<PluginHost> createEffectContext() override {
-                auto child=std::make_shared<ClapHost>();
-                if(!child->host.loadEffectContext(host))throw std::runtime_error(child->host.error());
-                child->host.lockAudioLayout();return child;
-            }
+            explicit ClapHost(oscairn_clap_host* h):host(h){sync();}
+            ~ClapHost() override {OSCAIRN_CLAP(free)(host);}
+            ClapHost(const ClapHost&)=delete;
+            ClapHost& operator=(const ClapHost&)=delete;
+            std::shared_ptr<PluginHost> createEffectContext() override {return std::make_shared<ClapHost>(checked(OSCAIRN_CLAP(effect_context)(host)));}
             std::optional<oscairn_effect_resources_t> effectResources() const override {
-                oscairn_effect_resources_t r{};if(host.effectResources(r))return r;return {};
+                oscairn_effect_resources_t r{};if(checked(OSCAIRN_CLAP(effect_resources)(host,&r)))return r;return {};
             }
-            std::optional<oscairn_memory_t> declaredMemory() const override {oscairn_memory_t m{};if(host.declaredMemory(m))return m;return {};}
-            void setMemoryRoom(uint64_t bytes) override {host.setMemoryRoom(bytes);}
-            void setActiveOutputs(uint64_t ports) override {host.setActiveOutputs(ports);}
-            uint32_t soundContextCapacity() const noexcept override {return host.soundContextCapacity();}
-            std::vector<oscairn_sound_context_info_t> soundContexts() const override {return host.soundContexts();}
+            std::optional<oscairn_memory_t> declaredMemory() const override {oscairn_memory_t m{};if(checked(OSCAIRN_CLAP(declared_memory)(host,&m)))return m;return {};}
+            void setMemoryRoom(uint64_t bytes) override {OSCAIRN_CLAP(set_memory_room)(host,bytes);}
+            void setActiveOutputs(uint64_t ports) override {OSCAIRN_CLAP(set_active_outputs)(host,ports);}
+            uint32_t soundContextCapacity() const noexcept override {return OSCAIRN_CLAP(sound_context_capacity)(host);}
+            std::vector<oscairn_sound_context_info_t> soundContexts() const override {
+                std::vector<oscairn_sound_context_info_t> r;checked(OSCAIRN_CLAP(sound_contexts)(host,append<oscairn_sound_context_info_t>,&r));return r;
+            }
             uint32_t prepareSound(const std::string& name,const std::vector<oscairn_sound_parameter_t>& p,const std::string& state,const std::string& preset,const std::string& sfz,const std::string& library,const std::string& directory) override {
-                if(!preset.empty()){if(!state.empty() || !p.empty() || !sfz.empty() || !library.empty() || !directory.empty())throw std::invalid_argument("A native sound from a preset takes nothing else");return host.prepareSound(name,presetFrom(preset));}
-                if(!state.empty())throw std::invalid_argument("Native contexts accept parameter, SFZ or preset patches only");return host.prepareSound(name,p,sfz,library,directory);}
-            bool selectSound(uint32_t id,int16_t channel) override {return host.selectSound(id,channel);}
-            bool discardSound(uint32_t id,bool) override {return host.discardSound(id);}
-            bool preparesSnapshots() const noexcept override {return host.preparesSoundSnapshots();}
-            bool ringsOut() const noexcept override {return host.ringsOut();}
-            bool chokeRetiring() override {return host.chokeRetiringSounds();}
-            bool voiceBudget() const noexcept override {return host.voiceBudget();}
-            bool honorsVolume() const noexcept override {return host.honorsVolume();}
-            void setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept override {host.setVoiceLimits(limit,contexts,count);}
-            uint32_t voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*& notes,uint32_t& count) const noexcept override {return host.voiceReport(voiceCost,notes,count);}
+                uint32_t id=0;
+                if(!preset.empty()){if(!state.empty() || !p.empty() || !sfz.empty() || !library.empty() || !directory.empty())throw std::invalid_argument("A native sound from a preset takes nothing else");
+                    const auto k=presetFrom(preset);const oscairn_clap_preset c{"",k.kind,k.location.c_str(),k.loadKey.c_str()};
+                    checked(OSCAIRN_CLAP(prepare_preset)(host,name.c_str(),&c,&id));return id;}
+                if(!state.empty())throw std::invalid_argument("Native contexts accept parameter, SFZ or preset patches only");
+                checked(OSCAIRN_CLAP(prepare_sound)(host,name.c_str(),p.data(),uint32_t(p.size()),sfz.c_str(),library.c_str(),directory.c_str(),&id));return id;}
+            bool selectSound(uint32_t id,int16_t channel) override {return checked(OSCAIRN_CLAP(select_sound)(host,id,channel));}
+            bool discardSound(uint32_t id,bool) override {return checked(OSCAIRN_CLAP(discard_sound)(host,id));}
+            bool preparesSnapshots() const noexcept override {return OSCAIRN_CLAP(prepares_snapshots)(host);}
+            bool ringsOut() const noexcept override {return OSCAIRN_CLAP(rings_out)(host);}
+            bool chokeRetiring() override {return checked(OSCAIRN_CLAP(choke_retiring)(host));}
+            bool voiceBudget() const noexcept override {return OSCAIRN_CLAP(voice_budget)(host);}
+            bool honorsVolume() const noexcept override {return OSCAIRN_CLAP(honors_volume)(host);}
+            void setVoiceLimits(uint32_t limit,const oscairn_voice_budget_context_t* contexts,uint32_t count) noexcept override {OSCAIRN_CLAP(set_voice_limits)(host,limit,contexts,count);}
+            uint32_t voiceReport(double& voiceCost,const oscairn_voice_budget_note_t*& notes,uint32_t& count) const noexcept override {return OSCAIRN_CLAP(voice_report)(host,&voiceCost,&notes,&count);}
             std::array<uint32_t,16> prepareSnapshot(const std::string& directory) override {
-                // What saveSnapshot wrote for a native engine: "state 1" and its state bundle.
-                const auto path=std::filesystem::path(directory);
-                const auto head=state_files::read(path/"snapshot",64);
-                if(std::string(head.begin(),head.end())!="state 1\n")throw std::runtime_error("Not a native sound snapshot");
-                const auto id=state_files::read(path/"state"/"plugin.id",65536);
-                if(std::string(id.begin(),id.end())!=host.descriptor().id)throw std::runtime_error("State belongs to a different CLAP plugin");
-                return host.prepareSoundSnapshot(state_files::read(path/"state"/"state.clap",kick::clap::Host::maxStateBytes));
+                std::array<uint32_t,16> ids{};checked(OSCAIRN_CLAP(prepare_snapshot)(host,directory.c_str(),ids.data()));return ids;
             }
-            bool savesSounds() const noexcept override {return host.savesSounds();}
-            void saveSound(uint32_t id,const std::string& directory) override {
-                state_files::Bundle bundle(directory);
-                const auto bytes=host.saveSoundState(id);const auto& plugin=host.descriptor().id;
-                std::filesystem::create_directory(bundle.temporary.path/"state");
-                state_files::write(bundle.temporary.path/"state"/"plugin.id",plugin.data(),plugin.size());
-                state_files::write(bundle.temporary.path/"state"/"state.clap",bytes.data(),bytes.size());
-                const std::string head="state 1\n";state_files::write(bundle.temporary.path/"snapshot",head.data(),head.size());
-                bundle.publish();
+            bool savesSounds() const noexcept override {return OSCAIRN_CLAP(saves_sounds)(host);}
+            void saveSound(uint32_t id,const std::string& directory) override {checked(OSCAIRN_CLAP(save_sound)(host,id,directory.c_str()));}
+            std::vector<oscairn_sound_parameter_t> soundValues(uint32_t id) const override {
+                std::vector<oscairn_sound_parameter_t> r;checked(OSCAIRN_CLAP(sound_values)(host,id,append<oscairn_sound_parameter_t>,&r));return r;
             }
-            std::vector<oscairn_sound_parameter_t> soundValues(uint32_t id) const override {return host.soundValues(id);}
-            bool supportsState() const noexcept override {return host.supportsState();}
-            bool hasWindow() const override {return host.hasGui();}
-            void showWindow(bool show,const std::string& title) override {if(!show)host.closeGui();else if(!host.showGui(title))throw std::runtime_error(host.error());}
+            bool supportsState() const noexcept override {return OSCAIRN_CLAP(supports_state)(host);}
+            bool hasWindow() const override {return OSCAIRN_CLAP(has_window)(host);}
+            void showWindow(bool show,const std::string& title) override {checked(OSCAIRN_CLAP(show_window)(host,show,title.c_str()));}
             // RFC 0005: through the isolated scan helper where one is configured; without one, this
             // plugin already runs in this process, and so does its index (within the index's budget).
             std::vector<PresetInfo> presets() override {
-                if(!placementPolicy().scan.empty())return scanPluginPresets(host.descriptor().path,host.descriptor().id);
-                std::vector<PresetInfo> r;for(const auto& p:host.presets())r.push_back({presetUri(p),p.name});return r;
+                if(!placementPolicy().scan.empty())return scanPluginPresets(descriptor_.path,descriptor_.id);
+                std::vector<PresetInfo> r;
+                checked(OSCAIRN_CLAP(presets)(host,[](void* to,const oscairn_clap_preset* p){static_cast<std::vector<PresetInfo>*>(to)->push_back({presetUri({p->name,p->kind,p->location,p->load_key}),p->name});},&r));
+                return r;
             }
-            void loadPreset(const std::string& uri) override {if(!host.loadPreset(presetFrom(uri)))throw std::runtime_error(host.error());}
-            void setAssets(kick::clap::AssetResolver* assets) noexcept override {host.setAssets(assets);}
-            std::vector<kick::clap::AssetReference> assetDependencies() const override {return host.assetDependencies();}
+            void loadPreset(const std::string& uri) override {
+                const auto p=presetFrom(uri);const oscairn_clap_preset c{p.name.c_str(),p.kind,p.location.c_str(),p.loadKey.c_str()};
+                control(OSCAIRN_CLAP(load_preset)(host,&c));
+            }
+            void setAssets(kick::clap::AssetResolver* assets) noexcept override {OSCAIRN_CLAP(set_assets)(host,assets);}
+            std::vector<kick::clap::AssetReference> assetDependencies() const override {
+                std::vector<kick::clap::AssetReference> r;
+                checked(OSCAIRN_CLAP(asset_dependencies)(host,[](void* to,const oscairn_clap_asset* a){static_cast<std::vector<kick::clap::AssetReference>*>(to)->push_back({a->library,a->path,a->sha256,a->optional});},&r));
+                return r;
+            }
             void saveSnapshot(const std::string& directory) override {
-                if(soundContextCapacity() && !host.supportsSoundSnapshot())throw std::runtime_error("Native engine has no complete sound-context snapshot interface");
+                if(soundContextCapacity() && !OSCAIRN_CLAP(supports_sound_snapshot)(host))throw std::runtime_error("Native engine has no complete sound-context snapshot interface");
                 PluginHost::saveSnapshot(directory);
             }
-            void saveState(const std::string& directory) override
-            {
-                state_files::Bundle bundle(directory);std::vector<uint8_t> bytes;
-                if(!host.saveState(bytes))throw std::runtime_error(host.error());
-                const auto& id=host.descriptor().id;
-                state_files::write(bundle.temporary.path/"plugin.id",id.data(),id.size());
-                state_files::write(bundle.temporary.path/"state.clap",bytes.data(),bytes.size());
-                bundle.publish();
+            void saveState(const std::string& directory) override {checked(OSCAIRN_CLAP(save_state)(host,directory.c_str()));}
+            void loadState(const std::string& directory) override {control(OSCAIRN_CLAP(load_state)(host,directory.c_str()));}
+            void service() override {control(OSCAIRN_CLAP(service)(host));}
+            bool reset() override {checked(OSCAIRN_CLAP(reset)(host));return true;}
+            void reconfigure(double rate,uint32_t frames) override {control(OSCAIRN_CLAP(reconfigure)(host,rate,frames));}
+            const kick::clap::Descriptor& descriptor() const noexcept override { return descriptor_; }
+            const std::vector<kick::clap::Parameter>& parameters() const noexcept override { return parameters_; }
+            const std::vector<kick::clap::Port>& inputPorts() const noexcept override { return inputs_; }
+            const std::vector<kick::clap::Port>& outputPorts() const noexcept override { return outputs_; }
+            bool usesClapNotes(uint32_t port) const noexcept override { return OSCAIRN_CLAP(uses_clap_notes)(host,port); }
+            bool takesSysex() const noexcept override { return OSCAIRN_CLAP(takes_sysex)(host); }
+            bool emitsSysex() const noexcept override { return OSCAIRN_CLAP(emits_sysex)(host); }
+            void panic() noexcept override { OSCAIRN_CLAP(panic)(host); }
+            uint32_t noteInputPorts() const noexcept override { return OSCAIRN_CLAP(note_input_ports)(host); }
+            uint32_t noteOutputPorts() const noexcept override { return OSCAIRN_CLAP(note_output_ports)(host); }
+            double parameterValue(clap_id id) const noexcept override { return OSCAIRN_CLAP(parameter_value)(host,id); }
+            uint64_t parameterReports() const noexcept override { return OSCAIRN_CLAP(parameter_reports)(host); }
+            uint64_t parameterRevision() const noexcept override { return OSCAIRN_CLAP(revision)(host); }
+            std::string parameterText(clap_id id, double value) const override {
+                std::string s;checked(OSCAIRN_CLAP(parameter_text)(host,id,value,[](void* to,const char* text,size_t size){static_cast<std::string*>(to)->assign(text,size);},&s));return s;
             }
-            void loadState(const std::string& directory) override
-            {
-                const auto path=std::filesystem::canonical(directory);
-                const auto id=state_files::read(path/"plugin.id",65536);
-                if(std::string(id.begin(),id.end())!=host.descriptor().id)throw std::runtime_error("State belongs to a different CLAP plugin");
-                const auto bytes=state_files::read(path/"state.clap",kick::clap::Host::maxStateBytes);
-                if(!host.loadState(bytes))throw std::runtime_error("CLAP state restore failed: "+host.error());
-            }
-            void service() override { host.service(); }
-            bool reset() override { host.reset(); return true; }
-            void reconfigure(double rate,uint32_t frames) override {if(!host.reconfigure(rate,frames))throw std::runtime_error(host.error());}
-            const kick::clap::Descriptor& descriptor() const noexcept override { return host.descriptor(); }
-            const std::vector<kick::clap::Parameter>& parameters() const noexcept override { return host.parameters(); }
-            const std::vector<kick::clap::Port>& inputPorts() const noexcept override { return host.inputPorts(); }
-            const std::vector<kick::clap::Port>& outputPorts() const noexcept override { return host.outputPorts(); }
-            bool usesClapNotes(uint32_t port) const noexcept override { return host.usesClapNotes(port); }
-            bool takesSysex() const noexcept override { return host.takesSysex(); }
-            bool emitsSysex() const noexcept override { return host.emitsSysex(); }
-            void panic() noexcept override { host.panic(); }
-            uint32_t noteInputPorts() const noexcept override { return host.noteInputPorts(); }
-            uint32_t noteOutputPorts() const noexcept override { return host.noteOutputPorts(); }
-            double parameterValue(clap_id id) const noexcept override { return host.parameterValue(id); }
-            uint64_t parameterReports() const noexcept override { return host.parameterReports(); }
-            uint64_t parameterRevision() const noexcept override { return host.metadataRevision(); }
-            std::string parameterText(clap_id id, double value) const override { return host.parameterText(id,value); }
-            bool setParameter(clap_id id, double value) noexcept override { return host.setParameter(id,value); }
-            bool parameterGesture(clap_id id, bool begin) noexcept override { return host.parameterGesture(id,begin); }
-            bool sendEvent(const kick::clap::Event& e) noexcept override { return host.enqueue(e); }
-            bool popOutput(kick::clap::Event& event) noexcept override { return host.popOutput(event); }
-            uint64_t outputEventDrops() const noexcept override { return host.outputEventDrops(); }
-            const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { return host.outputEvents(count); }
-            kick::clap::Statistics statistics() const noexcept override { return host.statistics(); }
-            bool asleep() const noexcept override { return host.asleep(); }
-            bool restful() const noexcept override { return host.restful(); }
-            void rested(uint32_t frames, uint32_t blocks) noexcept override { host.rested(frames, blocks); }
-            void mirrorWake(std::atomic<uint32_t>* mirror) noexcept override { host.mirrorWake(mirror); }
-            bool wasReset() const noexcept override { return host.wasReset(); }
-            bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames, const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override { return host.process(inputs,ni,outputs,no,frames,events,count,transport); }
+            bool setParameter(clap_id id, double value) noexcept override { return OSCAIRN_CLAP(set_parameter)(host,id,value); }
+            bool parameterGesture(clap_id id, bool begin) noexcept override { return OSCAIRN_CLAP(parameter_gesture)(host,id,begin); }
+            bool sendEvent(const kick::clap::Event& e) noexcept override { return OSCAIRN_CLAP(send_event)(host,&e); }
+            bool popOutput(kick::clap::Event& event) noexcept override { return OSCAIRN_CLAP(pop_output)(host,&event); }
+            uint64_t outputEventDrops() const noexcept override { return OSCAIRN_CLAP(output_event_drops)(host); }
+            const kick::clap::Event* outputEvents(uint32_t& count) const noexcept override { return OSCAIRN_CLAP(output_events)(host,&count); }
+            kick::clap::Statistics statistics() const noexcept override { kick::clap::Statistics s;OSCAIRN_CLAP(statistics)(host,&s);return s; }
+            bool asleep() const noexcept override { return OSCAIRN_CLAP(asleep)(host); }
+            bool restful() const noexcept override { return OSCAIRN_CLAP(restful)(host); }
+            void rested(uint32_t frames, uint32_t blocks) noexcept override { OSCAIRN_CLAP(rested)(host,frames,blocks); }
+            void mirrorWake(std::atomic<uint32_t>* mirror) noexcept override { OSCAIRN_CLAP(mirror_wake)(host,mirror); }
+            bool wasReset() const noexcept override { return OSCAIRN_CLAP(was_reset)(host); }
+            bool process(const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames, const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept override { return OSCAIRN_CLAP(process)(host,inputs,ni,outputs,no,frames,events,count,transport); }
         };
     }
     void PluginHost::saveSnapshot(const std::string& directory)
@@ -504,19 +532,6 @@ namespace oscairn
         const auto placement=policy.plugins.find(id);
         if(!policy.worker.empty() && (placement==policy.plugins.end()?policy.standard:placement->second)==Placement::Worker)
             return loadPluginInWorker(policy.worker,path,id,rate,frames,mode,policy.memoryLimit,memoryRoom);
-        const auto scan=kick::clap::inspect(path);
-        const auto found=std::find_if(scan.plugins.begin(),scan.plugins.end(),[&](const auto& p){return id.empty() || p.id==id;});
-        if(found==scan.plugins.end())
-            throw std::runtime_error(scan.failures.empty()?"No matching CLAP plugin in "+path:scan.failures.front().message);
-        auto host=std::make_shared<ClapHost>();
-        host->host.setMemoryRoom(memoryRoom);
-        host->host.setOfflineRendering(mode==ProcessingMode::Offline);
-        if(!host->host.load(*found,rate,frames))throw std::runtime_error("Cannot load "+found->id+": "+host->host.error());
-        host->host.setMemoryRoom(0);
-        host->host.lockAudioLayout();
-        // The first service (the plugin's init callback, its parameter flush) holds the gate; run it
-        // before any audio thread can see the plugin, or its first block is refused as a control silence.
-        host->service();
-        return host;
+        return std::make_shared<ClapHost>(checked(OSCAIRN_CLAP(new)(path.c_str(),id.c_str(),rate,frames,mode==ProcessingMode::Offline,memoryRoom)));
     }
 }

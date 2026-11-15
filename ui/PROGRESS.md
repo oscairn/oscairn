@@ -141,3 +141,19 @@ mute, solo, devices, key range, transpose and pedals are set without leaving it.
   `parts.pan`, `parts.solo`, `parts.input`, `session.status`; none new. Tests (`src/tests/part.rs`):
   cursor per pane, each edit's request, pedal round trip, refusal, touch, back, handover, themes.
   Not run on a unit; no window was shown.
+
+Branch `rust-performance` from `rust-part` (b72bb6ac): the whole Performance app in the Rust shell
+(owner, 2026-11-15); the checklist is ui/PERFORMANCE-APP.md (94 items, 0 needing a new request;
+the JUCE app on the keyboard is `--connect`ed, so every call is a request; the plugin scanner is a
+helper process, not an engine call).
+- Inventory written and committed. Part screen: the rest of the JUCE `partFields` (channel,
+  velocities, notes at once, reserve, priority, plays to, MIDI out and channel, sends, name, remove);
+  the "Oscairn app" row is gone. FOUND: the Part screen sent `parts.input` without `graph.commit`
+  (the engine stages it; each JUCE setter commits): fixed for every staged edit. Text keyboard:
+  `keyboard.rs`, a port of TextKeyboard.cpp with the cursor and knobs for use without touch;
+  profile `textEntry` read. 46 Rust tests pass on the Mac (cargo test --offline, headless).
+- NEXT (in order): the playing keyboard K2 (read KeyboardWindow.cpp and the profile's
+  onScreenKeyboard first); the sound chooser; the chain (D1..D12: scanner helper for D1); parameter
+  pages F; scenes A2..A4; knob row and Learn A9..A11; Save A15; undo/redo J1; Controls G, Mixer H,
+  Routing I, Parts list B; then step 5 (remove Play's Edit entry in play.slint:328 and play.rs
+  handover, update docs). Not done: all of those.

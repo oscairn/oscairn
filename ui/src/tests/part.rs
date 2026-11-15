@@ -3,7 +3,7 @@
 //! fake engine, as Play's are (the parent module has the fixture and the pictures).
 
 use super::*;
-use crate::part::Outcome::{Back, Handover, Stay};
+use crate::part::Outcome::{Back, Stay};
 
 fn part_graph() -> serde_json::Value {
     json!({
@@ -42,14 +42,20 @@ fn info_lines(ui: &Shell) -> Vec<String> {
 /// The part screen on its own, with `graph`, the whole list as one view.
 fn part_screen(s: &Screen, graph: &serde_json::Value, id: u32) -> crate::part::Screen {
     let mut part = crate::part::Screen::new(&s.ui);
-    s.ui.global::<crate::PartState>().set_rows_per_view(20);
+    s.ui.global::<crate::PartState>().set_rows_per_view(30);
     part.graph(graph);
     part.open(id);
     part
 }
 
+/// What was asked of the engine, the `graph.commit` after a staged edit left out (`commits` counts those).
 fn edits(part: &mut crate::part::Screen) -> Vec<(&'static str, serde_json::Value)> {
-    std::mem::take(&mut part.out).into_iter().map(|(_, m, p)| (m, p)).collect()
+    std::mem::take(&mut part.out).into_iter().map(|(_, m, p)| (m, p)).filter(|(m, _)| *m != "graph.commit").collect()
+}
+
+/// Every request, `graph.commit` included.
+fn requests(part: &mut crate::part::Screen) -> Vec<&'static str> {
+    std::mem::take(&mut part.out).into_iter().map(|(_, m, _)| m).collect()
 }
 
 fn mv(part: &mut crate::part::Screen, by: i32) {
@@ -73,7 +79,7 @@ fn part_cursor_edits_and_requests() {
     let list: Vec<(&str, &str)> = list.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     assert_eq!(
         list,
-        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Rename, sound, effects, sends", "Oscairn app ›")]
+        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Input channel", "Any channel"), ("Lowest velocity", "0"), ("Highest velocity", "127"), ("Notes at once", "Any"), ("Reserved notes", "None"), ("Priority", "0 (gives way first)"), ("Plays to", "Main"), ("MIDI out", "Off ›"), ("MIDI out channel", "Own channels"), ("Send to Reverb", "−6.0 dB"), ("Name", "Keys ›"), ("Remove part", "Press twice")]
     );
     assert_eq!(
         info_lines(ui),
@@ -91,7 +97,7 @@ fn part_cursor_edits_and_requests() {
     part.act(Action::Arrow { dx: 0, dy: -1 });
     assert_eq!(cursor_at(ui), Some(1));
     part.act(Action::End(1));
-    assert_eq!(cursor_at(ui), Some(11), "End: the last");
+    assert_eq!(cursor_at(ui), Some(22), "End: the last");
     part.act(Action::End(-1));
     assert_eq!(cursor_at(ui), Some(0));
     assert!(edits(&mut part).is_empty(), "moving the cursor sends nothing");
@@ -204,19 +210,27 @@ fn part_cursor_edits_and_requests() {
     assert_eq!(part.act(Action::Cancel(None)), Stay);
     assert_eq!(cursor_at(ui), None);
     assert_eq!(part.act(Action::Cancel(None)), Back);
-    // The handover row.
+    // Name: a press asks for the keyboard; Remove part needs a second press.
     part.act(Action::End(1));
-    part.act(Action::End(1));
-    assert_eq!(cursor_at(ui), Some(11));
-    assert_eq!(part.act(Action::Confirm(None)), Handover);
-    // A bus has the fader's settings only; an audio part no keys.
+    part.act(Action::End(1)); // the first shows the cursor, the second goes to the last
+    part.act(Action::Move { pane: None, by: -1 });
+    assert_eq!(part.act(Action::Confirm(None)), crate::part::Outcome::Prompt("Name of the part".into(), "Keys".into()));
+    part.not_entered();
+    part.act(Action::Move { pane: None, by: 1 });
+    assert_eq!(part.act(Action::Confirm(None)), Stay);
+    assert_eq!(rows(ui)[22].1, "Press again to remove");
+    part.act(Action::Move { pane: None, by: -1 });
+    part.act(Action::Move { pane: None, by: 1 });
+    assert_eq!(rows(ui)[22].1, "Press twice", "moving away undoes the first press");
+    assert!(requests(&mut part).is_empty());
+    // A bus has the fader's settings and where it plays to; an audio part no keys.
     let _bus = part_screen(&s, &part_graph(), 12);
-    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Rename, sound, effects, sends"]);
+    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "Name", "Remove part"]);
     assert_eq!(info_lines(ui), ["Sound", "No instrument", "Plays to", "Main", "Sends", "None", "Insert effects", "Hall"]);
     let mut audio = part_graph();
     audio["parts"][1]["input"] = json!({"kind": "audio", "port": 0});
     let _audio = part_screen(&s, &audio, 11);
-    assert_eq!(rows(ui).len(), 5);
+    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "MIDI out", "MIDI out channel", "Send to Reverb", "Name", "Remove part"]);
     assert_eq!(info_lines(ui)[5], "Reverb", "plays through a bus");
 }
 
@@ -328,6 +342,8 @@ fn part_on_the_shell() {
     let r = next(&mut f, "parts.input");
     assert_eq!((r["method"].as_str(), r["params"]["input"]["receive"].clone()), (Some("parts.input"), json!({"sustain": "none", "sostenuto": "none"})));
     f.reply(&r, json!({"result": {"accepted": true}}));
+    let r = next(&mut f, "graph.commit");
+    f.reply(&r, json!({"result": {"revision": 5}}));
     graph.borrow_mut()["parts"][0]["input"]["receive"] = json!({"sustain": "none", "sostenuto": "none"});
     graph.borrow_mut()["parts"][0]["mute"] = json!(true);
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "graph.changed", "params": {"revision": 5}})));
@@ -366,9 +382,45 @@ fn part_on_the_shell() {
     assert_eq!(rows(&ui).len(), 11);
     shell::act(Action::End(1));
     shell::act(Action::End(1));
-    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Rename, sound, effects, sends", true)], "the cursor turned the view");
+    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Remove part", true)], "the cursor turned the view");
+    // Rename from the shell: a press on Name opens the keyboard over the list; typing goes to it
+    // alone (End finds Done), Done sends parts.name and the commit; Cancel closes it with nothing sent.
+    shell::act(Action::Move { pane: None, by: -1 });
+    shell::set_text_on_screen(true);
     shell::act(Action::Confirm(None));
-    assert_eq!((ui.get_screen(), shell::handover()), (2, Some("performance")));
+    let keys = ui.global::<crate::KeyboardState>();
+    assert!(keys.get_open());
+    assert_eq!((keys.get_before().as_str(), keys.get_after().as_str()), ("Keys", ""), "the caret at the end");
+    shell::act(Action::Cancel(None));
+    assert!(!keys.get_open() && ui.get_screen() == 4, "Cancel closes the keyboard only");
+    shell::act(Action::Confirm(None));
+    shell::act(Action::End(-1));
+    shell::act(Action::Move { pane: None, by: 2 }); // Clear
+    shell::act(Action::Confirm(None));
+    assert_eq!(keys.get_before().as_str(), "");
+    keys.invoke_pressed(14); // by touch: p
+    keys.invoke_pressed(16); // a
+    keys.invoke_pressed(18); // d
+    assert_eq!(keys.get_before().as_str(), "pad");
+    shell::act(Action::End(1));
+    shell::act(Action::Confirm(None)); // Done
+    assert!(!keys.get_open());
+    graph.borrow_mut()["parts"][0]["name"] = json!("pad"); // as the engine would hold it, for any graph.get meanwhile
+    let r = next(&mut f, "parts.name");
+    assert_eq!((r["method"].as_str(), r["params"].clone()), (Some("parts.name"), json!({"part": 10, "name": "pad"})));
+    f.reply(&r, json!({"result": {"accepted": true}}));
+    let r = next(&mut f, "graph.commit");
+    assert_eq!(r["method"], "graph.commit", "a staged edit is committed, as the JUCE setters do");
+    f.reply(&r, json!({"result": {"revision": 6}}));
+    assert_eq!(part.get_name().as_str(), "pad");
+    // Remove part: two presses, then parts.remove and the commit, and back to Play.
+    shell::act(Action::Move { pane: None, by: 1 });
+    shell::act(Action::Confirm(None));
+    shell::act(Action::Confirm(None));
+    let r = next(&mut f, "parts.remove");
+    assert_eq!((r["method"].as_str(), r["params"].clone()), (Some("parts.remove"), json!({"part": 10})));
+    f.reply(&r, json!({"result": {"accepted": true}}));
+    assert_eq!(ui.get_screen(), 3, "back to Play");
 }
 
 // Part draws in the built-in themes and an odd one (large type, extreme colors), with a value

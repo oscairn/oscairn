@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The on-screen text keyboard (src/keyboard.rs), the JUCE TextKeyboard's layout: the text with its
+// caret and Left, Right, Clear, Cancel and Done in the top row, then four rows of keys.
+
+import { Theme } from "theme.slint";
+
+export struct KeyData {
+    label: string,
+    x: float, // in key units from the row's left
+    w: float, // in key units
+    total: float, // the row's width in key units
+    row: int,
+    index: int, // in the layout, which `pressed` names
+    cursor: bool,
+    on: bool,
+    special: bool,
+    disabled: bool,
+    done: bool,
+}
+
+export global KeyboardState {
+    in property <bool> open;
+    in property <string> title;
+    in property <string> before; // the text before the caret
+    in property <string> after;
+    in property <float> line; // the text's share of the top row
+    in property <bool> keys-shown: true; // false: a typing keyboard does the typing
+    in property <[KeyData]> keys;
+    callback pressed(int); // a tap types at once, as the JUCE keys are triggered on mouse down
+    callback released();
+    callback cancel();
+}
+
+export component Keyboard inherits Rectangle {
+    property <length> gutter: Theme.gap;
+    property <length> row-width: self.width - 2 * Theme.margin;
+    // Large targets for the stage: as tall as the screen allows, to twice a touch target.
+    property <length> key-height: min(2 * Theme.touch, (self.height - 2 * Theme.margin - Theme.touch - 6 * gutter) / 5);
+    background: Theme.surface;
+    // Takes every tap while it is open, so nothing under it is pressed.
+    TouchArea { }
+    Text {
+        x: Theme.margin;
+        y: Theme.margin;
+        width: parent.width - 2 * Theme.margin;
+        height: Theme.touch;
+        text: KeyboardState.title;
+        color: Theme.muted;
+        font-size: Theme.body;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        x: Theme.margin;
+        y: Theme.margin + Theme.touch + root.gutter;
+        width: KeyboardState.line * root.row-width - root.gutter;
+        height: root.key-height;
+        background: Theme.background;
+        border-radius: Theme.radius;
+        border-width: 1px;
+        border-color: Theme.border;
+        clip: true;
+        Text {
+            x: 8px;
+            width: parent.width - 16px;
+            height: parent.height;
+            text: KeyboardState.before + "|" + KeyboardState.after;
+            color: Theme.text;
+            font-size: Theme.body;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+    for key[i] in KeyboardState.keys: Rectangle {
+        x: Theme.margin + key.x / key.total * root.row-width;
+        y: Theme.margin + Theme.touch + root.gutter + (key.row == 0 ? 0px : (key.row) * (root.key-height + root.gutter));
+        width: key.w / key.total * root.row-width - root.gutter;
+        height: root.key-height;
+        border-radius: Theme.radius;
+        background: key.done ? Theme.accent : key.on ? Theme.accent.transparentize(0.6) : key.special ? Theme.raised : Theme.surface.brighter(0.15);
+        opacity: key.disabled ? 0.4 : 1;
+        Text {
+            text: key.label;
+            color: key.done ? Theme.background : Theme.text;
+            font-size: Theme.button;
+            font-weight: key.special ? 700 : 400;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        TouchArea {
+            enabled: !key.disabled;
+            pointer-event(e) => {
+                if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                    KeyboardState.pressed(key.index);
+                } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                    KeyboardState.released();
+                }
+            }
+        }
+        Rectangle {
+            border-radius: Theme.radius;
+            border-width: key.cursor ? 2px : 0px;
+            border-color: Theme.focus;
+        }
+    }
+}

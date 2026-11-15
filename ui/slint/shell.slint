@@ -8,7 +8,8 @@ import { Home, HomeState, TileData } from "home.slint";
 import { Setlist, SetlistState, SlotData, ListRow } from "setlist.slint";
 import { Play, PlayState, SceneData, StripData } from "play.slint";
 import { Part, PartState, SettingData, InfoLine } from "part.slint";
-export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, PartState, SettingData, InfoLine }
+import { Keyboard, KeyboardState, KeyData } from "keyboard.slint";
+export { Theme, Bar, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, PartState, SettingData, InfoLine, KeyboardState, KeyData }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -71,6 +72,11 @@ export component Shell inherits Window {
         font-size: Theme.title;
         color: Theme.muted;
         text: root.hands-over ? "Opening " + root.opening + "..." : root.opening + " is not in this UI yet: open it in the Oscairn app. Escape goes back.";
+    }
+    if KeyboardState.open: Keyboard {
+        y: Theme.bar-height;
+        width: parent.width;
+        height: parent.height - Theme.bar-height;
     }
     if root.engine != "": Rectangle {
         x: Theme.margin;

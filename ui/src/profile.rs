@@ -29,6 +29,9 @@ pub struct Profile {
     pub memory: u64,
     /// The apps Home offers; none: every one (a computer).
     pub apps: Vec<String>,
+    /// screens[0].textEntry is `onScreen`: no typing keyboard, so text is typed on the on-screen
+    /// keyboard's keys (the JUCE app's TextKeyboard); otherwise (the default) a typing keyboard does it.
+    pub text_on_screen: bool,
     /// panel.map: the panel map's file name (beside the program, in share/oscairn/panels) or path.
     pub panel_map: String,
 }
@@ -69,6 +72,7 @@ impl Profile {
             top_bar: crate::settings::over(MeterSettings::default(), &screen["topBar"]),
             memory: doc["compute"]["memory"].as_u64().unwrap_or(0).min(1 << 24) << 20,
             apps: doc["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect(),
+            text_on_screen: screen["textEntry"] == "onScreen",
             panel_map: doc["panel"]["map"].as_str().unwrap_or_default().into(),
         })
     }

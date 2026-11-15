@@ -9,6 +9,7 @@
 
 mod client;
 mod home;
+mod keyboard;
 mod nav;
 mod part;
 mod play;

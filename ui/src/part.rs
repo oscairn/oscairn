@@ -19,9 +19,13 @@
 //! `parts.level`, `parts.pan`, `parts.solo` and `parts.input` (the part's own input as `graph.get`
 //! gives it with the one setting changed, as the JUCE page's editInput does).
 //!
-//! Not here, handed to the JUCE app (the "Rename, sound, effects, sends" row): the name, choosing
-//! the sound, the chain's plugins and splits, sends and where it plays, MIDI out, the input
-//! channel, velocities, notes at once, reserve and priority.
+//! Also here, as the JUCE page's partFields list them: the name (a press opens the on-screen
+//! keyboard), where the part plays to (Main or a bus), the input channel, the velocities, notes at
+//! once, reserved notes, priority, MIDI out (a list of the outputs, and its channel), a send per
+//! bus, and Remove part (a second press confirms). Every edit that the engine stages (the input, MIDI
+//! out, output, sends, name, removal) is followed by `graph.commit`, as the JUCE page's setters commit.
+//!
+//! Not here yet: choosing the sound, the chain's plugins and splits (ui/PERFORMANCE-APP.md, C15 to D12).
 
 use crate::nav::{Action, Cursor};
 use crate::play::{chain_nodes, devices_name, fraction, is_instrument, level_at, note_name};
@@ -47,23 +51,44 @@ pub enum Outcome {
     Stay,
     /// Cancel with nothing to drop: back to Play.
     Back,
-    /// The JUCE app's Performance, for what is not here.
-    Handover,
+    /// A press on the name: the on-screen keyboard, with this title and text; `entered` takes the result.
+    Prompt(String, String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Item {
+    Name,
     Level,
     Pan,
     Mute,
     Solo,
+    Output,
     Devices,
+    Channel,
     LowKey,
     HighKey,
+    LowVelocity,
+    HighVelocity,
     Transpose,
+    MaxNotes,
+    Reserve,
+    Priority,
     Pedal(usize),
-    Handover,
+    MidiOut,
+    MidiChannel,
+    Send(u64),
+    Remove,
 }
+
+/// The two lists of devices: where the part plays from, and the outputs its MIDI goes to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Menu {
+    Devices,
+    MidiOut,
+}
+
+/// Notes at once and reserved notes, as the JUCE menus offer them (0: any, none).
+const NOTE_CHOICES: [i64; 14] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 24, 32, 64];
 
 const PEDALS: [&str; 3] = ["sustain", "sostenuto", "soft"];
 const PEDAL_NAMES: [&str; 3] = ["Sustain pedal", "Sostenuto pedal", "Soft pedal"];
@@ -107,13 +132,18 @@ pub struct Screen {
     id: u64,
     /// The part as graph.get gives it, with the edits made since: successive dial steps build on each other.
     part: Value,
-    /// session.status's midiInputs.
+    /// session.status's midiInputs and midiOutputs.
     inputs: Vec<Value>,
+    outputs: Vec<Value>,
     cursor: Cursor,
     /// The dial changes the value under the cursor.
     editing: bool,
-    /// The devices list, open: its own cursor.
-    menu: Option<Cursor>,
+    /// A devices list, open: which, and its own cursor.
+    menu: Option<(Menu, Cursor)>,
+    /// Remove part was pressed once: the next press removes it.
+    removing: bool,
+    /// The name's keyboard is open.
+    asking: bool,
     /// The read-only panel's own cursor: its view turns a page at a time.
     info_cursor: Cursor,
     rows: Rc<VecModel<SettingData>>,
@@ -129,7 +159,7 @@ impl Screen {
         let state = window.global::<PartState>();
         state.set_rows(ModelRc::from(rows.clone()));
         state.set_info(ModelRc::from(info.clone()));
-        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, out: vec![] }
+        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], outputs: vec![], removing: false, asking: false, cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, out: vec![] }
     }
 
     /// The part to show, from the graph already read.
@@ -138,6 +168,8 @@ impl Screen {
         self.cursor = Cursor::new(0, 1);
         self.editing = false;
         self.menu = None;
+        self.removing = false;
+        self.asking = false;
         self.info_cursor = Cursor::new(0, 1);
         self.say(String::new());
         self.load();
@@ -176,9 +208,12 @@ impl Screen {
     pub fn endpoints(&mut self, status: &Value) {
         if let Some(inputs) = status["midiInputs"].as_array() {
             self.inputs = inputs.clone();
-            if self.menu.is_some() {
-                self.show();
-            }
+        }
+        if let Some(outputs) = status["midiOutputs"].as_array() {
+            self.outputs = outputs.clone();
+        }
+        if self.menu.is_some() {
+            self.show();
         }
     }
 
@@ -206,22 +241,56 @@ impl Screen {
             return vec![];
         }
         let mut items = vec![Item::Level, Item::Pan, Item::Mute, Item::Solo];
-        if self.part["input"]["kind"] == "notes" {
-            items.extend([Item::Devices, Item::LowKey, Item::HighKey, Item::Transpose, Item::Pedal(0), Item::Pedal(1), Item::Pedal(2)]);
+        let notes = self.part["input"]["kind"] == "notes";
+        if notes {
+            items.extend([
+                Item::Devices,
+                Item::LowKey,
+                Item::HighKey,
+                Item::Transpose,
+                Item::Pedal(0),
+                Item::Pedal(1),
+                Item::Pedal(2),
+                Item::Channel,
+                Item::LowVelocity,
+                Item::HighVelocity,
+                Item::MaxNotes,
+                Item::Reserve,
+                Item::Priority,
+            ]);
         }
-        items.push(Item::Handover);
+        items.push(Item::Output);
+        if self.part["input"]["kind"] != "bus" {
+            items.extend([Item::MidiOut, Item::MidiChannel]);
+        }
+        items.extend(self.buses().into_iter().map(|(id, _)| Item::Send(id)));
+        items.extend([Item::Name, Item::Remove]);
         items
     }
 
-    /// The devices list's choices, as the JUCE page's menu: any, the kinds, then each input; a rule is None for "any".
-    fn options(&self) -> Vec<(String, Option<Value>)> {
+    /// The buses a part can play to or send to: every bus but itself, as the JUCE page lists them.
+    fn buses(&self) -> Vec<(u64, String)> {
+        self.graph["parts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| p["input"]["kind"] == "bus" && p["id"].as_u64() != Some(self.id))
+            .filter_map(|p| Some((p["id"].as_u64()?, p["name"].as_str().unwrap_or_default().to_string())))
+            .collect()
+    }
+
+    /// A list's choices, as the JUCE page's menus: any, (for inputs) the kinds, then each endpoint; a rule is None for "any".
+    fn options(&self, menu: Menu) -> Vec<(String, Option<Value>)> {
         let rule = |kind: &str, port: i64, pattern: &str, matches: &str| json!({"kind": kind, "port": port, "pattern": pattern, "match": matches});
-        let mut options: Vec<(String, Option<Value>)> = vec![("Any device".into(), None)];
-        for kind in ["builtIn", "external", "usb", "network"] {
-            let r = rule(kind, 0, "", "contains");
-            options.push((devices_name(&json!([r.clone()])), Some(r)));
+        let mut options: Vec<(String, Option<Value>)> = vec![(if menu == Menu::Devices { "Any device" } else { "Off" }.into(), None)];
+        if menu == Menu::Devices {
+            for kind in ["builtIn", "external", "usb", "network"] {
+                let r = rule(kind, 0, "", "contains");
+                options.push((devices_name(&json!([r.clone()])), Some(r)));
+            }
         }
-        for e in &self.inputs {
+        let endpoints = if menu == Menu::Devices { &self.inputs } else { &self.outputs };
+        for e in endpoints {
             let name = e["name"].as_str().unwrap_or_default();
             let r = match e["kind"].as_str() {
                 Some("builtIn") => rule("builtIn", 0, "", "contains"),
@@ -235,7 +304,21 @@ impl Screen {
             let label = if e["kind"] == "port" { format!("{} ({name})", devices_name(&json!([r.clone()]))) } else { name.to_string() };
             options.push((label, Some(r)));
         }
+        if menu == Menu::MidiOut {
+            // Rules naming outputs that are not connected stay on the list, to untick.
+            for r in self.part["midiOut"]["devices"].as_array().into_iter().flatten() {
+                if !options.iter().any(|(_, o)| o.as_ref() == Some(r)) {
+                    options.push((format!("{} (not connected)", devices_name(&json!([r.clone()]))), Some(r.clone())));
+                }
+            }
+        }
         options
+    }
+
+    /// The rules the list ticks: the part's input devices, or its MIDI out's.
+    fn rules(&self, menu: Menu) -> Vec<Value> {
+        let key = if menu == Menu::Devices { &self.part["input"]["devices"] } else { &self.part["midiOut"]["devices"] };
+        key.as_array().cloned().unwrap_or_default()
     }
 
     fn zone(&self) -> (i64, i64, i64) {
@@ -247,23 +330,118 @@ impl Screen {
         RECEIVE.iter().position(|r| self.part["input"]["receive"][PEDALS[i]] == r.0).unwrap_or(0)
     }
 
+    /// The first zone's velocities as MIDI values.
+    fn velocities(&self) -> (i64, i64) {
+        let z = &self.part["input"]["zones"][0];
+        let v = |i: usize, d: f64| (z["velocities"][i].as_f64().unwrap_or(d) * 127.).round() as i64;
+        (v(0, 0.), v(1, 1.))
+    }
+
+    /// The MIDI channel the zones take: 1 to 16, 0 any, -1 more than one, as the JUCE page's zoneChannel.
+    fn channel(&self) -> i64 {
+        let zones = self.part["input"]["zones"].as_array().cloned().unwrap_or_default();
+        let mask = |z: &Value| z["channels"].as_u64().unwrap_or(65535);
+        let first = zones.first().map_or(65535, mask);
+        if zones.iter().any(|z| mask(z) != first) {
+            -1
+        } else if first == 65535 {
+            0
+        } else if first.is_power_of_two() && first < 65536 {
+            first.trailing_zeros() as i64 + 1
+        } else {
+            -1
+        }
+    }
+
+    fn input_number(&self, key: &str) -> i64 {
+        self.part["input"][key].as_i64().unwrap_or(0)
+    }
+
+    /// The values a dial steps through for a choice, and the one now; None for an item that is no choice.
+    fn choices(&self, item: Item) -> Option<(Vec<i64>, i64)> {
+        let max = self.input_number("maxNotes");
+        Some(match item {
+            Item::Channel => ((0..=16).collect(), self.channel().max(0)),
+            Item::MaxNotes => (std::iter::once(0).chain(NOTE_CHOICES).collect(), max),
+            Item::Reserve => (std::iter::once(0).chain(NOTE_CHOICES.into_iter().filter(|n| max == 0 || *n <= max)).collect(), self.input_number("reserve")),
+            Item::Priority => ((0..=10).collect(), self.input_number("priority")),
+            Item::MidiChannel => ((0..=16).collect(), self.part["midiOut"]["channel"].as_i64().unwrap_or(0)),
+            Item::Output => (std::iter::once(0).chain(self.buses().into_iter().map(|(id, _)| id as i64)).collect(), self.part["bus"].as_i64().unwrap_or(0)),
+            _ => return None,
+        })
+    }
+
+    fn choice_text(&self, item: Item, value: i64) -> String {
+        let channel = |zero: &str| if value == 0 { zero.to_string() } else { format!("Channel {value}") };
+        match item {
+            Item::Channel if self.channel() < 0 => "Several channels".into(),
+            Item::Channel => channel("Any channel"),
+            Item::MaxNotes if value == 0 => "Any".into(),
+            Item::Reserve if value == 0 => "None".into(),
+            Item::MaxNotes | Item::Reserve => value.to_string(),
+            Item::Priority => match value {
+                0 => "0 (gives way first)".into(),
+                10 => "10 (gives way last)".into(),
+                n => n.to_string(),
+            },
+            Item::MidiChannel => channel("Own channels"),
+            Item::Output if value == 0 => "Main".into(),
+            Item::Output => self.buses().into_iter().find(|(id, _)| *id as i64 == value).map_or_else(|| "a bus".into(), |b| b.1),
+            _ => String::new(),
+        }
+    }
+
+    fn send_level_of(&self, bus: u64) -> f64 {
+        self.part["sends"].as_array().into_iter().flatten().find(|s| s["bus"].as_u64() == Some(bus)).and_then(|s| s["level"].as_f64()).unwrap_or(0.)
+    }
+
     fn setting(&self, item: Item) -> SettingData {
         let level = self.part["level"].as_f64().unwrap_or(1.);
         let (low, high, transpose) = self.zone();
+        let (low_velocity, high_velocity) = self.velocities();
         let flag = |key: &str| self.part[key].as_bool().unwrap_or(false);
+        let choice = |item: Item| {
+            let (_, now) = self.choices(item).unwrap_or_default();
+            self.choice_text(item, now)
+        };
         let (label, value, kind, on): (String, String, i32, bool) = match item {
+            Item::Name => ("Name".into(), format!("{} ›", self.part["name"].as_str().unwrap_or_default()), 2, false),
             Item::Level => ("Level".into(), db(level), 0, false),
             Item::Pan => ("Pan".into(), pan_text(self.part["pan"].as_f64().unwrap_or(0.)), 0, false),
             Item::Mute => ("Mute".into(), if flag("mute") { "On" } else { "Off" }.into(), 1, flag("mute")),
             Item::Solo => ("Solo".into(), if flag("solo") { "On" } else { "Off" }.into(), 1, flag("solo")),
+            Item::Output => ("Plays to".into(), choice(item), 0, false),
             Item::Devices => ("Plays from".into(), devices_name(&self.part["input"]["devices"]) + " ›", 3, false),
+            Item::Channel => ("Input channel".into(), choice(item), 0, false),
             Item::LowKey => ("Lowest key".into(), note_name(low), 0, false),
             Item::HighKey => ("Highest key".into(), note_name(high), 0, false),
+            Item::LowVelocity => ("Lowest velocity".into(), low_velocity.to_string(), 0, false),
+            Item::HighVelocity => ("Highest velocity".into(), high_velocity.to_string(), 0, false),
             Item::Transpose => ("Transpose".into(), signed(transpose), 0, false),
+            Item::MaxNotes => ("Notes at once".into(), choice(item), 0, false),
+            Item::Reserve => ("Reserved notes".into(), choice(item), 0, false),
+            Item::Priority => ("Priority".into(), choice(item), 0, false),
             Item::Pedal(i) => (PEDAL_NAMES[i].into(), RECEIVE[self.pedal(i)].1.into(), 0, false),
-            Item::Handover => ("Rename, sound, effects, sends".into(), "Oscairn app ›".into(), 2, false),
+            Item::MidiOut => ("MIDI out".into(), self.midi_out_name() + " ›", 3, false),
+            Item::MidiChannel => ("MIDI out channel".into(), choice(item), 0, false),
+            Item::Send(bus) => {
+                let name = self.buses().into_iter().find(|b| b.0 == bus).map(|b| b.1).unwrap_or_default();
+                (format!("Send to {name}"), db(self.send_level_of(bus)), 0, false)
+            }
+            Item::Remove => ("Remove part".into(), if self.removing { "Press again to remove" } else { "Press twice" }.into(), 2, self.removing),
         };
         SettingData { label: label.into(), value: value.into(), kind, on, cursor: false, editing: false }
+    }
+
+    /// "Off" for no outputs, else the outputs by name, "(not connected)" when none of the rules finds one.
+    fn midi_out_name(&self) -> String {
+        let rules = self.rules(Menu::MidiOut);
+        if rules.is_empty() {
+            return "Off".into();
+        }
+        let name = devices_name(&Value::Array(rules.clone()));
+        let found = self.options(Menu::MidiOut).iter().any(|(label, o)| o.as_ref().is_some_and(|r| rules.contains(r)) && !label.ends_with("(not connected)"));
+        if found { name } else { format!("{name} (not connected)") }
     }
 
     /// What the part is made of, read only: its sound and engine, where it plays, its sends and effects.
@@ -313,17 +491,18 @@ impl Screen {
         let per_view = state.get_rows_per_view().max(1) as usize;
         let items = self.items();
         self.cursor = fit(self.cursor, items.len(), per_view);
-        let options = if self.menu.is_some() { self.options() } else { vec![] };
-        if let Some(m) = self.menu {
-            self.menu = Some(fit(m, options.len(), per_view));
+        let options = self.menu.map_or_else(Vec::new, |(m, _)| self.options(m));
+        if let Some((m, c)) = self.menu {
+            self.menu = Some((m, fit(c, options.len(), per_view)));
         }
         let (rows, cursor): (Vec<SettingData>, Cursor) = match self.menu {
-            Some(m) => {
+            Some((m, c)) => {
+                let rules = self.rules(m);
                 let ticked = |o: &Option<Value>| match o {
-                    None => self.part["input"]["devices"].as_array().is_none_or(|d| d.is_empty()),
-                    Some(r) => self.part["input"]["devices"].as_array().is_some_and(|d| d.contains(r)),
+                    None => rules.is_empty(),
+                    Some(r) => rules.contains(r),
                 };
-                (options.iter().map(|(label, o)| SettingData { label: label.as_str().into(), value: if ticked(o) { "✓" } else { "" }.into(), kind: 1, on: ticked(o), ..Default::default() }).collect(), m)
+                (options.iter().map(|(label, o)| SettingData { label: label.as_str().into(), value: if ticked(o) { "✓" } else { "" }.into(), kind: 1, on: ticked(o), ..Default::default() }).collect(), c)
             }
             None => (items.iter().map(|i| self.setting(*i)).collect(), self.cursor),
         };
@@ -342,11 +521,30 @@ impl Screen {
         state.set_info_more(lines.len() > per);
         update(&self.info, lines.into_iter().skip(self.info_cursor.first).take(per).collect());
         state.set_name(self.part["name"].as_str().unwrap_or_default().into());
-        state.set_title(if self.menu.is_some() { "Plays from: press to tick or untick" } else { "" }.into());
-        state.set_view(if cursor.count == 0 { String::new() } else { format!("{} {}–{} of {}", if self.menu.is_some() { "Devices" } else { "Settings" }, cursor.first + 1, end, cursor.count) }.into());
+        state.set_title(
+            match self.menu {
+                Some((Menu::Devices, _)) => "Plays from: press to tick or untick",
+                Some((Menu::MidiOut, _)) => "MIDI out: press to tick or untick",
+                None => "",
+            }
+            .into(),
+        );
+        let what = match self.menu {
+            Some((Menu::Devices, _)) => "Devices",
+            Some((Menu::MidiOut, _)) => "Outputs",
+            None => "Settings",
+        };
+        state.set_view(if cursor.count == 0 { String::new() } else { format!("{what} {}–{} of {}", cursor.first + 1, end, cursor.count) }.into());
     }
 
+    /// An edit the engine stages: followed by `graph.commit`, as every JUCE setter commits.
     fn edit(&mut self, method: &'static str, params: Value) {
+        self.edit_live(method, params);
+        self.out.push((Request::Edit, "graph.commit", json!({})));
+    }
+
+    /// A live edit (a fader, a pan, solo): heard at once, no plan to compile.
+    fn edit_live(&mut self, method: &'static str, params: Value) {
         self.say(String::new());
         self.out.push((Request::Edit, method, params));
     }
@@ -356,21 +554,22 @@ impl Screen {
         self.edit("parts.input", params);
     }
 
-    fn send_level(&mut self) {
-        let params = json!({"part": self.id, "level": self.part["level"].as_f64().unwrap_or(1.), "mute": self.part["mute"].as_bool().unwrap_or(false)});
-        self.edit("parts.level", params);
+    fn send_midi_out(&mut self) {
+        let params = json!({"part": self.id, "midiOut": self.part["midiOut"].clone()});
+        self.edit("parts.midiOut", params);
     }
 
-    /// The first zone's keys and transpose set, as the JUCE page's setZone does: a zone that passes
-    /// everything is no zone, and the highest key is never under the lowest.
-    fn set_zone(&mut self, low: i64, high: i64, transpose: i64) {
+    fn send_level(&mut self) {
+        let params = json!({"part": self.id, "level": self.part["level"].as_f64().unwrap_or(1.), "mute": self.part["mute"].as_bool().unwrap_or(false)});
+        self.edit_live("parts.level", params);
+    }
+
+    /// A change to the first zone; a zone that passes everything is no zone, as the JUCE page's editZone has it.
+    fn edit_zone(&mut self, change: impl FnOnce(&mut Value)) {
         let mut list = self.part["input"]["zones"].as_array().cloned().unwrap_or_default();
-        let mut zone = list.first().cloned().unwrap_or_else(|| json!({"keys": [0, 127], "velocities": [0, 1], "channels": 65535, "transpose": 0, "curve": 1, "fixedVelocity": 0}));
-        zone["keys"] = json!([low, high]);
-        zone["transpose"] = json!(transpose);
-        let n = |v: &Value, d: f64| v.as_f64().unwrap_or(d);
-        let everything = (low, high, transpose) == (0, 127, 0)
-            && (n(&zone["velocities"][0], 0.), n(&zone["velocities"][1], 1.), n(&zone["channels"], 65535.), n(&zone["curve"], 1.), n(&zone["fixedVelocity"], 0.)) == (0., 1., 65535., 1., 0.);
+        let mut zone = list.first().cloned().unwrap_or_else(default_zone);
+        change(&mut zone);
+        let everything = zone == default_zone();
         if list.is_empty() {
             if !everything {
                 list.push(zone);
@@ -383,19 +582,49 @@ impl Screen {
         self.part["input"]["zones"] = Value::Array(list);
     }
 
+    /// The first zone's keys and transpose set, the highest key never under the lowest.
+    fn set_zone(&mut self, low: i64, high: i64, transpose: i64) {
+        self.edit_zone(|z| {
+            z["keys"] = json!([low, high]);
+            z["transpose"] = json!(transpose);
+        });
+    }
+
+    fn set_velocities(&mut self, low: i64, high: i64) {
+        self.edit_zone(|z| z["velocities"] = json!([low as f64 / 127., high as f64 / 127.]));
+    }
+
+    /// The MIDI channel every zone takes (0 any), as the JUCE page's zoneChannels: zones left identical
+    /// are one zone, and one that passes everything goes.
+    fn set_channel(&mut self, channel: i64) {
+        let mask = if channel == 0 { 65535 } else { 1u64 << (channel - 1) };
+        let mut zones = self.part["input"]["zones"].as_array().cloned().unwrap_or_default();
+        if zones.is_empty() && channel != 0 {
+            zones.push(default_zone());
+        }
+        for z in &mut zones {
+            z["channels"] = json!(mask);
+        }
+        let mut kept: Vec<Value> = Vec::new();
+        for z in zones {
+            if !kept.contains(&z) {
+                kept.push(z);
+            }
+        }
+        if channel == 0 && kept.len() == 1 && kept[0] == default_zone() {
+            kept.clear();
+        }
+        self.part["input"]["zones"] = Value::Array(kept);
+    }
+
     /// The value under the cursor stepped `by`, sent when it changed.
     fn dial(&mut self, item: Item, by: i64) {
         let (low, high, transpose) = self.zone();
+        let (low_velocity, high_velocity) = self.velocities();
         match item {
             Item::Level => {
                 let was = self.part["level"].as_f64().unwrap_or(1.);
-                let mut f = (fraction(was, 1.) + 0.02 * by as f32).clamp(0., 1.);
-                let mut level = level_at(f, 1.);
-                // Near silence a step is less than a thousandth: go on until it is heard.
-                while level == was && f > 0. && f < 1. {
-                    f = (f + 0.02 * by.signum() as f32).clamp(0., 1.);
-                    level = level_at(f, 1.);
-                }
+                let level = stepped_level(was, by);
                 if level != was {
                     self.part["level"] = json!(level);
                     self.send_level();
@@ -407,7 +636,7 @@ impl Screen {
                 if pan != was {
                     self.part["pan"] = json!(pan);
                     let params = json!({"part": self.id, "pan": pan});
-                    self.edit("parts.pan", params);
+                    self.edit_live("parts.pan", params);
                 }
             }
             Item::LowKey | Item::HighKey | Item::Transpose => {
@@ -421,6 +650,18 @@ impl Screen {
                 };
                 if (l, h, t) != (low, high, transpose) {
                     self.set_zone(l, h, t);
+                    self.send_input();
+                }
+            }
+            Item::LowVelocity | Item::HighVelocity => {
+                let (l, h) = if item == Item::LowVelocity {
+                    let l = (low_velocity + by).clamp(0, 127);
+                    (l, high_velocity.max(l))
+                } else {
+                    (low_velocity, (high_velocity + by).clamp(low_velocity, 127))
+                };
+                if (l, h) != (low_velocity, high_velocity) {
+                    self.set_velocities(l, h);
                     self.send_input();
                 }
             }
@@ -439,12 +680,74 @@ impl Screen {
                     self.send_input();
                 }
             }
-            Item::Mute | Item::Solo | Item::Devices | Item::Handover => {}
+            Item::Channel | Item::MaxNotes | Item::Reserve | Item::Priority | Item::MidiChannel | Item::Output => self.dial_choice(item, by),
+            Item::Send(bus) => {
+                let was = self.send_level_of(bus);
+                let level = stepped_level(was, by);
+                if level != was {
+                    let mut sends = self.part["sends"].as_array().cloned().unwrap_or_default();
+                    sends.retain(|s| s["bus"].as_u64() != Some(bus));
+                    // Without a level the send is removed, as the JUCE page's setSendLevel does at 0.
+                    let params = if level > 0. {
+                        sends.push(json!({"bus": bus, "level": level}));
+                        json!({"part": self.id, "bus": bus, "level": level})
+                    } else {
+                        json!({"part": self.id, "bus": bus})
+                    };
+                    self.part["sends"] = Value::Array(sends);
+                    self.edit("parts.send", params);
+                }
+            }
+            Item::Mute | Item::Solo | Item::Devices | Item::MidiOut | Item::Name | Item::Remove => {}
         }
     }
 
-    fn toggle(&mut self, option: Option<Value>) {
-        let mut rules = self.part["input"]["devices"].as_array().cloned().unwrap_or_default();
+    /// A choice stepped along its values.
+    fn dial_choice(&mut self, item: Item, by: i64) {
+        let Some((values, now)) = self.choices(item) else { return };
+        let at = values.iter().position(|v| *v == now).map_or_else(|| values.iter().position(|v| *v >= now).unwrap_or(values.len() - 1) as i64, |p| p as i64);
+        let to = values[(at + by).clamp(0, values.len() as i64 - 1) as usize];
+        if to == now {
+            return;
+        }
+        match item {
+            Item::Channel => {
+                self.set_channel(to);
+                self.send_input();
+            }
+            Item::MaxNotes => {
+                self.part["input"]["maxNotes"] = json!(to);
+                if to > 0 && self.input_number("reserve") > to {
+                    self.part["input"]["reserve"] = json!(to);
+                }
+                self.send_input();
+            }
+            Item::Reserve => {
+                self.part["input"]["reserve"] = json!(to);
+                self.send_input();
+            }
+            Item::Priority => {
+                self.part["input"]["priority"] = json!(to);
+                self.send_input();
+            }
+            Item::MidiChannel => {
+                // Disabled while no output is chosen, as the JUCE menu is.
+                if !self.rules(Menu::MidiOut).is_empty() {
+                    self.part["midiOut"]["channel"] = json!(to);
+                    self.send_midi_out();
+                }
+            }
+            Item::Output => {
+                self.part["bus"] = json!(to);
+                let params = if to == 0 { json!({"part": self.id}) } else { json!({"part": self.id, "bus": to}) };
+                self.edit("parts.output", params);
+            }
+            _ => {}
+        }
+    }
+
+    fn toggle(&mut self, menu: Menu, option: Option<Value>) {
+        let mut rules = self.rules(menu);
         match option {
             None => rules.clear(),
             Some(r) => match rules.iter().position(|x| x == &r) {
@@ -454,19 +757,33 @@ impl Screen {
                 None => rules.push(r),
             },
         }
-        self.part["input"]["devices"] = Value::Array(rules);
-        self.send_input();
+        match menu {
+            Menu::Devices => {
+                self.part["input"]["devices"] = Value::Array(rules);
+                self.send_input();
+            }
+            Menu::MidiOut => {
+                if !self.part["midiOut"].is_object() {
+                    self.part["midiOut"] = json!({"channel": 0});
+                }
+                self.part["midiOut"]["devices"] = Value::Array(rules);
+                self.send_midi_out();
+            }
+        }
     }
 
     /// A press on the item under the cursor.
     fn confirm(&mut self) -> Outcome {
-        if let Some(m) = self.menu {
-            if let Some(o) = m.at.and_then(|at| self.options().into_iter().nth(at)) {
-                self.toggle(o.1);
+        if let Some((menu, c)) = self.menu {
+            if let Some(o) = c.at.and_then(|at| self.options(menu).into_iter().nth(at)) {
+                self.toggle(menu, o.1);
             }
             return Outcome::Stay;
         }
         let Some(item) = self.cursor.at.and_then(|at| self.items().get(at).copied()) else { return Outcome::Stay };
+        if item != Item::Remove {
+            self.removing = false;
+        }
         match item {
             Item::Mute => {
                 let on = !self.part["mute"].as_bool().unwrap_or(false);
@@ -477,13 +794,42 @@ impl Screen {
                 let on = !self.part["solo"].as_bool().unwrap_or(false);
                 self.part["solo"] = json!(on);
                 let params = json!({"part": self.id, "solo": on});
-                self.edit("parts.solo", params);
+                self.edit_live("parts.solo", params);
             }
-            Item::Devices => self.menu = Some(Cursor::new(0, 1)),
-            Item::Handover => return Outcome::Handover,
+            Item::Devices => self.menu = Some((Menu::Devices, Cursor::new(0, 1))),
+            Item::MidiOut => self.menu = Some((Menu::MidiOut, Cursor::new(0, 1))),
+            Item::Name => {
+                self.asking = true;
+                return Outcome::Prompt("Name of the part".into(), self.part["name"].as_str().unwrap_or_default().into());
+            }
+            Item::Remove if !self.removing => self.removing = true,
+            Item::Remove => {
+                self.removing = false;
+                let params = json!({"part": self.id});
+                self.edit("parts.remove", params);
+                return Outcome::Back;
+            }
             _ => self.editing = !self.editing,
         }
         Outcome::Stay
+    }
+
+    /// The keyboard's text, after Done: the part's new name. Nothing typed keeps the name it has.
+    pub fn entered(&mut self, text: &str) {
+        self.asking = false;
+        let text = text.trim();
+        if text.is_empty() || self.part["name"].as_str() == Some(text) {
+            return;
+        }
+        self.part["name"] = json!(text);
+        let params = json!({"part": self.id, "name": text});
+        self.edit("parts.name", params);
+        self.show();
+    }
+
+    /// The keyboard closed without a name.
+    pub fn not_entered(&mut self) {
+        self.asking = false;
     }
 
     /// A navigation action. Any pane moves the one list: its cursor, or the value being changed.
@@ -512,6 +858,8 @@ impl Screen {
                     // the list closes
                 } else if self.editing {
                     self.editing = false;
+                } else if self.removing {
+                    self.removing = false;
                 } else if self.cursor.at.is_some() {
                     self.cursor = self.cursor.clear();
                 } else {
@@ -533,22 +881,25 @@ impl Screen {
 
     fn shift(&mut self, by: i64) {
         match &mut self.menu {
-            Some(m) => *m = m.moved(by),
-            None if !self.editing => self.cursor = self.cursor.moved(by),
+            Some((_, c)) => *c = c.moved(by),
+            None if !self.editing => {
+                self.cursor = self.cursor.moved(by);
+                self.removing = false;
+            }
             None => {}
         }
     }
 
     /// The item of the row `row` of the view, as an index into the list shown.
     fn at(&self, row: i32) -> usize {
-        self.menu.unwrap_or(self.cursor).first + row.max(0) as usize
+        self.menu.map_or(self.cursor, |m| m.1).first + row.max(0) as usize
     }
 
     /// A tap: the cursor to the row and what a press does; on a value, the dial then changes it.
     pub fn tap(&mut self, row: i32) -> Outcome {
         let at = self.at(row);
         match &mut self.menu {
-            Some(m) => *m = m.to(at),
+            Some((_, c)) => *c = c.to(at),
             None => self.cursor = self.cursor.to(at),
         }
         self.editing = false;
@@ -580,6 +931,7 @@ impl Screen {
         self.cursor = self.cursor.clear();
         self.editing = false;
         self.menu = None;
+        self.removing = false;
         self.show();
     }
 
@@ -587,4 +939,21 @@ impl Screen {
     pub fn shown(&mut self) {
         self.show();
     }
+}
+
+/// A zone that passes every note, as `graph.get` words it.
+fn default_zone() -> Value {
+    json!({"keys": [0, 127], "velocities": [0, 1], "channels": 65535, "transpose": 0, "curve": 1, "fixedVelocity": 0})
+}
+
+/// A level stepped `by` fader steps, as the Play strip's fader moves.
+fn stepped_level(was: f64, by: i64) -> f64 {
+    let mut f = (fraction(was, 1.) + 0.02 * by as f32).clamp(0., 1.);
+    let mut level = level_at(f, 1.);
+    // Near silence a step is less than a thousandth: go on until it is heard.
+    while level == was && f > 0. && f < 1. {
+        f = (f + 0.02 * by.signum() as f32).clamp(0., 1.);
+        level = level_at(f, 1.);
+    }
+    level
 }

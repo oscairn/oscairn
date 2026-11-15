@@ -14,12 +14,13 @@
 use crate::client::{Client, Error, Event, BUSY};
 use crate::home::{self, Home};
 use crate::nav::{self, Action};
+use crate::keyboard;
 use crate::part;
 use crate::play;
 use crate::profile::Profile;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, HomeState, PartState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, HomeState, KeyboardState, PartState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -109,6 +110,12 @@ pub struct App {
     setlist: setlist::Screen,
     play: play::Screen,
     part: part::Screen,
+    /// The on-screen keyboard, open for the screen that asked for text.
+    keyboard: Option<(Screen, keyboard::Keyboard)>,
+    /// The profile's textEntry is onScreen: the keyboard shows its keys.
+    text_on_screen: bool,
+    /// Repeats Del, Left and Right while one is held.
+    repeat: slint::Timer,
     /// Where Play was opened from, which Cancel goes back to.
     play_from: Screen,
     /// Asks for the meters while Play is shown, and only then.
@@ -159,7 +166,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     ui.global::<HomeState>().set_tiles(tiles.clone().into());
     ui.global::<HomeState>().on_tapped(|i| with_app(|a| a.tap(i)));
     ui.global::<Bar>().on_home(|| with_app(|a| a.go(Screen::Home)));
-    ui.on_key(|text| nav::from_key(&text).map(act).is_some());
+    ui.on_key(|text| key(&text));
     let lists = ui.global::<SetlistState>();
     lists.on_tapped_slot(|i| with_app(|a| a.on_setlist(|s| s.tap_slot(i.max(0) as usize))));
     lists.on_tapped_setlist(|i| with_app(|a| a.on_setlist(|s| s.tap_setlist(i.max(0) as usize))));
@@ -187,6 +194,10 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     part.on_step(|i, by| with_app(|a| a.on_part(|p| p.step_row(i, by))));
     part.on_info_scroll(|by| with_app(|a| a.on_part(|p| p.scroll_info(by))));
     part.on_back(|| with_app(|a| a.go(Screen::Play)));
+    let keys = ui.global::<KeyboardState>();
+    keys.on_pressed(|i| with_app(|a| a.keyboard_press(i)));
+    keys.on_released(|| with_app(|a| a.repeat.stop()));
+    keys.on_cancel(|| with_app(|a| a.keyboard_act(Action::Cancel(None))));
     // The JUCE Setlist app's own state file, so either opens where the other left off.
     let state = crate::settings::data_dir().map(|d| d.join("AppData/oscairn.setlist/state.json"));
     APP.with(|a| {
@@ -208,6 +219,9 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             setlist: setlist::Screen::new(ui, state),
             play: play::Screen::new(ui),
             part: part::Screen::new(ui),
+            keyboard: None,
+            text_on_screen: profile.text_on_screen,
+            repeat: slint::Timer::default(),
             play_from: Screen::Home,
             meters: slint::Timer::default(),
             performance_id: String::new(),
@@ -223,7 +237,14 @@ pub fn dispatch(event: Event<Request>) {
     with_app(|a| a.event(event))
 }
 
+/// A key typed on the computer's keyboard: text for the on-screen keyboard's field when it is open
+/// on a screen with a typing keyboard, else a navigation action. True when it was taken.
+pub fn key(text: &str) -> bool {
+    APP.with(|a| a.borrow_mut().as_mut().is_some_and(|app| app.key(text)))
+}
+
 /// A navigation action from any source, on the UI thread.
+#[cfg(test)]
 pub fn act(action: Action) {
     with_app(|a| a.act(action))
 }
@@ -490,7 +511,19 @@ impl App {
         }
     }
 
+    fn key(&mut self, text: &str) -> bool {
+        if !self.text_on_screen && self.keyboard.is_some() {
+            let outcome = self.keyboard.as_mut().map(|(_, k)| k.typed(text));
+            self.keyboard_outcome(outcome);
+            return true;
+        }
+        nav::from_key(text).map(|a| self.act(a)).is_some()
+    }
+
     fn act(&mut self, action: Action) {
+        if self.keyboard.is_some() {
+            return self.keyboard_act(action);
+        }
         match (self.screen, action) {
             (Screen::Opening, Action::Cancel(_)) if !self.hands_over => self.go(Screen::Home),
             (Screen::Opening, _) => {} // the display is going to the JUCE app
@@ -576,8 +609,56 @@ impl App {
     fn part_act(&mut self, f: impl FnOnce(&mut part::Screen) -> part::Outcome) {
         match self.on_part(f) {
             part::Outcome::Back => self.go(Screen::Play),
-            part::Outcome::Handover => self.hand_over(&home::APPS[0]),
+            part::Outcome::Prompt(title, text) => self.open_keyboard(Screen::Part, &title, &text),
             part::Outcome::Stay => {}
+        }
+    }
+
+    /// The on-screen keyboard over `screen`, which asked for text.
+    fn open_keyboard(&mut self, screen: Screen, title: &str, text: &str) {
+        if let Some(ui) = self.ui() {
+            self.keyboard = Some((screen, keyboard::Keyboard::open(&ui, title, text, self.text_on_screen)));
+        }
+    }
+
+    /// An action for the keyboard while it is open: Done hands the text to the screen that asked, Cancel closes it.
+    fn keyboard_act(&mut self, action: Action) {
+        let outcome = self.keyboard.as_mut().map(|(_, k)| k.act(action));
+        self.keyboard_outcome(outcome);
+    }
+
+    /// A key pressed by touch types at once; Del, Left and Right go on while it is held (450 ms, then every 70 ms).
+    fn keyboard_press(&mut self, i: i32) {
+        let i = i.max(0) as usize;
+        let outcome = self.keyboard.as_mut().map(|(_, k)| k.tap(i));
+        let repeats = self.keyboard.as_ref().is_some_and(|(_, k)| k.repeats(i));
+        self.keyboard_outcome(outcome);
+        if repeats {
+            self.repeat.start(slint::TimerMode::SingleShot, Duration::from_millis(450), || with_app(|a| a.keyboard_repeat()));
+        }
+    }
+
+    fn keyboard_repeat(&mut self) {
+        if let Some((_, k)) = self.keyboard.as_mut() {
+            k.repeat();
+            self.repeat.start(slint::TimerMode::Repeated, Duration::from_millis(70), || with_app(|a| a.keyboard_repeat()));
+        }
+    }
+
+    fn keyboard_outcome(&mut self, outcome: Option<keyboard::Outcome>) {
+        let typed = match outcome {
+            None | Some(keyboard::Outcome::Typing) => return,
+            Some(keyboard::Outcome::Accept(text)) => Some(text),
+            Some(keyboard::Outcome::Cancel) => None,
+        };
+        let Some((screen, k)) = self.keyboard.take() else { return };
+        self.repeat.stop();
+        k.close();
+        if screen == Screen::Part {
+            match typed {
+                Some(text) => self.on_part(|p| p.entered(&text)),
+                None => self.on_part(part::Screen::not_entered),
+            }
         }
     }
 
@@ -601,6 +682,10 @@ impl App {
     }
 
     fn go(&mut self, screen: Screen) {
+        if let Some((_, k)) = self.keyboard.take() {
+            k.close();
+            self.on_part(part::Screen::not_entered);
+        }
         if self.screen != screen {
             // A cursor drops when its screen goes, as on focus loss in the JUCE lists.
             self.home.cursor = self.home.cursor.clear();
@@ -684,4 +769,10 @@ impl App {
             });
         }
     }
+}
+
+/// Tests: the profile says text is typed on the on-screen keyboard's keys.
+#[cfg(test)]
+pub fn set_text_on_screen(on: bool) {
+    with_app(|a| a.text_on_screen = on)
 }

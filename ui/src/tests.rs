@@ -876,3 +876,4 @@ fn play_draws_in_every_theme() {
 
 #[cfg(test)]
 mod part;
+mod keyboard;

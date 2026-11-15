@@ -29,8 +29,8 @@ through `RemoteControl` to a method of the table. What is not an engine call at 
   (`scanPlugins`, `oscairn/discovery.h`). The engine is not involved, so no engine request exists
   or is needed; the Rust shell runs the same helper the same way (item D1). If the owner wants
   the engine to do it instead, that is a new request (`plugins.scan`) and a decision for core/control.
-- **The on-screen keyboard** (`Engine::openKeyboard`, `openPads`): the shell's own window, no
-  request (C14; the keyboard window is part of the shell, not of this app's list).
+- **The on-screen keyboards** (`Engine::openKeyboard`): the playing keyboard sends notes with
+  `notes.send` (K2); the text keyboard sends nothing (K1).
 - **A plugin's own window** (`openPluginWindow`, request `window.show`): exists as a request, but
   the owner decided that on the keyboard a plugin's own view is drawn into a surface the shell
   hands it (a separate project, not built). **This is the only item allowed to stay unported**
@@ -85,21 +85,21 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | C2 | Plays from (devices list) | `parts.input` | - | list, press ticks | [x] |
 | C3 | Lowest key, highest key, transpose (first zone) | `parts.input` | - | press then dial | [x] |
 | C4 | Sustain, sostenuto, soft pedal receive | `parts.input` | - | press then dial | [x] |
-| C5 | Rename the part | `parts.name` | - | press, keyboard (K1) | [ ] |
-| C6 | Input channel (any, 1..16, several: shown, not picked) | `parts.input` | - | press then dial / list | [ ] |
-| C7 | Notes at once (any, 1..N) | `parts.input` | - | press then dial | [ ] |
-| C8 | Reserved notes (none .. limit) | `parts.input` | - | press then dial | [ ] |
-| C9 | Priority 0..10 | `parts.input` | - | press then dial | [ ] |
-| C10 | Velocities (low, high) | `parts.input` | - | press then dial | [ ] |
-| C11 | Plays to (Main or a bus) | `parts.output` | - | press then dial / list | [ ] |
-| C12 | Sends per bus (level, 0 removes) | `parts.send` | - | press then dial | [ ] |
-| C13 | MIDI out (devices list: Off, connected outputs, rules not connected) and MIDI out channel (own, 1..16) | `parts.midiOut`, `session.status` (`midiOutputs`) | - | list, press ticks | [ ] |
-| C14 | Open the on-screen keyboard of the input that plays the part | shell window, no request | n/a | action on the part | [ ] (shell: out of this list's engine scope, button hidden when the profile offers none) |
+| C5 | Rename the part | `parts.name` | - | press, keyboard (K1) | [x] |
+| C6 | Input channel (any, 1..16, several: shown, not picked) | `parts.input` | - | press then dial / list | [x] |
+| C7 | Notes at once (any, 1..N) | `parts.input` | - | press then dial | [x] |
+| C8 | Reserved notes (none .. limit) | `parts.input` | - | press then dial | [x] |
+| C9 | Priority 0..10 | `parts.input` | - | press then dial | [x] |
+| C10 | Velocities (low, high) | `parts.input` | - | press then dial | [x] |
+| C11 | Plays to (Main or a bus) | `parts.output` | - | press then dial / list | [x] |
+| C12 | Sends per bus (level, 0 removes) | `parts.send` | - | press then dial | [x] |
+| C13 | MIDI out (devices list: Off, connected outputs, rules not connected) and MIDI out channel (own, 1..16) | `parts.midiOut`, `session.status` (`midiOutputs`) | - | list, press ticks | [x] |
+| C14 | Open the on-screen playing keyboard (K2) of the input that plays the part | `notes.send` (K2) | - | action on the part | [ ] (with K2; hidden when the profile's onScreenKeyboard is false) |
 | C15 | Sound: choose from the library (D1/E) | see E | - | action | [ ] |
 | C16 | Engine (the instrument's plugin) shown; replace instrument | `graph.get`; replace: `graph.replace` | - | action | [ ] |
 | C17 | Part controls (a part's own macros) listed with targets | `graph.get` (`controls`) | - | see G | [ ] |
-| C18 | Remove part | `parts.remove` | - | action, confirm | [ ] |
-| C19 | The handover row "Oscairn app" | removed | - | - | [ ] |
+| C18 | Remove part | `parts.remove` | - | action, confirm | [x] |
+| C19 | The handover row "Oscairn app" | removed | - | - | [x] |
 | C20 | Key (harmony) of the part | `harmony.set` (`part` key) | - | press then dial | [ ] |
 
 ## D. Chain, insert effects, splits and lanes
@@ -188,8 +188,19 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| K1 | On-screen keyboard operable by dial and press as well as touch (used by rename of parts, scenes, controls, Save, search) | - | - | dial moves, press types, Cancel backs out; Done confirms | [ ] |
+| K1 | On-screen text keyboard: a port of the JUCE TextKeyboard (every key, the symbols layer, Shift, Caps, caret, Clear, Cancel, Done, held repeat, the profile's `textEntry`), used by rename of parts, scenes, controls, Save, search | - | - | dial or left knob steps the cursor over the keys, right knob moves the caret, press types, Cancel closes, End finds Done | [x] (used by C5; scene, control, Save and search users come with their items) |
+| K2 | On-screen playing keyboard: a port of the JUCE KeyboardWindow (the keys that play when no MIDI keyboard is connected; Play's no-MIDI hint, A12, and each part's keyboard button, C14, lead to it; the profile's `onScreenKeyboard`), a range and key size that suit the 1280x720 touch screen, an octave shift on a knob | `notes.send` | - | knob for the octave, cursor over keys, press plays | [ ] not started |
 
 ## Counts
 
 Run `grep -c '^| [A-K][0-9]' ui/PERFORMANCE-APP.md` for the row total; the rows with `[x]` are done.
+
+## What the keyboards change from the JUCE ones (owner: a better layout is welcome, behaviors kept)
+
+K1 keeps every key and action of TextKeyboard.cpp (the rows, the symbols layer, one-shot Shift,
+Caps, Left and Right, Clear, Cancel, Done as Return, held repeat 450/70 ms, US QWERTY, no on-screen
+keys where `textEntry` is `keyboard`). Changed: keys up to twice a touch target tall (stage use);
+the first row's keys are proportions of the width, not fixed pixels; Cancel returns nothing to the
+caller (the JUCE one restores the editor's text, the same as nothing happening). Added for use
+without touch: the border cursor and the knobs. No owner rule was found in the JUCE comments for
+a layout; RFC 0019 is the source of the JUCE behavior. K2 (playing keyboard) is not yet read or ported.

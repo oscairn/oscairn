@@ -287,11 +287,34 @@ Play; Play's Cancel still goes to where Play was opened from.
   `session.status` once on opening and its notifications (the inputs). A refusal is said and the
   graph asked again. The engine core's note router delivers each part's pedals by `receive`
   (`NoteZones::takesPedal`), so the pedal rows are heard.
-- **Still handed over** (the "Rename, sound, effects, sends: Oscairn app" row opens the JUCE
-  Performance app, which does not open on this part): the name (`parts.name` exists; the shell has
-  no text entry), choosing the sound, the chain's plugins and splits, where the part plays and its
-  send levels (`parts.output`, `parts.send` exist; not made here), MIDI out, input channel,
-  velocities, notes at once, reserve and priority.
+- **Also here** (from the JUCE `partFields`): Input channel (any, 1 to 16; "Several channels" is
+  shown, not picked), Lowest and Highest velocity (0 to 127), Notes at once, Reserved notes (within
+  the limit), Priority (0 to 10), Plays to (Main or a bus), MIDI out (a list of the outputs: Off,
+  each output of `session.status`, rules whose output is not connected) and its channel, a Send to
+  each bus (0 removes it), Name (a press opens the on-screen keyboard, `keyboard.rs`), and Remove
+  part (a second press removes it and goes back to Play). Requests: `parts.input`, `parts.midiOut`,
+  `parts.output`, `parts.send`, `parts.name`, `parts.remove`. Every edit the engine stages (those
+  and the input, the devices, keys, transpose and pedals before them) is followed by `graph.commit`,
+  as each JUCE setter commits: before this the Part screen sent `parts.input` alone, which the
+  engine only stages, so those edits were not compiled until something else committed. Level,
+  pan, mute and solo are live and are not committed.
+- **Still handed over:** nothing in this screen: the handover row is gone. Not yet built here (the
+  checklist is ui/PERFORMANCE-APP.md): choosing the sound, the chain's plugins and splits, and the
+  parameter pages; Play's "Edit" entry still hands over until those are.
+
+### Text entry
+
+`keyboard.rs`, `slint/keyboard.slint`: the JUCE TextKeyboard (hosts/standalone/TextKeyboard.cpp)
+over the screen that asked, with its keys and behavior: the text with its caret, Left, Right,
+Clear, Cancel, Done; q to p with 1 to 0 on the symbols layer and Del; a to l; Shift (the next
+character) and z to m and the period; the layer key, Caps, space and , - / @. A tap types on
+press; Del, Left and Right repeat while held. Where the profile's `screens[].textEntry` is
+`keyboard` (the default, a computer) the rows of keys are left out and typed keys, Backspace, the
+arrows, Return and Escape do the typing. Added for use without touch: a border cursor on a key
+(the dial or left knob steps along the keys, the arrows move across and down, End finds Done, a
+press types), the right knob moves the caret. Changed from the JUCE one: keys are as tall as the
+screen allows (up to twice a touch target) and the text, Cancel and Done are in the first row
+as proportions of the width, not fixed pixels.
 - **Missing from the engine:** nothing found that the JUCE page uses in process and has no
   request: every setting above has one. (The sound picker and plugin insertion go through the
   JUCE app's own scanner and library views, not tried here.)

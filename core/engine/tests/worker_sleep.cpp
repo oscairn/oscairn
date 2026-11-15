@@ -6,7 +6,9 @@
 // steady time goes on through the blocks it slept. A plugin taking the beat and harmony (the follower fixture, asleep after
 // every block as an idle arpeggiator) rests too: the beat alone does not wake it, the transport starting does, and it gets
 // the free-running beat's position then. With OSCAIRN_WORKER_REST=0 every worker is called every block instead, and its
-// host still leaves a plugin asleep uncalled for the beat alone.
+// host still leaves a plugin asleep uncalled for the beat alone. Those run with OSCAIRN_WORKER_REST=all; unset (disabled),
+// a worker any note can reach is called every block too, and one whose every note connection is off (draining) rests:
+// a note in the very block its connection comes back on is played, the worker called on that block.
 //   oscairn-worker-sleep-test WORKER FIXTURE SOUND-SNAPSHOTS-FIXTURE FOLLOWER-FIXTURE
 #include <oscairn/graph.h>
 #include <oscairn/plugin_host.h>
@@ -32,8 +34,9 @@ int main(int argc, char** argv)
 {
     if(argc < 5) { std::fprintf(stderr, "usage: %s WORKER FIXTURE SOUND-SNAPSHOTS-FIXTURE FOLLOWER-FIXTURE\n", argv[0]); return 2; }
     const char* restVar = std::getenv("OSCAIRN_WORKER_REST");
-    const bool resting = !restVar || std::strcmp(restVar, "0") != 0;
-    // A block it slept through: rested, or with resting off called (its host leaving the plugin uncalled).
+    const std::string mode = restVar ? restVar : "";
+    const bool resting = mode == "all", disabled = mode != "all" && mode != "0";
+    // A block it slept through: rested, or with resting off (or its node playable) called (its host leaving the plugin uncalled).
     auto slept = [&](std::pair<uint64_t, uint64_t> b) { return resting ? b == std::pair<uint64_t, uint64_t>{0, 1} : b == std::pair<uint64_t, uint64_t>{1, 0}; };
     // WorkerHost's hold: a plugin asleep is still called for this many blocks in a row before it rests; `after` the
     // block that follows them.
@@ -143,6 +146,33 @@ int main(int argc, char** argv)
         unsetenv("FOLLOWER_SLEEPS");
     }
     catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
-    if(!failures) std::printf("worker sleep (rest %s): asleep, not called; called on the block a note, a command, a panic, a select, a choke_retiring or a transport change comes, not for the beat\n", resting ? "on" : "off");
+    // The policy's own case (disabled): the instrument's note connection off (draining, as a part a scene switches off),
+    // so no note can reach it; it rests. Turned back on, with a note in that very block: called on it, and it sounds.
+    if(disabled) try
+    {
+        auto host = oscairn::loadPluginInWorker(argv[1], argv[2], "org.kick.test.sleep", rate, frames, oscairn::ProcessingMode::Offline);
+        oscairn::Graph g(rate, frames);
+        const auto n = g.add(host);
+        g.connectNotes(oscairn::graphInput, n); g.connectAudio(n, oscairn::graphOutput); g.commit();
+        std::vector<float> l(frames), r(frames); float* out[]{l.data(), r.data()};
+        auto block = [&](std::vector<kick::clap::Event> e = {}) {
+            const auto before = host->statistics();
+            g.process(out, frames, nullptr, e.data(), uint32_t(e.size()));
+            const auto after = host->statistics();
+            return std::pair{after.calledBlocks - before.calledBlocks, after.restedBlocks - before.restedBlocks};
+        };
+        uint64_t rested = 0;
+        for(int i = 0; i < hold + 20; ++i) rested += block().second;
+        check(rested == 0, "playable, it is never rested: " + std::to_string(rested));
+        g.setDraining(oscairn::graphInput, n, true); g.commit();
+        rested = 0;
+        for(int i = 0; i < hold + 20; ++i) rested += block().second;
+        check(rested >= 19, "its note connection off, it rests after the hold: " + std::to_string(rested));
+        g.setDraining(oscairn::graphInput, n, false); g.commit();
+        check(block({kick::clap::Event::note(true, 60, 1)}) == std::pair<uint64_t, uint64_t>{1, 0} && l[0] != 0, "back on with a note in the same block: called on it, and it sounds");
+        check(host->statistics().lateBlocks + host->statistics().silentBlocks == 0, "no block lost");
+    }
+    catch(const std::exception& e) { std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1; }
+    if(!failures) std::printf("worker sleep (rest %s): asleep, not called; called on the block a note, a command, a panic, a select, a choke_retiring or a transport change comes, not for the beat\n", mode.empty() ? "disabled" : mode.c_str());
     return failures ? 1 : 0;
 }

@@ -71,6 +71,7 @@ namespace oscairn
             float* const* in=nullptr; float* const* out=nullptr; // its buffers, in the engine core's audio
             std::vector<oscairn_lane_route> routes; // where its param-target lanes go
             bool lanesIn = false; // lanes reach it
+            bool playable = true; // a note can reach it in this plan, or its sound can come (see the plan's build); else it may rest
             uint32_t lane = 0; // the budget's lane: the thread it renders on (PluginHost::lane)
             bool inProcess = false; // it renders in the engine's process (no PluginHost::lane): within the callback's time
             // RFC 0021 slice 3: a shared engine's step renders its instance for every node playing one
@@ -845,6 +846,17 @@ namespace oscairn
                 source.routes.back().notes=noteSourceOf(target,{from.first,t.target});
                 target.lanesIn = true;
             }
+        // OSCAIRN_WORKER_REST=disabled (realtime.h): a step can be played, so it is never rested, when a note can reach it
+        // (a note connection not draining, from the input or a step that can be played), audio comes from the input or such
+        // a step, lanes reach it, or nothing comes into it at all (it sounds on its own). Steps come after their sources.
+        for(size_t i=0;i<plan->steps.size();++i)
+        {
+            auto& s=plan->steps[i];
+            const auto can=[&](int from){return from<0 || size_t(from)>=i || plan->steps[size_t(from)].playable;};
+            s.playable=s.lanesIn || (s.noteSources.empty() && audioSources[i].empty())
+                || std::any_of(s.noteSources.begin(),s.noteSources.end(),[&](const Plan::Step::NoteSource& n){return !n.draining && can(n.step);})
+                || std::any_of(audioSources[i].begin(),audioSources[i].end(),[&](const oscairn_audio_route& r){return can(r.source);});
+        }
 
         {
             using Peaks=oscairn_peaks*;
@@ -1069,7 +1081,7 @@ namespace oscairn
             [](void*){return int64_t(std::chrono::steady_clock::now().time_since_epoch().count());},
             [](void*,int64_t at,bool only){worker::workerDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));worker::workerDeadlineOnly=only;},
             [](void* c,uint32_t n,oscairn_job job,void* context){C::of(c).helpers->run(n,reinterpret_cast<AudioHelpers::Job>(job),context);},
-            [](void* c,uint32_t s,uint32_t frames){return C::host(c,s).rest(frames);}};
+            [](void* c,uint32_t s,uint32_t frames){return (worker::workerRest()==worker::WorkerRest::all || !C::step(c,s).playable) && C::host(c,s).rest(frames);}};
         static_assert(std::is_same_v<std::chrono::steady_clock::duration,std::chrono::nanoseconds>);
         oscairn_plugins plugins=table;plugins.context=&calls;
         const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);

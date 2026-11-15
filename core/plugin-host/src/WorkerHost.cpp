@@ -46,9 +46,9 @@ namespace oscairn
     {
         using namespace worker;
 
-        // OSCAIRN_WORKER_REST, read once at the engine's start: 0 calls every worker every block, as before resting
-        // (a diagnostic A/B switch, developer-guide); anything else or unset rests a plugin asleep with nothing for it.
-        const bool workerRest = [] { const char* v = std::getenv("OSCAIRN_WORKER_REST"); return !v || std::strcmp(v, "0") != 0; }();
+        // OSCAIRN_WORKER_REST (realtime.h's workerRest), read as the engine starts: 0 calls every worker every block, as
+        // before resting; which of the others may rest, the graph says (Graph's rest call).
+        const bool workerRest = worker::workerRest() != WorkerRest::never;
 
         uint32_t channels(const std::vector<kick::clap::Port>& ports) { uint32_t n = 0; for(const auto& p : ports) n += p.channels; return n; }
 

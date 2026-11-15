@@ -105,6 +105,16 @@ namespace oscairn::worker
         return std::min<std::chrono::nanoseconds>(std::chrono::microseconds(us), allowance / 2);
     }
 
+    WorkerRest workerRest() noexcept
+    {
+        static const WorkerRest mode = [] {
+            const char* v = std::getenv("OSCAIRN_WORKER_REST");
+            const std::string s = v ? v : "";
+            return s == "0" ? WorkerRest::never : s == "all" ? WorkerRest::all : WorkerRest::disabled;
+        }();
+        return mode;
+    }
+
     bool deadlineAllowance() noexcept
     {
         const char* v = std::getenv("OSCAIRN_WORKER_DEADLINE");

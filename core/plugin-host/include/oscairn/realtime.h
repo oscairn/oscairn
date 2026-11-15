@@ -68,6 +68,11 @@ namespace oscairn::worker
     inline thread_local bool workerDeadlineOnly = false; // the graph's: step 6, workerDeadline in place of the allowance
     // Whether OSCAIRN_WORKER_DEADLINE asks for step 6 (a graph reads it as it is made).
     bool deadlineAllowance() noexcept;
+    // OSCAIRN_WORKER_REST, read once at the engine's start: which workers whose plugin is asleep with nothing for it
+    // are left uncalled (RFC 0045). disabled (unset, or anything but the others): only one no note can reach in the
+    // plan playing (Graph's playable); all ("all"): any, after its hold; never ("0"): none, every worker every block.
+    enum class WorkerRest { disabled, all, never };
+    WorkerRest workerRest() noexcept;
     // What became of a block the engine handed a worker, once it came for it: on time (done when it
     // came, or found done within the allowance); late, found done but past the allowance, its sound
     // played all the same (the engine's own thread woke late); or silent, not done within the

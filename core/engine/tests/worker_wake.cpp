@@ -4,10 +4,12 @@
 // worker, played in real time: CYCLES times, REST blocks with nothing for them, a note for SOUND blocks, let go.
 // For chains of 1, 3 and 5 effects it prints the chain's time and each worker's wake (hand-over until its audio
 // thread ran) and round trip on the block the note comes, against the same on a later sounding block, the idle
-// block's cost (past the hold), and every block lost (late or silenced). Fails on a lost block, or when a
-// worker asleep with nothing for it is called past the hold while resting is on (or rested while it is off).
+// block's cost (past the hold), and every block lost (late or silenced). With OSCAIRN_WORKER_REST unset (disabled) the
+// workers can be played, so none rests; with OFF given, the instrument's note connection is off (draining, as a part a
+// scene switches off) through each rest and back on in the very block of the note, so they rest and that enable wakes them.
+// Fails on a lost block, or when a worker that may rest is called past the hold (or one that may not is rested).
 // Absolute times do not transfer from this machine to the FANTOM; the comparison does.
-//   oscairn-worker-wake-test WORKER FIXTURE [CYCLES [REST [FRAMES [EFFECTS]]]]
+//   oscairn-worker-wake-test WORKER FIXTURE [CYCLES [REST [FRAMES [EFFECTS [off]]]]]
 #include <oscairn/graph.h>
 #include <oscairn/plugin_host.h>
 #include <oscairn/realtime.h>
@@ -24,12 +26,14 @@
 
 int main(int argc, char** argv)
 {
-    if(argc < 3) { std::fprintf(stderr, "usage: %s WORKER FIXTURE [CYCLES [REST [FRAMES [EFFECTS]]]]\n", argv[0]); return 2; }
+    if(argc < 3) { std::fprintf(stderr, "usage: %s WORKER FIXTURE [CYCLES [REST [FRAMES [EFFECTS [off]]]]]\n", argv[0]); return 2; }
     const int cycles = argc > 3 ? std::atoi(argv[3]) : 50, rest = argc > 4 ? std::atoi(argv[4]) : 400;
     constexpr int sound = 8;
     setenv("KICK_FIXTURE_EFFECT_SLEEP", "1", 1);
     const char* restVar = std::getenv("OSCAIRN_WORKER_REST");
-    const bool resting = !restVar || std::strcmp(restVar, "0") != 0;
+    const std::string mode = restVar ? restVar : "";
+    const bool off = argc > 7 && std::string(argv[7]) == "off";
+    const bool resting = mode == "all" || (mode != "0" && off); // whether an idle worker may rest here
     const uint32_t frames = argc > 5 ? uint32_t(std::atoi(argv[5])) : 128;
     constexpr int hold = 192; // WorkerHost's: blocks a plugin asleep is still called before it rests
     constexpr double rate = 48000;
@@ -78,8 +82,10 @@ int main(int argc, char** argv)
         for(int c = 0; c < cycles; ++c)
         {
             const auto calls = called();
+            if(off) { g.setDraining(oscairn::graphInput, nodes[0], true); g.commit(); }
             for(int i = 0; i < rest; ++i) { const auto t = block(); if(i >= hold + 2) { idle += t; ++idleBlocks; } }
             idleCalls += called() - calls;
+            if(off) { g.setDraining(oscairn::graphInput, nodes[0], false); g.commit(); } // on again, taken in the note's own block
             const auto w = measured({kick::clap::Event::note(true, 60, 1)});
             Took s;
             for(int i = 1; i < sound; ++i) { const auto t = i == sound / 2 ? measured({}) : Took{block()}; if(i == sound / 2) s = t; }
@@ -88,15 +94,15 @@ int main(int argc, char** argv)
             for(size_t k = 0; k < hosts.size(); ++k) { wake[k] += w.wake[k]; trip[k] += w.trip[k]; steadyWake[k] += s.wake[k]; steadyTrip[k] += s.trip[k]; }
         }
         const auto lostBlocks = lost() - lostBefore;
-        std::printf("1 instrument + %d effects, %d cycles of %d rested blocks (rest %s): chain %.1f us on the waking block (max %.1f), %.1f sounding (max %.1f); "
+        std::printf("1 instrument + %d effects, %d cycles of %d rested blocks (rest %s%s): chain %.1f us on the waking block (max %.1f), %.1f sounding (max %.1f); "
                     "idle block %.2f us, %llu worker calls in %llu idle blocks; lost %llu\n",
-                    effects, cycles, rest, resting ? "on" : "off", wakeChain / cycles, wakeMax, steadyChain / cycles, steadyMax, idle / std::max<uint64_t>(1, idleBlocks),
+                    effects, cycles, rest, mode.empty() ? "disabled" : mode.c_str(), off ? ", part off while resting" : "", wakeChain / cycles, wakeMax, steadyChain / cycles, steadyMax, idle / std::max<uint64_t>(1, idleBlocks),
                     (unsigned long long)idleCalls, (unsigned long long)idleBlocks, (unsigned long long)lostBlocks);
         for(size_t k = 0; k < hosts.size(); ++k)
             std::printf("  worker %zu: wake %.1f us waking, %.1f sounding; round trip %.1f waking, %.1f sounding\n",
                         k, wake[k] / cycles, steadyWake[k] / cycles, trip[k] / cycles, steadyTrip[k] / cycles);
         if(lostBlocks) { std::fprintf(stderr, "FAIL: %llu blocks lost\n", (unsigned long long)lostBlocks); ++failures; }
-        // Resting on, an idle worker called only for the hold; off, every worker every block.
+        // An idle worker that may rest called only for the hold; one that may not, every block.
         const uint64_t all = uint64_t(rest) * cycles * hosts.size();
         if(resting ? idleCalls > uint64_t(hold + 2) * cycles * hosts.size() || (rest > hold + 2 && idleCalls >= all) : idleCalls < all) { std::fprintf(stderr, "FAIL: %llu worker calls in idle blocks of %llu\n", (unsigned long long)idleCalls, (unsigned long long)all); ++failures; }
     }

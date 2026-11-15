@@ -237,7 +237,7 @@ fi
 # and OSCAIRN_OWN_HOST (plugin IDs given workers of their own),
 # and OSCAIRN_UI_PAINT_LOG (1: the app and its apps log what their windows draw each second),
 # and OSCAIRN_DEADLINE_SLACK_US (the profile's compute.deadlineSlack, RFC 0045's guard),
-# and OSCAIRN_WORKER_REST (0: every worker called every block, as before resting; for comparing),
+# and OSCAIRN_WORKER_REST (which idle workers rest: disabled, the default, all, or 0 for none; for comparing),
 # and so is every OSCAIRN_VA_*, OSCAIRN_PCM_*, OSCAIRN_SAMPLER_*, OSCAIRN_ANALOG_*, OSCAIRN_FM_*,
 # OSCAIRN_ARPEGGIATOR_* and OSCAIRN_EFFECTS_* (the first-party plugins' device settings, which
 # they read when an instance is created): refused, with a failure, when a value holds anything

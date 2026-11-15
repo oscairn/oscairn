@@ -559,14 +559,18 @@ target_link_libraries(oscairn-sound-snapshots-fixture PRIVATE oscairn_clap_heade
 set_target_properties(oscairn-sound-snapshots-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
 add_test(NAME worker-sleep COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
-set_tests_properties(worker-sleep PROPERTIES TIMEOUT 60)
+set_tests_properties(worker-sleep PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_REST=all")
+add_test(NAME worker-sleep-disabled COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
+    $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
+set_tests_properties(worker-sleep-disabled PROPERTIES TIMEOUT 60)
 add_test(NAME worker-sleep-off COMMAND oscairn-worker-sleep-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal>
     $<TARGET_FILE:oscairn-sound-snapshots-fixture> $<TARGET_FILE:oscairn-follower-fixture>)
 set_tests_properties(worker-sleep-off PROPERTIES TIMEOUT 60 ENVIRONMENT "OSCAIRN_WORKER_REST=0")
-# The cost of waking a rested chain of workers, in real time (a few cycles here; more by hand: CYCLES REST).
+# The cost of waking a rested chain of workers, in real time: the chain switched off while it rests and on with the note
+# (a few cycles here; more by hand, and the modes by OSCAIRN_WORKER_REST).
 add_executable(oscairn-worker-wake-test engine/tests/worker_wake.cpp)
 target_link_libraries(oscairn-worker-wake-test PRIVATE oscairn_engine)
-add_test(NAME worker-wake COMMAND oscairn-worker-wake-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> 10 260)
+add_test(NAME worker-wake COMMAND oscairn-worker-wake-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> 10 260 128 5 off)
 set_tests_properties(worker-wake PROPERTIES TIMEOUT 120)
 add_executable(oscairn-worker-reader-test engine/tests/worker_reader.cpp)
 target_include_directories(oscairn-worker-reader-test PRIVATE plugin-host/src)

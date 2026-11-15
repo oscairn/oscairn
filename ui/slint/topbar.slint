@@ -4,7 +4,7 @@
 // part right of the Performance has a fixed width, so a changing figure never moves anything:
 // an update repaints its own digits and bar and nothing else (src/tests.rs proves it).
 
-import { Theme } from "theme.slint";
+import { Theme, Field } from "theme.slint";
 
 // The section's columns, from the theme's small type: whole pixels, fixed for a theme.
 global Columns {
@@ -14,6 +14,9 @@ global Columns {
     out property <length> bar: round(Theme.small * 5 / 1px) * 1px;
     out property <length> percent: 3 * cell + sign;
     out property <length> row: round(Theme.small * 1.25 / 1px) * 1px;
+    out property <length> meter: 6px; // a meter bar's thickness
+    out property <length> icon: 24px; // the Home glyph
+    out property <length> pill: 36px; // the Performance field's height
 }
 
 // A whole percent in fixed cells, a digit each ("  7%", " 42%", "100%"): tabular, whatever the font.
@@ -67,7 +70,7 @@ component Meter inherits Rectangle {
         x: Columns.label;
         y: (parent.height - self.height) / 2;
         width: Columns.bar;
-        height: 6px;
+        height: Columns.meter;
         background: Theme.raised;
         Rectangle {
             x: 0;
@@ -115,20 +118,20 @@ export component TopBar inherits Rectangle {
     background: Theme.background;
     // The JUCE bar's line under it.
     Rectangle {
-        y: parent.height - 1px;
-        height: 1px;
-        background: Theme.border.with-alpha(0.35);
+        y: parent.height - Theme.hair;
+        height: Theme.hair;
+        background: Theme.track;
     }
     HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 10px;
-        spacing: 8px;
+        padding-left: Theme.margin;
+        padding-right: Theme.pad;
+        spacing: Theme.pad-narrow;
         if Bar.home-button: TouchArea {
             width: Theme.touch;
             clicked => { Bar.home(); }
             Image {
-                width: 24px;
-                height: 24px;
+                width: Columns.icon;
+                height: Columns.icon;
                 source: @image-url("../../hosts/standalone/icons/house.svg");
                 colorize: Theme.text;
             }
@@ -143,14 +146,12 @@ export component TopBar inherits Rectangle {
         // The open Performance and its scene: a pill, as wide as what is left.
         Rectangle {
             horizontal-stretch: 1;
-            Rectangle {
+            if Bar.performance != "": Field {
                 y: (parent.height - self.height) / 2;
-                height: 36px;
-                border-radius: min(self.height / 2, Theme.radius);
-                background: Bar.performance == "" ? transparent : Theme.surface;
+                height: Columns.pill;
                 Text {
-                    x: 12px;
-                    width: parent.width - 24px;
+                    x: Theme.pad-wide;
+                    width: parent.width - 2 * Theme.pad-wide;
                     vertical-alignment: center;
                     overflow: elide;
                     font-size: Theme.small;
@@ -168,10 +169,10 @@ export component TopBar inherits Rectangle {
             text: Bar.tempo;
         }
         resources := Rectangle {
-            width: !root.any ? 0 : Columns.label + (root.any-bar ? Columns.bar + 8px : 0) + (root.any-percent ? Columns.percent : 0);
+            width: !root.any ? 0 : Columns.label + (root.any-bar ? Columns.bar + Theme.pad-narrow : 0) + (root.any-percent ? Columns.percent : 0);
             VerticalLayout {
                 alignment: center;
-                spacing: 4px;
+                spacing: Theme.pad-tight;
                 if Bar.cpu-bar || Bar.cpu-percent: Meter {
                     label: "CPU";
                     value: Bar.cpu;
@@ -179,7 +180,7 @@ export component TopBar inherits Rectangle {
                     level: Bar.cpu-level;
                     bar: Bar.cpu-bar;
                     percent: Bar.cpu-percent;
-                    percent-x: Columns.label + (root.any-bar ? Columns.bar + 8px : 0);
+                    percent-x: Columns.label + (root.any-bar ? Columns.bar + Theme.pad-narrow : 0);
                 }
                 if Bar.ram-bar || Bar.ram-percent: Meter {
                     label: "RAM";
@@ -188,7 +189,7 @@ export component TopBar inherits Rectangle {
                     level: Bar.ram-level;
                     bar: Bar.ram-bar;
                     percent: Bar.ram-percent;
-                    percent-x: Columns.label + (root.any-bar ? Columns.bar + 8px : 0);
+                    percent-x: Columns.label + (root.any-bar ? Columns.bar + Theme.pad-narrow : 0);
                 }
             }
         }

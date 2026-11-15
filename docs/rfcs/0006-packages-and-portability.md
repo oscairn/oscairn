@@ -1,7 +1,8 @@
 # RFC 0006: Packages and cross-device portability
 
-Status: proposed. This is the packaging and transfer contract to build toward, not an
-implemented installer or project format. It refines [Portable sounds](../architecture.md#portable-sounds)
+Status: in progress. This is the packaging and transfer contract to build toward; what is
+built is signed plugin builds carried in archives into a plugin store, and installing packages from
+signed repositories ([RFC 0031](0031-package-repository-and-distribution.md)), not a project format. It refines [Portable sounds](../architecture.md#portable-sounds)
 and [Packages](../architecture.md#packages-sound-packs-libraries-and-plugins).
 
 ## Progress

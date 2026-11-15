@@ -1,6 +1,6 @@
 # RFC 0031: The package repository and distribution
 
-Status: proposed, 2026-11-01. Fills in step 6 of
+Status: in progress; proposed 2026-11-01, and the official repository is live at packages.oscairn.org (see [Progress](#progress) for what is built and tested). Fills in step 6 of
 [RFC 0006](0006-packages-and-portability.md) ("Catalogs, multi-device preparation and
 distribution polish") for packages. Builds on RFC 0006's packages, locks, offline repair and
 [signatures](0006-packages-and-portability.md#signatures), the

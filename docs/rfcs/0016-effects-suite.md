@@ -10,7 +10,7 @@ effects written for Oscairn or reused from open-source projects, with no Yamaha 
 Checked when built and tested; the sections below say how.
 
 - [ ] 1. Routing for converted effects: the converter's mapping onto parts, buses and wires;
-      node roles for device profiles (roles stored and exposed, [status](#node-roles-status);
+      node roles for device profiles (roles stored and exposed, [status](#where-the-effects-go);
       mapping profile controls to them remains); a test of side-chain on effect contexts
 - [ ] 2. The most-used types
 - [ ] 3. The remaining categories

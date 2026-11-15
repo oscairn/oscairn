@@ -1,7 +1,7 @@
 # RFC 0032: The arpeggiator
 
 Status: proposed, 2026-11-01. Steps 1 and 3 built in the host (below). The plugin is built in its own repository,
-`oscairn/arpeggiator` (MIT, private for now), from its plan (`doc/plan.md` there, read at
+`oscairn/arpeggiator` (MIT), from its plan (`doc/plan.md` there, read at
 commit d00c3b6 and again before this RFC was committed). This RFC is Oscairn's side: where the
 plugin sits, what the host must add for it, how conversion places it, and how it is tested.
 Builds on the parts and plugin roles of [RFC 0011](0011-performance-ui-and-editors.md),

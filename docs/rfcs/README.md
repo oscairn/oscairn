@@ -12,23 +12,23 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0001](0001-license.md) | License | accepted |
 | [0002](0002-param-target.md) | Parameter changes between plugins (oscairn.param-target) | draft, implemented |
 | [0003](0003-control-api.md) | Control API | partially implemented; local JSON-RPC transport and explicit engine/UI separation |
-| [0004](0004-hardware-services.md) | Hardware services, event timing and engine backends | proposed |
+| [0004](0004-hardware-services.md) | Hardware services, event timing and engine backends | proposed; step 1 built |
 | [0005](0005-sound-contexts.md) | Native prepared sound contexts | instrument contexts and full snapshots implemented; SFZ patches via the Legacy Sampler; effects covered by 0007 |
-| [0006](0006-packages-and-portability.md) | Packages and cross-device portability | proposed |
+| [0006](0006-packages-and-portability.md) | Packages and cross-device portability | in progress: archives carry signed plugin builds into a plugin store; the rest proposed |
 | [0007](0007-effect-contexts.md) | Independent effects on shared native engines | implemented Delay/bus foundation; automatic chain management planned |
-| [0008](0008-sfz-native-samples-and-conversion.md) | SFZ-based native samples and Yamaha conversion | one-region Legacy Sampler implemented; multisample, extensions and converters planned |
+| [0008](0008-sfz-native-samples-and-conversion.md) | SFZ-based native samples and Yamaha conversion | in progress: the one-region Legacy Sampler built; extension syntax and converters not defined |
 | [0009](0009-sound-assets-and-dependencies.md) | Sound assets and dependencies | steps 1–2 implemented; LV2 mapping and packages planned |
 | [0010](0010-plugin-worker-isolation.md) | Plugin worker isolation | in progress: steps 1–5 implemented on macOS |
 | [0011](0011-performance-ui-and-editors.md) | Performance UI, routing views and plugin editors | in progress: steps 1–4 and undo implemented |
 | [0012](0012-sync-external-midi-and-multi-device.md) | Sync, external MIDI devices and multi-device setlists | in progress: input device selectors, MIDI out and clock out implemented |
-| [0013](0013-awm2-class-sample-engine.md) | An AWM2-class sample engine | proposed |
+| [0013](0013-awm2-class-sample-engine.md) | An AWM2-class sample engine | in progress, built in the sfizz fork |
 | [0014](0014-fm-engine.md) | An 8-operator FM engine | proposed |
 | [0015](0015-analog-modeling-engine.md) | An analog-modeling engine | proposed |
 | [0016](0016-effects-suite.md) | An effects suite covering the MODX M platform | proposed |
 | [0017](0017-host-tuning.md) | Host-level tuning | proposed |
-| [0018](0018-voice-budget-and-stealing.md) | Voice budget and stealing | in progress: steps 1 to 4 implemented (the Legacy Sampler's extension and both device gates not yet) |
+| [0018](0018-voice-budget-and-stealing.md) | Voice budget and stealing | proposed; steps 1 to 4 implemented (step 3's device gate and step 4's AWM2-class gate unverified) |
 | [0019](0019-adaptive-ui.md) | One UI across desktop, touch panel and small screens | in progress: step 1 done, steps 2, 3 and 5 started |
-| [0020](0020-recording.md) | Recording | proposed |
+| [0020](0020-recording.md) | Recording | proposed; steps 1 to 4 built in part |
 | [0021](0021-sounds-performances-and-library.md) | Sounds, Performances and the library | in progress |
 | [0022](0022-apps-and-requests.md) | Apps that open each other | in progress |
 | [0023](0023-item-types.md) | Item types | proposed |
@@ -39,10 +39,10 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0028](0028-system-image-updates-boot-and-power.md) | The system image: updates, boot, storage and power | proposed |
 | [0029](0029-internationalization.md) | Internationalization | proposed |
 | [0030](0030-system-shell-launcher-and-navigation.md) | The system shell: launchers, the top bar and how screens flow | proposed; steps 1 and 2 started (Home, `home` and `back` buttons) |
-| [0031](0031-package-repository-and-distribution.md) | The package repository and distribution | proposed |
-| [0032](0032-arpeggiator.md) | The arpeggiator | proposed |
-| [0033](0033-script-block.md) | The script block | proposed |
-| [0034](0034-parallel-graph-rendering.md) | Parallel graph rendering | proposed |
+| [0031](0031-package-repository-and-distribution.md) | The package repository and distribution | in progress: the official repository is live at packages.oscairn.org |
+| [0032](0032-arpeggiator.md) | The arpeggiator | proposed; steps 1 and 3 built in the host, the plugin is in its own repository |
+| [0033](0033-script-block.md) | The script block | proposed; not implemented, the host side of step 5 is built |
+| [0034](0034-parallel-graph-rendering.md) | Parallel graph rendering | in progress: steps 1 and 2 built |
 | [0035](0035-system-base.md) | The system base: real-time tuning, security, licenses, the SDK, time and services | proposed |
 | [0036](0036-bluetooth.md) | Bluetooth MIDI and audio | proposed |
 | [0037](0037-storage-and-file-transfer.md) | Storage and file transfer | proposed |
@@ -53,4 +53,4 @@ tests it, with a note on what remains of a step that is partly done. The
 | [0042](0042-sliders-and-drawbars.md) | Sliders that follow a part, and organ drawbars | proposed |
 | [0043](0043-moving-sounds-to-newer-plugin-versions.md) | Moving sounds to newer plugin versions, and removing unused ones | proposed |
 | [0044](0044-panel-sections.md) | Panel sections: dedicated piano, organ and synth controls over flexible parts | proposed |
-| [0045](0045-audio-scheduling-on-small-devices.md) | Audio scheduling and placement on small devices | proposed; steps 1–3 built (measurement and an opt-in experiment) |
+| [0045](0045-audio-scheduling-on-small-devices.md) | Audio scheduling and placement on small devices | accepted 2026-11-13 but for decision 6, held; steps 1 to 4 and 6 built |

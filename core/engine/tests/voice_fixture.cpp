@@ -18,6 +18,8 @@
 // OSCAIRN_FIXTURE_VOICE_BUDGET): it reports no voices and no cost, and keeps to no limit, as a plugin whose report is wrong.
 // OSCAIRN_FIXTURE_IGNORE_LIMIT=1 (with OSCAIRN_FIXTURE_VOICE_BUDGET): it reports its voices truly but keeps to no limit.
 // OSCAIRN_FIXTURE_REPORT_US: the cost per voice it reports (default its real one), as a plugin's figure from another load.
+// OSCAIRN_FIXTURE_SUSTAIN=1: it takes the sustain pedal (MIDI controller 64, any channel): a note let go with the pedal
+// down sounds on, at its cost, until the pedal comes up, as a piano's.
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -32,7 +34,7 @@
 namespace {
 const char* features[]{CLAP_PLUGIN_FEATURE_INSTRUMENT,nullptr};
 const clap_plugin_descriptor_t descriptor{CLAP_VERSION,"org.oscairn.test.voices","Costly voices","Oscairn","","","","1","",features};
-struct Voice { bool active=false,held=false; int32_t id=-1; int16_t channel=0,key=0; double velocity=0,volume=1,phase=0,level=1,layer=1; uint32_t chokeLeft=0; bool choking=false; uint64_t started=0; };
+struct Voice { bool active=false,held=false,sustained=false; int32_t id=-1; int16_t channel=0,key=0; double velocity=0,volume=1,phase=0,level=1,layer=1; uint32_t chokeLeft=0; bool choking=false; uint64_t started=0; };
 struct Plugin {
     clap_plugin_t api{};const clap_host_t* host;
     double rate=48000,microseconds=0,blockMicroseconds=0,reportedMicroseconds=-1;bool cpuClock=false;uint32_t chokeFrames=144,layers=1,frames=128;
@@ -41,6 +43,7 @@ struct Plugin {
     bool noEnd=false; // OSCAIRN_FIXTURE_NO_END
     bool reportZero=false; // OSCAIRN_FIXTURE_REPORT_ZERO
     bool ignoreLimit=false; // OSCAIRN_FIXTURE_IGNORE_LIMIT
+    bool takesSustain=false,pedal=false; // OSCAIRN_FIXTURE_SUSTAIN; the pedal down
     struct Bad { long at=0,calls=1; float value=0; }; std::array<Bad,8> bad{}; size_t badCount=0; // OSCAIRN_FIXTURE_OUTPUT
     oscairn::voices::Limits limits; // oscairn.voice-budget's, audio thread
     double loudness(const Voice& v) const {return v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
@@ -69,6 +72,13 @@ struct Plugin {
         if(h->type==CLAP_EVENT_MIDI) // OSCAIRN_FIXTURE_MIDI: its notes as CLAP's
         {
             const auto& m=*reinterpret_cast<const clap_event_midi_t*>(h);const int kind=m.data[0]&0xf0;
+            if(kind==0xb0 && m.data[1]==64)
+            {
+                if(!takesSustain)return;
+                pedal=m.data[2]>=64;
+                if(!pedal)for(auto& v:voices)if(v.sustained){v.sustained=false;v.held=false;}
+                return;
+            }
             clap_event_note_t n{};n.header={sizeof(n),h->time,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_OFF,0};
             n.note_id=-1;n.channel=int16_t(m.data[0]&15);n.key=int16_t(m.data[1]);n.velocity=m.data[2]/127.0;
             if(kind==0x90 && m.data[2])n.header.type=CLAP_EVENT_NOTE_ON;
@@ -93,6 +103,7 @@ struct Plugin {
             }
             for(auto& v:voices)if(matches(v,n.note_id,n.channel,n.key))
             {
+                if(h->type==CLAP_EVENT_NOTE_OFF && pedal && v.held){v.sustained=true;continue;} // the pedal holds it
                 v.held=false;
                 if(h->type==CLAP_EVENT_NOTE_CHOKE && !v.choking){v.choking=true;v.chokeLeft=chokeFrames;}
             }
@@ -124,6 +135,7 @@ struct Plugin {
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_BLOCK_US"))blockMicroseconds=std::atof(us);
         cpuClock=std::getenv("OSCAIRN_FIXTURE_CPU_CLOCK")!=nullptr;
         noEnd=std::getenv("OSCAIRN_FIXTURE_NO_END")!=nullptr;
+        takesSustain=std::getenv("OSCAIRN_FIXTURE_SUSTAIN")!=nullptr;
         reportZero=std::getenv("OSCAIRN_FIXTURE_REPORT_ZERO")!=nullptr;
         if(const char* us=std::getenv("OSCAIRN_FIXTURE_REPORT_US"))reportedMicroseconds=std::atof(us);
         ignoreLimit=reportZero || std::getenv("OSCAIRN_FIXTURE_IGNORE_LIMIT")!=nullptr;

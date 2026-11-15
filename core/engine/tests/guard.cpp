@@ -18,11 +18,14 @@
 //     of its own that loses blocks (load not of their making): voices go within a few blocks of the first loss,
 //     off the parts' limits, and keep going while losses go on; a limit lowered does not grow straight back with the
 //     time the voices given up free, to bring the losses back (RFC 0045, 12k).
+//   pedalled: the starved case played as a pedalled passage (the sustain pedal down throughout, keys struck again and
+//     again, never all let go), with plain parts and with parts giving up their own: voices the pedal holds give way
+//     and the losses stop.
 //   deadline: instruments in the engine's process, each well within its lane, while the callback reaches its deadline
 //     after each block (load from outside the audio): notes give way across the lanes; with a heavy but healthy block
 //     (little left, the default threshold 0) or the whole time to spare, none; with a profile's threshold of 900 us
 //     (OSCAIRN_DEADLINE_SLACK_US), that little left is too little and notes give way.
-// Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline|burst|limit-first|starved] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
+// Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline|burst|limit-first|starved|pedalled] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
 // notes give way; a name runs that case alone.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
@@ -172,6 +175,40 @@ Starved starved(const char* plugin){
     return r;
 }
 
+// A pedalled passage (the owner's Sick tines case): two parts taking the sustain pedal, own-voices or not, into a bus
+// effect losing blocks; the pedal down from block 10, each part's sixteen keys struck a block apart and let go the
+// next, then one struck again every 8 blocks, never all let go. The effect's first lost block, the voices given up
+// (faded or off a limit) and the effect's losses from block 500 to 800.
+struct Pedalled { uint32_t first=0; uint64_t gaveUp=0,lateLost=0; };
+Pedalled pedalled(const char* plugin,bool own){
+    setenv("OSCAIRN_FIXTURE_VOICE_US","40",1);setenv("OSCAIRN_FIXTURE_SUSTAIN","1",1);if(own)setenv("OSCAIRN_FIXTURE_VOICE_BUDGET","1",1);
+    Graph g(48000,frames);
+    const auto a=g.add(plugin),b=g.add(plugin);
+    setenv("OSCAIRN_FIXTURE_EFFECT_US","1600",1);setenv("OSCAIRN_FIXTURE_EFFECT_LEVEL","0.4",1);
+    const auto bus=g.add(plugin,effect);
+    for(uint32_t p=0;p<2;++p){const auto n=p?b:a;NoteZone z;z.channels=uint16_t(1u<<p);z.part=p+1;g.connectNotes(graphInput,n,{z});g.connectAudio(n,bus);}
+    g.connectAudio(bus,graphOutput);
+    g.commit();g.setVoiceBudget(-1);
+    Pedalled r;uint64_t at500=0,mark=0;
+    play(g,800,[&](uint32_t block){
+        const uint64_t lost=g.host(bus).statistics().deadlineMisses;
+        if(!r.first && lost)r.first=block;
+        if(block==500)at500=lost;
+        mark=lost;
+        std::vector<Event> e;
+        for(int p=0;p<2;++p){
+            if(block==10)e.push_back(Event::midi(uint8_t(0xb0|p),64,127));
+            const int key=block>=20 && block<52?int(block-20)/2:block>=52 && block%8==0?int(block/8%16):-1;
+            if(key>=0 && block%2==0)e.push_back(Event::note(true,48+key,1,0,p));
+            const int up=block>=21 && block<53?int(block-21)/2:block>=53 && block%8==1?int(block/8%16):-1;
+            if(up>=0 && block%2==1)e.push_back(Event::note(false,48+up,0,0,p));}
+        return e;});
+    unsetenv("OSCAIRN_FIXTURE_EFFECT_US");unsetenv("OSCAIRN_FIXTURE_EFFECT_LEVEL");unsetenv("OSCAIRN_FIXTURE_VOICE_BUDGET");unsetenv("OSCAIRN_FIXTURE_SUSTAIN");
+    for(const auto n:{a,b}){const auto c=g.noteCost(n);r.gaveUp+=c.stolen+c.stolenForLoss+c.hardChokes+c.stolenForDeadline;}
+    r.lateLost=mark-at500;
+    return r;
+}
+
 // The chain's case, its notes released and the effects asleep: the instrument lane's limit then.
 double asleep(const char* plugin){
     setenv("OSCAIRN_WORKER_DEADLINE","1",1);setenv("OSCAIRN_FIXTURE_VOICE_US","90",1);
@@ -255,6 +292,14 @@ int main(int argc,char** argv){try{
     check(st.first>0,"the bus effect loses blocks");
     check(st.early>0,"voices go within a few blocks of the first loss");
     if(timing)check(st.lateLost<=5,"and keep going until losses stop: "+std::to_string(st.lateLost));
+    }
+    if(only.empty() || only=="pedalled"){
+    const auto plain=pedalled(argv[1],false),own=pedalled(argv[1],true);
+    std::printf("pedalled: plain parts: first lost block %u, %llu voices given up, %llu blocks lost from 500 to 800; parts giving up their own: %u, %llu, %llu\n",
+        plain.first,(unsigned long long)plain.gaveUp,(unsigned long long)plain.lateLost,own.first,(unsigned long long)own.gaveUp,(unsigned long long)own.lateLost);
+    check(plain.first>0 && own.first>0,"the bus effect loses blocks");
+    check(plain.gaveUp>0 && own.gaveUp>0,"voices held by the pedal give way");
+    if(timing)check(plain.lateLost<=5 && own.lateLost<=5,"and the losses stop, the pedal still down");
     }
     if(only.empty() || only=="deadline"){
     const auto d=late(argv[1]);

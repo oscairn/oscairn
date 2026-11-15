@@ -16,7 +16,8 @@
 //     its own, the host's notes untouched; one that ignores its limit has notes faded from outside after it.
 //   starved: two parts giving up their own voices, each well within its own lane, sending to a bus effect in a worker
 //     of its own that loses blocks (load not of their making): voices go within a few blocks of the first loss,
-//     off the parts' limits, and keep going while losses go on.
+//     off the parts' limits, and keep going while losses go on; a limit lowered stays down while the notes are held
+//     (the time the voices given up free does not raise it again, to bring the losses back).
 //   deadline: instruments in the engine's process, each well within its lane, while the callback reaches its deadline
 //     after each block (load from outside the audio): notes give way across the lanes; with a heavy but healthy block
 //     (little left, the default threshold 0) or the whole time to spare, none; with a profile's threshold of 900 us
@@ -153,7 +154,7 @@ Starved starved(const char* plugin){
     setenv("OSCAIRN_FIXTURE_VOICE_US","40",1);setenv("OSCAIRN_FIXTURE_VOICE_BUDGET","1",1);
     Graph g(48000,frames);
     const auto a=g.add(plugin),b=g.add(plugin);
-    setenv("OSCAIRN_FIXTURE_EFFECT_US","1600",1);setenv("OSCAIRN_FIXTURE_EFFECT_LEVEL","0.2",1);
+    setenv("OSCAIRN_FIXTURE_EFFECT_US","1600",1);setenv("OSCAIRN_FIXTURE_EFFECT_LEVEL","0.4",1);
     const auto bus=g.add(plugin,effect);
     for(uint32_t p=0;p<2;++p){const auto n=p?b:a;NoteZone z;z.channels=uint16_t(1u<<p);z.part=p+1;g.connectNotes(graphInput,n,{z});g.connectAudio(n,bus);}
     g.connectAudio(bus,graphOutput);

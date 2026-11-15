@@ -90,7 +90,7 @@ impl Activity {
 
 /// A note connection into a plugin taking CLAP notes: its route, its node's cost, its part's group
 /// (the first entry of its part, else itself), whether it counts its node at rest, its lane, and its
-/// part's reserve and priority; cut, the voices the guard took off its node's limit (a plugin giving up its own).
+/// part's reserve and priority; cap, the most voices the guard leaves its node (a plugin giving up its own), 0 for none.
 pub struct Entry {
     pub route: Route,
     pub cost: Shared<Activity>,
@@ -101,7 +101,7 @@ pub struct Entry {
     pub part: u32,
     pub reserve: u16,
     pub priority: u8,
-    pub cut: u32,
+    pub cap: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -393,7 +393,8 @@ impl Budget {
         let e = self.entries.get_mut(k)?;
         let a = &e.cost;
         if a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) > 1 && a.over_limit.load(Relaxed) <= BACKSTOP_BLOCKS {
-            e.cut += 1;
+            // One fewer than the limit in force, and held there: notes that keep arriving do not raise it again.
+            e.cap = a.voice_limit.load(Relaxed) - 1;
         } else {
             rs[e.route].steal(i, 0);
         }
@@ -426,12 +427,12 @@ impl Budget {
             a.faded_for_deadline.fetch_add(1, Relaxed);
         }
     }
-    /// The voices taken off a plugin's limit come back once it holds no note (the player let go): while notes
-    /// are held, giving them back would only bring the losses back.
+    /// A plugin's limit is let go once it holds no note (the player let go): while notes are held, giving
+    /// voices back would only bring the losses back.
     pub fn calm(&mut self, rs: &Routes) {
         for e in &mut self.entries {
             if !rs[e.route].used.any() {
-                e.cut = 0;
+                e.cap = 0;
             }
         }
     }
@@ -441,8 +442,8 @@ impl Budget {
     /// already), never fewer than those admitted unless the lane is measured over its limit, and then at
     /// most a quarter fewer than it sounds a block; 0 for no limit (no budget, or no cost measured).
     pub fn voice_limit(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> u32 {
-        let cut: u32 = self.entries.iter().filter(|e| std::ptr::eq(&*e.cost, node)).map(|e| e.cut).sum();
-        self.limit_for(rs, lane, node, voices, admitted).map_or(0, |l| l.saturating_sub(cut).max(1))
+        let cap = self.entries.iter().filter(|e| e.cap != 0 && std::ptr::eq(&*e.cost, node)).map(|e| e.cap).min().unwrap_or(u32::MAX);
+        self.limit_for(rs, lane, node, voices, admitted).map_or(0, |l| l.min(cap))
     }
     fn limit_for(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> Option<u32> {
         let each = node.note_now() / node.per_note_scale.get();

@@ -190,7 +190,7 @@ impl Notes {
                     part,
                     reserve: zone.map_or(0, |z| z.reserve),
                     priority: zone.map_or(0, |z| z.priority),
-                    cut: 0,
+                    cap: 0,
                 });
                 step.budgeted = true;
             }

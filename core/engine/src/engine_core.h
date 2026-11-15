@@ -148,7 +148,7 @@ typedef struct
     uint32_t p##notes_route(oscairn_notes* notes, uint32_t step, oscairn_key* keys, uint32_t count, uint32_t frames, uint32_t* next_id, \
                             oscairn_event* merged, uint32_t capacity, int16_t* heard, bool* overflow); \
     void p##notes_finish(oscairn_notes* notes, uint32_t step, const oscairn_finish* finish); \
-    uint32_t p##notes_voice_limit(const oscairn_notes* notes, uint32_t step, uint32_t voices); \
+    uint32_t p##notes_voice_limit(const oscairn_notes* notes, uint32_t step, uint32_t voices, uint32_t* contexts, uint32_t count); \
     void p##notes_end(oscairn_notes* notes, float slack);
 
 /* route_new: a ledger for a destination with `ports` note ports, bit p of clap_ports set where port p
@@ -169,7 +169,11 @@ typedef struct
  *   events merged.
  * notes_finish: after the step's plugin rendered: its notes counted and costed, a lost block marked on
  *   its lane and the lanes before it (the Rust core), its NOTE_ENDs taken.
- * notes_voice_limit: oscairn.voice-budget: the voices a step that gives up its own may keep.
+ * notes_voice_limit: oscairn.voice-budget: the voices a step that gives up its own may keep, `voices`
+ *   sounding now: those of the notes admitted and the room left at its cost per voice, never fewer than
+ *   those admitted unless its lane is measured over its limit (then at most a quarter fewer a block);
+ *   and into `contexts` (`count`, the step's sound contexts in order) each context's: its admitted
+ *   voices and its share of the instance's room, 0 for one holding none.
  * notes_end: the block is done: the lanes judged against their limits, the timing report kept; slack,
  *   the microseconds left before the callback's deadline once the block was collected (NaN: unknown),
  *   which the Rust core gives notes up for when it runs low. */

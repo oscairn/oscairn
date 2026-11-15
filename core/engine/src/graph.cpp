@@ -1318,7 +1318,10 @@ namespace oscairn
                 for(const auto& source:step.noteSources)if(source.channel==channel && !source.draining && source.zones.count){p.reserve=source.zones.zones[0].reserve;p.priority=source.zones.zones[0].priority;break;}};
             if(step.contexts.empty())part(-1,OSCAIRN_VOICE_BUDGET_SELECTED);
             else for(const auto& c:step.contexts)if(entries<parts.size())part(c.channel,c.sound->sound());
-            const uint32_t limit=OSCAIRN_CORE(notes_voice_limit)(plan->notes.get(),uint32_t(&step-plan->steps.data()),voices);
+            // Each sound context's own limit too: one sound's tails not given up for another's notes while the instance keeps within its own.
+            std::array<uint32_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> own{};
+            const uint32_t limit=OSCAIRN_CORE(notes_voice_limit)(plan->notes.get(),uint32_t(&step-plan->steps.data()),voices,own.data(),step.contexts.empty()?0:entries);
+            if(!step.contexts.empty())for(uint32_t i=0;i<entries;++i)parts[i].limit=own[i];
             if(limit==step.voiceLimit && entries==step.voiceContexts && !std::memcmp(parts.data(),step.voiceLimits.data(),entries*sizeof parts[0]))return;
             step.voiceLimit=limit;step.voiceLimits=parts;step.voiceContexts=entries;step.activity->voiceLimit=limit;
             step.host->setVoiceLimits(limit,parts.data(),entries);

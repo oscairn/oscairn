@@ -248,6 +248,7 @@ void run(uint64_t seed,uint32_t blocks)
             totals.merged+=n[0];
             // The plugin: its time from the notes it holds, its NOTE_ENDs, sometimes a lost block, a reset, silence.
             const bool processed=rng.below(50),reset=!rng.below(400),silent=!rng.below(3),spike=!rng.below(200);
+            uint32_t soundLimits[2][2]{}; // each core's limits for the step's sound contexts
             const uint32_t loudness=rng.below(100);
             for(int k=0;k<2;++k)
             {
@@ -273,9 +274,9 @@ void run(uint64_t seed,uint32_t blocks)
                 const float took=(plan[s].rest+plan[s].perNote*float(live))*(spike?3.f:1.f);
                 const oscairn_finish f{took,processed,reset,false,plan[s].ownVoices,plan[s].honors,2*live,plan[s].perNote*.5,voices.data(),uint32_t(voices.size()),sent.data(),uint32_t(sent.size())};
                 side.core.notesFinish(side.notes,uint32_t(s),&f);
-                if(plan[s].ownVoices)a.voiceLimit=side.core.notesVoiceLimit(side.notes,uint32_t(s),2*live);
+                if(plan[s].ownVoices)a.voiceLimit=side.core.notesVoiceLimit(side.notes,uint32_t(s),2*live,soundLimits[k],uint32_t(plan[s].contexts.size()));
             }
-            if(plan[s].ownVoices && sides[0]->activities[s]->get().voiceLimit!=sides[1]->activities[s]->get().voiceLimit)fail("voice limit",seed,b,int(s));
+            if(plan[s].ownVoices && (sides[0]->activities[s]->get().voiceLimit!=sides[1]->activities[s]->get().voiceLimit || !same(soundLimits[0],soundLimits[1],sizeof soundLimits[0])))fail("voice limits",seed,b,int(s));
         }
         // A MIDI tap and a harmony: the input through each one's route alone.
         for(int k=0;k<2;++k)

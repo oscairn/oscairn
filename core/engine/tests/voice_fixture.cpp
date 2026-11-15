@@ -16,6 +16,8 @@
 // OSCAIRN_FIXTURE_NO_END=1: it sends no NOTE_END, as a plugin that loses them. OSCAIRN_FIXTURE_MIDI=1: it takes
 // notes as MIDI only (its note port's one dialect), as a plugin of the MIDI world. OSCAIRN_FIXTURE_REPORT_ZERO=1 (with
 // OSCAIRN_FIXTURE_VOICE_BUDGET): it reports no voices and no cost, and keeps to no limit, as a plugin whose report is wrong.
+// OSCAIRN_FIXTURE_IGNORE_LIMIT=1 (with OSCAIRN_FIXTURE_VOICE_BUDGET): it reports its voices truly but keeps to no limit.
+// OSCAIRN_FIXTURE_REPORT_US: the cost per voice it reports (default its real one), as a plugin's figure from another load.
 #include <clap/clap.h>
 #include <oscairn-clap/voice-budget-plugin.hpp>
 #include <algorithm>
@@ -33,11 +35,12 @@ const clap_plugin_descriptor_t descriptor{CLAP_VERSION,"org.oscairn.test.voices"
 struct Voice { bool active=false,held=false; int32_t id=-1; int16_t channel=0,key=0; double velocity=0,volume=1,phase=0,level=1,layer=1; uint32_t chokeLeft=0; bool choking=false; uint64_t started=0; };
 struct Plugin {
     clap_plugin_t api{};const clap_host_t* host;
-    double rate=48000,microseconds=0,blockMicroseconds=0;bool cpuClock=false;uint32_t chokeFrames=144,layers=1,frames=128;
+    double rate=48000,microseconds=0,blockMicroseconds=0,reportedMicroseconds=-1;bool cpuClock=false;uint32_t chokeFrames=144,layers=1,frames=128;
     std::array<Voice,128> voices{};uint64_t started=0,calls=0;
     long spikeAt=0,spikeCalls=0;double spikeUs=0; // OSCAIRN_FIXTURE_SPIKE
     bool noEnd=false; // OSCAIRN_FIXTURE_NO_END
     bool reportZero=false; // OSCAIRN_FIXTURE_REPORT_ZERO
+    bool ignoreLimit=false; // OSCAIRN_FIXTURE_IGNORE_LIMIT
     struct Bad { long at=0,calls=1; float value=0; }; std::array<Bad,8> bad{}; size_t badCount=0; // OSCAIRN_FIXTURE_OUTPUT
     oscairn::voices::Limits limits; // oscairn.voice-budget's, audio thread
     double loudness(const Voice& v) const {return v.velocity*v.volume*v.level*v.layer*(v.choking?double(v.chokeLeft)/chokeFrames:1);}
@@ -122,6 +125,8 @@ struct Plugin {
         cpuClock=std::getenv("OSCAIRN_FIXTURE_CPU_CLOCK")!=nullptr;
         noEnd=std::getenv("OSCAIRN_FIXTURE_NO_END")!=nullptr;
         reportZero=std::getenv("OSCAIRN_FIXTURE_REPORT_ZERO")!=nullptr;
+        if(const char* us=std::getenv("OSCAIRN_FIXTURE_REPORT_US"))reportedMicroseconds=std::atof(us);
+        ignoreLimit=reportZero || std::getenv("OSCAIRN_FIXTURE_IGNORE_LIMIT")!=nullptr;
         if(const char* l=std::getenv("OSCAIRN_FIXTURE_LAYERS"))layers=std::clamp(std::atoi(l),1,16);
         if(const char* v=std::getenv("OSCAIRN_FIXTURE_SPIKE"))std::sscanf(v,"%ld:%ld:%lf",&spikeAt,&spikeCalls,&spikeUs);
         for(const char* v=std::getenv("OSCAIRN_FIXTURE_OUTPUT");v && *v && badCount<bad.size();){
@@ -176,8 +181,8 @@ struct Plugin {
             if(!std::strcmp(id,CLAP_EXT_AUDIO_PORTS))return &audio;
             static const oscairn_plugin_voice_budget_t budget{
                 [](const clap_plugin_t*){return true;},
-                [](const clap_plugin_t* p,uint32_t limit,const oscairn_voice_budget_context_t* c,uint32_t n){if(!self(p).reportZero)self(p).limits.set(limit,c,n);},
-                [](const clap_plugin_t* p,double* cost)->uint32_t{auto& s=self(p);if(cost)*cost=s.reportZero?0:s.microseconds*s.frames/128.0;uint32_t n=0;for(const auto& v:s.voices)n+=v.active && !s.reportZero;return n;},
+                [](const clap_plugin_t* p,uint32_t limit,const oscairn_voice_budget_context_t* c,uint32_t n){if(!self(p).ignoreLimit)self(p).limits.set(limit,c,n);},
+                [](const clap_plugin_t* p,double* cost)->uint32_t{auto& s=self(p);if(cost)*cost=s.reportZero?0:(s.reportedMicroseconds>=0?s.reportedMicroseconds:s.microseconds)*s.frames/128.0;uint32_t n=0;for(const auto& v:s.voices)n+=v.active && !s.reportZero;return n;},
                 [](const clap_plugin_t* p,oscairn_voice_budget_note_t* out,uint32_t capacity)->uint32_t{
                     auto& s=self(p);oscairn::voices::Report<128> report;if(s.reportZero)return 0;
                     for(const auto& v:s.voices)if(v.active)report.add(v.id,0,v.channel,v.key,s.loudness(v));

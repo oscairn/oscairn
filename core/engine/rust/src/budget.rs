@@ -416,18 +416,20 @@ impl Budget {
             a.faded_for_deadline.fetch_add(1, Relaxed);
         }
     }
-    /// oscairn.voice-budget: the voices a node on `lane` that gives up its own may keep from the next
-    /// block, `voices` sounding now: those and what the soft limit leaves at its cost per voice, at most
-    /// a quarter fewer; 0 for no limit (no budget, or no cost measured).
-    pub fn voice_limit(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32) -> u32 {
+    /// oscairn.voice-budget: the voices a node on `lane` that gives up its own may keep, `admitted` the
+    /// voices of the notes the host holds for it (not given up) and `voices` those it sounds now: those
+    /// admitted and the room the soft limit leaves at its cost per voice (the estimate counts the admitted
+    /// already), never fewer than those admitted unless the lane is measured over its limit, and then at
+    /// most a quarter fewer than it sounds a block; 0 for no limit (no budget, or no cost measured).
+    pub fn voice_limit(&self, rs: &Routes, lane: usize, node: &Activity, voices: u32, admitted: f32) -> u32 {
         let each = node.note_now() / node.per_note_scale.get();
-        let limit = self.lane(lane).limit;
-        if limit <= 0.0 || each <= 0.0 {
+        let l = self.lane(lane);
+        if l.limit <= 0.0 || each <= 0.0 {
             return 0;
         }
-        let room = (SOFT * limit - self.estimate(rs, lane, Counting::Kept)) / each;
-        // At most a quarter fewer a block; held below 2^16 voices, as a cost near 0 makes the room huge.
-        let v = voices as f32;
-        65536f32.min(1f32.max((v * 0.75).floor()).max(v + room.floor())) as u32
+        let room = ((SOFT * l.limit - self.estimate(rs, lane, Counting::Kept)) / each).floor();
+        let least = if l.over { (voices as f32 * 0.75).floor() } else { admitted };
+        // Held below 2^16 voices, as a cost near 0 makes the room huge.
+        65536f32.min(1f32.max(least).max(admitted + room)) as u32
     }
 }

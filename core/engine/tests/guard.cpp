@@ -8,11 +8,17 @@
 //     it, so its notes give way though each lane is within its own time.
 //   asleep: the chain's effects asleep on silence after the notes end: the instrument's lane still leaves room for
 //     them at their cost awake, so the first notes into it are costed before they wake.
+//   burst: eight notes in one block on an idle lane into a plugin giving up its own voices (oscairn.voice-budget), its
+//     cost per voice learned (seeded) so the eight fit the lane with little room left: all eight sound; spaced, the
+//     same; with the fixture really too slow for eight, its limit falls until they fit. A plugin without the
+//     extension: the eight sound, none given up.
+//   limit-first: the losses case with the instrument giving up its own voices: its limit is lowered and it gives up
+//     its own, the host's notes untouched; one that ignores its limit has notes faded from outside after it.
 //   deadline: instruments in the engine's process, each well within its lane, while the callback reaches its deadline
 //     after each block (load from outside the audio): notes give way across the lanes; with a heavy but healthy block
 //     (little left, the default threshold 0) or the whole time to spare, none; with a profile's threshold of 900 us
 //     (OSCAIRN_DEADLINE_SLACK_US), that little left is too little and notes give way.
-// Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
+// Usage: voice-fixture [--no-timing|--timing] [losses|chain|asleep|deadline|burst|limit-first] (OSCAIRN_PLUGIN_WORKER set). --no-timing checks only that
 // notes give way; a name runs that case alone.
 #include "oscairn/graph.h"
 #include "oscairn/realtime.h"
@@ -96,6 +102,47 @@ Chain chain(const char* plugin){
     return {gaveUp(g,instrument),g.noteCost(instrument).laneLimit};
 }
 
+// Eight notes from silence into one in-process instrument (its cost per voice seeded at `seed` us, really `real`),
+// all in one block or a block apart: the plugin's own voices sounding 40 blocks later, and the host's notes given up.
+struct Burst { uint32_t voices=0; uint64_t gaveUp=0; };
+Burst burst(const char* plugin,bool own,double seed,double real,bool spaced){
+    const std::string worker=std::getenv("OSCAIRN_PLUGIN_WORKER")?std::getenv("OSCAIRN_PLUGIN_WORKER"):"";
+    unsetenv("OSCAIRN_PLUGIN_WORKER");
+    setenv("OSCAIRN_FIXTURE_VOICE_US",std::to_string(real).c_str(),1);if(own)setenv("OSCAIRN_FIXTURE_VOICE_BUDGET","1",1);
+    setenv("OSCAIRN_FIXTURE_REPORT_US",std::to_string(seed).c_str(),1); // the cost it reports per voice: the learned one
+    Graph g(48000,frames);
+    const auto a=g.add(plugin);
+    unsetenv("OSCAIRN_FIXTURE_VOICE_BUDGET");unsetenv("OSCAIRN_FIXTURE_REPORT_US");if(!worker.empty())setenv("OSCAIRN_PLUGIN_WORKER",worker.c_str(),1);
+    g.connectNotes(graphInput,a);g.connectAudio(a,graphOutput);
+    g.commit();g.setVoiceBudget(-1);g.seedNoteCost(a,20,seed);
+    std::vector<float> left(frames),right(frames);float* out[]{left.data(),right.data()};
+    for(uint32_t block=0;block<(spaced?200u:60u);++block){
+        std::vector<Event> e;
+        for(int i=0;i<8;++i)if(block==10+(spaced?uint32_t(i)*20:0))e.push_back(Event::note(true,48+i*2,1,0,0));
+        g.process(out,frames,nullptr,e.data(),uint32_t(e.size()));
+    }
+    double cost;const oscairn_voice_budget_note_t* notes;uint32_t count;
+    return {own?g.host(a).voiceReport(cost,notes,count):g.sounding(a),gaveUp(g,a)};
+}
+
+// The losses case with the instrument giving up its own voices (ignoring its limit, or not): its notes the host
+// still holds, the voices it sounds, and the notes faded from outside.
+struct Limited { uint32_t held=0,voices=0; uint64_t faded=0; };
+Limited limited(const char* plugin,bool ignore){
+    setenv("OSCAIRN_FIXTURE_VOICE_US","100",1);setenv("OSCAIRN_FIXTURE_VOICE_BUDGET","1",1);if(ignore)setenv("OSCAIRN_FIXTURE_IGNORE_LIMIT","1",1);
+    Graph g(48000,frames);
+    const auto instrument=g.add(plugin);
+    setenv("OSCAIRN_FIXTURE_EFFECT_US","1700",1);setenv("OSCAIRN_FIXTURE_EFFECT_LEVEL","0.12",1);
+    const auto fx=g.add(plugin,effect);
+    g.connectNotes(graphInput,instrument);g.connectAudio(instrument,fx);g.connectAudio(fx,graphOutput);
+    g.commit();g.setVoiceBudget(-1);
+    play(g,800,[&](uint32_t block){return held(block,8);});
+    unsetenv("OSCAIRN_FIXTURE_EFFECT_US");unsetenv("OSCAIRN_FIXTURE_EFFECT_LEVEL");unsetenv("OSCAIRN_FIXTURE_VOICE_BUDGET");unsetenv("OSCAIRN_FIXTURE_IGNORE_LIMIT");
+    double cost;const oscairn_voice_budget_note_t* notes;uint32_t count;
+    const auto c=g.noteCost(instrument);
+    return {g.sounding(instrument),g.host(instrument).voiceReport(cost,notes,count),c.stolen+c.stolenForLoss+c.hardChokes+c.stolenForDeadline};
+}
+
 // The chain's case, its notes released and the effects asleep: the instrument lane's limit then.
 double asleep(const char* plugin){
     setenv("OSCAIRN_WORKER_DEADLINE","1",1);setenv("OSCAIRN_FIXTURE_VOICE_US","90",1);
@@ -155,6 +202,22 @@ int main(int argc,char** argv){try{
     const double limit=asleep(argv[1]);
     std::printf("asleep: the instrument lane's limit with the chain after it asleep %.0f us\n",limit);
     check(limit>0 && limit<.8*(std::chrono::duration<double,std::micro>(deadline).count()-1300)+50,"an effect asleep counts at its cost awake: "+std::to_string(limit));
+    }
+    if(only.empty() || only=="burst"){
+    const auto whole=burst(argv[1],true,150,10,false),spaced=burst(argv[1],true,150,10,true),slow=burst(argv[1],true,150,300,false),plain=burst(argv[1],false,150,10,false);
+    std::printf("burst: eight notes in a block %u voices, spaced %u, really too slow %u; without the extension %u notes sound, %llu given up\n",
+        whole.voices,spaced.voices,slow.voices,plain.voices,(unsigned long long)plain.gaveUp);
+    check(whole.voices==8,"a chord from silence sounds whole where the lane's time allows it: "+std::to_string(whole.voices));
+    check(spaced.voices==8,"spaced notes the same: "+std::to_string(spaced.voices));
+    check(slow.voices>0 && slow.voices<8,"really too slow, its limit falls: "+std::to_string(slow.voices));
+    check(plain.voices==8 && plain.gaveUp==0,"a plugin without the extension: every note sounds");
+    }
+    if(only.empty() || only=="limit-first"){
+    const auto own=limited(argv[1],false),ignoring=limited(argv[1],true);
+    std::printf("limit-first: keeping to its limit, the host holds %u notes, it sounds %u voices, %llu faded from outside; ignoring it: %u, %u, %llu\n",
+        own.held,own.voices,(unsigned long long)own.faded,ignoring.held,ignoring.voices,(unsigned long long)ignoring.faded);
+    check(own.faded==0 && own.held==8 && own.voices<8,"lost blocks lower the plugin's limit: it gives up its own voices, none faded from outside");
+    check(ignoring.faded>0,"a plugin that ignores its limit has notes faded from outside");
     }
     if(only.empty() || only=="deadline"){
     const auto d=late(argv[1]);

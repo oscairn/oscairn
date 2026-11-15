@@ -56,7 +56,7 @@ struct VoiceBudget
     // oscairn.voice-budget (step 4): the voices a node on `lane` that gives up its own may keep from the
     // next block, `voices` sounding now: those and what the soft limit leaves at its cost per voice, at
     // most a quarter fewer; 0 for no limit (no budget, or no cost measured).
-    uint32_t voiceLimit(uint32_t lane,const Graph::Activity& node,uint32_t voices) const noexcept;
+    uint32_t voiceLimit(uint32_t lane,const Graph::Activity& node,uint32_t voices,float admitted) const noexcept;
 private:
     struct Victim { const Entry* entry=nullptr; size_t slot=0; };
     enum Counting { Kept, Fading, Ending }; // the notes counted: not given up; and those fading; and those choked, until they end
@@ -484,15 +484,17 @@ inline void VoiceBudget::admit(NoteRoute& self,uint32_t time) noexcept
     }
     choke(lane,1,cost,&self,time,true);
 }
-inline uint32_t VoiceBudget::voiceLimit(uint32_t lane,const Graph::Activity& node,uint32_t voices) const noexcept
+inline uint32_t VoiceBudget::voiceLimit(uint32_t lane,const Graph::Activity& node,uint32_t voices,float admitted) const noexcept
 {
-    const float each=node.noteNow()/node.perNoteScale;const float limit=lanes[lane].limit;
-    if(limit<=0 || each<=0)return 0;
-    const float room=(soft*limit-estimate(lane,Kept))/each;
-    // At most a quarter fewer a block: one block's estimate, a measurement held up from outside
-    // in it, should not take a sound down to its loudest voices.
+    const float each=node.noteNow()/node.perNoteScale;const auto& l=lanes[lane];
+    if(l.limit<=0 || each<=0)return 0;
+    // The voices of the notes admitted (which the estimate counts already) and the room left; never fewer than
+    // those admitted on the estimate alone (a chord from silence sounds whole), only on a lane measured over its
+    // limit, and then at most a quarter fewer than it sounds a block.
+    const float room=std::floor((soft*l.limit-estimate(lane,Kept))/each);
+    const float least=l.over?std::floor(float(voices)*.75f):admitted;
     // Held below 2^16 voices: a node's estimate near 0 makes the room huge, past what uint32_t holds.
-    return uint32_t(std::min(65536.f,std::max({1.f,std::floor(float(voices)*.75f),float(voices)+std::floor(room)})));
+    return uint32_t(std::min(65536.f,std::max(std::max(1.f,least),admitted+room)));
 }
 inline void VoiceBudget::measured(uint32_t lane,float total) noexcept
 {

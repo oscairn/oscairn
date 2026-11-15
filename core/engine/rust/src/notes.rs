@@ -406,10 +406,24 @@ impl Notes {
         }
     }
 
-    /// See notes_voice_limit (engine_core.h).
-    pub fn voice_limit(&self, rs: &Routes, s: usize, voices: u32) -> u32 {
+    /// See notes_voice_limit (engine_core.h): the instance's limit and each sound context's, a context's the
+    /// voices of its admitted notes and its share of the instance's room (or of its excess, over it), 0 for a
+    /// context holding none (no limit of its own).
+    pub fn voice_limit(&self, rs: &Routes, s: usize, voices: u32, contexts: &mut [u32]) -> u32 {
         let Some((step, a)) = self.steps.get(s).and_then(|st| Some((st, st.activity.as_deref()?))) else { return 0 };
-        self.budget.voice_limit(rs, step.lane, a, voices)
+        let scale = a.per_note_scale.get();
+        let admitted = |channel: Option<i16>| {
+            let notes: u32 =
+                step.sources.iter().filter(|x| channel.is_none_or(|c| c == x.channel)).map(|x| rs[x.route].used.and_not(rs[x.route].stolen).count()).sum();
+            (notes as f32 * scale).ceil()
+        };
+        let all = admitted(None);
+        let limit = self.budget.voice_limit(rs, step.lane, a, voices, all);
+        for (out, c) in contexts.iter_mut().zip(&step.contexts) {
+            let own = admitted(Some(c.channel));
+            *out = if limit == 0 || own == 0.0 { 0 } else { 1f32.max(own + ((limit as f32 - all) * own / all).floor()) as u32 };
+        }
+        limit
     }
 
     /// A lost block on step `s`: its lane is marked, and every lane before it on the way, by the largest

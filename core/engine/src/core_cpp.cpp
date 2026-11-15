@@ -258,10 +258,23 @@ void cpp_core_notes_finish(oscairn_notes* notes,uint32_t s,const oscairn_finish*
     }
 }
 
-uint32_t cpp_core_notes_voice_limit(const oscairn_notes* notes,uint32_t s,uint32_t voices)
+uint32_t cpp_core_notes_voice_limit(const oscairn_notes* notes,uint32_t s,uint32_t voices,uint32_t* contexts,uint32_t count)
 {
     const auto& step=notes->steps[s];
-    return step.activity?notes->budget.voiceLimit(step.lane,*step.activity,voices):0;
+    if(!step.activity)return 0;
+    // The voices of the notes it holds unreleased or released, not given up: the step's, or a context's (its channel).
+    auto admitted=[&](const int16_t* channel){
+        uint32_t n=0;
+        for(const auto& source:step.sources)if(!channel || source.channel==*channel)for(const auto& slot:source.route->active())n+=slot.used && !slot.stolen;
+        return std::ceil(float(n)*step.activity->perNoteScale);};
+    const float all=admitted(nullptr);
+    const uint32_t limit=notes->budget.voiceLimit(step.lane,*step.activity,voices,all);
+    for(uint32_t c=0;c<count && c<step.contexts.size();++c)
+    {
+        const float own=admitted(&step.contexts[c].channel);
+        contexts[c]=!limit || own==0?0:uint32_t(std::max(1.f,own+std::floor((float(limit)-all)*own/all)));
+    }
+    return limit;
 }
 
 void cpp_core_notes_end(oscairn_notes* notes,float)

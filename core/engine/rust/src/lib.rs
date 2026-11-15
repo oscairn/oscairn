@@ -333,9 +333,9 @@ pub unsafe extern "C" fn rust_core_notes_finish(notes: *mut Notes, step: u32, fi
 /// # Safety
 /// `notes` is live.
 #[no_mangle]
-pub unsafe extern "C" fn rust_core_notes_voice_limit(notes: *const Notes, step: u32, voices: u32) -> u32 {
-    // SAFETY: live notes (the caller's contract).
-    unsafe { &*notes }.voice_limit(&Routes(()), step as usize, voices)
+pub unsafe extern "C" fn rust_core_notes_voice_limit(notes: *const Notes, step: u32, voices: u32, contexts: *mut u32, count: u32) -> u32 {
+    // SAFETY: live notes and `count` writable limits (the caller's contract).
+    unsafe { (&*notes).voice_limit(&Routes(()), step as usize, voices, slice_mut(contexts, count)) }
 }
 
 /// # Safety

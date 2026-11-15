@@ -42,6 +42,7 @@ struct oscairn_notes
     {
         Graph::Activity* activity; std::vector<Source> sources; std::vector<Context> contexts; uint32_t lane; bool inProcess, lateLane, budgeted=false;
         std::array<float,5> recent{}; uint8_t recentAt=0, recentN=0; // its last blocks' times (typical)
+        float awake=0; // an effect's usual time when it last ran awake
         uint32_t limitBefore=0; // the voice limit in force a block earlier, which it has had a block and a fade to keep to
     };
     std::vector<Step> steps;
@@ -219,7 +220,14 @@ void cpp_core_notes_finish(oscairn_notes* notes,uint32_t s,const oscairn_finish*
         const float raw=f->took,usual=v[step.recentN/2];
         auto& lane=notes->budget.lanes[step.lane];
         lane.took+=usual;
-        if(!step.budgeted)lane.othersTook+=usual;
+        // An effect asleep on silence counts at its cost awake (one never awake at its learned cost, its seed), as notes.rs does.
+        float cost=usual;
+        if(!step.budgeted && step.activity)
+        {
+            if(!step.activity->asleep.load(std::memory_order_relaxed))step.awake=usual;
+            cost=std::max(usual,step.awake>0?step.awake:step.activity->restNow());
+        }
+        if(!step.budgeted)lane.othersTook+=cost;
         else
         {
             uint32_t live=0;for(const auto& source:step.sources)live+=source.route->live();

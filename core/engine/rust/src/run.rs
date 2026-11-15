@@ -98,6 +98,7 @@ pub struct StepIn {
     pub routes: Vec<LaneRoute>,
     pub lanes_in: bool,
     pub budgeted: bool,
+    pub may_rest: bool,
 }
 
 pub struct Step {
@@ -105,6 +106,7 @@ pub struct Step {
     id: u32,
     harmony: i32,
     budgeted: bool,
+    may_rest: bool, // the rest policy lets its plugin rest at all (the plan's, once): else no rest check
     routes: Vec<LaneRoute>,
     releases: Vec<Event>, // at most MAX_BLOCK_EVENTS
     release_overflow: bool,
@@ -283,6 +285,7 @@ impl Run {
                 id: s.id,
                 harmony: s.harmony,
                 budgeted: s.budgeted,
+                may_rest: s.may_rest,
                 routes: s.routes,
                 releases: Vec::with_capacity(MAX_BLOCK_EVENTS),
                 release_overflow: false,
@@ -538,6 +541,9 @@ impl Run {
     /// RFC 0045, sleeping plugins: a block its plugin would sleep through, not called (no core events for it, its
     /// input quiet, the transport as it went, its host saying nothing else is pending): silence, rendered.
     fn rest(step: &Step, s: usize, audio: &mut Audio, b: &Block, p: &Plugins) -> bool {
+        if !step.may_rest {
+            return false;
+        }
         let frames = b.frames as usize;
         if b.transport_wake || step.merged().iter().any(|e| e.space() == CORE_SPACE) || !audio.quiet(s, frames) || !p.rest(s, b.frames) {
             return false;
@@ -906,6 +912,7 @@ mod tests {
             lane_routes: if s == 0 { &lane_route } else { std::ptr::null() },
             lane_route_count: u32::from(s == 0),
             lanes_in: s == 1,
+            may_rest: true,
         };
         let steps = [step(0), step(1)];
         let mut last = Harmony::default();

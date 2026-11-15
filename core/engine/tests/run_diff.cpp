@@ -188,7 +188,7 @@ struct Side
             for(const auto& src:s.sources)sources[i].push_back({route(src.route),&src.zones,nullptr,0,src.channel,src.draining,src.from});
             for(size_t c=0;c<s.contexts.size();++c)contexts[i].push_back({s.contexts[c],activities[s.host*3+1+c].core(),uint32_t(1000+s.host*3+c)});
             steps.push_back({activities[s.host*3].core(),sources[i].data(),uint32_t(sources[i].size()),contexts[i].data(),uint32_t(contexts[i].size()),uint32_t(s.worker?1+s.host%2:0),!s.worker,s.late,nullptr,0,
-                             reinterpret_cast<const void*>(uintptr_t(s.host+1)),100+s.host,s.harmony,s.lanes.data(),uint32_t(s.lanes.size()),s.lanesIn});
+                             reinterpret_cast<const void*>(uintptr_t(s.host+1)),100+s.host,s.harmony,s.lanes.data(),uint32_t(s.lanes.size()),s.lanesIn,s.host%3!=0});
             audio.push_back({reinterpret_cast<const void*>(uintptr_t(s.host+1)),0,2,2,nullptr,activities[s.host*3].core(),nullptr,0,nullptr,0});
             for(uint32_t c=0;c<2;++c)outs.push_back({int32_t(i),c,c,.5f,{uint8_t(1+i%3),0,0,0}});
         }
@@ -262,7 +262,7 @@ const oscairn_plugins plugins{nullptr,
     [](void* c){return Model::side(c).clock;},
     [](void* c,int64_t at,bool only){Model::log(c,20+only,0,&at,8);},
     [](void* c,uint32_t n,oscairn_job job,void* context){Model::log(c,22,n);for(uint32_t i=0;i<n;++i)job(context,i);},
-    [](void* c,uint32_t s,uint32_t frames){Model::log(c,23,s,&frames,4);const bool slept=Model::rng(c,s,23).below(3)==0;if(slept)Model::side(c).sent[s].clear();return slept;}}; // a host taking the block sends nothing
+    [](void* c,uint32_t s,uint32_t frames){if(Model::side(c).plan->steps[s].host%3==0){std::fprintf(stderr,"FAIL: rest asked of step %u, which may not rest (no rest check, no input scan)\n",s);std::abort();}Model::log(c,23,s,&frames,4);const bool slept=Model::rng(c,s,23).below(3)==0;if(slept)Model::side(c).sent[s].clear();return slept;}}; // a host taking the block sends nothing
 
 void input(Rng& rng,std::vector<Event>& out,std::vector<uint8_t>& tags)
 {

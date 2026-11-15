@@ -566,6 +566,7 @@ pub unsafe extern "C" fn rust_core_run_new(
                 routes: slice(s.lane_routes, s.lane_route_count).to_vec(),
                 lanes_in: s.lanes_in,
                 budgeted: b,
+                may_rest: s.may_rest,
             })
             .collect();
         let parts = slice(harmonies, harmony_count)
@@ -742,6 +743,7 @@ mod tests {
             lane_routes: std::ptr::null(),
             lane_route_count: 0,
             lanes_in: false,
+            may_rest: false,
         };
         let mut budgeted = false;
         // SAFETY: one step whose arrays and pointers outlive the notes.

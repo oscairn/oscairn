@@ -110,13 +110,15 @@ typedef struct
     const oscairn_link* next;
     uint32_t next_count;
     /* For the run alone: its plugin (an identity) and node; the part's harmony it gets (an index into
-     * the run's harmonies, -1: none); its lanes' routes; whether lanes reach it. */
+     * the run's harmonies, -1: none); its lanes' routes; whether lanes reach it; whether its plugin may be
+     * rested at all under the rest policy (decided once per plan: a step that may not skips the rest check). */
     const void* host;
     uint32_t id;
     int32_t harmony;
     const oscairn_lane_route* lane_routes;
     uint32_t lane_route_count;
     bool lanes_in;
+    bool may_rest;
 } oscairn_step;
 
 /* One block's timing, microseconds: budget as Graph::setVoiceBudget (0 none, below 0 the load

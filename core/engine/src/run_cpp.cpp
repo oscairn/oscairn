@@ -90,7 +90,7 @@ struct oscairn_run
         std::vector<int16_t> paramNotes; std::vector<Event> paramIn; uint32_t paramCount=0;
         std::vector<Event> merged; uint32_t mergedCount=0;
         bool processed=false, started=false; float cost=0; int64_t handed=0;
-        bool budgeted=false; uint64_t missed=0;
+        bool budgeted=false,mayRest=false; uint64_t missed=0;
         std::array<oscairn_voice_budget_context_t,OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS> voiceLimits{}; uint32_t voiceLimit=0, voiceContexts=0;
         struct Context { uint32_t id; int16_t channel; Graph::Activity* activity; };
         std::vector<Context> contexts;
@@ -114,7 +114,7 @@ oscairn_run* cpp_core_run_new(oscairn_notes* notes,oscairn_audio* audio,const os
     for(uint32_t i=0;i<count;++i)
     {
         const auto& s=steps[i];auto& step=run->steps[i];
-        step.host=s.host;step.id=s.id;step.activity=activity(s.activity);step.harmony=s.harmony;step.budgeted=budgeted[i];
+        step.host=s.host;step.id=s.id;step.activity=activity(s.activity);step.harmony=s.harmony;step.budgeted=budgeted[i];step.mayRest=s.may_rest;
         for(uint32_t k=0;k<s.source_count;++k){const auto& c=s.sources[k];step.noteSources.push_back({c.from,c.route,zones(c.zones),c.draining,c.channel});}
         step.routes.assign(s.lane_routes,s.lane_routes+s.lane_route_count);
         for(uint32_t k=0;k<s.context_count;++k)step.contexts.push_back({s.contexts[k].id,s.contexts[k].channel,activity(s.contexts[k].activity)});
@@ -305,6 +305,7 @@ bool cpp_core_run_block(oscairn_run* run,const oscairn_run_block* b,const oscair
     // RFC 0045, sleeping plugins: a block its plugin would sleep through, not called (no core events for it, its input
     // quiet, the transport as it went, its host saying nothing else is pending): silence, rendered.
     auto rest=[&](oscairn_run::Step& step){
+        if(!step.mayRest)return false;
         const bool events=std::any_of(step.merged.begin(),step.merged.begin()+step.mergedCount,[](const Event& e){return e.header()->space_id==CLAP_CORE_EVENT_SPACE_ID;});
         if(b->transport_wake || events || !cpp_core_audio_quiet(plan->audio,stepOf(step),frames) || !p->rest(cx,stepOf(step),frames))return false;
         cpp_core_audio_silence(plan->audio,stepOf(step),frames);step.processed=true;

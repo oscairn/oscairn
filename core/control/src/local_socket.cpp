@@ -467,8 +467,10 @@ namespace oscairn
             if(doc->type==json_type_object && controlFree.count(methodOf(doc.get())))return peer.rpc.dispatch(line);
             if(doc->type==json_type_object && duringLoad.count(methodOf(doc.get())))
             {
-                // Waited for once a pass, briefly: a load outside its windows refuses the pass's requests at once.
-                if(!gateHeld && !gateTried){gateTried=true;gateHeld=gate.try_lock_for(std::chrono::milliseconds(10));}
+                // Waited for once a pass, briefly: a load outside its windows refuses the pass's requests at once. try_lock_until on the system
+                // clock, not try_lock_for: libstdc++'s steady-clock wait is pthread_mutex_clocklock, which GCC 13's ThreadSanitizer does not intercept
+                // (it reports the matching unlock as one of an unlocked mutex, and races under the gate).
+                if(!gateHeld && !gateTried){gateTried=true;gateHeld=gate.try_lock_until(std::chrono::system_clock::now()+std::chrono::milliseconds(10));}
                 if(gateHeld)return peer.rpc.dispatch(line);
             }
             const auto ms=std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-runSince).count());

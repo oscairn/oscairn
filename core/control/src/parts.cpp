@@ -1744,6 +1744,7 @@ namespace oscairn
             Scene::PartState state{p.id, p.level, p.pan, p.mute, p.solo, p.sends, {}};
             for(const auto& sp : p.splits)
                 for(uint32_t i = 0; i < sp.lanes.size(); ++i) state.lanes.push_back({sp.id, i, sp.lanes[i].level, sp.lanes[i].pan, sp.lanes[i].mute, sp.lanes[i].solo});
+            if(scene.scope & Scene::Zones) state.zones = p.input.zones;
             scene.parts.push_back(std::move(state));
         }
         scene.values.clear();
@@ -1795,6 +1796,7 @@ namespace oscairn
                 {
                     if(p.id != state.part) continue;
                     if(has(Scene::Mutes)) { p.mute = state.mute; p.solo = state.solo; }
+                    if(has(Scene::Zones) && state.zones) p.input.zones = *state.zones; // buildParts below hands them to the engine as any zones edit does
                     if(!has(Scene::Mix)) continue;
                     p.level = state.level; p.pan = state.pan;
                     for(auto& send : p.sends) for(const auto& was : state.sends) if(was.bus == send.bus) send.level = was.level;

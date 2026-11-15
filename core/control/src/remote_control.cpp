@@ -328,6 +328,7 @@ namespace oscairn
                     Scene::PartState st{static_cast<uint32_t>(integer(field(p,"part"))),number(field(p,"level")),number(field(p,"pan")),boolean(field(p,"mute")),boolean(field(p,"solo")),{},{}};
                     for(auto x:array(field(p,"sends")))st.sends.push_back({static_cast<uint32_t>(integer(field(x,"bus"))),number(field(x,"level"))});
                     for(auto l:array(field(p,"lanes")))st.lanes.push_back({static_cast<uint32_t>(integer(field(l,"split"))),static_cast<uint32_t>(integer(field(l,"lane"))),number(field(l,"level")),number(field(l,"pan")),boolean(field(l,"mute")),boolean(field(l,"solo"))});
+                    if(detail::member(p,"zones"))st.zones=zones(field(p,"zones"));
                     scene.parts.push_back(std::move(st));
                 }
                 for(auto w:array(field(s,"wires")))scene.wires.push_back({ref(w),number(field(w,"level")),number(field(w,"pan")),boolean(field(w,"mute")),boolean(field(w,"solo"))});

@@ -1142,7 +1142,7 @@ namespace oscairn::standalone
         const auto it = std::find_if(scenes_.begin(), scenes_.end(), [&](const Scene& s) { return s.id == scene_; });
         if(it == scenes_.end()) return;
         const auto scene = *it;
-        const std::array<const char*, sceneKinds.size()> kinds{"Plugins and wires on or off", "Mutes and solos", "Levels, pans and sends", "Parameters and controls", "Control mappings"};
+        const std::array<const char*, sceneKinds.size()> kinds{"Plugins and wires on or off", "Mutes and solos", "Levels, pans and sends", "Parameters and controls", "Control mappings", "Part note zones"};
         static constexpr std::array<uint32_t, 8> glides{0, 100, 250, 500, 1000, 2000, 4000, 8000};
         juce::PopupMenu menu, scope, transition, curves, launches;
         for(size_t k = 0; k < kinds.size(); ++k) scope.addItem(10 + int(k), kinds[k], true, (scene.scope & (1u << k)) != 0);

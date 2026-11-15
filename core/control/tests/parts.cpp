@@ -978,6 +978,49 @@ namespace
 
     // Scenes: part faders and scene parameters, switched while a note is held without a gap,
     // and saved with the Performance.
+    // A scene memorises a part's input zones: recalling it moves the key ranges, notes held keep sounding.
+    void sceneZones(const char* fixture, const fs::path& root)
+    {
+        Session s(48000, frames);
+        const auto low = s.add("low", fixture, "org.kick.test.synth"), high = s.add("high", fixture, "org.kick.test.synth");
+        s.setParameter(low, 7, .25); s.setParameter(high, 7, .5);
+        NoteZone below; below.highKey = 59;
+        NoteZone above; above.lowKey = 60;
+        const auto bass = s.addPart("Bass", {PartInput::Kind::Notes, 0, {below}}), lead = s.addPart("Lead", {PartInput::Kind::Notes, 0, {above}});
+        s.insertIntoPart(bass, 0, low); s.insertIntoPart(lead, 0, high); s.commit();
+        Audio x; x.run(s);
+        const auto base = s.addScene("Base"); // bass 0-59, lead 60-127
+        check(s.graphState().scenes[0].parts[0].zones && s.graphState().scenes[0].parts[0].zones->size() == 1, "a scene stores each part's zones");
+        NoteZone shifted; shifted.lowKey = 80; shifted.transpose = 5;
+        s.setPartInput(bass, {PartInput::Kind::Notes, 0, {shifted}}); s.commit();
+        const auto moved = s.addScene("Moved"); // bass 80-127, lead 60-127
+        s.selectScene(base); x.run(s);
+        check(s.parts()[0].input.zones.size() == 1 && s.parts()[0].input.zones[0].highKey == 59, "recalling puts the zones back");
+        s.note(true, 40, 1); x.run(s); check(near(x.l[0], .25), "base: a low key plays the bass: " + std::to_string(x.l[0]));
+        s.selectScene(moved); x.run(s);
+        check(near(x.l[0], .25), "the note held across the recall keeps sounding: " + std::to_string(x.l[0]));
+        s.note(false, 40, 0); x.run(s); check(near(x.l[0], 0), "and releases after the range moved away");
+        s.note(true, 40, 1); x.run(s); check(near(x.l[0], 0), "moved: a note in the old range no longer sounds on the part");
+        s.note(true, 90, 1); x.run(s); check(near(x.l[0], .75), "a note in the new range does: " + std::to_string(x.l[0]));
+        s.note(false, 90, 0); s.note(false, 40, 0); x.run(s);
+        // A scene that does not apply zones leaves them alone.
+        s.selectScene(base); s.setSceneScope(moved, Scene::Mix); s.selectScene(moved);
+        check(s.parts()[0].input.zones[0].highKey == 59, "a scene without zones in its scope leaves them");
+        s.setSceneScope(moved, Scene::Everything);
+        // Store from the current state, then recall.
+        NoteZone narrow; narrow.lowKey = 68; narrow.highKey = 75; narrow.transpose = -7;
+        s.setPartInput(lead, {PartInput::Kind::Notes, 0, {narrow}}); s.commit(); s.storeScene(moved);
+        s.setPartInput(lead, {}); s.commit(); s.selectScene(base); s.selectScene(moved);
+        const auto& z = s.parts()[1].input.zones;
+        check(z.size() == 1 && z[0] == narrow, "store and recall round trip");
+        // Save and load.
+        const auto saved = root / "scene-zones";
+        s.savePerformance(saved.string());
+        Session t(48000, frames);
+        t.loadPerformance(saved.string());
+        check(t.graphState().scenes == s.graphState().scenes && t.graphState().scenes[1].parts[1].zones && (*t.graphState().scenes[1].parts[1].zones)[0] == narrow, "the Performance round-trips the scenes' zones");
+    }
+
     void scenes(const char* fixture, const fs::path& root)
     {
         Session s(48000, frames);
@@ -2721,6 +2764,7 @@ int main(int argc, char** argv)
         emptyBus(argv[1]);
         innerZones(argv[1], argv[5], argv[3], temp.path);
         scenes(argv[1], temp.path);
+        sceneZones(argv[1], temp.path);
         sceneSwitching(argv[1], temp.path);
         onOff(argv[1], temp.path);
         performanceChange(argv[1], temp.path);

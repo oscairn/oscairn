@@ -426,7 +426,7 @@ namespace oscairn
                     for( const auto& l : p.lanes ) lanes.push_back("{\"split\":" + std::to_string(l.split) + ",\"lane\":" + std::to_string(l.lane) + ",\"level\":" + encode(l.level) +
                         ",\"pan\":" + encode(l.pan) + ",\"mute\":" + flag(l.mute) + ",\"solo\":" + flag(l.solo) + '}');
                     parts.push_back("{\"part\":" + std::to_string(p.part) + ",\"level\":" + encode(p.level) + ",\"pan\":" + encode(p.pan) + ",\"mute\":" + flag(p.mute) +
-                        ",\"solo\":" + flag(p.solo) + ",\"sends\":" + join(sends) + ",\"lanes\":" + join(lanes) + '}');
+                        ",\"solo\":" + flag(p.solo) + ",\"sends\":" + join(sends) + ",\"lanes\":" + join(lanes) + (p.zones ? ",\"zones\":" + zonesJson(*p.zones) : std::string()) + '}');
                 }
                 for( const auto& m : s.wires ) mixes.push_back('{' + wireRefJson(m.wire) + ",\"level\":" + encode(m.level) + ",\"pan\":" + encode(m.pan) + ",\"mute\":" + flag(m.mute) + ",\"solo\":" + flag(m.solo) + '}');
                 for( const auto& v : s.values ) values.push_back("{\"node\":" + std::to_string(v.at.node) + ",\"param\":" + std::to_string(v.at.param) + ",\"value\":" + encode(v.value) + '}');
@@ -1520,7 +1520,7 @@ namespace oscairn
                         {
                             const auto name = std::string(string(e->value));
                             const auto at = std::find(sceneKinds.begin(), sceneKinds.end(), name);
-                            if( at == sceneKinds.end() ) invalid("a kind is enabled, mutes, mix, parameters or mappings");
+                            if( at == sceneKinds.end() ) invalid("a kind is enabled, mutes, mix, parameters, mappings or zones");
                             scope |= 1u << (at - sceneKinds.begin());
                         }
                         c.setSceneScope(integer(member(p,"scene")), scope);

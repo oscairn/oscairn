@@ -715,7 +715,7 @@ Control::PerformanceInfo Session::writeDocument(const std::string& directory,Per
                 std::vector<std::string> sends,lanes;
                 for(const auto& x:p.sends)sends.push_back("{\"bus\":"+std::to_string(x.bus)+",\"level\":"+numeric(x.level)+'}');
                 for(const auto& l:p.lanes)lanes.push_back("{\"split\":"+std::to_string(l.split)+",\"lane\":"+std::to_string(l.lane)+",\"level\":"+numeric(l.level)+",\"pan\":"+numeric(l.pan)+",\"mute\":"+(l.mute?"true":"false")+",\"solo\":"+(l.solo?"true":"false")+'}');
-                sp.push_back("{\"part\":"+std::to_string(p.part)+",\"level\":"+numeric(p.level)+",\"pan\":"+numeric(p.pan)+",\"mute\":"+(p.mute?"true":"false")+",\"solo\":"+(p.solo?"true":"false")+",\"sends\":"+join(sends)+",\"lanes\":"+join(lanes)+'}');}
+                sp.push_back("{\"part\":"+std::to_string(p.part)+",\"level\":"+numeric(p.level)+",\"pan\":"+numeric(p.pan)+",\"mute\":"+(p.mute?"true":"false")+",\"solo\":"+(p.solo?"true":"false")+",\"sends\":"+join(sends)+",\"lanes\":"+join(lanes)+(p.zones?",\"zones\":"+zonesText(*p.zones):std::string())+'}');}
             for(const auto& m:s.wires)if(here(m.wire))mixes.push_back("{"+ref(m.wire)+",\"level\":"+numeric(m.level)+",\"pan\":"+numeric(m.pan)+",\"mute\":"+(m.mute?"true":"false")+",\"solo\":"+(m.solo?"true":"false")+'}');
             for(const auto& v:s.values)if(keys.count(v.at.node))values.push_back("{\"node\":"+quote(keys.at(v.at.node))+",\"param\":"+std::to_string(v.at.param)+",\"value\":"+numeric(v.value)+'}');
             for(const auto& [m,v]:s.macros)sc.push_back("{\"control\":"+std::to_string(m)+",\"value\":"+numeric(v)+'}');
@@ -1342,13 +1342,14 @@ std::unique_ptr<Session::Prepared> Session::read(const fs::path& root,std::vecto
             for(auto n:array(field(s,"off"),256))scene.off.push_back(node(n));
             for(auto r:array(field(s,"offWires"),Graph::maxAudioConnections)){fields(r,{"kind","part","from","to","fromPort","toPort","send","split","lane","fader"});scene.offWires.push_back(wireRef(r,node));}
             for(auto p:array(field(s,"parts"),256)){
-                fields(p,{"part","level","pan","mute","solo","sends","lanes"});
+                fields(p,{"part","level","pan","mute","solo","sends","lanes","zones"});
                 Scene::PartState st{integer(field(p,"part")),number(field(p,"level")),number(field(p,"pan")),boolean(field(p,"mute")),boolean(field(p,"solo")),{},{}};
                 if(st.level<0 || st.pan<-1 || st.pan>1 || std::none_of(parts.begin(),parts.end(),[&](const Part& x){return x.id==st.part;}))bad("invalid scene part");
                 for(auto x:array(field(p,"sends"),256)){fields(x,{"bus","level"});st.sends.push_back({integer(field(x,"bus")),number(field(x,"level"))});if(st.sends.back().level<0)bad("invalid scene send");}
                 for(auto l:array(field(p,"lanes"),4096)){fields(l,{"split","lane","level","pan","mute","solo"});
                     Scene::LaneState lane{integer(field(l,"split")),integer(field(l,"lane")),number(field(l,"level")),number(field(l,"pan")),boolean(field(l,"mute")),boolean(field(l,"solo"))};
                     if(lane.level<0 || lane.pan<-1 || lane.pan>1)bad("invalid scene lane");st.lanes.push_back(lane);}
+                if(member(p,"zones"))st.zones=zonesFrom(field(p,"zones"));
                 scene.parts.push_back(std::move(st));}
             for(auto w:array(field(s,"wires"),Graph::maxAudioConnections)){
                 fields(w,{"kind","part","from","to","fromPort","toPort","send","split","lane","fader","level","pan","mute","solo"});
@@ -2068,6 +2069,7 @@ Control::Imported Session::importPerformance(const std::string& directory,const 
                     Scene::PartState st{it->second,number(field(p,"level")),number(field(p,"pan")),boolean(field(p,"mute")),boolean(field(p,"solo")),{},{}};
                     for(auto x:array(field(p,"sends"),256))if(const auto bus=partIds.find(integer(field(x,"bus")));bus!=partIds.end())st.sends.push_back({bus->second,number(field(x,"level"))});
                     for(auto l:array(field(p,"lanes"),4096))st.lanes.push_back({integer(field(l,"split")),integer(field(l,"lane")),number(field(l,"level")),number(field(l,"pan")),boolean(field(l,"mute")),boolean(field(l,"solo"))});
+                    if(member(p,"zones"))st.zones=zonesFrom(field(p,"zones"));
                     scene.parts.push_back(std::move(st));}
                 for(auto w:array(field(s,"wires"),Graph::maxAudioConnections))if(const auto x=ref(w))scene.wires.push_back({*x,number(field(w,"level")),number(field(w,"pan")),boolean(field(w,"mute")),boolean(field(w,"solo"))});
                 for(auto v:array(field(s,"values"),65536)){fields(v,{"node","param","value"});if(has(field(v,"node")))scene.values.push_back({{node(field(v,"node")),integer(field(v,"param"))},number(field(v,"value"))});}

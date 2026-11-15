@@ -312,7 +312,7 @@ namespace oscairn
     };
     struct Scene
     {
-        enum Kind : uint32_t { Enabled = 1, Mutes = 2, Mix = 4, Parameters = 8, Mappings = 16, Everything = 31 };
+        enum Kind : uint32_t { Enabled = 1, Mutes = 2, Mix = 4, Parameters = 8, Mappings = 16, Zones = 32, Everything = 63 };
         // How selecting it moves there: over `glide` milliseconds (0: at once) along `curve`, and
         // when: at once, or at the next beat or bar while the transport plays.
         enum class Curve { Linear, Ease, EqualPower };
@@ -324,6 +324,7 @@ namespace oscairn
             double level = 1, pan = 0; bool mute = false, solo = false;
             std::vector<Send> sends;
             std::vector<LaneState> lanes;
+            std::optional<std::vector<NoteZone>> zones; // Zones: the part's input zones; none: this scene leaves them alone
             bool operator==(const PartState&) const = default;
         };
         struct WireMix { WireRef wire; double level = 1, pan = 0; bool mute = false, solo = false; bool operator==(const WireMix&) const = default; };
@@ -336,14 +337,14 @@ namespace oscairn
         Launch launch = Launch::Now;
         std::vector<NodeId> off;         // Enabled: the plugins off
         std::vector<WireRef> offWires;   // Enabled: the wires off
-        std::vector<PartState> parts;    // Mutes (mute, solo) and Mix (the rest)
+        std::vector<PartState> parts;    // Mutes (mute, solo), Mix (the rest) and Zones (the part's input zones)
         std::vector<WireMix> wires;      // Mix: user wires' Mix rows
         std::vector<Value> values;       // Parameters
         std::vector<std::pair<uint32_t, double>> macros; // Parameters: each control's value
         double masterLevel = 1, masterPan = 0; // Mix: the Performance's main output
         bool operator==(const Scene&) const = default;
     };
-    inline constexpr std::array<const char*, 5> sceneKinds{"enabled", "mutes", "mix", "parameters", "mappings"}; // the scope's names, bit by bit
+    inline constexpr std::array<const char*, 6> sceneKinds{"enabled", "mutes", "mix", "parameters", "mappings", "zones"}; // the scope's names, bit by bit
     inline constexpr std::array<const char*, 3> sceneCurves{"linear", "ease", "equal-power"}, sceneLaunches{"now", "beat", "bar"};
 
     // RFC 0016's node roles: what a node is to a panel's buttons and pages ("edit Insertion A"),

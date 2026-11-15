@@ -160,6 +160,20 @@ namespace oscairn
         // keeps a lane for: its worker's (a plugin host's, shared by every plugin in it); null, one lane
         // for them all, for plugins rendering in the engine's process. Main thread.
         virtual const void* lane() const noexcept { return nullptr; }
+        // RFC 0045's plugin groups: nodes of one worker process handed their blocks together and rendered there in one
+        // round trip, a node's input mixed in the worker from the others' outputs. groupable: a worker node, which can.
+        // handed: audio thread, a block started and not yet finished. startGrouped: startProcess for a node whose
+        // audio comes from other nodes of its worker through these routes (source, its output channel, this node's
+        // input channel, gain, the block's live gain product from start to end when live, first: the channel's first
+        // route; sourceOutputs: the source's output buffers in the engine). The inputs are then not read when a source
+        // was handed this block.
+        static constexpr uint32_t maxGroupRoutes = 64; // a node's routes at most, its channels' (worker_shared.h's OSCAIRN_WORKER_MAX_FUSED)
+        struct GroupRoute { const PluginHost* source; const float* const* sourceOutputs; uint32_t sourceChannels, from, to; float gain, start, end; bool live, first; };
+        virtual bool groupable() const noexcept { return false; }
+        virtual bool handed() const noexcept { return false; }
+        virtual bool startGrouped(const GroupRoute*, uint32_t, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,
+                                  const kick::clap::Event* events, uint32_t count, const clap_event_transport_t* transport) noexcept
+        { return startProcess(inputs, ni, outputs, no, frames, events, count, transport); }
         // Audio thread, after process(): statistics().lastMicroseconds, for a host whose statistics()
         // reads main-thread state (the graph's voice budget asks for it every block).
         virtual double blockMicroseconds() const noexcept { return statistics().lastMicroseconds; }
@@ -310,8 +324,9 @@ namespace oscairn
         // makes least (setPluginCost); 0: a worker of its own for each plugin instance (RFC 0010). The
         // memory limit is then each host's. Offline rendering always has workers of their own.
         uint32_t hosts = 0;
-        // Plugin IDs given a worker of their own all the same, as without hosts; a plugin whose crash or
-        // hang took a shared host down joins them for the rest of the engine's life.
+        // Plugin IDs given a worker of their own all the same, as without hosts, and publishers (an entry ending in
+        // ".*", "com.example.*": every ID starting "com.example."); a plugin whose crash or hang took a shared host
+        // down joins them for the rest of the engine's life.
         std::set<std::string> ownHost;
     };
     // Starts as OSCAIRN_PLUGIN_WORKER says: every plugin in the worker executable it names, or none;

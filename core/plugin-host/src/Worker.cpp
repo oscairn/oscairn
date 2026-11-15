@@ -115,6 +115,12 @@ namespace oscairn::worker
         return mode;
     }
 
+    bool workerGroups() noexcept
+    {
+        const char* v = std::getenv("OSCAIRN_WORKER_GROUPS");
+        return !v || std::string(v) != "0";
+    }
+
     bool deadlineAllowance() noexcept
     {
         const char* v = std::getenv("OSCAIRN_WORKER_DEADLINE");
@@ -357,6 +363,9 @@ namespace oscairn::worker
             uint64_t revision = 0; // the parameter info the engine has
             std::vector<const float*> in; std::vector<float*> out; std::vector<clap_id> ids;
             uint64_t reported = 0; uint32_t seen = 0;
+            // RFC 0045's plugin groups: the engine's output guard mirrored (each channel's last good sample, frames faded
+            // since), its output as the guard leaves it when that differs (guarded), and the engine's last write seen.
+            std::vector<float> lastOut, guardedOut; uint32_t fadedFor = 0, published = 0; bool guarded = false;
 #ifdef OSCAIRN_HOSTILE_SIZES
             uint32_t trueFrames = 0, trueInputs = 0, trueOutputs = 0; // the engine's, true until the first wreck
 #endif
@@ -381,14 +390,75 @@ namespace oscairn::worker
             double rate = 48000; uint32_t frames = 0;
         };
 
+        // RFC 0045's plugin groups: the engine's output guard (audio_cpp.cpp's audio_finish, Graph::outputBound) on a
+        // node's last block, as the engine will run it on the same output, so a node mixed from it here hears what it
+        // would in the engine: a block with a sample not finite or past the bound fades from the last good samples.
+        constexpr float outputBound = 1e6f;
+        void guard(Node& n)
+        {
+            auto& s = *n.shared;
+            const uint32_t channels = std::min<uint32_t>(s.outputChannels - (s.ringOut ? 0 : s.ringOutChannels), uint32_t(n.lastOut.size()));
+            const uint32_t frames = std::min(s.frames, s.maxFrames), fade = std::max(1u, uint32_t(s.sampleRate * .001));
+            uint32_t bad = 0;
+            for(uint32_t c = 0; c < channels; ++c) { const float* x = n.out[c]; for(uint32_t i = 0; i < frames; ++i) bad |= uint32_t(!(std::fabs(x[i]) <= outputBound)); }
+            n.guarded = bad != 0;
+            if(!bad) { for(uint32_t c = 0; c < channels; ++c) n.lastOut[c] = frames ? n.out[c][frames - 1] : n.lastOut[c]; n.fadedFor = 0; return; }
+            for(uint32_t c = 0; c < channels; ++c)
+                for(uint32_t f = 0; f < frames; ++f)
+                    n.guardedOut[size_t(c) * s.maxFrames + f] = n.fadedFor + f < fade ? n.lastOut[c] * float(fade - 1 - n.fadedFor - f) / float(fade) : 0.f;
+            n.fadedFor = std::min(fade, n.fadedFor + frames);
+        }
+        // A node's input mixed from the other nodes of its group as the engine's audio core mixes a step's (audio_mix):
+        // in route order, the first route into a channel writing it, a channel without one silent. Compiled with
+        // -ffp-contract=off, as the engine core is, so every sample is the same.
+        void mix(Node& n, const std::atomic<Node*>* live, uint32_t count)
+        {
+            auto& s = *n.shared;
+            const uint32_t frames = std::min(s.frames, s.maxFrames), routes = std::min<uint32_t>(s.fusedCount, OSCAIRN_WORKER_MAX_FUSED);
+            bool written[64]{};
+            for(uint32_t k = 0; k < routes; ++k) if(s.fused[k].to < std::min<uint32_t>(s.inputChannels, 64)) written[s.fused[k].to] = true;
+            for(uint32_t c = 0; c < s.inputChannels; ++c) if(c >= 64 || !written[c]) std::fill_n(s.input(c), frames, 0.f);
+            for(uint32_t k = 0; k < routes; ++k)
+            {
+                const auto& r = s.fused[k];
+                Node* source = r.node < count ? live[r.node].load(std::memory_order_acquire) : nullptr;
+                if(r.to >= s.inputChannels || !source || !source->shared || r.from >= source->lastOut.size()) continue;
+                if(r.published && source->published != source->shared->published) { source->published = source->shared->published; guard(*source); }
+                const float* from = source->guarded ? source->guardedOut.data() + size_t(r.from) * source->shared->maxFrames : source->out[r.from];
+                float* dest = s.input(r.to);
+                if(r.live)
+                {
+                    const float start = r.start, end = r.end;
+                    if(start != end)
+                    {
+                        const float step = (end - start) / float(frames);
+                        for(uint32_t i = 0; i < frames; ++i) { const float g = r.gain * (start + step * float(i + 1)); dest[i] = r.first ? from[i] * g : dest[i] + from[i] * g; }
+                        continue;
+                    }
+                    const float g = r.gain * end;
+                    if(r.first) for(uint32_t i = 0; i < frames; ++i) dest[i] = from[i] * g;
+                    else for(uint32_t i = 0; i < frames; ++i) dest[i] += from[i] * g;
+                    continue;
+                }
+                if(r.first)
+                {
+                    if(r.gain == 1.f) std::copy_n(from, frames, dest);
+                    else for(uint32_t i = 0; i < frames; ++i) dest[i] = from[i] * r.gain;
+                }
+                else if(r.gain == 1.f) for(uint32_t i = 0; i < frames; ++i) dest[i] += from[i];
+                else for(uint32_t i = 0; i < frames; ++i) dest[i] += from[i] * r.gain;
+            }
+        }
+
         // One node's block, as the engine handed it.
-        void render(Node& n, uint32_t index, Doorbell& bell)
+        void render(Node& n, uint32_t index, Doorbell& bell, const std::atomic<Node*>* live, uint32_t nodes)
         {
             auto& s = *n.shared; auto& host = *n.host;
             const auto woke = std::chrono::steady_clock::now();
             const auto cpuAtWake = threadCpuNanoseconds();
+            if(s.fusedCount) mix(n, live, nodes);
             if(s.panic.exchange(0, std::memory_order_acq_rel)) host.panic();
-            if(s.restedBlocks) host.rested(s.restedFrames, s.restedBlocks); // its steady time and idle blocks go on by them
+            if(s.restedBlocks) { host.rested(s.restedFrames, s.restedBlocks); std::fill(n.lastOut.begin(), n.lastOut.end(), 0.f); n.fadedFor = 0; } // its steady time and idle blocks go on by them; the guard saw silence
             // oscairn.voice-budget: the engine's new limits, before the block, as kick::clap::Host takes them.
             if(s.setLimits) host.setVoiceLimits(s.voiceLimit, s.voiceContexts, std::min(s.voiceContextCount, OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS));
             uint32_t events = 0; // SysEx pointed at this process's mapping of the pool
@@ -427,6 +497,7 @@ namespace oscairn::worker
             s.asleep.store(host.asleep() ? 1 : 0, std::memory_order_relaxed);
             s.restful.store(host.restful() ? 1 : 0, std::memory_order_relaxed);
             s.reset = host.wasReset();
+            guard(n); // every block, so the mirror keeps step with the engine's guard
             {
                 double cost = 0; const oscairn_voice_budget_note_t* notes = nullptr; uint32_t noteCount = 0;
                 s.activeVoices = host.voiceReport(cost, notes, noteCount); s.voiceCost = cost;
@@ -486,13 +557,18 @@ namespace oscairn::worker
                     if(!node) continue;
                     const auto next = node->shared->request.load(std::memory_order_acquire);
                     if(next == node->seen) continue;
+                    // A node of a group's block waits in the pass for the sources rendered with it (RFC 0045's plugin groups).
+                    if(const auto& f = *node->shared; f.fusedCount && std::any_of(f.fused, f.fused + std::min<uint32_t>(f.fusedCount, OSCAIRN_WORKER_MAX_FUSED), [&](const oscairn_worker_fused& r) {
+                           Node* source = !r.published && r.node < count ? a.live[r.node].load(std::memory_order_acquire) : nullptr;
+                           return source && source != node && source->shared->request.load(std::memory_order_acquire) != source->seen; }))
+                        continue; // its sources render later in this pass, it in the next
                     node->seen = next;
                     const auto& s = *node->shared;
                     period = std::chrono::nanoseconds(int64_t(1e9 * std::min(s.frames, a.frames) / (s.sampleRate > 0 ? s.sampleRate : a.rate)));
                     // A later wave of the same period does not move its start.
                     if(const auto now = std::chrono::steady_clock::now(); now - periodStart > period / 2) periodStart = now;
                     spin = std::max(n ? spin : 0u, std::min<uint32_t>(s.spinNs, 2'000'000));
-                    render(*node, i, bell);
+                    render(*node, i, bell, a.live, count);
                     rendered[n++] = node;
                 }
 #ifdef RUSAGE_THREAD
@@ -573,6 +649,7 @@ namespace oscairn::worker
                 for(uint32_t i = 0; i < s.parameterCount; ++i) n->ids[i] = n->host->parameters()[i].id;
                 for(uint32_t c = 0; c < s.inputChannels; ++c) n->in.push_back(s.input(c));
                 for(uint32_t c = 0; c < s.outputChannels; ++c) n->out.push_back(s.output(c));
+                n->lastOut.assign(s.outputChannels, 0.f); n->guardedOut.assign(size_t(s.outputChannels) * s.maxFrames, 0.f); n->published = s.published;
                 n->reported = n->host->parameterReports();
                 n->seen = s.done.load(std::memory_order_acquire); // a request may already be waiting
 #ifdef OSCAIRN_HOSTILE_SIZES

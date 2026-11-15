@@ -62,6 +62,11 @@ Checked when built and tested; the sections below say how.
   - [x] 12l. Losses far apart still shed (a loss within 2 s of the last), down to each part's last voice; a chain that cannot fit counted
   - [x] 12m. A plugin without the voice budget held under what lost, across keys struck again
   - [x] 12n. A voice comes back only where the measurements say it fits; a probe that loses doubles its wait until release
+- [ ] 13. Plugin groups: a worker carries one or more plugins, the profile decides how many processes ([plugin groups](#plugin-groups-2026-11-15))
+  - [x] 13a. Nodes of one worker process whose audio flows between them rendered there in one round trip, any routing, sample for sample as apart
+  - [x] 13b. A publisher on the own-host list (`com.example.*`): its plugins always in workers of their own
+  - [ ] 13c. `compute.workers` `chain`: a part's chain placed in one process as it loads
+  - [ ] 13d. Pool placement by chain (a heavy instrument alone), so the spin applies; measured on the unit
 
 ## Problem
 
@@ -1313,7 +1318,8 @@ it uses.
    measured.
 3. Chains rendered in a host: the graph fuses a part's chain whose nodes share a host into one
    step, the host routing each node's output to the next itself (events and parameters still per
-   node, meters from the host's per-node peaks).
+   node, meters from the host's per-node peaks). Built 2026-11-15 for any routing, as
+   [plugin groups](#plugin-groups-2026-11-15): each node keeps its step and shared block.
 4. Residency across changes with background replacement (above). Before hosts, built 2026-11-13
    for one process per instance: reuse before a new process, the instances kept warm bounded by
    memory and let go in the background.
@@ -1414,6 +1420,63 @@ spin applies again, and in the container it cost the engine's thread about 29 po
 (9 % to 38 %) and missed more blocks, not fewer. The unit should be measured with and without it
 (the A/B plan below) before the profile keeps both; the engine's thread at 65 % on the unit with
 the spin on is the same effect.
+
+### Plugin groups (2026-11-15)
+
+Why: on the FANTOM-07 each worker costs the engine about 45 us a block even with its plugin asleep,
+and a 22-worker Performance spends a third of a core on it at rest. The 45 us is two scheduler
+wake-ups (the worker's audio thread woken by the doorbell, then the engine's thread woken from its
+wait on `done`; in an arm64 container 17 to 18 us of a 36 to 48 us round trip is the first, 4 to 5
+us the render of an asleep plugin, the rest the second). Fewer round trips is the lever; the
+owner's direction: a worker carries one or more plugins and the device profile decides.
+
+How (built, behind placement: with a worker per plugin instance, the default, nothing changes):
+the plan compiler forms groups inside each worker process. Walking nodes in dependency order, a
+node joins the group of its audio sources when it and they render in the same worker process and
+can hand blocks over, all its audio comes from members of one group (none from the graph input or
+a node elsewhere), its note and lane sources are in earlier waves (so its events are known when
+the group is handed over), it shares no engine with a node of that wave, it is not retiring and
+has no ring-out routes, the plan is not a played change whose gains ramp (`commit(true)`: the
+ramps are the engine core's state), blocks fit the worker's buffer, and `OSCAIRN_WORKER_GROUPS`
+is not 0. A joining node takes its group's wave. A path leaving a group and coming back is
+impossible by the second condition, so groups are convex; splits, merges, gains, live gain slots
+and taps to consumers outside all stay in a group.
+
+Each node keeps its own step, shared block, request and done; the engine hands every member its
+block in the group's wave and collects each as before, so meters, listening, lanes, NOTE_ENDs,
+the output guard, `called`/`rested`/`asleep`, render time, the voice report and cost stay per
+node; the run cores are unchanged. A follower's request carries its routes (the source's index in
+the worker, channels, gain, the block's live gain products, first); the worker renders a follower
+after its sources in the same pass, its input mixed from their outputs with the engine core's
+formula (`-ffp-contract=off`) after a mirror of the engine's output guard. Per block a follower
+is fused (a source was handed; a source not handed has its engine output, final by then, written
+into its shared output first), standalone (no source handed: its engine input is exact), or lost
+(a source still busy with an old block, or moved to another worker by a crash: silenced as a busy
+block, events carried). A follower is never rested while a source was handed that block, so a
+group rests only when every node in it may. A crash takes the process down with every group in
+it; each node is restored as in a plugin host. Exactness holds without lost blocks, restarts or
+voice-budget pressure (a follower's lane limit is set before its sources' block is measured).
+
+Tested: `plugin-groups-rest-{disabled,all,0}` render a serial chain, a send tapped mid-chain, a
+split and merge with gains, a live gain moving inside a group, a NaN through the guard between
+nodes, audio from the input splitting a group, notes from the input into a member, a part
+switched off and on, a node retiring and a ramped played change, each grouped in one host against
+groups off in the same host and against a worker per plugin, sample for sample and event for
+event, and check which nodes the rule groups; a publisher on the own-host list forms none; a host
+killed while a group plays comes back grouped and sounding. Not covered: a shared instance with
+sound contexts as a member, notes or lanes from a group's own wave (the fixture plugins send
+neither).
+
+Measured with `oscairn-group-bench` (Sick tines' shape: an instrument into five parts of three
+inserts, five sends, a master, every plugin the fixture's effect asleep on silent input; arm64
+container on 4 CPUs under other load, two runs, block p50 at rest / first block after a second of
+silence): a worker each 401 to 913 / 448 to 682 us; one plugin host with groups 215 to 229 / 404
+to 409 us (21 of 22 nodes in one round trip), without 644 to 698 / 703 to 773 us; three hosts 670
+to 741 us either way, as cost placement scattered every chain over them and no group formed.
+
+Not built: placing a part's chain in one process as it loads (`chain`), and pool placement by
+chain; without them groups form only where placement happened to put a chain together (three
+hosts by cost: none).
 
 ## The device A/B plan
 

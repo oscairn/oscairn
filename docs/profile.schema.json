@@ -78,13 +78,13 @@
         },
         "pluginHosts": {
           "type": "integer",
-          "description": "how many plugin hosts the plugins in workers share, each a worker process holding any plugins, an instance placed at its load in the one with the least measured cost; omitted or 0: a worker per plugin instance (RFC 0045)",
+          "description": "how many plugin hosts the plugins in workers share, each a worker process holding any plugins, an instance placed at its load in the one with the least measured cost; nodes of one host whose audio flows between them render there in one round trip (plugin groups); omitted or 0: a worker per plugin instance (RFC 0045)",
           "minimum": 0,
           "maximum": 64
         },
         "ownHost": {
           "type": "array",
-          "description": "plugin IDs given a worker of their own with plugin hosts all the same (RFC 0045)",
+          "description": "plugin IDs given a worker of their own with plugin hosts all the same, or publishers by an entry ending in .* (com.example.*: every ID starting com.example.) (RFC 0045)",
           "items": { "type": "string", "minLength": 1, "maxLength": 128 },
           "maxItems": 64
         },

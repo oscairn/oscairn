@@ -53,6 +53,7 @@ namespace oscairn
     {
         uint64_t replacementSerial=0;
         bool rampGains=false; // see commit()
+        std::vector<NodeId> grouped; // see Graph::grouped
         struct Harmony { std::shared_ptr<Graph::HeldKeys> held; NoteZones zones; bool input=false; uint8_t root=0; uint16_t scale=1; }; // see setHarmonies
         std::vector<Harmony> harmonies;
         std::vector<Graph::ControlTarget> controls; // see setControlTargets
@@ -85,6 +86,10 @@ namespace oscairn
                 std::shared_ptr<std::array<std::atomic<float>,Graph::meterChannels>> peaks; std::shared_ptr<Graph::Activity> activity;
             };
             std::vector<Context> contexts;
+            // RFC 0045's plugin groups: a node rendered in its sources' round trip, its audio routes (the engine core's
+            // order, first: the channel's first) mixed in the worker; empty for every other step.
+            struct Fused { int source; uint32_t from, to; float gain; std::array<uint8_t,4> live; bool first; };
+            std::vector<Fused> fused;
         };
 
         struct Tap { int step; std::shared_ptr<NoteRoute> route; NoteZones zones; uint64_t ports; uint8_t channel; }; // see setMidiTaps; step -1: the input
@@ -260,6 +265,7 @@ namespace oscairn
         next.replacementSerial_=replacementSerial_+1;
         std::unique_ptr<Plan> plan(next.compile());
         ++plansCompiled_;
+        grouped_ = plan->grouped;
         removedHosts_.reserve(removedHosts_.size()+nodes_.size());
         // A host carried over stays in use; listing it here too would keep it alive forever (collect() frees at one owner).
         // So is one taken over under another ID (RFC 0021).
@@ -649,7 +655,7 @@ namespace oscairn
         return result;
     }
 
-    Graph::Plan* Graph::compile() const
+    Graph::Plan* Graph::compile(bool ramped) const
     {
         // RFC 0021 slice 3: the nodes playing sounds of one shared engine are one step, its first
         // node's (the lead); every edge to or from any of them is the lead's.
@@ -699,7 +705,22 @@ namespace oscairn
         // RFC 0034: waves. A node's is one past its sources' and those of earlier nodes sharing its
         // engine (effect contexts never render at the same time); the plan runs wave by wave, in
         // the same order rendering serially or not, so both route notes identically.
+        // RFC 0045's plugin groups: a node whose audio all comes from one group of its own worker process, whose notes
+        // and lanes come from earlier waves, joins that group's wave, so the group's blocks cross to the worker once
+        // and render there in order, each node's input mixed in the worker (WorkerHost::startGrouped). Not where the
+        // core's state would differ there: a played change's ramps (ramped), ring-out routes, retiring nodes, blocks
+        // past the worker's buffer.
         std::map<NodeId, uint32_t> wave;
+        std::map<NodeId, NodeId> groupOf; // a groupable node's group, by its first node
+        auto hostOf = [&]( NodeId id ) -> const PluginHost* {
+            const auto* host = nodes_.at( id ).host.get();
+            if( const auto* sound = dynamic_cast<const SoundContext*>( host ) ) host = sound->engine()->host.get();
+            return host; };
+        const bool grouping = !ramped && maxFrames_ <= 8192 && worker::workerGroups();
+        auto groupable = [&]( NodeId id ) {
+            const auto* host = hostOf( id );
+            return host && host->groupable() && host->lane() && !nodes_.at( id ).retiring
+                && std::none_of( audioRoutes_.begin(), audioRoutes_.end(), [&]( const auto& r ) { return ( leadOf( r.from.node ) == id && r.from.port == ringOutPort ) || ( r.to.node == id && r.to.port == ringOutPort ); } ); };
         for( size_t i = 0; i < order.size(); ++i )
         {
             uint32_t w = 0;
@@ -707,9 +728,34 @@ namespace oscairn
                 for( const auto& e : *edges )
                     if( e.second == order[i] && internal( e ) )
                         w = std::max( w, wave.at( e.first ) + 1 );
+            uint32_t apart = 0; // one past the waves of earlier nodes sharing its engine
             for( size_t j = 0; j < i; ++j )
                 if( nodes_.at( order[j] ).effectGroup == nodes_.at( order[i] ).effectGroup || nodes_.at( order[j] ).host == nodes_.at( order[i] ).host )
-                    w = std::max( w, wave.at( order[j] ) + 1 );
+                    apart = std::max( apart, wave.at( order[j] ) + 1 );
+            w = std::max( w, apart );
+            if( grouping && groupable( order[i] ) )
+            {
+                groupOf[order[i]] = order[i];
+                std::optional<NodeId> group;
+                bool joins = true;
+                for( const auto& e : audioDependencies )
+                    if( e.second == order[i] )
+                    {
+                        const auto g = groupOf.find( e.first );
+                        if( !internal( e ) || g == groupOf.end() || ( group && *group != g->second ) || hostOf( e.first )->lane() != hostOf( order[i] )->lane() ) { joins = false; break; }
+                        group = g->second;
+                    }
+                uint32_t routes = 0;
+                for( const auto& r : audioRoutes_ ) if( r.to.node == order[i] ) routes += r.channels;
+                if( joins && group && routes <= PluginHost::maxGroupRoutes )
+                {
+                    const uint32_t at = wave.at( *group );
+                    for( const auto* edges : { &std::as_const( noteDependencies ), &std::as_const( mappingEdges ) } )
+                        for( const auto& e : *edges )
+                            if( e.second == order[i] && internal( e ) && wave.at( e.first ) >= at ) joins = false;
+                    if( joins && apart <= at ) { w = at; groupOf[order[i]] = *group; }
+                }
+            }
             wave[order[i]] = w;
         }
         std::stable_sort( order.begin(), order.end(), [&]( NodeId a, NodeId b ) { return wave.at( a ) < wave.at( b ); } );
@@ -771,6 +817,18 @@ namespace oscairn
             const auto from=resolve(c.from,true,c.channels),to=resolve(c.to,false,c.channels);
             for(uint32_t i=0;i<c.channels;++i)route(c.from.node,from+i,c.to.node,to+i,static_cast<float>(c.gain),c.live);
         }
+        for(size_t i=0;i<plan->steps.size();++i)
+            if(const auto g=groupOf.find(plan->steps[i].id);g!=groupOf.end() && g->second!=g->first)
+            {
+                std::vector<bool> written(plan->steps[i].audioInputs);
+                for(const auto& r:audioSources[i])
+                {
+                    const bool first=r.to<written.size() && !written[r.to];
+                    if(r.to<written.size())written[r.to]=true;
+                    plan->steps[i].fused.push_back({r.source,r.from,r.to,r.gain,{r.live[0],r.live[1],r.live[2],r.live[3]},first});
+                }
+                plan->grouped.push_back(plan->steps[i].id);
+            }
         for( const auto& [edge,state] : noteEdges_ )
         {
             const auto [from,to]=edge;
@@ -907,13 +965,16 @@ namespace oscairn
 
     void Graph::commit(bool rampGains)
     {
-        Plan* plan = compile(); // throws on a cycle, before anything changes
+        Plan* plan = compile(rampGains); // throws on a cycle, before anything changes
         ++plansCompiled_;
+        grouped_ = plan->grouped;
         plan->rampGains = rampGains;
         collect();
         notePlanned();
         delete pending_.exchange( plan, std::memory_order_acq_rel ); // a plan the audio thread never took
     }
+
+    bool Graph::grouped( NodeId node ) const { return std::find( grouped_.begin(), grouped_.end(), node ) != grouped_.end(); }
 
     bool Graph::planned( NodeId node ) const
     {
@@ -1062,16 +1123,39 @@ namespace oscairn
         // listener, the clock, the worker deadline (realtime.h) and the audio helpers through these calls.
         struct Calls
         {
-            Plan* plan; uint32_t frames; const clap_event_transport_t* transport; Listener* listener; AudioHelpers* helpers;
+            Plan* plan; uint32_t frames; const clap_event_transport_t* transport; Listener* listener; AudioHelpers* helpers; const float* liveFrom; const float* liveTo;
             static Calls& of(void* c) { return *static_cast<Calls*>(c); }
             static Plan::Step& step(void* c,uint32_t s) { return of(c).plan->steps[s]; }
             static PluginHost& host(void* c,uint32_t s) { return *step(c,s).host; }
             static const kick::clap::Event* events(const oscairn_event* e) { return reinterpret_cast<const kick::clap::Event*>(e); }
-        } calls{plan,frames,transport,listener,helpers_};
+            // RFC 0045's plugin groups: a step rendered in its sources' round trip, handed its routes with the block's live
+            // gain products, as the core's mix takes them.
+            static bool start(void* c,uint32_t s,const oscairn_event* e,uint32_t n)
+            {
+                auto& st=step(c,s);auto& cx=of(c);
+                if(st.fused.empty())return st.host->startProcess(st.in,st.audioInputs,st.out,st.audioOutputs,cx.frames,events(e),n,cx.transport);
+                std::array<PluginHost::GroupRoute,PluginHost::maxGroupRoutes> routes;
+                const uint32_t count=uint32_t(std::min(st.fused.size(),routes.size()));
+                for(uint32_t i=0;i<count;++i)
+                {
+                    const auto& f=st.fused[i];const auto& source=cx.plan->steps[size_t(f.source)];
+                    float start=1,end=1;
+                    for(const auto slot:f.live)if(slot){start*=cx.liveFrom[slot];end*=cx.liveTo[slot];}
+                    routes[i]={source.host.get(),source.out,source.audioOutputs,f.from,f.to,f.gain,start,end,f.live[0]!=0,f.first};
+                }
+                return st.host->startGrouped(routes.data(),count,st.in,st.audioInputs,st.out,st.audioOutputs,cx.frames,events(e),n,cx.transport);
+            }
+            // Never rested while a source was handed this block: its input in the engine is not that block's yet.
+            static bool handedSource(void* c,uint32_t s)
+            {
+                const auto& st=step(c,s);
+                return std::any_of(st.fused.begin(),st.fused.end(),[&](const Plan::Step::Fused& f){return of(c).plan->steps[size_t(f.source)].host->handed();});
+            }
+        } calls{plan,frames,transport,listener,helpers_,liveFrom_.data(),liveTo_.data()};
         using C=Calls;
         static const oscairn_plugins table{nullptr,
             [](void* c,uint32_t s,uint32_t* n){return coreEvents(C::host(c,s).outputEvents(*n));},
-            [](void* c,uint32_t s,const oscairn_event* e,uint32_t n){auto& st=C::step(c,s);return st.host->startProcess(st.in,st.audioInputs,st.out,st.audioOutputs,C::of(c).frames,C::events(e),n,C::of(c).transport);},
+            [](void* c,uint32_t s,const oscairn_event* e,uint32_t n){return C::start(c,s,e,n);},
             [](void* c,uint32_t s,const oscairn_event* e,uint32_t n){auto& st=C::step(c,s);return st.host->process(st.in,st.audioInputs,st.out,st.audioOutputs,C::of(c).frames,C::events(e),n,C::of(c).transport);},
             [](void* c,uint32_t s){return C::host(c,s).finishProcess();},
             [](void* c,uint32_t s){return C::host(c,s).oneBlockLate();},
@@ -1091,7 +1175,7 @@ namespace oscairn
             [](void*){return int64_t(std::chrono::steady_clock::now().time_since_epoch().count());},
             [](void*,int64_t at,bool only){worker::workerDeadline=std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));worker::workerDeadlineOnly=only;},
             [](void* c,uint32_t n,oscairn_job job,void* context){C::of(c).helpers->run(n,reinterpret_cast<AudioHelpers::Job>(job),context);},
-            [](void* c,uint32_t s,uint32_t frames){return C::host(c,s).rest(frames);}};
+            [](void* c,uint32_t s,uint32_t frames){return !C::handedSource(c,s) && C::host(c,s).rest(frames);}};
         static_assert(std::is_same_v<std::chrono::steady_clock::duration,std::chrono::nanoseconds>);
         oscairn_plugins plugins=table;plugins.context=&calls;
         const float period=float(frames/sampleRate_*1e6),deadline=period*float(1-worker::mixingReserve);

@@ -21,7 +21,7 @@ an implemented capability.
 | Write a MIDI effect or route audio-generated notes | [MIDI references](../plugins/midi-effects/README.md), [hybrid routing and feedback](architecture.md#midi-effects-hybrid-plugins-and-feedback) |
 | Export plugin state or edit sample properties | [Sound-management controls](control-protocol.md#state-export-presets-and-patch-properties) |
 | Choose or build the main sequencer | [Sequencer evaluation](sequencer-evaluation.md) |
-| Port chillbeast's Modular instrument | [Modular engine evaluation](modular-engine-evaluation.md) |
+| See why the Modular instrument was ported as it was | [Modular engine evaluation](modular-engine-evaluation.md), [the wrapper](../plugins/modular/README.md) |
 | Design parts, routing, mixer, plugin editors or control assignments | [Performance UI RFC](rfcs/0011-performance-ui-and-editors.md) (proposed) |
 | Drive external MIDI/CV gear, sync clocks or link several devices in one setlist | [Sync and multi-device RFC](rfcs/0012-sync-external-midi-and-multi-device.md) (in progress: MIDI out and clock out built) |
 | Build native sample support or choose a sample format | [SFZ-based native samples and conversion plan](rfcs/0008-sfz-native-samples-and-conversion.md), [player/format research](sample-players-and-formats.md), [ESP observations](yamaha-esp-samples-research.md) (first one-region slice implemented; multisample planned) |
@@ -30,6 +30,7 @@ an implemented capability.
 | Emit parameter-lock lanes from a sequencer | [Parameter-target extension](rfcs/0002-param-target.md) |
 | Add a desktop panel layout | [Layout format](../hosts/standalone/layouts/README.md) |
 | Configure audio, MIDI and helper processes | [Hosts](../hosts/README.md) |
+| Build or change the Rust UI | [Rust UI](rust-ui.md) |
 | Build the Linux image | [OS instructions](../os/README.md) |
 | Cut a release (the macOS dmg) | [Releasing](releasing.md) |
 | Try Oscairn on a KICK or a KICK emulator | [Running on a KICK](kick.md) |
@@ -37,7 +38,7 @@ an implemented capability.
 | Describe a device, or check whether a Performance fits its CPU and memory | [Device profiles](rfcs/0024-device-profiles.md), [profile schema](profile.schema.json), [resource budgets](rfcs/0025-resource-budgets.md) (both in progress) |
 | Understand Home, the top bar and how screens flow | [System shell RFC](rfcs/0030-system-shell-launcher-and-navigation.md) (proposed; Home built) |
 | Use native plugins in other DAWs or standalone | [Planned delivery contract](rfcs/0006-packages-and-portability.md#native-plugins-in-daws-and-standalone-applications) |
-| Plan installer-free transfers and shared plugin dependencies | [Packages and cross-device portability](rfcs/0006-packages-and-portability.md) (in part: archives carry signed plugin builds into a plugin store), [package repository](rfcs/0031-package-repository-and-distribution.md) (proposed) |
+| Plan installer-free transfers and shared plugin dependencies | [Packages and cross-device portability](rfcs/0006-packages-and-portability.md) (in part: archives carry signed plugin builds into a plugin store), [package repository](rfcs/0031-package-repository-and-distribution.md) (in progress; the official repository is live) |
 | Plan an arpeggiator or a script block | [Arpeggiator](rfcs/0032-arpeggiator.md), [script block](rfcs/0033-script-block.md) (both proposed) |
 | Understand hardware acceleration and timestamped I/O plans | [Hardware-services proposal](rfcs/0004-hardware-services.md) |
 | Understand the overall design and priorities | [Architecture](architecture.md), [roadmap](roadmap.md), [RFC index](rfcs/README.md) |

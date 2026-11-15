@@ -65,9 +65,18 @@ and the tests that need it. To build a local checkout of it instead, add
 The renderer writes an offline WAV; it does not open an audio device. Socket tests need
 permission to bind local sockets. For live output build the [desktop/helper](../hosts/README.md).
 For LV2 add `-DOSCAIRN_LV2=ON` and install Lilv/LV2 development packages as described in
-the [LV2 guide](../core/lv2-host/README.md). The default build does not require JUCE.
+the [LV2 guide](../core/lv2-host/README.md). The default build does not require JUCE, but it does require Rust (see below).
 `-DOSCAIRN_MODULAR=ON` (implied by `OSCAIRN_STANDALONE`) also builds the
 [Modular instrument](../plugins/modular/README.md), which downloads and links JUCE.
+
+Every configuration needs Rust 1.95.0 through rustup (`tools/install-rust.sh`): the sample pack
+library and the engine core are built with cargo. The engine core, which holds the engine thread's
+note routing and voice budget and the graph's audio and run loop, is Rust by default; its C++
+reference is always compiled for the differential tests, and `-DOSCAIRN_ENGINE_CORE=cpp` makes the
+engine use the reference instead. The CLAP host and the plugin worker are C++. Other options:
+`-DOSCAIRN_UI=ON` builds the Rust UI, `oscairn-ui` ([Rust UI](rust-ui.md)), with cargo;
+`-DOSCAIRN_AUDIO_O3=ON` compiles the audio path at `-O3` (the device image sets it);
+`-DOSCAIRN_ENGINE=ON` builds the separate engine helper, `oscairn-engine`.
 
 ### Run the tests
 
@@ -141,6 +150,7 @@ FANTOM-0's panel device and print its messages
 | `OSCAIRN_PLUGIN_HOSTS` | RFC 0045's plugin hosts: a whole number, 0 to 64, of worker processes the plugins in workers share in real time, each holding plugins of any kind beside each other, with one audio thread and one doorbell; an instance goes, as it loads, to the host whose plugins cost least by the Session's measurements (a plugin not measured counts a tenth of the block). Hosts start as instances need them and stay for the engine's life. A crash takes down one host, which is restarted with its instances restored; a plugin a shared host's crash or hang is put down to gets a worker of its own from then on. Unset or 0: a worker per plugin instance, as before. The app sets it from its profile's `compute.pluginHosts` unless it is set already (none on the FANTOM-07: three hosts measured worse there) |
 | `OSCAIRN_OWN_HOST` | Plugin IDs, separated by commas, given a worker of their own even with plugin hosts (the profile's `compute.ownHost`) |
 | `OSCAIRN_WORKER_EXTRA_BLOCK` | Experimental, off by default: plugin IDs, comma-separated (`org.oscairn.analog,org.oscairn.sampler`). Each instance of a listed plugin in a worker, in real time, renders each block while the engine plays the one before: it is heard exactly one block late, and has its allowance plus a block's period for each block ([RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md#one-block-late-for-one-part)). Read as each instance loads, fixed for its life; nothing switches it automatically |
+| `OSCAIRN_WORKER_REST` | `0`: every plugin worker is called every block, as before resting ([plugin porting](plugin-porting.md), "Asleep means not called"); a diagnostic A/B switch for the device, read once at the engine's start, settable in the bundle's `etc/default/oscairn-engine`. Unset or anything else: a worker whose plugin is asleep with nothing for it is not called once it has been so for 192 blocks in a row (0.5 s at 128 frames; a chain fed a moment ago stays warm). The first block after a rest costs the worker a cold wake-up ([worker-wake](../core/engine/tests/worker_wake.cpp) measures it). `engine.timing` gives each worker's `called`, `rested` and `asleep` |
 | `OSCAIRN_UI_PAINT_LOG` | `1`: the app and each app process (the Setlist, Settings) write to their logs, once a second, a line for each window that drew: its frames, the pixels painted in them and the milliseconds painting took, each a second (`oscairn: UI paint "<window>": ...`; [RFC 0045](rfcs/0045-audio-scheduling-on-small-devices.md)). On macOS the windows then paint with JUCE's software renderer, as on Linux. Unset: nothing is counted |
 | `OSCAIRN_WORKER_REPLY_SECONDS` | Tests: how long a control call waits for a worker |
 | `OSCAIRN_REQUIRE_SOCKET_BIND` | Tests: fail, rather than skip, when local sockets cannot be bound |
@@ -346,8 +356,8 @@ not part of ctest; run it after publishing.
 
 ### Planned
 
-A managed package installer and repository are planned
-([RFC 0031](rfcs/0031-package-repository-and-distribution.md)). The plan uses a project manifest and exact
+The package repository is live ([RFC 0031](rfcs/0031-package-repository-and-distribution.md));
+project-level dependency management is planned. The plan uses a project manifest and exact
 lockfile with a project-local dependency view backed by a shared durable content store.
 A download cache is separate; clearing it must not remove installed offline dependencies.
 Design new engines with stable logical/format

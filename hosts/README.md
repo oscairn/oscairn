@@ -18,6 +18,7 @@ Programs built on the core: a file renderer, a live audio/MIDI engine and a desk
 - `process/`: desktop helper startup and lifetime locks, independent of JUCE. A
   launcher attaches to a running engine or starts the bundled helper. Its destruction
   leaves that helper alive. Concurrent launches share one engine per plugin directory and audio configuration.
+- The Rust UI, `oscairn-ui`, is in [`ui/`](../ui) and is not built by default ([Rust UI](../docs/rust-ui.md)).
 - `standalone/`: `Oscairn`, the desktop UI and panel layouts. It starts at Home
   ([launching](#launching)). It starts or reconnects to a helper by default through
   cached `RemoteControl`. `--in-process` runs audio in the UI process; `--connect SOCKET`

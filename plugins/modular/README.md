@@ -1,6 +1,6 @@
 # Modular
 
-chillbeast's *Modular* instrument engine from his KICK firmware fork, to become an Oscairn
+chillbeast's *Modular* instrument engine from his KICK firmware fork, wrapped as an Oscairn
 CLAP instrument. See the [evaluation](../../docs/modular-engine-evaluation.md).
 
 ## Upstream

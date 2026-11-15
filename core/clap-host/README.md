@@ -4,6 +4,8 @@ Oscairn's raw CLAP adapter retains the `kick::clap` namespace and `kick-clap-*` 
 names from the KICK host imported with its history. It has no device or JUCE dependency.
 The JUCE session, touchscreen panel, player and audio-device benchmark that came with the
 KICK host were removed as unused on 2026-11-12.
+The engine and the plugin workers reach it through a C interface,
+[`clap_host.h`](../plugin-host/src/clap_host.h), whose C++ reference is `clap_host_cpp.cpp`.
 The [shared PluginHost](../plugin-host/include/oscairn/plugin_host.h) and graph build on it;
 new plugin authors should start with the [developer guide](../../docs/developer-guide.md).
 The vendored CLAP SDK revision is in `third_party/clap/upstream.json`.

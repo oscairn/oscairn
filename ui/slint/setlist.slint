@@ -3,7 +3,7 @@
 // right, a view of them at a time (a grid as the setlist's display says, or a list), Previous and
 // Next under them. Each pane's cursor is a border; the slot playing is marked apart from it.
 
-import { Theme } from "theme.slint";
+import { Theme, Section, Button, Cursor, RowMark, RowStyle } from "theme.slint";
 
 export struct ListRow {
     name: string,
@@ -45,59 +45,41 @@ export global SetlistState {
     callback play(); // open Play
 }
 
-export component Button inherits Rectangle {
-    in property <string> text;
-    in property <bool> enabled: true;
-    callback clicked();
-    border-radius: Theme.radius;
-    background: !enabled ? Theme.surface : touch.pressed ? Theme.accent : Theme.raised;
-    Text {
-        text: root.text;
-        color: root.enabled ? Theme.text : Theme.muted;
-        font-size: Theme.button;
-        font-weight: 700;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-    }
-}
-
 export component Setlist inherits Rectangle {
+    // The sections' gap (none in a theme whose sections join); the list's width and a slot's row height (Setlist.cpp's).
+    property <length> gap: Theme.gap-between(Theme.gap);
     property <length> row-height: Theme.touch;
     property <length> list-width: 280px;
+    property <length> line: 24px; // the message line above the buttons
+    property <length> number-column: 64px; // a list view's room for the slot's number
+    property <length> slot-row: 56px; // a slot's height in the list view
     property <length> header: Theme.touch;
-    property <length> footer: Theme.touch + 24px + Theme.gap;
+    property <length> footer: Theme.touch + line + Theme.gap;
     property <length> slots-x: list-width + 2 * Theme.margin;
     property <length> slots-width: self.width - slots-x - Theme.margin;
     property <length> slots-height: self.height - header - footer - 2 * Theme.margin - 2 * Theme.gap;
     property <int> across: SetlistState.grid ? SetlistState.columns : 1;
-    property <int> down: SetlistState.grid ? SetlistState.rows : max(1, floor((slots-height + Theme.gap) / (56px + Theme.gap)));
-    property <length> cell-width: (slots-width - (across - 1) * Theme.gap) / across;
-    property <length> cell-height: SetlistState.grid ? (slots-height - (down - 1) * Theme.gap) / down : 56px;
+    property <int> down: SetlistState.grid ? SetlistState.rows : max(1, floor((slots-height + gap) / (slot-row + gap)));
+    property <length> cell-width: (slots-width - (across - 1) * gap) / across;
+    property <length> cell-height: SetlistState.grid ? (slots-height - (down - 1) * gap) / down : slot-row;
     // The sizes setlist.rs pages by: settled whenever the screen's size or the setlist's display changes.
     changed down => { SetlistState.slots-per-view = across * down; }
     changed across => { SetlistState.slots-per-view = across * down; }
-    changed height => { SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + Theme.gap) / (row-height + Theme.gap))); }
+    changed height => { SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + gap) / (row-height + gap))); }
     init => {
         SetlistState.slots-per-view = across * down;
-        SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + Theme.gap) / (row-height + Theme.gap)));
+        SetlistState.list-rows = max(1, floor((self.height - 2 * Theme.margin + gap) / (row-height + gap)));
     }
 
-    for row[i] in SetlistState.setlists: Rectangle {
+    for row[i] in SetlistState.setlists: Section {
         x: Theme.margin;
-        y: Theme.margin + i * (root.row-height + Theme.gap);
+        y: Theme.margin + i * (root.row-height + root.gap);
         width: root.list-width;
         height: root.row-height;
-        background: row.shown ? Theme.raised : Theme.surface;
-        border-radius: Theme.radius;
-        border-width: row.cursor ? 2px : 0px;
-        border-color: Theme.focus;
+        fill: row.shown ? Theme.raised : Theme.surface;
         Text {
-            x: 12px;
-            width: parent.width - 24px;
+            x: Theme.pad-wide;
+            width: parent.width - 2 * Theme.pad-wide;
             vertical-alignment: center;
             overflow: elide;
             font-size: Theme.body;
@@ -107,6 +89,9 @@ export component Setlist inherits Rectangle {
         }
         TouchArea {
             clicked => { SetlistState.tapped-setlist(i); }
+        }
+        Cursor {
+            shown: row.cursor;
         }
     }
 
@@ -135,36 +120,38 @@ export component Setlist inherits Rectangle {
         text: SetlistState.page + "   " + SetlistState.view;
     }
 
-    for slot[i] in SetlistState.slots: Rectangle {
-        x: root.slots-x + mod(i, root.across) * (root.cell-width + Theme.gap);
-        y: Theme.margin + root.header + Theme.gap + floor(i / root.across) * (root.cell-height + Theme.gap);
+    for slot[i] in SetlistState.slots: Section {
+        property <color> base: slot.playing ? Theme.raised : Theme.surface;
+        property <bool> odd: !SetlistState.grid && mod(i, 2) == 1;
+        property <color> lifted: self.odd ? self.base.mix(Theme.raised, 0.65) : self.base;
+        x: root.slots-x + mod(i, root.across) * (root.cell-width + root.gap);
+        y: Theme.margin + root.header + Theme.gap + floor(i / root.across) * (root.cell-height + root.gap);
         width: root.cell-width;
         height: root.cell-height;
-        border-radius: Theme.radius;
-        background: slot.empty ? Theme.background : slot.tinted ? slot.tint.mix(Theme.surface, slot.playing ? 0.85 : 0.45) : slot.playing ? Theme.raised : Theme.surface;
+        // The item's color where the theme puts it (drawListRow): the whole slot, or a mark in it.
+        fill: slot.empty ? Theme.background : slot.tinted && Theme.rows == RowStyle.fill ? Theme.row-fill(slot.tint, self.lifted, Theme.text, self.odd) : self.lifted;
+        RowMark {
+            tint: slot.tint;
+            shown: slot.tinted && !slot.empty;
+        }
         // The slot playing: an accent edge on its left; the cursor: a focus border round it.
         if slot.playing: Rectangle {
             x: 0;
-            width: 6px;
+            width: Theme.mark;
             background: Theme.accent;
-            border-radius: Theme.radius;
-        }
-        Rectangle {
-            border-radius: Theme.radius;
-            border-width: slot.cursor ? 2px : 0px;
-            border-color: Theme.focus;
+            border-radius: Theme.section-radius;
         }
         if !slot.empty: Text {
-            x: 14px;
-            y: 6px;
+            x: Theme.pad-wide + Theme.pad-tight / 2;
+            y: Theme.pad-tight + Theme.pad-tight / 2;
             text: slot.number;
             color: Theme.muted;
             font-size: Theme.small;
             font-weight: 700;
         }
         if !slot.empty: Text {
-            x: SetlistState.grid ? 14px : 64px;
-            width: parent.width - self.x - 10px;
+            x: SetlistState.grid ? Theme.pad-wide + Theme.pad-tight / 2 : root.number-column;
+            width: parent.width - self.x - Theme.pad;
             height: parent.height;
             text: slot.note == "" ? slot.title : slot.title + "\n" + slot.note;
             color: slot.opens ? Theme.text : Theme.muted;
@@ -178,13 +165,16 @@ export component Setlist inherits Rectangle {
         TouchArea {
             clicked => { SetlistState.tapped-slot(i); }
         }
+        Cursor {
+            shown: slot.cursor;
+        }
     }
 
     Text {
         x: root.slots-x;
         y: root.height - root.footer - Theme.margin;
         width: root.slots-width;
-        height: 24px;
+        height: root.line;
         overflow: elide;
         font-size: Theme.small;
         color: Theme.muted;

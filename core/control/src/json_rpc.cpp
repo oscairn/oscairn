@@ -85,6 +85,13 @@ namespace oscairn
             if( n < 0 || n > maximum || std::floor( n ) != n ) invalid( "Integer outside permitted range" );
             return static_cast<uint32_t>( n );
         }
+        // A byte count: exact in a double up to 2^53 (a device with 4 GiB or more is not a 32-bit number).
+        uint64_t bytes( Value v )
+        {
+            const auto n = number( v );
+            if( n < 0 || n > 9007199254740992.0 || std::floor( n ) != n ) invalid( "Integer outside permitted range" );
+            return static_cast<uint64_t>( n );
+        }
         bool boolean( Value v )
         {
             if( !v || ( v->type != json_type_true && v->type != json_type_false ) ) invalid( "Expected a boolean" );
@@ -680,13 +687,13 @@ namespace oscairn
             // Resource budgets (RFC 0025).
             if(method=="budget.set") {
                 fields(p,{"cpu","memory","device","system","floor","margin","available"});
-                Control::Budget b;b.cpu=number(member(p,"cpu"));if(member(p,"memory"))b.memory=uint64_t(integer(member(p,"memory")));
-                for(auto [key,to]:{std::pair{"device",&b.device},{"system",&b.system},{"floor",&b.floor},{"margin",&b.margin},{"available",&b.available}})if(member(p,key))*to=uint64_t(integer(member(p,key)));
+                Control::Budget b;b.cpu=number(member(p,"cpu"));if(member(p,"memory"))b.memory=bytes(member(p,"memory"));
+                for(auto [key,to]:{std::pair{"device",&b.device},{"system",&b.system},{"floor",&b.floor},{"margin",&b.margin},{"available",&b.available}})if(member(p,key))*to=bytes(member(p,key));
                 try{c.setBudget(b);}catch(const std::invalid_argument& e){throw Failure{-32602,e.what()};}
                 return R"({"accepted":true})";
             }
             // Memory classes (RFC 0025): apps' reservations and launches.
-            auto appMemory=[&](Value v){fields(v,{"app","reserve","dropNext"});return Control::AppMemory{std::string(string(member(v,"app"))),uint64_t(integer(member(v,"reserve")))};};
+            auto appMemory=[&](Value v){fields(v,{"app","reserve","dropNext"});return Control::AppMemory{std::string(string(member(v,"app"))),bytes(member(v,"reserve"))};};
             auto appList=[&](const std::vector<Control::AppMemory>& apps){std::vector<std::string> out;for(const auto& a:apps)out.push_back("{\"app\":"+quote(a.app)+",\"reserve\":"+std::to_string(a.reserve)+'}');return join(out);};
             if(method=="memory.alwaysAvailable") {
                 fields(p,{"apps"});std::vector<Control::AppMemory> apps;for(auto a:array(member(p,"apps"),64))apps.push_back(appMemory(a));
@@ -701,7 +708,7 @@ namespace oscairn
             }
             if(method=="memory.shell") {
                 fields(p,{"bytes"});
-                try{c.setShellMemory(uint64_t(integer(member(p,"bytes"))));}catch(const std::invalid_argument& e){throw Failure{-32005,e.what()};}
+                try{c.setShellMemory(bytes(member(p,"bytes")));}catch(const std::invalid_argument& e){throw Failure{-32005,e.what()};}
                 return R"({"accepted":true})";
             }
             if(method=="memory.closed") {fields(p,{"app"});const std::string app(string(member(p,"app")));c.appClosed(app);client.launched(app,false);return R"({"closed":true})";}

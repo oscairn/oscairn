@@ -113,13 +113,19 @@ namespace
         if( !held().empty() || std::abs(f.left[511]) > 1e-6f ) throw std::runtime_error("A release for an input gone did not let go: " + held());
         std::cout << "ok: notes sent as a MIDI input play its zones, and each source's held keys are listed\n";
     }
+    // Byte counts past 32 bits: a desktop with 8 GiB sets its budget over the wire.
+    void bigBudget( const char* path )
+    {
+        Fixture f(path);
+        f.call("budget.set", R"({"cpu":0,"device":8589934592,"system":1073741824,"floor":536870912,"margin":268435456})");
+    }
 }
 int main( int argc, char** argv )
 {
     if( argc < 2 ) return 2;
     try
     {
-        if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); return 0; }
+        if( argc == 2 ) { equivalence(argv[1]); sources(argv[1]); bigBudget(argv[1]); return 0; }
         // Test-only line driver. Blank output represents no JSON-RPC response. After --stdio, a
         // repository snapshot preinstalled from as the engine does at start (preinstall.py), and
         // the address and root key of the repository the device ships it from, set first as an

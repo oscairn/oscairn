@@ -354,8 +354,9 @@ int main(int argc, char** argv)
             check(resident.size() == 5, "five workers kept warm: " + std::to_string(resident.size()));
             paced(.5); // past their last request
             // Other load on the machine (a shared runner) only adds CPU time to a worker, never takes any away: the least of up to three windows is its own.
+            const double limit = relaxed() ? .030 : .018; // 0.5% of a core on a CI runner or in a sanitizer build, 0.3% elsewhere
             double most = 1e9; bool measurable = true;
-            for(int window = 0; window < 3 && most > .030; ++window)
+            for(int window = 0; window < 3 && most > limit; ++window)
             {
                 std::vector<double> before; for(const auto pid : resident) before.push_back(cpuOf(pid));
                 paced(6);
@@ -364,7 +365,7 @@ int main(int argc, char** argv)
                 if(before.empty() || before[0] < 0) { measurable = false; break; }
             }
             std::printf("residents: the busiest of %zu workers kept warm used %.1f ms of CPU in 6 s while G played\n", resident.size(), most * 1e3);
-            check(!measurable || most <= .030, "a worker kept warm costs next to no CPU: at most 0.5% of a core (GitHub's macOS runners measure 0.3 to 0.4%, its Linux ones under 0.2%), " + std::to_string(most * 1e3) + " ms in 6 s");
+            check(!measurable || most <= limit, "a worker kept warm costs next to no CPU: at most 0.3% of a core (0.5% on a CI runner or in a sanitizer build: GitHub's macOS runners measure 0.3 to 0.4%), " + std::to_string(most * 1e3) + " ms in 6 s");
             // Y's build replaced (a library install): no load can take its instance kept warm, which goes.
             auto idle = [&] { std::map<std::string, size_t> n; for(const auto& i : t.engineTiming(false).instances) if(!i.inUse) ++n[i.plugin]; return n; };
             std::string yPlugin; for(const auto& [id, n] : idle()) if(n == 1) yPlugin = id;

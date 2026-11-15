@@ -1384,13 +1384,27 @@ has no uinput); not yet run on the unit. MENU held at power-on is still read on 
   ended a latched arpeggio. The arpeggiator 0.1.7 still cuts on CC 123 (it chokes, as on its own
   transport stop) until it treats CC 123 as a release ([plugin porting](plugin-porting.md)). Not
   yet tried on the unit.
+- **The HOLD jack's id and kind are unconfirmed (November 15: a pedal in the jack sent no CC 64
+  to the graph; injecting CC 64 sustains, so routing is fine).** Evidence in hand: Roland's test
+  tool names `HOLD` among the analog sources, and the map's analog 2 is the one id left in
+  0 to 24 once CUTOFF/RESONANCE (0, 1), the wheels (5, 6), the lever (7, 8), sliders (9 to 16)
+  and knobs (17 to 24) are placed; nothing read or measured ties HOLD to 2. The panel button HOLD
+  is switch 19. Whether the panel's processor or a BMC sends the HOLD jack is not established
+  (bmc-research `docs/fantom-panel-bus-behavior.md`, Open), and the app's sense gating is known
+  only for CTRL1 and CTRL2 (switches 35 to 38). The reader sends nothing to enable an analog
+  channel (the panel reports on its own once held), and no pedal-jack message has been seen. To
+  settle it, run `oscairn-panel-dump /usr/share/oscairn/panels/fantom-07.json` beside the engine
+  (it prints every message, unmapped ones with `-`, and a kind and id table at the end), plug the
+  pedal into HOLD, press and release it a few times; the engine's own log also lists unmapped
+  messages (at most ten a second). If nothing shows at all, the jack is not on the panel bus.
 - **The pedals:** the HOLD jack is `footswitch:1` in the map (analog 2), whose profile function is
   sustain: with nothing assigned to it, its position goes to the parts as CC 64 (0 to 127, so a
   half-damper pedal passes as one) from the built-in source, as the keys' notes, and reaches every part,
   a part played only from another keyboard too, unless the part's `receive` says otherwise, once
   the note router applies that (today a part whose devices leave out the built-in keys does not
   get it). Not yet seen on the
-  unit: which way a pedal reads (some switch pedals are inverted), and whether the BMC also sends
+  unit: which way a pedal reads (some switch pedals are inverted; `"invert": true` on its map entry
+  flips it), and whether the BMC also sends
   CC 64 with the keys (Roland's app takes one from that link), which would arrive twice. CTRL1 and
   CTRL2 (`pedal:1`, `pedal:2`) have no function in the profile: they play what a Performance or
   Sound assigns them. A pedal or footswitch with a standard controller's function (sustain,

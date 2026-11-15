@@ -948,7 +948,7 @@ void partsClient(const char* plugin,const char* delay)
         const auto zoned=remote.graphState().parts[0].input.zones;
         check(zoned.size()==1 && zoned[0].highKey==59 && zoned[0].transpose==12,"a part's zone set and read back over the socket");
         {const auto memo=remote.addScene("Memo");remote.setPartInput(part,{PartInput::Kind::Notes,0,{},devices});remote.selectScene(memo);
-         const auto& sp=remote.graphState().scenes.back().parts[0];
+         const auto sp=remote.graphState().scenes.back().parts[0];
          check(sp.zones && sp.zones->size()==1 && (*sp.zones)[0].highKey==59 && (*sp.zones)[0].transpose==12,"a scene's memorised zones are read over the socket");
          for(int i=0;i<500 && remote.graphState().parts[0].input.zones.empty();++i){remote.service();std::this_thread::sleep_for(std::chrono::milliseconds(1));}
          check(remote.graphState().parts[0].input.zones.size()==1,"selecting it over the socket puts the zones back");

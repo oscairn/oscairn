@@ -75,8 +75,13 @@ struct Event {
         static_assert(sizeof(T) <= capacity, "event too large");
         Event result;
         std::memcpy(result.bytes.data(), &source, sizeof(T));
+        result.clearPadding();
         return result;
     }
+    // Zeroes the padding between the fields of a note, note expression, parameter or MIDI event: a struct copied here
+    // leaves its own padding indeterminate (stack bytes under SRA), and the same event must be the same 64 bytes in
+    // every host and on every platform (a recording of it, a Rust host's copy of it, a plugin hashing it).
+    void clearPadding() noexcept;
     static Event midi(uint8_t status, uint8_t a, uint8_t b, uint32_t frame = 0,
                       uint16_t port = 0) noexcept;
     static Event note(bool on, int key, double velocity, uint32_t frame = 0,

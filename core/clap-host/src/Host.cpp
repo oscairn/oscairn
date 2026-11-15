@@ -37,6 +37,35 @@
 #endif
 
 namespace kick::clap {
+void Event::clearPadding() noexcept {
+    const auto* h = header();
+    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
+    auto zero = [&](size_t from, size_t to) { std::memset(bytes.data() + from, 0, to - from); };
+    switch (h->type) {
+    case CLAP_EVENT_NOTE_ON: case CLAP_EVENT_NOTE_OFF: case CLAP_EVENT_NOTE_CHOKE: case CLAP_EVENT_NOTE_END:
+        if (h->size == sizeof(clap_event_note_t)) zero(offsetof(clap_event_note_t, key) + sizeof(int16_t), offsetof(clap_event_note_t, velocity));
+        break;
+    case CLAP_EVENT_NOTE_EXPRESSION:
+        if (h->size == sizeof(clap_event_note_expression_t)) zero(offsetof(clap_event_note_expression_t, key) + sizeof(int16_t), offsetof(clap_event_note_expression_t, value));
+        break;
+    case CLAP_EVENT_PARAM_VALUE:
+        if (h->size == sizeof(clap_event_param_value_t)) {
+            zero(offsetof(clap_event_param_value_t, param_id) + sizeof(clap_id), offsetof(clap_event_param_value_t, cookie));
+            zero(offsetof(clap_event_param_value_t, key) + sizeof(int16_t), offsetof(clap_event_param_value_t, value));
+        }
+        break;
+    case CLAP_EVENT_PARAM_MOD:
+        if (h->size == sizeof(clap_event_param_mod_t)) {
+            zero(offsetof(clap_event_param_mod_t, param_id) + sizeof(clap_id), offsetof(clap_event_param_mod_t, cookie));
+            zero(offsetof(clap_event_param_mod_t, key) + sizeof(int16_t), offsetof(clap_event_param_mod_t, amount));
+        }
+        break;
+    case CLAP_EVENT_MIDI:
+        if (h->size == sizeof(clap_event_midi_t)) zero(offsetof(clap_event_midi_t, data) + sizeof(clap_event_midi_t::data), sizeof(clap_event_midi_t));
+        break;
+    default: break;
+    }
+}
 Event Event::midi(uint8_t status, uint8_t a, uint8_t b, uint32_t frame, uint16_t port) noexcept {
     clap_event_midi_t e{};
     e.header = {sizeof(e), frame, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, 0};

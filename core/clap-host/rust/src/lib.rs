@@ -5,6 +5,7 @@
 // The host is reached through a raw pointer and its fields are borrowed one at a time, briefly (host.rs says why).
 #![allow(dangerous_implicit_autorefs)]
 
+#[rustfmt::skip] // generated (core/engine/rust/bindgen), checked by clap_host_h_unchanged
 mod bindings;
 pub mod event;
 mod host;

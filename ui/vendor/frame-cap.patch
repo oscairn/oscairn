@@ -121,3 +121,14 @@ diff -ru a/fullscreenwindowadapter.rs b/fullscreenwindowadapter.rs
  }
  
  fn mouse_cursor_image() -> Image {
+diff -ru a/display/swdisplay.rs b/display/swdisplay.rs
+--- a/display/swdisplay.rs
++++ b/display/swdisplay.rs
+@@ -21,6 +21,7 @@
+     /// order of magnitude slower than reads from regular (cached) memory.
+     /// Renderers that read back destination pixels should then render into a
+     /// regular buffer and copy the result into the mapped buffer.
++    #[cfg_attr(not(enable_skia), allow(dead_code))] // only the Skia renderer asks
+     fn is_write_combined_memory(&self) -> bool;
+     fn as_presenter(self: Arc<Self>) -> Arc<dyn super::Presenter>;
+ }

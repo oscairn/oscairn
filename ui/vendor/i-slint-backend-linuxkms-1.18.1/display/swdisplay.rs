@@ -21,6 +21,7 @@ pub trait SoftwareBufferDisplay {
     /// order of magnitude slower than reads from regular (cached) memory.
     /// Renderers that read back destination pixels should then render into a
     /// regular buffer and copy the result into the mapped buffer.
+    #[cfg_attr(not(enable_skia), allow(dead_code))] // only the Skia renderer asks
     fn is_write_combined_memory(&self) -> bool;
     fn as_presenter(self: Arc<Self>) -> Arc<dyn super::Presenter>;
 }

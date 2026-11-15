@@ -385,10 +385,15 @@ case "$rotation" in
 270) matrix="0 -1 1 1 0 0" ;;
 *) matrix="" ;;
 esac
+# "touch_rule off" removes it for the X server: its libinput driver reads the same udev property,
+# so with the rule in place the matrix in xorg.conf turned touch twice under the JUCE app.
 touch_rule() {
 	[ -n "$matrix" ] || return 0
-	mkdir -p "$rules" && printf 'ACTION=="add|change", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n' "$matrix" > "$rules/99-oscairn-touch.rules" ||
+	if [ "${1:-}" = off ]; then
+		rm -f "$rules/99-oscairn-touch.rules"
+	else mkdir -p "$rules" && printf 'ACTION=="add|change", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", ENV{LIBINPUT_CALIBRATION_MATRIX}="%s"\n' "$matrix" > "$rules/99-oscairn-touch.rules" ||
 		{ say "cannot write $rules/99-oscairn-touch.rules: touch is not turned"; return 0; }
+	fi
 	command -v udevadm > /dev/null 2>&1 && udevadm control --reload && udevadm trigger --subsystem-match=input --action=change ||
 		say "udevadm did not apply the touch rule: touch is turned once the input devices are added again"
 }
@@ -412,6 +417,7 @@ keep_ui() {
 		ours || exit 0
 		if [ $status = 3 ] && handed_over; then
 			say "the Rust UI hands the display to the JUCE app for $app"
+			touch_rule off
 			"$root/start-chroot.sh" /usr/bin/Xorg :0 vt7 -novtswitch -nolisten tcp -noreset -nocursor -logfile /var/oscairn/log/Xorg.log < /dev/null &
 			xserver=$!
 			i=0
@@ -432,6 +438,7 @@ keep_ui() {
 			xorg=$(xorg_ours)
 			[ -z "$xorg" ] || kill $xorg 2>/dev/null
 			wait $xserver 2>/dev/null
+			touch_rule
 			fails=0
 			continue
 		fi

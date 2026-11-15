@@ -63,6 +63,11 @@ check "and the display left as it is" "! echo \"\$out\" | grep -q -e weston.serv
 out=$(OSCAIRN_UI=rust OSCAIRN_UI_ROTATION=90 OSCAIRN_UDEV_RULES="$bundle/rules" "$bundle/oscairn-fantom-start" --dry-run 2>&1); status=$?
 check "ui rust: the engine alone, then the Rust UI" "[ $status = 0 ] && echo \"\$out\" | grep -q 'setsid env oscairn-engine-run --output-device' && echo \"\$out\" | grep -q 'SLINT_KMS_ROTATION=90 /usr/bin/oscairn-ui --profile fantom-07 --socket /run/oscairn/engine.sock --handover' && ! echo \"\$out\" | grep -q -e /usr/bin/Oscairn -e /usr/bin/Xorg"
 check "and touch turned with it, by a rule at run time" "echo \"\$out\" | grep -q 'would write $bundle/rules/99-oscairn-touch.rules (LIBINPUT_CALIBRATION_MATRIX 0 1 0 -1 0 1)' && [ ! -e \"$bundle/rules\" ]"
+# The touch rule written for the Rust UI and removed for the X server (which turns touch itself).
+eval "$(sed -n '/^touch_rule()/,/^}/p' "$scripts/oscairn-fantom-start")"
+say() { :; }; rules=$bundle/rules2; matrix="0 1 0 -1 0 1"
+touch_rule; [ -e "$rules/99-oscairn-touch.rules" ] && touch_rule off
+check "the touch rule is removed for the X server" "[ ! -e \"$rules/99-oscairn-touch.rules\" ]"
 # The handover file read as the keeper reads it, with and without its newline (an unterminated
 # line once made the keeper start the Rust UI again in place of the JUCE app).
 eval "$(grep '^handed_over()' "$scripts/oscairn-fantom-start")"

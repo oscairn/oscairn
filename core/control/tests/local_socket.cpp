@@ -34,6 +34,19 @@ namespace
     using namespace oscairn;
     void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
     void check(bool value,const std::string& message){check(value,message.c_str());}
+    // A shared CI runner (CI is set) or a sanitizer build slows what is timed: only there may a timed scenario be run again.
+    bool relaxed()
+    {
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+        return true;
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+        return true;
+#endif
+#endif
+        const char* ci=std::getenv("CI");
+        return ci && *ci;
+    }
     struct TooSlow:std::runtime_error{using std::runtime_error::runtime_error;}; // a latency over its limit: a shared runner's stall adds to one, so the scenario may be run again
     std::array<int,2> pair()
     {
@@ -1042,11 +1055,11 @@ int main(int argc,char** argv)
         }
         if(argc==3 && std::string_view(argv[2])=="--properties"){propertyClient(argv[1]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--instances"){instanceClient(argv[1]);return 0;}
-        // The calls' latency is a worst case, and a stall of the machine only lengthens it: up to three runs, and the first within the limit stands.
+        // The calls' latency is a worst case, and a stall of the machine only lengthens it: on a CI runner or in a sanitizer build up to three runs, and the first within the limit stands; elsewhere one.
         for(const auto& [flag,mode]:{std::pair{"--busy",Load::fresh},std::pair{"--busy-taken",Load::takeOver},std::pair{"--busy-failing",Load::fail}})
             if(argc==3 && std::string_view(argv[2])==flag)
             {
-                for(int attempt=0;;++attempt)try{busyClient(argv[1],mode);return 0;}catch(const TooSlow&){if(attempt==2)throw;std::cerr<<"busy: too slow, again\n";}
+                for(int attempt=0;;++attempt)try{busyClient(argv[1],mode);return 0;}catch(const TooSlow&){if(attempt==(relaxed()?2:0))throw;std::cerr<<"busy: too slow, again\n";}
             }
         if(argc==4 && std::string_view(argv[2])=="--effects"){effectClient(argv[1],argv[3]);return 0;}
         if(argc==3 && std::string_view(argv[2])=="--sounds"){soundClient(argv[1]);return 0;}

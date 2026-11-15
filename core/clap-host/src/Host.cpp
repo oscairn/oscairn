@@ -1344,7 +1344,7 @@ bool TransportWatch::changed(const clap_event_transport_t* current, uint32_t fra
 bool Host::asleep() const noexcept { return impl->sleeping; }
 bool Host::restful() const noexcept {
     const auto& s = *impl;
-    return s.sleeping && !s.wake.load() && !s.flush.load() && !s.panic.load() && !s.carryCount && !s.wantsBeat.load() && !s.wantsHarmony.load();
+    return s.sleeping && !s.wake.load() && !s.flush.load() && !s.panic.load() && !s.carryCount;
 }
 void Host::rested(uint32_t frames, uint32_t blocks) noexcept { impl->steadyTime += frames; impl->idleBlocks.fetch_add(blocks); }
 void Host::mirrorWake(std::atomic<uint32_t>* mirror) noexcept { impl->wakeMirror = mirror; if (mirror) mirror->store(impl->wake.load() ? 1 : 0); }
@@ -1397,8 +1397,8 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         ~Acknowledge() { if(count) s.pendingCommands.fetch_sub(count, std::memory_order_release); }
     } acknowledged{s}; // Saving must wait until plugin processing, not just queue removal.
     try {
-        uint32_t total = 0;
-        bool harmonyCame = false; // a block without one: the plugin is in no part
+        uint32_t total = 0, timing = 0; // timing: of total, the beat and harmony events, which alone wake no plugin asleep
+        bool harmonyCame = false, harmonyNew = false; // a block without one: the plugin is in no part
         auto deliver = [&](Event e) {
             // A malformed or late event is dropped on its own; resetting the plugin
             // for it would cut every sounding note on stage.
@@ -1410,10 +1410,10 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
                     const auto& h = reinterpret_cast<const oscairn_event_harmony_t*>(e.header())->harmony;
                     harmonyCame = true;
                     if (!s.wantsHarmony.load(std::memory_order_relaxed) || (s.haveHarmony && !std::memcmp(&h, &s.lastHarmony, sizeof h))) return;
-                    s.lastHarmony = h; s.haveHarmony = true; s.publishHarmony(&h);
+                    s.lastHarmony = h; s.haveHarmony = true; harmonyNew = true; s.publishHarmony(&h);
                 }
                 if (total == Impl::renderEvents) { s.dropped.fetch_add(1); return; }
-                s.ordered[total] = {e, total}; ++total; return;
+                s.ordered[total] = {e, total}; ++total; ++timing; return;
             }
             // Events in other spaces (param-target) are for the caller, never for a plugin.
             if (!validEvent(e.header()) || e.header()->space_id != CLAP_CORE_EVENT_SPACE_ID || e.header()->time >= frames) { s.dropped.fetch_add(1); return; }
@@ -1450,7 +1450,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         if (s.panic.exchange(false)) {
             // Never leave a stuck gate after an event overflow. Reset is an
             // audio-thread operation and covers every note channel and port.
-            s.plugin->reset(s.plugin); total = 0; s.resetInProcess = true; s.sleeping = false; s.haveHarmony = false; // the harmony comes again next block
+            s.plugin->reset(s.plugin); total = timing = 0; s.resetInProcess = true; s.sleeping = false; s.haveHarmony = false; // the harmony comes again next block
         }
         std::sort(s.ordered.begin(), s.ordered.begin() + total, [](const Impl::TimedEvent& a, const Impl::TimedEvent& b) {
             return a.event.header()->time < b.event.header()->time ||
@@ -1460,7 +1460,9 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         if (input) for (uint32_t c = 0; c < ni && !hasInput; ++c) if (input[c])
             for (uint32_t i = 0; i < frames; ++i) if (input[c][i] != 0.f) { hasInput = true; break; }
         const bool transportWake = s.transport.changed(transport, frames, s.sampleRate);
-        if (s.sleeping && !total && !hasInput && !transportWake && !s.wake.exchange(false) && !s.flush.load()) { s.idleBlocks.fetch_add(1); s.steadyTime += frames; silence(); return true; }
+        // The beat and a harmony change alone wake no plugin asleep: they come with the block that does (the beat's
+        // tempo changes only with the transport, which wakes it); a harmony held back here is sent again then.
+        if (s.sleeping && total == timing && !hasInput && !transportWake && !s.wake.exchange(false) && !s.flush.load()) { if (harmonyNew) s.haveHarmony = false; s.idleBlocks.fetch_add(1); s.steadyTime += frames; silence(); return true; }
         s.wake.store(false); s.sleeping = false; if (s.wakeMirror) s.wakeMirror->store(0, std::memory_order_release);
         if (!s.processing) {
             if (!s.plugin->start_processing(s.plugin)) { s.failed.store(true); s.errors.fetch_add(1); silence(); return false; }

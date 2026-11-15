@@ -331,8 +331,8 @@ public:
     // sound until it gets input or events.
     bool asleep() const noexcept;
     // Asleep with nothing waiting to wake it but audio, notes, parameters or the transport: no request_process
-    // or request_flush, host command, select, choke or panic pending, nothing carried, and it takes no beat or
-    // harmony (which come every block). Its caller may then leave it uncalled for a block it would sleep through.
+    // or request_flush, host command, select, choke or panic pending, and nothing carried. The beat and harmony
+    // wake no plugin asleep (they come with the block that does). Its caller may then leave it uncalled for a block it would sleep through.
     bool restful() const noexcept;
     // Blocks its caller left it asleep without calling it, and their frames: its steady time goes on by them.
     void rested(uint32_t frames, uint32_t blocks) noexcept;

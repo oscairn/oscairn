@@ -4,10 +4,12 @@
 //   0: the latest harmony's chord_type + 100 * chord_root + 10000 * chord_bass, -1 before any
 //   1: its scale + 10000 * key_root, -1 before any
 //   2: the free-running beat, counted on at the tempo from the latest beat event, -1 before any
+// With FOLLOWER_SLEEPS set it returns CLAP_PROCESS_SLEEP from every block.
 // Its state is the harmony the host extension gives on the main thread (empty when it gives none).
 #include <clap/clap.h>
 #include <oscairn-clap/beat.h>
 #include <oscairn-clap/harmony.h>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -47,7 +49,8 @@ struct Plugin {
                 out[0][i]=float(s.chord);out[1][i]=float(s.scale);out[2][i]=float(s.beat);
                 if(s.beat>=0)s.beat+=s.perSample;
             }
-            return CLAP_PROCESS_CONTINUE;
+            static const bool sleeps=std::getenv("FOLLOWER_SLEEPS")!=nullptr; // asleep after every block, as an idle arpeggiator (worker-sleep)
+            return sleeps?CLAP_PROCESS_SLEEP:CLAP_PROCESS_CONTINUE;
         };
         api.get_extension=[](const clap_plugin_t*,const char* id)->const void*{
             static const clap_plugin_audio_ports_t audio{

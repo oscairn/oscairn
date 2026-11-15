@@ -250,6 +250,14 @@ struct Plugin {
         value.header = {sizeof(value), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0};
         value.param_id = 7; value.value = s.gain;
         b->out_events->try_push(b->out_events, &value.header);
+        // KICK_FIXTURE_EFFECT_SLEEP: the effect sleeps after a block of silent input, as a real effect with no tail (worker-wake).
+        static const bool effectSleeps = std::getenv("KICK_FIXTURE_EFFECT_SLEEP") != nullptr;
+        if (s.kind == 1 && effectSleeps) {
+            bool silent = true;
+            for (uint32_t c = 0; c < b->audio_inputs[0].channel_count; ++c)
+                for (uint32_t i = 0; i < b->frames_count; ++i) silent &= b->audio_inputs[0].data32[c][i] == 0.f;
+            if (silent) return CLAP_PROCESS_SLEEP;
+        }
         return !s.gate && (s.kind == 5 || s.kind == 11) ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
     }
     static const void* extension(const clap_plugin_t* plugin, const char* id) {

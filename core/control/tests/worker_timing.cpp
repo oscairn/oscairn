@@ -82,7 +82,7 @@ int main(int argc, char** argv)
     // Through the control protocol.
     oscairn::JsonRpc rpc(session);
     const auto reply = rpc.dispatch(R"({"jsonrpc":"2.0","id":1,"method":"engine.timing","params":{"reset":true}})").value_or("");
-    for(const char* field : {"\"collect\":{", "\"wake\":{", "\"run\":{", "\"busy\":" , "\"missPanics\":", "\"minorFaults\":", "\"majorFaults\":", "\"cpu\":{", "\"involuntarySwitches\":", "\"maxCpu\":"})
+    for(const char* field : {"\"collect\":{", "\"wake\":{", "\"run\":{", "\"busy\":" , "\"missPanics\":", "\"minorFaults\":", "\"majorFaults\":", "\"cpu\":{", "\"involuntarySwitches\":", "\"maxCpu\":", "\"called\":", "\"rested\":", "\"asleep\":"})
         check(reply.find(field) != std::string::npos, std::string("engine.timing gives each worker's ") + field);
     play(5);
     const auto after = session.engineTiming(false);

@@ -516,7 +516,7 @@ namespace oscairn
                 guard.limit = std::max(guard.limit, c.laneLimit); guard.took = std::max(guard.took, c.laneTook);
                 guard.faded += c.stolen; guard.fadedForTotal += c.stolenForDevice; guard.choked += c.hardChokes; guard.fadedForLoss += c.stolenForLoss; guard.lost += c.lostBlocks; guard.fadedForDeadline += c.stolenForDeadline; guard.unfit += c.unfitBlocks;
             }
-            t.workers.back().called = since(st.calledBlocks, base.calledBlocks); t.workers.back().rested = since(st.restedBlocks, base.restedBlocks);
+            t.workers.back().called = since(st.calledBlocks, base.calledBlocks); t.workers.back().rested = since(st.restedBlocks, base.restedBlocks); t.workers.back().asleep = host->asleep();
             if(reset) { r->reset(); timingBase_[host] = st; }
         }
         // A worker gone may leave its address to a new one: its counts go with it.

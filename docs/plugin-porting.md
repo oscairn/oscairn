@@ -730,8 +730,10 @@ stepped, hidden and read-only flags. How the editors use them:
 - **Asleep means not called:** after a block that returned `CLAP_PROCESS_SLEEP`, the host does
   not call `process` again until something comes for the plugin: audio input that is not
   silent, an event (notes, parameters, MIDI), or a transport change (play, stop, tempo, a jump).
-  A plugin that asked for the beat event space gets a beat every block, so it is called every
-  block; one that asked for harmony is called when its part's harmony changes. Blocks it sleeps
+  The beat and harmony events do not wake it: a plugin that asked for them gets them with the
+  block that does (the beat at the free-running position of that block, the part's harmony if
+  it changed while it slept), so an idle arpeggiator that returns `CLAP_PROCESS_SLEEP` is not
+  called while idle but on a transport change. Blocks it sleeps
   through still count in `steady_time`. This holds in the
   engine's process and in a plugin worker, where an uncalled block also saves the round trip.
   The host also calls `process` on the block after an accepted `select` (sound contexts), a

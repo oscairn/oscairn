@@ -1,3 +1,4 @@
+| `OSCAIRN_WORKER_REST` | `0`: every plugin worker is called every block, as before resting ([plugin porting](plugin-porting.md), "Asleep means not called"); a diagnostic A/B switch for the device, read once at the engine's start, settable in the bundle's `etc/default/oscairn-engine`. Unset or anything else: a worker whose plugin is asleep with nothing for it is not called once it has been so for 192 blocks in a row (0.5 s at 128 frames; a chain fed a moment ago stays warm). The first block after a rest costs the worker a cold wake-up ([worker-wake](../core/engine/tests/worker_wake.cpp) measures it). `engine.timing` gives each worker's `called`, `rested` and `asleep` |
 # Developing for Oscairn
 
 Oscairn hosts ordinary CLAP plugins and, when enabled at build time, LV2 plugins. You do

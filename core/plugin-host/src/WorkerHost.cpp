@@ -46,6 +46,10 @@ namespace oscairn
     {
         using namespace worker;
 
+        // OSCAIRN_WORKER_REST, read once at the engine's start: 0 calls every worker every block, as before resting
+        // (a diagnostic A/B switch, developer-guide); anything else or unset rests a plugin asleep with nothing for it.
+        const bool workerRest = [] { const char* v = std::getenv("OSCAIRN_WORKER_REST"); return !v || std::strcmp(v, "0") != 0; }();
+
         uint32_t channels(const std::vector<kick::clap::Port>& ports) { uint32_t n = 0; for(const auto& p : ports) n += p.channels; return n; }
 
         std::vector<kick::clap::Port> readPorts(Reader& r)
@@ -937,14 +941,17 @@ namespace oscairn
             // A block its plugin would sleep through, taken without the round trip (RFC 0045): asleep after its last
             // block with nothing pending there (restful) and no wake since (a select, choke, command or request_process
             // reaching it sets the wake word; a panic here waits in the shared block). Never a block a call late, or a
-            // worker down. The frames go to the worker with the next block, for its steady time.
+            // worker down. The frames go to the worker with the next block, for its steady time. Only after restHold such
+            // blocks in a row called: a chain fed a moment ago (an arpeggio's gaps, a phrase's) stays warm, and waking a
+            // rested one (its first block after a long sleep costs a cold wake-up, worker-wake) comes only after real silence.
             bool rest(uint32_t frames) noexcept override
             {
                 auto& s = *shared_;
-                if(extra_ || process()->failed.load() || busy_.load() || panicLater_.load(std::memory_order_relaxed) || carriedCount_ || replay_ ||
+                if(!workerRest || extra_ || process()->failed.load() || busy_.load() || panicLater_.load(std::memory_order_relaxed) || carriedCount_ || replay_ ||
                    s.done.load(std::memory_order_acquire) != sequence_ || !s.restful.load(std::memory_order_acquire) || s.wake.load(std::memory_order_acquire) ||
                    s.panic.load(std::memory_order_acquire))
                     return false;
+                if(restful_ < restHold) { ++restful_; holding_ = true; return false; }
                 outputCount_ = 0; if(sysexOutput_) sysexOutput_->used = 0; reset_ = false; kept_ = playedKept_ = true;
                 ++restedBlocks_; restedFrames_ += frames; rested_.fetch_add(1, std::memory_order_relaxed);
                 return true;
@@ -1193,6 +1200,8 @@ namespace oscairn
                 };
                 // While busy (until finish), a restart waits; it sets failed first, so a block that starts later sees it.
                 busy_.store(true);
+                if(!holding_) restful_ = 0; // a block it would not have slept through: the hold starts again
+                holding_ = false;
                 auto& s = *shared_;
                 if(events && count <= maxEvents) track(events, count); // also while it is down: the restart replays them
                 if(process()->failed.load() || frames > capacity_ || count > maxEvents || (count && !events) || (no && !outputs)) { kept_ = false; carriedCount_ = 0; if(carriedBytes_) carriedBytes_->used = 0; return silence(); }
@@ -1657,6 +1666,10 @@ namespace oscairn
             // those since the last handed, with their frames, which the next request tells the worker. Audio thread.
             std::atomic<uint64_t> called_{0}, rested_{0};
             uint32_t restedBlocks_ = 0, restedFrames_ = 0;
+            // Audio thread: the blocks in a row it could have rested, called while fewer than restHold (holding_: this one
+            // was).
+            static constexpr uint32_t restHold = 192; // 0.5 s at 128 frames and 48 kHz
+            uint32_t restful_ = 0; bool holding_ = false;
             std::atomic<bool> missed_{false};
             // RFC 0045's miss policy, audio thread: the events of blocks not handed (the worker still busy) for the
             // next block handed, and their SysEx bytes; the events the carry dropped, full; whether this call's

@@ -510,13 +510,13 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   engine call: no control request. A timed-out helper is killed with its process group, as the C++ one does.
 - **Parameter pages** (`params.rs` on the grid, `grid.rs`, `slint/grid.slint`; ui/GRID.md): host-drawn
   from the plugin's own layout data in `params.list` (widget, priority, group, range, views), as the
-  JUCE ParameterGrid: a page per top-level module, tabs on a page of more than 24, headings, tiles in
+  JUCE ParameterGrid: a page per top-level module (the first level of a two-level family of tabs, ui/TABS.md), tabs on a page of more than 24, headings, tiles in
   priority order in two to six columns for the width given, linked runs on one card, an envelope's
   curve above its stages; knobs, sliders, switches, dropdowns, split buttons, ranges and values, each
   with the plugin's own text (`params.text`). `params.get`, `params.set` inside `params.gesture`;
   `params.changed` while shown; the page shown is published with `controllers.view` `screen` for the
-  device's screen knobs and withdrawn on leaving. Without touch: dial in reading order (past the end
-  the page turns), left knob columns, right knob rows, press selects, dial changes, Cancel backs out.
+  device's screen knobs and withdrawn on leaving. Without touch: dial in reading order over the search, the
+  pages, the tabs and the tiles (a page or tab opens on a press; the tiles stop at their end), left knob columns, right knob rows, press selects, dial changes, Cancel backs out.
   The views of the reference are drawn above the tiles (`views.rs`: envelope, key and velocity map, FM
   operators, LFO, filter; the node or handle a tile sets is marked under the cursor) and dragged by touch
   where the reference drags them; a plugin of more than 24 parameters has the search field above the page

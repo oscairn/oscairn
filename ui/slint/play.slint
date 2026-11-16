@@ -5,7 +5,7 @@
 // channel, mute and solo), the master pinned at the right. A cursor is a focus border; the scene
 // playing is an accent fill and edge. Colors, corners, edges, sliders and marks are the theme's.
 
-import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle, FitText } from "theme.slint";
+import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle, FitText, TabBar } from "theme.slint";
 import { TileRow, GridTile } from "grid.slint";
 
 export struct SceneData {
@@ -74,6 +74,10 @@ export global PlayState {
     in property <string> knob-bank;
     in property <[GridTile]> knobs;
     in property <[KnobButton]> knob-buttons;
+    // The buttons that choose what the knobs follow, as tabs: their names, the one on and the one the cursor is on (-1 none).
+    in property <[string]> column-names;
+    in property <int> column-current: -1;
+    in property <int> column-cursor: -1;
     in property <length> knob-tile: 120px; // the grid's knob tile height (grid::KNOB_ROW)
     in-out property <length> knob-width: 300px; // the row's area, set by the screen: what the tiles are laid out for
     in-out property <length> knob-height: 120px;
@@ -439,12 +443,26 @@ export component Play inherits Rectangle {
         }
     }
 
-    // The knob row: a tile for each knob, and at the right the buttons that choose what they follow (the bank's beside).
+    // The knob row: a tile for each knob, and at the right what they follow (the Performance's controls or the selected
+    // part's own: two tabs, one column of the shell's tab family) and the bank's button beside.
+    if PlayState.has-knobs && root.has-column: TabBar {
+        x: root.column-x;
+        y: root.knobs-y + (root.knob-row - self.height) / 2;
+        width: root.column-width;
+        height: PlayState.column-names.length * root.pair-height;
+        vertical: true;
+        item: root.pair-height;
+        names: PlayState.column-names;
+        current: PlayState.column-current;
+        cursor: PlayState.column-cursor;
+        picked(i) => { PlayState.knob-button(i); }
+    }
     for b[i] in PlayState.knob-buttons: Button {
-        x: b.bank ? root.bank-x : root.column-x;
-        y: root.knobs-y + (b.bank ? (root.knob-row - self.height) / 2 : (root.knob-row - 2 * root.pair-height - root.gap) / 2 + i * (root.pair-height + root.gap));
-        width: b.bank ? root.bank-width : root.column-width;
-        height: b.bank ? min(Theme.touch, root.knob-row) : root.pair-height;
+        visible: b.bank;
+        x: root.bank-x;
+        y: root.knobs-y + (root.knob-row - self.height) / 2;
+        width: root.bank-width;
+        height: min(Theme.touch, root.knob-row);
         text: b.text;
         on: b.on;
         clicked => { PlayState.knob-button(i); }

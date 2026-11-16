@@ -348,3 +348,18 @@ redesigned on the owner's request (2026-11-15; ui/GRID.md "The FM operator view"
   ui/target/theme-shots/fm-*-THEME@1.55.png.
 - Not done or not verified: not run on a unit; no operator on/off field exists in the data (level 0 is the only "off"); the dots have no source.
 
+Branch `rust-app-tabs` (from `rust-app` f3470f25 with `rust-app-fm` joined: its two commits cherry-picked; the one conflict was this file, both
+appended entries kept; after the join 221 tests passed and `cargo clippy --all-targets` was clean). The owner's tabs request (2026-11-15; ui/TABS.md):
+- One tab family (slint/theme.slint `TabBar`, `TabPages`; replaces `TabStrip`): a strip or a column of tabs, two levels (pages, tabs), `folder` and
+  `segmented` in both forms, overflow that scrolls with arrow boxes, names to 70% then cut. The selected tab is a fill (`Theme.tab-on`, derived in
+  src/palette.rs `tabs`: at least 3 to 1 from an unselected tab's, text 4.5 to 1), bold; the cursor a ring with a gap. Users: the parameter pages
+  (pages over tabs, or a column of pages beside them on a window 560 logical px or more tall; the Search button moved to the header row) and Play's
+  Performance / part switch (a column of two). The inventory of every place that switches sibling views, with why not, is in ui/TABS.md.
+- src/tabs.rs: pages and tabs as one model (`Model`), from the module paths (today's rules, compared against a copy of the old logic over seven
+  fixtures) or from declared data (draft 6; PROVISIONAL fields `uiTabs`, `uiTab`, `valueIcons` of `params.list`, listed in PERFORMANCE-APP.md "Items
+  without a request"); `grid::icon` takes a declared icon first. Cursor: the dial walks search, pages, tabs, tiles; a press opens; the tiles stop at their
+  end (they used to turn the page); Page keys step at once.
+- Tests: the model (tests/tabs_model.rs), cursor, press, column, contrast per theme in pixels, overflow scrolling (tests/tabs.rs), Play's column
+  (tests/row.rs). Pictures: ui/target/theme-shots/tabs-*, tabrows-* (enlarged), play-tabs-*.
+- Not done or not verified: not run on a unit; no device profile has a page key, so on a unit stepping tabs is the dial (back, along, press); a view whose
+  parameters a plugin spreads over tabs is drawn from the tab shown, not once on the first (ui.h); the 70% rule is FitText's, looked at not pixel-tested.

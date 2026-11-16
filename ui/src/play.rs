@@ -531,7 +531,13 @@ impl Screen {
         let want = self.row.tiles(state.get_knob_width(), state.get_knob_height(), gap, &self.parts, self.scene);
         update(&self.row_tiles, want);
         let cursor = self.row.cursor;
-        let buttons: Vec<KnobButton> = self.row.buttons(&self.parts).into_iter().map(|(stop, text, on)| KnobButton { text: text.into(), on, cursor: cursor == Some(stop), bank: stop == Stop::Page }).collect();
+        let shown = self.row.buttons(&self.parts);
+        // What the knobs follow is a column of tabs (they come before the bank's button, whose place is the last).
+        let column: Vec<&(Stop, String, bool)> = shown.iter().filter(|b| b.0 != Stop::Page).collect();
+        state.set_column_names(ModelRc::new(VecModel::from(column.iter().map(|b| b.1.as_str().into()).collect::<Vec<slint::SharedString>>())));
+        state.set_column_current(column.iter().position(|b| b.2).map_or(-1, |i| i as i32));
+        state.set_column_cursor(column.iter().position(|b| cursor == Some(b.0)).map_or(-1, |i| i as i32));
+        let buttons: Vec<KnobButton> = shown.iter().map(|(stop, text, on)| KnobButton { text: text.as_str().into(), on: *on, cursor: cursor == Some(*stop), bank: *stop == Stop::Page }).collect();
         update(&self.row_buttons, buttons);
         state.set_knob_bank(self.row.bank().into());
         state.set_learning(self.row.learning());

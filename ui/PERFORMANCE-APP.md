@@ -45,7 +45,18 @@ through `RemoteControl` to a method of the table. What is not an engine call at 
   core/control/tests/physical_controls.cpp). A request such as `controllers.resolved` would make the
   port unnecessary and the tiles exact by construction: a decision for core/control, not taken here.
 
-Items needing a new request: **0** (so no change in core/control or docs/control-protocol.md).
+- **Declared pages, tabs and value icons** (draft 6 of the layout extension, ui.h `tab_count`, `tab`, `param_tab`,
+  `value_icon`; ui/TABS.md): the engine's `params.list` has no field for them yet. What the UI would read, named
+  provisionally by the UI until the protocol names them: at the top of the result `uiTabs`, an array of
+  `{id, parent, name}` (`parent` 0 a page, else a page's id; the plugin's order); on each parameter `uiTab`, the
+  id of the page or tab it is on (absent: the module path puts it); and `valueIcons`, for a stepped parameter of
+  at most 128 values, the `enum oscairn_icon` of each value from its minimum (0 none). The UI fills its pages and
+  tabs model from these where present and from the module paths otherwise, and takes a declared icon before the
+  name rule; with none of it the screens are as they were. This is a request for core/control to forward the
+  fields (a decision not taken here), not a new method.
+
+Items needing a new request: **0** (so no change in core/control or docs/control-protocol.md); one *field* in
+`params.list`, above, would let plugins declare tabs and icons.
 
 ## A. Play (PlayView.cpp)
 
@@ -144,10 +155,10 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
 | F1 | Read the plugin's parameters (`params.list`), hide hidden ones, read-only ones show the value only | `params.list` | - | - | [x] |
-| F2 | Pages: one per top-level module path ("Main" when none), numbered pages together; modules from the leading words of names when more than 24 parameters have no paths | derived | - | page list pane | [x] |
-| F3 | Tabs for the second level on a page of more than 24; a heading per module below | derived | - | tab list | [x] |
+| F2 | Pages: one per top-level module path ("Main" when none), numbered pages together; modules from the leading words of names when more than 24 parameters have no paths | derived | - | the first level of the shell's tab family (a strip or a column), the cursor walks it, a press opens (ui/TABS.md) | [x] |
+| F3 | Tabs for the second level on a page of more than 24; a heading per module below | derived | - | the second level of the tab family; plugins may name and order their own (provisional fields, ui/TABS.md) | [x] |
 | F4 | Tiles by priority (oscairn.ui `priority`), each with name, value text, a control: slider, two values a switch, a few values a list of them | `params.get`, `params.set`, `params.text`, `params.gesture` | - | on the grid (ui/GRID.md, branch rust-grid): knob, slider, switch, dropdown, split buttons, range, value; cursor in two dimensions, press, dial; each step sent between a gesture begin and end | [x] |
-| F5 | Search a parameter by name or module on any page | derived | - | keyboard (K1): back from the first tile (or up from the first row) is the search field, a press opens the on-screen keyboard, Cancel backs out the field, the cursor, the search, then the screen. Touch: a tap on the field. Built on rust-app-grid (9ee154cb; the field only for a plugin of more than 24 parameters, as the reference) | [x] |
+| F5 | Search a parameter by name or module on any page | derived | - | keyboard (K1): back from the first tile reaches the search through the tabs and pages (or up from the first row), a press opens the on-screen keyboard, Cancel backs out the cursor, the search, then the screen. Touch: a tap on the Search button of the header row (it moved from a field above the pages: ui/TABS.md). Built on rust-app-grid (9ee154cb; the field only for a plugin of more than 24 parameters, as the reference) | [x] |
 | F6 | The selected row/column of tiles is what the device's knobs play ("row:N" knobs); on the page, the screen knobs play the page by priority | `controllers.view` (screen page), `params.set` | - | the knob row (A9). Done on rust-grid: the screen page published by priority, withdrawn on leaving. Not done: `row:N` (no device profile has such knobs) | [ ] |
 | F7 | Rich views by field roles: envelopes (ADSR by name, DX7 rates/levels, FM-X), key and velocity maps, FM operator views and algorithm diagrams, LFOs, filters (response drawn) | `params.*` | - | the same tiles are always reachable; the rich view is drawn above them, and the node or handle a tile sets is marked where the cursor is on it. Every view of the reference is built on rust-app-grid (src/views.rs, ui/GRID.md has the list with file:line): the envelope (fields and, as the reference, ADSR, DX7 and FM-X names) with its nodes dragged by touch (e05bff23), the LFO (02ffdb0c) and filter (967cd464) previews, the key and velocity map (2fdad232) and the FM operator view (ec760a14), each dragged by touch where the reference drags it. The FM operator view was then redesigned on the owner's request (2026-11-15) and no longer matches the reference (ParameterGrid.cpp ~731), by his decision: the algorithm horizontal (carriers at the right, an output line), next to one graph with a line per operator in its own color scaled by its level, over a strip of operator cells; ui/GRID.md "The FM operator view" says how. Lines are drawn unscaled from one set of points and measured in the rendered pixels (tests/views.rs). Unverified on a unit | [x] |
 | F8 | Values follow the engine as they change (`params.changed`/`controls.changed`) | notifications | - | - | [x] |
@@ -235,6 +246,12 @@ the mixer strips' faders as the grid's upright slider (H), the other views.
 - The text keyboard on a hardware device overlays about the lower half of the screen as
   hosts/standalone/TextKeyboard.cpp does, the field being edited kept in view: not started.
 - The whole Performance app moves to the shell; no handover for a half-ported app.
+- Pages and tabs are not the reference's lists of buttons (2026-11-15, the owner: "Plugin uis can have tabs too,
+  like the modx does, they just need to be clear, and we need a consistent themeable style for tabs across the
+  whole ui"; "Yes plugins should be able to name and order their tabs"): one themed tab family on the parameter
+  pages (two levels) and Play's Performance / part switch, the search a header button, a page opening on a press and
+  not by the cursor walking off the tiles' end; a recorded, approved difference from ParameterGrid.cpp `refresh`
+  (ui/TABS.md).
 - The FM operator view is not the reference's (2026-11-15, the owner): the algorithm drawn horizontally, next to one graph
   with a line per operator in its own color, dots along the lines where a plugin can say where a note is (not yet);
   a recorded, approved difference from ParameterGrid.cpp ~731 (ui/GRID.md "The FM operator view").

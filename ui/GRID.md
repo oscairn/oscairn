@@ -36,6 +36,9 @@ the parameter pages on it are `ui/src/params.rs`.
   than 24 parameters without paths gets modules from leading name words; hidden parameters left
   out (params.rs already: `editor_parameters`, `editor_pages`, `tabs_for`).
 - Tabs: a page of more than 24 parameters gets a tab per second-level module (two or more).
+  Pages and tabs are one structure, src/tabs.rs `Model`, filled from the module paths or from what a
+  plugin declares, and drawn by the shell's one tab family: ui/TABS.md (an owner-approved difference from
+  the reference's lists of buttons).
 - Headings: within a page (or tab) the rest of the module path is a heading ("A › B"), 28 high
   (30 with its gap); groups in first-appearance order.
 - A range's high parameter has no tile (its low end's tile draws both).
@@ -199,8 +202,7 @@ data path selects them yet.
 Not built yet (in this order): Play's knob row and banks on grid tiles (A9-A11: PlayView.cpp,
 `controllers.view`, `assignments.get/set`), Play's mixer strips' faders as the upright slider
 (H). The key map, FM operator, filter and LFO views, dragging envelope points, the search (F5) and
-the DX7/FM-X envelope names are built (branch rust-app-grid; the views table above). Also: the page
-list column (180 px) stays on narrow windows; at 700
+the DX7/FM-X envelope names are built (branch rust-app-grid; the views table above). Also: at 700
 logical px the grid has 2 columns. Nothing failed to fit at 800x480 (2 columns, 3 rows of tiles
 in view, scrolling for the rest); the scene tile number overlap at 1.55 on Play is not fixed.
 
@@ -214,15 +216,18 @@ logical). What differs is the room. In the JUCE app the grid is the Part page's 
 750-788: 16 in from the sides, under the header 56, the chain strip 96 at least, the action row 44, gaps
 12 + 12 + 8, above a 28 footer, under the 48 high top bar; its page list 200 wide, 8 apart, its scroll
 bar 8: derived by reading, not measured on a running app); the Rust grid is a screen of its own with
-Back and the title (48), the page list 180, the margins 6:
+Back and the title (48), the margins 6, and, until the tab work (ui/TABS.md), the page list 180 wide; the pages are
+now a strip over the tiles on a window under 560 logical px tall (the keyboard's), so the numbers below are the
+tiles' area with pages and no tabs, and a page of tabs takes 48 more of the height:
 
 | FANTOM-07 (1.55) | Rust area | columns | tiles in view | JUCE panel (derived) | columns | tiles in view |
 |---|---|---|---|---|---|---|
-| knobs, two pages | 628 x 357 | 2 (311 x 120) | 4 | 578 x 129 | 2 | 2 |
+| knobs, two pages | 814 x 309 (was 628 x 357) | 3 (267 x 120) (was 2) | 6 (was 4) | 578 x 129 | 2 | 2 |
 | knobs, one page | 814 x 357 | 3 (267 x 120) | 6 | 786 x 129 | 3 | 3 |
 | sliders, one page | 814 x 357 | 3 (267 x 84) | 12 | 786 x 129 | 3 | 3 |
 
-Before and after are the same (4, 6 and 12; no change was needed). "Six tiles a page, two columns, small
+The one page rows are as before (6 and 12); two pages now have the width, 6 tiles in view instead of 4, for a
+shorter area (tests/grid.rs pins 814 x 309). "Six tiles a page, two columns, small
 knobs in large tiles" is the reference's too, and its knobs are the smaller: a 64 square (Theme.cpp
 drawRotarySlider: the arc 56 across at its middle, the disc 39), ours a 76 box (the arc 61, the disc 47), in
 a tile as wide as the column; at 628 the grid is 2 px short of a third column
@@ -251,8 +256,9 @@ yet meet the rule; not refactored now, to be scheduled:
 - Waveform icons: the plugin data carries no per-value icon hint (`ui.h` and `params.list` have `widget`, `group`,
   `view`... and nothing for icons), and the JUCE grid draws none. `grid::wave_icon` recognizes well-known waveform
   names (Saw, Sawtooth, Square, Sqr, Pulse, Sine, Sin, Triangle, Tri, Noise) on split buttons and dropdowns and
-  `grid.slint`'s `WaveIcon` draws them as paths. A per-value icon hint in the plugin data would be the proper
-  source; this rule should go when it exists.
+  `grid.slint`'s `WaveIcon` draws them as paths. Draft 6 of the layout extension has the proper source (`value_icon`,
+  `enum oscairn_icon`): `grid::icon` takes a declared icon first (provisional `valueIcons` of `params.list`, ui/TABS.md)
+  and falls back to the name rule, which goes when the engine forwards the declaration.
 - The switch tile: the JUCE grid draws a toggle `TextButton` at most 110 wide, left in the control row
   (ParameterGrid.cpp:1544). The Rust grid fills the control row's width instead, on the owner's remark that a pill
   floating in the tile looked wrong; a divergence from the reference to settle in both UIs.

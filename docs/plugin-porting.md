@@ -676,7 +676,16 @@ stepped, hidden and read-only flags. How the editors use them:
 - the first level of the module path names the page (`Operator 1`, `LFO 2`); numbered pages
   of one kind are kept together in number order. A page of more than 24 parameters gets a
   tab for each second level (`Operator 1/Envelope`); the rest of the path is a heading. So
-  give a large page second levels of a dozen or so parameters each;
+  give a large page second levels of a dozen or so parameters each. The shell draws pages
+  and tabs as one themed family of tabs, the pages a strip over the tabs (a column at the
+  left on a tall window), and a plugin cannot change how they look. Draft 6 of the layout
+  extension (`oscairn.ui/draft-6`, `tab_count`, `tab`, `param_tab`) lets a plugin name and
+  order its own pages and tabs and place parameters on them, whatever the module paths; the
+  UI is ready for it but the engine does not forward it yet, so declared tabs do not show
+  until it does (ui/TABS.md). A parameter placed on a page that has tabs, but on no tab, is
+  drawn above the tabs, whichever is open. `value_icon` names an icon for a stepped
+  parameter's values (a waveform's shape) in the same way, with the name rule (Saw, Sine...)
+  as today's fallback;
 - without module paths, a plugin of more than 24 parameters gets pages from its names'
   leading words (`Osc2 Detune` is `Detune` on page `Osc2`; `Arp Step 6 Transpose` is
   `Transpose` on page `Arp`, tab `Step 6`), pages in name order; give module paths to choose

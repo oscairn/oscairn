@@ -182,6 +182,65 @@ fn a_part_has_its_banks_and_the_bank_button_pages_them() {
     assert_eq!(rig.tiles()[0].name.as_str(), "Super");
 }
 
+// What the knobs follow, the Performance's controls or the selected part's own, is a column of two tabs of the
+// shell's tab family (the bank's button is not one: it cycles); the one followed has the selected fill, the stop
+// the cursor is on the ring, a tap on the other follows it.
+#[test]
+fn what_the_knobs_follow_is_a_column_of_tabs() {
+    let mut rig = Rig::new();
+    rig.play.tap_open(0);
+    rig.frame();
+    let ui = rig.s.ui.clone_strong();
+    let state = ui.global::<crate::PlayState>();
+    let names = || state.get_column_names().iter().map(|n| n.to_string()).collect::<Vec<_>>();
+    assert_eq!((names(), state.get_column_current(), state.get_column_cursor()), (vec!["Performance".to_string(), "Keys".to_string()], 0, -1));
+    rig.play.knob_button(1);
+    rig.frame();
+    assert_eq!((state.get_column_current(), state.get_column_cursor()), (1, -1), "a tap follows the part's controls");
+    rig.serve(&[(1, 7, 0.25), (1, 99, 40.)]);
+    // The bank's button, a second stop here, is not in the column.
+    assert_eq!(names().len(), 2);
+    assert_eq!(rig.buttons().len(), 3);
+    // The cursor on the first of the stops (the Performance's tab): a ring, and the selected fill is on the part's tab.
+    rig.play.act(Action::Move { pane: Some(0), by: 1 });
+    rig.play.act(Action::Move { pane: Some(0), by: 5 });
+    rig.play.act(Action::Move { pane: Some(0), by: 1 });
+    rig.frame();
+    assert_eq!((state.get_column_current(), state.get_column_cursor()), (1, 0));
+    // Painted: the selected tab's fill is in the column's place at the right of the knob row, and the other tab's.
+    let theme = ui.global::<crate::Theme>();
+    let (on, off) = (theme.get_tab_on(), theme.get_tab_off());
+    let count = |c: slint::Color| rig.s.pixels.iter().filter(|p| (p.r, p.g, p.b) == (c.red(), c.green(), c.blue())).count();
+    assert!(count(on) > 800 && count(off) > 800, "{} pixels of the selected fill, {} of the other's", count(on), count(off));
+    // A press on the stop under the cursor follows it.
+    rig.play.act(Action::Confirm(None));
+    rig.frame();
+    assert_eq!(state.get_column_current(), 0);
+}
+
+// Pictures for a look by eye: Play with a part selected, so the column of two tabs shows, in every theme, both tab
+// styles, at 1 and at the keyboard's 1.55: target/theme-shots/play-tabs-THEME-STYLE@SCALE.png.
+#[test]
+fn the_column_of_tabs_draws_in_every_theme() {
+    let mut rig = Rig::new();
+    rig.play.tap_open(0);
+    rig.play.knob_button(1);
+    rig.serve(&[(1, 7, 0.25), (1, 99, 40.)]);
+    rig.play.act(Action::Move { pane: Some(0), by: 1 });
+    rig.play.act(Action::Move { pane: Some(0), by: 6 });
+    for scale in [1., 1.55] {
+        rig.s.set_scale(scale);
+        for t in &all_themes() {
+            for (style, label) in [(crate::TabStyle::Folder, "folder"), (crate::TabStyle::Segmented, "segmented")] {
+                theme::apply(&rig.s.ui, t);
+                rig.s.ui.global::<crate::Theme>().set_tabs(style);
+                rig.frame();
+                shot(&rig.s, &format!("play-tabs-{}-{label}@{scale}", t.id));
+            }
+        }
+    }
+}
+
 // A value by touch: a finger on a knob begins a gesture, each drag sets the parameter across its range (a
 // stepped one rounded), the release ends it; a Performance control and a part's level are set as the JUCE
 // slider sets them.

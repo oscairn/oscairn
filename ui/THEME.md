@@ -113,8 +113,9 @@ corner); `fontScale` in the four type sizes; `spacing` (see "Spacing" below); `s
 step buttons, the grid's switch and split buttons, Home's icon chip, Back/Previous/Next; `edges`
 every Section, Button, Field, key; `depth` the 1 px shadow under buttons, keys, split buttons,
 thumbs, knob discs and the lifted tab; `sliders` the grid's sliders and range thumbs, the knob's disc
-and pointer, Play's faders (a drawbar and the upright slider are the same widget); `tabs` the grid's
-tab strip; `marks` Play's M and S; `sections` every card, tile, strip and panel, and the gap between
+and pointer, Play's faders (a drawbar and the upright slider are the same widget); `tabs` the shell's
+tab family (TabBar, TabPages: the parameter pages and Play's Performance / part switch; ui/TABS.md), its fill
+and text colors derived by src/palette.rs `tabs` (the selected fill 3 to 1 from an unselected one); `marks` Play's M and S; `sections` every card, tile, strip and panel, and the gap between
 them (the grid's layout reads it, Slint's screens use `Theme.gap-between`); `rows` the colors of
 Setlist slots (a mark left or right, a dot, or the slot's fill with the reference's contrast rule,
 `Theme.row-fill`); the piano keys' colors come from the text and surface inks as Panel.cpp's board
@@ -184,7 +185,7 @@ Checked in renders only on the Rust side (the odd themes: "Odd" spacing 1.6, "Od
 - Cursors are rounded in the shape of what they mark (`focus` color, 2 px), not the reference's square
   accent `drawRect`. Rows apart (Setlist, Part, chain and sounds lists) are drawn as sections, not as
   `drawListRow` bands (alternate row lift, the colored row only where a theme has a row color).
-  Tabs are drawn on the grid only; marks on Play only. The reference's hover shades are drawn on
+  Tabs are drawn on the parameter pages and Play's knob row; marks on Play only. The reference's hover shades are drawn on
   buttons; text boxes and the Settings widgets do not exist in the Rust UI yet.
 
 ## 3. Operator colors (the FM view)

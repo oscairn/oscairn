@@ -493,6 +493,8 @@ namespace oscairn
         uint32_t noteLimit(NodeId node) const; // its part's, or 0
         using Feeds = std::map<std::string, std::vector<std::string>>; // each part's buses (estimateOf)
         std::optional<Measurement> measurementFor(const std::string& key) const; // by plugin key, as costOf finds it: the build's, or the most of its builds'
+        // A shared instance's further part (`rank` 1 its second) by its plugin's measurement and declared total: nothing where none applies.
+        static std::optional<uint64_t> furtherPart(const std::optional<Measurement>& m, uint32_t rank, uint64_t declared);
         Estimate estimateOf(const std::vector<Cost>& plugins, const std::vector<Cost>& playing, const Feeds& feeds = {}) const;
         std::string tooMuch(const Estimate& e) const;          // what does not fit, for a refusal
         std::map<uint32_t, std::vector<double>> meters_, wireMeters_; // per part and per wire, per channel

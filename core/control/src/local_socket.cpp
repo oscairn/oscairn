@@ -239,6 +239,9 @@ namespace oscairn
         }
         // A request taking longer than this holds the control thread: the helper answers the rest meanwhile.
         constexpr auto takeover=std::chrono::milliseconds(25);
+        // What a safe request waits, at most, for the control thread to open a LoadWindow before it is refused as busy; the rest of the
+        // 100 ms every request is answered in (docs/control-protocol.md) is the helper's pass and the client's own scheduling.
+        constexpr auto gateWait=std::chrono::milliseconds(2);
         // Run by the helper during a long request when the control thread is in a LoadWindow: they read,
         // or play the open Performance through queues and atomics, and call no plugin's main-thread API.
         // Not controls.set: a parameter of a plugin in a worker is a round trip under that worker's lock,
@@ -467,10 +470,15 @@ namespace oscairn
             if(doc->type==json_type_object && controlFree.count(methodOf(doc.get())))return peer.rpc.dispatch(line);
             if(doc->type==json_type_object && duringLoad.count(methodOf(doc.get())))
             {
-                // Waited for once a pass, briefly: a load outside its windows refuses the pass's requests at once. try_lock_until on the system
-                // clock, not try_lock_for: libstdc++'s steady-clock wait is pthread_mutex_clocklock, which GCC 13's ThreadSanitizer does not intercept
-                // (it reports the matching unlock as one of an unlocked mutex, and races under the gate).
-                if(!gateHeld && !gateTried){gateTried=true;gateHeld=gate.try_lock_until(std::chrono::system_clock::now()+std::chrono::milliseconds(10));}
+                // Waited for once a pass, for at most gateWait: a load outside its windows refuses the pass's requests at once. Polled with
+                // try_lock on the steady clock, not a timed wait: a timed wait on a CI runner's macOS ended up to 90 ms late (a 10 ms one took
+                // 15 ms even here), and the refusal behind it broke the 100 ms every request is promised. try_lock is also what GCC 13's
+                // ThreadSanitizer sees (pthread_mutex_clocklock, behind try_lock_for, it does not: it reported the unlock as one of an unlocked mutex).
+                if(!gateHeld && !gateTried)
+                {
+                    gateTried=true;
+                    for(const auto until=Clock::now()+gateWait;!(gateHeld=gate.try_lock()) && Clock::now()<until;)std::this_thread::yield();
+                }
                 if(gateHeld)return peer.rpc.dispatch(line);
             }
             const auto ms=std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-runSince).count());

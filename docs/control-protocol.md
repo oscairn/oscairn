@@ -639,7 +639,7 @@ of the local server's own answers everyone else until it is done:
   Performance until the new one is published. Outside those
   stretches (estimating, preparing sounds beside a playing instance, giving a playing or warm
   instance it takes over its state, publishing) they are refused as below, after a wait of at
-  most 10 ms. The meters hold their values from before the load until it ends.
+  most 2 ms. The meters hold their values from before the load until it ends.
 - Any other request with an ID is refused at once, within milliseconds: error `-32009`,
   `data: {busy, ms}`, the method running and for how long so far. **A request refused as busy
   did not run**, so asking again is safe, unlike after a timeout. A batch is refused member by

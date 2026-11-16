@@ -197,11 +197,17 @@ with a slow disk: it overflows there (tested only from 1200 across).
 A take recording (the hardware REC button, or any app's) shows between the Performance and the
 tempo on every screen: a dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger
 color (once: Play has no mark of its own). It is what the JUCE record buttons show (`RecordButtons`), read as
-they read it: `record.takes` once with the first `status` of a connection, then the engine's `record`
+they read it: `record.get` once with the first `status` of a connection (it also says how many seconds the retroactive buffer keeps), then the engine's `record`
 topic (a take's state or time changed: at most ten a second while one runs, none at rest), the first take
-`waiting` or `recording`, its `frames` over its `sampleRate`. A `status` that says what the last said (its `cpuLoad`
-compared as the whole percent the bar shows) asks nothing and draws nothing; one that changed asks `memory.state` and
-`transport.get`, at most twice a second. The Record and Capture buttons themselves are not built.
+`waiting` or `recording`, its `frames` over its `sampleRate`. Record and Capture are the last two actions of every
+screen's bar, Home's included, as the reference draws them over every app: Record starts a take (`record.start`) or ends
+the one recording (`record.stop`); Capture saves the last 30 seconds the buffer keeps (`record.start` from `secondsAgo`,
+named for the Performance; off while the buffer keeps nothing). They are icons, and words in More.
+A `status` is compared by what the shell reads of it (the inputs and outputs, the failures, the keys held, the audio
+device, the memory the workers hold in whole MiB, and the load as the whole percent the bar shows: the engine's per-worker
+figures change with every one and are not compared); one that says what the last said asks nothing and draws nothing, a
+changed load moves the figure only, and something else changed asks `memory.state` and `transport.get`, at most twice a
+second. The tempo follows the `transport` topic.
 
 On the Performance app's screens (Play, Part, the chain, the sound chooser, the parameter pages, the
 scene's setup) the bar also has the screen's actions after the Performance's name: "Undo <edit>" and
@@ -237,7 +243,7 @@ The resource section shows two meters, CPU over RAM:
   and 100%, tempos of 5 and 999.9 and a very long Performance name and check that the section
   and the tempo never move.
 - **Cost:** `status` comes at most four times a second; the meters move at most twice a second
-  (`memory.state` and `transport.get` are asked then), and a property is set only when what it
+  (`memory.state` and `transport.get` are asked only when something besides the load changed), and a property is set only when what it
   shows changes (a whole percent, the tempo's text). The tests check that an update repaints a
   rectangle inside the section and that no pixel outside it changes, and that nothing is drawn at
   rest.
@@ -288,7 +294,12 @@ opened from); Edit, the last action of the top bar, opens the Parts list (below)
   no request to it), `controls.changed` for levels and mutes moved live (subscribed on opening Play
   and ended on leaving, because it comes up to 60 times a second), and `parts.meters`, asked by a
   100 ms timer that runs only while Play is shown, one request at a time (a slow engine never gets
-  a second). The shell at rest still wakes for nothing. No new engine request.
+  a second), and that stops after two seconds of answers with no signal in them (the peaks hold and fall, so a tail is
+  seen out) until something wakes it: a status whose keys held or inputs changed, `graph.changed`, `controls.changed`,
+  `controllers`, a request the shell sends that may play (`notes.*`, a scene, a level, a value, undo), or a `transport`
+  that plays. The shell at rest wakes for nothing and asks nothing (measured against the real engine,
+  ui/REAL-ENGINE.md). A note shorter than a status interval (a quarter of a second) that is in no `status` is not
+  metered until the next wake; an engine push of the levels would remove that. No new engine request.
 - **In Play now** (ui/PERFORMANCE-APP.md): the "+ Scene" tile (`scenes.add`) and, from the top bar's
   Scene action, the Scene screen (`scene.rs`: store, rename, the scope's six kinds, glide, curve and
   launch); the master as the last stop of the right pane, a press then the dial moving its fader; the

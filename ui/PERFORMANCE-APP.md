@@ -6,36 +6,47 @@ shell, so nothing in it hands the display to JUCE. This file is the checklist; a
 `PartsView.cpp`, `PartsModel.cpp`, `ParameterGrid.cpp`, and what they use from `Engine.cpp`,
 `Theme`, `Profile`, the knob and controller code, Learn.
 
-## State (2026-11-15, branch rust-app-real)
+## State (2026-11-16, branch rust-perf-finish)
 
-Of the 95 rows, 93 are ticked, 2 are n/a (B7, C17: the JUCE app has neither), none is open. A ticked row is built in
-the Rust shell and tested against a fake engine; some carry a recorded difference or a part left out, named in the
-row: F9 (a plugin's own view is a disabled entry: the one item allowed to stay unported), C16 (the JUCE Performance
-app has no "replace instrument": it is the Plugins app's PluginBrowser; its preset half is E6), F6 (the screen
-knobs' page is done and tested; the `row:N` half belongs to the JUCE Panel's desktop layouts, see below), D9 (the
-lane's keys are two rows, not the draggable keyboard strip), E1 (no tag colors, hiding a tag, compact or pill views,
-Options or install: Library app items), D6 (the In and Out ends are named, not drawn with the part's devices and
-sends). **Items without a request** (engine requests the Rust app still lacks, none added here; the section below
-has the reasons): the resolved slots of a device's knobs (`controllers.resolved`, A9: the shell ports the rules),
-the selected line of tiles for knobs bound `row:N` (F6: a `controllers.view` `row`), the declared pages, tabs and
-value icons in `params.list` (`uiTabs`, `uiTab`, `valueIcons`, provisional), the plugin's own view surface (F9), and
-what are not engine calls at all: the plugin scanner and the on-screen keyboards.
+Of the 95 rows, 93 are ticked and 2 are n/a (B7, C17: the JUCE app has neither); none is open. A ticked row is built in the
+Rust shell and tested against a fake engine. **Nothing inside the Performance app hands the display to the JUCE program**:
+Home's Performance tile opens Play, and every stop of every screen of the app (the dial, the knobs, every action of every bar)
+is walked by tests/handover.rs, which fails if a press shows the "Opening ..." screen or asks for a JUCE app. What stays
+unported inside is one thing, F9: a plugin's own view is a disabled entry (the owner's decision: a surface the shell hands the
+plugin, a separate project). The handover mechanism itself stays; **the Home tiles that still use it** are Library, Groovebox
+and Settings (and Recordings on a profile that offers it; the FANTOM-07's does not). The Performance and the Setlist are Rust
+screens.
 
-**Run against the real engine once (2026-11-15, ui/REAL-ENGINE.md), never on a device.** On a Mac with the null
-audio device, every screen of the app but the playing keyboard was opened and rendered headless by the real shell, and most of their actions
-were done once through the same callbacks touch and the dial use, each checked in the engine's own state and undone
-(the harness: `src/tests/real_engine.rs`, ignored by default). Five places where the UI and its fake engine had the
-protocol wrong were found and fixed (edits that commit nothing send no graph.changed: scenes, controls, live levels;
-a plugin's actions named a place, not the plugin); ten engine-side problems are listed there for a decision (among
-them: saves refused after a scene select until a load, no graph.changed after another client's load). Not exercised:
-anything that sounds or plays notes (no audio, no MIDI), the Setlist, the playing keyboard, Learn's assignment, some
-menus; the real desktop window opened and ran, but this session could neither capture nor drive it. Nothing has run on
-the keyboard's screen (KMS), under a touch panel, or with its knobs and dial. Not started: the text keyboard as an
-overlay on the lower half of a hardware screen (owner requirement below). This is not a finished app. Before the
-JUCE app can hand over: run it on the device, with every row above by touch and by the
-knobs, and the unit's own timing (the screens' redraw cost, the meters' poll); build the text keyboard overlay; decide
-the owner's open questions (C20, the part's key, is an addition the JUCE page does not have; the `row:N` request;
-plugin views); and only then remove the JUCE Performance screens.
+Built in this round, each with tests: the lane's keys as the reference's draggable keyboard strip (D9), the chain's In and Out
+ends with the devices and sends (D6), the sound chooser's tag colors, hiding and showing a tag and the one-line view, and its
+empty state offering the part as the first Sound (E1), Record and Capture on every bar (J4), the text keyboard as an overlay on
+the lower part of the screen (K1), and the small defects (a short title no longer folds the actions into More, the roomy theme
+fits below 1200 px, rail labels have padding). Recorded with reasons, not built: F6's `row:N` half (`git grep '"row:'` finds it
+only in hosts/standalone/layouts/keys49.json and kick.json, the JUCE desktop panel layouts; no file under devices/ nor any
+device profile binds a knob that way, and the reference publishes the line only when `Engine::rowKnobs() > 0`, which no profile
+gives), the pill view of E1 (no side column to make pills of: the filters are lists), "Options" and install of E1 (the Library
+app's), and the Part screen's key range as the strip (two rows; the strip is on the lane only, as the owner asked).
+**Items without a request** (engine requests the Rust app still lacks, none added here; the section below has the reasons): the
+resolved slots of a device's knobs (`controllers.resolved`, A9: the shell ports the rules), the selected line of tiles for knobs
+bound `row:N` (F6), the declared pages, tabs and value icons in `params.list` (`uiTabs`, `uiTab`, `valueIcons`, provisional), the
+plugin's own view surface (F9), an engine push of the meters' levels (the meters sleep after two seconds of silence and a note
+shorter than a status interval is not metered until the next wake), and what are not engine calls at all: the plugin scanner and
+the on-screen keyboards.
+
+**Run against the real engine twice (2026-11-15 and 2026-11-16, ui/REAL-ENGINE.md), never on a device.** On a Mac with the null
+audio device, every screen of the app but the playing keyboard was opened and rendered headless by the real shell and most of its
+actions were done once through the callbacks touch and the dial use, each checked in the engine's state and undone (the harness:
+`src/tests/real_engine.rs`, ignored by default). The second run, against the engine of main 40003f71: the eight engine problems of
+the first are fixed (problems 9 and 10 are not engine bugs of this app's), the shell at rest asks nothing (0 requests in 20 s on
+Home and on Play; 4.1 and 13.5 a second before) and draws only the CPU and RAM figures as they change, and four UI faults were
+found and fixed (listed there). One is left: an envelope drag is two undo steps (it sends one request for each parameter it moves;
+the fix is in the view-drag path of params.rs, which the FM view's branch owns). Not exercised: anything that sounds or plays
+notes (no audio, no MIDI), the Setlist, the playing keyboard, Learn's assignment, some menus, Record and Capture against the engine,
+the text keyboard overlay and the lane strip against the engine. **It has NOT run on a device**: nothing has run on the keyboard's
+screen (KMS), under a touch panel, or with its knobs and dial (another job is putting an earlier commit of this branch there). This
+is not a finished app until it has: run it on the device with every row above by touch and by the knobs, the unit's own timing
+(the redraw cost, the meters' wake), decide the owner's open questions (C20, the part's key, is an addition the JUCE page does not
+have; plugin views), and only then remove the JUCE Performance screens.
 
 How to read a row: **Request** is the control request(s) (docs/control-protocol.md) the JUCE
 code sends for it (through `Engine::edit` and `RemoteControl`, which sends exactly these when the
@@ -162,10 +173,10 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | D3 | Move left / right in the chain | `parts.move` | - | action | [x] |
 | D4 | Remove a box (keeps user wires reconnected) | `parts.removeNode` | - | action | [x] |
 | D5 | Turn a plugin off / on | `graph.enable` | - | action | [x] |
-| D6 | Show the chain: IN, boxes, OUT, "Dry" lane, role colors (instrument, effect), failed and off marks | `graph.get`, `session.status` (`failures`) | - | cursor along the chain | [x] src/chain.rs: the chain is the list (a press opens a plugin) and the panel draws the path In, each plugin or split with its lanes under it ("Dry" for a lane with no plugin), Out. A plugin's role word is the reference's `roleOf` (Instrument, Effect, Generator, Analyzer, Notes, Sequencer) colored by class as the Parts list's chips (instrument the accent, effect `positive`, the rest the notes wire color), faint when off, outlined in `danger` when `session.status` lists it as failed, and the line under the list says "NAME is silent: REASON" unless an edit was refused (the reference's `message_`). The shared row's text now shrinks to 70% before it is cut (it was elided). Tests: tests/chain.rs |
+| D6 | Show the chain: IN, boxes, OUT, "Dry" lane, role colors (instrument, effect), failed and off marks | `graph.get`, `session.status` (`failures`) | - | cursor along the chain | [x] src/chain.rs: the chain is the list (a press opens a plugin) and the panel draws the path: In (the part's devices and keys, what feeds a bus), each plugin or split with its lanes under it ("Dry" for a lane with no plugin), Out (Main or the bus it plays through, a line for each send, an arrow for each plugin outside the parts its plugins are wired to), each end one raised box as the reference draws IN and OUT (a device that is not found is not marked "No device" here as in the Parts list: the chain has no read of the inputs). A plugin's role word is the reference's `roleOf` (Instrument, Effect, Generator, Analyzer, Notes, Sequencer) colored by class as the Parts list's chips (instrument the accent, effect `positive`, the rest the notes wire color), faint when off, outlined in `danger` when `session.status` lists it as failed, and the line under the list says "NAME is silent: REASON" unless an edit was refused (the reference's `message_`). The shared row's text now shrinks to 70% before it is cut (it was elided). Tests: tests/chain.rs |
 | D7 | Insert a split (copy, mid/side, left/right, bands) with its Split/Join plugins | `parts.addSplit`, `graph.add` | - | action | [x] src/chain.rs: an insert row of the part's own chain lists the four kinds of split first, as `insertMenu` words them (a lane's lists none), then the plugins without Split and Join. A copy is `parts.addSplit` alone; the others `graph.add` of the Split plugin (and the Join plugin for left / right and mid / side) then `parts.addSplit` with `splitter` and `joiner`; refused, the added nodes are removed and committed; without the Split plugin the three kinds are listed and cannot be pressed. Tests: tests/chain_splits.rs |
 | D8 | Add lane / band, remove lane (with its plugins), remove split (keeps the first lane) | `parts.addLane`, `parts.removeLane`, `parts.removeSplit`, `graph.remove` | - | action | [x] src/chain.rs: a split is a row (kind and lanes) opening its lanes; Add lane (a copy) / Add band (fewer than four) `parts.addLane`; Remove lane (a copy, or bands of more than two) `parts.removeLane` then `graph.remove` of the lane's nodes, a split inside it too, wires reconnected; Remove split `parts.removeSplit` then `graph.remove` of every other lane's nodes. None asks first (the reference's do not): Undo covers them since each is followed by `graph.commit`. A lane's plugins insert, move (within the lane) and go as the chain's, with `split` and `lane` in the requests. A split inside a lane is listed, not opened (the reference draws a gap). Tests: tests/chain_splits.rs |
-| D9 | Lane settings: keys (zone editor), level, pan, mute, solo, crossovers | `parts.lane` | - | press then dial | [x] src/chain.rs: a lane lists its settings under its plugins: lowest and highest key, level (linear 0 to 100%, steps of 2), pan, mute, solo, each `parts.lane` with the whole lane as `editLane` sends it, then a commit; a band split lists its crossovers (the Split plugin's parameters 3 to 5, `params.get` / `params.set`, Hz, a dial step a sixth of an octave, no commit). Difference: the reference's lane keys are a draggable keyboard strip (ZoneEditor); here they are two rows the dial or - and + change, as the Part screen's key range is (the draggable strip is not built for either). Tests: tests/chain_splits.rs |
+| D9 | Lane settings: keys (zone editor), level, pan, mute, solo, crossovers | `parts.lane` | - | press then dial | [x] src/chain.rs: a lane lists its settings under its plugins: lowest and highest key, level (linear 0 to 100%, steps of 2), pan, mute, solo, each `parts.lane` with the whole lane as `editLane` sends it, then a commit; a band split lists its crossovers (the Split plugin's parameters 3 to 5, `params.get` / `params.set`, Hz, a dial step a sixth of an octave, no commit). A lane's keys are also the reference's draggable keyboard strip (ZoneEditor, keys only: src/keystrip.rs, slint/strip.slint) over the panel: the whole keyboard, 75 white keys, the range outlined with a handle at each end, the keys outside dimmed; an end within 8 pixels is dragged, the middle moves the whole range, anywhere else brings the nearer end there, one edit when the finger lifts, a double tap is the whole keyboard; without touch the two rows stay (the reference has no other way) and the strip shows which end the dial changes. The Part screen's own key range is still two rows (not built there). Tests: tests/chain_splits.rs |
 | D10 | Scene controls of a plugin ("Scene controls...": which plugin parameters a scene touches) | `scenes.untouched` | - | action | [x] src/chain.rs: "Scene controls..." among a plugin's actions lists its parameters (`params.list`) ticked where scenes touch them (automatable, not read only, not set aside); choosing one sets it aside or takes it back with the others kept (`scenes.untouched`, from graph.get's `sceneUntouched`, no commit as the JUCE `sceneControlsMenu`); the menu is menu.rs's. |
 | D11 | Routing... on a box (opens I) | - | - | action | [x] src/chain.rs: "Routing..." among a plugin's actions opens Routing with it chosen. |
 | D12 | A box's plugin parameters (host-drawn pages, F) | see F | - | press | [x] |
@@ -174,7 +185,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| E1 | Library sounds list (query, search, tags, favorites) | `library.query`, `library.libraries`, `library.favorite` | - | list, press | [x] src/sounds.rs: as LibraryPane.cpp's pane: the search typed on the keyboard, a Filters row (Favorites, Recent, Library = everything / my own / an installed library, Tags = the matches' with counts, the chosen first, all must match), each change `library.query` again; a Sound's row has its tags and description, Locked, Does not fit this device, Auditioning (kept here from the audition started, the reference polls `audition.get`), a star and its color where the theme puts it; its actions add it to the favorites or take it out. Not built: the tag colors, hiding a tag, the compact and pill views, Options (edit, copy, delete, export), install (Library app items, not the chooser's). Tests: tests/sounds_filters.rs |
+| E1 | Library sounds list (query, search, tags, favorites) | `library.query`, `library.libraries`, `library.favorite` | - | list, press | [x] src/sounds.rs: as LibraryPane.cpp's pane: the search typed on the keyboard, a Filters row (Favorites, Recent, Library = everything / my own / an installed library, Tags = the matches' with counts, the chosen first, all must match), each change `library.query` again; a Sound's row has its tags and description, Locked, Does not fit this device, Auditioning (kept here from the audition started, the reference polls `audition.get`), a star and its color where the theme puts it; its actions add it to the favorites or take it out. A tag's color shows on its row and is chosen, a tag is hidden and shown again (`library.tag`), and "One line a Sound" is the compact view, kept in library-view.txt as the JUCE pane keeps it; each by the cursor and a press (Tags > Hide a tag or give it a color > the tag). With no Sound in the library the list offers "Save this part as the first Sound". Not built: the pill view (the filters are lists here, there is no side column to make pills of; its word in library-view.txt is kept as read), Options (edit, copy, delete, export) and install (Library app items, not the chooser's). Tests: tests/sounds_filters.rs |
 | E2 | Load a sound into the part | `parts.loadSound` | - | press | [x] |
 | E3 | New part from a sound | `parts.fromSound` | - | action | [x] |
 | E4 | Save the part as a sound (name, as new) | `parts.saveSound` | - | action, keyboard | [x] |
@@ -233,14 +244,14 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 |---|---|---|---|---|---|
 | J1 | Undo / Redo with the edit's name on the button | `edit.undo`, `edit.redo`, `edit.history` | - | top bar actions | [x] src/shell.rs, slint/topbar.slint: on every screen of the app (Play, Part, Chain, Sounds, Parameters; the JUCE buttons are in the Edit view header only), "Undo <edit>" and "Redo <edit>" off when empty; edit.history asked on entering a screen and on each graph.changed. The bar's cursor (all of A14-A16's top bar actions): the third pane (`move:2`), Tab, or the dial moving up out of the first row of Play, Part, Chain and Sounds (not the parameter grid: it needs a hook in grid.rs); Confirm does it, past the last stop or Cancel gives the cursor back |
 | J2 | The refusal of an edit said on the screen | error replies | - | - | [x] |
-| J3 | The shell opens the Performance app everywhere (Home tile, Setlist's Play, Play's part press), the handover entries and "Oscairn app" rows for this app gone | - | - | - | [x] nothing of this app hands the display over now: Play's footer button went with A14 (the Part screen's row went with C19); tests.rs asserts Edit leaves no handover |
-| J4 | Recording indicator (owner, 2026-11-15): a take running and its time, on every screen's top bar, once (Play has no mark of its own: the reference draws it in the Launcher's RecordButtons over every app, and PlayView.cpp has none): a filled dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger color. Learned as the JUCE RecordButtons learn it (`Engine::takes`): `record.takes` with the first status of a connection, then the engine's `record` topic (nothing wakes at rest); the first take `waiting` or `recording`, its frames over its sample rate. Not built: the Record and Capture buttons themselves (the hardware REC button starts and ends a take in the engine) | `record.takes` | - | shown only | [x] |
+| J3 | The shell opens the Performance app everywhere (Home tile, Setlist's Play, Play's part press), the handover entries and "Oscairn app" rows for this app gone | - | - | - | [x] nothing of this app hands the display over: Play's footer button went with A14 (the Part screen's row went with C19). tests/handover.rs walks every stop of every screen of the app by the dial and every action of every bar from Home's Performance tile on the shell started with a handover file, and fails if any press shows the Opening screen or asks for a JUCE app; the one thing that stays unported inside is F9 |
+| J4 | Recording indicator (owner, 2026-11-15): a take running and its time, on every screen's top bar, once (Play has no mark of its own: the reference draws it in the Launcher's RecordButtons over every app, and PlayView.cpp has none): a filled dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger color. Learned as the JUCE RecordButtons learn it (`Engine::takes`): `record.takes` with the first status of a connection, then the engine's `record` topic (nothing wakes at rest); the first take `waiting` or `recording`, its frames over its sample rate. Record and Capture are the last two actions of every screen's bar, Home's included (the reference draws RecordButtons over every app): Record starts a take (`record.start`) or ends the one recording (`record.stop`, an unfilled ring in the danger color, filled while a take records), Capture saves the last 30 seconds the buffer keeps as a take named for the Performance (`record.start` from `secondsAgo`; off while `record.get`'s `retro` is 0); icons, and words in More. A refusal is said in the name's place | `record.get`, `record.start`, `record.stop` | - | bar stops | [x] |
 
 ## K. Text entry
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| K1 | On-screen text keyboard: a port of the JUCE TextKeyboard (every key, the symbols layer, Shift, Caps, caret, Clear, Cancel, Done, held repeat, the profile's `textEntry`), used by rename of parts, scenes, controls, Save, search | - | - | dial or left knob steps the cursor over the keys, right knob moves the caret, press types, Cancel closes, End finds Done | [x] (used by C5; scene, control, Save and search users come with their items) |
+| K1 | On-screen text keyboard: a port of the JUCE TextKeyboard (every key, the symbols layer, Shift, Caps, caret, Clear, Cancel, Done, held repeat, the profile's `textEntry`), used by rename of parts, scenes, controls, Save, search | - | - | dial or left knob steps the cursor over the keys, right knob moves the caret, press types, Cancel closes, End finds Done | [x] (used by C5; scene, control, Save and search users come with their items). On a screen with no typing keyboard it is an overlay on the lower part of the screen (a caption line and five rows of keys a touch target tall each: 60% of the keyboard's screen, as the reference's TextKeyboard puts it), the screen above takes no touch; its own text line is the field being edited, so the field is in view above the keys and the screen behind is not moved (the reference moves a dialog up; here the typing is in the keyboard). Every text field of the app uses it (part, scene, control and Sound names, Save, the searches). Tests: tests/keyboard.rs |
 | K2 | On-screen playing keyboard: a port of the JUCE KeyboardWindow (the keys that play when no MIDI keyboard is connected; Play's no-MIDI hint, A12, and each part's keyboard button, C14, lead to it; the profile's `onScreenKeyboard`), a range and key size that suit the 1280x720 touch screen, an octave shift on a knob | `notes.send` | - | knob for the octave, cursor over keys, press plays | [x] src/piano.rs: two octaves and the next C, octave on the left knob, cursor on the right knob and dial; the Play no-MIDI hint (A12) still to add as a second way in |
 
 ## Counts

@@ -713,7 +713,10 @@ component VTabs inherits Rectangle {
 // the wider of its two lines when that is narrower.
 component RailNeed inherits Rectangle {
     in property <TabLabel> label;
-    preferred-width: root.label.bottom == "" ? whole.preferred-width : min(whole.preferred-width, max(top.preferred-width, bottom.preferred-width));
+    // The room for a label across: a name of one word that does not fit even at 70% of the type is wrapped across two lines
+    // (`RailItem`), so it asks for nothing and does not shrink the others.
+    in property <length> inner;
+    preferred-width: root.label.bottom == "" ? (whole.preferred-width * 0.7 > root.inner + 0.5px ? 0px : whole.preferred-width) : min(whole.preferred-width, max(top.preferred-width, bottom.preferred-width));
     whole := Text {
         visible: false;
         width: 0px;
@@ -756,6 +759,8 @@ component RailItem inherits Rectangle {
     callback reveal();
     property <length> size: Theme.small * root.fit;
     property <bool> one: root.label.bottom == "" || measure.preferred-width * root.fit <= root.inner + 0.5px;
+    // A name of one word too wide for the rail at the shrunk type goes across two lines, cut where a line is still too long.
+    property <bool> wrap: root.label.bottom == "" && measure.preferred-width * root.fit > root.inner + 0.5px;
     changed active => { if self.active { root.reveal(); } }
     changed y => { if self.active { root.reveal(); } }
     changed height => { if self.active { root.reveal(); } }
@@ -785,6 +790,7 @@ component RailItem inherits Rectangle {
         font-weight: root.selected ? 700 : 400;
         horizontal-alignment: center;
         vertical-alignment: root.one ? TextVerticalAlignment.center : TextVerticalAlignment.bottom;
+        wrap: root.wrap ? TextWrap.char-wrap : TextWrap.no-wrap;
         overflow: elide;
     }
     if !root.one: Text {
@@ -857,6 +863,7 @@ component Rail inherits Rectangle {
         height: 0px;
         for l in root.labels: RailNeed {
             label: l;
+            inner: root.inner;
         }
     }
     // The track: a raised column where the tabs are lifted out of it, else the rule along the page's side.

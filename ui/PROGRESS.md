@@ -312,3 +312,12 @@ and the parameter pages; the Parts work's `Theme.bar-cursor` stays): 208 tests a
   line, Learn's or the one under the strips; with two at once, 15 in the roomy theme at 1.55: not improved).
 - Seen, not fixed (grid.slint is another branch's): a knob tile 92 wide puts the parameter's name without its plugin's (`Knob::narrow`, as the
   reference at that width), and the grid's tile cuts a long value ("40...") there.
+
+- Routing at the keyboard's scale. The reference (PartsView.cpp, routing page) lays the graph out at its own size, then fits it to the space
+  above a fixed 190 px panel with `scale = min(1, canvas / layout)` and no floor: it shrinks, it does not scroll or zoom. Here at 826x465 the
+  test graph (1068x288 laid out) was drawn at a scale of 0.52, 150 logical px high (box names 7 px, details 5 px, measured from the picture). Now the drawing keeps the theme's type scale (at least 1), all
+  box text is at least the theme's small size (the detail and chip text, which were 77% and 85% of it, are at it), and what does not fit scrolls
+  (a drag; the cursor moving follows). The buttons share Back's line when they fit and the panel takes its rows, so the canvas is 260
+  logical px high at that size, drawn at scale 1 (names 13 px, details 13 px), 1068 px wide in a canvas of 798. Tests: the pixel
+  test now scrolls the drawing in steps and measures every wire end while in view; a new test checks the cursor's place is whole in the view at each
+  dial step and a drag of 120 px moves it 40 or more, at 826x465 and 800x480.

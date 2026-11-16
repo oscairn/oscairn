@@ -527,7 +527,8 @@ fn blue(p: &slint::Rgb8Pixel) -> bool {
 
 /// How far each audio wire's ends are from its ports in the rendered pixels at this window size and scale: a
 /// wire's color is found within a line's width of where it leaves its source box's right edge and enters its
-/// target's left edge, and the box is on the other side of that edge (not the wire's color).
+/// target's left edge, and the box is on the other side of that edge (not the wire's color). The drawing is
+/// scrolled over the canvas in steps, so every end is measured while it is in view; an end never in view is a miss.
 fn miss(w: usize, h: usize, scale: f32) -> Vec<String> {
     let mut s = Screen::sized(w, h);
     s.set_scale(scale);
@@ -536,28 +537,66 @@ fn miss(w: usize, h: usize, scale: f32) -> Vec<String> {
     s.frame();
     r.shown();
     s.frame();
-    let state = s.ui.global::<RoutingState>();
-    let (cx, cy) = (f64::from(state.get_canvas_x()), f64::from(state.get_canvas_y()) + f64::from(s.ui.global::<crate::Theme>().get_bar_height()));
+    let ui = s.ui.clone_strong();
+    let state = ui.global::<RoutingState>();
+    let (cx, cy) = (f64::from(state.get_canvas_x()), f64::from(state.get_canvas_y()) + f64::from(ui.global::<crate::Theme>().get_bar_height()));
+    let (cw, ch) = (f64::from(state.get_canvas_width()), f64::from(state.get_canvas_height()));
+    let (max_x, max_y) = ((f64::from(state.get_content_width()) - cw).max(0.), (f64::from(state.get_content_height()) - ch).max(0.));
     let sc = f64::from(scale);
     let mut bad = vec![];
     let at = |s: &Screen, x: f64, y: f64| -> slint::Rgb8Pixel { s.pixels[(y.round().clamp(0., s.h as f64 - 1.) as usize) * s.w + (x.round().clamp(0., s.w as f64 - 1.) as usize)] };
     let found = |s: &Screen, x: f64, y: f64, reach: f64| (-(reach as i32)..=reach as i32).any(|dy| (-1..=1).any(|dx| blue(&at(s, x + f64::from(dx), y + f64::from(dy)))));
-    for (id, from, to, lines) in r.wire_ends() {
-        let reach = (3. + lines as f64 * 1.2 * 2.5 / 2.) * sc.max(1.);
-        let (sx, sy) = ((cx + from.0) * sc, (cy + from.1) * sc);
-        let (ex, ey) = ((cx + to.0) * sc, (cy + to.1) * sc);
-        let step = 2. * sc;
-        if !found(&s, sx + step, sy, reach) {
-            bad.push(format!("wire {id} not found after its source's edge at {sx:.1},{sy:.1} ({w}x{h}@{scale})"));
+    let ends = r.wire_ends();
+    assert!(!ends.is_empty());
+    let mut measured = std::collections::BTreeSet::new();
+    let mut pan_y = 0.;
+    for _ in 0..20 {
+        let mut pan_x = 0.;
+        for _ in 0..20 {
+            state.set_pan_x(pan_x as f32);
+            state.set_pan_y(pan_y as f32);
+            s.frame();
+            s.frame();
+            for (id, from, to, lines) in &ends {
+                let reach = (3. + *lines as f64 * 1.2 * 2.5 / 2.) * sc.max(1.);
+                // An end is measured when the stretch of wire after it and the box before it are inside the canvas.
+                let inside = |p: (f64, f64)| p.0 - pan_x > 8. + reach && p.0 - pan_x < cw - 8. - reach && p.1 - pan_y > reach && p.1 - pan_y < ch - reach;
+                let (sx, sy) = ((cx + from.0 - pan_x) * sc, (cy + from.1 - pan_y) * sc);
+                let (ex, ey) = ((cx + to.0 - pan_x) * sc, (cy + to.1 - pan_y) * sc);
+                let step = 2. * sc;
+                if inside(*from) {
+                    measured.insert((*id, 0));
+                    if !found(&s, sx + step, sy, reach) {
+                        bad.push(format!("wire {id} not found after its source's edge at {sx:.1},{sy:.1} ({w}x{h}@{scale}, panned {pan_x},{pan_y})"));
+                    }
+                    if blue(&at(&s, sx - step, sy)) {
+                        bad.push(format!("wire {id} drawn over its source box at {w}x{h}@{scale}"));
+                    }
+                }
+                if inside(*to) {
+                    measured.insert((*id, 1));
+                    if !found(&s, ex - step, ey, reach) {
+                        bad.push(format!("wire {id} not found before its target's edge at {ex:.1},{ey:.1} ({w}x{h}@{scale}, panned {pan_x},{pan_y})"));
+                    }
+                }
+            }
+            if pan_x >= max_x {
+                break;
+            }
+            pan_x = (pan_x + cw / 2.).min(max_x);
         }
-        if blue(&at(&s, sx - step, sy)) {
-            bad.push(format!("wire {id} drawn over its source box at {w}x{h}@{scale}"));
+        if pan_y >= max_y {
+            break;
         }
-        if !found(&s, ex - step, ey, reach) {
-            bad.push(format!("wire {id} not found before its target's edge at {ex:.1},{ey:.1} ({w}x{h}@{scale})"));
+        pan_y = (pan_y + ch / 2.).min(max_y);
+    }
+    for (id, ..) in &ends {
+        for end in 0..2 {
+            if !measured.contains(&(*id, end)) {
+                bad.push(format!("wire {id}'s end {end} was never in view ({w}x{h}@{scale}, content {:.0}x{:.0} in {cw:.0}x{ch:.0})", max_x + cw, max_y + ch));
+            }
         }
     }
-    assert!(!r.wire_ends().is_empty());
     if !bad.is_empty() {
         png(&s, &format!("routing-pixels-{w}x{h}"));
     }
@@ -754,4 +793,57 @@ fn the_keys_open_the_keyboard_and_a_plugins_own_view_is_listed_disabled() {
     r.status(&json!({"failures": [{"node": 8, "name": "Master FX", "reason": "it crashed"}]}));
     assert!(ui.global::<RoutingState>().get_boxes().iter().find(|b| b.name == "Master FX").unwrap().failed);
     assert_eq!(ui.global::<RoutingState>().get_message().as_str(), "Master FX is silent: it crashed");
+}
+
+// A drawing larger than the canvas at a legible size scrolls: the dial moves the cursor over its places and the view
+// follows it (the place is whole in the canvas), a drag moves the view, and no text of a box is under the theme's
+// small size. At the keyboard's size (826x465 logical) and a small device's.
+#[test]
+fn a_drawing_larger_than_the_canvas_scrolls_with_the_cursor_and_a_drag_and_its_type_stays_legible() {
+    for (size, scale) in [((1280, 720), 1.55), ((800, 480), 1.)] {
+        let mut s = Screen::sized(size.0, size.1);
+        s.set_scale(scale);
+        let mut r = routing_screen(&mut s, &graph());
+        let ui = s.ui.clone_strong();
+        let state = ui.global::<RoutingState>();
+        let what = format!("{size:?}@{scale}");
+        let (cw, ch) = (state.get_canvas_width(), state.get_canvas_height());
+        assert!(state.get_content_width() > cw, "{what}: the drawing is wider than the canvas ({} in {cw})", state.get_content_width());
+        // The drawing is laid out at the type's own size, not shrunk to the canvas.
+        assert!(state.get_scale() >= 1.0, "{what}: scale {}", state.get_scale());
+        assert!(state.get_base() * state.get_scale() >= ui.global::<crate::Theme>().get_small() - 0.01, "{what}: type under the small size");
+        // The dial through every place: the one with the cursor is whole in the view.
+        let mut moved = false;
+        for _ in 0..12 {
+            mv(&mut r, Some(0), 1);
+            s.frame();
+            r.shown();
+            s.frame();
+            let (px, py) = (state.get_pan_x(), state.get_pan_y());
+            moved |= px > 0.5 || py > 0.5;
+            let boxes: Vec<crate::RoutingBox> = state.get_boxes().iter().chain(state.get_controls().iter()).chain(state.get_frames().iter()).collect();
+            let b = boxes.iter().find(|b| b.cursor).unwrap_or_else(|| panic!("{what}: a cursor"));
+            let (x, y) = (b.x - px, b.y - py);
+            assert!(x >= -0.5 && x + b.w <= cw + 0.5 && y >= -0.5 && y + b.h <= ch + 0.5, "{what}: {} at {x},{y} {}x{} is not whole in {cw}x{ch}", b.name, b.w, b.h);
+        }
+        assert!(moved, "{what}: the view followed the cursor");
+        // A drag over the canvas moves the view the other way, as a finger does.
+        mv(&mut r, Some(0), -20);
+        r.act(Action::Cancel(None));
+        state.set_pan_x(0.);
+        state.set_pan_y(0.);
+        s.frame();
+        let (cx, cy) = (state.get_canvas_x(), state.get_canvas_y() + ui.global::<crate::Theme>().get_bar_height());
+        let window = ui.window();
+        let at = |dx: f32| slint::LogicalPosition::new(cx + cw - 4. + dx, cy + 4.);
+        use slint::platform::{PointerEventButton, WindowEvent};
+        window.dispatch_event(WindowEvent::PointerPressed { position: at(0.), button: PointerEventButton::Left });
+        for step in 1..=10 {
+            window.dispatch_event(WindowEvent::PointerMoved { position: at(-12. * step as f32) });
+            s.frame();
+        }
+        window.dispatch_event(WindowEvent::PointerReleased { position: at(-120.), button: PointerEventButton::Left });
+        s.frame();
+        assert!(state.get_pan_x() > 40., "{what}: a drag of 120 moved the view {}", state.get_pan_x());
+    }
 }

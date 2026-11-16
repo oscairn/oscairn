@@ -397,11 +397,16 @@ a panel under it for what is chosen.
   slot in each column a wire crosses, eight sweeps ordering each column to cross fewer wires, each wire its own place
   on a box's edge, an expanded part a frame whose plugins are laid out the same way inside it, a wire back to an
   earlier column going below everything, control lines (a plugin's lane to a control or a parameter, the control to
-  the plugins it drives) routed in right angles around the boxes by a shortest-path search. The screen fits it to
-  the canvas (scale at most 1, as the JUCE view) and gives the component one set of points: wires are `Path`s with
-  `fit: preserve` in the canvas's pixels, boxes sit at the same points, so a wire meets its port wherever the window
-  is (`src/tests/routing.rs` measures it in rendered pixels at five sizes and scales; without `fit: preserve` it
-  fails). The theme's wire properties are used as the JUCE view uses them: `audio` and `notes` for enabled wires,
+  the plugins it drives) routed in right angles around the boxes by a shortest-path search. The JUCE view fits it to
+  the canvas with no floor (scale at most 1: at the keyboard's 826x465 its text is a few pixels); here the drawing keeps
+  a legible size, the theme's type scale (at least 1), so no text of a box is under the theme's small size, and what
+  does not fit the canvas scrolls: a drag (a `Flickable`), or the cursor reaching a place out of view (the dial, the
+  left knob and the arrows move it over the places and the view follows to hold the place whole). The header's
+  buttons share the line of Back and the title when they all fit, and the panel takes the rows it has (a view of at
+  most two fifths of the height, two rows at least), the drawing the rest. The component gets one set of points:
+  wires are `Path`s with `fit: preserve` in the pixels of the drawing, boxes sit at the same points, so a wire meets
+  its port wherever the window is and wherever it is scrolled (`src/tests/routing.rs` measures every end in rendered
+  pixels at five sizes and scales, scrolling the drawing in steps; without `fit: preserve` it fails). The theme's wire properties are used as the JUCE view uses them: `audio` and `notes` for enabled wires,
   `disabled` and `draining` (dashed), `unconnected` for a wire that no longer fits its ports, `control` for the control
   lines; a wire a user drew is thicker; a bus is a line per channel, eight at most; with Meters on a wire that carries
   sound (above -60 dB) takes the level's color: positive, `warning` from -12 dB, `danger` from -3.

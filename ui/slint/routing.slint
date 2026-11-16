@@ -73,7 +73,15 @@ export global RoutingState {
     in property <[RoutingBox]> controls;
     in property <[RoutingWire]> wires;
     in property <[RoutingLink]> links;
-    in property <float> scale: 1; // the drawing's, which its type is scaled by
+    in property <float> scale: 1; // the drawing's (the theme's type scale, at least 1), which its type is scaled by
+    // The type of the drawing at scale 1: the theme's small size at its own scale, so no text of a box is under it.
+    out property <length> base: Theme.small / Theme.font-scale;
+    // The drawing is as large as it is laid out (it is not shrunk to fit the canvas) and scrolls in the canvas.
+    in property <length> content-width: 0px;
+    in property <length> content-height: 0px;
+    in-out property <length> pan-x: 0px;
+    in-out property <length> pan-y: 0px;
+    in property <int> panel-need: 1; // rows the panel would show if it had the room
     in property <bool> frames-collapsible;
     in property <[PanelRowData]> panel;
     in property <bool> more-panel;
@@ -140,7 +148,7 @@ component FrameBox inherits Rectangle {
         height: root.head;
         text: data.name;
         color: Theme.text;
-        font-size: Theme.small * 1.08 * root.s;
+        font-size: RoutingState.base * 1.08 * root.s;
         font-weight: 700;
         overflow: elide;
         vertical-alignment: center;
@@ -187,7 +195,7 @@ component NodeBox inherits Rectangle {
         height: (parent.height - 4px) * 0.6;
         text: data.name;
         color: Theme.text;
-        font-size: Theme.small * root.s;
+        font-size: RoutingState.base * root.s;
         overflow: elide;
         vertical-alignment: bottom;
     }
@@ -198,7 +206,7 @@ component NodeBox inherits Rectangle {
         height: (parent.height - 4px) * 0.4;
         text: data.off ? (data.detail == "" ? "off" : data.detail + " · off") : data.detail;
         color: Theme.muted;
-        font-size: Theme.small * 0.77 * root.s;
+        font-size: RoutingState.base * root.s;
         overflow: elide;
         vertical-alignment: top;
     }
@@ -247,7 +255,7 @@ component PartBox inherits Rectangle {
         height: (parent.height - 16px * root.s) / 2;
         text: data.detail == "" ? data.name : data.name + "  " + data.detail.to-uppercase();
         color: Theme.text;
-        font-size: Theme.small * 1.08 * root.s;
+        font-size: RoutingState.base * 1.08 * root.s;
         font-weight: 700;
         overflow: elide;
         vertical-alignment: bottom;
@@ -256,7 +264,7 @@ component PartBox inherits Rectangle {
         x: 12px * root.s;
         y: 8px * root.s + (parent.height - 16px * root.s) / 2 + 4px * root.s;
         width: parent.width - 24px * root.s - 38px * root.s;
-        height: 18px * root.s;
+        height: 20px * root.s;
         clip: true;
         HorizontalLayout {
             alignment: start;
@@ -266,7 +274,7 @@ component PartBox inherits Rectangle {
                 if i > 0: Text {
                     text: "›";
                     color: Theme.muted;
-                    font-size: Theme.small * 0.85 * root.s;
+                    font-size: RoutingState.base * root.s;
                     vertical-alignment: center;
                 }
                 Rectangle {
@@ -277,7 +285,7 @@ component PartBox inherits Rectangle {
                         x: 7px * root.s;
                         text: chip;
                         color: Theme.text;
-                        font-size: Theme.small * 0.85 * root.s;
+                        font-size: RoutingState.base * root.s;
                         vertical-alignment: center;
                     }
                 }
@@ -319,7 +327,7 @@ component ControlPill inherits Rectangle {
         height: parent.height;
         text: data.name;
         color: Theme.text;
-        font-size: Theme.small * 0.92 * root.s;
+        font-size: RoutingState.base * root.s;
         overflow: elide;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -382,32 +390,45 @@ export component Routing inherits Rectangle {
     property <length> header: Theme.touch;
     property <length> footer: Theme.small + 2 * Theme.pad-tight;
     property <int> tool-count: RoutingState.tools.length;
-    property <int> across: max(1, min(tool-count, floor((self.width - 2 * Theme.margin + Theme.gap) / (Theme.button-width * 1.3 + Theme.gap))));
-    property <int> tool-lines: tool-count == 0 ? 0 : ceil(tool-count / across);
-    property <length> tool-width: (self.width - 2 * Theme.margin - (across - 1) * Theme.gap) / across;
-    property <length> tools-y: Theme.margin + header + Theme.gap;
+    // The buttons share the header's line with Back and the title when they all fit there, else take lines under it.
+    property <length> title-width: title-measure.preferred-width + Theme.pad;
+    property <length> tools-x: Theme.margin + Theme.button-width + 2 * Theme.gap + title-width;
+    property <length> tool-min: Theme.button-width * 1.3;
+    property <bool> inline: tool-count > 0 && tool-count * (tool-min + Theme.gap) - Theme.gap <= self.width - Theme.margin - tools-x;
+    property <int> across: inline ? tool-count : max(1, min(tool-count, floor((self.width - 2 * Theme.margin + Theme.gap) / (tool-min + Theme.gap))));
+    property <int> tool-lines: tool-count == 0 || inline ? 0 : ceil(tool-count / across);
+    property <length> tool-left: inline ? tools-x : Theme.margin;
+    property <length> tool-width: (self.width - Theme.margin - tool-left - (across - 1) * Theme.gap) / across;
+    property <length> tools-y: inline ? Theme.margin : Theme.margin + header + Theme.gap;
     property <length> tools-height: tool-lines * Theme.touch + max(0, tool-lines - 1) * Theme.gap;
-    property <length> body-y: tools-y + tools-height + Theme.gap;
+    property <length> body-y: inline ? Theme.margin + header + Theme.gap : tools-y + tools-height + (tool-lines > 0 ? Theme.gap : 0px);
     property <length> body-bottom: self.height - Theme.margin - footer - Theme.gap;
     property <length> body-height: max(0px, body-bottom - body-y);
-    // The drawing above, the panel for what is chosen below it: the panel at least two rows, else two
-    // fifths of what is left.
+    // The drawing above, the panel for what is chosen below it. The panel takes the rows it has, a view of at
+    // least two rows (the cap is two fifths of what is left, at most 60%); the drawing the rest.
     property <length> row-pitch: Theme.touch + gap;
-    property <length> panel-height: min(body-height * 0.7, max(2 * row-pitch + 2 * Theme.pad-tight, body-height * 0.4));
+    property <length> panel-need: max(1, RoutingState.panel-need) * row-pitch - gap + 2 * Theme.pad-tight;
+    property <length> panel-cap: min(body-height * 0.6, max(2 * row-pitch - gap + 2 * Theme.pad-tight, body-height * 0.4));
+    property <length> panel-height: min(panel-cap, panel-need);
     property <length> canvas-y: body-y;
     property <length> canvas-outer: max(0px, body-height - panel-height - gap);
     property <length> inset: Theme.pad-narrow;
     property <length> canvas-w: max(0px, self.width - 2 * Theme.margin - 2 * inset);
     property <length> canvas-h: max(0px, canvas-outer - 2 * inset);
     property <length> panel-y: canvas-y + canvas-outer + gap;
-    property <int> rows: max(1, floor((panel-height - 2 * Theme.pad-tight + gap) / row-pitch));
+    // What a view holds is what the panel could have at most, so it does not wait on the panel taking its height.
+    property <int> rows: max(1, floor((panel-cap - 2 * Theme.pad-tight + gap) / row-pitch));
     property <length> unit: 150px * Theme.font-scale;
     property <int> units: max(1, floor((self.width - 2 * Theme.margin - 2 * Theme.pad - 110px * Theme.font-scale) / (unit + Theme.gap)));
+    property <length> pan-x: RoutingState.pan-x;
+    property <length> pan-y: RoutingState.pan-y;
     changed canvas-w => { RoutingState.canvas-width = canvas-w; RoutingState.resized(); }
     changed canvas-h => { RoutingState.canvas-height = canvas-h; RoutingState.resized(); }
     changed rows => { RoutingState.panel-rows = rows; RoutingState.resized(); }
     changed units => { RoutingState.panel-units = units; RoutingState.resized(); }
     changed canvas-y => { RoutingState.canvas-y = canvas-y + inset; }
+    changed pan-x => { view.content-x = -self.pan-x; }
+    changed pan-y => { view.content-y = -self.pan-y; }
     init => {
         RoutingState.canvas-width = canvas-w;
         RoutingState.canvas-height = canvas-h;
@@ -417,6 +438,12 @@ export component Routing inherits Rectangle {
         RoutingState.panel-units = units;
     }
 
+    title-measure := Text {
+        visible: false;
+        text: "Routing";
+        font-size: Theme.title;
+        font-weight: 700;
+    }
     Button {
         x: Theme.margin;
         y: Theme.margin;
@@ -428,7 +455,7 @@ export component Routing inherits Rectangle {
     Text {
         x: Theme.margin + Theme.button-width + 2 * Theme.gap;
         y: Theme.margin;
-        width: root.width - Theme.button-width - 2 * Theme.margin - 2 * Theme.gap;
+        width: root.inline ? root.title-width : root.width - Theme.button-width - 2 * Theme.margin - 2 * Theme.gap;
         height: root.header;
         text: "Routing";
         color: Theme.text;
@@ -438,7 +465,7 @@ export component Routing inherits Rectangle {
         vertical-alignment: center;
     }
     for tool[i] in RoutingState.tools: Rectangle {
-        x: Theme.margin + mod(i, root.across) * (root.tool-width + Theme.gap);
+        x: root.tool-left + mod(i, root.across) * (root.tool-width + Theme.gap);
         y: root.tools-y + floor(i / root.across) * (Theme.touch + Theme.gap);
         width: root.tool-width;
         height: Theme.touch;
@@ -453,12 +480,15 @@ export component Routing inherits Rectangle {
         }
     }
     // The drawing: frames under the wires, the wires, the boxes, the control lines and their pills.
-    Rectangle {
+    view := Flickable {
         x: Theme.margin + root.inset;
         y: root.canvas-y + root.inset;
         width: root.canvas-w;
         height: root.canvas-h;
-        clip: true;
+        content-width: RoutingState.content-width;
+        content-height: RoutingState.content-height;
+        changed content-x => { RoutingState.pan-x = -self.content-x; }
+        changed content-y => { RoutingState.pan-y = -self.content-y; }
         for f[i] in RoutingState.frames: FrameBox {
             x: f.x * 1px;
             y: f.y * 1px;
@@ -471,8 +501,8 @@ export component Routing inherits Rectangle {
         for w in RoutingState.wires: Path {
             x: 0;
             y: 0;
-            width: root.canvas-w;
-            height: root.canvas-h;
+            width: RoutingState.content-width;
+            height: RoutingState.content-height;
             fit: preserve; // the commands are in pixels of the canvas: no scaling, no stroke inset
             stroke: w.color.with-alpha(w.alpha);
             stroke-width: w.width * 1px;
@@ -496,8 +526,8 @@ export component Routing inherits Rectangle {
         for l in RoutingState.links: Path {
             x: 0;
             y: 0;
-            width: root.canvas-w;
-            height: root.canvas-h;
+            width: RoutingState.content-width;
+            height: RoutingState.content-height;
             fit: preserve;
             stroke: Theme.background.with-alpha(l.alpha * 0.9);
             stroke-width: (l.width + 3) * 1px;
@@ -507,8 +537,8 @@ export component Routing inherits Rectangle {
         for l in RoutingState.links: Path {
             x: 0;
             y: 0;
-            width: root.canvas-w;
-            height: root.canvas-h;
+            width: RoutingState.content-width;
+            height: RoutingState.content-height;
             fit: preserve;
             stroke: Theme.wire-control.with-alpha(l.alpha);
             stroke-width: l.width * 1px;

@@ -235,6 +235,18 @@ fn sync<P: PartialEq + Clone, S: Clone + 'static>(model: &VecModel<S>, last: &mu
     *last = now;
 }
 
+/// Where a view `room` long in a canvas scrolled to `pan` has to move to hold the stretch `at` to `at + len` with
+/// `margin` to spare: where it is when it holds it, else the least move (to the stretch's start when it is longer).
+fn follow(pan: f64, at: f64, len: f64, room: f64, margin: f64) -> f64 {
+    if len + 2. * margin >= room || at - margin < pan {
+        at - margin
+    } else if at + len + margin > pan + room {
+        at + len + margin - room
+    } else {
+        pan
+    }
+}
+
 /// A wire's id, where it leaves and where it enters in the canvas's pixels, and how many lines it is.
 #[cfg(test)]
 pub type WireEnds = (u64, (f64, f64), (f64, f64), usize);
@@ -400,9 +412,11 @@ pub struct Screen {
     routed: Option<(u64, u64)>,
     routed_part: u64,
     layout: Layout,
-    /// The layout as it was drawn: its scale and where it starts in the canvas.
+    /// The layout as it was drawn: its scale and where it starts in the canvas (centered when it is smaller).
     scale: f64,
     origin: (f64, f64),
+    /// The place of the order the view last followed: the view moves to a place the cursor reaches, once.
+    followed: Option<usize>,
     /// Where the cursor can go on the canvas, in order, and what each place is.
     order: Vec<Pick>,
     stop: Option<Stop>,
@@ -464,6 +478,7 @@ impl Screen {
             layout: Layout::default(),
             scale: 1.,
             origin: (0., 0.),
+            followed: None,
             order: vec![],
             stop: None,
             touched: 0,
@@ -736,16 +751,44 @@ impl Screen {
             self.layout = wires::layout_routing(&self.g, self.collapsed, &self.expanded, &Metrics::default());
             self.dirty = false;
         }
+        // The drawing is not shrunk to fit: its type is the theme's small size at the least (the reference scales it
+        // down with no floor, to a few pixels). What does not fit the canvas is scrolled: a drag, or the cursor
+        // reaching a place that is out of view.
         let (lw, lh) = (f64::from(self.layout.width.max(1)), f64::from(self.layout.height.max(1)));
-        self.scale = (cw / lw).min(ch / lh).min(1.);
-        if !self.scale.is_finite() || self.scale <= 0. {
-            self.scale = 0.1;
-        }
-        self.origin = (((cw - lw * self.scale) / 2.).max(0.), (ch - lh * self.scale) / 2.);
+        self.scale = f64::from(ui.global::<Theme>().get_font_scale()).max(1.);
+        self.origin = (((cw - lw * self.scale) / 2.).max(0.), ((ch - lh * self.scale) / 2.).max(0.));
+        let (content_w, content_h) = (cw.max(lw * self.scale), ch.max(lh * self.scale));
         self.order = self.make_order();
         if matches!(self.stop, Some(Stop::Canvas(i)) if i >= self.order.len()) {
             self.stop = None;
             self.editing = false;
+        }
+        let view = ui.global::<RoutingState>();
+        let mut pan = (f64::from(view.get_pan_x()).clamp(0., content_w - cw), f64::from(view.get_pan_y()).clamp(0., content_h - ch));
+        match self.stop {
+            Some(Stop::Canvas(i)) if self.followed != Some(i) => {
+                self.followed = Some(i);
+                if let Some(at) = self.order.get(i).copied() {
+                    let bounds = match at {
+                        Pick::Frame(b) | Pick::Box(b) => self.layout.boxes[b].bounds,
+                        Pick::Control(c) => self.layout.controls[c].bounds,
+                    };
+                    let (x, y, w, h) = self.rect(bounds);
+                    let room = 8. * self.scale;
+                    pan = (follow(pan.0, f64::from(x), f64::from(w), cw, room), follow(pan.1, f64::from(y), f64::from(h), ch, room));
+                }
+            }
+            Some(Stop::Canvas(_)) => {}
+            _ => self.followed = None,
+        }
+        let pan = (pan.0.clamp(0., content_w - cw), pan.1.clamp(0., content_h - ch));
+        view.set_content_width(content_w as f32);
+        view.set_content_height(content_h as f32);
+        if (f64::from(view.get_pan_x()) - pan.0).abs() > 0.01 {
+            view.set_pan_x(pan.0 as f32);
+        }
+        if (f64::from(view.get_pan_y()) - pan.1).abs() > 0.01 {
+            view.set_pan_y(pan.1 as f32);
         }
         let colors = self.colors();
         let routing = self.routing_nodes();
@@ -913,6 +956,7 @@ impl Screen {
         sync(&self.tools, &mut self.last_tools, tools_now, |t| RoutingToolData { label: t.label.as_str().into(), on: t.on, cursor: t.cursor });
         let state = ui.global::<RoutingState>();
         state.set_scale(self.scale as f32);
+        state.set_panel_need(rows.len() as i32);
         state.set_more_panel(rows.len() > per);
         state.set_message(self.said.as_str().into());
         let failure = self.failures.first().map(|f| format!("{} is silent: {}", f.1, f.2)).unwrap_or_default();

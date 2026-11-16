@@ -172,6 +172,9 @@ pub fn within(inner: Rect, outer: Rect) -> bool {
     inner.0 >= outer.0 && inner.1 >= outer.1 && inner.0 + inner.2 <= outer.0 + outer.2 && inner.1 + inner.3 <= outer.1 + outer.3
 }
 
+/// The one config file the tests share and one of them rewrites (routing-view.txt): whoever reads or writes it holds this.
+static ROUTING_FILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The pixels outside `r` that differ between two frames.
 fn changed_outside(a: &[Rgb8Pixel], b: &[Rgb8Pixel], r: Rect) -> usize {
     (0..W * H).filter(|&i| !within(((i % W) as i32, (i / W) as i32, 1, 1), r) && a[i] != b[i]).count()
@@ -274,6 +277,8 @@ impl Fixture {
         let _ = std::fs::remove_file(&path);
         let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         let (tx, events) = mpsc::channel();
+        // The shell reads routing-view.txt as it starts; the test that toggles it (and puts it back) holds this meanwhile.
+        let _routing_file = ROUTING_FILE.lock().unwrap_or_else(|e| e.into_inner());
         shell::start(&screen.ui, path, &crate::profile::Profile::load(profile).unwrap(), true, move |e| {
             let _ = tx.send(e);
         })

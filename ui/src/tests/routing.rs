@@ -402,6 +402,7 @@ fn parts_collapse_and_expand_and_the_choice_is_kept() {
     r.tap_chevron(0, 0);
     // The choice: off, every part a frame, kept as "expanded"; on again, "collapsed".
     let file = crate::settings::config_dir().unwrap().join("routing-view.txt");
+    let _file = super::ROUTING_FILE.lock().unwrap_or_else(|e| e.into_inner()); // a shell starting meanwhile would read "expanded"
     r.tap_tool(1);
     assert_eq!(state.get_frames().row_count(), 3);
     assert!(state.get_boxes().iter().all(|b| !b.part));

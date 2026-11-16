@@ -760,3 +760,32 @@ fn touch_switches_a_mark_selects_a_row_and_explains_a_disabled_cell() {
     assert_eq!(shape_row(&s), 6);
     assert!(labels_of(&s, 0).iter().any(|t| t.starts_with("This plugin has no solo")), "the readout: {:?}", labels_of(&s, 0));
 }
+
+// The detail's graph: a handle is dragged by touch (its stage's time or rate across its slot, its level up), for the
+// selected operator only, inside one gesture.
+#[test]
+fn the_detail_graphs_handles_are_dragged_by_touch() {
+    let (s, mut p) = open_at(Spec { ops: 4, ..ENGINE }, (1280, 720), 1.55, &dark(), Side, 1);
+    let panel = panels(&s.ui)[2].clone();
+    let points: Vec<(f32, f32)> = panel.points.iter().map(|q| (q.x, q.y)).collect();
+    assert_eq!(points.len(), 5, "hold, attack, two decays, release");
+    // The attack's handle (the second): across and down.
+    let (x, y) = points[1];
+    sent(&mut p.out);
+    assert!(p.view_down(2, x, y));
+    p.view_move(2, x + 14., y + 9.);
+    p.view_up(2, x + 14., y + 9.);
+    let out = sent(&mut p.out);
+    let mut ids: Vec<u64> = sets(&out).iter().map(|q| q.0).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids, [u64::from(id(1, ENV + 1)), u64::from(id(1, ENV + 11))], "the attack's rate and level of operator 1, nothing else: {out:?}");
+    assert!(out.iter().any(|o| o.0 == "params.gesture" && o.1["begin"] == true) && out.iter().any(|o| o.0 == "params.gesture" && o.1["begin"] == false));
+    // The hold's handle has a time and no level.
+    let (x, y) = points[0];
+    assert!(p.view_down(2, x, y));
+    p.view_move(2, x + 10., y + 30.);
+    p.view_up(2, x + 10., y + 30.);
+    let ids: Vec<u64> = sets(&sent(&mut p.out)).iter().map(|q| q.0).collect();
+    assert!(!ids.is_empty() && ids.iter().all(|&i| i == u64::from(id(1, ENV))), "the hold's time only: {ids:?}");
+}

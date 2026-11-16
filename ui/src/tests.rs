@@ -473,15 +473,15 @@ fn home_moves_by_keys_panel_and_touch() {
     assert_eq!((s.ui.get_screen(), title(&s.ui).as_str(), s.ui.global::<Bar>().get_home_button(), s.ui.global::<Bar>().get_back()), (1, "Setlist", true, true));
     assert!(key(s, slint::platform::Key::Escape), "Cancel goes Home");
     assert_eq!((s.ui.get_screen(), cursor(s)), (0, None), "the cursor dropped with its screen");
-    s.ui.global::<HomeState>().invoke_tapped(4); // Settings: a JUCE screen
-    assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Settings", Some("settings")));
+    s.ui.global::<HomeState>().invoke_tapped(3); // Groovebox: a JUCE screen
+    assert_eq!((s.ui.get_screen(), s.ui.get_opening().as_str(), shell::handover()), (2, "Groovebox", Some("groovebox")));
     let file = std::env::temp_dir().join(format!("oscairn-ui-handover-{}", std::process::id()));
     shell::write_handover(&file, shell::handover().unwrap()).unwrap();
     let written = std::fs::read_to_string(&file).unwrap();
     let _ = std::fs::remove_file(&file);
-    assert_eq!(written, "settings\n", "a whole line, as the start script reads it");
+    assert_eq!(written, "groovebox\n", "a whole line, as the start script reads it");
     s.frame();
-    s.save("home-opening-settings");
+    s.save("home-opening-groovebox");
     shell::act(Action::Move { pane: None, by: 1 });
     assert_eq!(f.screen.ui.get_screen(), 2, "while the display goes to the JUCE app, nothing is taken");
 }

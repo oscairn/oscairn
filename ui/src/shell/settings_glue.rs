@@ -5,13 +5,16 @@
 
 use super::*;
 
-/// Whether Home's Settings tile opens the Rust app. Not until every page of ui/SETTINGS-APP.md is built: a half app that
-/// hands the display back is worse than the JUCE app, so the tile hands over as before. Opened for development with
-/// `OSCAIRN_UI_SETTINGS=1`; the tests enter it with `shell::goto`.
-const PORTED: bool = false;
+/// Whether Home's Settings tile opens the Rust app: it does (Settings is ported whole). `OSCAIRN_UI_SETTINGS=0` hands the tile over to the JUCE
+/// app again (a fault found on the device); `OSCAIRN_UI_SETTINGS=1` opens the Rust app whatever `PORTED` says.
+const PORTED: bool = true;
 
 pub(super) fn in_rust() -> bool {
-    PORTED || std::env::var_os("OSCAIRN_UI_SETTINGS").is_some_and(|v| v != "0" && !v.is_empty())
+    match std::env::var_os("OSCAIRN_UI_SETTINGS") {
+        Some(v) if v == "0" => false,
+        Some(v) if !v.is_empty() => true,
+        _ => PORTED,
+    }
 }
 
 /// The theme the user's choice names was shown by the watcher of `appearance.txt` (another program chose it): the

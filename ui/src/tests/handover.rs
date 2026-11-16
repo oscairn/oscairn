@@ -64,6 +64,10 @@ fn close_overlays(f: &mut Fixture) {
 enum Step {
     Stop(i32),
     Bar(usize),
+    /// A row of the bar's More menu.
+    Menu(usize),
+    /// A page of the app's rail (the Library's kinds, the Settings' pages).
+    Page(usize),
 }
 
 /// The stop `k` of the screen by the dial, pressed.
@@ -96,6 +100,20 @@ fn enter(f: &mut Fixture, tile: i32, path: &[Step]) {
             Step::Stop(k) => press_stop(f, k),
             Step::Bar(i) => {
                 ui.global::<Bar>().invoke_action(i as i32);
+                settle(f);
+            }
+            Step::Page(i) => {
+                if tile == 1 {
+                    ui.global::<crate::LibraryState>().invoke_show_page(i as i32);
+                } else {
+                    ui.global::<crate::SettingsState>().invoke_show_page(i as i32);
+                }
+                settle(f);
+            }
+            Step::Menu(i) => {
+                ui.global::<Bar>().invoke_more_tapped();
+                f.screen.frame(); // the menu counts the rows its window holds once it is drawn
+                ui.global::<crate::MenuState>().invoke_tapped(i as i32);
                 settle(f);
             }
         }
@@ -149,6 +167,28 @@ fn walk(f: &mut Fixture, tile: i32, depth: usize, seen: &mut HashSet<String>, pr
     enter(f, tile, path);
     let n = ui.global::<Bar>().get_actions().row_count();
     let more = ui.global::<Bar>().get_more();
+    if more && tile != 0 {
+        // The actions are folded into More: each row of its menu is pressed (the Library and Settings walks).
+        ui.global::<Bar>().invoke_more_tapped();
+        f.screen.frame();
+        let rows = ui.global::<crate::MenuState>().get_rows().row_count();
+        close_overlays(f);
+        for i in 0..rows {
+            enter(f, tile, path);
+            ui.global::<Bar>().invoke_more_tapped();
+            f.screen.frame();
+            ui.global::<crate::MenuState>().invoke_tapped(i as i32);
+            settle(f);
+            *pressed += 1;
+            no_handover(&ui, &format!("{at} menu row {i}"));
+            close_overlays(f);
+            if here(&ui) != at && ui.get_screen() != 0 {
+                path.push(Step::Menu(i));
+                walk(f, tile, depth - 1, seen, pressed, path);
+                path.pop();
+            }
+        }
+    }
     for i in 0..n {
         if more {
             break; // the same actions are in More's menu
@@ -190,8 +230,8 @@ fn nothing_in_the_performance_app_hands_the_display_over() {
     assert!(pressed > 300, "the walk pressed {pressed}");
 }
 
-// The other apps on Home still hand over until they are ported: the tiles that do (Library, Groovebox, Recordings,
-// Settings; the Setlist and the Performance are in this shell).
+// The apps on Home that are not ported still hand over: the Groovebox (and Recordings, where a profile offers it); the
+// Performance, the Library, the Setlist and Settings are in this shell.
 #[test]
 fn the_home_tiles_that_still_hand_over_are_the_unported_apps() {
     let names: Vec<String> = {
@@ -213,8 +253,8 @@ fn the_home_tiles_that_still_hand_over_are_the_unported_apps() {
         }
     }
     eprintln!("tiles that hand over: {handing:?} of {names:?}");
-    assert!(!handing.iter().any(|n| n == "Performance" || n == "Setlist"), "{handing:?}");
-    assert!(!handing.is_empty(), "the other apps are still the JUCE app's");
+    assert!(!handing.iter().any(|n| ["Performance", "Library", "Setlist", "Settings"].contains(&n.as_str())), "{handing:?}");
+    assert_eq!(handing, ["Groovebox"], "the one app not ported is still the JUCE app's");
 }
 
 // The same walk from Home's Library tile: every stop and every bar action of the Library app, the catalog and the file chooser
@@ -231,11 +271,37 @@ fn nothing_in_the_library_app_hands_the_display_over() {
     assert_eq!(ui.get_screen(), 13, "the Library tile opens the Rust Library");
     no_handover(&ui, "the Library tile");
     let (mut seen, mut pressed) = (HashSet::new(), 0);
-    walk(&mut f, 1, 7, &mut seen, &mut pressed, &mut vec![]);
+    for page in 0..3 {
+        walk(&mut f, 1, 7, &mut seen, &mut pressed, &mut vec![Step::Page(page)]);
+    }
     let mut screens: Vec<&String> = seen.iter().collect();
     screens.sort();
     eprintln!("walked {} places with {pressed} presses: {screens:?}", seen.len());
     assert!(seen.iter().any(|s| s.starts_with("13:Library")), "the Library's list was walked: {screens:?}");
     assert!(seen.len() >= 3, "the walk went into what opens (filters, menus, the catalog): {screens:?}");
     assert!(pressed > 40, "the walk pressed {pressed}");
+}
+
+// The same walk from Home's Settings tile: every page of its rail, every stop and bar action, the menus and questions.
+#[test]
+fn nothing_in_the_settings_app_hands_the_display_over() {
+    let mut f = Fixture::new("handover-settings");
+    f.engine.answer(); // session.hello
+    f.pump();
+    let ui = f.screen.ui.clone_strong();
+    shell::settings_in_rust(true);
+    ui.global::<HomeState>().invoke_tapped(4); // the Settings tile
+    settle(&mut f);
+    assert_eq!(ui.get_screen(), 14, "the Settings tile opens the Rust Settings");
+    no_handover(&ui, "the Settings tile");
+    let (mut seen, mut pressed) = (HashSet::new(), 0);
+    for page in 0..6 {
+        walk(&mut f, 4, 7, &mut seen, &mut pressed, &mut vec![Step::Page(page)]);
+    }
+    let mut screens: Vec<&String> = seen.iter().collect();
+    screens.sort();
+    eprintln!("walked {} places with {pressed} presses: {screens:?}", seen.len());
+    assert!(seen.iter().any(|s| s.starts_with("14:Settings")), "the Settings' pages were walked: {screens:?}");
+    assert!(seen.len() >= 6, "every page was walked: {screens:?}");
+    assert!(pressed > 30, "the walk pressed {pressed}");
 }

@@ -145,13 +145,13 @@ fn pictures_of_the_library() {
             s.serve();
             // Not opened: the engine's refusal, said.
             // (A name the search left on the screen still finds.)
-            s.e.items[1].name = "Velvet Refused 000".into();
+            s.e.items[1].name = "Velvet Aaa 000".into();
             s.e.items[1].unfit = "needs 3 GB of memory".into();
             shell::goto(shell::Screen::Library);
             s.serve();
-            press(&mut s, "Velvet Refused 000");
+            press(&mut s, "Velvet Aaa 000");
             shoot(&mut s, "refused");
-            assert_eq!(super::library::footer(&ui).0, "Not opened: Velvet Refused 000 does not fit this device: needs 3 GB of memory", "the refusal is said under the list");
+            assert_eq!(super::library::footer(&ui).0, "Not opened: Velvet Aaa 000 does not fit this device: needs 3 GB of memory", "the refusal is said under the list");
             shell::goto(shell::Screen::Home);
         }
     }

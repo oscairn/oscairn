@@ -4,13 +4,16 @@
 
 use super::*;
 
-/// Whether Home's Library tile opens the Rust app. Not until every screen of ui/LIBRARY-APP.md is built: a half app
-/// that hands the display back is worse than the JUCE app, so the tile hands over as before. Opened for development
-/// with `OSCAIRN_UI_LIBRARY=1`; the tests enter it with `shell::goto`.
-const PORTED: bool = false;
+/// Whether Home's Library tile opens the Rust app: it does (Library is ported whole). `OSCAIRN_UI_LIBRARY=0` hands the tile over to the JUCE
+/// app again (a fault found on the device); `OSCAIRN_UI_LIBRARY=1` opens the Rust app whatever `PORTED` says.
+const PORTED: bool = true;
 
 pub(super) fn in_rust() -> bool {
-    PORTED || std::env::var_os("OSCAIRN_UI_LIBRARY").is_some_and(|v| v != "0" && !v.is_empty())
+    match std::env::var_os("OSCAIRN_UI_LIBRARY") {
+        Some(v) if v == "0" => false,
+        Some(v) if !v.is_empty() => true,
+        _ => PORTED,
+    }
 }
 
 impl App {

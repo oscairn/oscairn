@@ -62,6 +62,7 @@ Checked when built and tested; the sections below say how.
   - [x] 12l. Losses far apart still shed (a loss within 2 s of the last), down to each part's last voice; a chain that cannot fit counted
   - [x] 12m. A plugin without the voice budget held under what lost, across keys struck again
   - [x] 12n. A voice comes back only where the measurements say it fits; a probe that loses doubles its wait until release
+  - [x] 12o. The soft limit's fades leave each connection its last note, so every plugin of a Performance in one worker never leaves a part silent
 - [ ] 13. Plugin groups: a worker carries one or more plugins, the profile decides how many processes ([plugin groups](#plugin-groups-2026-11-15))
   - [x] 13a. Nodes of one worker process whose audio flows between them rendered there in one round trip, any routing, sample for sample as apart
   - [x] 13b. A publisher on the own-host list (`com.example.*`): its plugins always in workers of their own
@@ -998,6 +999,14 @@ to, which has rule 12a and none after it). Its rules, as built:
   6 from 15 s on, the last block lost at 12 s, none in the 63 s after with keys struck again each
   second, and voices back to 29 once the effects' load fell. The transient case recovers by the same
   measurements (past 10 voices 1,318 blocks after the overload, all back by the end).
+- 12o. A lane of many plugins (2026-11-16). With every plugin of Sick tines in one worker (`pool` 1) a pedalled
+  passage held 0 to 1 voices and lost no block, against 9 to 13 a part with a worker each: the lane's estimate adds every
+  node's cost, the 21 effects' beside the instrument's, against the one lane limit, where a worker each compares each alone,
+  so the soft limit's fades (a note-on, a block past the limit, the lanes' total) took every sustained note once the others
+  alone passed it. They now leave each connection its last note (`choose_soft`, both cores); only `choke`, for a block that
+  would be missed, takes it. Fewer voices than a worker each is right where the costs are real, one worker being one
+  allowance; none is not. Tested by `engine-core-pool`: three sounds and 21 effects of 40 us in one lane, 2 voices in
+  all (a sound with none) before, 4 after; a worker each keeps 21.
 
 ## Core placement
 

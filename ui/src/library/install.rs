@@ -193,9 +193,9 @@ mod tests {
     #[test]
     fn the_signer_is_described_as_the_reference_words_it() {
         let s = |status: &str, name: &str| Signer { status: status.into(), key: "0123456789abcdef".into(), key_name: name.into(), ..Default::default() };
-        assert_eq!(describe_signer(&s("trusted", "Ada")), "Signed by Ada (0123 4567 89ab cdef), a key you trust");
+        assert_eq!(describe_signer(&s("trusted", "Quill")), "Signed by Quill (0123 4567 89ab cdef), a key you trust");
         assert_eq!(describe_signer(&s("unknown", "")), "Signed by key 0123 4567 89ab cdef, not a key you trust");
-        assert_eq!(describe_signer(&s("revoked", "Ada")), "Signed by Ada (0123 4567 89ab cdef), which is revoked");
+        assert_eq!(describe_signer(&s("revoked", "Quill")), "Signed by Quill (0123 4567 89ab cdef), which is revoked");
         assert_eq!(describe_signer(&s("unsigned", "")), "Not signed");
     }
 }

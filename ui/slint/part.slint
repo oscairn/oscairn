@@ -19,6 +19,7 @@ export struct SettingData {
     failed: bool, // a plugin that failed and is silent: outlined in the danger color
     tint: color, // an item's own color, where the theme puts it (drawListRow): the whole row or a mark in it
     tinted: bool,
+    columns: [string], // a row in columns (the Catalog's: name, version, publisher, state and summary), each shrunk then cut on its own
 }
 
 export struct InfoLine {
@@ -75,14 +76,29 @@ component Row inherits Section {
     property <length> mark-room: data.tinted && Theme.rows != RowStyle.fill ? 2 * Theme.mark + Theme.pad-tight : 0px;
     property <length> label-room: Theme.rows == RowStyle.right ? 0px : root.mark-room;
     property <length> value-room: Theme.rows == RowStyle.right ? root.mark-room : 0px;
-    FitText {
+    // A row in columns: the widths are shares of what the gaps (the theme's padding) leave, the same in every row so they line up.
+    property <bool> in-columns: data.columns.length == 4;
+    property <length> col-gap: Theme.pad;
+    property <length> col-room: root.width - 2 * Theme.pad - root.label-room - 3 * root.col-gap;
+    property <[float]> col-share: [0.31, 0.13, 0.22, 0.34];
+    for t[c] in data.columns: FitText {
+        visible: root.in-columns;
+        x: Theme.pad + root.label-room + (c > 0 ? root.col-share[0] * root.col-room + root.col-gap : 0px) + (c > 1 ? root.col-share[1] * root.col-room + root.col-gap : 0px) + (c > 2 ? root.col-share[2] * root.col-room + root.col-gap : 0px);
+        width: root.col-share[c] * root.col-room;
+        height: parent.height;
+        text: t;
+        ink: c == 1 ? Theme.muted : c == 3 ? Theme.muted : Theme.text;
+        bold: c == 2;
+        align: TextHorizontalAlignment.left;
+    }
+    if !root.in-columns: FitText {
         x: Theme.pad + root.label-room;
         width: parent.width * 0.4 - Theme.pad - root.label-room;
         height: parent.height;
         text: data.label;
         align: TextHorizontalAlignment.left;
     }
-    FitText {
+    if !root.in-columns: FitText {
         x: parent.width * 0.4;
         width: parent.width * 0.6 - Theme.pad - root.buttons - root.value-room;
         height: parent.height;

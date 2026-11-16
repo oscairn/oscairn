@@ -315,6 +315,29 @@ pub fn describe(o: &Offer) -> String {
     }
 }
 
+/// A row in columns: the name, the version, the publisher, then the state and the summary (what `describe` says in a line).
+/// What has no publisher to say (withdrawn, cannot be installed here) says it all in the last.
+pub fn columns(o: &Offer) -> [String; 4] {
+    let version = o.installed.as_deref().filter(|_| o.installed.is_some()).unwrap_or(&o.version.version).to_string();
+    let withdrawn = o.installed.is_some() && o.record.withdrawn.as_ref().is_some_and(|w| !w.reason.is_empty());
+    if withdrawn || !(o.installable || o.installed.is_some()) {
+        return [o.title().to_string(), version, String::new(), describe(o)];
+    }
+    let state = if o.update {
+        format!("Update to {}", o.version.version)
+    } else if o.built_in {
+        "Built in".into()
+    } else if o.other_build {
+        "Installed (a different build)".into()
+    } else if o.installed.is_some() {
+        if o.record.dependency { format!("Installed {}", with_what(o)) } else { "Installed".into() }
+    } else {
+        String::new()
+    };
+    let last = [state.as_str(), o.package.summary.as_str()].iter().filter(|t| !t.is_empty()).copied().collect::<Vec<_>>().join(SEPARATOR);
+    [o.title().to_string(), version, o.package.publisher.clone(), last]
+}
+
 /// "NAME VERSION was withdrawn by REPOSITORY: REASON" for what is installed and withdrawn since, else empty.
 pub fn withdrawn_saying(o: &Offer) -> String {
     match o.record.withdrawn.as_ref().filter(|w| !w.reason.is_empty()) {
@@ -468,7 +491,7 @@ mod tests {
     }
 
     fn package(id: &str, name: &str, versions: Vec<Version>) -> Package {
-        Package { id: id.into(), name: name.into(), publisher: "Ada".into(), publisher_key: "0123456789abcdef".into(), summary: "Pads".into(), versions, ..Default::default() }
+        Package { id: id.into(), name: name.into(), publisher: "Quill".into(), publisher_key: "0123456789abcdef".into(), summary: "Pads".into(), versions, ..Default::default() }
     }
 
     fn listing(packages: Vec<Package>) -> Vec<(String, Listing)> {
@@ -495,7 +518,7 @@ mod tests {
         let l = listing(vec![package("a", "A", vec![version("1.0"), version("2.0"), beta, yanked, needs])]);
         let o = &offers(&l, &BTreeMap::new(), &BTreeMap::new())[0];
         assert_eq!((o.version.version.as_str(), o.installable), ("2.0", true));
-        assert_eq!(describe(o), "Ada  ·  Pads");
+        assert_eq!(describe(o), "Quill  ·  Pads");
         // Nothing installable: the newest, with why.
         let l = listing(vec![package("a", "A", vec![{
             let mut v = version("2.2");
@@ -520,14 +543,14 @@ mod tests {
         let all = offers(&l, &installed, &BTreeMap::new());
         let (a, b) = (&all[0], &all[1]);
         assert!(a.update && a.offered());
-        assert_eq!(describe(a), "Update to 2.0  ·  Ada  ·  Pads");
+        assert_eq!(describe(a), "Update to 2.0  ·  Quill  ·  Pads");
         assert!(b.other_build && b.offered());
-        assert_eq!(describe(b), "Installed (a different build)  ·  Ada  ·  Pads");
+        assert_eq!(describe(b), "Installed (a different build)  ·  Quill  ·  Pads");
         // Installed as this repository builds it: nothing to install.
         installed.insert("b".to_string(), Installed { id: "b".into(), version: "1.0".into(), sha256: "aaaa".into(), ..Default::default() });
         let all = offers(&l, &installed, &BTreeMap::new());
         assert!(!all[1].other_build && !all[1].offered());
-        assert_eq!(describe(&all[1]), "Installed  ·  Ada  ·  Pads");
+        assert_eq!(describe(&all[1]), "Installed  ·  Quill  ·  Pads");
     }
 
     #[test]
@@ -538,11 +561,11 @@ mod tests {
         let bundled = BTreeMap::from([("org.oscairn.delay".to_string(), "1.0".to_string())]);
         let o = &offers(&l, &BTreeMap::new(), &bundled)[0];
         assert!(o.built_in && o.update && o.installable);
-        assert_eq!(describe(o), "Update to 2.0  ·  Ada  ·  Pads");
+        assert_eq!(describe(o), "Update to 2.0  ·  Quill  ·  Pads");
         let bundled = BTreeMap::from([("org.oscairn.delay".to_string(), "2.0".to_string())]);
         let o = &offers(&l, &BTreeMap::new(), &bundled)[0];
         assert!(o.built_in && !o.update);
-        assert_eq!(describe(o), "Built in  ·  Ada  ·  Pads");
+        assert_eq!(describe(o), "Built in  ·  Quill  ·  Pads");
         assert_eq!(facts(o).iter().find(|f| f.0 == "Installed").unwrap().1, "2.0, built in: it comes with the app");
         // A package of several plugins is built in only when all of them are.
         let mut v = version("1.0");
@@ -579,7 +602,7 @@ mod tests {
         let all = offers(&l, &installed, &BTreeMap::new());
         let assets = all.iter().find(|o| o.package.id == "assets").unwrap();
         assert_eq!(assets.with, "Plug");
-        assert_eq!(describe(assets), "Installed with Plug  ·  Ada  ·  Pads");
+        assert_eq!(describe(assets), "Installed with Plug  ·  Quill  ·  Pads");
     }
 
     #[test]
@@ -594,7 +617,7 @@ mod tests {
         let o = &offers(&listing(vec![p]), &BTreeMap::new(), &BTreeMap::new())[0];
         let f = facts(o);
         assert_eq!(f.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["Summary", "Version", "License", "Publisher", "Repository", "Size", "Needs", "Download for another device"]);
-        assert_eq!(f[3].1, "Ada, key 0123 4567 89ab cdef");
+        assert_eq!(f[3].1, "Quill, key 0123 4567 89ab cdef");
         assert_eq!(f[5].1, "5.0 MB to download, 12.0 MB installed");
         assert_eq!(f[6].1, "base 1.1 or later");
         assert_eq!(downloads(o).iter().map(|d| d.0.as_str()).collect::<Vec<_>>(), ["linux-arm64", "All platforms"]);
@@ -610,7 +633,7 @@ mod tests {
         o.record = Installed { sha256: "fedcba9876543210ffff".into(), signers: vec!["1111222233334444".into()], ..Default::default() };
         assert_eq!(
             replace_question(&o),
-            "A 1.0 is installed here, but it is not the build Example has.\n\nInstalled: archive fedcba9876543210, signed by key 1111 2222 3333 4444\nExample's: archive 0123456789abcdef, signed by Ada, key 0123 4567 89ab cdef\n\nInstalling the repository's build replaces the installed one."
+            "A 1.0 is installed here, but it is not the build Example has.\n\nInstalled: archive fedcba9876543210, signed by key 1111 2222 3333 4444\nExample's: archive 0123456789abcdef, signed by Quill, key 0123 4567 89ab cdef\n\nInstalling the repository's build replaces the installed one."
         );
         o.record.sha256.clear();
         assert!(replace_question(&o).contains("Installed: a build installed some other way, its archive not known"));
@@ -623,23 +646,23 @@ mod tests {
     #[test]
     fn the_question_for_code_is_told_by_who_signed_it() {
         // Signed by the key the repository lists for the publisher: trust it and install.
-        let q = code_question(&[signer("unknown", "0123456789abcdef", "pub")], "Example", "Ada", "0123456789abcdef");
-        assert_eq!(q.title, "Trust Ada to install plugins?");
+        let q = code_question(&[signer("unknown", "0123456789abcdef", "pub")], "Example", "Quill", "0123456789abcdef");
+        assert_eq!(q.title, "Trust Quill to install plugins?");
         assert_eq!(q.buttons, ["Trust and install", "Cancel"]);
         assert_eq!((q.trust, q.anyway), (Some(0), None));
         assert_eq!(q.keys, [("pub".to_string(), "0123456789abcdef".to_string())]);
-        assert!(q.message.contains("The repository Example lists this key as Ada's.\n\nKey fingerprint: 0123 4567 89ab cdef"));
+        assert!(q.message.contains("The repository Example lists this key as Quill's.\n\nKey fingerprint: 0123 4567 89ab cdef"));
         // A stranger's key: trust it, or install this once.
-        let q = code_question(&[signer("unknown", "ffffeeeeddddcccc", "pub2")], "Example", "Ada", "0123456789abcdef");
+        let q = code_question(&[signer("unknown", "ffffeeeeddddcccc", "pub2")], "Example", "Quill", "0123456789abcdef");
         assert_eq!(q.title, "Install code from an unknown key?");
         assert_eq!(q.buttons, ["Trust this key", "Install anyway", "Cancel"]);
         assert_eq!((q.trust, q.anyway), (Some(0), Some(1)));
-        assert!(q.message.contains("signed by key ffff eeee dddd cccc, which Example does not list as Ada's"));
+        assert!(q.message.contains("signed by key ffff eeee dddd cccc, which Example does not list as Quill's"));
         let q = code_question(&[signer("unknown", "ffffeeeeddddcccc", "pub2"), signer("unknown", "aaaabbbbccccdddd", "pub3")], "", "", "");
         assert_eq!(q.buttons[0], "Trust these keys");
         assert!(q.message.contains("which this repository does not list as this publisher's"));
         // Unsigned: install anyway or not.
-        let q = code_question(&[signer("unsigned", "", "")], "Example", "Ada", "x");
+        let q = code_question(&[signer("unsigned", "", "")], "Example", "Quill", "x");
         assert_eq!(q.title, "Install unsigned code?");
         assert_eq!((q.buttons.len(), q.trust, q.anyway), (2, None, Some(0)));
         assert!(q.message.starts_with("Fuzz 1.0 in this package is not signed"));

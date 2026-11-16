@@ -14,7 +14,7 @@ fn version(v: &str, types: serde_json::Value) -> serde_json::Value {
 }
 
 fn package(id: &str, name: &str, versions: Vec<serde_json::Value>) -> serde_json::Value {
-    json!({"id": id, "name": name, "summary": "Invented", "license": "CC0", "publisher": "Ada", "publisherKey": "0123456789abcdef", "tags": ["demo"], "versions": versions})
+    json!({"id": id, "name": name, "summary": "Invented", "license": "CC0", "publisher": "Quill", "publisherKey": "0123456789abcdef", "tags": ["demo"], "versions": versions})
 }
 
 /// A library whose engine has one repository with a Performance package, a plugin and a Sounds package.
@@ -62,7 +62,7 @@ fn the_repositories_are_read_by_jobs_and_listed() {
     r.c.scanned(BTreeMap::new());
     r.later_all();
     assert_eq!(labels(r.ui()), ["Dawn Pads  1.1.0"]);
-    assert_eq!(value_of(r.ui(), "Dawn Pads  1.1.0"), "Ada  ·  Invented");
+    assert_eq!(value_of(r.ui(), "Dawn Pads  1.1.0"), "Quill  ·  Invented");
     assert!(info(r.ui()).join(" ").contains("From Example."), "{:?}", info(r.ui()));
     r.c.show_page(1);
     assert_eq!(labels(r.ui()), ["Felt Keys  1.0.0"]);
@@ -142,7 +142,7 @@ fn the_catalog_is_searched() {
     catalog(&mut r, &[]);
     assert_eq!(r.c.bar_tools().iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Search"]);
     assert_eq!(r.tool("Search"), Outcome::Prompt("Search the Catalog by name, tag or publisher".into(), String::new()));
-    r.c.entered("pipe ada");
+    r.c.entered("pipe quill");
     assert_eq!(labels(r.ui()), ["Pipe Organ  1.0.0"]);
     r.tool("Search");
     r.c.entered("zzz");
@@ -161,11 +161,11 @@ fn what_is_installed_is_marked() {
     r.e.repo_packages[0].1.as_mut().unwrap().push(package("org.example.new", "Needs Update", vec![bad]));
     catalog(&mut r, &[("org.example.fuzz", "1.5.0")]);
     assert_eq!(labels(r.ui()), ["Dawn Pads  1.0.0", "Needs Update  3.0.0"]);
-    assert_eq!(value_of(r.ui(), "Dawn Pads  1.0.0"), "Update to 1.1.0  ·  Ada  ·  Invented");
+    assert_eq!(value_of(r.ui(), "Dawn Pads  1.0.0"), "Update to 1.1.0  ·  Quill  ·  Invented");
     assert_eq!(value_of(r.ui(), "Needs Update  3.0.0"), "Cannot be installed here: it needs a system update: Oscairn 9 or later");
     assert!(rows(r.ui())[1].off, "dimmed");
     r.c.show_page(2);
-    assert_eq!(value_of(r.ui(), "Fuzz Box  1.5.0"), "Update to 2.0.0  ·  Ada  ·  Invented", "built in at 1.5.0: its row says the version it has");
+    assert_eq!(value_of(r.ui(), "Fuzz Box  1.5.0"), "Update to 2.0.0  ·  Quill  ·  Invented", "built in at 1.5.0: its row says the version it has");
 }
 
 // A package's details: each fact a row, the download addresses, then Install (or Update to V, or the repository's build) and
@@ -178,7 +178,7 @@ fn a_package_is_installed_from_its_details() {
     assert_eq!(r.c.path(), ["Library", "Catalog", "Dawn Pads"]);
     let facts: Vec<(String, String)> = rows(r.ui()).iter().map(|x| (x.label.to_string(), x.value.to_string())).collect();
     assert_eq!(facts[..3], [("Install".to_string(), String::new()), ("Summary".to_string(), "Invented".to_string()), ("Version".to_string(), "1.1.0".to_string())], "what can be done comes first");
-    assert!(facts.contains(&("License".to_string(), "CC0".to_string())) && facts.contains(&("Publisher".to_string(), "Ada, key 0123 4567 89ab cdef".to_string())) && facts.contains(&("Repository".to_string(), "Example".to_string())));
+    assert!(facts.contains(&("License".to_string(), "CC0".to_string())) && facts.contains(&("Publisher".to_string(), "Quill, key 0123 4567 89ab cdef".to_string())) && facts.contains(&("Repository".to_string(), "Example".to_string())));
     assert!(facts.contains(&("Size".to_string(), "5.0 MB to download, 12.0 MB installed".to_string())) && facts.contains(&("Needs".to_string(), "Nothing else".to_string())));
     assert!(facts.contains(&("Download for another device".to_string(), String::new())) && facts.iter().any(|f| f.1 == "https://repo.example/exports/1.1.0.olib"));
     assert_eq!(facts.last().unwrap().0, "Back");
@@ -214,7 +214,7 @@ fn code_from_an_unknown_source_asks_first() {
     r.press_row("Install");
     r.later_all();
     let (title, message, choices) = r.c.take_notice().expect("the question");
-    assert_eq!(title, "Trust Ada to install plugins?");
+    assert_eq!(title, "Trust Quill to install plugins?");
     assert!(message.contains("Key fingerprint: 0123 4567 89ab cdef"), "{message}");
     assert_eq!(choices, ["Trust and install", "Cancel"]);
     assert_eq!(r.e.called("packages.install").len(), 1);
@@ -222,7 +222,7 @@ fn code_from_an_unknown_source_asks_first() {
     r.c.noticed(Some(0));
     r.settle();
     r.later_all();
-    assert_eq!(r.e.called("trust.set"), [json!({"key": "pub-key-bytes", "name": "Ada", "scope": ["plugins"], "revoked": false})]);
+    assert_eq!(r.e.called("trust.set"), [json!({"key": "pub-key-bytes", "name": "Quill", "scope": ["plugins"], "revoked": false})]);
     let installs = r.e.called("packages.install");
     assert_eq!(installs.len(), 2);
     assert_eq!(installs[1]["acceptUnsignedCode"], false);
@@ -280,7 +280,7 @@ fn a_different_build_is_replaced_only_when_asked() {
     let mut r = rig();
     r.e.installed_packages = vec![json!({"id": "org.example.pads", "version": "1.1.0", "kind": "library", "repository": "https://repo.example", "sha256": "other-build-sha-0123456789", "signers": ["1111222233334444"], "otherBuild": false, "withdrawn": null, "dependency": false})];
     catalog(&mut r, &[]);
-    assert_eq!(value_of(r.ui(), "Dawn Pads  1.1.0"), "Installed (a different build)  ·  Ada  ·  Invented");
+    assert_eq!(value_of(r.ui(), "Dawn Pads  1.1.0"), "Installed (a different build)  ·  Quill  ·  Invented");
     r.press_row("Dawn Pads  1.1.0");
     r.e.calls.clear();
     r.press_row("Install the repository's build");

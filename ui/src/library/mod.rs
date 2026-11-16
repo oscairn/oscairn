@@ -588,15 +588,24 @@ impl Screen {
             _ => {}
         }
         let mut lines = Vec::new();
-        if let (Mode::List, Some(item)) = (&self.mode, self.cursor_item().and_then(|i| self.items.get(i))) {
+        // The item the cursor is on; with the cursor on the filters row, the one chosen before, else the first: what the panel
+        // shows follows the cursor and moving it asks for nothing (looking is not an edit).
+        let shown = self.cursor_item().and_then(|i| self.items.get(i)).or_else(|| self.selected.as_ref().and_then(|s| self.items.iter().find(|i| i.id == *s))).or_else(|| self.items.first());
+        if let (Mode::List, Some(item)) = (&self.mode, shown) {
             lines.push(head(self.kind.singular()));
             lines.push(line(item.title().into()));
+            if item.favorite {
+                lines.push(line("\u{2605} Favorite".into()));
+            }
             if !item.tags.is_empty() {
                 lines.push(line(item.tags.join(", ")));
             }
             lines.extend(wrap(&item.description, INFO_WIDTH).into_iter().map(line));
             let from = if item.own() { "My own".to_string() } else { format!("Locked: {}", self.filters.source_name(&item.library, &self.libraries)) };
             lines.push(line(from));
+            if item.in_place {
+                lines.push(line("A folder indexed in place".into()));
+            }
             if !item.unfit.is_empty() {
                 lines.push(head("Does not fit this device"));
                 lines.extend(wrap(&item.unfit, INFO_WIDTH).into_iter().map(line));

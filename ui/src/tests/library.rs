@@ -200,3 +200,93 @@ fn the_kinds_are_tabs_and_clear_the_tags() {
     r.settle();
     assert_eq!(labels(r.ui()), ["Filters", "Friday Set"]);
 }
+
+/// Every name the Library's fixtures use for an item, a library, a package, a publisher or a signer: invented, none a person's
+/// or a company's (the repository is public). A new fixture name is added here on purpose.
+pub const INVENTED: &[&str] = &[
+    "An invented package with a summary long enough that it has to be cut",
+    "Big and bright",
+    "Brass Corner",
+    "Brass Hall",
+    "Bus A",
+    "Chorus",
+    "Dawn Pad",
+    "Dawn Pads",
+    "Dusk Lead With A Name Long Enough To Be Cut",
+    "Encore",
+    "Evening Strings",
+    "Fine",
+    "Friday Set",
+    "Friend Pack",
+    "Fuzz",
+    "Fuzz Box",
+    "Glass Choir",
+    "Hiss",
+    "Hollow Reed",
+    "Invented",
+    "Key ffffeeeeddddcccc",
+    "Lead",
+    "Lv",
+    "Old",
+    "Old Organ",
+    "One",
+    "Pad Synth",
+    "Page 1",
+    "Pebble",
+    "Quill",
+    "Quill Audio Works",
+    "Renamed",
+    "S",
+    "Set 1",
+    "Setlist",
+    "Sketch One",
+    "Soft Felt",
+    "Stage Pack",
+    "synth",
+    "Two",
+    "Verse",
+    "Warm Bass",
+    "x",
+    "",
+];
+
+// The names the Library's fixtures put in an item, a publisher, a signer, a package or a summary come from the invented list:
+// the sources of every Library test are read for them, so a real person's or company's name cannot come back without that
+// list being edited on purpose.
+#[test]
+fn fixture_names_come_from_the_invented_list() {
+    let sources = [
+        include_str!("library.rs"),
+        include_str!("library_catalog.rs"),
+        include_str!("library_fake.rs"),
+        include_str!("library_import.rs"),
+        include_str!("library_install.rs"),
+        include_str!("library_items.rs"),
+        include_str!("library_list.rs"),
+        include_str!("library_manage.rs"),
+        include_str!("library_open.rs"),
+        include_str!("library_setlist.rs"),
+        include_str!("library_shell.rs"),
+        include_str!("library_shots.rs"),
+        include_str!("real_engine/library.rs"),
+    ];
+    let mut seen = 0;
+    for source in sources {
+        for key in ["\"name\": \"", "\"publisher\": \"", "\"keyName\": \"", "\"summary\": \"", "\"description\": \""] {
+            for part in source.split(key).skip(1) {
+                let value = part.split('"').next().unwrap_or("");
+                seen += 1;
+                assert!(INVENTED.contains(&value), "{key}{value}\" is not in the invented list (tests/library.rs INVENTED)");
+            }
+        }
+        for part in source.split("stored(\"").skip(1) {
+            // stored("performance", "p1", "Evening Strings"): the third string.
+            let fields: Vec<&str> = part.splitn(7, '"').collect();
+            if fields.len() >= 6 && fields[1] == ", " && fields[3] == ", " {
+                seen += 1;
+                assert!(INVENTED.contains(&fields[4]), "stored(.., \"{}\") is not in the invented list", fields[4]);
+            }
+        }
+    }
+    assert!(seen > 20, "the fixtures were read: {seen}");
+}

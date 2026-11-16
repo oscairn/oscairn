@@ -130,7 +130,7 @@ impl Catalog {
     pub fn rows(&self) -> Vec<SettingData> {
         self.shown()
             .into_iter()
-            .map(|o| SettingData { label: format!("{}  {}", o.title(), o.installed.as_deref().filter(|_| o.installed.is_some()).unwrap_or(&o.version.version)).into(), value: catalog::describe(o).into(), kind: 2, off: !(o.installable || o.installed.is_some()), ..Default::default() })
+            .map(|o| SettingData { label: format!("{}  {}", o.title(), o.installed.as_deref().filter(|_| o.installed.is_some()).unwrap_or(&o.version.version)).into(), value: catalog::describe(o).into(), columns: ModelRc::new(VecModel::from(catalog::columns(o).into_iter().map(slint::SharedString::from).collect::<Vec<_>>())), kind: 2, off: !(o.installable || o.installed.is_some()), ..Default::default() })
             .collect()
     }
 

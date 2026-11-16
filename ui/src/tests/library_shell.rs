@@ -205,7 +205,7 @@ fn the_catalog_is_read_on_the_shell() {
     s.e.repos = vec![("https://repo.example".into(), "Example".into(), true)];
     s.e.repo_packages = vec![(
         "https://repo.example".into(),
-        Ok(vec![json!({"id": "org.example.pads", "name": "Dawn Pads", "summary": "Invented", "license": "CC0", "publisher": "Ada", "publisherKey": "0123456789abcdef", "tags": [],
+        Ok(vec![json!({"id": "org.example.pads", "name": "Dawn Pads", "summary": "Invented", "license": "CC0", "publisher": "Quill", "publisherKey": "0123456789abcdef", "tags": [],
             "versions": [{"version": "1.0.0", "channel": "stable", "yanked": "", "incompatible": "", "sha256": "aa", "size": 1000, "installed": 2000, "types": {"oscairn.performance": 2}, "dependencies": [], "withdrawn": null, "exports": []}]})]),
     )];
     let ui = s.ui();

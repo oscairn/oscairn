@@ -29,7 +29,7 @@ pub fn folder(name: &str) -> std::path::PathBuf {
 fn archive(kind: &str, items: &[(&str, &str, &str)], code: serde_json::Value) -> serde_json::Value {
     json!({"id": "friend-pack", "name": "Friend Pack", "kind": kind,
         "items": items.iter().map(|(k, id, name)| json!({"kind": k, "id": id, "name": name})).collect::<Vec<_>>(),
-        "code": code, "signer": {"kind": "archive", "name": "", "version": "", "platform": "", "status": "trusted", "key": "0123456789abcdef", "keyName": "Ada", "publicKey": ""},
+        "code": code, "signer": {"kind": "archive", "name": "", "version": "", "platform": "", "status": "trusted", "key": "0123456789abcdef", "keyName": "Quill", "publicKey": ""},
         "license": "CC0", "source": {"url": "https://example.org/pack", "revision": "v1"}})
 }
 
@@ -75,7 +75,7 @@ fn a_file_is_chosen_and_its_contents_asked_about() {
     let lines = info(r.ui());
     assert_eq!(lines[0], "Install Friend Pack");
     let text = lines.join(" ");
-    assert!(text.contains("Signed by Ada (0123 4567 89ab cdef), a key you trust"), "{text}");
+    assert!(text.contains("Signed by Quill (0123 4567 89ab cdef), a key you trust"), "{text}");
     assert!(text.contains("CC0") && text.contains("Source: https://example.org/pack at v1"), "{text}");
     // Everything ticked is all of it: an empty list.
     r.e.calls.clear();
@@ -136,8 +136,8 @@ fn code_from_an_unknown_source_is_warned_about() {
     let code = json!([
         {"kind": "clap", "name": "Fuzz", "version": "1.2", "platform": "linux-arm64", "status": "unknown", "key": "aaaabbbbccccdddd", "keyName": "", "publicKey": "pub"},
         {"kind": "clap", "name": "Hiss", "version": "0.1", "platform": "macos-arm64", "status": "unsigned", "key": "", "keyName": "", "publicKey": ""},
-        {"kind": "clap", "name": "Old", "version": "3", "platform": "linux-arm64", "status": "revoked", "key": "1111222233334444", "keyName": "Bob", "publicKey": "pub2"},
-        {"kind": "clap", "name": "Fine", "version": "1", "platform": "linux-arm64", "status": "trusted", "key": "9999888877776666", "keyName": "Ada", "publicKey": "pub3"}]);
+        {"kind": "clap", "name": "Old", "version": "3", "platform": "linux-arm64", "status": "revoked", "key": "1111222233334444", "keyName": "Pebble", "publicKey": "pub2"},
+        {"kind": "clap", "name": "Fine", "version": "1", "platform": "linux-arm64", "status": "trusted", "key": "9999888877776666", "keyName": "Quill", "publicKey": "pub3"}]);
     let mut r = Rig::new(library());
     r.e.archives = vec![(dir.join("synth.olib").display().to_string(), archive("plugin", &[], code))];
     open_chooser(&mut r, &dir);
@@ -149,7 +149,7 @@ fn code_from_an_unknown_source_is_warned_about() {
     assert!(text.contains("• Fuzz 1.2 (linux-arm64), signed by unknown key aaaabbbbccccdddd"), "{text}");
     assert!(text.contains("• Hiss 0.1 (macos-arm64), unsigned"), "{text}");
     assert!(text.contains("Signed by a revoked key, so not installed: • Old 3 (linux-arm64)"), "{text}");
-    assert!(text.contains("Old 3 (linux-arm64): Signed by Bob (1111 2222 3333 4444), which is revoked, not installed"), "{text}");
+    assert!(text.contains("Old 3 (linux-arm64): Signed by Pebble (1111 2222 3333 4444), which is revoked, not installed"), "{text}");
     assert!(!text.contains("• Fine"), "a trusted build is not warned about");
     assert_eq!(rows(r.ui()).len(), 2);
     r.e.calls.clear();

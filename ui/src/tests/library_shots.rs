@@ -144,11 +144,14 @@ fn pictures_of_the_library() {
             shell::goto(shell::Screen::Home);
             s.serve();
             // Not opened: the engine's refusal, said.
+            // (A name the search left on the screen still finds.)
+            s.e.items[1].name = "Velvet Refused 000".into();
             s.e.items[1].unfit = "needs 3 GB of memory".into();
             shell::goto(shell::Screen::Library);
             s.serve();
-            ui.global::<PartState>().invoke_tapped(2);
+            press(&mut s, "Velvet Refused 000");
             shoot(&mut s, "refused");
+            assert_eq!(super::library::footer(&ui).0, "Not opened: Velvet Refused 000 does not fit this device: needs 3 GB of memory", "the refusal is said under the list");
             shell::goto(shell::Screen::Home);
         }
     }
@@ -205,10 +208,10 @@ fn pictures_of_the_second_cut() {
     let code = json!([
         {"kind": "clap", "name": "Fuzz Box", "version": "1.2", "platform": "linux-arm64", "status": "unknown", "key": "aaaabbbbccccdddd", "keyName": "", "publicKey": "pub"},
         {"kind": "clap", "name": "Hiss", "version": "0.1", "platform": "macos-arm64", "status": "unsigned", "key": "", "keyName": "", "publicKey": ""},
-        {"kind": "clap", "name": "Old Organ", "version": "3.0", "platform": "linux-arm64", "status": "revoked", "key": "1111222233334444", "keyName": "Bob", "publicKey": "p2"}]);
+        {"kind": "clap", "name": "Old Organ", "version": "3.0", "platform": "linux-arm64", "status": "revoked", "key": "1111222233334444", "keyName": "Pebble", "publicKey": "p2"}]);
     let archive = json!({"id": "friend-pack", "name": "Friend Pack", "kind": "library", "items": [{"kind": "performance", "id": "x1", "name": "Dawn Pad"}, {"kind": "sound", "id": "x2", "name": "Warm Bass"}, {"kind": "performance", "id": "x3", "name": "Dusk Lead With A Name Long Enough To Be Cut"}],
-        "code": code, "signer": {"kind": "archive", "name": "", "version": "", "platform": "", "status": "unknown", "key": "0123456789abcdef", "keyName": "Ada", "publicKey": ""}, "license": "CC0-1.0", "source": {"url": "https://example.org/friend-pack", "revision": "v1.2.0"}});
-    let pkg = |id: &str, name: &str, types: serde_json::Value| json!({"id": id, "name": name, "summary": "An invented package with a summary long enough that it has to be cut", "license": "CC0", "publisher": "Ada Lovelace Audio", "publisherKey": "0123456789abcdef", "tags": ["demo"],
+        "code": code, "signer": {"kind": "archive", "name": "", "version": "", "platform": "", "status": "unknown", "key": "0123456789abcdef", "keyName": "Quill", "publicKey": ""}, "license": "CC0-1.0", "source": {"url": "https://example.org/friend-pack", "revision": "v1.2.0"}});
+    let pkg = |id: &str, name: &str, types: serde_json::Value| json!({"id": id, "name": name, "summary": "An invented package with a summary long enough that it has to be cut", "license": "CC0", "publisher": "Quill Audio Works", "publisherKey": "0123456789abcdef", "tags": ["demo"],
         "versions": [{"version": "1.2.0", "channel": "stable", "yanked": "", "incompatible": "", "sha256": "aabbccddeeff00112233", "size": 5242880, "installed": 12582912, "types": types, "dependencies": [{"id": "org.example.base", "version": "1.0"}], "withdrawn": null,
             "exports": [{"platform": "linux-arm64", "address": "https://repo.example/exports/a/1.2.0/a-1.2.0-linux-arm64.olib"}]}]});
     for (window, (w, h, scale), themes) in [("keyboard", (1280, 720, 1.55f32), vec!["dark", "odd", "joined"]), ("desktop", (1280, 720, 1.), vec!["dark"]), ("small", (800, 480, 1.), vec!["dark"])] {
@@ -286,4 +289,39 @@ fn pictures_of_the_second_cut() {
             shell::goto(shell::Screen::Home);
         }
     }
+}
+
+// A rail label too wide for the rail even at 70% of the type goes across two lines before it is cut: the Library's selected
+// tab reads "Performances" in two lines (the pixels of its fill read for lines of ink), and a short name stays in one.
+#[test]
+fn a_rail_label_that_does_not_fit_at_seventy_percent_wraps_to_two_lines() {
+    fit_to_window();
+    let mut s = Shelf::new("rail-wrap");
+    let ui = s.ui();
+    shell::library_in_rust(true);
+    s.f.screen.resize(1280, 720);
+    s.f.screen.set_scale(1.55);
+    theme::apply(&ui, &theme::chosen(&theme::Places::default(), "oscairn-dark", ""));
+    s.e.items = big(10);
+    shell::goto(shell::Screen::Home);
+    shell::goto(shell::Screen::Library);
+    serve_and_draw(&mut s, "library-rail-wrap");
+    let screen = &s.f.screen;
+    let theme = ui.global::<crate::Theme>();
+    let (on, ink) = (theme.get_tab_on(), theme.get_tab_on_ink());
+    let same = |p: slint::Rgb8Pixel, c: slint::Color| (p.r, p.g, p.b) == (c.red(), c.green(), c.blue());
+    let rail = (theme.get_rail_width() * 1.55) as usize;
+    // The selected tab's rows: where the fill is at the rail's left edge.
+    let rows: Vec<usize> = (0..screen.h).filter(|&y| same(screen.pixels[y * screen.w + 6], on)).collect();
+    assert!(rows.len() > 40, "the selected tab is in the rail: {} rows", rows.len());
+    let mut bands = 0;
+    let mut in_band = false;
+    for &y in &rows {
+        let has_ink = (0..rail).any(|x| same(screen.pixels[y * screen.w + x], ink));
+        if has_ink && !in_band {
+            bands += 1;
+        }
+        in_band = has_ink;
+    }
+    assert_eq!(bands, 2, "the selected tab's label is in two lines");
 }

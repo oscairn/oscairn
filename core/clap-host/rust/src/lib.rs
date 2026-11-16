@@ -35,20 +35,6 @@ unsafe fn arg<'a>(p: *const c_char) -> &'a str {
     unsafe { CStr::from_ptr(p) }.to_str().unwrap_or_default()
 }
 
-/// # Safety
-/// kind is null or writable.
-#[no_mangle]
-pub unsafe extern "C" fn rust_clap_error(kind: *mut c_int) -> *const c_char {
-    FAILURE.with(|f| {
-        let f = f.borrow();
-        if !kind.is_null() {
-            // SAFETY: the caller's.
-            unsafe { *kind = f.0 };
-        }
-        f.1.as_ptr() // lives in this thread's slot until its next failure, as clap_host.h says
-    })
-}
-
 /// kick::clap::inspect's part that loading uses: the binary's plugins, as its scan reads them.
 fn inspect(path: &str) -> Result<Vec<CString>, String> {
     let library = library::open(path)?;
@@ -80,13 +66,7 @@ fn inspect(path: &str) -> Result<Vec<CString>, String> {
 }
 
 /// What loading a CLAP plugin in this process did (clap_host_cpp.cpp's cpp_clap_new).
-///
-/// # Safety
-/// path and id are NUL-terminated.
-#[no_mangle]
-pub unsafe extern "C" fn rust_clap_new(path: *const c_char, id: *const c_char, rate: f64, frames: u32, offline: bool, memory_room: u64) -> *mut Host {
-    // SAFETY: the caller's.
-    let (path, id) = unsafe { (CStr::from_ptr(path).to_string_lossy().into_owned(), CStr::from_ptr(id)) };
+fn new(path: String, id: &CStr, rate: f64, frames: u32, offline: bool, memory_room: u64) -> *mut Host {
     let found = match inspect(&path) {
         Ok(ids) => ids.into_iter().find(|p| id.is_empty() || p.as_c_str() == id),
         Err(e) => return failed(e, null_mut()),
@@ -126,25 +106,10 @@ fn load(s: H, path: &str, id: &CStr, rate: f64, frames: u32) -> bool {
     s.failed.store(true, SeqCst);
     false
 }
-/// # Safety
-/// host is rust_clap_new's, freed once, on its main thread.
-#[no_mangle]
-pub unsafe extern "C" fn rust_clap_free(host: *mut Host) {
-    if host.is_null() {
-        return;
-    }
-    // SAFETY: the caller's.
-    let s = unsafe { H::new(host) };
-    let gate = host::Gate::new(&s.gate);
-    close(s);
-    drop(gate);
-    // SAFETY: the caller's: Host::create's, freed once, its last use.
-    drop(unsafe { Box::from_raw(host) });
-}
-
-// The rest, one by one: each the C++ reference's call (clap_host_cpp.cpp) on this host.
-macro_rules! host_fn {
-    ($(fn $name:ident($h:ident $(, $a:ident: $t:ty)*) -> $r:ty $body:block)*) => {$(
+/// clap_host.h's functions, one table: `fn` takes a live host first (made an H here), `raw fn` its arguments as given.
+macro_rules! exports {
+    () => {};
+    (fn $name:ident($h:ident $(, $a:ident: $t:ty)*) -> $r:ty $body:block $($rest:tt)*) => {
         /// # Safety
         /// host is a live rust_clap_new host, on the thread clap_host.h names for this call; pointers as it says.
         #[no_mangle]
@@ -153,9 +118,45 @@ macro_rules! host_fn {
             let $h = unsafe { H::new($h) };
             $body
         }
-    )*};
+        exports!($($rest)*);
+    };
+    (raw fn $name:ident($($a:ident: $t:ty),*) -> $r:ty $body:block $($rest:tt)*) => {
+        /// # Safety
+        /// The arguments as clap_host.h says.
+        #[no_mangle]
+        pub unsafe extern "C" fn $name($($a: $t),*) -> $r $body
+        exports!($($rest)*);
+    };
 }
-host_fn! {
+exports! {
+    raw fn rust_clap_error(kind: *mut c_int) -> *const c_char {
+        FAILURE.with(|f| {
+            let f = f.borrow();
+            if !kind.is_null() {
+                // SAFETY: the caller's.
+                unsafe { *kind = f.0 };
+            }
+            f.1.as_ptr() // lives in this thread's slot until its next failure, as clap_host.h says
+        })
+    }
+    raw fn rust_clap_new(path: *const c_char, id: *const c_char, rate: f64, frames: u32, offline: bool, memory_room: u64) -> *mut Host {
+        // SAFETY: the caller's NUL-terminated strings.
+        let (path, id) = unsafe { (CStr::from_ptr(path).to_string_lossy().into_owned(), CStr::from_ptr(id)) };
+        new(path, id, rate, frames, offline, memory_room)
+    }
+    raw fn rust_clap_free(host: *mut Host) -> () {
+        if host.is_null() {
+            return;
+        }
+        // SAFETY: the caller's: rust_clap_new's, freed once, on its main thread.
+        let s = unsafe { H::new(host) };
+        let gate = host::Gate::new(&s.gate);
+        close(s);
+        drop(gate);
+        // SAFETY: as above: Host::create's, its last use.
+        drop(unsafe { Box::from_raw(host) });
+    }
+    // The rest, one by one: each the C++ reference's call (clap_host_cpp.cpp) on this host.
     fn rust_clap_revision(h) -> u64 { h.metadata_version.get() }
     fn rust_clap_note_input_ports(h) -> u32 { h.note_inputs.with(|v| v.len()) as u32 }
     fn rust_clap_note_output_ports(h) -> u32 { h.note_outputs.with(|v| v.len()) as u32 }
@@ -285,77 +286,69 @@ host_fn! {
         // SAFETY: the caller's.
         unsafe { voice_report(&h, &mut *cost, &mut *notes, &mut *count) }
     }
-}
-
-/// rust_clap_describe: the descriptor, its lists, the ports and the parameters, one by one.
-///
-/// # Safety
-/// As host_fn's; to's callbacks callable.
-#[no_mangle]
-pub unsafe extern "C" fn rust_clap_describe(h: *mut Host, to: *const oscairn_clap_description) {
-    // SAFETY: the caller's.
-    let (h, to) = unsafe { (H::new(h), &*to) };
-    let c = to.context;
-    // The caller's callbacks copy what they are given and do not reach the host, so the fields are lent to them.
-    // SAFETY: (each callback): the caller's, given values alive for the call.
-    h.info.with(|d| unsafe {
-        let descriptor = oscairn_clap_descriptor {
-            path: d.path.as_ptr(),
-            id: d.id.as_ptr(),
-            name: d.name.as_ptr(),
-            vendor: d.vendor.as_ptr(),
-            version: d.version.as_ptr(),
-            description: d.description.as_ptr(),
-            preset_discovery: false, // as Host::load's describe leaves it
-        };
-        to.descriptor.unwrap()(c, &descriptor);
-        for f in &d.features {
-            to.feature.unwrap()(c, f.as_ptr());
+    // The descriptor, its lists, the ports and the parameters, one by one.
+    fn rust_clap_describe(h, to: *const oscairn_clap_description) -> () {
+        // SAFETY: the caller's description, its callbacks callable.
+        let to = unsafe { &*to };
+        let c = to.context;
+        // The caller's callbacks copy what they are given and do not reach the host, so the fields are lent to them.
+        // SAFETY: (each callback): the caller's, given values alive for the call.
+        h.info.with(|d| unsafe {
+            let descriptor = oscairn_clap_descriptor {
+                path: d.path.as_ptr(),
+                id: d.id.as_ptr(),
+                name: d.name.as_ptr(),
+                vendor: d.vendor.as_ptr(),
+                version: d.version.as_ptr(),
+                description: d.description.as_ptr(),
+                preset_discovery: false, // as Host::load's describe leaves it
+            };
+            to.descriptor.unwrap()(c, &descriptor);
+            for f in &d.features {
+                to.feature.unwrap()(c, f.as_ptr());
+            }
+            for (number, name) in &d.lanes {
+                to.lane.unwrap()(c, *number, name.as_ptr());
+            }
+        });
+        for (input, ports) in [(true, &h.inputs), (false, &h.outputs)] {
+            // SAFETY: as above.
+            ports.with(|ports| unsafe {
+                for p in ports {
+                    let port = oscairn_clap_port { id: p.id, name: p.name.as_ptr(), channels: p.channels, flags: p.flags };
+                    to.port.unwrap()(c, input, &port);
+                }
+            });
         }
-        for (number, name) in &d.lanes {
-            to.lane.unwrap()(c, *number, name.as_ptr());
-        }
-    });
-    for (input, ports) in [(true, &h.inputs), (false, &h.outputs)] {
         // SAFETY: as above.
-        ports.with(|ports| unsafe {
-            for p in ports {
-                let port = oscairn_clap_port { id: p.id, name: p.name.as_ptr(), channels: p.channels, flags: p.flags };
-                to.port.unwrap()(c, input, &port);
+        h.param_info.with(|params| unsafe {
+            for p in params {
+                let q = oscairn_clap_parameter {
+                    id: p.id,
+                    name: p.name.as_ptr(),
+                    module: p.module.as_ptr(),
+                    minimum: p.minimum,
+                    maximum: p.maximum,
+                    default_value: p.default_value,
+                    flags: p.flags,
+                    widget: p.widget,
+                    priority: p.priority,
+                    range_high: p.range_high,
+                    group: p.group,
+                    role: p.role,
+                    view: p.view,
+                    field: p.field,
+                    index: p.index,
+                    algorithms: p.algorithms.as_ptr(),
+                    algorithm_count: p.algorithms.len() as u32,
+                    seconds: p.seconds.as_ptr(),
+                    second_count: p.seconds.len() as u32,
+                };
+                to.parameter.unwrap()(c, &q);
             }
         });
     }
-    // SAFETY: as above.
-    h.param_info.with(|params| unsafe {
-        for p in params {
-            let q = oscairn_clap_parameter {
-                id: p.id,
-                name: p.name.as_ptr(),
-                module: p.module.as_ptr(),
-                minimum: p.minimum,
-                maximum: p.maximum,
-                default_value: p.default_value,
-                flags: p.flags,
-                widget: p.widget,
-                priority: p.priority,
-                range_high: p.range_high,
-                group: p.group,
-                role: p.role,
-                view: p.view,
-                field: p.field,
-                index: p.index,
-                algorithms: p.algorithms.as_ptr(),
-                algorithm_count: p.algorithms.len() as u32,
-                seconds: p.seconds.as_ptr(),
-                second_count: p.seconds.len() as u32,
-            };
-            to.parameter.unwrap()(c, &q);
-        }
-    });
-}
-
-// The control calls of the rest of the host (more.rs), each as clap_host_cpp.cpp's.
-host_fn! {
+    // The control calls of the rest of the host (more.rs), each as clap_host_cpp.cpp's.
     fn rust_clap_save_state(h, directory: *const c_char) -> bool {
         // SAFETY: the caller's NUL-terminated path.
         more::save_state_files(h, unsafe { arg(directory) }).map_or_else(|e| fail_with(e, false), |()| true)
@@ -416,18 +409,9 @@ host_fn! {
         for v in more::sound_values(&h, id) { unsafe { each.unwrap()(context, &v) } }
         true
     }
-}
-
-/// An effect context made from a loaded instance (cpp_clap_effect_context).
-///
-/// # Safety
-/// As host_fn's.
-#[no_mangle]
-pub unsafe extern "C" fn rust_clap_effect_context(source: *mut Host) -> *mut Host {
-    // SAFETY: the caller's.
-    match more::effect_context(unsafe { H::new(source) }) {
-        Ok(h) => h.ptr(),
-        Err(e) => fail_with(e, null_mut()),
+    // An effect context made from a loaded instance (cpp_clap_effect_context).
+    fn rust_clap_effect_context(h) -> *mut Host {
+        match more::effect_context(h) { Ok(context) => context.ptr(), Err(e) => fail_with(e, null_mut()) }
     }
 }
 

@@ -128,7 +128,7 @@ pub fn load_state(s: H, bytes: Vec<u8>) -> bool {
         return false;
     }
     drain_commands(&s);
-    s.carry_count.set(0);
+    s.carry_count.store(0, Relaxed);
     if let Err(e) = activate(s) {
         fail(&s, format!("Plugin state restoration failed: {e}"));
         return false;
@@ -501,10 +501,10 @@ fn flush_commands(s: H) {
                 chunk[n] = translate_event(&s, e);
                 n += 1;
             }
-        } else if (s.carry_count.get() as usize) < MAX_BLOCK_EVENTS {
-            let at = s.carry_count.get();
+        } else if (s.carry_count.load(Relaxed) as usize) < MAX_BLOCK_EVENTS {
+            let at = s.carry_count.load(Relaxed);
             s.carry_events.with(|c| c[at as usize] = e);
-            s.carry_count.set(at + 1);
+            s.carry_count.store(at + 1, Relaxed);
         } else {
             s.panic.store(true, SeqCst);
             s.dropped.fetch_add(1, SeqCst);

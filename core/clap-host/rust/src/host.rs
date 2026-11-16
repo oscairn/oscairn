@@ -42,7 +42,7 @@ use std::cell::{Cell, UnsafeCell};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ops::Deref;
 use std::ptr::{null, null_mut, NonNull};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::*};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering::*};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -190,7 +190,7 @@ impl Deref for H {
         // the gate and read by the gate's holder (the main thread, or the audio thread inside process()) and by the main
         // thread; the audio thread's, which the main thread touches only holding the gate while the plugin is not
         // processing. An Owned lends its field only to a closure that does not call into the plugin, the one way this
-        // thread can reach the same field again. The reads outside these groups are Owned::racy, each saying why.
+        // thread can reach the same field again. The one read outside these groups is Owned::racy, saying why.
         unsafe { self.0.as_ref() }
     }
 }
@@ -470,12 +470,12 @@ pub struct Host {
     last_harmony: Owned<oscairn_harmony_t>,
     have_harmony: Owned<bool>,
     transport: Owned<TransportWatch>,
-    // Set by the worker's control thread (mirror_wake) and read by any thread that wakes the plugin: racy, see there.
-    wake_mirror: Owned<*const AtomicU32>,
+    // Set by the worker's control thread (mirror_wake) and read by any thread that wakes the plugin.
+    wake_mirror: AtomicPtr<AtomicU32>,
     ordered: Owned<Box<[Timed; RENDER_EVENTS]>>,
     chunk_events: Owned<Box<[Event; RENDER_EVENTS]>>,
     pub carry_events: Owned<Box<[Event; MAX_BLOCK_EVENTS]>>,
-    pub carry_count: Owned<u32>, // also read by restful(), racy: see there
+    pub carry_count: AtomicU32, // written under the gate, read by restful() without: see there
     pub block_output: Owned<Box<[Event; MAX_BLOCK_EVENTS]>>,
     block_output_count: Owned<u32>,
     pub published_output_count: Owned<u32>,
@@ -634,9 +634,7 @@ pub fn main(s: &Host) -> bool {
     if s.main_thread.get() == Some(me) {
         return true;
     }
-    // SAFETY: NOT kept by the groups: a control call on another thread breaks clap_host.h's contract (and H::new's),
-    // and its message races with the main thread's, as in Host.cpp's main(); within the contract this line is not reached.
-    unsafe { *s.message.as_ptr() = "CLAP control operation must run on its main thread".into() };
+    s.errors.fetch_add(1, SeqCst); // the text is not written here: this is not the main thread, and message is its own
     false
 }
 fn is_main_of(s: &Host) -> bool {
@@ -675,10 +673,9 @@ unsafe extern "C" fn request_flush(h: *const clap_host) {
 }
 pub fn wake_up(s: &Host) {
     s.wake.store(true, SeqCst);
-    // SAFETY: NOT kept by the groups (mirror_wake says why, as Host.cpp's plain pointer); the mirror outlives its setting (Host.h).
-    let mirror = unsafe { s.wake_mirror.racy() };
+    let mirror = s.wake_mirror.load(SeqCst);
     if !mirror.is_null() {
-        // SAFETY: as above.
+        // SAFETY: the mirror outlives its setting (Host.h).
         unsafe { (*mirror).store(1, Release) };
     }
 }
@@ -1231,7 +1228,7 @@ pub fn close(s: H) {
     s.latency_frames.store(0, SeqCst);
     s.steady_time.set(0);
     s.transport.with(TransportWatch::reset);
-    s.carry_count.set(0);
+    s.carry_count.store(0, Relaxed);
     s.metadata_version.set(s.metadata_version.get() + 1);
 }
 
@@ -2427,9 +2424,10 @@ pub fn voice_report(s: &Host, cost: &mut f64, notes: &mut *const oscairn_voice_b
 }
 /// The audio thread's, between blocks.
 pub fn restful(s: &Host) -> bool {
-    // SAFETY: NOT kept by the groups: carry_count is the gate holder's, and this read holds no gate, so it races with a
-    // loadState or a save's flush on the main thread (which write it under the gate), as Host::restful reads carryCount.
-    s.sleeping.load(SeqCst) && !s.wake.load(SeqCst) && !s.flush.load(SeqCst) && !s.panic.load(SeqCst) && unsafe { s.carry_count.racy() } == 0
+    // carry_count is written under the gate and read here without. A stale read is harmless: 0 where events were just carried
+    // rests the worker for one more block (they wait in carry_events for the block that runs), and more than 0 where they
+    // were just cleared keeps it awake one more block. Never dropped.
+    s.sleeping.load(SeqCst) && !s.wake.load(SeqCst) && !s.flush.load(SeqCst) && !s.panic.load(SeqCst) && s.carry_count.load(Relaxed) == 0
 }
 /// The audio thread's, between blocks.
 pub fn rested(s: &Host, frames: u32, blocks: u32) {
@@ -2439,10 +2437,7 @@ pub fn rested(s: &Host, frames: u32, blocks: u32) {
 /// # Safety
 /// mirror outlives its setting, or is null.
 pub unsafe fn mirror_wake(s: &Host, mirror: *const AtomicU32) {
-    // SAFETY: NOT kept by the groups: the worker sets the mirror from its control thread once the engine may already
-    // process the node (Worker.cpp), while the audio thread and the plugin's request_process read it (wake_up, render),
-    // a plain pointer as in Host.cpp. Reported, not changed here.
-    unsafe { *s.wake_mirror.as_ptr() = mirror };
+    s.wake_mirror.store(mirror.cast_mut(), SeqCst);
     if !mirror.is_null() {
         // SAFETY: the caller's.
         unsafe { (*mirror).store(u32::from(s.wake.load(SeqCst)), SeqCst) };
@@ -2677,10 +2672,10 @@ unsafe fn render(
         }
     }
     let mut c = Collect { total: 0, harmony_came: false, timing: 0, harmony_new: false };
-    for i in 0..s.carry_count.get() as usize {
+    for i in 0..s.carry_count.load(Relaxed) as usize {
         append(s, &mut c, frames, s.carry_events.with(|e| e[i]));
     }
-    s.carry_count.set(0);
+    s.carry_count.store(0, Relaxed);
     let direct = (count as usize).min(MAX_PROCESS_EVENTS);
     while (*acknowledged as usize) < MAX_BLOCK_EVENTS {
         let Some(e) = s.commands.pop() else { break };
@@ -2757,10 +2752,9 @@ unsafe fn render(
     }
     s.wake.store(false, SeqCst);
     s.sleeping.store(false, SeqCst);
-    // SAFETY: NOT kept by the groups (mirror_wake says why); the mirror outlives its setting.
-    let mirror = unsafe { s.wake_mirror.racy() };
+    let mirror = s.wake_mirror.load(SeqCst);
     if !mirror.is_null() {
-        // SAFETY: as above.
+        // SAFETY: the mirror outlives its setting (Host.h).
         unsafe { (*mirror).store(0, Release) };
     }
     if !s.processing.load(SeqCst) {

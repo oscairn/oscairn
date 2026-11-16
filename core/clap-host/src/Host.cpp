@@ -297,8 +297,8 @@ struct Host::Impl {
     std::atomic<bool> processing{false}; // read by service() without the gate
     std::atomic<uint32_t> pendingCommands{0}; // enqueued but not yet delivered to the plugin
     TransportWatch transport;
-    std::atomic<uint32_t>* wakeMirror = nullptr; // see Host::mirrorWake
-    void wakeUp() noexcept { wake.store(true); if (wakeMirror) wakeMirror->store(1, std::memory_order_release); }
+    std::atomic<std::atomic<uint32_t>*> wakeMirror{nullptr}; // see Host::mirrorWake; set by the worker's control thread, read by any thread that wakes the plugin
+    void wakeUp() noexcept { wake.store(true); if (auto* mirror = wakeMirror.load()) mirror->store(1, std::memory_order_release); }
     std::atomic_flag gate = ATOMIC_FLAG_INIT;
     std::atomic<bool> loaded{false}, failed{false}, dirty{false};
     std::atomic<uint64_t> parameterReports{0};
@@ -315,7 +315,10 @@ struct Host::Impl {
     std::array<TimedEvent, renderEvents> ordered;
     std::array<Event, renderEvents> chunkEvents;
     std::array<Event, maxBlockEvents> carryEvents;
-    uint32_t carryCount = 0;
+    // Written under the gate; restful() reads it without. A stale read is harmless: 0 where events were just carried
+    // rests the worker for one more block (they wait in carryEvents for the block that runs), and more than 0 where
+    // they were just cleared keeps it awake one more block. Never dropped.
+    std::atomic<uint32_t> carryCount{0};
     // Non-parameter output of the current process() call, collected only while
     // inProcess is set and published to the caller when the call returns.
     std::array<Event, maxBlockEvents> blockOutput;
@@ -348,7 +351,7 @@ struct Host::Impl {
     bool main() {
         if (mainThread == std::thread::id{}) mainThread = std::this_thread::get_id();
         if (mainThread == std::this_thread::get_id()) return true;
-        message = "CLAP control operation must run on its main thread";
+        errors.fetch_add(1); // the text is not written here: this is not the main thread, and message is its own
         return false;
     }
     static bool CLAP_ABI isMain(const clap_host_t* h) { return self(h).mainThread == std::this_thread::get_id(); }
@@ -639,7 +642,7 @@ struct Host::Impl {
         wake.store(false); flush.store(false); panic.store(false); rescan.store(0); latencyFrames.store(0);
         steadyTime = 0;
         transport.reset();
-        carryCount = 0;
+        carryCount.store(0, std::memory_order_relaxed);
         ++metadataVersion;
     }
     void initialize(double sampleRate,uint32_t frames,const std::vector<uint8_t>& bytes) {
@@ -1214,7 +1217,7 @@ bool Host::saveState(std::vector<uint8_t>& destination) {
             if (type == CLAP_EVENT_PARAM_VALUE || type == CLAP_EVENT_PARAM_GESTURE_BEGIN || type == CLAP_EVENT_PARAM_GESTURE_END)
                 if (s.chunkCount < maxBlockEvents) s.chunkEvents[s.chunkCount++] = s.translate(e);
             if (type != CLAP_EVENT_PARAM_VALUE && type != CLAP_EVENT_PARAM_GESTURE_BEGIN && type != CLAP_EVENT_PARAM_GESTURE_END) {
-                if (s.carryCount < maxBlockEvents) s.carryEvents[s.carryCount++] = e;
+                if (const auto count = s.carryCount.load(std::memory_order_relaxed); count < maxBlockEvents) { s.carryEvents[count] = e; s.carryCount.store(count + 1, std::memory_order_relaxed); }
                 else { s.panic.store(true); s.dropped.fetch_add(1); }
             }
         }
@@ -1241,7 +1244,7 @@ bool Host::loadState(const std::vector<uint8_t>& bytes) {
             s.activate(); s.message = "Plugin rejected state" + (s.lastLoggedError.empty() ? std::string() : ": " + s.lastLoggedError); return false;
         }
         Event e; while (s.commands.pop(e)) s.pendingCommands.fetch_sub(1);
-        s.carryCount = 0;
+        s.carryCount.store(0, std::memory_order_relaxed);
         s.activate(); s.dirty.store(false); s.failed.store(false); return true;
     } catch (const std::exception& e) { s.fail(std::string("Plugin state restoration failed: ") + e.what()); return false; }
       catch (...) { s.fail("Plugin state restoration failed"); return false; }
@@ -1374,10 +1377,10 @@ bool TransportWatch::changed(const clap_event_transport_t* current, uint32_t fra
 bool Host::asleep() const noexcept { return impl->sleeping; }
 bool Host::restful() const noexcept {
     const auto& s = *impl;
-    return s.sleeping && !s.wake.load() && !s.flush.load() && !s.panic.load() && !s.carryCount;
+    return s.sleeping && !s.wake.load() && !s.flush.load() && !s.panic.load() && !s.carryCount.load(std::memory_order_relaxed);
 }
 void Host::rested(uint32_t frames, uint32_t blocks) noexcept { impl->steadyTime += frames; impl->idleBlocks.fetch_add(blocks); }
-void Host::mirrorWake(std::atomic<uint32_t>* mirror) noexcept { impl->wakeMirror = mirror; if (mirror) mirror->store(impl->wake.load() ? 1 : 0); }
+void Host::mirrorWake(std::atomic<uint32_t>* mirror) noexcept { impl->wakeMirror.store(mirror); if (mirror) mirror->store(impl->wake.load() ? 1 : 0); }
 bool Host::wasReset() const noexcept { return impl->resetInProcess; }
 Statistics Host::statistics() const noexcept { auto& s = *impl; Statistics r{s.blocks.load(), s.dropped.load(), s.errors.load(), s.lastUs.load(), s.maxUs.load(), s.deadlineMisses.load(), s.controlSilences.load(), s.idleBlocks.load()}; r.cpuMicroseconds = s.totalUs.load(); return r; }
 bool Host::enqueue(const Event& e) noexcept {
@@ -1470,8 +1473,8 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
             } else deliver(e);
         };
         Event event;
-        for (uint32_t i = 0; i < s.carryCount; ++i) append(s.carryEvents[i]);
-        s.carryCount = 0;
+        for (uint32_t i = 0, n = s.carryCount.load(std::memory_order_relaxed); i < n; ++i) append(s.carryEvents[i]);
+        s.carryCount.store(0, std::memory_order_relaxed);
         const uint32_t direct = std::min(count, maxProcessEvents);
         while (acknowledged.count < maxBlockEvents && s.commands.pop(event)) { ++acknowledged.count; append(event); }
         for (uint32_t i = 0; i < direct; ++i) append(incoming[i]);
@@ -1500,7 +1503,7 @@ bool Host::process(const float* const* input, uint32_t ni, float* const* output,
         // The beat and a harmony change alone wake no plugin asleep: they come with the block that does (the beat's
         // tempo changes only with the transport, which wakes it); a harmony held back here is sent again then.
         if (s.sleeping && total == timing && !hasInput && !transportWake && !s.wake.exchange(false) && !s.flush.load()) { if (harmonyNew) s.haveHarmony = false; s.idleBlocks.fetch_add(1); s.steadyTime += frames; silence(); return true; }
-        s.wake.store(false); s.sleeping = false; if (s.wakeMirror) s.wakeMirror->store(0, std::memory_order_release);
+        s.wake.store(false); s.sleeping = false; if (auto* mirror = s.wakeMirror.load()) mirror->store(0, std::memory_order_release);
         if (!s.processing) {
             if (!s.plugin->start_processing(s.plugin)) { s.failed.store(true); s.errors.fetch_add(1); silence(); return false; }
             s.processing = true;

@@ -199,6 +199,10 @@ pub struct App {
     /// stop 0 when shown, then each action): None while the screen has the cursor.
     bar_list: Vec<(topbar::Do, String, bool)>,
     bar_at: Option<usize>,
+    /// The bar is too narrow for its actions and shows one "More", a menu of them (`Bar.more`).
+    bar_more: bool,
+    /// The menu open is the bar's "More": a choice is an action of `bar_list`.
+    bar_menu: bool,
     bar_rows: Rc<VecModel<BarAction>>,
     /// Clears what the last action said.
     notice: slint::Timer,
@@ -256,6 +260,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     let bar_rows = Rc::new(VecModel::<BarAction>::default());
     ui.global::<Bar>().set_actions(bar_rows.clone().into());
     ui.global::<Bar>().on_action(|i| with_app(|a| a.bar_tap(i.max(0) as usize)));
+    ui.global::<Bar>().on_more_tapped(|| with_app(|a| a.bar_tap(0)));
+    ui.global::<Bar>().on_more_changed(|| with_app(|a| a.show_bar()));
     ui.global::<Bar>().on_pill_tapped(|| with_app(|a| a.bar_pill()));
     ui.on_key(|text| key(&text));
     ui.on_key_released(|text| {
@@ -429,6 +435,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             history: topbar::History::default(),
             bar_list: vec![],
             bar_at: None,
+            bar_more: false,
+            bar_menu: false,
             bar_rows,
             notice: slint::Timer::default(),
             saving: None,
@@ -944,25 +952,41 @@ impl App {
     }
 
     /// The stops the top bar's cursor visits: the Performance's name (Save As New) when shown,
-    /// then each action.
+    /// then each action, or "More" alone when the bar folds them into it.
     fn bar_stops(&self) -> usize {
-        usize::from(!self.shown.performance.is_empty()) + self.bar_list.len()
+        usize::from(!self.shown.performance.is_empty()) + if self.bar_more { 1.min(self.bar_list.len()) } else { self.bar_list.len() }
     }
 
     /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
     fn show_bar(&mut self) {
         let learn = (self.screen == Screen::Play && self.play.can_learn()).then(|| self.play.learning());
         self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing), learn)) } else { vec![] };
+        let Some(ui) = self.ui() else { return };
+        self.bar_more = ui.global::<Bar>().get_more() && !self.bar_list.is_empty();
         if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
             self.bar_at = None;
         }
-        let Some(ui) = self.ui() else { return };
         let pill = usize::from(!self.shown.performance.is_empty());
-        let rows: Vec<BarAction> =
-            self.bar_list.iter().enumerate().map(|(i, (_, label, enabled))| BarAction { label: label.as_str().into(), enabled: *enabled, cursor: self.bar_at == Some(i + pill) }).collect();
+        let more = self.bar_more;
+        let rows: Vec<BarAction> = self
+            .bar_list
+            .iter()
+            .enumerate()
+            .map(|(i, (what, label, enabled))| BarAction {
+                label: label.as_str().into(),
+                enabled: *enabled,
+                cursor: !more && self.bar_at == Some(i + pill),
+                icon: match what {
+                    topbar::Do::Undo => 1,
+                    topbar::Do::Redo => 2,
+                    _ => 0,
+                },
+            })
+            .collect();
         crate::setlist::update(&self.bar_rows, rows);
         ui.global::<crate::Theme>().set_bar_cursor(self.bar_at.is_some());
         let bar = ui.global::<Bar>();
+        bar.set_more_cursor(more && self.bar_at == Some(pill));
         let on_pill = pill == 1 && self.bar_at == Some(0);
         if bar.get_pill_cursor() != on_pill {
             bar.set_pill_cursor(on_pill);
@@ -975,10 +999,21 @@ impl App {
         if stop < pill {
             return self.save(true);
         }
+        if self.bar_more {
+            // "More" is the one stop: a menu of the actions, those that cannot be done now dimmed.
+            let items = self.bar_list.iter().enumerate().map(|(i, (_, label, enabled))| menu::Item { enabled: *enabled, ..menu::Item::choice(label.as_str(), i) }).collect();
+            self.bar_menu = true;
+            return self.open_menu(self.screen, "More", items);
+        }
         let Some((what, _, enabled)) = self.bar_list.get(stop - pill).cloned() else { return };
         if !enabled {
             return;
         }
+        self.bar_run(what);
+    }
+
+    /// Does an action of the top bar.
+    fn bar_run(&mut self, what: topbar::Do) {
         match what {
             topbar::Do::Undo => self.send(Request::History, "edit.undo", json!({})),
             topbar::Do::Redo => self.send(Request::History, "edit.redo", json!({})),
@@ -1247,6 +1282,7 @@ impl App {
     }
 
     fn close_menu(&mut self) {
+        self.bar_menu = false;
         if let Some((_, mut m)) = self.menu.take() {
             m.close();
         }
@@ -1284,6 +1320,13 @@ impl App {
         match outcome {
             Some(menu::Outcome::Choose(id)) => {
                 let screen = self.menu.take().map(|(s, _)| s);
+                if std::mem::take(&mut self.bar_menu) {
+                    if let Some((what, _, true)) = self.bar_list.get(id).cloned() {
+                        self.bar_run(what);
+                    }
+                    self.show_bar();
+                    return;
+                }
                 if screen == Some(Screen::Controls) {
                     self.on_controls(|c| c.chosen(id));
                 }
@@ -1294,7 +1337,10 @@ impl App {
                     self.on_chain(|c| c.chosen(id));
                 }
             }
-            Some(menu::Outcome::Close) => self.menu = None,
+            Some(menu::Outcome::Close) => {
+                self.menu = None;
+                self.bar_menu = false;
+            }
             _ => {}
         }
     }

@@ -321,3 +321,12 @@ and the parameter pages; the Parts work's `Theme.bar-cursor` stays): 208 tests a
   logical px high at that size, drawn at scale 1 (names 13 px, details 13 px), 1068 px wide in a canvas of 798. Tests: the pixel
   test now scrolls the drawing in steps and measures every wire end while in view; a new test checks the cursor's place is whole in the view at each
   dial step and a drag of 120 px moves it 40 or more, at 826x465 and 800x480.
+
+- Top bar at narrow widths (the overflow noted above is fixed). The rule, in order (slint/topbar.slint, tests/bar.rs): Undo and Redo to icons, then all
+  actions into one "More" (a menu; one stop for the cursor; `Bar.more` read by the shell) while the Performance's name keeps 16 small-type heights;
+  then the name's room down to 9 (text 70% then cut: `FitText`); then the meters' names, then half their bars; last "disk slow" becomes "slow". The
+  recording mark and the tempo always stay. Seen in the pictures (ui/target/theme-shots/bar-narrow-*): at 826 across (the keyboard's) and 800 the six
+  Play actions are folded into More and the name is 200 to 312 wide (226 to 312 at 826); at 640 the name is 126 to 144 wide (least 117), and with a slow
+  disk the meters have no names and short bars and the mark says "slow"; at 1280 across at scale 1 everything shows. Measured by the test in every built-in theme and the tight odd one at 826, 800, 640 and 1280 across, with and without a slow
+  disk: the meters end inside the bar, the name has at least its least, the mark fits between the name and the tempo. NOT held in the roomy odd
+  theme (type 1.39, spacing 1.6) below 1200 across: its fixed parts alone are wider (the meters end at 839 of 826 with a slow disk).

@@ -70,7 +70,13 @@ fn only_one_cursor_shows_the_bars_or_the_screens() {
     let (top, below) = (focus_pixels(&f.screen, 0, 48), focus_pixels(&f.screen, 48, f.screen.h));
     assert!(below > 0 && top == 0, "the strip's again: {top} in the bar, {below} below");
     // The Parts list, a cell with the cursor, then the bar's.
-    ui.global::<crate::Bar>().invoke_action(bar as i32 - 1);
+    // The roomy theme's type folds the actions into "More" at this width: Edit is the last row of its menu.
+    if ui.global::<crate::Bar>().get_more() {
+        ui.global::<crate::Bar>().invoke_more_tapped();
+        ui.global::<crate::MenuState>().invoke_tapped(bar as i32 - 1);
+    } else {
+        ui.global::<crate::Bar>().invoke_action(bar as i32 - 1);
+    }
     assert_eq!(ui.get_screen(), 9);
     shell::act(Action::Move { pane: Some(0), by: 1 });
     f.screen.frame();

@@ -170,6 +170,15 @@ scene (`performance.info`, `graph.get`, asked again on each `graph.changed`), th
 (`transport.get`) and the resource section. Everything right of the Performance has a fixed
 width, so a changing figure never moves anything.
 
+A narrow bar gives up, in this order, only as much as it must (`slint/topbar.slint`: the widths of the items are
+measured, the stage is chosen by what the Performance's name would be left with): the actions' words (Undo and Redo
+become icons, then all the actions fold into one "More", a menu of them: the cursor's one stop, a press or a tap
+opens it, a disabled action cannot be chosen) while the name keeps 16 small-type heights of room; then the name's
+room goes down to 9 (its text shrinks to 70%, then is cut); then the meters lose their names (CPU, RAM), then half
+their bars' length; last, a slow disk's "disk slow" is shortened to "slow". The recording mark and the tempo are never
+dropped. In the roomy odd test theme (type 1.39, spacing 1.6) the parts that never give way are wider than 640 or 826
+with a slow disk: it overflows there (tested only from 1200 across).
+
 A take recording (the hardware REC button, or any app's) shows between the Performance and the
 tempo on every screen: a dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger
 color (once: Play has no mark of its own). It is what the JUCE record buttons show (`RecordButtons`), read as

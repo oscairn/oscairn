@@ -144,7 +144,7 @@ fn the_bar_draws_in_every_theme_and_at_a_narrow_width() {
     for (w, h) in [(1280, 720), (800, 480)] {
         let mut s = Screen::sized(w, h);
         let bar = s.ui.global::<Bar>();
-        let action = |label: &str, enabled: bool, cursor: bool| BarAction { label: label.into(), enabled, cursor };
+        let action = |label: &str, enabled: bool, cursor: bool| BarAction { label: label.into(), enabled, cursor, icon: 0 };
         bar.set_actions(slint::ModelRc::new(slint::VecModel::from(vec![action("Undo Volume of Keys", true, false), action("Redo", false, false), action("Save", true, true)])));
         bar.set_performance("Grand Piano with a rather long name".into());
         bar.set_scene("Chorus".into());
@@ -173,4 +173,112 @@ fn the_bar_draws_in_every_theme_and_at_a_narrow_width() {
 fn only_the_performance_apps_screens_have_actions() {
     let f = Fixture::new("bar-home");
     assert!(labels(&f).is_empty());
+}
+
+// A narrow bar gives up, in order: the actions' words (undo and redo to icons, then all the actions into one "More")
+// while the name keeps its comfortable room, the name's room down to its least (its text shrinks to 70%, then is cut),
+// the meters' names, then their bars' length. The recording mark and the tempo stay, and nothing runs off the bar:
+// at the keyboard's 826 across, 800 and 640, with a take recording (slow, or not), the longest actions and a long name.
+#[test]
+fn a_narrow_bar_folds_its_actions_before_it_cuts_anything() {
+    use crate::BarAction;
+    for (w, h, scale) in [(1280, 720, 1.55), (800, 480, 1.0), (640, 480, 1.0), (1280, 720, 1.0)] {
+        for behind in [false, true] {
+            let mut s = Screen::sized(w, h);
+            s.set_scale(scale);
+            let logical = w as f32 / scale;
+            let ui = s.ui.clone_strong();
+            let bar = ui.global::<Bar>();
+            let action = |label: &str, enabled: bool, icon: i32| BarAction { label: label.into(), enabled, cursor: false, icon };
+            let list = [action("Undo Volume of Keys", true, 1), action("Redo", false, 2), action("Save", true, 0), action("Scene", true, 0), action("Learn", true, 0), action("Edit", true, 0)];
+            bar.set_actions(slint::ModelRc::new(slint::VecModel::from(list.to_vec())));
+            bar.set_performance("Grand Piano with a rather long name".into());
+            bar.set_scene("Chorus".into());
+            bar.set_tempo("120.0 BPM".into());
+            bar.set_cpu(42);
+            bar.set_cpu_known(true);
+            bar.set_ram(60);
+            bar.set_ram_known(true);
+            bar.set_recording(true);
+            bar.set_recording_time("12:07".into());
+            bar.set_recording_behind(behind);
+            bar.set_where("Play".into());
+            bar.set_home_button(true);
+            s.ui.set_screen(3);
+            let mut modes = vec![];
+            let mut unfit = vec![];
+            for t in all_themes() {
+                theme::apply(&s.ui, &t);
+                s.frame();
+                s.frame();
+                let what = format!("{w}x{h}@{scale} behind {behind} in {}", t.id);
+                let small = s.ui.global::<crate::Theme>().get_small();
+                let pad = s.ui.global::<crate::Theme>().get_pad();
+                let (end, pill_end) = (s.ui.get_resources_x() + s.ui.get_resources_width(), s.ui.get_pill_x() + s.ui.get_pill_width());
+                let mark = s.ui.get_rec_width();
+                let fits = end <= logical - pad + 0.5 && s.ui.get_pill_width() >= (small * 9.).round() - 0.5 && mark > 0. && s.ui.get_tempo_x() - mark >= pill_end - 0.5;
+                eprintln!("BAR {what}: modes {:?}, name {:.0}, meters end {end:.0} of {logical:.0}, fits {fits}", (s.ui.get_actions_mode(), s.ui.get_meters_mode()), s.ui.get_pill_width());
+                if !fits {
+                    unfit.push(what.clone());
+                }
+                modes.push((s.ui.get_actions_mode(), s.ui.get_meters_mode()));
+                shot(&s, &format!("bar-narrow-{}-{w}x{h}@{scale}{}", t.id, if behind { "-slow" } else { "" }));
+            }
+            // In the dark theme: what the width gives.
+            let (actions, meters) = modes[0];
+            match logical {
+                x if x >= 1200. => assert_eq!((actions, meters), (0, 0), "{w}x{h}@{scale}: room for everything"),
+                x if x < 700. => assert_eq!(actions, 2, "{w}x{h}@{scale}: folded into More"),
+                _ => assert!(actions >= 1, "{w}x{h}@{scale}: icons or More"),
+            }
+            assert!(meters == 0 || actions == 2, "the meters give up nothing while the actions can still fold");
+            // Nothing runs off the bar or leaves the name under its least, except in the roomy odd theme (type 1.39, spacing
+            // 1.6), whose fixed parts alone are wider than a narrow bar.
+            let unfit: Vec<_> = unfit.into_iter().filter(|w| !(w.ends_with("in odd") && logical < 1200.)).collect();
+            assert!(unfit.is_empty(), "{unfit:?}");
+        }
+    }
+}
+
+// On the shell: at 640 across the actions are one "More" stop; it opens a menu of them (a disabled one cannot be chosen)
+// by the dial and by touch, and a choice does what the action does.
+#[test]
+fn more_opens_a_menu_of_the_actions_by_the_dial_and_by_touch() {
+    let mut f = play_on_the_shell("bar-more", json!({"id": "p1", "name": "Grand", "unsaved": false}), play_graph());
+    f.screen.set_scale(2.0); // 640 across
+    f.screen.frame();
+    f.screen.frame();
+    let ui = f.screen.ui.clone_strong();
+    assert!(ui.global::<Bar>().get_more(), "folded at 640");
+    f.screen.frame();
+    // The stops are the name and More: the third pane enters at the name, the dial goes on to More.
+    shell::act(Action::Move { pane: Some(2), by: 1 });
+    assert!(ui.global::<Bar>().get_pill_cursor());
+    shell::act(Action::Move { pane: None, by: 1 });
+    assert!(ui.global::<Bar>().get_more_cursor(), "the cursor is on More");
+    shell::act(Action::Confirm(None));
+    assert!(ui.global::<crate::MenuState>().get_open(), "More opened its menu");
+    f.screen.frame();
+    f.screen.frame();
+    let rows = || -> Vec<(String, bool, bool)> { ui.global::<crate::MenuState>().get_rows().iter().map(|r| (r.label.to_string(), r.enabled, r.cursor)).collect() };
+    assert_eq!((rows()[0].0.as_str(), rows()[1].0.as_str(), rows()[1].1), ("Undo Volume of Keys", "Redo", false), "{:?}", rows());
+    // Redo is off: touching it does nothing. The dial goes down to Edit (the last) and a press does it: the Parts list.
+    ui.global::<crate::MenuState>().invoke_tapped(1);
+    assert_eq!(ui.get_screen(), 3, "a disabled action does nothing");
+    for _ in 0..10 {
+        if rows().iter().any(|r| r.2 && r.0 == "Edit") {
+            break;
+        }
+        shell::act(Action::Move { pane: None, by: 1 });
+    }
+    assert!(rows().iter().any(|r| r.2 && r.0 == "Edit"), "the dial reached Edit: {:?}", rows());
+    shell::act(Action::Confirm(None));
+    assert_eq!(ui.get_screen(), 9);
+    assert!(!ui.global::<crate::MenuState>().get_open());
+    // And by touch on More itself, closed by Cancel.
+    f.screen.frame();
+    ui.global::<Bar>().invoke_more_tapped();
+    assert!(ui.global::<crate::MenuState>().get_open());
+    shell::act(Action::Cancel(None));
+    assert!(!ui.global::<crate::MenuState>().get_open());
 }

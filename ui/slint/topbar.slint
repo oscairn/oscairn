@@ -4,7 +4,7 @@
 // part right of the Performance has a fixed width, so a changing figure never moves anything:
 // an update repaints its own digits and bar and nothing else (src/tests.rs proves it).
 
-import { Theme, Field, Button, Cursor } from "theme.slint";
+import { Theme, Field, Button, Cursor, FitText } from "theme.slint";
 
 // The section's columns, from the theme's small type: whole pixels, fixed for a theme.
 global Columns {
@@ -21,6 +21,9 @@ global Columns {
     out property <length> action: 36px; // an action button's height
     out property <length> action-max: 2 * Theme.button-width; // its widest, a long edit's name elided
     out property <length> rec-slow: round(Theme.small * 6 / 1px) * 1px; // "disk slow"
+    out property <length> rec-slow-short: round(Theme.small * 3 / 1px) * 1px; // "slow", on the narrowest bar
+    out property <length> pill-min: round(Theme.small * 9 / 1px) * 1px; // the Performance's name keeps at least this
+    out property <length> pill-comfort: round(Theme.small * 16 / 1px) * 1px; // the room the name has before anything is folded away
 }
 
 // A whole percent in fixed cells, a digit each ("  7%", " 42%", "100%"): tabular, whatever the font.
@@ -59,10 +62,13 @@ component Meter inherits Rectangle {
     in property <bool> bar;
     in property <bool> percent;
     in property <length> percent-x;
+    in property <bool> labeled: true; // a narrow bar drops the names before it cuts a meter
+    in property <length> label-width: Columns.label;
+    in property <length> bar-width: Columns.bar;
     property <color> ink: level == 2 ? Theme.danger : level == 1 ? Theme.warning : Theme.muted;
     property <color> fill: level == 2 ? Theme.danger : level == 1 ? Theme.warning : Theme.accent;
     height: Columns.row;
-    Text {
+    if root.labeled: Text {
         x: 0;
         width: Columns.label;
         vertical-alignment: center;
@@ -71,9 +77,9 @@ component Meter inherits Rectangle {
         text: root.label;
     }
     if root.bar: Rectangle {
-        x: Columns.label;
+        x: root.label-width;
         y: (parent.height - self.height) / 2;
-        width: Columns.bar;
+        width: root.bar-width;
         height: Columns.meter;
         background: Theme.raised;
         Rectangle {
@@ -92,10 +98,11 @@ component Meter inherits Rectangle {
 
 // A take is recording (the JUCE record buttons' message, Recording.cpp): a filled dot and "REC m:ss"
 // in the danger color, and "disk slow" when the writer is behind. Fixed widths, so the seconds
-// changing repaint their own cells only. Shown by the top bar and on Play.
+// changing repaint their own cells only. Shown by the top bar, once (Play has no mark of its own).
 export component RecordingMark inherits Rectangle {
     out property <length> dot: Theme.small * 0.7;
-    width: Bar.recording-width;
+    in property <bool> short; // "slow" for "disk slow": the narrowest bar's last saving
+    width: Bar.recording-width - (root.short && Bar.recording-behind ? Columns.rec-slow - Columns.rec-slow-short : 0px);
     Rectangle {
         x: 0;
         y: (parent.height - self.height) / 2;
@@ -115,11 +122,11 @@ export component RecordingMark inherits Rectangle {
     }
     if Bar.recording-behind: Text {
         x: Theme.small + Columns.rec-text + Theme.pad-narrow;
-        width: Columns.rec-slow;
+        width: root.short ? Columns.rec-slow-short : Columns.rec-slow;
         vertical-alignment: center;
         font-size: Theme.small;
         color: Theme.danger;
-        text: "disk slow";
+        text: root.short ? "slow" : "disk slow";
     }
 }
 
@@ -128,13 +135,16 @@ export struct BarAction {
     label: string,
     enabled: bool,
     cursor: bool,
+    icon: int, // 0 none, 1 undo, 2 redo: what a narrow bar draws in place of the words
 }
 
 component ActionButton inherits Rectangle {
     in property <BarAction> data;
     in property <length> cap: Columns.action-max; // the widest it gets, a long edit's name elided
+    in property <bool> compact; // an icon in place of the words where it has one
+    property <bool> icon-only: root.compact && root.data.icon > 0;
     callback clicked();
-    width: min(measure.preferred-width + 2 * Theme.pad-wide, root.cap);
+    width: root.icon-only ? Columns.action : min(measure.preferred-width + 2 * Theme.pad-wide, root.cap);
     measure := Text {
         visible: false;
         font-size: Theme.button;
@@ -144,9 +154,18 @@ component ActionButton inherits Rectangle {
     Button {
         y: (parent.height - self.height) / 2;
         height: Columns.action;
-        text: root.data.label;
+        text: root.icon-only ? "" : root.data.label;
         enabled: root.data.enabled;
         clicked => { root.clicked(); }
+    }
+    if root.icon-only: Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: Columns.icon * 0.85;
+        height: Columns.icon * 0.85;
+        source: root.data.icon == 1 ? @image-url("../../hosts/standalone/icons/undo-2.svg") : @image-url("../../hosts/standalone/icons/redo-2.svg");
+        colorize: Theme.text;
+        opacity: root.data.enabled ? 1 : Theme.disabled;
     }
     Cursor {
         y: (parent.height - Columns.action) / 2;
@@ -163,6 +182,11 @@ export global Bar {
     in property <bool> pill-cursor; // the cursor is on the Performance's name (Save As New)
     in property <string> notice; // what the last action said ("Saved"), in the name's place for a while
     callback action(int);
+    // A bar too narrow for its actions folds them into one "More" (a menu of them): set by the bar, which the shell reads.
+    in-out property <bool> more;
+    in property <bool> more-cursor;
+    callback more-tapped();
+    callback more-changed();
     callback pill-tapped();
     in property <bool> recording; // a take is recording
     in property <string> recording-time; // "m:ss"
@@ -191,11 +215,76 @@ export component TopBar inherits Rectangle {
     out property <length> resources-x: resources.x;
     out property <length> resources-width: resources.width;
     out property <length> tempo-x: tempo.x;
+    out property <length> pill-x: pill.x;
+    out property <length> pill-width: pill.width;
+    // What a narrow bar gives up, in this order: the actions (their words, undo and redo first, then all of them folded
+    // into "More") while the name keeps its comfortable room; then the name's room down to its least; then the
+    // meters' names, then their bars' length. The recording mark and the tempo stay.
+    out property <int> actions-mode: n-actions == 0 ? 0 : room-for(w-full, res-full, rec-full) >= Columns.pill-comfort ? 0 : room-for(w-icons, res-full, rec-full) >= Columns.pill-comfort ? 1 : 2;
+    out property <int> meters-mode: actions-mode < 2 ? 0 : room-for(w-more, res-full, rec-full) >= Columns.pill-min ? 0 : room-for(w-more, res-nolabel, rec-full) >= Columns.pill-min ? 1 : 2;
+    // Last of all, a slow disk's words are shortened ("slow"): the mark itself stays.
+    out property <bool> rec-short: meters-mode == 2 && room-for(w-more, res-narrow, rec-full) < Columns.pill-min;
+    out property <length> rec-width: rec-short && Bar.recording-behind ? rec-full - (Columns.rec-slow - Columns.rec-slow-short) : rec-full;
     property <bool> any-bar: Bar.cpu-bar || Bar.ram-bar;
     property <bool> any-percent: Bar.cpu-percent || Bar.ram-percent;
     property <bool> any: any-bar || any-percent;
+    property <int> n-actions: Bar.actions.length;
+    property <length> gap: Theme.pad-narrow;
+    property <length> label-w: meters-mode == 0 ? Columns.label : 0px;
+    property <length> bar-w: meters-mode == 2 ? Columns.bar / 2 : Columns.bar;
+    property <length> percent-at: label-w + (any-bar ? bar-w + gap : 0px);
+    property <length> res-full: any ? Columns.label + (any-bar ? Columns.bar + gap : 0px) + (any-percent ? Columns.percent : 0px) : 0px;
+    property <length> res-nolabel: any ? res-full - Columns.label : 0px;
+    property <length> res-narrow: any ? (any-bar ? Columns.bar / 2 + gap : 0px) + (any-percent ? Columns.percent : 0px) : 0px;
+    property <length> rec-full: Bar.recording-width;
+    property <length> res-now: any ? percent-at + (any-percent ? Columns.percent : 0px) : 0px;
+    property <length> w-full: n-actions > 0 ? full.preferred-width : 0px;
+    property <length> w-icons: n-actions > 0 ? icons.preferred-width : 0px;
+    property <length> w-more: n-actions > 0 ? more-measure.preferred-width + 2 * Theme.pad-wide : 0px;
+    property <length> tempo-width: round(Theme.small * 6.5 / 1px) * 1px;
+    // The items of the line: Home's button, where, the name (the rest), the actions, the recording mark, the tempo, the meters.
+    property <int> items: (Bar.home-button ? 1 : 0) + 2 + (n-actions > 0 ? 1 : 0) + (Bar.recording ? 1 : 0) + 1 + (any ? 1 : 0);
+    // What the name has of the line when the actions take `actions` and the meters `meters`.
+    pure function room-for(actions: length, meters: length, rec: length) -> length {
+        return root.width - Theme.margin - Theme.pad - (Bar.home-button ? Theme.touch : 0px) - where-measure.preferred-width - actions - rec - tempo-width - meters - (items - 1) * gap;
+    }
     height: Theme.bar-height;
     background: Theme.background;
+    changed actions-mode => { Bar.more = self.actions-mode == 2; Bar.more-changed(); }
+    init => { Bar.more = self.actions-mode == 2; }
+    where-measure := Text {
+        visible: false;
+        font-size: Theme.body;
+        font-weight: 700;
+        text: Bar.where;
+    }
+    more-measure := Text {
+        visible: false;
+        font-size: Theme.button;
+        font-weight: 700;
+        text: "More";
+    }
+    // The actions as they would be at full size and with icons, only to know how wide they come to.
+    Rectangle {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        full := HorizontalLayout {
+            spacing: root.gap;
+            for action in Bar.actions: ActionButton {
+                data: action;
+                cap: min(Columns.action-max, root.width * 0.16);
+            }
+        }
+        icons := HorizontalLayout {
+            spacing: root.gap;
+            for action in Bar.actions: ActionButton {
+                data: action;
+                compact: true;
+                cap: min(Columns.action-max, root.width * 0.16);
+            }
+        }
+    }
     // The JUCE bar's line under it.
     Rectangle {
         y: parent.height - Theme.hair;
@@ -205,7 +294,7 @@ export component TopBar inherits Rectangle {
     HorizontalLayout {
         padding-left: Theme.margin;
         padding-right: Theme.pad;
-        spacing: Theme.pad-narrow;
+        spacing: root.gap;
         if Bar.home-button: TouchArea {
             width: Theme.touch;
             clicked => { Bar.home(); }
@@ -223,20 +312,20 @@ export component TopBar inherits Rectangle {
             color: Theme.text;
             text: Bar.where;
         }
-        // The open Performance and its scene: a pill, as wide as what is left.
-        Rectangle {
+        // The open Performance and its scene: a pill, as wide as what is left (at least `pill-min`).
+        pill := Rectangle {
             horizontal-stretch: 1;
-            min-width: 0px;
+            min-width: Bar.performance != "" ? Columns.pill-min : 0px;
             if Bar.performance != "": Field {
                 y: (parent.height - self.height) / 2;
                 height: Columns.pill;
-                Text {
+                FitText {
                     x: Theme.pad-wide;
                     width: parent.width - 2 * Theme.pad-wide;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    font-size: Theme.small;
-                    color: Bar.notice == "" ? Theme.text : Theme.accent;
+                    height: parent.height;
+                    align: left;
+                    size: Theme.small;
+                    ink: Bar.notice == "" ? Theme.text : Theme.accent;
                     text: Bar.notice != "" ? Bar.notice : Bar.scene == "" ? Bar.performance : Bar.performance + "  ·  " + Bar.scene;
                 }
                 TouchArea {
@@ -249,14 +338,24 @@ export component TopBar inherits Rectangle {
                 }
             }
         }
-        for action[i] in Bar.actions: ActionButton {
-            data: action;
-            cap: min(Columns.action-max, root.width * 0.16); // a narrow bar elides a long name sooner
-            clicked => { Bar.action(i); }
+        if root.n-actions > 0 && root.actions-mode < 2: HorizontalLayout {
+            spacing: root.gap;
+            for action[i] in Bar.actions: ActionButton {
+                data: action;
+                compact: root.actions-mode == 1;
+                cap: min(Columns.action-max, root.width * 0.16); // a narrow bar elides a long name sooner
+                clicked => { Bar.action(i); }
+            }
         }
-        if Bar.recording: RecordingMark {}
+        if root.n-actions > 0 && root.actions-mode == 2: ActionButton {
+            data: { label: "More", enabled: true, cursor: Bar.more-cursor, icon: 0 };
+            clicked => { Bar.more-tapped(); }
+        }
+        if Bar.recording: RecordingMark {
+            short: root.rec-short;
+        }
         tempo := Text {
-            width: round(Theme.small * 6.5 / 1px) * 1px;
+            width: root.tempo-width;
             horizontal-alignment: right;
             vertical-alignment: center;
             font-size: Theme.small;
@@ -264,7 +363,7 @@ export component TopBar inherits Rectangle {
             text: Bar.tempo;
         }
         resources := Rectangle {
-            width: !root.any ? 0 : Columns.label + (root.any-bar ? Columns.bar + Theme.pad-narrow : 0) + (root.any-percent ? Columns.percent : 0);
+            width: root.res-now;
             VerticalLayout {
                 alignment: center;
                 spacing: Theme.pad-tight;
@@ -275,7 +374,10 @@ export component TopBar inherits Rectangle {
                     level: Bar.cpu-level;
                     bar: Bar.cpu-bar;
                     percent: Bar.cpu-percent;
-                    percent-x: Columns.label + (root.any-bar ? Columns.bar + Theme.pad-narrow : 0);
+                    percent-x: root.percent-at;
+                    labeled: root.meters-mode == 0;
+                    label-width: root.label-w;
+                    bar-width: root.bar-w;
                 }
                 if Bar.ram-bar || Bar.ram-percent: Meter {
                     label: "RAM";
@@ -284,7 +386,10 @@ export component TopBar inherits Rectangle {
                     level: Bar.ram-level;
                     bar: Bar.ram-bar;
                     percent: Bar.ram-percent;
-                    percent-x: Columns.label + (root.any-bar ? Columns.bar + Theme.pad-narrow : 0);
+                    percent-x: root.percent-at;
+                    labeled: root.meters-mode == 0;
+                    label-width: root.label-w;
+                    bar-width: root.bar-w;
                 }
             }
         }

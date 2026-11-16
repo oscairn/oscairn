@@ -29,6 +29,9 @@ endif()
 # RFC 0010: hosts one plugin in its own process for the engine.
 add_executable(oscairn-plugin-worker plugin-host/src/worker_main.cpp)
 target_link_libraries(oscairn-plugin-worker PRIVATE oscairn_plugin_host)
+# Every worker holds its binary resident and locked (RFC 0025): the code it never calls left out (the Rust staticlib,
+# one LTO object, comes in whole once the Rust CLAP host is used). Only unreferenced sections go, so nothing is slower.
+target_link_options(oscairn-plugin-worker PRIVATE $<IF:$<PLATFORM_ID:Darwin>,-Wl$<COMMA>-dead_strip,-Wl$<COMMA>--gc-sections>)
 install(TARGETS oscairn-plugin-worker RUNTIME DESTINATION bin)
 
 add_executable(oscairn-plugin-scan plugin-host/src/scan.cpp plugin-host/src/extract.cpp)

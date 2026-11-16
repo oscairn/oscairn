@@ -86,6 +86,7 @@ namespace
         decltype(&cpp_clap_asset_dependencies) assetDependencies; decltype(&cpp_clap_load_preset) loadPreset;
         decltype(&cpp_clap_presets) presets; decltype(&cpp_clap_set_assets) setAssets;
         decltype(&cpp_clap_set_voice_limits) setVoiceLimits; decltype(&cpp_clap_voice_report) voiceReport; decltype(&cpp_clap_mirror_wake) mirrorWake;
+        decltype(&cpp_clap_wants_events) wantsEvents;
     };
 #define OSCAIRN_API(p) Api{p##clap_error, p##clap_new, p##clap_free, p##clap_revision, p##clap_describe, p##clap_note_input_ports, p##clap_note_output_ports, \
     p##clap_uses_clap_notes, p##clap_takes_sysex, p##clap_emits_sysex, p##clap_supports_state, p##clap_supports_sound_snapshot, p##clap_has_window, \
@@ -95,7 +96,7 @@ namespace
     p##clap_rings_out, p##clap_process, p##clap_output_events, p##clap_panic, p##clap_asleep, p##clap_restful, p##clap_rested, p##clap_was_reset, \
     p##clap_save_state, p##clap_load_state, p##clap_effect_context, p##clap_sound_contexts, p##clap_prepare_sound, p##clap_prepare_preset, \
     p##clap_select_sound, p##clap_discard_sound, p##clap_prepare_snapshot, p##clap_save_sound, p##clap_sound_values, p##clap_choke_retiring, \
-    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake}
+    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake, p##clap_wants_events}
 
     // A transcript: labeled items, each its bytes.
     struct Transcript
@@ -271,6 +272,7 @@ namespace
         for(uint32_t i = 0; i < a.noteInputs(h); ++i) t.put(n + "clap notes", a.usesClapNotes(h, i));
         for(const bool b : {a.takesSysex(h), a.emitsSysex(h), a.supportsState(h), a.supportsSoundSnapshot(h), a.hasWindow(h), a.voiceBudget(h), a.honorsVolume(h),
                             a.preparesSnapshots(h), a.savesSounds(h), a.ringsOut(h)}) t.put(n + "flag", b);
+        t.put(n + "wants", a.wantsEvents(h));
         t.put(n + "capacity", a.capacity(h));
         oscairn_memory_t m{}; t.put(n + "declared", a.declaredMemory(h, &m)); t.put(n + "memory", m);
         oscairn_effect_resources_t r{}; t.put(n + "effect resources", a.effectResources(h, &r));

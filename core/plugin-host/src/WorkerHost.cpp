@@ -475,6 +475,7 @@ namespace oscairn
                 window_ = r.u8(); snapshots_ = r.u8(); ringOut_ = r.u8(); savesSounds_ = r.u8();
                 voiceBudget_ = r.u8(); honorsVolume_ = r.u8();
                 sysexIn_ = r.u8(); sysexOut_ = r.u8();
+                wants_ = r.u8();
                 description_ = r.data.substr(at, r.at - at);
 
                 // Shared block, sized for the ports and maximum block, handed over as a descriptor.
@@ -909,6 +910,7 @@ namespace oscairn
             uint32_t noteOutputPorts() const noexcept override { return noteOutputs_; }
             bool usesClapNotes(uint32_t port) const noexcept override { return port < clapNotes_.size() && clapNotes_[port]; }
             bool takesSysex() const noexcept override { return sysexIn_; }
+            uint32_t wantsEvents() const noexcept override { return wants_; }
             bool emitsSysex() const noexcept override { return sysexOut_; }
             // While down, a panic would reach the restarted worker and drop its first block's events.
             // With the extra block the worker may still be rendering the last block, which a panic now must not reach: it waits for the next one.
@@ -1313,6 +1315,8 @@ namespace oscairn
                 if(auto* pool = s.inputBytes()) pool->used = 0;
                 for(uint32_t i = 0; i < count; ++i)
                 {
+                    // The beat's and the harmony's go to a plugin that asked for them; its host would drop them on arrival.
+                    if(const auto space = events[i].header()->space_id; (space == kick::clap::Host::beatSpace && !(wants_ & 1)) || (space == kick::clap::Host::harmonySpace && !(wants_ & 2))) continue;
                     s.events[kept] = events[i];
                     if(share(s.events[kept], s.inputBytes())) ++kept;
                     else sysexDrops_.fetch_add(1, std::memory_order_relaxed);
@@ -1694,6 +1698,7 @@ namespace oscairn
             std::vector<kick::clap::Port> inputs_, outputs_;
             uint32_t noteInputs_ = 0, noteOutputs_ = 0, contexts_ = 0;
             bool sysexIn_ = true, sysexOut_ = true; // from the description: whether it can take, send SysEx
+            uint8_t wants_ = 3; // from the description: the events of Oscairn's it asked for (PluginHost::wantsEvents)
             std::vector<uint8_t> clapNotes_;
             bool state_ = false, effects_ = false, window_ = false, snapshots_ = false, ringOut_ = false, savesSounds_ = false, voiceBudget_ = false, honorsVolume_ = false;
             std::string windowTitle_; // the window the engine last opened, for a restarted worker; under control

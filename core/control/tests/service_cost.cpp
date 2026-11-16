@@ -48,6 +48,15 @@ int main(int argc, char** argv)
     std::array<float, 128> l{}, r{};
     float* out[2]{l.data(), r.data()};
     for(int i = 0; i < 100; ++i) { s.service(); s.process(nullptr, 0, out, 2, 128); }
+    if(std::getenv("BLOCKS")) // the blocks' cost too, the engine thread's CPU and the wall time of each
+    {
+        const int n = std::atoi(std::getenv("BLOCKS"));
+        for(int i = 0; i < 200; ++i) s.process(nullptr, 0, out, 2, 128);
+        const double c0 = threadSeconds(); const auto w0 = std::chrono::steady_clock::now();
+        for(int i = 0; i < n; ++i) s.process(nullptr, 0, out, 2, 128);
+        const double c1 = threadSeconds(); const auto w1 = std::chrono::steady_clock::now();
+        std::printf("process: %.2f us CPU, %.2f us wall a block\n", 1e6 * (c1 - c0) / n, std::chrono::duration<double, std::micro>(w1 - w0).count() / n);
+    }
     const int ticks = std::getenv("TICKS") ? std::atoi(std::getenv("TICKS")) : 400;
     const auto requests = workerRequests();
     const double before = threadSeconds();

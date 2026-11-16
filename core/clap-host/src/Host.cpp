@@ -1629,6 +1629,7 @@ bool Host::selectSound(uint32_t id,int16_t channel) {
 }
 bool Host::preparesSoundSnapshots() const noexcept {return impl->soundSnapshots!=nullptr;}
 bool Host::ringsOut() const noexcept {return impl->ringOutChannels!=0;}
+uint32_t Host::wantsEvents() const noexcept {return (impl->wantsBeat.load(std::memory_order_relaxed)?1u:0u)|(impl->wantsHarmony.load(std::memory_order_relaxed)?2u:0u);}
 bool Host::voiceBudget() const noexcept {return impl->voiceBudget!=nullptr;}
 void Host::setActiveOutputs(uint64_t ports) noexcept {
     auto& s=*impl;

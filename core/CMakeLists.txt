@@ -652,6 +652,12 @@ foreach(rest IN ITEMS disabled all 0)
     set_tests_properties(plugin-groups-rest-${rest} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE ENVIRONMENT "${groups_env}")
 endforeach()
 
+# RFC 0045: the beat and the harmony go to the plugins that asked for them, in a worker.
+add_executable(oscairn-worker-timing-events-test engine/tests/worker_timing_events.cpp)
+target_link_libraries(oscairn-worker-timing-events-test PRIVATE oscairn_engine oscairn_clap_headers)
+add_dependencies(oscairn-worker-timing-events-test oscairn-follower-fixture)
+add_test(NAME worker-timing-events COMMAND oscairn-worker-timing-events-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:kick-clap-fixture-normal> $<TARGET_FILE:oscairn-follower-fixture>)
+set_tests_properties(worker-timing-events PROPERTIES TIMEOUT 60)
 # RFC 0045: a worker that answered nothing for a while is serviced less often.
 add_executable(oscairn-worker-service-test engine/tests/worker_service.cpp)
 target_link_libraries(oscairn-worker-service-test PRIVATE oscairn_engine)

@@ -564,6 +564,17 @@ impl From<String> for Failure {
     }
 }
 
+/// A Box of plain old data whose zero is its start, taken zeroed from the allocator: a page of it is resident when
+/// first written, and one never used (a block's events never fill the arrays) costs nothing, where building the array
+/// by value and boxing it writes every byte. Allocated when the host is made, never on the audio thread.
+///
+/// # Safety
+/// All bits zero must be a valid `T`.
+unsafe fn zeroed_box<T>() -> Box<T> {
+    // SAFETY: the caller's.
+    unsafe { Box::<T>::new_zeroed().assume_init() }
+}
+
 impl Host {
     /// A new Host, its handle's until it is freed (Box::from_raw of its pointer).
     pub fn create() -> H {
@@ -601,9 +612,9 @@ impl Host {
             input_buffers: Owned::new(Vec::new()), output_buffers: Owned::new(Vec::new()), input_pointers: Owned::new(Vec::new()),
             output_pointers: Owned::new(Vec::new()), scratch: Owned::new(Vec::new()), timers: Owned::new(Vec::new()), fds: Owned::new(Vec::new()),
             sysex_output: Owned::new(None), commands: Queue::new(MAX_EVENTS), emitted: Queue::new(MAX_EVENTS),
-            ordered: Owned::new(Box::new([Timed::default(); RENDER_EVENTS])), chunk_events: Owned::new(Box::new([Event::default(); RENDER_EVENTS])),
-            carry_events: Owned::new(Box::new([Event::default(); MAX_BLOCK_EVENTS])), block_output: Owned::new(Box::new([Event::default(); MAX_BLOCK_EVENTS])),
-            voice_notes: Owned::new(Box::new(std::mem::zeroed())), // plain old data
+            ordered: Owned::new(zeroed_box()), chunk_events: Owned::new(zeroed_box()),
+            carry_events: Owned::new(zeroed_box()), block_output: Owned::new(zeroed_box()),
+            voice_notes: Owned::new(zeroed_box()), // plain old data
             sample_rate: Owned::new(48000.0), max_frames: Owned::new(512), current_process_frames: Owned::new(1), next_timer: Owned::new(1),
         }
         // SAFETY: every field is set (above, or valid as zeros).

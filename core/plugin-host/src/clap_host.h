@@ -141,6 +141,7 @@ typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
     bool p##clap_set_parameter(oscairn_clap_host* host, uint32_t id, double value); \
     bool p##clap_parameter_gesture(oscairn_clap_host* host, uint32_t id, bool begin); \
     uint64_t p##clap_parameter_reports(const oscairn_clap_host* host); \
+    uint64_t p##clap_value_rescans(const oscairn_clap_host* host); /* values read again with no output events */ \
     bool p##clap_send_event(oscairn_clap_host* host, const oscairn_clap_event* event); \
     bool p##clap_pop_output(oscairn_clap_host* host, oscairn_clap_event* event); \
     uint64_t p##clap_output_event_drops(const oscairn_clap_host* host); \

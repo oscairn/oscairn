@@ -228,6 +228,7 @@ exports! {
     fn rust_clap_set_parameter(h, id: u32, value: f64) -> bool { set_parameter(&h, id, value) }
     fn rust_clap_parameter_gesture(h, id: u32, begin: bool) -> bool { parameter_gesture(&h, id, begin) }
     fn rust_clap_parameter_reports(h) -> u64 { h.parameter_reports.load(Acquire) }
+    fn rust_clap_value_rescans(h) -> u64 { h.value_rescans.load(Acquire) }
     fn rust_clap_send_event(h, e: *const event::Event) -> bool {
         // SAFETY: the caller's event.
         enqueue(&h, unsafe { &*e })

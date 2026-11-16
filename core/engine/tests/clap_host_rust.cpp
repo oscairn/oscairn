@@ -86,7 +86,7 @@ namespace
         decltype(&cpp_clap_asset_dependencies) assetDependencies; decltype(&cpp_clap_load_preset) loadPreset;
         decltype(&cpp_clap_presets) presets; decltype(&cpp_clap_set_assets) setAssets;
         decltype(&cpp_clap_set_voice_limits) setVoiceLimits; decltype(&cpp_clap_voice_report) voiceReport; decltype(&cpp_clap_mirror_wake) mirrorWake;
-        decltype(&cpp_clap_wants_events) wantsEvents;
+        decltype(&cpp_clap_wants_events) wantsEvents; decltype(&cpp_clap_value_rescans) valueRescans;
     };
 #define OSCAIRN_API(p) Api{p##clap_error, p##clap_new, p##clap_free, p##clap_revision, p##clap_describe, p##clap_note_input_ports, p##clap_note_output_ports, \
     p##clap_uses_clap_notes, p##clap_takes_sysex, p##clap_emits_sysex, p##clap_supports_state, p##clap_supports_sound_snapshot, p##clap_has_window, \
@@ -96,7 +96,7 @@ namespace
     p##clap_rings_out, p##clap_process, p##clap_output_events, p##clap_panic, p##clap_asleep, p##clap_restful, p##clap_rested, p##clap_was_reset, \
     p##clap_save_state, p##clap_load_state, p##clap_effect_context, p##clap_sound_contexts, p##clap_prepare_sound, p##clap_prepare_preset, \
     p##clap_select_sound, p##clap_discard_sound, p##clap_prepare_snapshot, p##clap_save_sound, p##clap_sound_values, p##clap_choke_retiring, \
-    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake, p##clap_wants_events}
+    p##clap_asset_dependencies, p##clap_load_preset, p##clap_presets, p##clap_set_assets, p##clap_set_voice_limits, p##clap_voice_report, p##clap_mirror_wake, p##clap_wants_events, p##clap_value_rescans}
 
     // A transcript: labeled items, each its bytes.
     struct Transcript
@@ -240,6 +240,7 @@ namespace
         result(t, a, n + "load preset", a.loadPreset(h, &bogus));
         const oscairn_clap_preset inside{"", 1, "", "first"};
         result(t, a, n + "load preset inside", a.loadPreset(h, &inside));
+        t.put(n + "value rescans", a.valueRescans(h)); // a preset loaded reads the values again
     }
 
     void play(Transcript& t, const Api& a, const std::string& path, const std::string& id, bool& allocated)
@@ -368,6 +369,7 @@ namespace
                 a.service(h);
                 oscairn_clap_event e; while(a.pop(h, &e)) t.put(b + " output", e);
                 t.put(b + " drops", a.drops(h));
+                t.put(b + " value rescans", a.valueRescans(h));
             }
         }
         control(t, a, h, n, ids, minimum, flags, ni, no, allocated);

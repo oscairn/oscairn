@@ -367,6 +367,7 @@ pub struct Host {
     pub failed: AtomicBool,
     dirty: AtomicBool,
     pub parameter_reports: AtomicU64,
+    pub value_rescans: AtomicU64, // Host::valueRescans: values read again with no output events
     restart: AtomicBool,
     callback: AtomicBool,
     pub wake: AtomicBool,
@@ -2264,6 +2265,7 @@ fn service_inner(s: H) -> R<()> {
                 s.param_values.with(|v| f64_store(&v[i], value));
             }
         }
+        s.value_rescans.fetch_add(1, Release);
     }
     // While the plugin is processing, process() performs requested flushes on the audio thread. Otherwise flush here,
     // excluding a process() that starts.

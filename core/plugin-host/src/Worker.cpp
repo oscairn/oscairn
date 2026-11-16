@@ -378,6 +378,7 @@ namespace oscairn::worker
             uint64_t revision = 0; // the parameter info the engine has
             std::vector<const float*> in; std::vector<float*> out; std::vector<clap_id> ids;
             uint64_t reported = 0; uint32_t seen = 0;
+            uint64_t reread = 0; // the host's valueRevision the engine was told of (Service)
             // RFC 0045's plugin groups: the engine's output guard mirrored (each channel's last good sample, frames faded
             // since), its output as the guard leaves it when that differs (guarded), and the engine's last write seen.
             std::vector<float> lastOut, guardedOut; uint32_t fadedFor = 0, published = 0; bool guarded = false;
@@ -666,6 +667,7 @@ namespace oscairn::worker
                 for(uint32_t c = 0; c < s.outputChannels; ++c) n->out.push_back(s.output(c));
                 n->lastOut.assign(s.outputChannels, 0.f); n->guardedOut.assign(size_t(s.outputChannels) * s.maxFrames, 0.f); n->published = s.published;
                 n->reported = n->host->parameterReports();
+                n->reread = n->host->valueRevision();
                 n->seen = s.done.load(std::memory_order_acquire); // a request may already be waiting
 #ifdef OSCAIRN_HOSTILE_SIZES
                 n->trueFrames = s.maxFrames; n->trueInputs = s.inputChannels; n->trueOutputs = s.outputChannels;
@@ -771,6 +773,10 @@ namespace oscairn::worker
                     while(events.size() < 4096 && host.popOutput(e)) events.push_back(e);
                     w.u32(uint32_t(events.size()));
                     for(const auto& x : events) w.bytes(x.bytes.data(), x.bytes.size());
+                    // Values read again with no events (a values rescan), 1, which the engine then compares
+                    // (Session::service); 2: a host that cannot tell (PluginHost::unreportedValues), compared always.
+                    const auto reread = host.valueRevision();
+                    w.u8(reread == PluginHost::unreportedValues ? 2 : reread != n.reread); n.reread = reread;
                     // An info rescan, which the plugin's host takes in service: the new info follows.
                     const auto revision = host.parameterRevision();
                     w.u8(revision != n.revision);

@@ -54,13 +54,14 @@ namespace oscairn
         {
             nodes_.erase(n); leaving_.insert(n); graph_.setRetiring(n, true);
             std::erase_if(observed_, [&](const auto& entry) { return entry.first.first == n; });
+            valueRevisions_.erase(n);
         }
         for(const auto& e : graph_.describe().notes) if(tried.count(e.second)) graph_.setDraining(e.first, e.second, true);
         // What was set aside sounds again: out of the leaving ones if it was still ringing.
         for(const auto& [n, named] : a.before->nodes) if(leaving_.erase(n)) graph_.setRetiring(n, a.before->disabled.count(n) != 0);
         apply(model(), *a.before);
         undo_ = std::move(a.undo); redo_ = std::move(a.redo); floor_ = a.floor; saved_ = a.saved; mergeable_ = false;
-        observed_.clear();
+        observed_.clear(); valueRevisions_.clear();
         for(const auto& [n, name] : nodes_) for(const auto& p : graph_.host(n).parameters()) observed_[{n, p.id}] = graph_.host(n).parameterValue(p.id);
         if(a.what.kind == "performance")
         {

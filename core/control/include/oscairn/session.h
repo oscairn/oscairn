@@ -369,6 +369,7 @@ namespace oscairn
         size_t warmInstances() const noexcept { return warm_.size(); }  // instances kept loaded once rung out, for the next change (RFC 0021)
         uint64_t keptStates() const noexcept { return keptStates_; }      // of those taken over, ones already holding the node's state: reset, not loaded
         uint64_t besideSounds() const noexcept { return beside_; }        // of those, native instruments whose sounds were prepared beside the playing ones
+        uint64_t parametersCompared() const noexcept { return parametersCompared_; } // the parameter values service() compared so far
         size_t ringOutRoutes() const;                                     // hidden routes ringing their outgoing sounds out through the outgoing chain (RFC 0021), for tests
         // RFC 0025: memory runs short (Linux PSI, polled at each service with memory classes):
         // one more item let go in the eviction order, a next entry prepared to cut, then, since
@@ -683,6 +684,7 @@ namespace oscairn
         std::set<NodeId> leaving_;            // the last Performance's plugins, ringing out after a change; not part of this one
         uint64_t reused_ = 0;                 // reusedInstances()
         uint64_t keptStates_ = 0;             // keptStates()
+        uint64_t parametersCompared_ = 0;     // parametersCompared()
         Timing::Open lastOpen_;               // engine.timing's open: the last Performance opened
         uint32_t nextPart_ = 1, nextWire_ = 1;
         std::vector<Scene> scenes_;
@@ -888,6 +890,7 @@ namespace oscairn
         std::map<Address,double> observed_;
         std::map<NodeId,uint64_t> outputDrops_;
         std::map<NodeId,uint64_t> parameterRevisions_; // each plugin's parameter info as last seen
+        std::map<NodeId,uint64_t> valueRevisions_; // each node's valueRevision when service last compared its values; none: at the next tick
         // Each node's parameter info as graphState() gave it: its plugin, that plugin's info revision,
         // and the revision clients were given. The count goes on past the revisions earlier engines
         // reserved in the data folder (or from the clock, if later), so a new engine's revisions

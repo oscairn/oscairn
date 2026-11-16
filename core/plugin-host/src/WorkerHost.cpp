@@ -616,6 +616,7 @@ namespace oscairn
                 // shortcut: a window the person closed in the old worker opens again; the worker does not report closing.
                 if(!windowTitle_.empty()) try { process()->exchange(header(Op::Window).u8(1).str(windowTitle_).data); } catch(const std::exception&) {}
                 if(activeOutputs_) process()->exchange(header(Op::ActiveOutputs).u64(*activeOutputs_).data); // the ports the engine takes sound from, as last told
+                valueRevision_.fetch_add(1, std::memory_order_relaxed); // the new worker's values, as restored
             }
             bool hasWindow() const override { return window_; }
             void showWindow(bool show, const std::string& title) override
@@ -672,8 +673,11 @@ namespace oscairn
                 try { r = request(Op::Service); } catch(const std::exception&) { return; }
                 pending_.clear(); next_ = 0;
                 for(auto n = r.u32(); n--;) { kick::clap::Event e; r.bytes(e.bytes.data(), e.bytes.size()); pending_.push_back(e); }
+                const auto reread = r.u8(); // values the plugin's host read again (Worker.cpp's Service); 2: it cannot tell
+                if(reread == 2) unreported_.store(true, std::memory_order_relaxed);
+                else if(reread) valueRevision_.fetch_add(1, std::memory_order_relaxed);
                 const bool rescanned = r.u8();
-                if(pending_.empty() && !rescanned) { if(quiet_.load(std::memory_order_relaxed) < quietServices) quiet_.fetch_add(1, std::memory_order_relaxed); }
+                if(pending_.empty() && !rescanned && !reread) { if(quiet_.load(std::memory_order_relaxed) < quietServices) quiet_.fetch_add(1, std::memory_order_relaxed); }
                 else quiet_.store(0, std::memory_order_relaxed);
                 if(!rescanned) return;
                 // An info rescan (names, flags, hints) keeps the parameters and their order, which the
@@ -690,6 +694,7 @@ namespace oscairn
                 catch(const std::exception&) {}
             }
             uint64_t parameterRevision() const noexcept override { return revision_.load(std::memory_order_relaxed); }
+            uint64_t valueRevision() const noexcept override { return unreported_.load(std::memory_order_relaxed) ? unreportedValues : valueRevision_.load(std::memory_order_relaxed); }
             bool supportsState() const noexcept override { return state_; }
             void saveState(const std::string& directory) override { request(Op::SaveState, Writer().str(directory)); }
             void loadState(const std::string& directory) override
@@ -699,6 +704,7 @@ namespace oscairn
                 // before one leaves the plugin as it was (RFC 0025).
                 process()->exchange(header(Op::LoadState).str(directory).data);
                 selections_[0].fetch_add(1, std::memory_order_release); // the state holds the values now
+                valueRevision_.fetch_add(1, std::memory_order_relaxed);
                 record(Op::SaveState);
                 process()->fitLimit();
             }
@@ -716,6 +722,7 @@ namespace oscairn
                 auto lock = controlFor();
                 process()->exchange(header(Op::LoadPreset).str(uri).data);
                 selections_[0].fetch_add(1, std::memory_order_release);
+                valueRevision_.fetch_add(1, std::memory_order_relaxed);
                 record(Op::SaveState);
             }
             // Only on a host nothing plays (not yet, or no longer: RFC 0021), so the record can be saved at once.
@@ -726,6 +733,7 @@ namespace oscairn
                 // before one leaves the plugin as it was (RFC 0025).
                 process()->exchange(header(Op::LoadSnapshot).str(directory).data);
                 selections_[0].fetch_add(1, std::memory_order_release);
+                valueRevision_.fetch_add(1, std::memory_order_relaxed);
                 if(contexts_)
                 {
                     // The snapshot's sounds have fresh IDs.
@@ -875,6 +883,7 @@ namespace oscairn
                 // How many sounds the snapshot holds is the plugin's to read: room for every free context until it says.
                 const auto free = contexts_ - uint32_t(before.size());
                 Reader r = growing(free, [&] { return process()->exchange(header(Op::PrepareSnapshot).str(directory).data); });
+                valueRevision_.fetch_add(1, std::memory_order_relaxed); // the worker published values after it
                 std::array<uint32_t, 16> worker{};
                 for(auto& id : worker) id = r.u32();
                 // The new sounds in the order a load of the snapshot lists them, its slots': their IDs ascend.
@@ -1199,6 +1208,7 @@ namespace oscairn
                 Writer w = header(Op::PrepareSound); w.str(p.name).u32(uint32_t(p.values.size()));
                 for(const auto& v : p.values) w.u32(v.id).f64(v.value);
                 w.str(p.state).str(p.preset).str(p.sfz).str(p.library).str(p.directory);
+                valueRevision_.fetch_add(1, std::memory_order_relaxed); // the worker publishes values after it
                 if(!contexts_) return process()->exchange(w.data).u32();
                 const auto id = growing(1, [&] { return process()->exchange(w.data); }).u32();
                 if(id == CLAP_INVALID_ID) --grown_;
@@ -1745,6 +1755,8 @@ namespace oscairn
             std::vector<double> values_;
             bool besideRecord_ = false; // the record is a snapshot prepared beside (RFC 0021); under control
             std::atomic<uint64_t> revision_{0}; // moves with each info rescan the worker forwards
+            std::atomic<uint64_t> valueRevision_{0}; // valueRevision: moves with each request after which the worker's values may differ unannounced
+            std::atomic<bool> unreported_{false}; // the worker's host cannot tell (an LV2 plugin's)
             // Audio thread, and what the supervisor reads of it.
             std::atomic<uint32_t> requested_{0};
             std::atomic<int64_t> requestedAt_{0};

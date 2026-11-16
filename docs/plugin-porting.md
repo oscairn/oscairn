@@ -705,6 +705,12 @@ stepped, hidden and read-only flags. How the editors use them:
   editors redraw their pages within half a second. Adding or removing parameters still needs
   `CLAP_PARAM_RESCAN_ALL` and a restart. A plugin in a worker process gets the same: the
   worker forwards the new info with its next service;
+- a value the plugin changes itself (its own preset browser, a mode that resets other
+  controls) reaches the editors only as CLAP asks: a `CLAP_EVENT_PARAM_VALUE` output event
+  from `process()` or `flush()` (`request_flush` when it is not processing), or
+  `clap_host_params.rescan(CLAP_PARAM_RESCAN_VALUES)` from the main thread after changing
+  several at once. The host does not read every value on its own: a value changed without
+  either stays stale on screen until the next rescan;
 - value texts are shown as written, except a bare number with more than three decimals,
   which is shortened (`0.0100000` shows as `0.01`), so write units and names where they help;
 - a search box finds parameters on any page by name or module, so keep names specific;

@@ -302,6 +302,7 @@ struct Host::Impl {
     std::atomic_flag gate = ATOMIC_FLAG_INIT;
     std::atomic<bool> loaded{false}, failed{false}, dirty{false};
     std::atomic<uint64_t> parameterReports{0};
+    std::atomic<uint64_t> valueRescans{0}; // Host::valueRescans
     std::atomic<bool> restart{false}, callback{false}, wake{false}, flush{false}, panic{false};
     std::atomic<uint32_t> rescan{0}, latencyFrames{0};
     std::atomic<uint64_t> blocks{0}, dropped{0}, errors{0};
@@ -1166,6 +1167,7 @@ void Host::service() {
             s.deactivate(); s.activate();
         } else if (flags & CLAP_PARAM_RESCAN_VALUES) {
             for (size_t i = 0; i < s.paramInfo.size(); ++i) { double value; if (s.params->get_value(s.plugin, s.paramInfo[i].id, &value) && std::isfinite(value)) s.paramValues[i].store(value); }
+            s.valueRescans.fetch_add(1, std::memory_order_release);
         }
         // While the plugin is processing, process() performs requested flushes on
         // the audio thread. Otherwise flush here, excluding a process() that starts.
@@ -1273,6 +1275,7 @@ bool Host::loadPreset(const Preset& preset) {
         }
         // The preset changed the plugin's parameters: read them back.
         if (s.params) for (size_t i = 0; i < s.paramInfo.size(); ++i) { double value; if (s.params->get_value(s.plugin, s.paramInfo[i].id, &value) && std::isfinite(value)) s.paramValues[i].store(value); }
+        s.valueRescans.fetch_add(1, std::memory_order_release);
         s.dirty.store(true);
         return true;
     } catch (...) { s.fail("Plugin threw while loading a preset"); return false; }
@@ -1348,6 +1351,7 @@ bool Host::parameterGesture(clap_id id, bool begin) noexcept {
 }
 bool Host::stateDirty() const noexcept { return impl->dirty.load(); }
 uint64_t Host::parameterReports() const noexcept { return impl->parameterReports.load(std::memory_order_acquire); }
+uint64_t Host::valueRescans() const noexcept { return impl->valueRescans.load(std::memory_order_acquire); }
 uint32_t Host::latency() const noexcept { return impl->latencyFrames.load(); }
 bool TransportWatch::changed(const clap_event_transport_t* current, uint32_t frames, double sampleRate) noexcept {
     bool changed = !observed || had != (current != nullptr);

@@ -124,6 +124,8 @@ namespace oscairn
         uint32_t noteOutputPorts() const noexcept override { return 0; }
         double parameterValue(clap_id id) const noexcept override;
         uint64_t parameterRevision() const noexcept override { return engine_->host->parameterRevision(); }
+        // The instance's, moved on by each sound's values shown here (selectSound, setValues): both only grow.
+        uint64_t valueRevision() const noexcept override { const auto e = engine_->host->valueRevision(); return e == unreportedValues ? e : e + shown_; }
         std::string parameterText(clap_id id, double value) const override { return engine_->host->parameterText(id, value); }
         bool setParameter(clap_id id, double value) noexcept override;
         bool parameterGesture(clap_id id, bool begin) noexcept override { return engine_->host->parameterGesture(id, begin); }
@@ -152,6 +154,7 @@ namespace oscairn
         void showValues(uint32_t sound); // the sound's own values, where the plugin gives them
         std::vector<kick::clap::Port> port_, none_;
         std::map<clap_id, double> values_;
+        uint64_t shown_ = 0; // values_ set from a sound's (valueRevision)
         std::array<kick::clap::Event, 256> queue_{}; // control thread to audio thread
         std::atomic<uint32_t> head_{0}, tail_{0};
         bool queue(clap_id id, double value) noexcept;

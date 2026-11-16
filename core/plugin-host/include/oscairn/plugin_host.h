@@ -134,6 +134,12 @@ namespace oscairn
         virtual double parameterValue(clap_id id) const noexcept = 0;
         // Changes when the plugin reports new parameter values while processing; audio thread.
         virtual uint64_t parameterReports() const noexcept { return 0; }
+        // Changes when parameterValue may give another value with no output event saying so and no
+        // setParameter of the caller's: the plugin's values read again (a values rescan, a preset), a sound
+        // selected, a worker restarted. unreportedValues: the host cannot tell, and its values are to be
+        // compared every time (Session::service). Control thread.
+        static constexpr uint64_t unreportedValues = UINT64_MAX;
+        virtual uint64_t valueRevision() const noexcept { return unreportedValues; }
         // Changes when parameters() does (a rescan of their info); main thread. 0: never.
         virtual uint64_t parameterRevision() const noexcept { return 0; }
         virtual std::string parameterText(clap_id id, double value) const = 0;

@@ -252,6 +252,7 @@ namespace oscairn
             uint32_t noteOutputPorts() const noexcept override { return OSCAIRN_CLAP(note_output_ports)(host); }
             double parameterValue(clap_id id) const noexcept override { return OSCAIRN_CLAP(parameter_value)(host,id); }
             uint64_t parameterReports() const noexcept override { return OSCAIRN_CLAP(parameter_reports)(host); }
+            uint64_t valueRevision() const noexcept override { return OSCAIRN_CLAP(value_rescans)(host); }
             uint64_t parameterRevision() const noexcept override { return OSCAIRN_CLAP(revision)(host); }
             std::string parameterText(clap_id id, double value) const override {
                 std::string s;checked(OSCAIRN_CLAP(parameter_text)(host,id,value,[](void* to,const char* text,size_t size){static_cast<std::string*>(to)->assign(text,size);},&s));return s;

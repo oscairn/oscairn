@@ -7,9 +7,10 @@ target_include_directories(oscairn_plugin_host PUBLIC plugin-host/include)
 target_link_libraries(oscairn_plugin_host PUBLIC kick_clap_host samplepack::samplepack oscairn_engine_core PRIVATE Threads::Threads) # oscairn_engine_core: the Rust CLAP host (clap-host/rust) too
 target_compile_options(oscairn_plugin_host PRIVATE -Wall -Wextra)
 # The CLAP host the engine and the plugin worker use (plugin-host/src/clap_host.h): the Rust one (clap-host/rust), or its
-# C++ reference (kick::clap::Host). Both are always built, for clap-host-rust; the reference stays the default until the
-# Rust host has played on a device.
-set(OSCAIRN_CLAP_HOST cpp CACHE STRING "The CLAP host plugins load in: cpp (kick::clap::Host), or rust (clap-host/rust)")
+# C++ reference (kick::clap::Host). Rust is the default (the owner's decision after the keyboard comparison). Both are
+# always built: the C++ host stays as the reference the comparison tests run against, until it is deleted after recorded
+# transcripts replace it; -DOSCAIRN_CLAP_HOST=cpp makes the engine and the worker use it.
+set(OSCAIRN_CLAP_HOST rust CACHE STRING "The CLAP host plugins load in: cpp (kick::clap::Host), or rust (clap-host/rust)")
 set_property(CACHE OSCAIRN_CLAP_HOST PROPERTY STRINGS cpp rust)
 if(OSCAIRN_CLAP_HOST STREQUAL "rust")
     target_compile_definitions(oscairn_plugin_host PRIVATE OSCAIRN_CLAP_HOST_RUST=1)

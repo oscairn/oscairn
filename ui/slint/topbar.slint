@@ -275,19 +275,27 @@ export component TopBar inherits Rectangle {
     // What a narrow bar gives up, in this order: the actions (their words, undo and redo first, then all of them folded
     // into "More") while the name keeps its comfortable room; then the name's room down to its least; then the
     // meters' names, then their bars' length. The recording mark and the tempo stay.
-    out property <int> actions-mode: n-actions == 0 ? 0 : room-for(w-full, res-full, rec-full) >= Columns.pill-comfort ? 0 : room-for(w-icons, res-full, rec-full) >= Columns.pill-comfort ? 1 : 2;
-    out property <int> meters-mode: actions-mode < 2 ? 0 : room-for(w-more, res-full, rec-full) >= Columns.pill-min ? 0 : room-for(w-more, res-nolabel, rec-full) >= Columns.pill-min ? 1 : 2;
-    // Last of all, a slow disk's words are shortened ("slow"): the mark itself stays.
-    out property <bool> rec-short: meters-mode == 2 && room-for(w-more, res-narrow, rec-full) < Columns.pill-min;
-    out property <length> rec-width: rec-short && Bar.recording-behind ? rec-full - (Columns.rec-slow - Columns.rec-slow-short) : rec-full;
+    out property <int> actions-mode: n-actions == 0 ? 0 : room-for(w-full, res-full, rec-full) >= title-comfort ? 0 : room-for(w-icons, res-full, rec-full) >= title-comfort ? 1 : 2;
+    // Then, in a bar still too narrow (a roomy theme's type and spacing), a slow disk's words are shortened ("slow"), and
+    // last of all the meters' bars go and their percents stay (mode 3).
+    out property <int> meters-mode: actions-mode < 2 ? 0 : room-for(w-more, res-full, rec-full) >= Columns.pill-min ? 0 : room-for(w-more, res-nolabel, rec-full) >= Columns.pill-min ? 1 : room-for(w-more, res-narrow, rec-short-w) >= Columns.pill-min ? 2 : any-percent ? 3 : 2;
+    out property <bool> rec-short: meters-mode >= 2 && room-for(w-more, res-narrow, rec-full) < Columns.pill-min;
+    property <length> rec-short-w: Bar.recording-behind ? rec-full - (Columns.rec-slow - Columns.rec-slow-short) : rec-full;
+    out property <length> rec-width: rec-short ? rec-short-w : rec-full;
+    property <bool> bars-ok: meters-mode < 3;
+    property <bool> bars-shown: any-bar && bars-ok;
+    // The room the name wants before the actions give up their words: the title as it is written, up to the comfortable
+    // room, and never less than the least (a short title such as "Routing" leaves its room to the actions).
+    property <length> title-comfort: max(Columns.pill-min, min(Columns.pill-comfort, title-measure.preferred-width + (Bar.title-field ? 2 * Theme.pad-wide : 0px)));
     property <bool> any-bar: Bar.cpu-bar || Bar.ram-bar;
     property <bool> any-percent: Bar.cpu-percent || Bar.ram-percent;
     property <bool> any: any-bar || any-percent;
     property <int> n-actions: Bar.actions.length;
-    property <length> gap: Theme.pad-narrow;
+    // The items' spacing: a bar narrow for the type (a roomy theme on a small screen) spaces them by the least.
+    property <length> gap: root.width < 48 * Theme.small ? Theme.pad-tight : Theme.pad-narrow;
     property <length> label-w: meters-mode == 0 ? Columns.label : 0px;
     property <length> bar-w: meters-mode == 2 ? Columns.bar / 2 : Columns.bar;
-    property <length> percent-at: label-w + (any-bar ? bar-w + gap : 0px);
+    property <length> percent-at: label-w + (bars-shown ? bar-w + gap : 0px);
     property <length> res-full: any ? Columns.label + (any-bar ? Columns.bar + gap : 0px) + (any-percent ? Columns.percent : 0px) : 0px;
     property <length> res-nolabel: any ? res-full - Columns.label : 0px;
     property <length> res-narrow: any ? (any-bar ? Columns.bar / 2 + gap : 0px) + (any-percent ? Columns.percent : 0px) : 0px;
@@ -297,7 +305,7 @@ export component TopBar inherits Rectangle {
     property <length> w-icons: n-actions > 0 ? icons.preferred-width : 0px;
     property <length> w-more: n-actions > 0 ? more-measure.preferred-width + 2 * Theme.pad-wide : 0px;
     property <length> back-w: Bar.back ? back-measure.preferred-width + 2 * Theme.pad-wide : 0px;
-    property <length> tempo-width: round(Theme.small * 6.5 / 1px) * 1px;
+    property <length> tempo-width: round(Theme.small * 5.8 / 1px) * 1px;
     // The items of the line: Home's button, Back, the title (the rest), the actions, the recording mark, the tempo, the meters.
     property <int> items: (Bar.home-button ? 1 : 0) + (Bar.back ? 1 : 0) + 1 + (n-actions > 0 ? 1 : 0) + (Bar.recording ? 1 : 0) + 1 + (any ? 1 : 0);
     // What the name has of the line when the actions take `actions` and the meters `meters`.
@@ -308,6 +316,12 @@ export component TopBar inherits Rectangle {
     background: Theme.background;
     changed actions-mode => { Bar.more = self.actions-mode == 2; Bar.more-changed(); }
     init => { Bar.more = self.actions-mode == 2; }
+    title-measure := Text {
+        visible: false;
+        font-size: Bar.title-field ? Theme.small : Theme.body;
+        font-weight: Bar.title-field ? 400 : 700;
+        text: Bar.path.length > 0 ? Bar.path[0] : "";
+    }
     back-measure := Text {
         visible: false;
         font-size: Theme.button;
@@ -422,24 +436,24 @@ export component TopBar inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 spacing: Theme.pad-tight;
-                if Bar.cpu-bar || Bar.cpu-percent: Meter {
+                if (Bar.cpu-bar && root.bars-ok) || Bar.cpu-percent: Meter {
                     label: "CPU";
                     value: Bar.cpu;
                     known: Bar.cpu-known;
                     level: Bar.cpu-level;
-                    bar: Bar.cpu-bar;
+                    bar: Bar.cpu-bar && root.bars-ok;
                     percent: Bar.cpu-percent;
                     percent-x: root.percent-at;
                     labeled: root.meters-mode == 0;
                     label-width: root.label-w;
                     bar-width: root.bar-w;
                 }
-                if Bar.ram-bar || Bar.ram-percent: Meter {
+                if (Bar.ram-bar && root.bars-ok) || Bar.ram-percent: Meter {
                     label: "RAM";
                     value: Bar.ram;
                     known: Bar.ram-known;
                     level: Bar.ram-level;
-                    bar: Bar.ram-bar;
+                    bar: Bar.ram-bar && root.bars-ok;
                     percent: Bar.ram-percent;
                     percent-x: root.percent-at;
                     labeled: root.meters-mode == 0;

@@ -824,8 +824,9 @@ component Rail inherits Rectangle {
     out property <length> item: max(Theme.touch, root.room / max(1, root.labels.length));
     property <length> content: root.labels.length * root.item;
     out property <bool> over: root.content > root.room + 0.5px;
-    // The room for a label across: the rail less the tab's inset and a little air each side.
-    property <length> inner: root.width - 2 * (Theme.tab-pad + Theme.pad-tight / 2);
+    // The room for a label across: the rail less the tab's inset and the padding each side, so a bold label never
+    // touches the tab's edges.
+    property <length> inner: root.width - 2 * (Theme.tab-pad + Theme.pad-tight);
     // 1: the small type fits every label's width; else the least shrink that fits them all, at most to 70%.
     out property <float> fit: max(0.7, min(1.0, root.inner / max(1px, need.preferred-width)));
     callback fitted(float);

@@ -243,9 +243,10 @@ fn a_narrow_bar_folds_its_actions_before_it_cuts_anything() {
                 _ => assert!(actions >= 1, "{w}x{h}@{scale}: icons or More"),
             }
             assert!(meters == 0 || actions == 2, "the meters give up nothing while the actions can still fold");
-            // Nothing runs off the bar or leaves the name under its least, except in the roomy odd theme (type 1.39, spacing
-            // 1.6), whose fixed parts alone are wider than a narrow bar.
-            let unfit: Vec<_> = unfit.into_iter().filter(|w| !(w.ends_with("in odd") && logical < 1200.)).collect();
+            // Nothing runs off the bar or leaves the name under its least, in any theme (the roomy odd one included: type 1.39,
+            // spacing 1.6), but for that theme at 640 across, which the fixed parts alone (Home, Back, More, the mark, the
+            // tempo, the percents) are wider than.
+            let unfit: Vec<_> = unfit.into_iter().filter(|w| !(w.ends_with("in odd") && logical < 700.)).collect();
             assert!(unfit.is_empty(), "{unfit:?}");
         }
     }
@@ -294,4 +295,38 @@ fn more_opens_a_menu_of_the_actions_by_the_dial_and_by_touch() {
     assert!(ui.global::<crate::MenuState>().get_open());
     shell::act(Action::Cancel(None));
     assert!(!ui.global::<crate::MenuState>().get_open());
+}
+
+// A short title leaves its room to the actions: the bar folds them into More only when they do not fit with the title as
+// it is written (up to the comfortable room), measured, not whenever the comfortable room would not be left.
+#[test]
+fn a_short_title_leaves_its_room_to_the_actions() {
+    use crate::BarAction;
+    let mode_with = |path: &str| {
+        let mut s = Screen::sized(1280, 720);
+        s.set_scale(1.55); // the keyboard's 826 across
+        let ui = s.ui.clone_strong();
+        let bar = ui.global::<Bar>();
+        let action = |label: &str, icon: i32| BarAction { label: label.into(), enabled: true, cursor: false, icon, on: false };
+        let list = [action("Strips", 0), action("Sends", 0), action("Undo", 1), action("Redo", 2), action("Save", 0)];
+        bar.set_actions(slint::ModelRc::new(slint::VecModel::from(list.to_vec())));
+        bar.set_tempo("120.0 BPM".into());
+        bar.set_cpu(5);
+        bar.set_cpu_known(true);
+        bar.set_ram(20);
+        bar.set_ram_known(true);
+        bar.set_path(slint::ModelRc::new(slint::VecModel::from(vec![slint::SharedString::from(path)])));
+        bar.set_title_field(false);
+        bar.set_back(true);
+        bar.set_home_button(true);
+        s.ui.set_screen(10);
+        s.frame();
+        s.frame();
+        shot(&s, &format!("bar-title-{}", path.len()));
+        s.ui.get_actions_mode()
+    };
+    let short = mode_with("Mixer");
+    let long = mode_with("Lead  ›  Insert effects  ›  Basic Synth  ›  Modulation Matrix");
+    assert!(short < 2, "the actions fit beside a short title: {short}");
+    assert!(short <= long, "a short title never folds more than a long one: {short} {long}");
 }

@@ -731,10 +731,10 @@ fn a_rails_text_is_the_small_type_where_it_fits_else_shrunk_alike_down_to_sevent
     let (pages, tabs) = fits(&five_pages());
     println!("five pages: the pages' rail {pages:.2}, the tabs' rail {tabs:.2}");
     assert_eq!(tabs, 1., "the digits of the operators");
-    assert!(pages >= 0.9, "Operators, Filter, Amp, Voicing, Global: the small type, or all but: {pages}");
+    assert!(pages >= 0.85, "Operators, Filter, Amp, Voicing, Global: the small type, or all but: {pages}");
     let (pages, tabs) = fits(&long_names());
     println!("long names: the pages' rail {pages:.2}, the tabs' rail {tabs:.2}");
-    assert_eq!(pages, 1., "Sound, Output");
+    assert!(pages >= 0.85, "Sound, Output: the small type, or all but, with the padding each side: {pages}");
     assert!((0.7..1.).contains(&tabs),"Modulation Matrix, Voice Shaping, Macro Controls, Global: shrunk alike, not below 70%: {tabs}");
     let (pages, _) = fits(&named(&["A page named for everything it holds, and then some", "Filter"]));
     assert_eq!(pages, 0.7, "a name that does not fit even then is shrunk to 70% and cut");

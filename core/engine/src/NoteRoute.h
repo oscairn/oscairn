@@ -61,7 +61,7 @@ private:
     struct Victim { const Entry* entry=nullptr; size_t slot=0; };
     enum Counting { Kept, Fading, Ending }; // the notes counted: not given up; and those fading; and those choked, until they end
     float estimate(uint32_t lane,Counting counting) const noexcept;
-    Victim choose(uint32_t lane,bool reserved) noexcept;
+    Victim choose(uint32_t lane,bool reserved,bool last=false) noexcept;
     Victim fadingNote(uint32_t lane) const noexcept;
     float reserves(uint32_t lane) noexcept;
     void choke(uint32_t lane,float scale,float extra,const NoteRoute* self,uint32_t time,bool atNoteOn) noexcept;
@@ -396,7 +396,7 @@ inline float VoiceBudget::estimate(uint32_t lane,Counting counting) const noexce
 // else velocity), then the oldest. reserved: held notes within a reserve may go too. A plugin
 // that gives up its own voices (step 4) is left to the voice limit it was given while it keeps within
 // it. Notes of nodes whose notes cost: a MIDI-dialect plugin's too, ended by a note-off.
-inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved) noexcept
+inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved,bool last) noexcept
 {
     for(auto& g:groups)g={};
     for(const auto& e:entries)for(const auto& slot:e.route->active())if(slot.used && !slot.stolen && slot.held)
@@ -411,6 +411,7 @@ inline VoiceBudget::Victim VoiceBudget::choose(uint32_t lane,bool reserved) noex
         const auto& g=groups[e.group];
         const NoteZone* z=e.zones && e.zones->count?&e.zones->zones[0]:nullptr;
         const uint16_t reserve=z?z->reserve:0;const uint8_t priority=z?z->priority:0;
+        if(last){uint32_t kept=0;for(size_t i=0;i<e.route->top;++i)kept+=e.route->notes[i].used && !e.route->notes[i].stolen;if(kept<=1)continue;} // a connection's last note stays
         for(size_t i=0;i<e.route->top;++i)
         {
             const auto& slot=e.route->notes[i];
@@ -487,7 +488,7 @@ inline void VoiceBudget::admit(NoteRoute& self,uint32_t time) noexcept
     const float cost=mine->cost->ownVoices?0:mine->cost->noteNow();
     while(estimate(lane,Kept)+cost>soft*limit)
     {
-        const auto v=choose(lane,false);
+        const auto v=choose(lane,false,true);
         if(!v.entry)break;
         v.entry->route->steal(v.entry->route->notes[v.slot],v.entry->route==&self?time:0);
         v.entry->cost->stolen.fetch_add(1,std::memory_order_relaxed);
@@ -520,7 +521,7 @@ inline void VoiceBudget::measured(uint32_t lane,float total) noexcept
     const float scale=std::min(total/e,1.25f);
     while(estimate(lane,Kept)*scale>soft*l.limit)
     {
-        const auto v=choose(lane,false);
+        const auto v=choose(lane,false,true);
         if(!v.entry)break;
         v.entry->route->steal(v.entry->route->notes[v.slot],0);
         v.entry->cost->stolen.fetch_add(1,std::memory_order_relaxed);
@@ -538,7 +539,7 @@ inline void VoiceBudget::device(float total) noexcept
     while(excess>0)
     {
         Victim best;float most=0;
-        for(uint32_t i=0;i<lanes.size();++i)if(const auto v=choose(i,false);v.entry && v.entry->cost->noteNow()>most){best=v;most=v.entry->cost->noteNow();}
+        for(uint32_t i=0;i<lanes.size();++i)if(const auto v=choose(i,false,true);v.entry && v.entry->cost->noteNow()>most){best=v;most=v.entry->cost->noteNow();}
         if(!best.entry)return;
         best.entry->route->steal(best.entry->route->notes[best.slot],0);
         best.entry->cost->stolenForDevice.fetch_add(1,std::memory_order_relaxed);

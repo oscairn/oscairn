@@ -855,6 +855,7 @@ fn next_edit(f: &mut Fixture) -> serde_json::Value {
         let r = f.engine.request();
         match r["method"].as_str() {
             Some("parts.meters") => f.reply(&r, json!({"result": {"meters": []}})),
+            Some("edit.history") => f.reply(&r, json!({"result": {"undo": "", "redo": ""}})),
             // The JUCE strip commits after a level, solo or master edit; counted, answered.
             Some("graph.commit") => {
                 COMMITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -881,7 +882,7 @@ fn play_by_panes_touch_and_meters() {
     assert_eq!(f.screen.ui.get_screen(), 3);
     // The shell's ten on connecting, then Play's controls.changed subscription.
     let mut methods = vec![];
-    for _ in 0..11 {
+    for _ in 0..12 {
         let request = f.engine.request();
         let method = request["method"].as_str().unwrap().to_string();
         let result = match method.as_str() {
@@ -1048,6 +1049,7 @@ fn play_draws_in_every_theme() {
 }
 
 #[cfg(test)]
+mod bar;
 mod part;
 mod keyboard;
 mod pages;

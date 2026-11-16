@@ -93,6 +93,10 @@ impl Screen {
         Screen { b: Browser::new(ui), graph: Value::Null, id: 0, mode: Mode::List, plugins: vec![], scanning: true, windows: HashMap::new(), out: vec![] }
     }
 
+    pub fn at_top(&self) -> bool {
+        self.b.at_top()
+    }
+
     pub fn open(&mut self, id: u32) {
         self.id = id as u64;
         self.mode = Mode::List;

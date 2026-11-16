@@ -58,7 +58,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | A12 | The no-MIDI hint ("No MIDI device. Open the on-screen keyboard", Dismiss, kept) | `session.status` (`midiInputs`) | - | cursor on the link, press | [ ] |
 | A13 | Empty state: "No parts yet. Edit adds them." | - | - | - | [ ] |
 | A14 | Edit / Play toggle in the top bar | - | - | top bar action | [ ] |
-| A15 | Save (to the library; names the Performance when it has no id, or Save As New) | `performance.info`, `library.save` | - | top bar action; keyboard (K1) for a new name | [ ] |
+| A15 | Save (to the library; names the Performance when it has no id, or Save As New) | `performance.info`, `library.save` | - | top bar action; keyboard (K1) for a new name | [x] src/shell.rs: the Save button saves a Performance in the library at once, asks the name of one that is not (K1), a blank name keeps its own; the Performance's name on the bar is Save As New (JUCE: a tap on it); the engine's refusal and "Performance saved." are said in the name's place for 4 s |
 | A16 | Learn in the top bar when the device has knobs | - | - | top bar action | [ ] |
 | A17 | Meters and live values while shown only | `parts.meters`, `controls.changed` | - | - | [x] |
 
@@ -180,7 +180,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| J1 | Undo / Redo with the edit's name on the button | `edit.undo`, `edit.redo`, `edit.history` | - | top bar actions | [ ] |
+| J1 | Undo / Redo with the edit's name on the button | `edit.undo`, `edit.redo`, `edit.history` | - | top bar actions | [x] src/shell.rs, slint/topbar.slint: on every screen of the app (Play, Part, Chain, Sounds, Parameters; the JUCE buttons are in the Edit view header only), "Undo <edit>" and "Redo <edit>" off when empty; edit.history asked on entering a screen and on each graph.changed. The bar's cursor (all of A14-A16's top bar actions): the third pane (`move:2`), Tab, or the dial moving up out of the first row of Play, Part, Chain and Sounds (not the parameter grid: it needs a hook in grid.rs); Confirm does it, past the last stop or Cancel gives the cursor back |
 | J2 | The refusal of an edit said on the screen | error replies | - | - | [x] |
 | J3 | The shell opens the Performance app everywhere (Home tile, Setlist's Play, Play's part press), the handover entries and "Oscairn app" rows for this app gone | - | - | - | [ ] |
 | J4 | Recording indicator (owner, 2026-11-15): a take running and its time, on every screen's top bar and on Play: a filled dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger color. Learned as the JUCE RecordButtons learn it (`Engine::takes`): `record.takes` polled every 250 ms (here with the `status` notifications, so nothing wakes at rest); the first take `waiting` or `recording`, its frames over its sample rate. Not built: the Record and Capture buttons themselves (the hardware REC button starts and ends a take in the engine) | `record.takes` | - | shown only | [x] |

@@ -4,7 +4,7 @@
 // part right of the Performance has a fixed width, so a changing figure never moves anything:
 // an update repaints its own digits and bar and nothing else (src/tests.rs proves it).
 
-import { Theme, Field } from "theme.slint";
+import { Theme, Field, Button, Cursor } from "theme.slint";
 
 // The section's columns, from the theme's small type: whole pixels, fixed for a theme.
 global Columns {
@@ -18,6 +18,8 @@ global Columns {
     out property <length> icon: 24px; // the Home glyph
     out property <length> pill: 36px; // the Performance field's height
     out property <length> rec-text: round(Theme.small * 5.4 / 1px) * 1px; // "REC 99:59", fixed so the seconds never move it
+    out property <length> action: 36px; // an action button's height
+    out property <length> action-max: 2 * Theme.button-width; // its widest, a long edit's name elided
     out property <length> rec-slow: round(Theme.small * 6 / 1px) * 1px; // "disk slow"
 }
 
@@ -121,8 +123,46 @@ export component RecordingMark inherits Rectangle {
     }
 }
 
+// One action of the screen shown (undo, save, ...): a button; `cursor` is the focus border.
+export struct BarAction {
+    label: string,
+    enabled: bool,
+    cursor: bool,
+}
+
+component ActionButton inherits Rectangle {
+    in property <BarAction> data;
+    in property <length> cap: Columns.action-max; // the widest it gets, a long edit's name elided
+    callback clicked();
+    width: min(measure.preferred-width + 2 * Theme.pad-wide, root.cap);
+    measure := Text {
+        visible: false;
+        font-size: Theme.button;
+        font-weight: 700;
+        text: root.data.label;
+    }
+    Button {
+        y: (parent.height - self.height) / 2;
+        height: Columns.action;
+        text: root.data.label;
+        enabled: root.data.enabled;
+        clicked => { root.clicked(); }
+    }
+    Cursor {
+        y: (parent.height - Columns.action) / 2;
+        height: Columns.action;
+        corner: Theme.button-radius(Columns.action);
+        shown: root.data.cursor;
+    }
+}
+
 // What the top bar shows, set by shell.rs.
 export global Bar {
+    in property <[BarAction]> actions; // what the screen shown offers
+    in property <bool> pill-cursor; // the cursor is on the Performance's name (Save As New)
+    in property <string> notice; // what the last action said ("Saved"), in the name's place for a while
+    callback action(int);
+    callback pill-tapped();
     in property <bool> recording; // a take is recording
     in property <string> recording-time; // "m:ss"
     in property <bool> recording-behind; // its writer is behind: the disk is slow
@@ -185,6 +225,7 @@ export component TopBar inherits Rectangle {
         // The open Performance and its scene: a pill, as wide as what is left.
         Rectangle {
             horizontal-stretch: 1;
+            min-width: 0px;
             if Bar.performance != "": Field {
                 y: (parent.height - self.height) / 2;
                 height: Columns.pill;
@@ -194,10 +235,22 @@ export component TopBar inherits Rectangle {
                     vertical-alignment: center;
                     overflow: elide;
                     font-size: Theme.small;
-                    color: Theme.text;
-                    text: Bar.scene == "" ? Bar.performance : Bar.performance + "  ·  " + Bar.scene;
+                    color: Bar.notice == "" ? Theme.text : Theme.accent;
+                    text: Bar.notice != "" ? Bar.notice : Bar.scene == "" ? Bar.performance : Bar.performance + "  ·  " + Bar.scene;
+                }
+                TouchArea {
+                    clicked => { Bar.pill-tapped(); }
+                }
+                Cursor {
+                    corner: Theme.field-radius(parent.height);
+                    shown: Bar.pill-cursor;
                 }
             }
+        }
+        for action[i] in Bar.actions: ActionButton {
+            data: action;
+            cap: min(Columns.action-max, root.width * 0.16); // a narrow bar elides a long name sooner
+            clicked => { Bar.action(i); }
         }
         if Bar.recording: RecordingMark {}
         tempo := Text {

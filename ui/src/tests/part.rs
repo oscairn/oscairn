@@ -279,7 +279,7 @@ fn part_on_the_shell() {
     f.engine.answer(); // session.hello
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
-    for _ in 0..11 {
+    for _ in 0..12 {
         let request = f.engine.request();
         let result = match request["method"].as_str().unwrap() {
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
@@ -304,6 +304,7 @@ fn part_on_the_shell() {
             "graph.get" => graph.borrow().clone(),
             "session.status" => json!({"midiInputs": []}),
             "unsubscribe" | "subscribe" => json!({}),
+            "edit.history" => json!({"undo": "", "redo": ""}),
             "graph.commit" => json!({"revision": 1}),
             _ => return r,
         };

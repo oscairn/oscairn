@@ -21,7 +21,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
     let graph = super::part::part_graph();
-    for _ in 0..11 {
+    for _ in 0..12 {
         let request = f.engine.request();
         let result = match request["method"].as_str().unwrap() {
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
@@ -45,6 +45,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
             "params.text" => json!({"text": "t"}),
             "controllers.view" => json!({"accepted": true}),
             "unsubscribe" | "subscribe" => json!({}),
+            "edit.history" => json!({"undo": "", "redo": ""}),
             _ => return r,
         };
         f.reply(&r, json!({"result": result}));

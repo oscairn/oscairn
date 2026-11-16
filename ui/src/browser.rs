@@ -76,6 +76,12 @@ impl Browser {
         self.editing = false;
     }
 
+    /// The cursor is on the first row and no value is being changed: moving up leaves the list
+    /// for the top bar's actions.
+    pub fn at_top(&self) -> bool {
+        self.cursor.at == Some(0) && !self.editing
+    }
+
     /// Row `row` of the view as an index of the whole list.
     pub fn index(&self, row: i32) -> usize {
         self.cursor.first + row.max(0) as usize

@@ -25,7 +25,7 @@ use crate::play;
 use crate::profile::Profile;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, GridState, HomeState, KeyboardState, PartState, PianoState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, BarAction, GridState, HomeState, KeyboardState, PartState, PianoState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -46,6 +46,10 @@ pub enum Request {
     Memory,
     /// record.takes: whether a take is recording, and for how long.
     Record,
+    /// edit.history, edit.undo, edit.redo: what undo and redo would now do.
+    History,
+    /// library.save, from the top bar.
+    Save,
     /// library.query's total of Performances (false) or Sounds (true), for Home's Library line.
     Library(bool),
     /// controllers.view: whether lists are on screen, so the panel's navigate controls navigate.
@@ -158,6 +162,18 @@ pub struct App {
     meters: slint::Timer,
     /// The open Performance's library ID (performance.info), which the setlist's slot playing is compared with.
     performance_id: String,
+    performance_name: String,
+    /// What undo and redo would do (edit.history), named on the top bar's buttons.
+    history: topbar::History,
+    /// The top bar's actions as shown, and the stop the cursor is on (the Performance's name is
+    /// stop 0 when shown, then each action): None while the screen has the cursor.
+    bar_list: Vec<(topbar::Do, String, bool)>,
+    bar_at: Option<usize>,
+    bar_rows: Rc<VecModel<BarAction>>,
+    /// Clears what the last action said.
+    notice: slint::Timer,
+    /// The text keyboard is open for Save (true: Save As New).
+    saving: Option<bool>,
 }
 
 thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
@@ -168,6 +184,11 @@ fn with_app(f: impl FnOnce(&mut App)) {
             f(app)
         }
     })
+}
+
+/// The Performance app's screens, which carry the top bar's actions (undo, redo, save).
+fn has_actions(screen: Screen) -> bool {
+    matches!(screen, Screen::Play | Screen::Part | Screen::Chain | Screen::Sounds | Screen::Params)
 }
 
 /// The screens that follow levels and mutes moved live (controls.changed).
@@ -202,6 +223,10 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     ui.global::<HomeState>().set_tiles(tiles.clone().into());
     ui.global::<HomeState>().on_tapped(|i| with_app(|a| a.tap(i)));
     ui.global::<Bar>().on_home(|| with_app(|a| a.go(Screen::Home)));
+    let bar_rows = Rc::new(VecModel::<BarAction>::default());
+    ui.global::<Bar>().set_actions(bar_rows.clone().into());
+    ui.global::<Bar>().on_action(|i| with_app(|a| a.bar_tap(i.max(0) as usize)));
+    ui.global::<Bar>().on_pill_tapped(|| with_app(|a| a.bar_pill()));
     ui.on_key(|text| key(&text));
     ui.on_key_released(|text| {
         with_app(|a| {
@@ -298,6 +323,13 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             play_from: Screen::Home,
             meters: slint::Timer::default(),
             performance_id: String::new(),
+            performance_name: String::new(),
+            history: topbar::History::default(),
+            bar_list: vec![],
+            bar_at: None,
+            bar_rows,
+            notice: slint::Timer::default(),
+            saving: None,
         };
         app.part.keys = profile.on_screen_keyboard;
         app.show_home();
@@ -417,6 +449,9 @@ impl App {
                 if live(self.screen) {
                     self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
                 }
+                if has_actions(self.screen) {
+                    self.ask(Request::History, "edit.history");
+                }
             }
             Event::Lost(why) => {
                 self.show(|s| s.recording = None); // what the engine is doing is not known now
@@ -426,7 +461,12 @@ impl App {
             }
             Event::Notification { method, params } => match method.as_str() {
                 "status" => self.status(&params),
-                "graph.changed" => self.ask_performance(),
+                "graph.changed" => {
+                    self.ask_performance();
+                    if has_actions(self.screen) {
+                        self.ask(Request::History, "edit.history"); // an edit: what undo names changed
+                    }
+                }
                 "params.changed" => {
                     self.on_params(|p| p.changed(&params));
                 }
@@ -517,6 +557,8 @@ impl App {
                     self.stale = true;
                 }
                 match request {
+                    Request::Save if e.code != 0 => self.say(&format!("Not saved: {}", e.message)),
+                    Request::History if e.code != 0 => self.say(&format!("The engine refused: {}", e.message)),
                     Request::Reopen if e.code != 0 => eprintln!("oscairn-ui: performance.reopen: {}", e.message),
                     Request::Shell if e.code != 0 => eprintln!("oscairn-ui: memory.shell: {}", e.message),
                     _ => {}
@@ -525,8 +567,17 @@ impl App {
             }
         };
         match request {
+            Request::History => {
+                self.history = topbar::History::read(&r);
+                self.show_bar();
+            }
+            Request::Save => {
+                self.say("Performance saved.");
+                self.ask_performance();
+            }
             Request::Info => {
                 self.performance_id = r["id"].as_str().unwrap_or_default().to_string();
+                self.performance_name = r["name"].as_str().unwrap_or_default().to_string();
                 self.follow();
                 self.show(|s| s.performance = topbar::performance(&r))
             }
@@ -596,7 +647,11 @@ impl App {
             bar.set_ram_level(level(next.ram));
         }
         let lines_changed = (&next.performance, &next.audio_device, next.performances, next.sounds) != (&was.performance, &was.audio_device, was.performances, was.sounds);
+        let named = (next.performance.is_empty()) != (was.performance.is_empty());
         self.shown = next;
+        if named {
+            self.show_bar(); // the name is a stop of the bar's cursor
+        }
         if lines_changed {
             self.show_home();
         }
@@ -640,6 +695,15 @@ impl App {
             self.keyboard_outcome(outcome);
             return true;
         }
+        if text == "\t" && self.keyboard.is_none() && self.piano.is_none() {
+            // Tab: the top bar's actions have the cursor, and Tab again gives it back.
+            if self.bar_at.take().is_some() {
+                self.show_bar();
+            } else {
+                self.bar_enter(Action::Move { pane: Some(2), by: 0 });
+            }
+            return true;
+        }
         nav::from_key(text).map(|a| self.act(a)).is_some()
     }
 
@@ -649,6 +713,12 @@ impl App {
         }
         if self.piano.is_some() {
             return self.piano_act(action);
+        }
+        if self.bar_at.is_some() {
+            return self.bar_act(action);
+        }
+        if self.bar_enter(action) {
+            return;
         }
         match (self.screen, action) {
             (Screen::Opening, Action::Cancel(_)) if !self.hands_over => self.go(Screen::Home),
@@ -687,6 +757,143 @@ impl App {
                     self.go(Screen::Home);
                 }
             }
+        }
+    }
+
+    /// What an action of the top bar said, in the Performance's name's place for a few seconds.
+    fn say(&mut self, text: &str) {
+        if let Some(ui) = self.ui() {
+            ui.global::<Bar>().set_notice(text.into());
+        }
+        self.notice.start(slint::TimerMode::SingleShot, Duration::from_secs(4), || {
+            with_app(|a| {
+                if let Some(ui) = a.ui() {
+                    ui.global::<Bar>().set_notice(SharedString::new());
+                }
+            })
+        });
+    }
+
+    /// The stops the top bar's cursor visits: the Performance's name (Save As New) when shown,
+    /// then each action.
+    fn bar_stops(&self) -> usize {
+        usize::from(!self.shown.performance.is_empty()) + self.bar_list.len()
+    }
+
+    /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
+    fn show_bar(&mut self) {
+        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history) } else { vec![] };
+        if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
+            self.bar_at = None;
+        }
+        let Some(ui) = self.ui() else { return };
+        let pill = usize::from(!self.shown.performance.is_empty());
+        let rows: Vec<BarAction> =
+            self.bar_list.iter().enumerate().map(|(i, (_, label, enabled))| BarAction { label: label.as_str().into(), enabled: *enabled, cursor: self.bar_at == Some(i + pill) }).collect();
+        crate::setlist::update(&self.bar_rows, rows);
+        let bar = ui.global::<Bar>();
+        let on_pill = pill == 1 && self.bar_at == Some(0);
+        if bar.get_pill_cursor() != on_pill {
+            bar.set_pill_cursor(on_pill);
+        }
+    }
+
+    /// Does what stop `stop` of the bar does.
+    fn bar_do(&mut self, stop: usize) {
+        let pill = usize::from(!self.shown.performance.is_empty());
+        if stop < pill {
+            return self.save(true);
+        }
+        let Some((what, _, enabled)) = self.bar_list.get(stop - pill).cloned() else { return };
+        if !enabled {
+            return;
+        }
+        match what {
+            topbar::Do::Undo => self.send(Request::History, "edit.undo", json!({})),
+            topbar::Do::Redo => self.send(Request::History, "edit.redo", json!({})),
+            topbar::Do::Save => self.save(false),
+        }
+    }
+
+    fn bar_tap(&mut self, i: usize) {
+        self.bar_at = None;
+        let pill = usize::from(!self.shown.performance.is_empty());
+        self.bar_do(i + pill);
+        self.show_bar();
+    }
+
+    fn bar_pill(&mut self) {
+        self.bar_at = None;
+        if has_actions(self.screen) && !self.shown.performance.is_empty() {
+            self.bar_do(0);
+        }
+        self.show_bar();
+    }
+
+    /// Save to the library, as the JUCE app does (LibraryPane.cpp, savePerformance): a Performance
+    /// already in the library is saved over; else, or as new, the name is asked for on the keyboard.
+    fn save(&mut self, as_new: bool) {
+        if !as_new && !self.performance_id.is_empty() {
+            return self.send(Request::Save, "library.save", json!({}));
+        }
+        self.saving = Some(as_new);
+        let title = if as_new { "Save As New: the Performance's name" } else { "Save: the Performance's name" };
+        let name = self.performance_name.clone();
+        self.open_keyboard(self.screen, title, &name);
+    }
+
+    /// An action while the top bar has the cursor: it moves along the stops (leaving past the
+    /// last, back to the screen), Confirm does what the stop does, Cancel gives the cursor back.
+    fn bar_act(&mut self, action: Action) {
+        let stops = self.bar_stops() as i64;
+        let at = self.bar_at.unwrap_or(0) as i64;
+        let to = |by: i64| {
+            let next = at + by;
+            (0..stops).contains(&next).then_some(next as usize)
+        };
+        match action {
+            Action::Move { by, .. } => self.bar_at = if by < 0 { to(by.into()).or(Some(0)) } else { to(by.into()) },
+            Action::Arrow { dx, dy } => {
+                let by = i64::from((dx + dy).signum());
+                self.bar_at = if by < 0 { to(by).or(Some(0)) } else { to(by) };
+            }
+            Action::End(by) => self.bar_at = Some(if by < 0 { 0 } else { stops as usize - 1 }),
+            Action::Page(_) => {}
+            Action::Confirm(_) => {
+                if let Some(at) = self.bar_at {
+                    self.bar_do(at);
+                }
+            }
+            Action::Cancel(_) => self.bar_at = None,
+        }
+        self.show_bar();
+    }
+
+    /// The cursor onto the top bar's actions, at the first stop or the last, when something asks
+    /// for it: the third list pane (`move:2`), the Tab key, or the dial moving up out of the top
+    /// of the screen's list. True when it did.
+    fn bar_enter(&mut self, action: Action) -> bool {
+        if !has_actions(self.screen) || self.bar_stops() == 0 {
+            return false;
+        }
+        let first = match action {
+            Action::Move { pane: Some(2..), by } => by >= 0,
+            Action::Move { pane: None | Some(0), by } if by < 0 && self.at_top() => false,
+            _ => return false,
+        };
+        self.bar_at = Some(if first { 0 } else { self.bar_stops() - 1 });
+        self.show_bar();
+        true
+    }
+
+    /// The screen's cursor is on its first row: moving up leaves for the bar.
+    fn at_top(&self) -> bool {
+        match self.screen {
+            Screen::Play => self.play.at_top(),
+            Screen::Part => self.part.at_top(),
+            Screen::Chain => self.chain.at_top(),
+            Screen::Sounds => self.sounds.at_top(),
+            _ => false,
         }
     }
 
@@ -949,6 +1156,17 @@ impl App {
         let Some((screen, k)) = self.keyboard.take() else { return };
         self.repeat.stop();
         k.close();
+        if let Some(as_new) = self.saving.take() {
+            // Save's name, the JUCE way: a blank name keeps the Performance's own.
+            if let Some(name) = typed.map(|t| t.trim().to_string()) {
+                let mut params = json!({"new": as_new});
+                if !name.is_empty() {
+                    params["name"] = json!(name);
+                }
+                self.send(Request::Save, "library.save", params);
+            }
+            return;
+        }
         match (screen, typed) {
             (Screen::Part, Some(text)) => self.on_part(|p| p.entered(&text)),
             (Screen::Part, None) => self.on_part(part::Screen::not_entered),
@@ -981,6 +1199,7 @@ impl App {
         self.close_piano();
         if let Some((_, k)) = self.keyboard.take() {
             k.close();
+            self.saving = None;
             self.on_part(part::Screen::not_entered);
             self.on_sounds(sounds::Screen::not_entered);
         }
@@ -1017,6 +1236,7 @@ impl App {
         }
         let was = self.screen;
         self.screen = screen;
+        self.bar_at = None;
         if (was == Screen::Opening) != (screen == Screen::Opening) {
             self.send_view();
         }
@@ -1065,6 +1285,10 @@ impl App {
             self.follow();
             self.play.shown();
             self.meters.start(slint::TimerMode::Repeated, play::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+        }
+        self.show_bar();
+        if has_actions(screen) {
+            self.ask(Request::History, "edit.history");
         }
     }
 

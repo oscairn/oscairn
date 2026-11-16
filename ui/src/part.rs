@@ -187,6 +187,11 @@ impl Screen {
     }
 
     /// The part to show, from the graph already read.
+    /// The cursor is on the first row, at rest: moving up leaves for the top bar's actions.
+    pub fn at_top(&self) -> bool {
+        self.cursor.at == Some(0) && !self.editing && self.menu.is_none()
+    }
+
     pub fn open(&mut self, id: u32) {
         self.id = id as u64;
         self.active = true;

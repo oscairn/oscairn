@@ -497,6 +497,11 @@ impl Screen {
         self.held = down.then(|| if row < 0 { -1 } else { self.parts.get(self.at(row)).map_or(-2, |p| p.id as i64) });
     }
 
+    /// The scene cursor is on the first tile: moving up or left leaves for the top bar's actions.
+    pub fn at_top(&self) -> bool {
+        self.touched == 0 && self.scene_cursor.at == Some(0)
+    }
+
     /// The cursors drop when the screen goes, as on focus loss in the JUCE lists.
     pub fn hidden(&mut self) {
         self.scene_cursor = self.scene_cursor.clear();

@@ -110,6 +110,35 @@ pub fn scene(graph: &Value) -> String {
     graph["scenes"].as_array().and_then(|s| s.iter().find(|s| &s["id"] == id)).and_then(|s| s["name"].as_str()).unwrap_or_default().into()
 }
 
+/// What an action of the top bar does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Do {
+    Undo,
+    Redo,
+    /// Save to the library; the Performance's name on the bar is Save As New.
+    Save,
+}
+
+/// What undo and redo would now do, by the edit's name (edit.history; empty: nothing).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct History {
+    pub undo: String,
+    pub redo: String,
+}
+
+impl History {
+    pub fn read(v: &Value) -> History {
+        History { undo: v["undo"].as_str().unwrap_or_default().into(), redo: v["redo"].as_str().unwrap_or_default().into() }
+    }
+}
+
+/// The actions the Performance app's screens offer, as the JUCE Edit view's header names them
+/// (PartsView.cpp: "Undo <edit>", Redo, Save): each with its label and whether it can be used now.
+pub fn actions(history: &History) -> Vec<(Do, String, bool)> {
+    let named = |what: &str, name: &str| if name.is_empty() { what.to_string() } else { format!("{what} {name}") };
+    vec![(Do::Undo, named("Undo", &history.undo), !history.undo.is_empty()), (Do::Redo, named("Redo", &history.redo), !history.redo.is_empty()), (Do::Save, "Save".into(), true)]
+}
+
 /// A take being recorded, as the JUCE record buttons (Recording.cpp, RecordButtons) show it: the
 /// time the first take waiting for its start or recording has run, "m:ss", and whether its writer
 /// is behind (`behind`: the disk is slow).

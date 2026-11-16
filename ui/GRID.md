@@ -102,7 +102,7 @@ key map, FM operators.
 | Filter response | `Filter` L359-415 | none (a preview) | views.rs `draw_filter`, `filter_of`, `filter_named`, `filter_db`; pixel test tests/views.rs | done |
 | LFO waveform | `Lfo` L419-473 | none (a preview) | views.rs `draw_lfo`, `lfo_of`, `wave_named`; pixel test tests/views.rs | done |
 | Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | views.rs `draw_map`, `map_of`, `map_drag`; tests/views.rs | done |
-| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | src/fm.rs (the owner's own design, below: not the reference's) with views.rs `View::Fm`; tests/fm*.rs | done, differing from the reference by the owner's decision (2026-11-15); since 2026-11-16 the top pane of a master and detail ("Master and detail"); the reference's two guards stay (operators past 8 are skipped, a feedback with no target operator is not drawn) |
+| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | src/fm.rs (the owner's own design, below: not the reference's) with views.rs `View::Fm`, `View::Stages`; tests/fm*.rs | done, differing from the reference by the owner's decision (2026-11-15); since 2026-11-16 the top pane of a master and detail ("Master and detail"), with an operator table ("The operator table") over a dense detail of named envelope stages and compact controls ("The detail"); the reference's two guards stay (operators past 8 are skipped, a feedback with no target operator is not drawn) |
 
 ## The FM operator view: the owner's design (2026-11-15), a difference from the reference
 
@@ -137,15 +137,12 @@ fills the area: the diagram, the graph and a list of the operators side by side.
   operators (the longest of all), else each uses its own normalized axis. The selected operator's line is thicker,
   on top, and the only one with handles (touch drags a node: its time across, its level up, for that operator
   only); the others are thin.
-- List (the strip of the first version is gone: it was a row of cells under the diagram and the graph): one line per
-  operator at the right of the overview, as many lines as the plugin has operators (none for a missing one), each its
-  number chip in the operator's color, its level (the plugin's text over a thin bar in the operator's color) and its ratio
-  (edged in the accent while the fixed switch is on, with the switch's text before the ratio's when the box is wide enough
-  for both at 70% type). Fine, detune and every other parameter of an operator are in the detail (below), not here.
+- Table (the list of the first version, a line of number, level and ratio, is gone): one row for each operator in the middle of
+  the overview, its columns and cells in "The operator table".
 - Choosing an operator, a master and detail: see "Master and detail". The selected operator is told in four places at
-  once: the ring round its box in the diagram, its thick line (the only one with handles) in the graph, its raised line
-  with the text-colored edge in the list, and the detail's heading in its color. By touch a tap on its box, its line or its
-  list line chooses it, the level bar and ratio box of a line are dragged as before, a drag across the diagram steps the
+  once: the ring round its box in the diagram, its thick line (the only one with handles) in the graph, its raised row
+  with the text-colored edge in the table, and the detail's heading in its color. By touch a tap on its box, its line or its
+  table row chooses it, the level bar and the number cells of a row are dragged as before, a drag across the diagram steps the
   algorithm and a tap on its left or right half steps it back or on; a tap on the algorithm's or feedback's name above the
   diagram steps it by its halves too.
 - Dots (`Screen::set_positions`, `fm::Along`): the graph draws a dot (a halo and a dot in the operator's color)
@@ -164,55 +161,156 @@ tabs: the rule that folds a page of tabs that are the indexes of one view into i
 - **The block.** Where a page has a view with an overview (`grid::master_view`: a view with an `algorithm`), its parameters
   with an index of 1 to 8 are not tiles of the page: they are the detail. The block fills the area (the page's view height)
   and is, top to bottom: the overview (panel 0, the view's own panel), the detail's heading (panel 1: a bar in the selected
-  operator's color with "Operator N" or the folded tab's name, the rows it shows and two arrows that page them), and the
-  selected operator's tiles. Parameters of the page that are in no view, and the view's with an index past 8, stay ordinary
+  operator's color with "Operator N" or the folded tab's name, a previous and a next arrow, and the rows it shows with two
+  arrows that page them), the operator's envelope (panel 2: the graph and the labels of the Time and Level rows) and, over
+  panel 2 and under it, the operator's parameters as compact tiles: the stages' controls in two rows, then the others. Parameters of the page that are in no view, and the view's with an index past 8, stay ordinary
   tiles under the block, by the rules above (the page scrolls to them).
-- **Overview** (always all operators): at the left the horizontal algorithm diagram, then the shared graph, then the list.
-  Under the page's tabs the view's own parameters (index 0: algorithm, feedback, any other) are named in a line over the
-  diagram ("Algorithm 3", "Feedback 5"), and are cursor stops and touch targets there; they are not tiles anywhere.
-- **Detail.** Every parameter that carries the view and the selected operator's index, in the plugin's priority order
-  (numbered first, then the plugin's own), as the grid's own tiles (knob, slider, switch, dropdown, split buttons at their
-  usual size: a tile is 84 high, 120 with a knob on the page, a column at least 210 wide), row by row at the page's
-  column count. Switching operator keeps the row.
-- **Split.** The detail gets as many full rows as leave the overview its preferred height (14 lines of the small type, at
-  least 1.6 lines for each operator's list line: `fm::preferred_height`), at least one and at most what the operator
-  with most parameters needs; the overview gets the rest, never less than `fm::least_height` (a list line 1.1 lines of type
-  high). Only when even one row does not leave the least does the block go past the area and the page scroll. Measured
-  (tests/fm_master.rs `the_overview_and_the_detail_share_the_area_at_the_three_screens`, dark theme, tiles with knobs;
-  area width x height, overview height, then the detail is the heading 26 and the row 120 and the gaps):
+- **Overview** (always all operators): three panes across, the graph at the left, the operator table in the middle and the
+  algorithm diagram at the right (the owner's arrangement). Under the page's tabs the view's own parameters (index 0: algorithm, feedback, any other) are named in a line over
+  the diagram ("Algorithm 3", "Feedback 5"), and are cursor stops and touch targets there; they are not tiles anywhere. The
+  table's width is its columns' (scaled 0.8 to 1); what is left goes to the graph (45%) and the diagram (55%, never less
+  than nine lines of type or its heads); a graph that would not get nine lines of type across is left out, so it is the
+  diagram that shrinks, never the table's rows.
+- **Detail** (the owner, 2026-11-16: "we can def fit more info on the screen than just the grid system, but we do want to
+  keep it visually consistent with the rest of the design language"): top to bottom a heading bar in the selected operator's
+  color (a previous and a next arrow, each a touch target wide, then "Operator N", and at the right "Row 1 of 3" with two
+  arrows when the other controls have more rows than are in view), the operator's envelope (a graph over a **Time** row and
+  a **Level** row of compact controls, "The detail" below) and the operator's other parameters as compact controls, up to
+  eight to a row, in the plugin's priority order (compact: "Compact control"). Every parameter carrying the view and the
+  selected operator's index is there once; those of the envelope's stages are in its rows, not again below.
+- **Split.** One rule: the table's rows keep at least 1.3 lines of the small type; the detail's controls keep their size;
+  the detail's graph appears when at least four lines of type are left for it; then the table's rows grow up to 1.7 lines
+  of type, then the graph (to nine, then without limit), then the table's again (to 2.0). More rows of other controls
+  than one are shown only while the table keeps 1.7 lines a row and the graph its four. Only when the table's least and the
+  detail's two rows and one row do not fit does the block go past the area and the page scroll. Measured by
+  tests/fm_table.rs `the_screens_hold_all_rows_the_stage_rows_and_a_row_of_controls` (dark theme, the engine-like fixture:
+  area logical px, overview height with the table's row height in lines of type at 13 px, the detail's graph, a compact
+  control 44 high; the stage rows are two and the controls one row of eight in every case below):
 
-  | Screen | pages | area | overview | detail rows in view |
-  |---|---|---|---|---|
-  | 826 x 465 (1280 x 720 at 1.55) | none | 814 x 405 | 259 | 1 (3 tiles) |
-  | | rail at the side | 743 x 405 | 259 | 1 (3 tiles) |
-  | | strip over | 814 x 357 | 211 | 1 (3 tiles) |
-  | 1280 x 720 at 1 | none | 1268 x 660 | 274 (8 and 6 operators), 394 (4) | up to 3 (6 tiles) |
-  | | rail at the side | 1197 x 660 | 274, 394 | up to 3 |
-  | | strip over | 1268 x 612 | 226, 346 | up to 3 |
-  | 800 x 480 at 1 | none | 788 x 420 | 274 | 1 (3 tiles) |
-  | | rail at the side | 717 x 420 | 274 | 1 |
-  | | strip over | 788 x 372 | 226 | 1 |
+  | Screen | pages | area | 8 operators: overview (row), graph | 6: overview (row), graph | 4: overview (row), graph |
+  |---|---|---|---|---|---|
+  | 826 x 465 (1280 x 720 at 1.55) | none | 814 x 405 | 229 (23.0), none | 173 (21.9), 148 | 143 (26.0), 178 |
+  | | rail at the side | 743 x 405 | 229 (23.0), none | 173 (21.9), 148 | 143 (26.0), 178 |
+  | | strip over | 814 x 357 | 181 (17.0), none | 181 (23.3), none | 125 (21.9), 148 |
+  | 1280 x 720 at 1 | none | 1268 x 660 | 253 (26.0), 227 | 197 (26.0), 283 | 143 (26.0), 337 |
+  | | rail at the side | 1197 x 660 | 253 (26.0), 227 | 197 (26.0), 283 | 143 (26.0), 337 |
+  | | strip over | 1268 x 612 | 222 (22.1), 210 | 197 (26.0), 235 | 143 (26.0), 289 |
+  | 800 x 480 at 1 | none | 788 x 420 | 188 (17.9), 148 | 174 (22.1), 162 | 143 (26.0), 193 |
+  | | rail at the side | 717 x 420 | 188 (17.9), 148 | 174 (22.1), 162 | 143 (26.0), 193 |
+  | | strip over | 788 x 372 | 196 (18.9), none | 196 (25.9), none | 140 (25.8), 148 |
 
-  The overview is that tall because one row of knob tiles is 120 and the heading 26: with the preferred height at 8
-  operators (220 at the small type's 13) a second row would cost more than the overview can give up at 405. Where an
-  operator has more parameters than the rows in view, the rest are paged by row (below).
-- **Rows.** One row at a time. The heading's arrows (touch) and the dial or an arrow key (without touch) move the first
-  row in view by one; past the last tile in view the dial goes to the start of the next row, and back from the first to the
-  end of the row before; down from the last row in view or up from the first with the arrow keys keeps the column.
-- **Without touch.** The dial walks, in this order: the page rail (when there is one), the tabs of the page when it has
-  tabs, the overview's row (the view's own parameters, then operators 1 to N), then the detail's tiles (and the page's
-  ordinary tiles after them). Which operator to look at is not an edit: the detail and the knobs follow the cursor along the
-  operators at once (a relayout of the detail and, when it changed, one `controllers.view`; no parameter is set). A view's own
-  parameter is reached the same way but nothing changes until a press gives it the dial (a gesture begins) and a press or
-  Cancel ends it. A press on an operator takes the cursor to the detail tile it last left (else the first). Quick operator
-  step: from the detail the cursor up (an arrow key, CURSOR UP on a unit) goes to the operator's line, the dial steps the
-  operator, the cursor down returns to the same tile, so one parameter is swept across the operators; the page keys
-  (Page Up, Page Down) step the operator at once, keeping the cursor on its tile and the row, and turn the page only
-  past either end.
-- **The knobs under the screen** play the detail's whole list for the selected operator in the order of the detail (not only
-  the tiles in view), then the view's own parameters, then the page's other tiles by priority: `controllers.view` `screen` is
-  published again when the selection changes. Without a row of eight in view the knobs still play eight: the first row of
-  tiles is a prefix of what they play.
+  So at the keyboard's screen with 8 operators every row of the table shows without scrolling (17.0 to 23.0 logical px a
+  row, 1.3 to 1.8 lines of type: the least is 1.3), the Time and Level rows and the row of eight controls show, and the
+  detail's own graph is left out (the shared graph at the top, with the selected operator's line thick and its handles, is the
+  graph then); with 6 or 4 operators, or on a larger screen, the room that is freed goes to the detail's graph. With pages over
+  the 357 high area the graph is left out for 6 as well. The diagram is the pane that shrinks (an 8-operator flow at the
+  keyboard's screen is about 200 logical px across).
+- **Rows.** The other controls page one row at a time (the stage rows do not). The heading's arrows (touch) and the dial or an
+  arrow key (without touch) move the first row in view by one; past the last control in view the dial goes to the start of
+  the next row, and back from the first to the end of the row before; down from the last row in view or up from the first
+  with the arrow keys keeps the column.
+- **Without touch.** The unit has a dial (and INC, DEC, CURSOR UP and CURSOR DOWN, which all step it by one: the device's panel map, devices/*/panels), two more encoders for panes 0 and 1,
+  ENTER (confirm) and EXIT (cancel); it has no left or right key. So the dial walks in reading order: the page rail (when
+  there is one), the tabs of the page when it has tabs, the overview's row (the view's own parameters, then the table's cells
+  row by row, left to right in each row), then the detail's controls (the Time row, the Level row, the other controls), then the page's
+  ordinary tiles. Pane 0's encoder (and a left or right arrow key) moves along a table row and pane 1's (and an up or down
+  arrow key) down the rows in the same column; a keyboard's arrows do all four. Which operator to look at is not an edit: the
+  detail and the knobs follow the cursor along the rows at once (a relayout of the detail and, when it changed, one
+  `controllers.view`; no parameter is set). A view's own parameter or a cell is reached the same way but nothing changes until
+  ENTER: it switches a mark (mute, solo, mode) or gives the cell's value the dial (a gesture begins; the dial changes it, ENTER or
+  EXIT ends it). A cell that cannot be edited does nothing and its reason is in the table's heading line while the cursor is on it.
+  Quick operator step: the dial or pane 1 down the rows, the page keys (Page Up, Page Down) step the operator at once from
+  anywhere, keeping the cursor on its control and the row, and turn the page only past either end.
+- **The knobs under the screen** play the selected row of the table, its columns left to right (level, coarse, fine, the
+  ratio, detune: the switched cells, mute, solo and mode, are not knob material), then the operator's other parameters in the
+  detail's order (the stages' controls first, then the others; not only those in view), then the view's own parameters, then
+  the page's other tiles by priority: `controllers.view` `screen` is published again when the selection changes. A player selects
+  an operator and has its level, coarse, fine and detune under the first four knobs at once.
+
+## The operator table (owner, 2026-11-16: "i do want to use the table")
+
+One row for each operator (src/fm.rs `Column`, `Row`, `geometry`, `draw`), the selected row lit (raised, with the text
+color's edge): the operator's number chip in its color (dimmed while it is silent), **M** and **S**, the **level** as a bar in
+the operator's color with its value, **coarse**, **fine**, the **ratio or fixed frequency** as text, **detune**. Columns appear
+only for fields the plugin's data has (`FmShape::columns`): level for `operatorLevel`; coarse for `ratio` and fine for `fine`
+where the operator has a `fine` of its own, with a **mode** column (`fixed`: Ratio or Fixed) beside them; with no `fine` the
+`ratio` field is one column of text (with "Hz" added where the operator is fixed and the plugin's text has no unit; the cell
+is edged in the accent then); detune for `detune`. Column headings once, in the small dim type over the first row; M and S need
+none (the marks carry the letter). Coarse and fine are the plugin's text, nothing is computed: the extension has no field for a combined ratio or
+frequency (notes/ui-fm-fields-proposal.md, outside the repository, asks for one).
+
+Editing in place, by the dial and the buttons: the cursor moves by row and column (above); ENTER on a mark switches it, on
+another cell gives its value the dial (the ring is the accent's while it has it), ENTER or EXIT ends it. By touch: a tap
+on any cell selects its row, on M, S or the mode switches it when the finger lifts on the cell it went down on; a drag
+up or down on a number's cell steps it (a step per 12 px as before); a touch on a level bar sets the level where it lands and
+follows the finger across the bar. The level bar is the whole bar, not only its fill.
+
+Mute and solo are the same marks as Play's and the mixer's (`Theme.mark-radius`, the theme's mark style, red-toned mute
+`Theme.danger`, solo the accent, off `Theme.mark-off`): they are **audition switches** (owner's decision 2026-11-16, from the
+reference's own parameter list: an operator has no stored mute, solo or on/off there; a silent operator is saved as level
+0): transient, not saved with the sound, not undo steps, not automatable. What the data offers:
+
+- a mute field (`operatorMute`, provisional: the extension has no such field yet) marked `transient`: M is one `params.set`
+  with no gesture and no commit; S is the host's: it mutes every other operator (one `params.set` each, only those not
+  muted) and gives the mutes back as they were when the last solo is released (several may be soloed: the un-soloed are
+  muted, the soloed not); the state is the view's own (per UI instance, no process-wide state; a mute pressed during a
+  solo is what the release restores), is gone when another sound opens in the part, and a small accent "solo" mark over
+  the M and S columns tells that a solo is on; a muted operator's chip, line, box and bar are dimmed, so is every
+  operator that is not soloed while any is;
+- a mute field that is not transient: M is an edit as any other (a gesture around its `params.set`); S is disabled: a host
+  solo would record edits as the player's and save them, and the readout says so;
+- a mute and a solo field (`operatorSolo`, provisional): M and S are one edit each of their fields;
+- neither: M and S are drawn disabled (outlined, faint) and the readout says "This plugin has no mute for its operators".
+
+The readout is the table's heading line: while the cursor (or a tap) is on a disabled cell the column headings give way to
+its reason. The proposal for the extension (new `oscairn_field` values, the transient flag) is in
+notes/ui-fm-fields-proposal.md, outside the repository.
+
+## The detail: named stages in real units, compact controls
+
+The envelope of an operator is shown and edited as **named stages**, not numbered rates and levels (src/grid.rs `stages`):
+
+- A numbered envelope (`rateK` or `timeK`, `levelK`): a segment with a time and no level of its own is a **Hold**; the others in
+  order are the **Attack**, the **Decay** (**Decay 1**, **Decay 2**... where there are more than one) and, the last, the
+  **Release**. Four rates and four levels read Attack, Decay 1, Decay 2 (level 3 is the sustain), Release (level 4 the
+  start and end level). A level is shown once under the stage whose own field it is (`levelK` under segment K): the
+  engine's hold has no level of its own, and the release level it starts from is the release's.
+- A named envelope (`delay`, `attack`, `hold`, `decay`, `sustain`, `release`): by its fields, the sustain level under the
+  decay as "Sustain".
+- **Times.** A time stage shows the plugin's `seconds` where it gives them, in ms or s ("12 ms", "1.3 s"), else the
+  parameter's own text. A **rate** (the plugin's `rateK`, faster when higher: the time a stage takes depends on the levels
+  it runs between, only the plugin knows it) shows, with `seconds`, the time a segment across the whole range takes,
+  marked "/range" ("180 ms /range"): never presented as the stage's duration; without `seconds` the raw value and the word
+  "rate" ("57 rate"). A made-up time is never shown.
+- The graph (a larger view of the selected operator's envelope: bright over a wash with handles; every other operator's line
+  dim behind it) gives **each stage a slot of its own**, as wide as the others (a hold after the sustain between two
+  slots); a stage's point lies in its slot at the stage's own place on the slot's axis: a time by its seconds on the
+  scale (about even below 50 ms, logarithmic past it, up to the longest stage of all the operators), else by its range.
+  The axis is one slot wide and read stage by stage, with a time scale under the graph (ticks and the labels that fit:
+  10 s, 1 s, 100 ms, 10 ms; where a stage is a rate the widths are told "nominal", and where there are no seconds "by
+  value"). The top pane's shared graph keeps its stage-after-stage axis on one time scale where every stage has
+  seconds, with the same scale and notes. The slots are why a control can sit under its point wherever the values put it.
+- **The Time row and the Level row** (`View::Stages`, one panel with the graph and the labels "Time" and "Level" at the
+  left, and compact controls over it): each control is in the slot of the stage it moves (the slot is the control's
+  width; a stage's point lies within it, within a node's radius: tests/fm_table.rs `each_stage_control_is_under_its_point`),
+  a knob with its name over it and its value beside it, so the Time row's Hold, Attack, Decay 1, Decay 2 and Release sit under
+  the graph's stage boundaries and the Level row's Attack, Decay 1, Decay 2 and Release under theirs; the hold has no level
+  control. Slots narrower than a touch target (an envelope of more than about eight stages at 826) shrink the controls to the slot.
+- **Compact control** (owner: a denser view of the same design language; `grid::compact_height`, `Theme.compact-height`,
+  `Theme.compact-width`, defined once and held equal by a test): the touch target high (44) or what its name line (1.15 lines
+  of the small type), a control 0.45 of a touch target high and the tight paddings (twice `Theme.pad-tight`) need, if
+  that is more, and 1.9 touch targets wide at least (so eight fit across the narrowest screen with both rails: 743 across).
+  Never below the touch target. It is the grid's tile in a smaller drawing: the same section background, edge and radius,
+  type sizes (the name in the small bold dim type, the value in the small type), knob, slider, switch and list drawing,
+  cursor ring and accent while editing; a knob at the left of the cell with its value beside it (shrunk to 70% before it is
+  cut). The gaps inside the detail are two thirds of the sections' (none in a theme whose sections join). Split buttons are a
+  list in it, a range a slider. Another view that wants a dense row sets `GridTile.compact` and lays its tiles out at
+  `grid::compact_height` high.
+- The pitch envelope and the other parameters an engine has (about twenty an operator: level velocity, scaling, form,
+  key-on reset, fixed key follow, pitch velocity, the pitch envelope's levels and times...) are plain controls of the row of
+  eight, paged by row; a second small envelope as a second graph is not drawn: the extension has no way to say one
+  operator has two envelopes beyond a view number of its own (notes/ui-fm-fields-proposal.md).
+
 - **What an element overview would plug into.** The mechanism is shared and not FM's: `grid::Master` (the area, the
   selected index, the first row) in, `grid::Detail` out (the view, the index, its parameters, the rows), `Screen::operator`
   (the selection), `select`, `page_rows`, the overview's cursor stops (`Strip::Overview`) and a page's folded tabs

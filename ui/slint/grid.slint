@@ -6,7 +6,7 @@
 // envelope's curve) above them. Without touch the cursor is a focus border and a tile being changed
 // an accent one; by touch knobs and sliders drag, switches, stops and dropdowns tap.
 
-import { Theme, Section, Button, Cursor, Field, TabPages, TabLabel, Thumb, SliderBar, SliderStyle, DepthStyle, SectionStyle } from "theme.slint";
+import { Theme, Section, Button, Cursor, Field, FitText, TabPages, TabLabel, Thumb, SliderBar, SliderStyle, DepthStyle, SectionStyle } from "theme.slint";
 
 export struct GridTile {
     x: length,
@@ -29,6 +29,7 @@ export struct GridTile {
     editing: bool,
     part: int, // a range being changed: 0 its low end, 1 its high end
     linked: bool,
+    compact: bool, // a compact control of a master's detail (Theme.compact-height): the name over a small control and its value
 }
 
 export struct GridCard {
@@ -80,6 +81,7 @@ export struct GridBox {
     text: string,
     text-ink: int,
     bold: bool,
+    mark: bool, // drawn with a mark's corners (the theme's mute and solo mark)
 }
 
 export struct GridPanel {
@@ -270,10 +272,14 @@ component Tile inherits Rectangle {
     callback release(int);
     callback tap(int, int);
     // A tile's insides (ParameterGrid's): the name line, the control under it, a knob at most 76 wide, a drag of 150 for the whole range.
-    property <length> pad: Theme.pad;
-    property <length> control-y: Theme.pad-narrow + Theme.small + Theme.pad-narrow;
-    property <length> control-h: min(Theme.touch, self.height - self.control-y - Theme.pad-narrow);
-    property <length> knob-max: 76px;
+    // A compact tile (a master's detail, Theme.compact-height): tight paddings, the name line as high as its type, the
+    // control as high as what is left, a knob at the left with its value beside it.
+    property <bool> compact: data.compact;
+    property <length> pad: compact ? Theme.pad-tight : Theme.pad;
+    property <length> name-y: compact ? Theme.pad-tight : Theme.pad-narrow;
+    property <length> control-y: compact ? Theme.pad-tight + Theme.compact-name : Theme.pad-narrow + Theme.small + Theme.pad-narrow;
+    property <length> control-h: compact ? self.height - self.control-y - Theme.pad-tight : min(Theme.touch, self.height - self.control-y - Theme.pad-narrow);
+    property <length> knob-max: compact ? Theme.touch : 76px;
     property <length> drag-span: 150px;
     property <length> reach: Theme.thumb / 2; // a slider's thumb reaches past its ends
     property <bool> lit: data.editing || data.cursor;
@@ -284,20 +290,32 @@ component Tile inherits Rectangle {
         width: parent.width;
         height: parent.height;
     }
-    Text {
+    if !root.compact: Text {
         x: root.pad;
-        y: Theme.pad-narrow;
-        width: (data.kind == 2 && !root.says) || data.kind == 3 || data.kind == 4 ? parent.width - 2 * root.pad : parent.width * 0.55 - root.pad;
+        y: root.name-y;
+        width: (data.kind == 2 && !root.says) || data.kind == 3 || data.kind == 4 || (root.compact && data.kind == 1) ? parent.width - 2 * root.pad : parent.width * 0.55 - root.pad;
         text: data.name;
         color: Theme.muted;
         font-size: Theme.small;
         font-weight: 700;
         overflow: elide;
     }
+    // A compact control's name: shrunk to 70% before it is cut.
+    if root.compact: FitText {
+        x: root.pad;
+        y: root.name-y;
+        width: (data.kind == 2 && !root.says) || data.kind == 3 || data.kind == 4 || data.kind == 1 ? parent.width - 2 * root.pad : parent.width * 0.55 - root.pad;
+        height: Theme.compact-name;
+        text: data.name;
+        ink: Theme.muted;
+        size: Theme.small;
+        bold: true;
+        align: TextHorizontalAlignment.left;
+    }
     // The value as the plugin writes it (the control says it for lists, switches and buttons).
-    if (data.kind != 2 && data.kind != 3 && data.kind != 4) || root.says: Text {
+    if ((data.kind != 2 && data.kind != 3 && data.kind != 4) || root.says) && !(root.compact && data.kind == 1): Text {
         x: parent.width * 0.55;
-        y: Theme.pad-narrow;
+        y: root.name-y;
         width: parent.width * 0.45 - root.pad;
         text: data.value;
         color: data.editing ? Theme.accent : Theme.text;
@@ -326,15 +344,28 @@ component Tile inherits Rectangle {
         from-top: data.kind == 8;
         lit: root.lit;
     }
+    property <length> knob-side: min(min(self.height - self.control-y - (self.compact ? Theme.pad-tight : Theme.margin), self.width - 2 * self.pad), self.knob-max);
+    property <length> knob-x: self.compact ? self.pad : (self.width - self.knob-side) / 2;
     if data.kind == 1: Knob {
-        property <length> side: min(min(parent.height - root.control-y - Theme.margin, parent.width - 2 * root.pad), root.knob-max);
-        x: (parent.width - self.side) / 2;
+        x: root.knob-x;
         y: root.control-y;
-        width: self.side;
-        height: self.side;
+        width: root.knob-side;
+        height: root.knob-side;
         arc: data.arc;
         norm: data.norm;
         lit: root.lit;
+    }
+    // A compact knob's value beside it, shrunk to 70% before it is cut.
+    if data.kind == 1 && root.compact: FitText {
+        x: root.knob-x + root.knob-side + root.pad;
+        y: root.control-y;
+        width: max(0px, parent.width - self.x - root.pad);
+        height: root.control-h;
+        text: data.value;
+        ink: data.editing ? Theme.accent : Theme.text;
+        size: Theme.small;
+        bold: true;
+        align: TextHorizontalAlignment.left;
     }
     // A switch is a button, on in the accent.
     if data.kind == 3: Button {
@@ -344,6 +375,7 @@ component Tile inherits Rectangle {
         height: root.control-h;
         text: data.value;
         on: data.on;
+        size: root.compact ? Theme.small : Theme.button;
     }
     if data.kind == 4: Field {
         x: root.pad;
@@ -357,6 +389,7 @@ component Tile inherits Rectangle {
             text: data.value;
             icon: data.icon;
             room: self.width;
+            size: root.compact ? Theme.small : Theme.button;
             left: true;
         }
         Image {
@@ -468,7 +501,7 @@ component ViewPanel inherits Section {
         if (i >= 16) {
             return Theme.operators[i - 16];
         }
-        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : i == 7 ? Theme.accent.with-alpha(Theme.wash-light) : i == 8 ? Theme.keys-white : i == 9 ? Theme.wash-color : i == 10 ? Theme.zone-faint : i == 12 ? Theme.focus : i == 13 ? transparent : Theme.on-accent;
+        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : i == 7 ? Theme.accent.with-alpha(Theme.wash-light) : i == 8 ? Theme.keys-white : i == 9 ? Theme.wash-color : i == 10 ? Theme.zone-faint : i == 12 ? Theme.focus : i == 13 ? transparent : i == 14 ? Theme.danger : i == 15 ? Theme.mark-off : Theme.on-accent;
     }
     pure function stroke(w: int) -> length {
         return w == 0 ? Theme.hair : w == 1 ? Theme.thin : Theme.cursor-width;
@@ -497,7 +530,7 @@ component ViewPanel inherits Section {
         y: b.y;
         width: b.w;
         height: b.h;
-        border-radius: Theme.radius / 2;
+        border-radius: b.mark ? Theme.mark-radius(min(b.w, b.h)) : Theme.radius / 2;
         background: root.ink(b.fill);
         border-width: b.edge >= 0 ? Theme.hair : 0px;
         border-color: b.edge >= 0 ? root.ink(b.edge) : transparent;
@@ -520,18 +553,29 @@ component ViewPanel inherits Section {
             overflow: elide;
         }
     }
-    for l in data.labels: Text {
+    // A label too wide for its box shrinks to 70% before it is cut.
+    for l in data.labels: Rectangle {
         x: l.x;
         y: l.y;
         width: l.w;
         height: l.h;
-        text: l.text;
-        color: root.ink(l.ink);
-        font-size: Theme.small;
-        font-weight: l.bold ? 700 : 400;
-        horizontal-alignment: l.align == 1 ? center : l.align == 2 ? right : left;
-        vertical-alignment: center;
-        overflow: elide;
+        label-measure := Text {
+            visible: false;
+            text: l.text;
+            font-size: Theme.small;
+            font-weight: l.bold ? 700 : 400;
+        }
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: l.text;
+            color: root.ink(l.ink);
+            font-size: Theme.small * max(0.7, min(1.0, parent.width / max(1px, label-measure.preferred-width)));
+            font-weight: l.bold ? 700 : 400;
+            horizontal-alignment: l.align == 1 ? center : l.align == 2 ? right : left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
     }
     for p in data.points: Rectangle {
         x: p.x - Theme.node / 2;

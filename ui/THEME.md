@@ -223,3 +223,23 @@ that leaves it out has): whichever of the two leaves the content the larger area
 one of the three refuses the theme, in both readers (src/theme.rs; hosts/standalone/Theme.cpp, tested by `desktop-theme`). The JUCE
 app's own layouts (its parameter grid lists pages as buttons down the left) do not follow it: it parses, validates and keeps the choice
 and draws as before. The two odd test themes differ (`odd`: `side`, `odd-joined`: `top`), so every render over all themes covers both.
+
+## Compact control and the marks in views (2026-11-16)
+
+A dense row in a view that is allowed to be denser than the generic grid (the FM operators view's detail: ui/GRID.md "The detail")
+uses the grid's tile in a smaller drawing, defined once in the theme's sizes and derived from the touch size, the spacing and the
+type scale (nothing hardcoded; `no_screen_hardcodes_what_the_theme_sets` still holds):
+
+- `Theme.compact-height` = the larger of `touch` (44) and twice `pad-tight` + `compact-name` (1.15 times `small`) + 0.45 of `touch`: 44
+  at the touch scale and the default spacing, more with a larger type or a roomier spacing; never below the touch target.
+  `grid::compact_height(scale, spacing)` is the same formula for the layout, and `the_compact_control_is_defined_once_...`
+  holds the two equal in every theme.
+- `Theme.compact-width` = 1.9 touch targets (84): the least across; eight fit across the keyboard's narrowest screen with both
+  rails (743 logical px), which the row of eight knobs under the screen asks for.
+- The same section background, edge and radius, the small type for the name (bold, dim) and the value, the same knob, slider,
+  switch and field drawing, cursor ring and accent while editing. The name and the knob's value shrink to 70% before they
+  are cut. A tile sets `GridTile.compact` (src/grid.rs `Tile::compact`) to draw as one.
+- Mute and solo marks drawn inside a view's panel (a table's) are `GridBox.mark`: the corner is `Theme.mark-radius`, an off
+  mark is `Theme.mark-off` (the same alpha the Play and mixer marks use: `Mark` takes it from the theme now), a mute that is on
+  `Theme.danger` and a solo that is on the accent, as the strips'. Inks 14 and 15 of a view are `Theme.danger` and `Theme.mark-off`.
+- A label in a view's panel shrinks to 70% before it is cut (it was elided).

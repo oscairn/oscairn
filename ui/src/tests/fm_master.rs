@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The FM operators view as a master and a detail on one page (ui/GRID.md "Master and detail", ui/TABS.md "Tabs that
-//! are indexes"): the overview of every operator on top, the selected one's parameters as tiles under it; the page of
-//! tabs that were the operators' indexes folded into it; selection by the dial and by touch reaching the diagram,
-//! the graph, the list and the detail; the knobs under the screen; rows paged; the split at the screens' sizes.
+//! are indexes"): the overview of every operator on top, the selected one's parameters as compact controls under it; the
+//! page of tabs that were the operators' indexes folded into it; selection by the dial and by touch reaching the diagram,
+//! the graph, the table and the detail; the knobs under the screen; rows paged. The table, the stages, mute and solo and
+//! the split at the screens' sizes are in tests/fm_table.rs.
 
 use super::fm::*;
-use super::fm_view::check_panel;
 use super::shots::*;
 use super::*;
 use crate::nav::Action;
@@ -173,9 +173,9 @@ fn tabs_that_are_the_indexes_of_one_view_fold_into_it_and_others_stay_tabs() {
     assert!(m.pages[0].indexed.is_none());
 }
 
-// Selecting an operator, by a tap on its line, reaches the diagram, the graph, the list and the detail at once.
+// Selecting an operator, by a tap on its table row, reaches the diagram, the graph, the table and the detail at once.
 #[test]
-fn selecting_an_operator_reaches_the_diagram_the_graph_the_list_and_the_detail() {
+fn selecting_an_operator_reaches_the_diagram_the_graph_the_table_and_the_detail() {
     let list = plugin(8, false);
     let (s, mut p) = open_at(&list, (1280, 720), 1., &all_themes()[0], Top);
     let ring_around = |s: &Screen, n: usize| -> bool {
@@ -193,56 +193,48 @@ fn selecting_an_operator_reaches_the_diagram_the_graph_the_list_and_the_detail()
         let ink = 16 + n as i32 - 1;
         let thick = panel.shapes.iter().any(|x| x.ink == ink && !x.fill && x.width == 2);
         let thin_others = (0..8).filter(|&m| m != n - 1).all(|m| !panel.shapes.iter().any(|x| (x.ink == 16 + m as i32 || x.ink == 32 + m as i32) && !x.fill && x.width == 2));
-        let chosen_cells = panel.boxes.iter().filter(|b| b.fill == 4 && b.edge == 3 && b.text.is_empty()).count();
-        let cell = panel.boxes.iter().find(|b| b.fill == 4 && b.edge == 3 && b.text.is_empty()).map(|b| (b.y, b.h));
-        let chip = panel.boxes.iter().filter(|b| b.edge == -1 && b.text == n.to_string()).last().map(|b| b.y + b.h / 2.);
-        let in_cell = matches!((cell, chip), (Some((y, h)), Some(c)) if c > y && c < y + h);
+        let chosen_rows = panel.boxes.iter().filter(|b| b.fill == 4 && b.edge == 3 && b.text.is_empty()).count();
+        let row = panel.boxes.iter().find(|b| b.fill == 4 && b.edge == 3 && b.text.is_empty()).map(|b| (b.y, b.h));
+        let chip = panel.boxes.iter().filter(|b| b.edge == -1 && b.text == n.to_string() && b.fill >= 16).last().map(|b| b.y + b.h / 2.);
+        let in_row = matches!((row, chip), (Some((y, h)), Some(c)) if c > y && c < y + h);
         let detail = &panels(&s.ui)[1];
         let tinted = detail.shapes.iter().next().is_some_and(|x| x.fill && x.ink == ink);
-        (ring_around(s, n), thick && thin_others, chosen_cells == 1 && in_cell, tinted && heading(s) == format!("Operator {n}"))
+        (ring_around(s, n), thick && thin_others, chosen_rows == 1 && in_row, tinted && heading(s) == format!("Operator {n}"))
     };
     assert_eq!(facts(&s, 1), (true, true, true, true), "operator 1 at the start");
     for n in [5, 8, 3] {
         tap_operator(&mut p, &s, n);
         let names = tile_names(&s);
-        assert!(!names.is_empty() && names.iter().all(|t| t.ends_with(&format!(" {n}"))), "the detail holds operator {n}'s parameters only: {names:?}");
-        assert_eq!(facts(&s, n), (true, true, true, true), "diagram ring, thick line, list cell and detail heading of operator {n}");
+        assert!(names.contains(&format!("Ratio {n}")) && (1..=8).filter(|&m| m != n).all(|m| !names.contains(&format!("Ratio {m}"))), "the detail holds operator {n}'s parameters only: {names:?}");
+        assert_eq!(facts(&s, n), (true, true, true, true), "diagram ring, thick line, table row and detail heading of operator {n}");
     }
     assert!(s.ui.global::<GridState>().get_tabs().row_count() == 0, "no tab for an operator");
 }
 
-// The detail has every parameter of the operator and only its, in the plugin's priority order (the numbered first, then
-// the plugin's own), at the size the grid's tiles are elsewhere; the knobs under the screen play them in that order.
+// The detail has the selected operator's parameters and only its: its envelope's stages first as the Time and Level rows
+// (named, not numbered), then the others in the plugin's priority order; the knobs under the screen play the table's row first.
 #[test]
-fn the_detail_lists_the_selected_operators_parameters_in_priority_order_and_the_knobs_play_them() {
+fn the_detail_lists_the_selected_operators_parameters_and_the_knobs_play_its_row() {
     let mut list = plugin(8, false);
-    // Operator 5's ratio first, its release level second, its level third.
+    // Operator 5's ratio first, its rate 4 second, its level third.
     for p in list["parameters"].as_array_mut().unwrap() {
         let id = p["id"].as_u64().unwrap();
         p["priority"] = json!(match id {
             205 => 1,
-            644 => 2, // rate 4 of operator 5 (600 + 10 n + k)
+            654 => 2, // rate 4 of operator 5 (600 + 10 n + k)
             105 => 3,
             _ => 0,
         });
     }
-    let all: Vec<Value> = list["parameters"].as_array().unwrap().iter().filter(|p| p["index"] == 5).cloned().collect();
-    let mut expected: Vec<(u64, String)> = all.iter().map(|p| (p["id"].as_u64().unwrap(), p["name"].as_str().unwrap().to_string())).collect();
-    expected.sort_by_key(|(id, _)| match id {
-        205 => 1,
-        644 => 2,
-        105 => 3,
-        _ => u64::MAX,
-    });
     let (s, mut p) = open_at(&list, (1280, 720), 1., &all_themes()[0], Top);
     sent(&mut p.out);
     tap_operator(&mut p, &s, 5);
     let out = sent(&mut p.out);
-    // 13 parameters at 6 columns: all in view, three rows.
-    assert_eq!(tile_names(&s), expected.iter().map(|e| e.1.clone()).collect::<Vec<_>>(), "exactly operator 5's, in priority order");
+    // 13 parameters: the four rates and four levels (their stages, in two rows), then the others by priority.
+    assert_eq!(tile_names(&s), ["Attack", "Decay 1", "Decay 2", "Release", "Attack", "Decay 1", "Decay 2", "Release", "Ratio 5", "Level 5", "Fine 5", "Detune 5", "Level 0 5"], "operator 5's, stages by name");
     let tiles: Vec<crate::GridTile> = s.ui.global::<GridState>().get_tiles().iter().collect();
-    assert!(tiles.iter().all(|t| (t.h == 84. || t.h == 120.) && t.w >= 150.), "tiles are the grid's size");
-    assert_eq!(param_ids(&out)[..13], expected.iter().map(|e| e.0).collect::<Vec<_>>()[..], "the knobs play the row as the detail has it");
+    assert!(tiles.iter().all(|t| t.compact && t.h >= 44.), "compact controls, never below a touch target");
+    assert_eq!(param_ids(&out)[..5], [105, 205, 305, 355, 654], "the table's row (level, ratio, fine, detune), then the rest by priority");
     // Another operator: the knobs follow.
     tap_operator(&mut p, &s, 2);
     let out = sent(&mut p.out);
@@ -251,164 +243,103 @@ fn the_detail_lists_the_selected_operators_parameters_in_priority_order_and_the_
     assert!(out.iter().all(|o| o.0 != "params.set"));
 }
 
-// The rows of a detail that has more than it shows: the dial pages by row past the last or first tile in view, the
+// The rows of controls a detail has more of than fits: the dial pages by row past the last or first control in view, the
 // arrows of the heading by touch, the page keys step the operator and keep the row.
 #[test]
 fn rows_page_by_the_dial_by_touch_and_the_page_keys_step_operators() {
-    let list = plugin(8, false);
-    // 826 x 465: three columns, one row in view of a 13-parameter operator (5 rows).
-    let (s, mut p) = open_at(&list, (1280, 720), 1.55, &all_themes()[0], Side);
-    tap_operator(&mut p, &s, 5);
-    assert_eq!(tile_names(&s).len(), 3, "one row of three tiles in view");
-    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 1 of 5"), "the heading says which row");
+    use super::fm_table::{open_at as table_open, ENGINE};
+    // 826 x 465: eight to a row, one row in view of the 22 other parameters of an engine's operator: three rows.
+    let (s, mut p) = table_open(ENGINE, (1280, 720), 1.55, &super::fm_table::dark(), Side, 1);
+    let in_view = |s: &Screen| tile_names(s).len();
+    assert_eq!(in_view(&s), 9 + 8, "the nine stage controls and one row of eight");
+    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 1 of 3"), "the heading says which row");
     p.act(Action::Move { pane: None, by: 1 });
     assert_eq!(cursor_tile(&s), Some(0));
-    p.act(Action::Move { pane: None, by: 2 });
-    assert_eq!(cursor_tile(&s), Some(2));
+    p.act(Action::Move { pane: None, by: 16 });
+    assert_eq!(cursor_tile(&s), Some(16), "the last control of the row in view");
     let first_row = tile_names(&s);
     p.act(Action::Move { pane: None, by: 1 });
-    assert_ne!(tile_names(&s), first_row, "the next row of tiles");
-    assert_eq!(cursor_tile(&s), Some(0), "the cursor at the start of the new row");
-    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 2 of 5"));
+    assert_ne!(tile_names(&s), first_row, "the next row of controls");
+    assert_eq!(cursor_tile(&s), Some(9), "the cursor at the start of the new row");
+    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 2 of 3"));
     p.act(Action::Move { pane: None, by: -1 });
-    assert_eq!((tile_names(&s), cursor_tile(&s)), (first_row.clone(), Some(2)), "and back a row, at the end of it");
+    assert_eq!((tile_names(&s), cursor_tile(&s)), (first_row.clone(), Some(16)), "and back a row, at the end of it");
     // Down by the arrows, in the column the cursor is in.
     p.act(Action::Arrow { dx: 0, dy: 1 });
-    assert_eq!(cursor_tile(&s), Some(2));
-    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 2 of 5"));
+    assert_eq!(cursor_tile(&s), Some(16));
+    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 2 of 3"));
     // By touch: the heading's down arrow.
     let head = panels(&s.ui)[1].clone();
-    let (x, y) = (head.w - head.h / 2., head.h / 2.);
+    let (x, y) = (head.w - 22., head.h / 2.);
     assert!(p.view_down(1, x, y));
     p.view_up(1, x, y);
-    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 3 of 5"), "a tap on the down arrow pages a row");
+    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 3 of 3"), "a tap on the down arrow pages a row");
     // The page keys step operators and keep the row.
     p.act(Action::Page(1));
-    assert_eq!(heading(&s), "Operator 6");
-    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 3 of 5"), "the same row of the next operator");
+    assert_eq!(heading(&s), "Operator 2");
+    assert!(panels(&s.ui)[1].labels.iter().any(|l| l.text == "Row 3 of 3"), "the same row of the next operator");
+    // The heading's selector steps the operator by touch, too, and costs no edit.
+    sent(&mut p.out);
+    let head = panels(&s.ui)[1].clone();
+    assert!(p.view_down(1, 22. + 44., head.h / 2.));
+    p.view_up(1, 22. + 44., head.h / 2.);
+    assert_eq!(heading(&s), "Operator 3");
+    assert!(p.view_down(1, 22., head.h / 2.));
+    p.view_up(1, 22., head.h / 2.);
+    assert_eq!(heading(&s), "Operator 2");
+    assert!(sent(&mut p.out).iter().all(|o| o.0 != "params.set"));
     p.act(Action::Page(-1));
+    assert_eq!(heading(&s), "Operator 1");
     p.act(Action::Page(-1));
-    assert_eq!(heading(&s), "Operator 4");
-    for _ in 0..3 {
-        p.act(Action::Page(-1));
-    }
     assert_eq!(heading(&s), "Operator 1");
 }
 
-// The dial walks the overview (the view's own parameters, then the operators) between the page rail and the tiles; looking at
-// an operator is not an edit, so the detail follows the cursor; the algorithm needs a press and a press to leave.
+// The dial walks the overview (the view's own parameters, then the table's cells in reading order) between the page rail
+// and the controls; looking at a row is not an edit, so the detail follows the cursor; a press on a cell edits it, on the
+// algorithm gives it the dial, and a press ends it.
 #[test]
 fn the_dial_walks_the_overview_and_the_detail_follows_without_an_edit() {
-    let list = plugin(8, true);
-    let (s, mut p) = open_at(&list, (1280, 720), 1.55, &all_themes()[0], Side);
+    use super::fm_table::{open_at as table_open, ENGINE};
+    let (s, mut p) = table_open(ENGINE, (1280, 720), 1.55, &super::fm_table::dark(), Side, 1);
     sent(&mut p.out);
     let rings = |s: &Screen| panels(&s.ui)[0].shapes.iter().filter(|x| x.ink == 12).count();
     assert_eq!(rings(&s), 0);
     p.act(Action::Move { pane: None, by: 1 });
-    assert_eq!(cursor_tile(&s), Some(0), "the first move lands on the first tile");
+    assert_eq!(cursor_tile(&s), Some(0), "the first move lands on the first control");
     p.act(Action::Move { pane: None, by: -1 });
-    assert_eq!((cursor_tile(&s), rings(&s)), (None, 1), "one step back is the overview, on the operator in view");
+    assert_eq!((cursor_tile(&s), rings(&s)), (None, 1), "one step back is the table, on the operator in view");
     assert_eq!(heading(&s), "Operator 1");
-    p.act(Action::Move { pane: None, by: 1 });
-    assert_eq!(heading(&s), "Operator 2", "one step on is the next operator, selected as the cursor reaches it");
+    // Seven columns to a row: seven on is the next row's first cell, and the operator shown follows the cursor.
+    p.act(Action::Move { pane: None, by: 7 });
+    assert_eq!(heading(&s), "Operator 2", "the next row, selected as the cursor reaches it");
     assert_eq!(rings(&s), 1, "one cursor at a time");
     let out = sent(&mut p.out);
-    assert!(out.iter().all(|o| o.0 != "params.set" && o.0 != "params.gesture"), "walking the overview sends no edit: {out:?}");
-    assert_eq!(&param_ids(&out)[..2], [102, 202], "the knobs follow the operator in view");
-    // A press on an operator takes the cursor into its tiles.
-    p.act(Action::Confirm(None));
-    assert_eq!(cursor_tile(&s), Some(0));
-    // Up to the overview and down again lands on the same tile; a step on in between is the next operator.
-    p.act(Action::Move { pane: None, by: 2 });
-    assert_eq!(cursor_tile(&s), Some(2));
-    p.act(Action::Arrow { dx: 0, dy: -1 });
-    assert_eq!((cursor_tile(&s), heading(&s)), (None, "Operator 2".to_string()));
-    p.act(Action::Move { pane: None, by: 1 });
-    assert_eq!(heading(&s), "Operator 3");
+    assert!(out.iter().all(|o| o.0 != "params.set" && o.0 != "params.gesture"), "walking the table sends no edit: {out:?}");
+    assert_eq!(&param_ids(&out)[..2], [1200, 1201], "the knobs follow the operator in view");
+    // Down by the arrows: the rows; down from the last row: the controls; up again: the table, on the same operator.
     p.act(Action::Arrow { dx: 0, dy: 1 });
-    assert_eq!(cursor_tile(&s), Some(2), "the tile it left");
-    assert!(tile_names(&s).iter().all(|n| n.ends_with(" 3")));
-    // The algorithm: moved to, it changes nothing; a press gives it the dial and a gesture; a press ends it.
+    assert_eq!(heading(&s), "Operator 3");
+    for _ in 0..5 {
+        p.act(Action::Arrow { dx: 0, dy: 1 });
+    }
+    assert_eq!(heading(&s), "Operator 8");
+    p.act(Action::Arrow { dx: 0, dy: 1 });
+    assert!(cursor_tile(&s).is_some(), "past the last row: the controls");
     p.act(Action::Arrow { dx: 0, dy: -1 });
-    p.act(Action::Move { pane: None, by: -3 });
-    assert_eq!(heading(&s), "Operator 3", "the view's own parameters do not select an operator");
+    assert_eq!((cursor_tile(&s), heading(&s)), (None, "Operator 8".to_string()), "the table again, on the operator it left");
+    // The algorithm: moved to, it changes nothing; a press gives it the dial and a gesture; a press ends it.
+    for _ in 0..8 {
+        p.act(Action::Arrow { dx: 0, dy: -1 });
+    }
+    assert_eq!(heading(&s), "Operator 1", "up from the first row is the view's own parameters, which select no operator");
     assert_eq!(rings(&s), 1);
     sent(&mut p.out);
-    p.act(Action::Move { pane: None, by: -1 });
-    let out = sent(&mut p.out);
-    assert!(out.iter().all(|o| o.0 != "params.set"), "a move onto the algorithm changes nothing");
+    p.act(Action::Move { pane: None, by: 0 });
+    assert!(sent(&mut p.out).iter().all(|o| o.0 != "params.set"), "a move onto the algorithm changes nothing");
     p.act(Action::Confirm(None));
     p.act(Action::Move { pane: None, by: 1 });
     p.act(Action::Confirm(None));
     let out = sent(&mut p.out);
     assert_eq!(out.iter().filter(|o| o.0 == "params.set").count(), 1);
     assert_eq!((out.first().unwrap(), out.last().unwrap()), (&gesture(1, true), &gesture(1, false)));
-}
-
-fn detail_area(s: &Screen) -> (f32, f32) {
-    let g = s.ui.global::<GridState>();
-    (g.get_view_width(), g.get_view_height())
-}
-
-// The split at the three screens, 8, 6 and 4 operators, with the pages at the side, over the tiles, and no pages at all:
-// the overview as high as it needs, a row of normal tiles under it, a line for each operator and none for the missing.
-#[test]
-fn the_overview_and_the_detail_share_the_area_at_the_three_screens() {
-    let mut report = String::new();
-    for ops in [8usize, 6, 4] {
-        for (size, scale) in [((1280, 720), 1.55f32), ((1280, 720), 1.), ((800, 480), 1.)] {
-            for (name, pages, placement) in [("no pages", false, Top), ("pages at the side", true, Side), ("pages over", true, Top)] {
-                let list = plugin(ops, pages);
-                let t = &all_themes()[0];
-                let (s, _p) = open_at(&list, size, scale, t, placement);
-                let at = format!("{ops} operators, {size:?}@{scale}, {name}");
-                let (w, h) = detail_area(&s);
-                let all = panels(&s.ui);
-                assert_eq!(all.len(), 2, "the overview and the detail's heading {at}");
-                let (top, head) = (&all[0], &all[1]);
-                check_panel(top, ops, 13. * t.data.font_scale, &at);
-                let tiles: Vec<crate::GridTile> = s.ui.global::<GridState>().get_tiles().iter().collect();
-                assert!(!tiles.is_empty(), "a row of tiles {at}");
-                assert!(tiles.iter().all(|t| (t.h == 84. || t.h == 120.) && t.w >= 200.), "tiles of the grid's size {at}: {:?}", tiles.iter().map(|t| (t.w, t.h)).collect::<Vec<_>>());
-                let lines = top.boxes.iter().filter(|b| b.edge == -1 && !b.text.is_empty() && (16..24).contains(&b.fill) || b.edge == -1 && !b.text.is_empty() && b.fill >= 32).count();
-                assert_eq!(lines, ops, "a line for each operator and none more {at}");
-                assert!(s.ui.global::<GridState>().get_tabs().row_count() == 0, "no tab {at}");
-                let bottom = tiles.iter().map(|t| t.y + t.h).fold(0., f32::max);
-                let fits = bottom <= h + 0.5;
-                assert!(fits || (ops == 8 && placement == Top && pages), "the block fits the area {at}: ends at {bottom} of {h}");
-                report += &format!("{at}: area {w:.0}x{h:.0}, overview {:.0}, heading {:.0}, tiles {:.0}x{:.0} x{} in view, block ends {bottom:.0}{}\n", top.h, head.h, tiles[0].w, tiles[0].h, tiles.len(), if fits { "" } else { " (past the area)" });
-            }
-        }
-    }
-    println!("{report}");
-}
-
-// Pictures for a look by eye: target/theme-shots/master-OPS-SELECTED-PLACEMENT-THEME@SCALE.png.
-#[test]
-fn master_detail_pictures() {
-    for ops in [8usize, 6, 4] {
-        let picks: &[usize] = match ops {
-            8 => &[1, 5, 8],
-            6 => &[1, 5, 6],
-            _ => &[1, 3, 4],
-        };
-        let list = plugin(ops, true);
-        for (placement, pname) in [(Side, "side"), (Top, "top")] {
-            for (size, scale) in [((1280, 720), 1.55f32), ((1280, 720), 1.), ((800, 480), 1.)] {
-                let themes = all_themes();
-                for (ti, t) in themes.iter().enumerate() {
-                    // Every theme at the keyboard's screen; the dark one at the other two.
-                    if scale != 1.55 && ti != 0 {
-                        continue;
-                    }
-                    let (mut s, mut p) = open_at(&list, size, scale, t, placement);
-                    for &n in picks {
-                        tap_operator(&mut p, &s, n);
-                        s.frame();
-                        shot(&s, &format!("master-{ops}-{n}-{pname}-{}@{scale}-{}x{}", t.id, size.0, size.1));
-                    }
-                }
-            }
-        }
-    }
 }

@@ -58,6 +58,9 @@ pub struct Param {
     pub declared_tab: Option<u32>,
     /// PROVISIONAL (draft 6's `value_icon`): the `enum oscairn_icon` of each value from the minimum, 0 none.
     pub icons: Vec<u32>,
+    /// PROVISIONAL (draft 7, notes/ui-fm-fields-proposal.md): a mute that is not the player's edit, not saved with the
+    /// sound and not an undo step (`transient` in `params.list`); the host may then derive a solo from it.
+    pub transient: bool,
 }
 
 impl Param {
@@ -118,6 +121,7 @@ pub fn parse(list: &Value) -> Vec<Param> {
             algorithms: p["algorithms"].as_array().into_iter().flatten().map(routing).collect(),
             declared_tab: p["uiTab"].as_u64().map(|v| v as u32),
             icons: p["valueIcons"].as_array().into_iter().flatten().map(|v| v.as_u64().unwrap_or(0) as u32).collect(),
+            transient: p["transient"].as_bool().unwrap_or(false),
         })
         .collect()
 }
@@ -212,6 +216,28 @@ pub struct Tile {
     pub control: Control,
     /// In a linked run (drawn as one card with its neighbors).
     pub linked: bool,
+    /// A compact control of a master's detail (`compact_height`): smaller than a tile, for a dense row.
+    pub compact: bool,
+    /// The envelope stage the control moves, which names it and says how its value reads, where the tile is one of a
+    /// master's Time or Level rows.
+    pub stage: Option<Stage>,
+}
+
+/// An envelope control of a master's detail: its name ("Hold", "Decay 1") and what it moves.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Stage {
+    pub name: String,
+    pub kind: StageKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StageKind {
+    /// A time: how long the stage takes.
+    Time,
+    /// A rate: how fast the stage runs, higher is faster; the time it takes depends on the levels it runs between.
+    Rate,
+    /// A level the envelope reaches.
+    Level,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -253,6 +279,8 @@ pub struct Detail {
     pub per: usize,
     /// The tiles of the detail in view: the first of the page's.
     pub tiles: usize,
+    /// How many of them come first and are not paged: the Time and Level rows of the envelope's stages.
+    pub fixed: usize,
 }
 
 /// What a page with a master and detail is laid out for.
@@ -336,42 +364,7 @@ pub fn layout_with(params: &[Param], groups: &[(String, Vec<usize>)], width: f32
         let mut members = members;
         let mut block = false;
         if let (None, Some(view)) = (&out.detail, master_view(params, members)) {
-            let fm = views::fm_of(params, view);
-            let (count, selected) = (fm.operators.len(), master.selected.min(fm.operators.len().saturating_sub(1)));
-            let index = selected as u64 + 1;
-            let mut own: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == 0).collect();
-            by_priority(params, &mut own);
-            let of = |n: u64| -> Vec<usize> {
-                let mut v: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == n && !drawn_by_another(params, i)).collect();
-                by_priority(params, &mut v);
-                v
-            };
-            let (list, most) = (of(index), (1..=count as u64).map(|n| of(n).len()).max().unwrap_or(0));
-            let rows_of = |n: usize| n.div_ceil(cols);
-            let (rows, max_rows) = (rows_of(list.len()), rows_of(most).max(1));
-            let area = (master.height - y).max(0.);
-            let detail_h = |r: usize| DETAIL_HEAD + gap + r as f32 * height + r.saturating_sub(1) as f32 * gap;
-            let pref = crate::fm::preferred_height(count, master.scale, master.spacing);
-            let mut per = 1;
-            for r in 2..=max_rows {
-                if area - gap - detail_h(r) >= pref {
-                    per = r;
-                }
-            }
-            let top = (area - gap - detail_h(per)).max(crate::fm::least_height(count, master.scale, master.spacing));
-            let row = master.row.min(rows.saturating_sub(per));
-            let title = master.names.iter().find(|n| n.0 == index).map_or_else(|| format!("Operator {index}"), |n| n.1.clone());
-            out.panels.push(Panel { rect: Rect { x: 0., y, w: width, h: top }, view: View::Fm(fm), params: vec![] });
-            let head = Rect { x: 0., y: y + top + gap, w: width, h: DETAIL_HEAD };
-            out.panels.push(Panel { rect: head, view: View::Detail(views::DetailHead { color: selected, title, rows, row, per }), params: vec![] });
-            let first = head.y + DETAIL_HEAD + gap;
-            let shown: Vec<usize> = list.iter().copied().skip(row * cols).take(per * cols).collect();
-            for (k, &param) in shown.iter().enumerate() {
-                let rect = Rect { x: (k % cols) as f32 * (tile_w + gap), y: first + (k / cols) as f32 * (height + gap), w: tile_w, h: height };
-                out.tiles.push(Tile { param, rect, control: control_of(param), linked: false });
-            }
-            out.detail = Some(Detail { view, index, count, own, params: list, columns: cols, rows, row, per, tiles: shown.len() });
-            y += top + gap + detail_h(per);
+            y += master_block(&mut out, params, members, view, width, gap, control_of, master, y);
             rest = members.iter().copied().filter(|&i| !(params[i].view == view && params[i].index <= 8)).collect();
             members = &rest;
             block = true;
@@ -502,7 +495,7 @@ pub fn layout_with(params: &[Param], groups: &[(String, Vec<usize>)], width: f32
                     }
                     card = Some(card.map_or(cell, |c| c.union(&cell)));
                 }
-                out.tiles.push(Tile { param, rect: cell, control: control_of(param), linked: group });
+                out.tiles.push(Tile { param, rect: cell, control: control_of(param), linked: group, compact: false, stage: None });
                 column += 1;
             }
             if let Some(c) = card {
@@ -519,6 +512,149 @@ pub fn layout_with(params: &[Param], groups: &[(String, Vec<usize>)], width: f32
     }
     out.height = y.max(1.);
     out
+}
+
+/// A compact control's widget for a parameter whose plain control is `control`: split buttons need more width than a
+/// compact control has, so a few values are a list there; a range and the upright sliders are a plain slider.
+fn compact_control(control: Control) -> Control {
+    match control {
+        Control::Buttons => Control::List,
+        Control::Range | Control::VSlider | Control::Drawbar => Control::Slider,
+        c => c,
+    }
+}
+
+/// The master and detail block of a page, ui/GRID.md "Master and detail": the overview (panel 0: the algorithm, a
+/// graph of every operator, the operator table), under it the heading of the selected operator (panel 1), then its
+/// envelope as a graph (panel 2) with its stages' controls over it: a Time row and a Level row, each control in the
+/// slot of the stage it moves; then its other parameters as compact controls, as many to a row as fit up to eight.
+/// Appends the panels and tiles to `out` and returns the block's height. The block fills the area; what the overview
+/// keeps, in order: its table's rows at the least height, the detail's controls, the graph's least, then it grows.
+#[allow(clippy::too_many_arguments)]
+fn master_block(out: &mut Laid, params: &[Param], members: &[usize], view: u64, width: f32, gap: f32, control_of: &dyn Fn(usize) -> Control, master: &Master, y: f32) -> f32 {
+    // Inside the detail the gaps are a third less than the sections' (a dense panel); a joined theme's stay none.
+    let cg = gap * 2. / 3.;
+    let fm = views::fm_of(params, view);
+    let count = fm.operators.len();
+    let selected = master.selected.min(count.saturating_sub(1));
+    let index = selected as u64 + 1;
+    let mut own: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == 0).collect();
+    by_priority(params, &mut own);
+    let of = |n: u64| -> Vec<usize> {
+        let mut v: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == n && !drawn_by_another(params, i)).collect();
+        by_priority(params, &mut v);
+        v
+    };
+    let list = of(index);
+    let (scale, spacing) = (master.scale, master.spacing);
+    let small = 13. * scale;
+    let sc = compact_height(scale, spacing);
+    let cols = compact_columns(width, cg);
+    // The selected operator's envelope, by name: its stages' time and level controls.
+    let fields: Vec<&str> = fm.operators.get(selected).map_or(vec![], |o| o.envelope.iter().map(|&i| params[i].field.as_str()).collect());
+    let env = envelope_of_fields(&fields);
+    let named = stages(&env, &fields);
+    let global = |local: usize| fm.operators[selected].envelope[local];
+    let label = 3.6 * small;
+    let slots = stage_slots(&env, label, width - NODE_RADIUS);
+    let has_stages = !named.cells.is_empty();
+    let mut level_free: Vec<bool> = vec![true; named.cells.len()];
+    for (k, cell) in named.cells.iter().enumerate() {
+        if cell.level.is_some() {
+            level_free[k] = false;
+        }
+    }
+    let slot_rect = |k: usize, row_y: f32| -> Rect {
+        let (a, b) = slots[k];
+        let x = a + cg / 2.;
+        let right = if k + 1 == slots.len() { width } else { b - cg / 2. };
+        Rect { x, y: row_y, w: (right - x).max(0.), h: sc }
+    };
+    // The rows' places come later; the stage tiles are made with a row of 0 and moved.
+    let mut stage_tiles: Vec<(usize, usize, Stage, bool)> = Vec::new(); // (param, slot, stage, in the level row)
+    for (k, cell) in named.cells.iter().enumerate() {
+        if let Some((t, rate)) = cell.time {
+            stage_tiles.push((global(t), k, Stage { name: cell.name.clone(), kind: if rate { StageKind::Rate } else { StageKind::Time } }, false));
+        }
+    }
+    for (k, cell) in named.cells.iter().enumerate() {
+        if let Some((l, name)) = &cell.level {
+            stage_tiles.push((global(*l), k, Stage { name: name.clone(), kind: StageKind::Level }, true));
+        }
+    }
+    // The start level of an envelope that has one of its own goes under the first stage when that has no level.
+    if let (Some(s), Some(k)) = (named.start, level_free.iter().position(|&f| f)) {
+        if k == 0 {
+            stage_tiles.push((global(s), 0, Stage { name: "Start".into(), kind: StageKind::Level }, true));
+        }
+    }
+    let in_stages: Vec<usize> = stage_tiles.iter().map(|t| t.0).collect();
+    // The mute and solo fields are the table's marks, not controls of the row.
+    let rest: Vec<usize> = list.iter().copied().filter(|i| !in_stages.contains(i) && !matches!(params[*i].field.as_str(), "operatorMute" | "operatorSolo")).collect();
+    let has_levels = stage_tiles.iter().any(|t| t.3);
+    let env_rows = if !has_stages { 0 } else if has_levels { 2 } else { 1 };
+    let rows_of = |n: usize| n.div_ceil(cols);
+    let rest_rows = rows_of(rest.len());
+    let stages_h = |graph: f32| -> f32 {
+        if env_rows == 0 {
+            0.
+        } else {
+            (if graph > 0. { graph + cg } else { 0. }) + env_rows as f32 * sc + (env_rows - 1) as f32 * cg
+        }
+    };
+    let params_h = |r: usize| if r == 0 { 0. } else { r as f32 * sc + (r - 1) as f32 * cg };
+    // The detail under the overview: the heading, the stages (their graph over the two rows), the other controls.
+    let detail_h = |graph: f32, r: usize| DETAIL_HEAD + if env_rows > 0 { cg + stages_h(graph) } else { 0. } + if r > 0 { cg + params_h(r) } else { 0. };
+    let area = (master.height - y).max(0.);
+    let (least, pref, greatest) = (crate::fm::least_height(count, scale, spacing), crate::fm::preferred_height(count, scale, spacing), crate::fm::greatest_height(count, scale, spacing));
+    let (gmin, gmax) = (4. * small, 9. * small);
+    // Rows of the other controls: one, and more while the overview keeps what it prefers and the graph its least.
+    let mut per = rest_rows.min(1);
+    for r in 2..=rest_rows {
+        if area - gap - detail_h(if has_stages { gmin } else { 0. }, r) >= pref {
+            per = r;
+        }
+    }
+    let room = area - gap - detail_h(0., per);
+    let (top, graph) = if env_rows > 0 && room - cg - least >= gmin {
+        let mut top = (room - cg - gmin).clamp(least, pref);
+        let mut graph = room - cg - top;
+        if graph > gmax {
+            top = (room - cg - gmax).min(greatest).max(top);
+            graph = room - cg - top;
+        }
+        (top, graph)
+    } else {
+        (room.max(least), 0.)
+    };
+    let row = master.row.min(rest_rows.saturating_sub(per));
+    let title = master.names.iter().find(|n| n.0 == index).map_or_else(|| format!("Operator {index}"), |n| n.1.clone());
+    out.panels.push(Panel { rect: Rect { x: 0., y, w: width, h: top }, view: View::Fm(fm.clone()), params: vec![] });
+    let head = Rect { x: 0., y: y + top + gap, w: width, h: DETAIL_HEAD };
+    let rows = rest_rows;
+    out.panels.push(Panel { rect: head, view: View::Detail(views::DetailHead { color: selected, title, count, index: selected, rows, row, per }), params: vec![] });
+    let mut next = head.y + DETAIL_HEAD + cg;
+    let before = out.tiles.len();
+    if env_rows > 0 {
+        let rect = Rect { x: 0., y: next, w: width, h: stages_h(graph) };
+        out.panels.push(Panel { rect, view: View::Stages(views::StagesShape { fm: fm.clone(), graph, row: sc, gap: cg, label, rows: true }), params: vec![] });
+        let time_y = next + if graph > 0. { graph + cg } else { 0. };
+        for (param, k, stage, level) in stage_tiles {
+            let rect = slot_rect(k, if level { time_y + sc + cg } else { time_y });
+            let control = if params[param].readonly() { Control::Value } else { Control::Knob };
+            out.tiles.push(Tile { param, rect, control, linked: false, compact: true, stage: Some(stage) });
+        }
+        next += stages_h(graph) + cg;
+    }
+    let fixed = out.tiles.len() - before;
+    let tile_w = (width - cg * (cols - 1) as f32) / cols as f32;
+    let shown: Vec<usize> = rest.iter().copied().skip(row * cols).take(per * cols).collect();
+    for (k, &param) in shown.iter().enumerate() {
+        let rect = Rect { x: (k % cols) as f32 * (tile_w + cg), y: next + (k / cols) as f32 * (sc + cg), w: tile_w, h: sc };
+        out.tiles.push(Tile { param, rect, control: compact_control(control_of(param)), linked: false, compact: true, stage: None });
+    }
+    out.detail = Some(Detail { view, index, count, own, params: list, columns: cols, rows, row, per, tiles: out.tiles.len() - before, fixed });
+    top + gap + detail_h(graph, per)
 }
 
 /// What a row of knob tiles is as high as: a tile (84) and the knob's extra (36), as the pages' tiles with a knob.
@@ -572,6 +708,7 @@ pub fn row_tile(rect: Rect, face: &Face) -> crate::GridTile {
         editing: face.editing,
         part: 0,
         linked: false,
+        compact: false,
     }
 }
 
@@ -877,6 +1014,10 @@ pub fn stage_across(p: &Param, v: f64, rate: bool, longest: f64) -> f64 {
 }
 
 /// An envelope's seconds-axis position (0 to 1) of a time of `seconds` when the longest stage is `longest`.
+pub fn stage_axis(seconds: f64, longest: f64) -> f64 {
+    time_across(seconds, longest)
+}
+
 fn time_across(seconds: f64, longest: f64) -> f64 {
     (seconds / SHORT_STAGE).ln_1p() / (longest / SHORT_STAGE).ln_1p()
 }
@@ -985,6 +1126,161 @@ pub fn envelope_layout_in(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) 
 
 fn norm_or(p: Option<usize>, fixed: f64, norm: &dyn Fn(usize) -> f64) -> f64 {
     p.map_or(fixed, norm)
+}
+
+/// The slots of an envelope's stages in a plot from `left` to `right`: stage k's slot, `envelope_layout_slots` and the
+/// controls under the plot go by it.
+pub fn stage_slots(e: &Envelope, left: f32, right: f32) -> Vec<(f32, f32)> {
+    let aw = right - left;
+    let hold = if e.points.iter().any(|p| p.sustain) { aw * 0.14 } else { 0. };
+    let segment = (aw - hold) / e.points.len().max(1) as f32;
+    let mut slot = left;
+    e.points
+        .iter()
+        .map(|p| {
+            let at = (slot, slot + segment);
+            slot += segment + if p.sustain { hold } else { 0. };
+            at
+        })
+        .collect()
+}
+
+/// An envelope laid out in slots, as the master's detail draws it: stage k has the slot k of the plot, every slot as
+/// wide, and its point lies inside it at its stage's place on the slot's own scale (a time by its seconds on the log
+/// axis up to `longest_of_all`, else by the parameter's range; a rate reversed). The time axis is therefore one slot
+/// wide and read stage by stage, and a control placed under the slot is under its point whatever the values are. The
+/// hold after a sustain is a gap between two slots, as in `envelope_layout_in`. Levels are as given (no gain).
+pub fn envelope_layout_slots(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f64, area: (f32, f32, f32, f32), longest_of_all: f64) -> EnvLayout {
+    let (left, top, right, bottom) = area;
+    let (aw, ah) = (right - left, bottom - top);
+    let sustains = e.points.iter().any(|p| p.sustain);
+    let hold = if sustains { aw * 0.14 } else { 0. };
+    let segment = (aw - hold) / e.points.len().max(1) as f32;
+    let least = (20f32).min(segment / 4.);
+    let times: Vec<&Param> = e.points.iter().filter_map(|p| p.time).map(|t| params[t]).collect();
+    let own = longest_stage(&times);
+    let longest = if own > 0. { own.max(longest_of_all) } else { 0. };
+    let level = |p: Option<usize>, fixed: f64| bottom - norm_or(p, fixed, norm) as f32 * ah;
+    let mut slot = left;
+    let mut points = vec![(left, level(e.start, 0.))];
+    let mut handles = Vec::new();
+    for p in &e.points {
+        let from = slot;
+        let x = match p.time {
+            Some(t) => from + least + stage_across(params[t], norm(t), p.rate, longest) as f32 * (segment - least),
+            None => from,
+        };
+        let y = level(p.level, p.fixed);
+        points.push((x, y));
+        handles.push(EnvHandle { at: (x, y), from });
+        slot += segment;
+        if p.sustain {
+            slot += hold;
+            points.push((slot, y));
+        }
+    }
+    let line = points.iter().enumerate().map(|(k, (x, y))| format!("{} {x:.1} {y:.1}", if k == 0 { "M" } else { " L" })).collect::<String>();
+    let end = points.last().map_or(left, |p| p.0);
+    let fill = format!("{line} L {end:.1} {bottom:.1} L {left:.1} {bottom:.1} Z");
+    EnvLayout { bottom, height: ah, segment, least, longest, handles, line, fill, points }
+}
+
+// ---- A master's detail: compact controls, and an envelope's stages by name ----
+
+/// The touch target's least height (`Theme.touch`, RFC 0019).
+pub const TOUCH: f32 = 44.;
+
+/// A compact control's height, defined once (slint/theme.slint `Theme.compact-height` is this formula and a test holds
+/// the two equal): the touch target, or what its name line, a control 0.45 of a touch target high and the tight paddings
+/// need at the theme's type scale and spacing, whichever is more. Never less than the touch target.
+pub fn compact_height(scale: f32, spacing: f32) -> f32 {
+    (2. * 4. * spacing + 1.15 * 13. * scale + 0.45 * TOUCH).max(TOUCH)
+}
+
+/// A compact control's least width (`Theme.compact-width`): 1.9 touch targets, which puts eight across the narrowest of the
+/// keyboard's screens with both rails (743 logical px).
+pub const COMPACT_WIDTH: f32 = 1.9 * TOUCH;
+
+/// How many compact controls a row of `width` holds (a row of up to eight: the eight knobs under the screen), two at least.
+pub fn compact_columns(width: f32, gap: f32) -> usize {
+    (((width + gap) / (COMPACT_WIDTH + gap)) as usize).clamp(2, 8)
+}
+
+/// One stage of an envelope as a master's detail names it, and the controls that move its point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StageCells {
+    pub name: String,
+    /// The time or rate parameter (a place in the envelope's list), and whether it is a rate.
+    pub time: Option<(usize, bool)>,
+    /// The level the stage reaches, when the stage has a parameter of its own for it, and its name.
+    pub level: Option<(usize, String)>,
+}
+
+/// An envelope's stages by name, one per point, and the start level when it has a parameter of its own.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stages {
+    pub cells: Vec<StageCells>,
+    pub start: Option<usize>,
+}
+
+/// Names the points of an envelope from its fields: the named stages by their fields (Delay, Attack, Hold, Decay,
+/// Release; the sustain's level is "Sustain"), the numbered ones by their place: a segment with a time or rate and no
+/// level of its own is a Hold, the others in turn the Attack, Decay (Decay 1, Decay 2... where there are more than one)
+/// and, the last, the Release. A level is shown once, under the stage whose own field it is (numbered `levelK` under
+/// segment K), not again where the envelope reuses it (the start level of a hold).
+pub fn stages(e: &Envelope, fields: &[&str]) -> Stages {
+    let field = |i: Option<usize>| i.and_then(|i| fields.get(i).copied()).unwrap_or("");
+    let numbered = e.points.iter().any(|p| matches!(field(p.time).strip_prefix("time").or_else(|| field(p.time).strip_prefix("rate")), Some(n) if n.parse::<u8>().is_ok()));
+    let own_level = |k: usize, p: &Point| p.level.filter(|&l| if numbered { field(Some(l)) == format!("level{}", k + 1) } else { field(Some(l)) == "sustain" });
+    let moving: Vec<usize> = (0..e.points.len()).filter(|&k| numbered && own_level(k, &e.points[k]).is_some()).collect();
+    let mut cells = Vec::new();
+    for (k, p) in e.points.iter().enumerate() {
+        let name = if numbered {
+            match moving.iter().position(|&m| m == k) {
+                None => "Hold".to_string(),
+                Some(j) => match (j, moving.len()) {
+                    (_, 1) => "Stage".to_string(),
+                    (0, _) => "Attack".to_string(),
+                    (j, m) if j + 1 == m => "Release".to_string(),
+                    (_, 3) => "Decay".to_string(),
+                    (j, _) => format!("Decay {j}"),
+                },
+            }
+        } else {
+            match field(p.time) {
+                "delay" => "Delay",
+                "attack" => "Attack",
+                "hold" => "Hold",
+                "decay" => "Decay",
+                "release" => "Release",
+                _ => "Stage",
+            }
+            .to_string()
+        };
+        let level = own_level(k, p).map(|l| (l, if !numbered { "Sustain".to_string() } else { name.clone() }));
+        cells.push(StageCells { name, time: p.time.map(|t| (t, p.rate)), level });
+    }
+    Stages { cells, start: e.start.filter(|&s| field(Some(s)) == "level0") }
+}
+
+/// A stage's length in seconds at `norm` (0 to 1 of its range), when the plugin gives them: its `seconds` at evenly
+/// spaced values, as the graph reads them.
+pub fn stage_seconds(p: &Param, norm: f64) -> Option<f64> {
+    (p.seconds.len() >= 2).then(|| seconds_at(&p.seconds, norm))
+}
+
+/// A length of time as a control writes it: "12 ms", "9.5 ms", "1.3 s", "12 s".
+pub fn seconds_text(s: f64) -> String {
+    let ms = s * 1000.;
+    if ms < 9.95 {
+        format!("{ms:.1} ms")
+    } else if s < 1. {
+        format!("{} ms", ms.round())
+    } else if s < 9.95 {
+        format!("{s:.1} s")
+    } else {
+        format!("{} s", s.round())
+    }
 }
 
 #[cfg(test)]

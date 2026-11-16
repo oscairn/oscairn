@@ -400,3 +400,23 @@ operator) over the selected operator's own tiles under a heading in its color; a
 the knobs under the screen follow the selection; fixtures' tab and page names made neutral. Tests: tests/fm_master.rs.
 
 Branch `rust-perf-finish` (2026-11-16; local `rust-app` adcf9952 rebased onto main 40003f71, one conflict in docs/plugin-porting.md kept both sides): the Performance app finished but for what the State paragraph of PERFORMANCE-APP.md leaves. Baseline after the rebase: 281 passed, 1 ignored, clippy clean. Real engine again (ui/REAL-ENGINE.md): the eight engine problems fixed, idle 0 requests on Home and Play, four UI faults fixed. D9 key strip, D6 ends, E1 tag colors/hide/one line and the first Sound, Record and Capture, the text keyboard overlay, the bar and rail defects, and tests/handover.rs (the walk). Now 294 passed, 1 ignored, `cargo clippy --offline --all-targets` clean (`sh ui/target/test.sh test --offline`; recreate target/test.sh: it wipes target/home and runs cargo with OSCAIRN_DATA_HOME and OSCAIRN_CONFIG_HOME there). Not run on a device.
+
+Branch `rust-fm-table` (from `rust-app` adcf9952; baseline 281 passed, 1 ignored, `cargo clippy --offline --all-targets` clean, confirmed): the FM
+operators view's operator table and its dense detail (owner, 2026-11-16; ui/GRID.md "The operator table", "The detail").
+- The overview is graph | table | diagram; the table has a row for each operator (number chip, M, S, level bar, coarse, fine, ratio or
+  frequency, detune; columns only for fields the data has), every cell edited in place (dial in reading order, panes 0 and 1 along and down,
+  ENTER edits or switches, EXIT ends; touch taps, drags, level bar); the knobs play the selected row. M and S are audition switches (the
+  owner's decision): a transient mute field drives M, S is derived in the host (the others muted, restored on release), neither field: both
+  disabled with the reason in the table's heading line. Provisional field names `operatorMute`, `operatorSolo` and `transient`: the
+  extension has none yet (notes/ui-fm-fields-proposal.md, outside the repository).
+- The detail: heading with an operator selector, the envelope as named stages (Hold, Attack, Decay 1, Decay 2, Release by the fields'
+  place or names) in a Time row over a Level row under a graph that gives each stage a slot, times only where `seconds` is given (a rate's
+  marked "/range", else "rate"), then compact controls (`Theme.compact-height` = `grid::compact_height`, the touch target at least, up to
+  eight a row, paged). Labels in a view panel shrink to 70% before they are cut.
+- Tests: tests/fm_table.rs (columns, cell cursor and edit, mute and solo for four kinds of data with no gesture or commit for a transient
+  mute, knob row, stage names, times, controls under their points, the compact size held equal in every theme, the screens' numbers, touch)
+  and the old FM tests moved onto the new layout (fm_master, fm_touch, fm_view). 290 passed, 1 ignored, clippy clean.
+- Pictures: ui/target/theme-shots/table-ENVELOPE-OPERATORS-SELECTED-PLACEMENT-THEME@SCALE-WxH.png (engine-like data, named stages with
+  and without seconds, numbered rates with and without; 8, 6 and 4 operators; dark, light, both odd themes, the joined block theme),
+  table-crop-*.png enlarged. Not run on a unit. Not held: the roomy odd theme (type 1.39, spacing 1.6) at the keyboard's screen, where the
+  block is taller than the area and the page scrolls; the detail's own graph is left out at 8 operators on the keyboard's 405.

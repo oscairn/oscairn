@@ -1175,6 +1175,7 @@ mod fm_view;
 mod palette;
 mod fm_touch;
 mod fm_master;
+mod fm_table;
 mod fm_dots;
 mod fm_lines;
 mod grid;

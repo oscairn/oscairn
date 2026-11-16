@@ -16,7 +16,7 @@
 //! and drags. Dots that move along the lines come from `Ctx::positions` and are drawn only when given.
 
 use crate::grid::{self, Param};
-use crate::views::{height_of, inner_rect, poly, rect_path, width_of, Area, BoxDraw, Ctx, Drawn, Handle, Held, Ink, Label, Shape};
+use crate::views::{height_of, inner_rect, poly, rect_path, width_of, Area, BoxDraw, Ctx, Drawn, Handle, Held, Ink, Label, Shape, StagesShape};
 
 /// Where an operator's most recent voice is on its envelope line: a fraction of the line's length, or a
 /// fraction of one of the line's segments (segment 0 runs from the start to the first node; a sustain's hold
@@ -31,15 +31,81 @@ pub enum Along {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Operator {
     pub level: Option<usize>,
+    /// The frequency ratio, or the coarse part of it where the operator has a `fine` of its own.
     pub ratio: Option<usize>,
     pub fixed: Option<usize>,
+    pub fine: Option<usize>,
+    pub detune: Option<usize>,
+    /// PROVISIONAL (notes/ui-fm-fields-proposal.md): the operator's mute and solo, `operatorMute` and `operatorSolo`
+    /// in `params.list`. The layout extension has no field for either yet.
+    pub mute: Option<usize>,
+    pub solo: Option<usize>,
     /// The operator's envelope parameters (the grid's), in the plugin's order.
     pub envelope: Vec<usize>,
 }
 
 impl Operator {
     fn owns(&self, param: usize) -> bool {
-        [self.level, self.ratio, self.fixed].contains(&Some(param)) || self.envelope.contains(&param)
+        [self.level, self.ratio, self.fixed, self.fine, self.detune, self.mute, self.solo].contains(&Some(param)) || self.envelope.contains(&param)
+    }
+}
+
+/// A column of the operator table. A column is there when the plugin's data has the field for any operator (mute and
+/// solo always: off, with the reason, where the plugin has none).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Column {
+    Mute,
+    Solo,
+    Level,
+    /// The ratio's coarse part (the `ratio` field, where there is a `fine` field too).
+    Coarse,
+    Fine,
+    /// The ratio, or the fixed frequency: the `ratio` field's text (with its unit when the operator is fixed).
+    Ratio,
+    /// The mode, ratio or fixed (the `fixed` field), where coarse and fine are columns of their own.
+    Mode,
+    Detune,
+}
+
+/// Where a solo comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SoloFrom {
+    /// The plugin's own solo field.
+    Field,
+    /// The host's: the others muted, over a mute the plugin says is transient (not saved, not an undo step).
+    Others,
+    None,
+}
+
+impl Column {
+    pub fn heading(self, f: &FmShape) -> &'static str {
+        match self {
+            Column::Mute => "M",
+            Column::Solo => "S",
+            Column::Level => "Level",
+            Column::Coarse => "Coarse",
+            Column::Fine => "Fine",
+            Column::Ratio if f.operators.iter().any(|o| o.fixed.is_some()) => "Ratio/Hz",
+            Column::Ratio => "Ratio",
+            Column::Mode => "Mode",
+            Column::Detune => "Detune",
+        }
+    }
+    /// The parameter an operator's cell in this column edits.
+    pub fn param(self, o: &Operator) -> Option<usize> {
+        match self {
+            Column::Mute => o.mute,
+            Column::Solo => o.solo,
+            Column::Level => o.level,
+            Column::Coarse | Column::Ratio => o.ratio,
+            Column::Fine => o.fine,
+            Column::Mode => o.fixed,
+            Column::Detune => o.detune,
+        }
+    }
+    /// Pressed and not turned: the cell is switched, not dialed.
+    pub fn toggles(self) -> bool {
+        matches!(self, Column::Mute | Column::Solo | Column::Mode)
     }
 }
 
@@ -60,6 +126,64 @@ impl FmShape {
     /// The operator (0 to 7) a parameter belongs to.
     pub fn operator_of(&self, param: usize) -> Option<usize> {
         self.operators.iter().position(|o| o.owns(param))
+    }
+
+    /// The table's columns, left to right, for the fields the data has: mute and solo, level, then coarse and fine with the mode where the operator has a `fine` field of
+    /// its own, else the ratio as one column, then detune.
+    pub fn columns(&self) -> Vec<Column> {
+        let any = |f: &dyn Fn(&Operator) -> bool| self.operators.iter().any(f);
+        let mut v = vec![];
+        // Mute and solo are always there; where the plugin has no field for one it is shown off, with the reason.
+        if !self.operators.is_empty() {
+            v.extend([Column::Mute, Column::Solo]);
+        }
+        if any(&|o| o.level.is_some()) {
+            v.push(Column::Level);
+        }
+        if any(&|o| o.fine.is_some()) {
+            if any(&|o| o.ratio.is_some()) {
+                v.push(Column::Coarse);
+            }
+            v.push(Column::Fine);
+            if any(&|o| o.fixed.is_some()) {
+                v.push(Column::Mode);
+            }
+        } else if any(&|o| o.ratio.is_some() || o.fixed.is_some()) {
+            v.push(Column::Ratio);
+        }
+        if any(&|o| o.detune.is_some()) {
+            v.push(Column::Detune);
+        }
+        v
+    }
+
+    /// Where the operators' solo comes from: a solo field, else the host muting the others over a mute the plugin
+    /// marks transient, else nowhere (the S column is then shown off, with the reason in the readout).
+    pub fn solo_from(&self, params: &[Param]) -> SoloFrom {
+        if self.operators.iter().any(|o| o.solo.is_some()) {
+            SoloFrom::Field
+        } else if self.operators.iter().all(|o| o.mute.is_some_and(|m| params[m].transient)) && self.operators.iter().any(|o| o.mute.is_some()) {
+            SoloFrom::Others
+        } else {
+            SoloFrom::None
+        }
+    }
+
+    /// Why the cell of operator `n` in `column` cannot be edited, if it cannot (said in the cursor's readout).
+    pub fn disabled(&self, n: usize, column: Column, params: &[Param]) -> Option<&'static str> {
+        let o = self.operators.get(n)?;
+        match column {
+            Column::Solo => match self.solo_from(params) {
+                SoloFrom::Others => None,
+                SoloFrom::Field if o.solo.is_some() => None,
+                SoloFrom::Field => Some("This operator has no solo"),
+                SoloFrom::None if self.operators.iter().any(|o| o.mute.is_some()) => Some("No solo: this plugin's mute is saved with the sound, so the host does not mute others"),
+                SoloFrom::None => Some("This plugin has no solo for its operators"),
+            },
+            Column::Mute if o.mute.is_none() => Some("This plugin has no mute for its operators"),
+            _ if column.param(o).is_none() => Some("This operator has no such field"),
+            _ => None,
+        }
     }
 }
 
@@ -89,6 +213,10 @@ pub fn fm_of(params: &[Param], view: u64) -> FmShape {
             "operatorLevel" => op.level = Some(i),
             "ratio" => op.ratio = Some(i),
             "fixed" => op.fixed = Some(i),
+            "fine" => op.fine = Some(i),
+            "detune" => op.detune = Some(i),
+            "operatorMute" => op.mute = Some(i),
+            "operatorSolo" => op.solo = Some(i),
             field if grid::is_envelope(field) => op.envelope.push(i),
             _ => {}
         }
@@ -478,16 +606,16 @@ pub fn diagram(flow: &Flow, count: usize, area: Area, small: f32, routed: bool, 
     d
 }
 
-/// One line of the overview's list: an operator's number, its level (a bar under its text) and its ratio.
+/// One line of the operator table: the operator's number chip, a cell in each of the table's columns
+/// (`FmShape::columns`), and the whole line.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Cell {
+pub struct Row {
     pub whole: Area,
     pub chip: Area,
-    pub level: Area,
-    pub ratio: Area,
+    pub cells: Vec<Area>,
 }
 
-/// An operator's envelope line in the plot.
+/// An operator's envelope line in a plot.
 struct Line {
     envelope: grid::Envelope,
     layout: grid::EnvLayout,
@@ -506,12 +634,17 @@ struct Geometry {
     graph: Option<Area>,
     plot: Area,
     picture: Diagram,
-    cells: Vec<Cell>,
+    columns: Vec<Column>,
+    /// The line over the table where the columns' headings are (or the readout of the cell the cursor is on).
+    heading: Area,
+    rows: Vec<Row>,
     heads: Vec<Head>,
     lines: Vec<Option<Line>>,
     selected: usize,
     tag: (f32, f32),
     small: f32,
+    /// Where the graph's time scale goes: under its plot.
+    scale: Area,
 }
 
 fn contains(a: Area, at: (f32, f32), grow: f32) -> bool {
@@ -519,13 +652,15 @@ fn contains(a: Area, at: (f32, f32), grow: f32) -> bool {
 }
 
 /// The measures of the overview that its height and the detail's are worked out from, all from the theme's type
-/// size and spacing: where the body starts under the heads, the least a list line is as high as, and the gap
-/// between lines.
+/// size and spacing: where the body starts under the heads, the least a table row is as high as and what it is given
+/// when there is room, the gap between rows, and the foot.
 struct Metrics {
     small: f32,
     sp: f32,
     body_top: f32,
     row_min: f32,
+    row_pref: f32,
+    row_max: f32,
     gap: f32,
     foot: f32,
 }
@@ -533,20 +668,26 @@ struct Metrics {
 fn metrics(scale: f32, spacing: f32) -> Metrics {
     let small = 13. * scale;
     let sp = spacing;
-    Metrics { small, sp, body_top: 6. * sp + small * 1.3 + 2. * sp, row_min: small * 1.1, gap: 3. * sp, foot: 8. * sp }
+    Metrics { small, sp, body_top: 6. * sp + small * 1.3 + 2. * sp, row_min: small * 1.3, row_pref: small * 1.7, row_max: small * 2., gap: 2. * sp, foot: 6. * sp }
 }
 
-/// The least the overview is high and still draws `count` operators as lines of the list each its least high.
+/// The least the overview is high and still draws `count` operators as table rows each its least high.
 pub fn least_height(count: usize, scale: f32, spacing: f32) -> f32 {
     let m = metrics(scale, spacing);
     m.body_top + count as f32 * m.row_min + count.saturating_sub(1) as f32 * m.gap + m.foot
 }
 
-/// What the overview is given when the detail can spare it: lines of 1.6 lines of type, and at least 14 lines of type
+/// What the overview is given when the detail can spare it: rows of 1.7 lines of type, and at least 11 lines of type
 /// in all, which keeps the diagram's boxes and the graph's tags legible.
 pub fn preferred_height(count: usize, scale: f32, spacing: f32) -> f32 {
     let m = metrics(scale, spacing);
-    (m.body_top + count as f32 * m.small * 1.6 + count.saturating_sub(1) as f32 * m.gap + m.foot).max(m.small * 14.)
+    (m.body_top + count as f32 * m.row_pref + count.saturating_sub(1) as f32 * m.gap + m.foot).max(m.small * 11.)
+}
+
+/// The most the overview's rows can use: past it the table's rows stay as high as they are.
+pub fn greatest_height(count: usize, scale: f32, spacing: f32) -> f32 {
+    let m = metrics(scale, spacing);
+    m.body_top + count as f32 * m.row_max + count.saturating_sub(1) as f32 * m.gap + m.foot
 }
 
 /// The algorithm's routing at its value, when the plugin gives one.
@@ -561,25 +702,94 @@ fn bold_width(text: &str, small: f32) -> f32 {
     text.chars().count() as f32 * 0.6 * small * 1.06
 }
 
+/// The widths of a table's columns at the type size `small` and a row `row` high: marks are square, the chip is a
+/// little wider than high, the rest by what they hold ("Ratio/Hz" and "12.34 Hz" are the widest texts).
+fn column_width(column: Column, small: f32, row: f32) -> f32 {
+    match column {
+        Column::Mute | Column::Solo => row,
+        Column::Level => 6. * small,
+        Column::Coarse | Column::Fine => 3.7 * small,
+        Column::Ratio => 5. * small,
+        Column::Mode => 3.6 * small,
+        Column::Detune => 3.7 * small,
+    }
+}
+
+/// The time scale's room under a graph (ticks and their labels), and how wide the graph's right margin for the
+/// operators' tags is.
+fn scale_height(small: f32) -> f32 {
+    small * 1.4
+}
+
+/// An envelope plot's lines: every operator's in `plot`, on one time scale. `slotted`: a stage in a slot of its own
+/// (the detail's graph: levels as given), else stage after stage with each line scaled by its operator's level.
+fn lines_in(f: &FmShape, c: &Ctx, plot: Area, slotted: bool) -> Vec<Option<Line>> {
+    let count = f.operators.len();
+    let mut lines: Vec<Option<Line>> = (0..count).map(|_| None).collect();
+    let shapes: Vec<(grid::Envelope, Vec<&Param>)> = f
+        .operators
+        .iter()
+        .map(|o| {
+            let fields: Vec<&str> = o.envelope.iter().map(|&i| c.params[i].field.as_str()).collect();
+            (grid::envelope_of_fields(&fields), o.envelope.iter().map(|&i| &c.params[i]).collect())
+        })
+        .collect();
+    let longest = shapes.iter().map(|(e, refs)| grid::longest_stage(&e.points.iter().filter_map(|p| p.time).map(|t| refs[t]).collect::<Vec<_>>())).fold(0., f64::max);
+    for (n, ((e, refs), o)) in shapes.into_iter().zip(&f.operators).enumerate() {
+        if e.points.is_empty() {
+            continue;
+        }
+        let norm = |k: usize| (c.norm)(o.envelope[k]);
+        let gain = if slotted { 1. } else { o.level.map_or(1., |l| (c.norm)(l) as f32) };
+        let layout = if slotted { grid::envelope_layout_slots(&e, &refs, &norm, plot, longest) } else { grid::envelope_layout_in(&e, &refs, &norm, plot, gain, longest) };
+        lines[n] = Some(Line { envelope: e, layout, gain });
+    }
+    lines
+}
+
 fn geometry(f: &FmShape, c: &Ctx) -> Geometry {
     let m = metrics(c.scale, c.spacing);
     let (small, sp) = (m.small, m.sp);
     let pad = 12. * sp;
     let count = f.operators.len();
+    let columns = f.columns();
     let has_graph = f.operators.iter().any(|o| !grid::envelope_of_fields(&o.envelope.iter().map(|&i| c.params[i].field.as_str()).collect::<Vec<_>>()).points.is_empty());
     let (top, bottom) = (m.body_top, c.h - m.foot);
     let (left, right) = (pad, c.w - pad);
-    // The list of operators at the right: a line each, as high as the room gives (at most 2.3 lines of type for few).
-    let row_max = small * if count <= 6 { 2.3 } else { 1.9 };
-    let row = if count > 0 { ((bottom - top - m.gap * (count - 1) as f32) / count as f32).clamp(m.row_min, row_max) } else { m.row_min };
-    let list_w = (((right - left) * 0.22).max(small * 11.5)).min(small * 15.).min(right - left);
-    let list_left = right - list_w;
-    let across = list_left - 12. * sp - left;
-    let diagram_right = if has_graph { left + (across - 12. * sp) * 0.46 } else { left + across };
-    let diagram_area = (left, top, diagram_right, bottom);
-    let graph = has_graph.then_some((diagram_right + 12. * sp, top, left + across, bottom));
+    let row = if count > 0 { ((bottom - top - m.gap * (count - 1) as f32) / count as f32).clamp(m.row_min, m.row_max) } else { m.row_min };
+    // The table's width: its columns at the widths their texts need, scaled between 0.8 and 1 by what the panes beside
+    // it leave (the marks and the chip stay the row's size); the graph at its left and the diagram at its right share
+    // the rest. A graph that would not get nine lines of type across is left out: the diagram is what shrinks.
+    let chip_w = row.max(small * 1.7);
+    let cell_gap = 3. * sp;
+    let pane_gap = 12. * sp;
+    let fixed: f32 = chip_w + columns.iter().filter(|k| matches!(k, Column::Mute | Column::Solo)).map(|_| cell_gap + row).sum::<f32>();
+    let flexible: f32 = columns.iter().filter(|k| !matches!(k, Column::Mute | Column::Solo)).map(|&k| cell_gap + column_width(k, small, row)).sum();
+    let avail = right - left;
+    // The least the diagram is given: nine lines of type across, and the room its heads (the view's own parameters named
+    // over it) need side by side.
+    let texts: Vec<(usize, String)> = f.own.iter().map(|&p| (p, format!("{} {}", c.params[p].name, (c.text)(p)))).collect();
+    let head_widths: Vec<f32> = texts.iter().map(|(_, t)| bold_width(t, small) + 1.).collect();
+    let min_diagram = (9. * small).max(head_widths.iter().sum::<f32>() + 12. * sp * head_widths.len().saturating_sub(1) as f32) + 2.;
+    let min_pane = 9. * small;
+    let fit = |panes: usize| -> f32 {
+        let room = avail - fixed - panes as f32 * pane_gap - (panes - 1) as f32 * min_pane - min_diagram;
+        (room / flexible.max(1.)).clamp(0.8, 1.)
+    };
+    let graph_shown = has_graph && avail - (fixed + flexible * 0.8) - 2. * pane_gap >= min_pane + min_diagram;
+    let stretch = fit(if graph_shown { 2 } else { 1 });
+    let table_w = fixed + flexible * stretch;
+    let rest = (avail - table_w - if graph_shown { 2. } else { 1. } * pane_gap).max(0.);
+    let diagram_w = if graph_shown { (rest * 0.55).max(min_diagram).min(rest) } else { rest };
+    let graph_w = if graph_shown { rest - diagram_w } else { 0. };
+    let table_x = left + if graph_shown { graph_w + pane_gap } else { 0. };
+    let diagram_x = table_x + table_w + pane_gap;
+    let diagram_area = (diagram_x.min(right), top, right, bottom);
     let tag = (small * 1.3, small * 1.2);
-    let plot = graph.map_or((0., 0., 0., 0.), |g| (g.0 + 10. * sp, g.1 + grid::NODE_RADIUS + 4., g.2 - tag.0 - grid::NODE_RADIUS - 6., g.3 - 8.));
+    let graph = graph_shown.then_some((left, top, left + graph_w, bottom));
+    let scale_room = if graph_shown { scale_height(small) } else { 0. };
+    let plot = graph.map_or((0., 0., 0., 0.), |g| (g.0 + 10. * sp, g.1 + grid::NODE_RADIUS + 4., g.2 - tag.0 - grid::NODE_RADIUS - 6., g.3 - 8. - scale_room));
+    let scale = graph.map_or((0., 0., 0., 0.), |g| (plot.0, plot.3 + 4., plot.2 + tag.0, g.3 - 2.));
     let route = route_of(f, c);
     let flow = (count > 0).then(|| match &route {
         Some(r) => algorithm_layout(r, count),
@@ -590,59 +800,57 @@ fn geometry(f: &FmShape, c: &Ctx) -> Geometry {
             flow
         }
     });
-    let picture = flow.as_ref().map(|fl| diagram(fl, count, diagram_area, small, route.is_some(), graph.is_none())).unwrap_or_default();
-    // The heads: the view's own parameters named in a line over the diagram, each as wide as its text.
+    let picture = flow.as_ref().map(|fl| diagram(fl, count, diagram_area, small, route.is_some(), true)).unwrap_or_default();
+    // The heads: the view's own parameters named in a line over the diagram, each as wide as its text; the gaps between them
+    // give way (to none) where the diagram is not wide enough for both, then the heads' widths share what there is.
+    let widths = head_widths;
+    let room = (right - diagram_x).max(0.);
+    let gap = if texts.len() > 1 { ((room - widths.iter().sum::<f32>()) / (texts.len() - 1) as f32).clamp(0., 12. * sp) } else { 0. };
+    let shrink = (room / (widths.iter().sum::<f32>() + gap * texts.len().saturating_sub(1) as f32).max(1.)).min(1.);
     let mut heads = Vec::new();
-    let mut x = left;
-    for &p in &f.own {
-        let text = format!("{} {}", c.params[p].name, (c.text)(p));
-        let w = bold_width(&text, small).min((list_left - 12. * sp - x).max(0.));
+    let mut x = diagram_x;
+    for ((p, text), w) in texts.into_iter().zip(widths) {
+        let w = w * shrink;
         heads.push(Head { area: (x, 6. * sp, x + w, 6. * sp + small * 1.3), param: p, text });
-        x += w + 12. * sp;
+        x += w + gap;
     }
-    // The cells: chip, level (text over a bar) and ratio on one line.
-    let cell_gap = 3. * sp;
-    let ratio_w = ((list_w - row) * 0.42).max(small * 3.);
-    let level_w = (list_w - row - ratio_w - 2. * cell_gap).max(0.);
-    let cells = (0..count)
+    // The table: the chip, then a cell for each column, on one line for each operator.
+    let widths: Vec<f32> = columns.iter().map(|&k| if matches!(k, Column::Mute | Column::Solo) { row } else { column_width(k, small, row) * stretch }).collect();
+    let rows = (0..count)
         .map(|n| {
             let y = top + (row + m.gap) * n as f32;
-            let chip = (list_left, y, list_left + row, y + row);
-            let level = (chip.2 + cell_gap, y, chip.2 + cell_gap + level_w, y + row);
-            let ratio = (level.2 + cell_gap, y, right, y + row);
-            Cell { whole: (list_left - 1., y - 1., right + 1., y + row + 1.), chip, level, ratio }
+            let chip = (table_x, y, table_x + chip_w, y + row);
+            let mut x = chip.2 + cell_gap;
+            let cells = widths
+                .iter()
+                .map(|w| {
+                    let a = (x, y, x + w, y + row);
+                    x += w + cell_gap;
+                    a
+                })
+                .collect();
+            Row { whole: (table_x - 1., y - 1., table_x + table_w + 1., y + row + 1.), chip, cells }
         })
         .collect();
-    // The lines: every operator's envelope in the plot, on one time scale, scaled by its level.
-    let mut lines: Vec<Option<Line>> = (0..count).map(|_| None).collect();
-    if has_graph {
-        let shapes: Vec<(grid::Envelope, Vec<&Param>)> = f
-            .operators
-            .iter()
-            .map(|o| {
-                let fields: Vec<&str> = o.envelope.iter().map(|&i| c.params[i].field.as_str()).collect();
-                (grid::envelope_of_fields(&fields), o.envelope.iter().map(|&i| &c.params[i]).collect())
-            })
-            .collect();
-        let longest = shapes
-            .iter()
-            .map(|(e, refs)| grid::longest_stage(&e.points.iter().filter_map(|p| p.time).map(|t| refs[t]).collect::<Vec<_>>()))
-            .fold(0., f64::max);
-        for (n, ((e, refs), o)) in shapes.into_iter().zip(&f.operators).enumerate() {
-            if e.points.is_empty() {
-                continue;
-            }
-            let norm = |k: usize| (c.norm)(o.envelope[k]);
-            let gain = o.level.map_or(1., |l| (c.norm)(l) as f32);
-            let layout = grid::envelope_layout_in(&e, &refs, &norm, plot, gain, longest);
-            lines[n] = Some(Line { envelope: e, layout, gain });
-        }
-    }
-    Geometry { diagram: diagram_area, graph, plot, picture, cells, heads, lines, selected: c.selected.min(count.saturating_sub(1)), tag, small }
+    let heading = (table_x, 6. * sp, table_x + table_w, 6. * sp + small * 1.3);
+    let lines = if has_graph && graph_shown { lines_in(f, c, plot, false) } else { (0..count).map(|_| None).collect() };
+    Geometry { diagram: diagram_area, graph, plot, picture, columns, heading, rows, heads, lines, selected: c.selected.min(count.saturating_sub(1)), tag, small, scale }
 }
 
+/// Whether operator `n` is muted: its mute field is on.
+fn muted(f: &FmShape, c: &Ctx, n: usize) -> bool {
+    f.operators[n].mute.is_some_and(|m| (c.norm)(m) > 0.5)
+}
+
+/// Whether operator `n` is soloed: its solo field is on, or the host has soloed it.
+fn soloed(f: &FmShape, c: &Ctx, n: usize) -> bool {
+    f.operators[n].solo.is_some_and(|s| (c.norm)(s) > 0.5) || c.soloed.get(n).copied().unwrap_or(false)
+}
+
+/// Whether an operator is silent in the picture: its level is 0, it is muted, or another is soloed and it is not.
 fn dimmed(f: &FmShape, c: &Ctx, n: usize) -> bool {
-    f.operators[n].level.is_some_and(|l| (c.norm)(l) <= 0.)
+    let any_solo = (0..f.operators.len()).any(|m| soloed(f, c, m));
+    f.operators[n].level.is_some_and(|l| (c.norm)(l) <= 0.) || muted(f, c, n) || (any_solo && !soloed(f, c, n))
 }
 
 /// The point `along` a line's vertices.
@@ -672,22 +880,41 @@ fn circle(x: f32, y: f32, r: f32) -> String {
     format!("M {:.2} {y:.2} A {r:.2} {r:.2} 0 1 0 {:.2} {y:.2} A {r:.2} {r:.2} 0 1 0 {:.2} {y:.2} Z", x - r, x + r, x - r)
 }
 
-/// The ratio box's text: the plugin's, with the fixed-frequency switch's when it is on and the box is wide
-/// enough for both (at 70% type, an estimate of 0.6 em a character); else the ratio's alone and the box is
-/// edged in the accent, which says the same.
-fn ratio_text(o: &Operator, c: &Ctx, room: f32) -> (String, bool) {
+/// The ratio column's text: the plugin's text for the ratio, and when the operator is fixed (its `fixed` field on: the
+/// value is a frequency) the unit "Hz" where the plugin's own text has none. Whether it is fixed says it again in the
+/// cell's edge.
+fn ratio_text(o: &Operator, c: &Ctx) -> (String, bool) {
     let ratio = o.ratio.map(|r| (c.text)(r)).unwrap_or_default();
     match o.fixed.filter(|&x| (c.norm)(x) > 0.5) {
-        Some(fixed) => {
-            let both = format!("{} {ratio}", (c.text)(fixed));
-            if both.chars().count() as f32 * 0.6 * 13. * c.scale * 0.7 <= room - 2. {
-                (both, true)
-            } else {
-                (ratio, true)
-            }
-        }
+        Some(_) if ratio.chars().any(char::is_alphabetic) => (ratio, true),
+        Some(_) => (format!("{ratio} Hz"), true),
         None => (ratio, false),
     }
+}
+
+/// A table cell's text, and whether its edge is the accent's (a fixed frequency).
+fn cell_text(f: &FmShape, c: &Ctx, n: usize, column: Column) -> (String, bool) {
+    let o = &f.operators[n];
+    let of = |p: Option<usize>| p.map(|p| (c.text)(p)).unwrap_or_default();
+    match column {
+        Column::Mute => ("M".into(), false),
+        Column::Solo => ("S".into(), false),
+        Column::Level => (of(o.level), false),
+        Column::Coarse => (of(o.ratio), false),
+        Column::Fine => (of(o.fine), false),
+        Column::Ratio => ratio_text(o, c),
+        Column::Mode => (of(o.fixed), o.fixed.is_some_and(|x| (c.norm)(x) > 0.5)),
+        Column::Detune => (of(o.detune), false),
+    }
+}
+
+/// A level cell's bar and the text of its value beside it.
+fn level_parts(cell: Area, row: f32) -> (Area, Area) {
+    let w = width_of(cell);
+    let text_w = (w * 0.38).max(0.);
+    let bar_h = (row * 0.42).max(3.);
+    let mid = (cell.1 + cell.3) / 2.;
+    ((cell.0, mid - bar_h / 2., cell.2 - text_w, mid + bar_h / 2.), (cell.2 - text_w, cell.1, cell.2, cell.3))
 }
 
 fn arrow(tip: (f32, f32), toward: (f32, f32), size: f32) -> String {
@@ -700,6 +927,44 @@ fn arrow(tip: (f32, f32), toward: (f32, f32), size: f32) -> String {
 
 fn ring(a: Area, grow: f32) -> String {
     rect_path(a.0 - grow, a.1 - grow, width_of(a) + 2. * grow, height_of(a) + 2. * grow)
+}
+
+/// The graph's time scale: where a stage's time falls along one stage of the plot (a stage's width is its least plus a
+/// share of the rest by `grid::stage_across`: about even below 50 ms, logarithmic past it), as ticks under the plot with
+/// the labels that fit, the longest first; and a note where the widths are not times. `layout` is a line's layout in the
+/// plot (its stage width and its least), `at` the left edge of the stage the scale is drawn along.
+fn scale_marks(d: &mut Drawn, layout: &grid::EnvLayout, at: f32, area: Area, small: f32, nominal: bool) {
+    let (y, bottom) = (area.1 + 2., area.3);
+    let note = |d: &mut Drawn, text: &str| {
+        let w = bold_width(text, small);
+        d.labels.push(Label { x: area.2 - w, y, w, h: bottom - y, text: text.into(), ink: Ink::Muted, bold: false, align: 2 });
+    };
+    if layout.longest <= 0. {
+        note(d, "by value");
+        return;
+    }
+    let (from, to) = (at + layout.least, at + layout.segment);
+    d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 1, commands: poly(&[(crisp(from), y), (crisp(to), y)]) });
+    let mut right_edge = f32::MAX;
+    for (t, text) in [(10., "10 s"), (1., "1 s"), (0.1, "100 ms"), (0.01, "10 ms")] {
+        if t > layout.longest * 1.001 {
+            continue;
+        }
+        let x = from + grid::stage_axis(t, layout.longest) as f32 * (to - from);
+        d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 1, commands: poly(&[(crisp(x), y), (crisp(x), y + 3.)]) });
+        let w = bold_width(text, small);
+        // Labels are drawn only where they do not run into the one to their right (the longer time).
+        let mut left = (x - w / 2.).max(area.0);
+        if left + w > right_edge {
+            continue;
+        }
+        left = left.min(right_edge - w);
+        right_edge = left - 2.;
+        d.labels.push(Label { x: left, y: y + 3., w, h: (bottom - y - 3.).max(0.), text: text.into(), ink: Ink::Muted, bold: false, align: 1 });
+    }
+    if nominal && at + layout.segment + bold_width("nominal", small) < area.2 {
+        note(d, "nominal");
+    }
 }
 
 pub fn draw(f: &FmShape, c: &Ctx) -> Drawn {
@@ -732,15 +997,15 @@ pub fn draw(f: &FmShape, c: &Ctx) -> Drawn {
         let o = g.picture.out_label;
         d.labels.push(Label { x: o.0, y: o.1, w: width_of(o), h: height_of(o), text: "Out".into(), ink: Ink::Muted, bold: false, align: 1 });
     }
-    // The selected operator's ring, around its box in the diagram and its chip in the strip.
+    // The selected operator's ring, around its box in the diagram.
     if g.selected < g.picture.boxes.len() {
         d.shapes.push(Shape { ink: Ink::Text, fill: false, width: 1, commands: ring(g.picture.boxes[g.selected], 2.5) });
     }
     for (n, b) in g.picture.boxes.iter().enumerate() {
         let (fill, text) = if dimmed(f, c, n) { (Ink::dim_operator(n), Ink::Text) } else { (Ink::operator(n), Ink::on_operator(n)) };
-        d.boxes.push(BoxDraw { x: b.0, y: b.1, w: width_of(*b), h: height_of(*b), fill, edge: Some(Ink::Border), text: (n + 1).to_string(), text_ink: text, bold: true });
+        d.boxes.push(BoxDraw { x: b.0, y: b.1, w: width_of(*b), h: height_of(*b), fill, edge: Some(Ink::Border), text: (n + 1).to_string(), text_ink: text, bold: true, mark: false });
     }
-    // The graph: a frame, every operator's line (the dimmed first, the selected last), a tag at each end.
+    // The graph: a frame, every operator's line (the dimmed first, the selected last), a tag at each end, the time scale.
     if let Some(frame) = g.graph {
         d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: inner_rect(frame, 1.) });
         let mut tags: Vec<(usize, f32, f32)> = vec![];
@@ -772,6 +1037,11 @@ pub fn draw(f: &FmShape, c: &Ctx) -> Drawn {
                 d.shapes.push(Shape { ink: Ink::operator(n), fill: true, width: 0, commands: circle(x, y, radius) });
             }
         }
+        // The time scale, along the first stage of the selected operator's line (its stage width is the same for all).
+        if let Some(line) = g.lines.get(g.selected).and_then(Option::as_ref).or_else(|| g.lines.iter().flatten().next()) {
+            let nominal = g.lines.iter().flatten().any(|l| l.envelope.points.iter().any(|p| p.rate));
+            scale_marks(&mut d, &line.layout, g.plot.0, g.scale, g.small, nominal);
+        }
         // The selected operator's envelope nodes are the handles.
         if let (Some(line), Some(o)) = (&g.lines[g.selected], f.operators.get(g.selected)) {
             for (h, p) in line.layout.handles.iter().zip(&line.envelope.points) {
@@ -787,31 +1057,79 @@ pub fn draw(f: &FmShape, c: &Ctx) -> Drawn {
             d.shapes.push(Shape { ink, fill: false, width: 2, commands: inner_rect((h.area.0 - 3., h.area.1, h.area.2 + 3., h.area.3), 2.) });
         }
     }
-    // The list: a line for each operator.
-    let bar_h = (3. * c.spacing).max(2.);
-    for (n, (cell, o)) in g.cells.iter().zip(&f.operators).enumerate() {
-        let chosen = n == g.selected;
-        d.boxes.push(BoxDraw { x: cell.whole.0, y: cell.whole.1, w: width_of(cell.whole), h: height_of(cell.whole), fill: if chosen { Ink::Raised } else { Ink::Clear }, edge: Some(if chosen { Ink::Text } else { Ink::Frame }), text: String::new(), text_ink: Ink::Text, bold: false });
-        let (fill, text) = if dimmed(f, c, n) { (Ink::dim_operator(n), Ink::Text) } else { (Ink::operator(n), Ink::on_operator(n)) };
-        d.boxes.push(BoxDraw { x: cell.chip.0, y: cell.chip.1, w: width_of(cell.chip), h: height_of(cell.chip), fill, edge: None, text: (n + 1).to_string(), text_ink: text, bold: true });
-        if let Some(l) = o.level {
-            let lv = cell.level;
-            d.boxes.push(BoxDraw { x: lv.0, y: lv.1, w: width_of(lv), h: height_of(lv) - bar_h, fill: Ink::Clear, edge: None, text: (c.text)(l), text_ink: Ink::Text, bold: true });
-            let bar = (lv.0, lv.3 - bar_h, lv.2, lv.3);
-            d.boxes.push(BoxDraw { x: bar.0, y: bar.1, w: width_of(bar), h: bar_h, fill: Ink::Raised, edge: Some(Ink::Frame), text: String::new(), text_ink: Ink::Text, bold: false });
-            let v = (c.norm)(l) as f32 * width_of(bar);
-            if v > 0. {
-                d.boxes.push(BoxDraw { x: bar.0, y: bar.1, w: v, h: bar_h, fill: Ink::operator(n), edge: None, text: String::new(), text_ink: Ink::Text, bold: false });
+    // The table. Over it, the columns' headings in the small dim type, once; or, while the cursor is on a cell that
+    // cannot be edited, why (the cursor's readout).
+    let why = c.cell.and_then(|(n, k)| g.columns.get(k).and_then(|&col| f.disabled(n, col, c.params)));
+    let head = g.heading;
+    match (why, g.rows.first()) {
+        (Some(why), _) => d.labels.push(Label { x: head.0, y: head.1, w: width_of(head), h: height_of(head), text: why.into(), ink: Ink::Text, bold: false, align: 0 }),
+        (None, Some(first)) => {
+            let label = |d: &mut Drawn, a: Area, text: &str| d.labels.push(Label { x: a.0, y: head.1, w: width_of(a), h: height_of(head), text: text.into(), ink: Ink::Muted, bold: false, align: 1 });
+            label(&mut d, first.chip, "Op");
+            for (&col, &cell) in g.columns.iter().zip(&first.cells) {
+                if !matches!(col, Column::Mute | Column::Solo) {
+                    label(&mut d, cell, col.heading(f));
+                }
             }
         }
-        let (ratio, fixed) = ratio_text(o, c, width_of(cell.ratio));
-        d.boxes.push(BoxDraw { x: cell.ratio.0, y: cell.ratio.1, w: width_of(cell.ratio), h: height_of(cell.ratio), fill: Ink::Raised, edge: fixed.then_some(Ink::Accent), text: ratio, text_ink: Ink::Text, bold: false });
-        // The cursor on the operator's line of the overview.
-        if c.over == Some(n) {
-            d.shapes.push(Shape { ink: Ink::Focus, fill: false, width: 2, commands: inner_rect((cell.whole.0 - 1., cell.whole.1 - 1., cell.whole.2 + 1., cell.whole.3 + 1.), 2.) });
+        _ => {}
+    }
+    // A solo that is on is told over the mute and solo marks: a forgotten solo makes a sound seem broken.
+    if let (true, Some(first)) = (c.soloed.iter().any(|&s| s), g.rows.first()) {
+        if let Some(m) = g.columns.iter().position(|&k| k == Column::Mute) {
+            let (x0, x1) = (first.cells[m].0, first.cells[m + 1].2);
+            d.labels.push(Label { x: x0, y: head.1, w: x1 - x0, h: height_of(head), text: "solo".into(), ink: Ink::Accent, bold: true, align: 1 });
+        }
+    }
+    let row_h = g.rows.first().map_or(0., |r| height_of(r.whole) - 2.);
+    for (n, (row, o)) in g.rows.iter().zip(&f.operators).enumerate() {
+        let chosen = n == g.selected;
+        d.boxes.push(BoxDraw { x: row.whole.0, y: row.whole.1, w: width_of(row.whole), h: height_of(row.whole), fill: if chosen { Ink::Raised } else { Ink::Clear }, edge: Some(if chosen { Ink::Text } else { Ink::Frame }), text: String::new(), text_ink: Ink::Text, bold: false, mark: false });
+        let (fill, text) = if dimmed(f, c, n) { (Ink::dim_operator(n), Ink::Text) } else { (Ink::operator(n), Ink::on_operator(n)) };
+        d.boxes.push(BoxDraw { x: row.chip.0, y: row.chip.1, w: width_of(row.chip), h: height_of(row.chip), fill, edge: None, text: (n + 1).to_string(), text_ink: text, bold: true, mark: false });
+        for (k, (&col, &cell)) in g.columns.iter().zip(&row.cells).enumerate() {
+            let disabled = f.disabled(n, col, c.params).is_some();
+            let (w, h) = (width_of(cell), height_of(cell));
+            match col {
+                Column::Mute | Column::Solo => {
+                    let on = if col == Column::Mute { muted(f, c, n) } else { soloed(f, c, n) };
+                    let (fill, edge, ink) = match (disabled, on) {
+                        (true, _) => (Ink::Clear, Some(Ink::Frame), Ink::Frame),
+                        (false, true) => (if col == Column::Mute { Ink::Danger } else { Ink::Accent }, None, Ink::Background),
+                        (false, false) => (Ink::MarkOff, None, Ink::Muted),
+                    };
+                    d.boxes.push(BoxDraw { x: cell.0, y: cell.1, w, h, fill, edge, text: if col == Column::Mute { "M" } else { "S" }.into(), text_ink: ink, bold: true, mark: true });
+                }
+                Column::Level => {
+                    if let Some(l) = o.level {
+                        let (bar, value) = level_parts(cell, row_h);
+                        d.boxes.push(BoxDraw { x: bar.0, y: bar.1, w: width_of(bar), h: height_of(bar), fill: Ink::Background, edge: Some(Ink::Frame), text: String::new(), text_ink: Ink::Text, bold: false, mark: false });
+                        let v = (c.norm)(l) as f32 * width_of(bar);
+                        if v > 0. {
+                            d.boxes.push(BoxDraw { x: bar.0, y: bar.1, w: v, h: height_of(bar), fill: if dimmed(f, c, n) { Ink::dim_operator(n) } else { Ink::operator(n) }, edge: None, text: String::new(), text_ink: Ink::Text, bold: false, mark: false });
+                        }
+                        d.boxes.push(BoxDraw { x: value.0, y: value.1, w: width_of(value), h: height_of(value), fill: Ink::Clear, edge: None, text: (c.text)(l), text_ink: Ink::Text, bold: true, mark: false });
+                    }
+                }
+                _ => {
+                    if column_has(col, o) {
+                        let (text, fixed) = cell_text(f, c, n, col);
+                        d.boxes.push(BoxDraw { x: cell.0, y: cell.1, w, h, fill: if chosen { Ink::Background } else { Ink::Raised }, edge: Some(if fixed { Ink::Accent } else { Ink::Frame }), text, text_ink: Ink::Text, bold: false, mark: false });
+                    }
+                }
+            }
+            if c.cell == Some((n, k)) {
+                let ink = if c.editing { Ink::Accent } else { Ink::Focus };
+                d.shapes.push(Shape { ink, fill: false, width: 2, commands: inner_rect((cell.0 - 1., cell.1 - 1., cell.2 + 1., cell.3 + 1.), 2.) });
+            }
         }
     }
     d
+}
+
+/// Whether the operator has what its cell in `column` shows.
+fn column_has(column: Column, o: &Operator) -> bool {
+    column.param(o).is_some() || (column == Column::Ratio && o.fixed.is_some())
 }
 
 /// The operators in drawing order for the graph: dimmed ones first, then the rest, the selected last.
@@ -840,15 +1158,27 @@ fn distance_to_line(points: &[(f32, f32)], at: (f32, f32)) -> f32 {
 pub fn grab(f: &FmShape, c: &Ctx, at: (f32, f32)) -> Option<Held> {
     let g = geometry(f, c);
     let raw = |p: usize| c.params[p].min + (c.norm)(p) * (c.params[p].max - c.params[p].min);
-    for (n, (cell, o)) in g.cells.iter().zip(&f.operators).enumerate() {
-        let near = |a: Area| contains(a, at, 2.);
-        if let (true, Some(l)) = (near(cell.level), o.level) {
-            return Some(Held::Level { param: l });
+    for (n, (row, o)) in g.rows.iter().zip(&f.operators).enumerate() {
+        if contains(row.chip, at, 1.) {
+            return Some(Held::Select(n));
         }
-        if let (true, Some(r)) = (near(cell.ratio), o.ratio) {
-            return Some(Held::Ratio { param: r, start: raw(r), from: at });
+        for (k, (&col, &cell)) in g.columns.iter().zip(&row.cells).enumerate() {
+            if !contains(cell, at, 1.) {
+                continue;
+            }
+            return Some(if f.disabled(n, col, c.params).is_some() {
+                Held::Cell { row: n, col: k }
+            } else if col.toggles() {
+                Held::Mark { row: n, col: k }
+            } else {
+                match col.param(o) {
+                    Some(l) if col == Column::Level => Held::Level { param: l },
+                    Some(p) => Held::Ratio { param: p, start: raw(p), from: at },
+                    None => Held::Cell { row: n, col: k },
+                }
+            });
         }
-        if contains(cell.whole, at, 0.) {
+        if contains(row.whole, at, 0.) {
             return Some(Held::Select(n));
         }
     }
@@ -891,11 +1221,14 @@ pub fn drag(f: &FmShape, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f6
     match held {
         Held::Level { param } => {
             let g = geometry(f, c);
-            let Some(cell) = f.operators.iter().position(|o| o.level == Some(*param)).and_then(|n| g.cells.get(n)) else { return vec![] };
-            vec![(*param, c.params[*param].denorm(f64::from(((at.0 - cell.level.0) / width_of(cell.level)).clamp(0., 1.))))]
+            let Some(n) = f.operators.iter().position(|o| o.level == Some(*param)) else { return vec![] };
+            let Some(k) = g.columns.iter().position(|&col| col == Column::Level) else { return vec![] };
+            let Some(row) = g.rows.get(n) else { return vec![] };
+            let (bar, _) = level_parts(row.cells[k], height_of(row.whole) - 2.);
+            vec![(*param, c.params[*param].denorm(f64::from(((at.0 - bar.0) / width_of(bar).max(1.)).clamp(0., 1.))))]
         }
         Held::Algorithm { param, start, from } | Held::Ratio { param, start, from } => {
-            // A step per 24 pixels across the routing, or up a ratio; a continuous one by its range.
+            // A step per 24 pixels across the routing, or up a number; a continuous one by its range.
             let steps = if matches!(held, Held::Algorithm { .. }) { f64::from(at.0 - from.0) / 24. } else { f64::from(from.1 - at.1) / 12. };
             let p = &c.params[*param];
             let v = if p.stepped { start + steps.trunc() } else { start + steps / 100. * (p.max - p.min) };
@@ -904,22 +1237,28 @@ pub fn drag(f: &FmShape, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f6
         Held::Node(k) => {
             let g = geometry(f, c);
             let (Some(Some(line)), Some(o)) = (g.lines.get(g.selected), f.operators.get(g.selected)) else { return vec![] };
-            let (Some(p), Some(h)) = (line.envelope.points.get(*k), line.layout.handles.get(*k)) else { return vec![] };
-            let l = &line.layout;
-            let mut out = Vec::new();
-            if let Some(t) = p.time {
-                let param = &c.params[o.envelope[t]];
-                let across = ((at.0 - h.from - l.least) / (l.segment - l.least)).clamp(0., 1.);
-                out.push((o.envelope[t], param.denorm(grid::stage_normal(param, p.rate, l.longest, f64::from(across)))));
-            }
-            if let (Some(v), true) = (p.level, line.gain > 0.) {
-                let up = ((l.bottom - at.1) / l.height).clamp(0., 1.);
-                out.push((o.envelope[v], c.params[o.envelope[v]].denorm(f64::from(up))));
-            }
-            out
+            node_drag(line, o, c, *k, at, false)
         }
-        Held::Select(_) | Held::Nudge { .. } | Held::Rows(_) => vec![],
+        Held::Select(_) | Held::Nudge { .. } | Held::Rows(_) | Held::Operator(_) | Held::Cell { .. } | Held::Mark { .. } => vec![],
     }
+}
+
+/// What dragging node `k` of an operator's line to `at` sets: its stage's time across (its own stage in the line, or its
+/// slot) and its level up.
+fn node_drag(line: &Line, o: &Operator, c: &Ctx, k: usize, at: (f32, f32), slotted: bool) -> Vec<(usize, f64)> {
+    let (Some(p), Some(h)) = (line.envelope.points.get(k), line.layout.handles.get(k)) else { return vec![] };
+    let l = &line.layout;
+    let mut out = Vec::new();
+    if let Some(t) = p.time {
+        let param = &c.params[o.envelope[t]];
+        let across = ((at.0 - h.from - l.least) / (l.segment - l.least)).clamp(0., 1.);
+        out.push((o.envelope[t], param.denorm(grid::stage_normal(param, p.rate, l.longest, f64::from(across)))));
+    }
+    if let (Some(v), true) = (p.level, line.gain > 0. || slotted) {
+        let up = ((l.bottom - at.1) / l.height).clamp(0., 1.);
+        out.push((o.envelope[v], c.params[o.envelope[v]].denorm(f64::from(up))));
+    }
+    out
 }
 
 /// What letting go sets: a tap on the diagram steps the algorithm, back on its left half, on on its right.
@@ -939,4 +1278,86 @@ pub fn release(f: &FmShape, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize,
         }
         _ => vec![],
     }
+}
+
+// ---- The detail's envelope ----
+
+/// Where the stages' plot is in the detail's envelope panel: from the rows' left edge across, under the room a node's
+/// radius needs, down to the time scale.
+fn stages_plot(s: &StagesShape, c: &Ctx) -> Area {
+    let small = 13. * c.scale;
+    (s.label, grid::NODE_RADIUS + 4., c.w - grid::NODE_RADIUS, (s.graph - scale_height(small) - 4.).max(grid::NODE_RADIUS + 5.))
+}
+
+/// The detail's envelope panel: the selected operator's envelope large (its line bright over a wash with handles, the
+/// others' dim behind it, a stage to a slot of the plot), the time scale under it, and the labels of the rows of
+/// stage controls under that ("Time", "Level").
+pub fn draw_stages(s: &StagesShape, c: &Ctx) -> Drawn {
+    let f = &s.fm;
+    let mut d = Drawn::default();
+    let n_ops = f.operators.len();
+    if n_ops == 0 {
+        return d;
+    }
+    let small = 13. * c.scale;
+    let selected = c.selected.min(n_ops - 1);
+    if s.rows {
+        let first = if s.graph > 0. { s.graph + s.gap } else { 0. };
+        for (k, text) in ["Time", "Level"].into_iter().enumerate() {
+            let y = first + k as f32 * (s.row + s.gap);
+            d.labels.push(Label { x: 4. * c.spacing, y, w: (s.label - 4. * c.spacing).max(0.), h: s.row, text: text.into(), ink: Ink::Muted, bold: true, align: 0 });
+        }
+    }
+    if s.graph <= 0. {
+        return d;
+    }
+    let plot = stages_plot(s, c);
+    let lines = lines_in(f, c, plot, true);
+    let ink_of = |n: usize| if dimmed(f, c, n) { Ink::dim_operator(n) } else { Ink::operator(n) };
+    d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: inner_rect((s.label, 0., c.w, s.graph), 1.) });
+    // The slots' edges: a hairline where each stage's slot starts, so the controls under it are under its stage.
+    if let Some(line) = lines.get(selected).and_then(Option::as_ref) {
+        let mut rules = String::new();
+        for h in line.layout.handles.iter().skip(1) {
+            rules += &poly(&[(crisp(h.from), plot.1 - grid::NODE_RADIUS), (crisp(h.from), plot.3)]);
+            rules += " ";
+        }
+        if !rules.is_empty() {
+            d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: rules });
+        }
+    }
+    let others: Vec<usize> = (0..n_ops).filter(|&n| n != selected).collect();
+    for n in others.into_iter().chain([selected]) {
+        let Some(line) = &lines[n] else { continue };
+        if n == selected {
+            d.shapes.push(Shape { ink: Ink::dim_operator(n), fill: true, width: 0, commands: line.layout.fill.clone() });
+        }
+        d.shapes.push(Shape { ink: if n == selected { Ink::operator(n) } else { ink_of(n) }, fill: false, width: if n == selected { 2 } else { 1 }, commands: line.layout.line.clone() });
+    }
+    if let (Some(line), Some(o)) = (&lines[selected], f.operators.get(selected)) {
+        for (h, p) in line.layout.handles.iter().zip(&line.envelope.points) {
+            d.handles.push(Handle { at: h.at, params: [p.time, p.level].into_iter().flatten().map(|k| o.envelope[k]).collect() });
+        }
+        let nominal = lines.iter().flatten().any(|l| l.envelope.points.iter().any(|p| p.rate));
+        let scale = (plot.0, plot.3 + 4., c.w - 2., s.graph - 2.);
+        scale_marks(&mut d, &line.layout, plot.0, scale, small, nominal);
+    }
+    d
+}
+
+pub fn grab_stages(s: &StagesShape, c: &Ctx, at: (f32, f32)) -> Option<Held> {
+    let d = draw_stages(s, c);
+    d.handles.iter().enumerate().filter(|(_, h)| (h.at.0 - at.0).hypot(h.at.1 - at.1) < crate::views::REACH).min_by(|a, b| (a.1.at.0 - at.0).hypot(a.1.at.1 - at.1).total_cmp(&(b.1.at.0 - at.0).hypot(b.1.at.1 - at.1))).map(|(k, _)| Held::Node(k))
+}
+
+pub fn drag_stages(s: &StagesShape, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f64)> {
+    let Held::Node(k) = held else { return vec![] };
+    let f = &s.fm;
+    if f.operators.is_empty() || s.graph <= 0. {
+        return vec![];
+    }
+    let selected = c.selected.min(f.operators.len() - 1);
+    let lines = lines_in(f, c, stages_plot(s, c), true);
+    let Some(line) = lines[selected].as_ref() else { return vec![] };
+    node_drag(line, &f.operators[selected], c, *k, at, true)
 }

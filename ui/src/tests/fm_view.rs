@@ -67,7 +67,7 @@ fn drawn(panel: &crate::GridPanel) -> Drawn {
         .filter(|b| b.edge == 2)
         .map(|b| (b.text.parse::<usize>().expect("a numbered box"), (b.x, b.y, b.x + b.w, b.y + b.h)))
         .collect();
-    let frame = panel.shapes.iter().position(|s| s.ink == 5).expect("the graph's frame");
+    let frame = panel.shapes.iter().position(|s| s.ink == 5).unwrap_or(panel.shapes.row_count());
     let mut wires = vec![];
     let mut bus = None;
     for s in panel.shapes.iter().take(frame) {
@@ -122,11 +122,12 @@ pub(super) fn check_panel(panel: &crate::GridPanel, ops: usize, small: f32, at: 
     }
     for l in panel.labels.iter() {
         assert!(l.x >= 0. && l.y >= 0. && l.x + l.w <= w && l.y + l.h <= h, "label {:?} outside the panel {at}", l.text);
-        assert!(text_width(&l.text, l.bold, small) <= l.w, "label {:?} is cut ({} px wide) {at}", l.text, l.w);
+        assert!(text_width(&l.text, l.bold, small) <= l.w, "label {:?} is cut ({} px wide, needs {}) {at}", l.text, l.w, text_width(&l.text, l.bold, small));
     }
     // Every operator has its number at the end of its line in the graph.
     let tags = panel.labels.iter().filter(|l| is_operator_ink(l.ink)).count();
-    assert!(tags >= ops, "a numbered tag at each line end {at}: {tags}");
+    // (A theme with big type at a small width has no room for the graph: it is left out, and its tags with it.)
+    assert!(tags >= ops || !panel.shapes.iter().any(|s| s.ink == 5), "a numbered tag at each line end {at}: {tags}");
 }
 
 #[test]

@@ -102,6 +102,12 @@ export global Theme {
     // Sizes with no theme property: touch targets (RFC 0019).
     out property <length> bar-height: 48px;
     out property <length> touch: 44px;
+    // A compact control of a master's detail (src/grid.rs `compact_height`, which a test holds equal): the touch target
+    // high, or what its name line, a control 0.45 of a touch target high and the tight paddings need if that is more, and
+    // 1.9 touch targets wide at least (eight across the keyboard's screen with both rails). Never lower than the touch target.
+    out property <length> compact-name: 1.15 * small;
+    out property <length> compact-height: max(touch, 2 * pad-tight + compact-name + 0.45 * touch);
+    out property <length> compact-width: 1.9 * touch;
     // Paddings and gaps, times the theme's spacing: the dense gap and margin (Theme.h), then the
     // insides: text from an edge, a card's padding, a control's inset, a tight inset.
     out property <length> gap: 4px * spacing;
@@ -161,6 +167,7 @@ export global Theme {
     out property <color> knob-disc: sliders == SliderStyle.filled ? raised : #ffffff;
     out property <color> knob-pointer: sliders == SliderStyle.filled ? text : background;
     out property <color> track-line: border.with-alpha(0.55); // a rotary's track, a line slider's
+    out property <color> mark-off: border.with-alpha(0.5); // a mute or solo mark that is off (Mark)
     out property <color> slider-track: sliders == SliderStyle.filled ? border : track-line;
     // drawEdge: nothing, a hairline (the border at 60%) or the border; a cursor is the accent, 2 px.
     out property <length> edge-width: edges == EdgeStyle.none ? 0px : hair;
@@ -311,7 +318,7 @@ export component Mark inherits Rectangle {
         width: root.side;
         height: root.side;
         border-radius: Theme.mark-radius(root.side);
-        background: root.on ? root.tint : Theme.border.with-alpha(0.5);
+        background: root.on ? root.tint : Theme.mark-off;
         Text {
             text: root.letter;
             color: root.on ? Theme.background : Theme.muted;

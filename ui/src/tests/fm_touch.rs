@@ -20,9 +20,15 @@ fn box_of(panel: &crate::GridPanel, n: usize) -> (f32, f32) {
     (b.x + b.w / 2., b.y + b.h / 2.)
 }
 
-/// The strip's level bars (their tracks), by operator.
+/// The table's level bars (their tracks), by operator.
 fn tracks(panel: &crate::GridPanel) -> Vec<crate::GridBox> {
-    panel.boxes.iter().filter(|b| b.fill == 4 && b.edge == 5 && b.text.is_empty()).collect()
+    panel.boxes.iter().filter(|b| b.fill == 6 && b.edge == 5 && b.text.is_empty()).collect()
+}
+
+/// A point of the diagram's area that no box or wire is on: the bottom left corner, under the head that names the algorithm.
+fn diagram_corner(panel: &crate::GridPanel) -> (f32, f32) {
+    let head = panel.labels.iter().find(|l| l.text.starts_with("Algorithm")).expect("the algorithm's head");
+    (head.x + 1., panel.h - 8.)
 }
 
 fn param_ids(sent: &[(&str, serde_json::Value)]) -> Vec<u64> {
@@ -72,8 +78,9 @@ fn a_tap_on_a_box_a_cell_or_a_line_chooses_the_operator_and_sets_nothing() {
     assert_eq!(nodes(&panels(&s.ui)[0]), first, "operator 1 again");
     // A tap away from everything but the routing steps the algorithm (the old behavior, kept): left half, back.
     sent(&mut p.out);
-    assert!(p.view_down(0, 14., 36.));
-    p.view_up(0, 14., 36.);
+    let corner = diagram_corner(&panels(&s.ui)[0]);
+    assert!(p.view_down(0, corner.0, corner.1));
+    p.view_up(0, corner.0, corner.1);
     assert_eq!(set_ids(&sent(&mut p.out)), [1], "the algorithm");
 }
 
@@ -133,15 +140,15 @@ fn the_cursor_on_the_overview_chooses_an_operator_and_rings_its_line() {
     // The first move is the first tile; one back is the overview on operator 1; two on is operator 3.
     p.act(Action::Move { pane: None, by: 1 });
     p.act(Action::Move { pane: None, by: -1 });
-    p.act(Action::Move { pane: None, by: 2 });
+    p.act(Action::Move { pane: Some(1), by: 2 });
     s.frame();
-    assert_eq!(rings(&s), 1, "the line the cursor is on");
+    assert_eq!(rings(&s), 1, "the cell the cursor is on");
     assert_ne!(nodes(&panels(&s.ui)[0]), first, "operator 3 is the one chosen");
     let names: Vec<String> = s.ui.global::<crate::GridState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
     assert!(names.contains(&"Ratio 3".to_string()) && !names.contains(&"Ratio 1".to_string()), "its tiles: {names:?}");
     let out = sent(&mut p.out);
     assert_eq!(&param_ids(&out)[..2], [13, 23], "the knobs play it");
-    p.act(Action::Move { pane: None, by: -2 });
+    p.act(Action::Move { pane: Some(1), by: -2 });
     assert_eq!(nodes(&panels(&s.ui)[0]), first);
 }
 
@@ -166,7 +173,7 @@ fn a_level_bar_and_a_ratio_are_edited_in_the_strip_by_touch_as_before() {
     let out = sent(&mut p.out);
     assert!(out.contains(&set(12, 99.)) && out.contains(&gesture(12, false)), "dragged past the end: {out:?}");
     // A ratio up two steps (25 px).
-    let ratio = panel.boxes.iter().filter(|b| b.fill == 4 && b.text.starts_with('x')).nth(3).expect("operator 4's ratio").clone();
+    let ratio = panel.boxes.iter().filter(|b| (b.fill == 4 || b.fill == 6) && b.text.starts_with('x')).nth(3).expect("operator 4's ratio").clone();
     assert!(p.view_down(0, ratio.x + 2., ratio.y + ratio.h / 2.));
     p.view_move(0, ratio.x + 2., ratio.y + ratio.h / 2. - 25.);
     p.view_up(0, ratio.x + 2., ratio.y + ratio.h / 2. - 25.);
@@ -206,12 +213,13 @@ fn dragging_across_the_diagram_steps_the_algorithm() {
     theme::apply(&s.ui, &all_themes()[0]);
     let mut p = open_with(&mut s, fm_plugin(), &fm_values(1.), &fm_text);
     sent(&mut p.out);
-    assert!(p.view_down(0, 14., 36.));
-    p.view_move(0, 44., 36.);
-    p.view_move(0, 74., 36.);
-    p.view_move(0, -16., 36.);
-    p.view_move(0, 1014., 36.);
-    p.view_up(0, 1014., 36.);
+    let (x, y) = diagram_corner(&panels(&s.ui)[0]);
+    assert!(p.view_down(0, x, y));
+    p.view_move(0, x + 30., y);
+    p.view_move(0, x + 60., y);
+    p.view_move(0, x - 30., y);
+    p.view_move(0, x + 1000., y);
+    p.view_up(0, x + 1000., y);
     let out = sent(&mut p.out);
     let sets: Vec<serde_json::Value> = out.iter().filter(|o| o.0 == "params.set").map(|o| o.1.clone()).collect();
     assert_eq!(sets, [set(1, 2.).1, set(1, 3.).1, set(1, 0.).1, set(1, 3.).1], "1 + 1, 1 + 2, 1 - 1, and the end");
@@ -245,19 +253,21 @@ fn an_operator_at_level_zero_is_dimmed_and_missing_data_leaves_the_rest_whole() 
     let mut list = fm_n(&[shared()]);
     let all: Vec<serde_json::Value> = list["parameters"].as_array().unwrap().iter().filter(|p| !matches!(p["field"].as_str(), Some("attack" | "decay" | "sustain" | "release") | Some("rate1" | "rate2" | "rate3" | "rate4" | "level0" | "level1" | "level2" | "level3" | "level4"))).cloned().collect();
     list["parameters"] = json!(all);
+    // The diagram's area runs from the head that names the algorithm to the panel's right edge: wider without a graph.
+    let spread = |panel: &crate::GridPanel| panel.w - panel.labels.iter().find(|l| l.text.starts_with("Algorithm")).expect("the head").x;
     let wide = {
         let mut s = Screen::sized(1280, 720);
         theme::apply(&s.ui, &all_themes()[0]);
         let _r = open_with(&mut s, list, &fm_n_values(0., false), &fm_n_text);
         let panel = panels(&s.ui)[0].clone();
         assert!(!panel.shapes.iter().any(|x| x.ink == 5), "no graph without an envelope");
-        panel.boxes.iter().filter(|b| b.edge == 2).map(|b| b.x + b.w).fold(0., f32::max)
+        spread(&panel)
     };
     let narrow = {
         let mut s = Screen::sized(1280, 720);
         theme::apply(&s.ui, &all_themes()[0]);
         let _r = open_with(&mut s, fm_n(&[shared()]), &fm_n_values(0., false), &fm_n_text);
-        panels(&s.ui)[0].boxes.iter().filter(|b| b.edge == 2).map(|b| b.x + b.w).fold(0., f32::max)
+        spread(&panels(&s.ui)[0])
     };
     assert!(wide > narrow, "the diagram is wider ({wide}) than beside a graph ({narrow})");
 }

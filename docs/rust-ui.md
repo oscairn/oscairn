@@ -561,9 +561,11 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   operators, LFO, filter; the node or handle a tile sets is marked under the cursor) and dragged by touch
   where the reference drags them; a plugin of more than 24 parameters has the search field above the page
   list (the on-screen keyboard for its text; back from the first tile reaches it). An FM operator view is the
-  top pane of a master and detail (an overview of every operator over the selected one's tiles; a page whose
-  tabs were the operators' indexes is folded into it, no tab per operator: ui/GRID.md "Master and detail",
-  ui/TABS.md "Tabs that are indexes"). The grid framework and the views are in ui/GRID.md.
+  top pane of a master and detail (an overview of every operator, with a table of them (mute, solo, level, coarse,
+  fine, ratio or frequency, detune: each cell edited in place), over the selected one's envelope as named stages
+  in a Time row and a Level row and its other parameters as compact controls; a page whose tabs were the
+  operators' indexes is folded into it, no tab per operator: ui/GRID.md "Master and detail", "The operator table",
+  "The detail", ui/TABS.md "Tabs that are indexes"). The grid framework and the views are in ui/GRID.md.
 - **Sound chooser** (`sounds.rs`): `library.query` of kind `sound` (a search typed on the keyboard
   narrows it), and for the one pressed `parts.loadSound`, `parts.fromSound`, `audition.start` and
   `audition.stop`, and `parts.saveSound` (over its Sound, or new with a name typed). The engine's refusals

@@ -40,6 +40,9 @@ impl Ink {
     pub const Focus: Ink = Ink(12);
     /// Nothing: a box with no fill.
     pub const Clear: Ink = Ink(13);
+    /// A mute's color when on, and a mark that is off (mute and solo, as Play's and the mixer's are drawn).
+    pub const Danger: Ink = Ink(14);
+    pub const MarkOff: Ink = Ink(15);
 
     /// The color of operator `n` (0 to 7: src/palette.rs), the text that reads on it, and the color dimmed.
     pub fn operator(n: usize) -> Ink {
@@ -94,6 +97,8 @@ pub struct BoxDraw {
     pub text: String,
     pub text_ink: Ink,
     pub bold: bool,
+    /// Drawn with a mark's corners (the theme's mute and solo mark: square or round).
+    pub mark: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -117,6 +122,23 @@ pub enum View {
     Fm(FmShape),
     /// The heading of a master and detail page's detail pane (ui/GRID.md "Master and detail").
     Detail(DetailHead),
+    /// The selected operator's envelope in the detail, larger, over the rows of its stages' controls (the panel
+    /// holds the graph and the rows' labels; the controls are tiles over it).
+    Stages(StagesShape),
+}
+
+/// The detail's envelope panel: the FM view whose selected operator it shows, and the rows of controls under the
+/// graph (their height, `grid::compact_height`, and the gap between them), where the graph is `graph` high (0: none).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StagesShape {
+    pub fm: FmShape,
+    pub graph: f32,
+    pub row: f32,
+    pub gap: f32,
+    /// The left edge of the rows' controls and of the graph's plot: the labels "Time" and "Level" are before it.
+    pub label: f32,
+    /// Whether the Time row and the Level row are there (the envelope has stages).
+    pub rows: bool,
 }
 
 /// The detail pane's heading: a bar in the selected one's color with its name; when the detail has more rows of
@@ -126,6 +148,9 @@ pub struct DetailHead {
     /// The color (0 to 7) of the one selected, as the overview draws it.
     pub color: usize,
     pub title: String,
+    /// How many there are to select, which of them (0 to count - 1) is: the heading's selector steps the choice.
+    pub count: usize,
+    pub index: usize,
     /// Rows of tiles in all, the first one shown, and how many are.
     pub rows: usize,
     pub row: usize,
@@ -151,11 +176,12 @@ pub struct Ctx<'a> {
     pub spacing: f32,
     /// The FM view's selected operator (0 to 7): the one the cursor is on, else the last touched.
     pub selected: usize,
-    /// The operator whose line of the overview's list the cursor is on, if it is on one (the cursor on an overview
-    /// stop: `focus` is then the view's own parameter it is on, if it is on one).
-    pub over: Option<usize>,
-    /// The dial has the parameter `focus` is (a press, then the dial): its ring is the accent's.
+    /// The table cell the cursor is on, as (operator 0 to 7, column among `FmShape::columns`): `over` is then its row.
+    pub cell: Option<(usize, usize)>,
+    /// The dial has the parameter `focus` is, or the cell `cell` is on (a press, then the dial): its ring is the accent's.
     pub editing: bool,
+    /// Which operators are soloed by the host (a solo the plugin has no field for: `fm::SoloFrom::Others`).
+    pub soloed: &'a [bool],
     /// Where each operator's most recent voice is on its envelope, when the plugin says (`None`: no dot).
     pub positions: &'a [Option<Along>],
 }
@@ -178,6 +204,12 @@ pub enum Held {
     Nudge { param: usize, start: f64, from: (f32, f32), mid: f32 },
     /// The detail's rows paged by this many (a tap on its heading's arrows).
     Rows(i32),
+    /// The selected operator stepped by this many (a tap on the heading's selector).
+    Operator(i32),
+    /// A tap on a table cell of operator `row` (0 to 7) in the column `col` of the table's: selects the operator.
+    Cell { row: usize, col: usize },
+    /// The same on a switched cell (mute, solo, mode): letting go on it switches it.
+    Mark { row: usize, col: usize },
 }
 
 fn nearest(handles: &[Handle], at: (f32, f32)) -> Option<usize> {
@@ -201,16 +233,28 @@ pub fn draw(view: &View, c: &Ctx) -> Drawn {
         View::Map(m, index) => draw_map(m, *index, c),
         View::Fm(f) => crate::fm::draw(f, c),
         View::Detail(h) => draw_detail(h, c),
+        View::Stages(s) => crate::fm::draw_stages(s, c),
     }
 }
 
 /// The detail heading's height (a heading of the grid, a little less: it is a bar).
 pub const DETAIL_HEAD: f32 = 26.;
 
-/// The heading's arrows: the (up, down) boxes at its right, each a touch target as high as the heading.
+/// A heading's arrow is a touch target wide (the heading is not as high as one).
+fn arrow_width(c: &Ctx) -> f32 {
+    c.h.max(grid::TOUCH)
+}
+
+/// The heading's row arrows: the (up, down) boxes at its right, each a touch target wide.
 fn detail_arrows(c: &Ctx) -> (Area, Area) {
-    let side = c.h;
+    let side = arrow_width(c);
     ((c.w - 2. * side, 0., c.w - side, c.h), (c.w - side, 0., c.w, c.h))
+}
+
+/// The heading's selector: the (previous, next) boxes at its left.
+fn detail_selector(c: &Ctx) -> (Area, Area) {
+    let side = arrow_width(c);
+    ((0., 0., side, c.h), (side, 0., 2. * side, c.h))
 }
 
 fn draw_detail(h: &DetailHead, c: &Ctx) -> Drawn {
@@ -220,22 +264,36 @@ fn draw_detail(h: &DetailHead, c: &Ctx) -> Drawn {
     d.shapes.push(Shape { ink: fill, fill: true, width: 0, commands: rect_path(1., 1., c.w - 2., c.h - 2.) });
     let small = 13. * c.scale;
     let pad = 8. * c.spacing;
+    let mid = |a: Area| ((a.0 + a.2) / 2., (a.1 + a.3) / 2.);
+    let r = (c.h * 0.22).max(3.);
+    // The selector: previous and next, which the operator's number between them says (an arrow that cannot go
+    // further is a hairline outline).
+    let selector = h.count > 1;
+    let left = if selector { 2. * arrow_width(c) } else { 0. };
+    if selector {
+        let (prev, next) = detail_selector(c);
+        for (a, dir, on) in [(prev, -1., h.index > 0), (next, 1., h.index + 1 < h.count)] {
+            let (x, y) = mid(a);
+            let tip = (x + dir * r * 0.8, y);
+            let base = x - dir * r * 0.8;
+            let tri = poly(&[tip, (base, y - r), (base, y + r)]) + " Z";
+            d.shapes.push(Shape { ink: text, fill: on, width: 1, commands: tri });
+        }
+    }
     let paged = h.rows > h.per;
-    let right = if paged { c.w - 2. * c.h - pad } else { c.w - pad };
-    d.labels.push(Label { x: pad, y: 1., w: (right - pad).max(0.), h: c.h - 2., text: h.title.clone(), ink: text, bold: true, align: 0 });
+    let right = if paged { c.w - 2. * arrow_width(c) - pad } else { c.w - pad };
+    d.labels.push(Label { x: left + pad, y: 1., w: (right - left - pad).max(0.), h: c.h - 2., text: h.title.clone(), ink: text, bold: true, align: 0 });
     if paged {
         let shown = if h.per == 1 { format!("Row {} of {}", h.row + 1, h.rows) } else { format!("Rows {} to {} of {}", h.row + 1, h.row + h.per, h.rows) };
         let room = 0.6 * small * 1.06 * shown.chars().count() as f32;
-        d.labels.push(Label { x: (right - room).max(c.w * 0.3), y: 1., w: room.min(right - c.w * 0.3), h: c.h - 2., text: shown, ink: text, bold: false, align: 2 });
+        let from = (right - room).max(left + c.w * 0.3);
+        d.labels.push(Label { x: from, y: 1., w: (right - from).max(0.), h: c.h - 2., text: shown, ink: text, bold: false, align: 2 });
         let (up, down) = detail_arrows(c);
-        let mid = |a: Area| ((a.0 + a.2) / 2., (a.1 + a.3) / 2.);
-        let r = (c.h * 0.22).max(3.);
         for (a, dir, on) in [(up, -1., h.row > 0), (down, 1., h.row + h.per < h.rows)] {
             let (x, y) = mid(a);
             let tip = (x, y + dir * r * 0.8);
             let base = y - dir * r * 0.8;
             let tri = poly(&[tip, (x - r, base), (x + r, base)]) + " Z";
-            // An arrow that cannot go further is a hairline outline.
             d.shapes.push(Shape { ink: text, fill: on, width: 1, commands: tri });
         }
     }
@@ -248,18 +306,28 @@ pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
     match view {
         View::Envelope(_) | View::Map(..) => nearest(&draw(view, c).handles, at).map(Held::Node),
         View::Fm(f) => crate::fm::grab(f, c, at),
-        View::Detail(h) if h.rows > h.per => {
-            let (up, down) = detail_arrows(c);
+        View::Detail(h) => {
             let inside = |a: Area| at.0 >= a.0 && at.0 <= a.2 && at.1 >= a.1 && at.1 <= a.3;
-            if inside(up) {
-                Some(Held::Rows(-1))
-            } else if inside(down) {
-                Some(Held::Rows(1))
-            } else {
-                None
+            if h.rows > h.per {
+                let (up, down) = detail_arrows(c);
+                if inside(up) {
+                    return Some(Held::Rows(-1));
+                } else if inside(down) {
+                    return Some(Held::Rows(1));
+                }
             }
+            if h.count > 1 {
+                let (prev, next) = detail_selector(c);
+                if inside(prev) {
+                    return Some(Held::Operator(-1));
+                } else if inside(next) {
+                    return Some(Held::Operator(1));
+                }
+            }
+            None
         }
-        View::Detail(_) | View::Filter(_) | View::Lfo(_) => None,
+        View::Stages(s) => crate::fm::grab_stages(s, c, at),
+        View::Filter(_) | View::Lfo(_) => None,
     }
 }
 
@@ -267,7 +335,7 @@ pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
 pub fn touched(view: &View, c: &Ctx, held: &Held) -> Vec<usize> {
     match held {
         Held::Node(k) => draw(view, c).handles.get(*k).map(|h| h.params.clone()).unwrap_or_default(),
-        Held::Select(_) | Held::Rows(_) => vec![],
+        Held::Select(_) | Held::Rows(_) | Held::Operator(_) | Held::Cell { .. } | Held::Mark { .. } => vec![],
         Held::Algorithm { param, .. } | Held::Level { param } | Held::Ratio { param, .. } | Held::Nudge { param, .. } => vec![*param],
     }
 }
@@ -278,6 +346,7 @@ pub fn drag(view: &View, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f6
         (View::Envelope(e), Held::Node(k)) => envelope_drag(e, c, *k, at),
         (View::Map(m, index), Held::Node(k)) => map_drag(m, *index, c, *k, at),
         (View::Fm(f), held) => crate::fm::drag(f, c, held, at),
+        (View::Stages(s), held) => crate::fm::drag_stages(s, c, held, at),
         _ => vec![],
     }
 }
@@ -297,12 +366,17 @@ pub fn release(view: &View, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize,
 
 /// The operator an FM view's held handle belongs to (0 to 7), so a touch on it selects that operator.
 pub fn operator_held(view: &View, c: &Ctx, held: &Held) -> Option<usize> {
-    let View::Fm(f) = view else { return None };
+    let f = match view {
+        View::Fm(f) => f,
+        View::Stages(s) => &s.fm,
+        _ => return None,
+    };
     match held {
         Held::Select(n) => Some(*n),
+        Held::Cell { row, .. } | Held::Mark { row, .. } => Some(*row),
         Held::Level { param } | Held::Ratio { param, .. } => f.operator_of(*param),
         Held::Node(k) => draw(view, c).handles.get(*k).and_then(|h| h.params.first()).and_then(|&p| f.operator_of(p)),
-        Held::Algorithm { .. } | Held::Nudge { .. } | Held::Rows(_) => None,
+        Held::Algorithm { .. } | Held::Nudge { .. } | Held::Rows(_) | Held::Operator(_) => None,
     }
 }
 

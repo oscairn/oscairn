@@ -244,3 +244,16 @@ Branch `rust-app-play` (from `rust-app` 85ce5fd5; baseline 88 tests, clippy clea
   owns: what Play needs from the grid is a way to lay a row of knob tiles out in a given area and to publish the row as
   `controllers.view`'s `screen` page), A14 and J3 (Edit needs the Parts list, B, which nothing builds yet: the footer button
   that hands over to the JUCE app stays until it does).
+
+Branch `rust-app-grid` from `rust-app` (85ce5fd5): parameter pages, section F (ui/PERFORMANCE-APP.md F5 and F7 ticked).
+- The reference selects no vertical slider or drawbar from plugin data (ParameterGrid.cpp `Control` has horizontal slider
+  and knob only; `enum oscairn_widget` has neither; RFC 0042: no drawbar view), so that item has nothing to select by: they
+  stay widgets for Play's slider row (ui/GRID.md).
+- `src/views.rs` and the `ViewPanel` of slint/grid.slint draw every graph view from one set of points (paths unscaled,
+  `fit: preserve`, boxes, labels, handles): envelope nodes dragged by touch (e05bff23), the LFO (02ffdb0c), the filter
+  (967cd464), the key and velocity map (2fdad232), the FM operator view (ec760a14), the search (9ee154cb), and the DX7 and
+  FM-X envelope names. Each view's lines are measured in the rendered pixels (tests/views.rs, tests/shots.rs) at two window
+  sizes and two scales: worst offset of the drawn line from its path 0.16 to 0.20 px (limit 0.6); a path a pixel off is
+  seen as that far off, so the measure can fail. Tile density (GRID.md): no change was needed.
+- Tests: `sh ui/target/test.sh test --offline` 111 passed (baseline 88), `cargo clippy --offline --all-targets` clean.
+  Pictures: ui/target/screens/grid-{lfo,filter,keymap,fm,search}*.png, ui/target/theme-shots/grid-*-*.png. Not run on a unit.

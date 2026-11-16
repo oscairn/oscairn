@@ -40,7 +40,8 @@ the parameter pages on it are `ui/src/params.rs`.
   (30 with its gap); groups in first-appearance order.
 - A range's high parameter has no tile (its low end's tile draws both).
 - Order: priority (numbered first, then the plugin's order), stable sort.
-- Columns: `clamp(width / 210, 2, 6)`; gap 6 (sectionGap); tile width `(width - gap*(cols-1))/cols`.
+- Columns: `clamp(width / 210, 2, 6)`; gap 6 (sectionGap); tile width `(width - gap*(cols-1))/cols`
+  (the numbers at the devices' screens, Rust and reference: "Tile density" below).
 - Tile height: 84 in touch mode (64 with a mouse); a page with any knob gets +36 (+30).
 - Rich views first, across the full width, each a panel, in this order: an FM operator view where its
   algorithm parameter is (300 high touch), an envelope per (view, index) (180), a key map per
@@ -94,7 +95,7 @@ key map, FM operators.
 
 | View | Reference | Drag | Rust | Status |
 |---|---|---|---|---|
-| Envelope | `Envelope` L478-570 | a node: time across, level up | views.rs `draw_envelope`, grid.rs `envelope_layout` | done (names: ADSR only; DX7 and FM-X names not ported) |
+| Envelope | `Envelope` L478-570 | a node: time across, level up | views.rs `draw_envelope`, grid.rs `envelope_layout`, `envelope_of_names` (ADSR, DX7 and FM-X names) | done |
 | Filter response | `Filter` L359-415 | none (a preview) | views.rs `draw_filter`, `filter_of`, `filter_named`, `filter_db`; pixel test tests/views.rs | done |
 | LFO waveform | `Lfo` L419-473 | none (a preview) | views.rs `draw_lfo`, `lfo_of`, `wave_named`; pixel test tests/views.rs | done |
 | Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | views.rs `draw_map`, `map_of`, `map_drag`; tests/views.rs | done |
@@ -149,10 +150,38 @@ data path selects them yet.
 
 Not built yet (in this order): Play's knob row and banks on grid tiles (A9-A11: PlayView.cpp,
 `controllers.view`, `assignments.get/set`), Play's mixer strips' faders as the upright slider
-(H), the key map, FM operator, filter and LFO views, dragging envelope points, the search (F5),
-DX7/FM-X envelope names. Also: the page list column (180 px) stays on narrow windows; at 700
+(H). The key map, FM operator, filter and LFO views, dragging envelope points, the search (F5) and
+the DX7/FM-X envelope names are built (branch rust-app-grid; the views table above). Also: the page
+list column (180 px) stays on narrow windows; at 700
 logical px the grid has 2 columns. Nothing failed to fit at 800x480 (2 columns, 3 rows of tiles
 in view, scrolling for the rest); the scene tile number overlap at 1.55 on Play is not fixed.
+
+## Tile density at the devices' screens (checked 2026-11-15, tests/grid.rs `tile_density_...`)
+
+The rules are the reference's (build in touch mode): columns `clamp(width / 210, 2, 6)`, a tile 84 high
+(120 with a knob), gap 6, a heading 30, panels 140 to 300 (the views table). Nothing in the Rust grid
+differed, so nothing was changed: the same logical pixels, since the shell and the JUCE app both scale
+the screen by the profile's `Screen::scale()` (FANTOM-07 1280x720, diagonal 140: 1.55, so 826 x 465
+logical). What differs is the room. In the JUCE app the grid is the Part page's panel (PartsView.cpp
+750-788: 16 in from the sides, under the header 56, the chain strip 96 at least, the action row 44, gaps
+12 + 12 + 8, above a 28 footer, under the 48 high top bar; its page list 200 wide, 8 apart, its scroll
+bar 8: derived by reading, not measured on a running app); the Rust grid is a screen of its own with
+Back and the title (48), the page list 180, the margins 6:
+
+| FANTOM-07 (1.55) | Rust area | columns | tiles in view | JUCE panel (derived) | columns | tiles in view |
+|---|---|---|---|---|---|---|
+| knobs, two pages | 628 x 357 | 2 (311 x 120) | 4 | 578 x 129 | 2 | 2 |
+| knobs, one page | 814 x 357 | 3 (267 x 120) | 6 | 786 x 129 | 3 | 3 |
+| sliders, one page | 814 x 357 | 3 (267 x 84) | 12 | 786 x 129 | 3 | 3 |
+
+Before and after are the same (4, 6 and 12; no change was needed). "Six tiles a page, two columns, small
+knobs in large tiles" is the reference's too, and its knobs are the smaller: a 64 square (Theme.cpp
+drawRotarySlider: the arc 56 across at its middle, the disc 39), ours a 76 box (the arc 61, the disc 47), in
+a tile as wide as the column; at 628 the grid is 2 px short of a third column
+(630), as the reference is at its width. The test pins the Rust numbers at the FANTOM-07, MODX-M and
+Kick screens and that they are never fewer than the reference's room gives. One px differs inside a
+tile: the control starts 29 below the top (8 + the small type's 13 + 8) where the JUCE tile has 30
+(8 + a fixed 18 + 4); the small type scales with the theme's font scale, the 18 does not.
 
 ## Universal UI debts (owner: one UI for the keyboard, resizable desktop windows, later a DAW plugin)
 

@@ -356,7 +356,11 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   `params.changed` while shown; the page shown is published with `controllers.view` `screen` for the
   device's screen knobs and withdrawn on leaving. Without touch: dial in reading order (past the end
   the page turns), left knob columns, right knob rows, press selects, dial changes, Cancel backs out.
-  Not yet: key maps, FM operators, LFO and filter views, dragging the envelope, the search.
+  The views of the reference are drawn above the tiles (`views.rs`: envelope, key and velocity map, FM
+  operators, LFO, filter; the node or handle a tile sets is marked under the cursor) and dragged by touch
+  where the reference drags them; a plugin of more than 24 parameters has the search field above the page
+  list (the on-screen keyboard for its text; back from the first tile reaches it). The grid framework
+  and the views are in ui/GRID.md.
 - **Sound chooser** (`sounds.rs`): `library.query` of kind `sound` (a search typed on the keyboard
   narrows it), and for the one pressed `parts.loadSound`, `parts.fromSound`, `audition.start` and
   `audition.stop`, and `parts.saveSound` (over its Sound, or new with a name typed). The engine's refusals

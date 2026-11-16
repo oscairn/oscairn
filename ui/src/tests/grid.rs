@@ -453,3 +453,54 @@ fn a_larger_spacing_grows_the_gaps_between_tiles() {
     assert!(seen[1].1 < seen[0].1 && seen[0].1 < seen[2].1, "rows are farther apart as the spacing grows: {seen:?}");
     assert_eq!(seen[3], seen[0], "and back");
 }
+
+// Tile density at the devices' screens against the reference's own rules (ParameterGrid::build in touch
+// mode: columns width / 210 from 2 to 6, a tile 84 high or 120 with a knob, a gap of 6), and against the
+// reference's room: in the JUCE app the grid is the Part page's panel, 16 in from each side, under the
+// header (56), the chain strip (96 at least), a plugin's action row (44) and gaps (12 + 12 + 8) and above
+// a 28 footer, under the 48 high top bar; its page list is 200 wide and 8 apart, its scroll bar 8. The Rust
+// grid is a screen of its own, so it has more room (PartsView.cpp:750-788 for the sums).
+#[test]
+fn tile_density_follows_the_references_rules_and_has_more_room() {
+    fit_to_window();
+    // The devices' screens (hosts/standalone/profiles) at the scale Screen::scale gives them.
+    for (name, w, h, scale) in [("FANTOM-07", 1280usize, 720usize, 1.55f32), ("MODX-M", 800, 480, 1.), ("Kick", 1024, 600, 1.)] {
+        for (what, widget, pages, knobs) in [("knobs, two pages", "knob", true, true), ("knobs, one page", "knob", false, true), ("sliders, one page", "slider", false, false)] {
+            let mut list = Vec::new();
+            for i in 0..16 {
+                let mut p = param(i, &format!("P{i}"), if pages && i >= 8 { "B" } else { "A" }, 1., false, widget, 0);
+                p["group"] = json!(0);
+                list.push(p);
+            }
+            let mut s = Screen::sized(w, h);
+            s.set_scale(scale);
+            s.frame();
+            let _p = open(&mut s, json!({ "parameters": list }), &[]);
+            s.frame();
+            let g = s.ui.global::<crate::GridState>();
+            let tiles: Vec<crate::GridTile> = g.get_tiles().iter().collect();
+            let (vw, vh) = (g.get_view_width(), g.get_view_height());
+            let columns = tiles.iter().filter(|t| t.y == 0.).count();
+            let in_view = tiles.iter().filter(|t| t.y + t.h <= vh).count();
+            assert_eq!(columns, ((vw / 210.) as usize).clamp(2, 6), "{name} {what}: the reference's columns for the width");
+            assert_eq!(tiles[0].h, if knobs { 120. } else { 84. }, "{name} {what}: the reference's tile height");
+            assert!((tiles[1].x - (tiles[0].x + tiles[0].w) - 6.).abs() < 0.01, "{name} {what}: the gap");
+            // The reference's room at this screen, in the JUCE app's logical pixels.
+            let (jw, jh) = (w as f32 / scale - 32. - if pages { 208. } else { 0. } - 8., h as f32 / scale - 48. - 32. - (56. + 12. + 96. + 12.) - 28. - (44. + 8.));
+            let reference_columns = ((jw / 210.) as usize).clamp(2, 6);
+            let reference_rows = ((jh + 6.) / ((if knobs { 120. } else { 84. }) + 6.)).floor().max(0.) as usize;
+            let reference_in_view = reference_columns * reference_rows;
+            println!("{name} {what}: Rust {vw:.0}x{vh:.0} px, {columns} columns, {in_view} tiles in view; the reference {jw:.0}x{jh:.0}, {reference_columns} columns, {reference_in_view} tiles in view");
+            assert!(columns >= reference_columns && in_view >= reference_in_view, "{name} {what}: not fewer than the reference");
+            if name == "FANTOM-07" {
+                let numbers = (vw.round() as i32, vh.round() as i32, columns, in_view, reference_columns, reference_in_view);
+                let expected = match what {
+                    "knobs, two pages" => (628, 357, 2, 4, 2, 2),
+                    "knobs, one page" => (814, 357, 3, 6, 3, 3),
+                    _ => (814, 357, 3, 12, 3, 3),
+                };
+                assert_eq!(numbers, expected, "FANTOM-07 {what}");
+            }
+        }
+    }
+}

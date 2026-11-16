@@ -523,12 +523,61 @@ pub fn envelope_of_fields(fields: &[&str]) -> Envelope {
     e
 }
 
-/// An ADSR recognized by its parameters' names within one module (Attack, Decay, Sustain, Release,
-/// optionally Delay and Hold). shortcut: the JUCE app also recognizes DX7 and FM-X names; port them
-/// when a plugin without views needs them.
+/// An envelope recognized by its parameters' names within one module (ParameterGrid.cpp `envelopeOf`, any
+/// case): a DX7's four rates and four levels (it starts from level 4 and holds at level 3); an FM-X's time and
+/// level for each stage; or an ADSR (Attack and Release with a Decay or a Sustain, optionally Delay and Hold).
 pub fn envelope_of_names(names: &[&str]) -> Envelope {
     let find = |n: &str| names.iter().position(|x| x.eq_ignore_ascii_case(n));
-    named(find("attack"), find("decay"), find("sustain"), find("release"), find("delay"), find("hold"))
+    let either = |options: &[&str]| options.iter().find_map(|o| find(o));
+    let mut e = Envelope::default();
+    let (r, l) = ([find("Rate 1"), find("Rate 2"), find("Rate 3"), find("Rate 4")], [find("Level 1"), find("Level 2"), find("Level 3"), find("Level 4")]);
+    if r.iter().chain(&l).all(Option::is_some) {
+        e.start = l[3];
+        e.points = (0..4).map(|k| Point { time: r[k], level: l[k], fixed: 0., sustain: k == 2, rate: true }).collect();
+        return e;
+    }
+    if let (Some(attack_time), Some(release_time)) = (find("Attack Time"), find("Release Time")) {
+        e.start = either(&["Release (Hold) Level", "Hold Level", "Initial Level"]);
+        if let Some(hold) = find("Hold Time") {
+            e.points.push(Point { time: Some(hold), level: e.start, ..Default::default() });
+        }
+        e.points.push(Point { time: Some(attack_time), level: find("Attack Level"), fixed: 1., ..Default::default() });
+        for (t, lv) in [("Decay 1 Time", "Decay 1 Level"), ("Decay 2 Time", "Decay 2 Level"), ("Decay Time", "Decay Level")] {
+            if let Some(time) = find(t) {
+                let fixed = e.points.last().map_or(0., |p| p.fixed);
+                e.points.push(Point { time: Some(time), level: find(lv), fixed, ..Default::default() });
+            }
+        }
+        if let Some(p) = e.points.last_mut() {
+            p.sustain = true;
+        }
+        let level = either(&["Release Level", "Release (Hold) Level"]).or(e.start);
+        e.points.push(Point { time: Some(release_time), level, ..Default::default() });
+        return e;
+    }
+    let (attack, decay, sustain, release) = (find("Attack"), find("Decay"), find("Sustain"), find("Release"));
+    if attack.is_some() && release.is_some() && (decay.is_some() || sustain.is_some()) {
+        if let Some(delay) = find("Delay") {
+            e.points.push(Point { time: Some(delay), ..Default::default() });
+        }
+        e.points.push(Point { time: attack, fixed: 1., ..Default::default() });
+        if let Some(hold) = find("Hold") {
+            e.points.push(Point { time: Some(hold), fixed: 1., ..Default::default() });
+        }
+        if decay.is_some() {
+            e.points.push(Point { time: decay, level: sustain, fixed: if sustain.is_some() { 0. } else { 1. }, ..Default::default() });
+        }
+        if decay.is_none() && sustain.is_some() {
+            if let Some(p) = e.points.last_mut() {
+                p.level = sustain;
+            }
+        }
+        if let Some(p) = e.points.last_mut() {
+            p.sustain = true;
+        }
+        e.points.push(Point { time: release, ..Default::default() });
+    }
+    e
 }
 
 /// The envelope's parameters in the order its tiles are linked: each point's time then level.
@@ -841,6 +890,33 @@ mod tests {
         assert!(points[1].1 > 28. && points[1].1 < 170., "the sustain level halfway");
         assert_eq!(arc(0., 0.), "");
         assert!(arc(0., 1.).contains(" 1 1 "), "past 180 degrees: the large arc");
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    // The envelopes a plugin without views is recognized to have, by its parameters' names.
+    #[test]
+    fn envelopes_by_name_as_the_reference_recognizes_them() {
+        // A DX7's: rates and levels, from level 4, holding at level 3, every segment a rate.
+        let dx = envelope_of_names(&["Level 4", "Rate 1", "Rate 2", "Rate 3", "Rate 4", "Level 1", "Level 2", "Level 3"]);
+        assert_eq!(dx.start, Some(0));
+        assert_eq!(dx.points.iter().map(|p| (p.time, p.level, p.sustain, p.rate)).collect::<Vec<_>>(), [(Some(1), Some(5), false, true), (Some(2), Some(6), false, true), (Some(3), Some(7), true, true), (Some(4), Some(0), false, true)]);
+        assert!(envelope_of_names(&["Rate 1", "Rate 2", "Rate 3", "Rate 4", "Level 1", "Level 2", "Level 3"]).points.is_empty(), "without level 4 it is nothing");
+        // An FM-X's: a time and a level a stage, from a hold level, the release back to it.
+        let fm = envelope_of_names(&["Hold Level", "Attack Time", "Attack Level", "Decay 1 Time", "Decay 1 Level", "Decay 2 Time", "Decay 2 Level", "Release Time", "Release Level"]);
+        assert_eq!(fm.start, Some(0));
+        assert_eq!(fm.points.iter().map(|p| (p.time, p.level, p.fixed, p.sustain)).collect::<Vec<_>>(), [(Some(1), Some(2), 1., false), (Some(3), Some(4), 1., false), (Some(5), Some(6), 1., true), (Some(7), Some(8), 0., false)]);
+        let held = envelope_of_names(&["Initial Level", "Hold Time", "Attack Time", "Release Time"]);
+        assert_eq!(held.points.iter().map(|p| (p.time, p.level)).collect::<Vec<_>>(), [(Some(1), Some(0)), (Some(2), None), (Some(3), Some(0))], "the release without a level returns to the first");
+        // An ADSR needs a Decay or a Sustain beside Attack and Release; Delay and Hold are optional.
+        assert!(envelope_of_names(&["Attack", "Release"]).points.is_empty());
+        let a = envelope_of_names(&["Delay", "Attack", "Hold", "Sustain", "Release"]);
+        assert_eq!(a.points.iter().map(|p| (p.time, p.level, p.fixed, p.sustain)).collect::<Vec<_>>(), [(Some(0), None, 0., false), (Some(1), None, 1., false), (Some(2), Some(3), 1., true), (Some(4), None, 0., false)], "no decay: the sustain level is the last stage's");
+        let adsr = envelope_of_names(&["attack", "DECAY", "release"]);
+        assert_eq!(adsr.points.iter().map(|p| (p.level, p.fixed, p.sustain)).collect::<Vec<_>>(), [(None, 1., false), (None, 1., true), (None, 0., false)], "no sustain level: the decay stays at full");
     }
 }
 

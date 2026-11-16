@@ -173,6 +173,17 @@ What differs from the doc, or that the doc leaves out:
 - `library.edit` needs `name`, `description` and `tags` all, though the doc's "takes `{id,name,description,tags}`
   and an optional `color`" reads as optional-by-omission only for `color`.
 - `audition.start` with `part` absent is part 0 (the handler's default), so a Performance needs none.
+- `setlists.save` reads the document strictly, and **`display` must have `columns` and `rows` (1 to 8) whatever its
+  `mode`** (setlist.cpp:84-87): `{"mode":"list"}` alone is refused with -32602 "its display has no columns". The doc's
+  field table says they are for a grid. Found by the real engine (the fake engine, and `setlist.rs`'s test document,
+  had `{"mode":"list"}`); a new setlist here is `{"mode":"list","columns":4,"rows":3}`, the JUCE `Control::Setlist`'s
+  defaults. An empty `info.id` is a new setlist, as the doc says.
+- **After `library.load` the engine pushes `session.resync {topic: params.changed}` at once and `graph.changed`
+  about three seconds later** (seen on a connection subscribed to `graph.changed`, `controllers` and `params.changed`:
+  the reply at 0.02 s, `graph.changed {revision}` at 3.0 s, with the null audio device; nothing for a request that
+  changes nothing). REAL-ENGINE.md's problem 2 said another client's load sent none: a shorter wait than this one.
+  The Rust shell does not wait for it: it reads the Performance when the load's reply comes, and again when the
+  notification does.
 - A load and an audition are long requests: the single connection of the Rust shell is refused with -32009 for any
   other request while one runs, so the shell asks the steps of an opening again (it never loses the connection).
 - The JUCE app runs an opening on a second connection that waits its turn (`RemoteControl` with `waits`); the Rust

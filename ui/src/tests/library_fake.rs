@@ -334,6 +334,19 @@ impl Library {
                 if doc["format"] != "oscairn.setlist" || doc["version"] != 2 || !doc["pages"].is_array() {
                     return Err(refused(-32602, "Not a setlist"));
                 }
+                // setlist.cpp `readSetlist`: the display has its mode, columns and rows, whatever the mode (1 to 8 each).
+                let display = doc["display"].as_object().ok_or_else(|| refused(-32602, "not a usable setlist: its display is not an object"))?;
+                if !["list", "scroll", "grid"].contains(&display.get("mode").and_then(Value::as_str).unwrap_or_default()) {
+                    return Err(refused(-32602, "not a usable setlist: its display's mode is not list, scroll or grid"));
+                }
+                for k in ["columns", "rows"] {
+                    if !display.get(k).and_then(Value::as_u64).is_some_and(|n| (1..=8).contains(&n)) {
+                        return Err(refused(-32602, &format!("not a usable setlist: its display has no {k}")));
+                    }
+                }
+                if display.keys().any(|k| !["mode", "columns", "rows"].contains(&k.as_str())) {
+                    return Err(refused(-32602, "not a usable setlist: its display has a member it does not know"));
+                }
                 let mut id = doc["info"]["id"].as_str().unwrap_or_default().to_string();
                 let mut doc = doc;
                 if !self.docs.iter().any(|d| d["info"]["id"] == id) {

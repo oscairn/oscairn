@@ -19,7 +19,7 @@ fn state(name: &str, content: Option<serde_json::Value>) -> std::path::PathBuf {
 fn setlist_doc(id: &str, name: &str) -> serde_json::Value {
     json!({"format": "oscairn.setlist", "version": 2,
         "info": {"id": id, "name": name, "description": "", "tags": [], "color": "", "revision": "", "parent": "", "hash": "", "origin": null},
-        "display": {"mode": "list"},
+        "display": {"mode": "list", "columns": 4, "rows": 3},
         "pages": [{"name": "Set 1", "slots": [{"id": "x1", "name": "One", "color": "", "label": ""}, null]}, {"name": "Encore", "slots": [{"id": "x2", "name": "Two", "color": "", "label": "Last"}]}]})
 }
 

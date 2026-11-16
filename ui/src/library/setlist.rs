@@ -43,7 +43,7 @@ pub fn read_state(file: &std::path::Path) -> Option<(String, Option<usize>)> {
 fn new_document(name: &str) -> Value {
     json!({"format": "oscairn.setlist", "version": 2,
         "info": {"id": "", "name": name, "description": "", "tags": [], "color": "", "revision": "", "parent": "", "hash": "", "origin": null},
-        "display": {"mode": "list"}, "pages": [{"name": "Page 1", "slots": []}]})
+        "display": {"mode": "list", "columns": 4, "rows": 3}, "pages": [{"name": "Page 1", "slots": []}]})
 }
 
 impl Screen {

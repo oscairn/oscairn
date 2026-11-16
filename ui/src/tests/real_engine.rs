@@ -1483,6 +1483,23 @@ fn short(v: &Value) -> String {
     if s.len() > 160 { format!("{}...", &s[..160]) } else { s }
 }
 
+mod library;
+
+// The Library app against the same engine, with a small library of its own (ui/LIBRARY-APP.md): the shell reaches
+// it with the switch the tests use. Run with OSCAIRN_DATA_HOME at the engine's data folder (the state file of
+// "Add to setlist" is written there).
+#[test]
+#[ignore = "needs a running engine: OSCAIRN_REAL_SOCKET"]
+fn real_library() {
+    let Some(mut r) = Real::start() else {
+        eprintln!("real_library: OSCAIRN_REAL_SOCKET is not set");
+        return;
+    };
+    shell::library_in_rust(true);
+    library::library(&mut r);
+    eprintln!("\nFINDINGS ({}):\n{}", r.findings.len(), r.findings.join("\n"));
+}
+
 #[test]
 #[ignore = "needs a running engine: OSCAIRN_REAL_SOCKET"]
 fn real_engine() {

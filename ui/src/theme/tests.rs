@@ -68,6 +68,7 @@ fn every_built_in_theme_loads_with_its_file_values() {
             depth: DepthStyle::Flat,
             sliders: SliderStyle::Cap,
             tabs: TabStyle::Folder,
+            tab_placement: crate::TabPlacement::Auto,
             marks: MarkStyle::Square,
             sections: SectionStyle::Joined,
             rows: RowStyle::Fill
@@ -196,6 +197,16 @@ fn a_bad_file_is_refused_as_the_reference_refuses_it() {
     assert_eq!(edit(&|d| {
         d.as_object_mut().unwrap().remove("style");
     }), Err("Theme needs a style"));
+    // tabPlacement is optional (absent: auto) and, when there, one of auto, top and side.
+    assert_eq!(edit(&|d| {
+        d["style"].as_object_mut().unwrap().remove("tabPlacement");
+    }).map(|t| t.style.tab_placement), Ok(crate::TabPlacement::Auto));
+    for (word, want) in [("auto", crate::TabPlacement::Auto), ("top", crate::TabPlacement::Top), ("side", crate::TabPlacement::Side)] {
+        assert_eq!(edit(&|d| d["style"]["tabPlacement"] = json!(word)).map(|t| t.style.tab_placement), Ok(want), "{word}");
+    }
+    for bad in [json!("left"), json!("Side"), json!(""), json!(3), json!(null), json!(true), json!(["side"])] {
+        assert_eq!(edit(&|d| d["style"]["tabPlacement"] = bad.clone()), Err("Theme style choice is not one of its options"), "{bad}");
+    }
     for (key, bad) in [("buttons", "square"), ("edges", "thin"), ("depth", "hard"), ("sliders", "round"), ("tabs", "pills"), ("marks", "oval"), ("sections", "apart"), ("rows", "top")] {
         assert_eq!(edit(&|d| d["style"][key] = json!(bad)), Err("Theme style choice is not one of its options"), "{key}");
         assert_eq!(edit(&|d| d["style"][key] = json!(3)), Err("Theme style choice is not one of its options"), "{key}");

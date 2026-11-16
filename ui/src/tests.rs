@@ -491,7 +491,7 @@ pub fn odd_theme() -> theme::Loaded {
         "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
         "colors": {"background": "#000000", "surface": "#7A0070", "raised": "#006B6B", "border": "#FF8800", "text": "#FFFFFF", "muted": "#00FFFF", "accent": "#FFFF00",
                    "positive": "#FF00FF", "danger": "#00FF00", "warning": "#FF0000", "focus": "#0000FF"},
-        "style": {"buttons": "pill", "edges": "outlined", "depth": "soft", "sliders": "cap", "tabs": "folder", "marks": "round", "sections": "separate", "rows": "fill"},
+        "style": {"buttons": "pill", "edges": "outlined", "depth": "soft", "sliders": "cap", "tabs": "folder", "tabPlacement": "side", "marks": "round", "sections": "separate", "rows": "fill"},
         "wires": {"audio": "#FF0000", "notes": "#00FF00", "disabled": "#FFFFFF", "draining": "#0000FF", "unconnected": "#FFFF00", "control": "#FF00FF"}}))
 }
 
@@ -502,7 +502,7 @@ pub fn joined_theme() -> theme::Loaded {
         "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
         "colors": {"background": "#F0E8D0", "surface": "#FFF8E0", "raised": "#E0D0A0", "border": "#806000", "text": "#201000", "muted": "#504020", "accent": "#0040C0",
                    "positive": "#006000", "danger": "#C00000"},
-        "style": {"buttons": "rounded", "edges": "none", "depth": "flat", "sliders": "filled", "tabs": "segmented", "marks": "square", "sections": "joined", "rows": "dot"},
+        "style": {"buttons": "rounded", "edges": "none", "depth": "flat", "sliders": "filled", "tabs": "segmented", "tabPlacement": "top", "marks": "square", "sections": "joined", "rows": "dot"},
         "wires": {"audio": "#0000FF", "notes": "#00FF00", "disabled": "#808080", "draining": "#FF8800", "unconnected": "#FF0000", "control": "#00FFFF"}}))
 }
 

@@ -104,6 +104,8 @@ pub struct Screen {
     strip: Option<(Strip, usize)>,
     /// The pages are a column at the left (the window said so), not a strip over the tabs.
     column: bool,
+    /// The tabs are a column too (the side arrangement): beside the pages' column, not over the tiles.
+    tabs_column: bool,
     values: HashMap<u32, f64>,
     /// The plugin's text for a parameter's value, by value's bits.
     texts: HashMap<(u32, u64), String>,
@@ -155,6 +157,7 @@ impl Screen {
             entry: 0,
             strip: None,
             column: false,
+            tabs_column: false,
             values: HashMap::new(),
             texts: HashMap::new(),
             laid: Laid::default(),
@@ -530,6 +533,7 @@ impl Screen {
         self.follow(g.get_view_height());
         g.set_name(self.name.as_str().into());
         self.column = g.get_column();
+        self.tabs_column = g.get_layout() == 2;
         let page = self.entries.get(self.entry).map_or(0, |e| e.page);
         let searching = !self.search.is_empty();
         let pages: Vec<slint::SharedString> = self.model.pages.iter().map(|p| p.name.as_str().into()).collect();
@@ -792,12 +796,12 @@ impl Screen {
         let bars = self.bars();
         let pages = Stop::Row(Strip::Pages);
         let tabs = Stop::Row(Strip::Tabs);
-        let column = self.column;
+        let (column, tabs_column) = (self.column, self.tabs_column);
         // The row above `from` (above the tiles when None) that is over the content: the pages' column is
         // beside the tabs and the tiles, not over them.
         let above = |from: Option<Stop>| -> Option<Stop> {
             let place = from.and_then(|f| bars.iter().position(|s| *s == f)).unwrap_or(bars.len());
-            bars[..place].iter().rev().copied().find(|s| !(column && *s == pages))
+            bars[..place].iter().rev().copied().find(|s| !(column && *s == pages || tabs_column && *s == tabs))
         };
         let first_tile = |me: At| if self.laid.tiles.is_empty() { me } else { At::Tile(0) };
         let (mut dx, mut dy) = (dx, dy);
@@ -809,6 +813,7 @@ impl Screen {
                 At::Tile(t) => match grid::arrow(&self.laid.tiles, t, sx, sy) {
                     Some(to) => At::Tile(to),
                     None if sy < 0 => above(None).map_or(at, |stop| self.selected(stop)),
+                    None if sx < 0 && tabs_column && bars.contains(&tabs) => self.selected(tabs),
                     None if sx < 0 && column && bars.contains(&pages) => self.selected(pages),
                     None => at,
                 },
@@ -827,6 +832,19 @@ impl Screen {
                         } else {
                             first_tile(at)
                         }
+                    } else {
+                        at
+                    }
+                }
+                // The tabs a column beside the pages' column: up and down along it, left to the pages, right to the tiles.
+                At::Bar(stop @ Stop::Row(Strip::Tabs), i) if tabs_column => {
+                    let len = self.row_len(Strip::Tabs);
+                    if sy != 0 {
+                        At::Bar(stop, (i as i32 + sy).clamp(0, len as i32 - 1) as usize)
+                    } else if sx > 0 {
+                        first_tile(at)
+                    } else if bars.contains(&pages) {
+                        self.selected(pages)
                     } else {
                         at
                     }

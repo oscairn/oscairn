@@ -6,7 +6,7 @@
 // envelope's curve) above them. Without touch the cursor is a focus border and a tile being changed
 // an accent one; by touch knobs and sliders drag, switches, stops and dropdowns tap.
 
-import { Theme, Section, Button, Cursor, Field, TabPages, Thumb, SliderBar, SliderStyle, DepthStyle, SectionStyle } from "theme.slint";
+import { Theme, Section, Button, Cursor, Field, TabPages, TabPlacement, Thumb, SliderBar, SliderStyle, DepthStyle, SectionStyle } from "theme.slint";
 
 export struct GridTile {
     x: length,
@@ -104,6 +104,11 @@ export global GridState {
     in property <int> page-cursor: -1;
     in property <int> tab-cursor: -1;
     in-out property <bool> column;
+    // The tabs' arrangement: 0 two strips, 1 the pages a column over a strip of tabs, 2 two columns.
+    in-out property <int> layout;
+    // The widths the columns have, for the tests of the side arrangement.
+    in-out property <length> pages-column;
+    in-out property <length> tabs-column;
     in property <[GridTile]> tiles;
     in property <[GridCard]> cards;
     in property <[GridHeading]> headings;
@@ -584,7 +589,9 @@ export component Grid inherits Rectangle {
     property <length> gap: Theme.gap-between(Theme.gap);
     property <length> heading: 28px;
     // The pages are a column at the left on a window tall enough to spare the width, else a strip over the tabs.
-    property <bool> column: self.height >= Theme.column-from;
+    // The tabs' arrangement: the theme's choice, or by the window's height (the pages a column on a tall one).
+    property <int> layout: Theme.tab-placement == TabPlacement.top ? 0 : Theme.tab-placement == TabPlacement.side ? 2 : self.height >= Theme.column-from ? 1 : 0;
+    property <bool> column: layout >= 1;
     property <length> top: Theme.margin;
     property <length> footer: GridState.message == "" ? 0 : Theme.touch;
     property <length> area-width: tabs.content-width;
@@ -597,8 +604,15 @@ export component Grid inherits Rectangle {
         GridState.view-height = area-height;
         GridState.resized();
     }
-    changed column => { GridState.column = root.column; }
+    property <length> pages-column: tabs.pages-column;
+    property <length> tabs-column: tabs.tabs-column;
+    changed pages-column => { GridState.pages-column = root.pages-column; }
+    changed tabs-column => { GridState.tabs-column = root.tabs-column; }
+    changed layout => { GridState.layout = root.layout; GridState.column = root.column; }
     init => {
+        GridState.layout = root.layout;
+        GridState.pages-column = root.pages-column;
+        GridState.tabs-column = root.tabs-column;
         GridState.column = root.column;
         GridState.view-width = area-width;
         GridState.view-height = area-height;
@@ -609,7 +623,7 @@ export component Grid inherits Rectangle {
         y: root.top;
         width: root.width - 2 * Theme.margin;
         height: max(0px, root.height - root.top - Theme.margin - root.footer);
-        column: root.column;
+        mode: root.layout;
         pages: GridState.pages;
         page: GridState.page;
         page-cursor: GridState.page-cursor;

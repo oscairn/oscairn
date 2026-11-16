@@ -10,7 +10,7 @@ a second level of tabs.
 **A recorded difference from the reference (owner-approved, with the request above).** The JUCE parameter grid
 (hosts/standalone/ParameterGrid.cpp `refresh`) lists pages as buttons down the left, over a search field, and
 draws tabs as rows of the same plain buttons; here pages and tabs are one themed family (below), the search is
-a button in the header row, and the cursor does not turn the page as it walks off the end of the tiles (a page
+a button on the top bar, and the cursor does not turn the page as it walks off the end of the tiles (a page
 or tab opens on a press). The rules that say which pages and tabs a plugin has (`tabsFor`: a page per
 top-level module, a tab per second-level module on a page of more than 24 parameters) are the reference's and
 unchanged.
@@ -51,8 +51,14 @@ So the family has three users today: the parameter pages (two levels), and Play'
   the tabs a strip under it. A page with fewer than two tabs has no second row; a plugin with one page has
   neither (no empty row). The content goes where `content-x`, `content-y`, `content-width` and
   `content-height` say.
-- The grid picks `column` from the window: `Theme.column-from` (560 logical px) of height or more. At
-  826 x 465 (the keyboard at 1.55) and 800 x 480 it is two strips.
+- The arrangement is the theme's `tabPlacement` (THEME.md): `top` two strips, `side` two columns at the left (pages, then
+  tabs), `auto` the size rule that was the only rule before: `Theme.column-from` (560 logical px) of height or more is the
+  pages' column with the tabs a strip over the tiles, else two strips (at 826 x 465, the keyboard at 1.55, and 800 x 480 it is two
+  strips). `TabPages` takes it as `mode` (0 strips, 1 the pages' column, 2 two columns); the Grid publishes it as `GridState.layout`.
+- In `side` each column is as wide as its longest name in bold needs plus the tab's padding, at least 1.6 touch targets and at
+  most `Theme.side-share` (22%) of the screen's width, so at 826 across one column is at most 179 px (138 at 640); a longer name
+  shrinks to 70% and is then cut. A column with more entries than fit scrolls down (touch drags it) with an arrow box over the cut
+  end, as the strips do. A plugin with one page has no pages' column and a page with fewer than two tabs has no tabs' column.
 
 ### The theme
 
@@ -87,8 +93,8 @@ is a literal.
   reference's rules, `editor_pages` and `tabs_for`), or from what a plugin declares (`Model::declared`, below);
   the widgets and the screen's cursor read the model only. A parameter on a page that has tabs but on no tab is
   drawn above the tabs, whichever tab is open (the header's rule).
-- The search is a button at the end of the header row (Back, the title, Search) for a plugin of more than 24
-  parameters; while a search is on it reads "Search: " and the text (not lit: the cursor's ring would vanish on the accent). It no longer costs a column.
+- The search is a button of the top bar (the screen's own action, with Back and the path title: docs/rust-ui.md "The top bar
+  carries the chrome") for a plugin of more than 24 parameters; while a search is on it reads "Search: " and the text (not lit: the cursor's ring would vanish on the accent). It no longer costs a column.
 
 ### The arrangement for the keyboard's screen
 
@@ -116,8 +122,10 @@ to the next row's *selected* entry. Left and right (or the right knob, up and do
 between rows: in a strip, left and right along it, up and down to the row above and below; in the pages'
 column, up and down along it, right to the tabs (or the tiles), left from the first tab or the first column of
 tiles back to the pages. Nothing opens by being moved to: a press opens the page or tab under the cursor (the
-cursor stays on it), the tiles stop at either end and no longer turn the page. Cancel backs out: the cursor, the
-search, the screen.
+cursor stays on it), the tiles stop at either end and no longer turn the page. In `side` the tabs are a column beside the
+pages': up and down along each, right to the next column or the tiles, left from the first column of tiles to the tabs and from the
+tabs to the pages (the dial's order is the same: pages, tabs, tiles). Cancel is Back, the screen's one step up, from anywhere; the search
+is the top bar's, reached by its own cursor stop.
 
 A direct way to step tabs from inside a page: the page keys (Page Up and Page Down on a computer keyboard,
 `Action::Page`) step through the pages and tabs at once, tab by tab and then the next page. The reference has
@@ -156,3 +164,21 @@ the ones on the tab shown.
 
 A plugin that wants its own tabs and its own separate GUI draws them itself; the family is what it can use
 instead, from `ui.h` (`oscairn_ui_tab_t`), without writing a line of drawing.
+
+## Placement: the two forms on the keyboard's screen (2026-11-16)
+
+With the screen's header row gone to the top bar (the grid starts under the bar), 826 x 465 logical (1280 x 720 at 1.55), the tile
+area in logical pixels, measured by rendering both (tests/tabs.rs
+`the_placements_on_the_keyboards_screen_leave_the_tiles_their_room`, pictures `tabs-placement-*`; segmented style, dark theme):
+
+| Plugin | `top` (two strips) | `side` (two columns) |
+|---|---|---|
+| 5 pages, the first of 8 tabs | 814 x 309 = 251 072, 3 columns of tiles (rows: 44 + 4 + 44 + 4) | 593 x 405 = 239 800, 2 columns (pages 104 wide, tabs 109) |
+| 2 pages, no tabs | 814 x 357 = 290 135 | 729 x 405 = 294 814 (pages 81 wide) |
+| the FM fixture (one page) | 814 x 405 = 329 198 (no rows: nothing to switch) | 814 x 405 = 329 198 (no columns) |
+
+`side` leaves the tiles the full height (465 less the bar's 48 and the 6 px margin above and below) at the price of width: with eight
+tabs the strips' three columns of tiles become two, and the area is 5% smaller; with two pages and no tabs it is the larger. Both
+forms were looked at in both tab styles in every theme (pictures `tabs-side-*` and `tabs-placement-*` in target/theme-shots): the folder
+style's pieces are rounded at the left with a rule at the right edge of each column, the segmented style's tracks are two columns, the selected tab
+is the same fill in both (tested in the pixels of both columns).

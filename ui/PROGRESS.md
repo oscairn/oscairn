@@ -375,3 +375,10 @@ is written again as this file says: the data and config folders in ui/target/hom
   color. E6 (2fe24a21): Presets... on a plugin's actions. Pictures in ui/target/screens: chain-marks-*, chain-split-*, chain-lane-*,
   chain-lane-settings-*, chain-presets-*, sounds-list-*, sounds-filters-* in the dark, odd and odd-joined themes at 1280x720, 1280x720@1.55, 800x480.
 - State and what has never been run against the real engine or on a device: the top of ui/PERFORMANCE-APP.md.
+
+Branch `rust-app-chrome` (from `rust-app` bc6e42d6; baseline 256 passed, 1 ignored, clippy clean): the top bar carries the chrome
+(Back, the path title, the screens' own actions; Cancel is Back in one step; each screen has the header row's 48 logical px), a status
+that says what the last said costs no request and no frame, and the theme's `tabPlacement` (auto, top, side) in both theme readers with
+the side form of the tab family. Now 268 passed, 1 ignored, `cargo clippy --offline --all-targets` clean. The JUCE `desktop-theme`
+test passed on the Mac (build-th). Not run on a unit; the ignored real-engine harness was not run and its Cancel sequences assume
+the old layered Cancel.

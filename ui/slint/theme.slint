@@ -23,6 +23,8 @@ export enum EdgeStyle { none, hairline, outlined }
 export enum DepthStyle { flat, soft }
 export enum SliderStyle { filled, line, cap }
 export enum TabStyle { folder, segmented }
+// Where two levels of tabs go on a screen: two strips (top), two columns at the left (side), or by the window's height (auto).
+export enum TabPlacement { auto, top, side }
 export enum MarkStyle { square, round }
 export enum SectionStyle { separate, joined }
 export enum RowStyle { left, right, dot, fill }
@@ -81,6 +83,7 @@ export global Theme {
     in property <DepthStyle> depth: DepthStyle.soft;
     in property <SliderStyle> sliders: SliderStyle.line;
     in property <TabStyle> tabs: TabStyle.segmented;
+    in property <TabPlacement> tab-placement: TabPlacement.auto;
     in property <MarkStyle> marks: MarkStyle.square;
     in property <SectionStyle> sections: SectionStyle.separate;
     in property <RowStyle> rows: RowStyle.left;
@@ -111,6 +114,8 @@ export global Theme {
     out property <length> button-width: 110px;
     out property <length> overlay-width: 420px;
     out property <length> pages-width: 180px;
+    // The most of a screen's width one column of tabs takes in the side arrangement (ui/TABS.md).
+    out property <float> side-share: 0.22;
     // A window at least this tall has room for the pages as a column beside the tiles (ui/TABS.md).
     in property <length> column-from: 560px;
     // A cursor's border and a cursor on the piano keys; the rule between neighbors.
@@ -659,9 +664,11 @@ export component TabBar inherits Rectangle {
     }
 }
 
-// Two levels: pages, and under each the page's tabs (none for a page with fewer than two). The pages are a
-// column at the left with the tabs a strip over the content (`column`), or two strips stacked, the pages
-// over the tabs. The content goes where the out properties say, in this component's own pixels.
+// Two levels: pages, and under each the page's tabs (none for a page with fewer than two). `mode` is the arrangement:
+// 0 two strips stacked, the pages over the tabs; 1 the pages a column at the left with the tabs a strip over the
+// content; 2 two columns at the left, the pages and then the tabs beside them, each as wide as its longest name needs
+// (at most `Theme.side-share` of the width). The content goes where the out properties say, in this component's own
+// pixels.
 export component TabPages inherits Rectangle {
     in property <[string]> pages;
     in property <int> page;
@@ -669,35 +676,56 @@ export component TabPages inherits Rectangle {
     in property <[string]> tabs;
     in property <int> tab;
     in property <int> tab-cursor: -1;
-    in property <bool> column;
+    in property <int> mode;
     in property <length> column-width: Theme.pages-width;
     callback page-picked(int);
     callback tab-picked(int);
     property <bool> has-pages: root.pages.length > 1;
     property <bool> has-tabs: root.tabs.length > 1;
-    property <length> side: root.column && root.has-pages ? root.column-width + Theme.gap : 0px;
-    property <length> pages-height: !root.column && root.has-pages ? Theme.touch + Theme.gap : 0px;
-    property <length> tabs-height: root.has-tabs ? Theme.touch + Theme.gap : 0px;
-    out property <length> content-x: root.side;
+    property <bool> side: root.mode == 2;
+    // A column of the side arrangement: its longest name in bold with the tab's own padding, between a touch target
+    // and a share of the width.
+    property <length> pad: 2 * (Theme.pad-wide + Theme.tab-pad);
+    property <length> cap: max(Theme.touch * 1.6, root.width * Theme.side-share);
+    property <length> pages-need: pages-probe.preferred-width + root.pad;
+    property <length> tabs-need: tabs-probe.preferred-width + root.pad;
+    out property <length> pages-column: root.side ? min(root.cap, max(Theme.touch * 1.6, root.pages-need)) : root.column-width;
+    out property <length> tabs-column: min(root.cap, max(Theme.touch * 1.6, root.tabs-need));
+    property <length> pages-side: root.mode >= 1 && root.has-pages ? root.pages-column + Theme.gap : 0px;
+    property <length> tabs-side: root.side && root.has-tabs ? root.tabs-column + Theme.gap : 0px;
+    property <length> pages-height: root.mode == 0 && root.has-pages ? Theme.touch + Theme.gap : 0px;
+    property <length> tabs-height: !root.side && root.has-tabs ? Theme.touch + Theme.gap : 0px;
+    out property <length> content-x: root.pages-side + root.tabs-side;
     out property <length> content-y: root.pages-height + root.tabs-height;
-    out property <length> content-width: max(0px, root.width - root.side);
+    out property <length> content-width: max(0px, root.width - root.content-x);
     out property <length> content-height: max(0px, root.height - root.content-y);
+    pages-probe := VerticalLayout {
+        width: 0px;
+        height: 0px;
+        for name in root.pages: Text { text: name; font-size: Theme.button; font-weight: 700; }
+    }
+    tabs-probe := VerticalLayout {
+        width: 0px;
+        height: 0px;
+        for name in root.tabs: Text { text: name; font-size: Theme.button; font-weight: 700; }
+    }
     if root.has-pages: TabBar {
         x: 0px;
         y: 0px;
-        width: root.column ? root.column-width : root.width;
-        height: root.column ? root.height : Theme.touch;
-        vertical: root.column;
+        width: root.mode >= 1 ? root.pages-column : root.width;
+        height: root.mode >= 1 ? root.height : Theme.touch;
+        vertical: root.mode >= 1;
         names: root.pages;
         current: root.page;
         cursor: root.page-cursor;
         picked(i) => { root.page-picked(i); }
     }
     if root.has-tabs: TabBar {
-        x: root.side;
-        y: root.pages-height;
-        width: root.width - root.side;
-        height: Theme.touch;
+        x: root.side ? root.pages-side : root.pages-side;
+        y: root.side ? 0px : root.pages-height;
+        width: root.side ? root.tabs-column : root.width - root.pages-side;
+        height: root.side ? root.height : Theme.touch;
+        vertical: root.side;
         names: root.tabs;
         current: root.tab;
         cursor: root.tab-cursor;

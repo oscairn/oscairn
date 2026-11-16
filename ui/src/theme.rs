@@ -16,7 +16,7 @@
 //! does. Held per window: `apply` sets the window's `Theme` global, nothing is process-wide.
 
 use crate::profile::{DEFAULT_THEME, THEMES};
-use crate::{ButtonStyle, DepthStyle, EdgeStyle, MarkStyle, RowStyle, SectionStyle, Shell, SliderStyle, TabStyle, Theme};
+use crate::{ButtonStyle, DepthStyle, EdgeStyle, MarkStyle, RowStyle, SectionStyle, Shell, SliderStyle, TabPlacement, TabStyle, Theme};
 use serde_json::{Map, Value};
 use slint::{Color, ComponentHandle};
 use std::path::{Path, PathBuf};
@@ -37,6 +37,8 @@ pub struct Style {
     pub depth: DepthStyle,
     pub sliders: SliderStyle,
     pub tabs: TabStyle,
+    /// Optional: where two levels of tabs go (the pages over the tabs, two columns at the left, or by the window's height).
+    pub tab_placement: TabPlacement,
     pub marks: MarkStyle,
     pub sections: SectionStyle,
     pub rows: RowStyle,
@@ -50,6 +52,7 @@ impl Default for Style {
             depth: DepthStyle::Soft,
             sliders: SliderStyle::Line,
             tabs: TabStyle::Segmented,
+            tab_placement: TabPlacement::Auto,
             marks: MarkStyle::Square,
             sections: SectionStyle::Separate,
             rows: RowStyle::Left,
@@ -239,17 +242,20 @@ impl ThemeData {
             control: hex(wires.get("control"))?,
         };
         let style = object.get("style").and_then(Value::as_object).ok_or("Theme needs a style")?;
-        fields(style, &["buttons", "edges", "depth", "sliders", "tabs", "marks", "sections", "rows"])?;
+        fields(style, &["buttons", "edges", "depth", "sliders", "tabs", "tabPlacement", "marks", "sections", "rows"])?;
         let choice = |key: &str, options: &[&str]| -> Result<usize, Refused> {
             let v = style.get(key).and_then(Value::as_str);
             v.and_then(|v| options.iter().position(|o| *o == v)).ok_or("Theme style choice is not one of its options")
         };
+        // Optional: absent is auto, anything present must be one of the three, as the JUCE reader has it.
+        let tab_placement = if style.contains_key("tabPlacement") { [TabPlacement::Auto, TabPlacement::Top, TabPlacement::Side][choice("tabPlacement", &["auto", "top", "side"])?] } else { TabPlacement::Auto };
         let style = Style {
             buttons: [ButtonStyle::Rounded, ButtonStyle::Pill][choice("buttons", &["rounded", "pill"])?],
             edges: [EdgeStyle::None, EdgeStyle::Hairline, EdgeStyle::Outlined][choice("edges", &["none", "hairline", "outlined"])?],
             depth: [DepthStyle::Flat, DepthStyle::Soft][choice("depth", &["flat", "soft"])?],
             sliders: [SliderStyle::Filled, SliderStyle::Line, SliderStyle::Cap][choice("sliders", &["filled", "line", "cap"])?],
             tabs: [TabStyle::Folder, TabStyle::Segmented][choice("tabs", &["folder", "segmented"])?],
+            tab_placement,
             marks: [MarkStyle::Square, MarkStyle::Round][choice("marks", &["square", "round"])?],
             sections: [SectionStyle::Separate, SectionStyle::Joined][choice("sections", &["separate", "joined"])?],
             rows: [RowStyle::Left, RowStyle::Right, RowStyle::Dot, RowStyle::Fill][choice("rows", &["left", "right", "dot", "fill"])?],
@@ -542,6 +548,7 @@ pub fn apply(window: &Shell, theme: &Loaded) {
     g.set_depth(s.depth);
     g.set_sliders(s.sliders);
     g.set_tabs(s.tabs);
+    g.set_tab_placement(s.tab_placement);
     g.set_marks(s.marks);
     g.set_sections(s.sections);
     g.set_rows(s.rows);

@@ -39,16 +39,8 @@ pub(super) fn percent(_: u32, v: f64) -> String {
 
 /// A plugin's page in a window of this size and scale, in this theme and tab style.
 fn shown(list: &serde_json::Value, (w, h): (usize, usize), scale: f32, theme: &theme::Loaded, style: TabStyle) -> (Screen, crate::params::Screen) {
-    fit_to_window();
-    let mut s = Screen::sized(w, h);
-    s.set_scale(scale);
-    theme::apply(&s.ui, theme);
-    s.ui.global::<Theme>().set_tabs(style);
-    let mut screen = open_with(&mut s, list.clone(), &values_of(list), &percent);
-    s.frame();
-    screen.shown();
-    s.frame();
-    (s, screen)
+    // Whatever the theme says of the placement: these tests are of the size rule and of the strips and the column.
+    placed(list, (w, h), scale, theme, style, crate::TabPlacement::Auto)
 }
 
 fn plugins() -> Vec<(&'static str, serde_json::Value)> {
@@ -467,4 +459,180 @@ fn the_arrangements_on_the_keyboards_screen() {
             shot(&s, &format!("tabs-arrangement-{plugin}-{label}@1.55"));
         }
     }
+}
+
+/// The window `w` x `h` at `scale` with the plugin's page in the placement chosen (whatever the theme says).
+fn placed(list: &serde_json::Value, (w, h): (usize, usize), scale: f32, theme: &theme::Loaded, style: TabStyle, placement: crate::TabPlacement) -> (Screen, crate::params::Screen) {
+    fit_to_window();
+    let mut s = Screen::sized(w, h);
+    s.set_scale(scale);
+    theme::apply(&s.ui, theme);
+    s.ui.global::<Theme>().set_tabs(style);
+    s.ui.global::<Theme>().set_tab_placement(placement);
+    let mut screen = open_with(&mut s, list.clone(), &values_of(list), &percent);
+    s.frame();
+    screen.shown();
+    s.frame();
+    (s, screen)
+}
+
+/// A plugin of two pages, the first of twelve tabs (more than a column of touch targets holds at 465).
+fn twelve_tabs() -> serde_json::Value {
+    let mut list = Vec::new();
+    for n in 1..=12u32 {
+        for (k, name) in ["Level", "Ratio", "Fine"].iter().enumerate() {
+            list.push(p(n * 10 + k as u32, name, &format!("Operators/Operator {n}"), "knob"));
+        }
+    }
+    for k in 0..3 {
+        list.push(p(900 + k, &format!("Out {k}"), "Output", "knob"));
+    }
+    json!({"parameters": list})
+}
+
+/// The two columns of the side arrangement, in the window's pixels: the pages' and the tabs'.
+fn side_columns(s: &Screen, scale: f32) -> (Box4, Box4) {
+    let (g, t) = (s.ui.global::<GridState>(), s.ui.global::<Theme>());
+    let (margin, gap) = (t.get_margin(), t.get_gap());
+    let to = |v: f32| (v * scale).round() as usize;
+    let top = t.get_bar_height() + margin;
+    let bottom = s.h as f32 / scale - margin;
+    let tabs_x = margin + g.get_pages_column() + gap;
+    ((to(margin), to(top), to(margin + g.get_pages_column()), to(bottom)), (to(tabs_x), to(top), to(tabs_x + g.get_tabs_column()), to(bottom)))
+}
+
+// The tile area on the keyboard's screen (826 x 465 logical at 1.55) in the two placements, for a 5-page plugin whose first
+// page has 8 tabs, a 2-page plugin with no tabs and the FM fixture: two strips (`top`) take the height of the rows,
+// the two columns (`side`) take width instead and leave the tiles the whole height. Printed (ui/TABS.md has them).
+#[test]
+fn the_placements_on_the_keyboards_screen_leave_the_tiles_their_room() {
+    use crate::TabPlacement::{Side, Top};
+    let t = &all_themes()[0];
+    for (plugin, list) in plugins() {
+        let mut heights = vec![];
+        for (label, placement) in [("top", Top), ("side", Side)] {
+            let (s, _) = placed(&list, (1280, 720), 1.55, t, TabStyle::Segmented, placement);
+            let (w, h) = area(&s);
+            let g = s.ui.global::<GridState>();
+            println!("{plugin} {label}: tile area {w:.0} x {h:.0} = {:.0} (logical px), {} columns of tiles, pages column {:.0}, tabs column {:.0}", w * h, g.get_tiles().iter().filter(|t| t.y == 0.).count(), g.get_pages_column(), g.get_tabs_column());
+            shot(&s, &format!("tabs-placement-{plugin}-{label}@1.55"));
+            heights.push(h);
+            assert_eq!(g.get_layout(), if placement == Top { 0 } else { 2 }, "{plugin} {label}");
+        }
+        // 465 less the bar's 48, the margin above and below.
+        assert!((heights[1] - (465. - 48. - 12.)).abs() < 1., "{plugin}: the side arrangement leaves the tiles the full height: {}", heights[1]);
+        assert!(heights[1] >= heights[0], "{plugin}: {heights:?}");
+    }
+    // `auto` is the size rule: the pages a column on a window 560 tall or more, else two strips.
+    let (s, _) = placed(&five_pages(), (1280, 720), 1., t, TabStyle::Segmented, crate::TabPlacement::Auto);
+    assert_eq!(s.ui.global::<GridState>().get_layout(), 1);
+    let (s, _) = placed(&five_pages(), (1280, 720), 1.55, t, TabStyle::Segmented, crate::TabPlacement::Auto);
+    assert_eq!(s.ui.global::<GridState>().get_layout(), 0);
+}
+
+// The side columns take the width their longest name needs and no more than the stated share of the width (a name longer than
+// that shrinks to 70% and is then cut), a column of short names is narrower than a column of long ones, and a page
+// with no tabs has no second column.
+#[test]
+fn the_side_columns_take_only_the_width_their_names_need() {
+    use crate::TabPlacement::Side;
+    let t = &all_themes()[0];
+    let touch = |s: &Screen| s.ui.global::<Theme>().get_touch();
+    for (w, scale) in [(1280, 1.55f32), (800, 1.), (1280, 2.)] {
+        let logical = w as f32 / scale;
+        let (s, _) = placed(&five_pages(), (w, 720), scale, t, TabStyle::Segmented, Side);
+        let g = s.ui.global::<GridState>();
+        let share = s.ui.global::<Theme>().get_side_share();
+        let (pages, tabs) = (g.get_pages_column(), g.get_tabs_column());
+        println!("{logical:.0} across: pages column {pages:.0}, tabs column {tabs:.0}, at most {:.0} each", share * (logical - 12.));
+        for width in [pages, tabs] {
+            assert!(width <= share * (logical - 12.) + 1. && width >= 1.6 * touch(&s) - 1., "{width} of {logical}");
+        }
+        // "Operator 1" is longer than "Filter" and "Amp": the tabs' column is the wider of the two here.
+        assert!(tabs > pages, "the column of longer names is wider: {tabs} against {pages}");
+    }
+    // A long name is capped at the share and still shown whole where it fits at 70% (looked at in the pictures).
+    let long = json!({"parameters": [
+        p(1, "A", "A page with a very long name indeed", "knob"), p(2, "B", "A page with a very long name indeed", "knob"),
+        p(3, "C", "Short", "knob"), p(4, "D", "Short", "knob")]});
+    let (s, _) = placed(&long, (1280, 720), 1.55, t, TabStyle::Segmented, Side);
+    let g = s.ui.global::<GridState>();
+    assert!((g.get_pages_column() - s.ui.global::<Theme>().get_side_share() * (1280. / 1.55 - 12.)).abs() < 1., "capped at the share: {}", g.get_pages_column());
+    shot(&s, "tabs-side-long-name@1.55");
+    // Two pages of short names and no tabs: one column of its own width, the content right after it.
+    let (s, _) = placed(&super::grid::every_kind(), (1280, 720), 1.55, t, TabStyle::Segmented, Side);
+    let g = s.ui.global::<GridState>();
+    assert!(g.get_tabs().row_count() <= 1 && g.get_pages_column() < 0.22 * 814., "{}", g.get_pages_column());
+}
+
+// The selected tab is told by its fill in the side arrangement too: in every theme and both styles, in both columns, the
+// selected fill and an unselected one are both painted in quantity (the contrast between them is the palette's, tested above).
+#[test]
+fn the_selected_tab_is_told_by_its_fill_in_the_side_columns() {
+    use crate::TabPlacement::Side;
+    for t in &all_themes() {
+        for (style, label) in [(TabStyle::Folder, "folder"), (TabStyle::Segmented, "segmented")] {
+            for (size, scale) in [((1280, 720), 1.55), ((800, 480), 1.)] {
+                let (s, _) = placed(&five_pages(), size, scale, t, style, Side);
+                let g = s.ui.global::<Theme>();
+                let (on, off) = (g.get_tab_on(), g.get_tab_off());
+                let (pages, tabs) = side_columns(&s, scale);
+                for (what, r) in [("pages", pages), ("tabs", tabs)] {
+                    let (n_on, n_off) = (count(&s, r, on), count(&s, r, off));
+                    assert!(n_on > 400 && n_off > 400, "{} {label} {what} {size:?}@{scale}: {n_on} pixels of the selected fill, {n_off} of the unselected", t.id);
+                }
+                shot(&s, &format!("tabs-side-{}-{label}@{}x{}x{scale}", t.id, size.0, size.1));
+            }
+        }
+    }
+}
+
+// More tabs than the column holds: the tabs' column shows that it goes on (an arrow box over the cut end), scrolls to keep
+// the cursor's tab in view, and the dial walks the pages, then the tabs, then the tiles, and a press opens (never the move).
+#[test]
+fn a_side_column_that_overflows_scrolls_and_the_dial_walks_pages_then_tabs_then_tiles() {
+    use crate::nav::Action;
+    use crate::TabPlacement::Side;
+    let t = &all_themes()[0];
+    let surface = t.data.ink("surface");
+    let more = |s: &Screen, r: Box4, last: bool| -> usize {
+        let m = (0.6 * s.ui.global::<Theme>().get_touch()) as usize;
+        let b = if last { (r.0, r.3 - m + 2, r.2, r.3) } else { (r.0, r.1, r.2, r.1 + m - 2) };
+        count(s, b, surface) * 100 / ((b.2 - b.0) * (b.3 - b.1)).max(1)
+    };
+    let (mut s, mut p) = placed(&twelve_tabs(), (800, 480), 1., t, TabStyle::Segmented, Side);
+    let (_, col) = side_columns(&s, 1.);
+    assert_eq!(s.ui.global::<GridState>().get_tabs().row_count(), 12);
+    let (top, bottom) = (more(&s, col, false), more(&s, col, true));
+    println!("tabs column at the start: {top} % top, {bottom} % bottom are an arrow box");
+    assert!(top < 30 && bottom > 70, "the end that goes on says so: {top} {bottom}");
+    // The dial: the first tile, back to the tabs (on the one shown), a press, and the cursor on the last tab shows it.
+    p.act(Action::Move { pane: None, by: 1 });
+    assert_eq!(on(&s.ui), On::Tile(0));
+    p.act(Action::Move { pane: None, by: -1 });
+    assert_eq!(on(&s.ui), On::Tab(0), "back from the first tile: the tabs");
+    p.act(Action::Move { pane: None, by: -1 });
+    assert_eq!(on(&s.ui), On::Page(0), "back from the tabs: the pages");
+    p.act(Action::Move { pane: None, by: 2 });
+    p.act(Action::Move { pane: None, by: 11 });
+    s.frame();
+    assert_eq!(on(&s.ui), On::Tab(11));
+    assert_eq!(s.ui.global::<GridState>().get_tab(), 0, "moving opened nothing");
+    let (top, bottom) = (more(&s, col, false), more(&s, col, true));
+    assert!(top > 70 && bottom < 30, "the cursor's tab is scrolled into view: {top} {bottom}");
+    p.act(Action::Confirm(None));
+    assert_eq!(s.ui.global::<GridState>().get_tab(), 11, "a press opens");
+    // Arrows in the columns: left from the tiles to the tabs, left again to the pages, right back.
+    p.act(Action::Move { pane: None, by: 1 });
+    assert_eq!(on(&s.ui), On::Tile(0));
+    p.act(Action::Arrow { dx: -1, dy: 0 });
+    assert_eq!(on(&s.ui), On::Tab(11), "left from the first column of tiles: the tabs, on the one shown");
+    p.act(Action::Arrow { dx: 0, dy: -1 });
+    assert_eq!(on(&s.ui), On::Tab(10), "up and down along the tabs");
+    p.act(Action::Arrow { dx: -1, dy: 0 });
+    assert_eq!(on(&s.ui), On::Page(0), "left from the tabs: the pages");
+    p.act(Action::Arrow { dx: 1, dy: 0 });
+    assert_eq!(on(&s.ui), On::Tab(11), "right from the pages: the tabs, on the one shown");
+    p.act(Action::Arrow { dx: 1, dy: 0 });
+    assert_eq!(on(&s.ui), On::Tile(0), "right from the tabs: the tiles");
 }

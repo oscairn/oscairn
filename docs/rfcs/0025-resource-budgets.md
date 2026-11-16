@@ -129,6 +129,19 @@ voices. Now:
   declaration, not a whole instance each, as they did when the noise went the other way).
   The instance's sounds are asked of its worker once a memory reading (every 200 ticks), by its
   first node, not every tick for each part (RFC 0045's one ask per shared instance).
+- **The same for an open Performance** (2026-11-16, evening): a further part of a shared instance
+  that is open (`budget.estimate` without a folder, a plugin added, the memory committed beside a
+  load, the room a loading plugin is given) counts as in a Performance not open (`Session::furtherPart`),
+  ranked by its MIDI channel past the instance's first (the lowest, whose node counts the instance).
+  Before, it took the effect-context rule, its context's declaration plus the instance's declared
+  assets (the Sampler 0.9.2's 331,656 + 9,581,064): on the unit, TSO Carol Bells' four further
+  Sampler parts counted 9,912,720 bytes each on top of the instance's 44,134,400 (record: `sounds` 5,
+  `perContext` 0), 170.9 MB estimated where its workers held 128.4 MB. The open estimate now prices
+  them at nothing (`control-multi-sampler-load`, with that record). Open question: a Performance not
+  open is priced from all of the build's records merged (no declaration to pick one by: the most
+  memory, the fewest sounds and the largest `perContext` of any), which on the unit's records gives
+  each further part 25,141,248 bytes, one record's `perContext`; measured per sound and declaration,
+  not merged, is the likely fix.
 - **The test for "fits"** is per core. Plugins in workers render in parallel on the audio cores,
   all but one (`usableCores() - 1`, at least one: one is left to the system and the display); a
   part's chain renders one plugin after another within a block. A Performance fits when its total

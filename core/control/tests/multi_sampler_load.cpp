@@ -231,6 +231,39 @@ int main(int argc, char** argv)
             check(parts == 5 && measured == 5, "the sampler's parts measured: " + std::to_string(measured) + " of " + std::to_string(parts));
             check(e.memory + slack >= heldTogether, "the estimate is not below what the workers hold: " + megabytes(e.memory) + " against " + megabytes(heldTogether));
             check(e.memory <= heldTogether + margin, "nor more than " + megabytes(margin) + " above it: " + megabytes(e.memory) + " against " + megabytes(heldTogether));
+
+            // The same Performance open, as budget.estimate without a folder, a plugin added and a load beside it count it. The unit's
+            // TSO Carol Bells: its instance's record memory 44,134,400, sounds 5, perContext 0; each further part counted at its context's
+            // and the instance's assets' declaration (9,912,720 bytes) on top of the instance. First that record (perContext 0, five
+            // sounds), then a measurements file of an older version beside it, whose memory is read again and must change nothing.
+            const auto file = together / "home" / "measurements.json";
+            auto rewrite = [&](const char* pattern, const char* with) {
+                std::string text;
+                { std::ifstream in(file); text.assign(std::istreambuf_iterator<char>(in), {}); }
+                text = std::regex_replace(text, std::regex(pattern), with);
+                { std::ofstream out(file); out << text; }
+                return text;
+            };
+            const auto record = rewrite("(pack-holder[^}]*\"perContext\":)[0-9]+", "$010");
+            check(std::regex_search(record, std::regex("pack-holder[^}]*\"memory\":[1-9][^}]*\"perContext\":0,\"sounds\":5")), "the unit's record: memory, perContext 0, sounds 5");
+            for(int pass = 0; pass < 2; ++pass)
+            {
+                if(pass) { rewrite("\"version\":[0-9]+", "\"version\":5"); rewrite("(pack-holder[^}]*\"memory\":)[0-9]+", "$019912720"); }
+                Session t(rate, frames);
+                t.setBudget({.9, 0});
+                t.loadPerformance((together / "performance").string());
+                play(t);
+                const auto heldOpen = workers(t).first;
+                const auto open = t.estimate();
+                uint64_t instance = 0; int further = 0, guessed = 0;
+                for(const auto& c : open.plugins)
+                    if(c.plugin == holderId) { if(c.memory > instance) instance = c.memory; further += c.memory == 0; guessed += !c.measured || c.memory == 9912720; }
+                std::printf("together, open (pass %d): estimate %s, the instance %s, %d further parts at nothing, %d at a guess; the workers hold %s\n", pass, megabytes(open.memory).c_str(), megabytes(instance).c_str(), further, guessed, megabytes(heldOpen).c_str());
+                check(further == 4 && guessed == 0, "open, the instance counts once and its four further parts nothing: " + std::to_string(further) + " at nothing, " + std::to_string(guessed) + " at a guess");
+                check(open.memory + slack >= heldOpen, "open, the estimate is not below what the workers hold: " + megabytes(open.memory) + " against " + megabytes(heldOpen));
+                check(open.memory <= heldOpen + margin, "open, nor more than " + megabytes(margin) + " above it: " + megabytes(open.memory) + " against " + megabytes(heldOpen));
+                t.saveMeasurementsNow();
+            }
         }
     }
     catch(const std::exception& x) { std::fprintf(stderr, "FAIL: %s\n", x.what()); return 1; }

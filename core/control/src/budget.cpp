@@ -181,12 +181,34 @@ namespace oscairn
     // alone); a plugin not yet measured, its declaration instead of the default. An effect context
     // made from another counts its context bytes, from oscairn.memory or else effect contexts'
     // resources, since its engine's shared bytes are counted with the engine.
+    // RFC 0025, a further part of a shared instance (an open Performance's and one not open alike): nothing while its
+    // instance's measured memory held as many sounds (its parts measured together), then what a sound context was measured
+    // to add, else the plugin's word times 2.5 (plugins under-declare: the Sampler's 324 KiB context measured 433 to 753
+    // KiB); never above an instance of its own as measured, never below its word.
+    std::optional<uint64_t> Session::furtherPart(const std::optional<Measurement>& m, uint32_t rank, uint64_t declared)
+    {
+        if(m && m->memory && rank < m->sounds) return 0;
+        if(!declared) return std::nullopt;
+        const auto guess = m && m->perContext ? m->perContext : declared * 5 / 2;
+        return std::max(declared, m && m->memory ? std::min(m->memory, guess) : guess);
+    }
+
     Control::Cost Session::nodeCost(const Graph& graph, NodeId node, const std::string& name, uint32_t limit) const
     {
         const auto& host = graph.host(node);
         // RFC 0045: the CPU measured is a sound's (Session::measure), so each node sharing an instance counts its own.
-        auto c = costOf(pluginKey(graph, node), name, host.descriptor().id, limit, host.descriptor().path);
+        const auto key = pluginKey(graph, node);
+        auto c = costOf(key, name, host.descriptor().id, limit, host.descriptor().path);
         const auto declared = declaredBy(host);
+        // A part sharing an instance past its first (the lowest channel, whose node counts the instance as measure() reads it):
+        // as a Performance not open counts it, not its context's and the instance's assets' declaration on top of the instance.
+        if(const auto* context = dynamic_cast<const SoundContext*>(&host); context && !context->leads())
+        {
+            const auto rank = uint32_t(std::popcount(context->engine()->channels & ((1u << context->channel()) - 1)));
+            const auto m = measurementFor(key);
+            if(const auto x = furtherPart(m, rank, declared ? total(*declared) : m ? m->declared : 0)) c.memory = *x;
+            return c;
+        }
         std::optional<oscairn_effect_resources_t> resources;
         if(!declared) try { resources = host.effectResources(); } catch(const std::exception&) {}
         if(graph.effectSource(node) != node)
@@ -862,15 +884,8 @@ namespace oscairn
                 shares = n % seen->contexts != 0;
                 instance = measuredKey + "/" + std::to_string(n / seen->contexts);
             }
-            // A further part: none while its instance's measured memory held as many sounds (its parts measured together), then what a
-            // sound context was measured to add, else the plugin's word times 2.5 (plugins under-declare: the Sampler's 324 KiB context
-            // measured 433 to 753 KiB); never above an instance of its own as measured, never below its word.
-            if(shares && seen && seen->memory && ++further[instance] < seen->sounds) coming.back().memory = 0;
-            else if(shares && seen && seen->declared)
-            {
-                const auto guess = seen->perContext ? seen->perContext : seen->declared * 5 / 2;
-                coming.back().memory = std::max(seen->declared, seen->memory ? std::min(seen->memory, guess) : guess);
-            }
+            // A further part (furtherPart).
+            if(shares && seen) if(const auto x = furtherPart(seen, ++further[instance], seen->declared)) coming.back().memory = *x;
         }
         return estimateOf(coming, playing, its);
     }

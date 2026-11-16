@@ -162,6 +162,8 @@ pub struct App {
     retro: f64,
     /// The transport is playing (the `transport` topic): the meters are asked while it does.
     playing: bool,
+    /// An ask for what undo names was dropped while one was out: asked again when it answers.
+    history_again: bool,
     flush: slint::Timer,
     /// performance.info and graph.get refused while the engine was busy: asked again at the next meters.
     stale: bool,
@@ -435,6 +437,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             meters_asleep: false,
             meter_every: Duration::from_millis(100),
             playing: false,
+            history_again: false,
             retro: 0.,
             flush: slint::Timer::default(),
             stale: false,
@@ -570,6 +573,10 @@ impl App {
         let same = std::mem::discriminant(&request);
         if self.client.waiting(|r| std::mem::discriminant(r) == same).is_none() {
             self.send(request, method, json!({}));
+        } else if matches!(request, Request::History) {
+            // What undo names changed while the answer to an earlier ask was on its way: that answer may predate it, so
+            // the answer asks again (an edit that is two steps, a drag, is the case).
+            self.history_again = true;
         }
     }
 
@@ -838,8 +845,14 @@ impl App {
                 return;
             }
             Request::Params(r) => {
+                // A value this UI set is an edit the engine can undo, and the engine does not always say so with a
+                // params.changed of its own: what undo names is asked when the set is answered.
+                let set = matches!(r, params::Request::Set) && result.is_ok();
                 if self.on_params(|c| c.reply(r, result)) {
                     self.ask_performance();
+                }
+                if set && has_actions(self.screen) {
+                    self.ask(Request::History, "edit.history");
                 }
                 return;
             }
@@ -875,6 +888,9 @@ impl App {
             Request::History => {
                 self.history = topbar::History::read(&r);
                 self.show_bar();
+                if std::mem::take(&mut self.history_again) {
+                    self.ask(Request::History, "edit.history");
+                }
             }
             Request::Save => {
                 self.say("Performance saved.");

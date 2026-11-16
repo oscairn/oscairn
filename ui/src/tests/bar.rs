@@ -347,6 +347,36 @@ fn record_and_capture_are_on_the_bar() {
     png(&f.screen, "bar-record");
 }
 
+// A second change that comes while the answer to what undo names is on its way is not lost: the answer may predate it, so it
+// is asked again (a drag that sets two parameters is two undo steps, and the bar must name the last).
+#[test]
+fn a_change_while_undo_is_being_read_asks_again() {
+    let mut f = play_on_the_shell("bar-again", json!({"id": "p1", "name": "Grand", "unsaved": false}), play_graph());
+    let note = |f: &mut Fixture| {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "graph.changed", "params": {}})));
+        f.pump();
+    };
+    note(&mut f);
+    // graph.changed asks the Performance and what undo names; the history answer is held back.
+    let mut history = None;
+    for _ in 0..3 {
+        let r = f.engine.request();
+        match r["method"].as_str().unwrap() {
+            "edit.history" => history = Some(r),
+            "performance.info" => f.reply(&r, json!({"result": {"id": "p1", "name": "Grand", "unsaved": false}})),
+            "graph.get" => f.reply(&r, json!({"result": play_graph()})),
+            other => panic!("{other}"),
+        }
+    }
+    let first = history.expect("what undo names was asked");
+    note(&mut f); // another change while it is out: the ask is dropped, but remembered
+    f.reply(&first, json!({"result": {"undo": "Decay", "redo": ""}}));
+    let r = request_in(&mut f, "edit.history", &json!({"undo": "Sustain", "redo": ""}), &play_graph());
+    assert_eq!(r["method"], "edit.history", "asked again when the first answered");
+    f.reply(&r, json!({"result": {"undo": "Sustain", "redo": ""}}));
+    assert_eq!(labels(&f)[0].0, "Undo Sustain");
+}
+
 // A short title leaves its room to the actions: the bar folds them into More only when they do not fit with the title as
 // it is written (up to the comfortable room), measured, not whenever the comfortable room would not be left.
 #[test]

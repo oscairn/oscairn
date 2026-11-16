@@ -88,9 +88,9 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     let mut g = graph();
     ui.global::<crate::Bar>().invoke_action(3); // Scene
     assert_eq!((ui.get_screen(), title(&ui)), (8, "Scene setup".to_string()), "the scene's name comes with its graph");
-    for _ in 0..4 {
-        // The screen asks again for what it shows: the Performance, the graph, the history.
-        let r = f.engine.request();
+    // The screen asks again for what it shows: the Performance, the graph, the history (and what undo names again when a
+    // change came while the first ask was out).
+    while let Some(r) = f.engine.try_request(std::time::Duration::from_millis(150)) {
         let result = match r["method"].as_str().unwrap() {
             "graph.get" => g.clone(),
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),

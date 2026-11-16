@@ -105,10 +105,11 @@ int main(int argc, char** argv)
             // A click plays as the window's input: the KeyLab's reaches Any and KeyLab only, not
             // Keyboard only; the on-screen keyboard's reaches Any and Keyboard only, not KeyLab only.
             {
-                // The mouse with the window on screen, over every window: JUCE's keyboard hit-tests
-                // through the window, so one off screen or covered would hear no click.
+                // The mouse with the window on screen. Not set always on top: the window's own timer
+                // (KeyboardWindow.cpp) puts that back to whether the process is the foreground one,
+                // which a test's is not, within 250 ms, and the window changing level is a change of
+                // active window that lets go of the key held (the flaky "key shows down" failure).
                 auto* window = keyboards.window("KeyLab 61");
-                window->setAlwaysOnTop(true);
                 window->setTopLeftPosition(juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea.getPosition());
                 settle();
                 auto& board = keyLabKeys->keys().keyboard();
@@ -126,7 +127,6 @@ int main(int argc, char** argv)
                 check(keyLabKeys->keys().down(64) && keyLabKeys->keys().velocity(64) > .5f, "the key shows down, low on it loud");
                 board.mouseUp(down);
                 check(wait([&] { return !holds(3, 64); }), "let go, the KeyLab's key is up");
-                window->setAlwaysOnTop(false);
             }
             check(quiet(), "the parts fall quiet");
             screenKeys->keys().press(64, true);

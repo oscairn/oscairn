@@ -1884,6 +1884,16 @@ pub fn open_piano(input: &str) {
     with_app(|a| a.open_piano(input))
 }
 
+/// Tests: the plugin scanner's answer handed to the screens, as start_scan's thread hands it through
+/// the event loop, which the headless tests do not have.
+#[cfg(test)]
+pub fn plugins_found(found: Vec<crate::scan::Plugin>) {
+    with_app(|a| {
+        a.on_routing(|r| r.plugins(found.clone()));
+        a.on_chain(|c| c.plugins(found))
+    })
+}
+
 /// The plugin folder the command line gave.
 pub fn set_plugin_dir(dir: Option<String>) {
     PLUGIN_DIR.with(|d| *d.borrow_mut() = dir);

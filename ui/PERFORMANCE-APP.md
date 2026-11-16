@@ -6,7 +6,7 @@ shell, so nothing in it hands the display to JUCE. This file is the checklist; a
 `PartsView.cpp`, `PartsModel.cpp`, `ParameterGrid.cpp`, and what they use from `Engine.cpp`,
 `Theme`, `Profile`, the knob and controller code, Learn.
 
-## State (2026-11-15, branch rust-app-finish)
+## State (2026-11-15, branch rust-app-real)
 
 Of the 95 rows, 93 are ticked, 2 are n/a (B7, C17: the JUCE app has neither), none is open. A ticked row is built in
 the Rust shell and tested against a fake engine; some carry a recorded difference or a part left out, named in the
@@ -21,13 +21,18 @@ the selected line of tiles for knobs bound `row:N` (F6: a `controllers.view` `ro
 value icons in `params.list` (`uiTabs`, `uiTab`, `valueIcons`, provisional), the plugin's own view surface (F9), and
 what are not engine calls at all: the plugin scanner and the on-screen keyboards.
 
-**Never run against the real engine or on a device, so far: everything in this list.** Every test drives the fake
-engine (the test against the real engine, `ui-rust` in CMake, was written before these screens and has not been run for them), and the request
-shapes of the splits, lanes, presets and library filters are read from docs/control-protocol.md and
-`RemoteControl`, not seen answered. Nothing has run on the keyboard's screen (KMS), under a touch panel, with its
-knobs and dial, or on a desktop window other than the headless renderer. Not started: the text keyboard as an
+**Run against the real engine once (2026-11-15, ui/REAL-ENGINE.md), never on a device.** On a Mac with the null
+audio device, every screen of the app but the playing keyboard was opened and rendered headless by the real shell, and most of their actions
+were done once through the same callbacks touch and the dial use, each checked in the engine's own state and undone
+(the harness: `src/tests/real_engine.rs`, ignored by default). Five places where the UI and its fake engine had the
+protocol wrong were found and fixed (edits that commit nothing send no graph.changed: scenes, controls, live levels;
+a plugin's actions named a place, not the plugin); ten engine-side problems are listed there for a decision (among
+them: saves refused after a scene select until a load, no graph.changed after another client's load). Not exercised:
+anything that sounds or plays notes (no audio, no MIDI), the Setlist, the playing keyboard, Learn's assignment, some
+menus; the real desktop window opened and ran, but this session could neither capture nor drive it. Nothing has run on
+the keyboard's screen (KMS), under a touch panel, or with its knobs and dial. Not started: the text keyboard as an
 overlay on the lower half of a hardware screen (owner requirement below). This is not a finished app. Before the
-JUCE app can hand over: run it against the real engine and on the device, with every row above by touch and by the
+JUCE app can hand over: run it on the device, with every row above by touch and by the
 knobs, and the unit's own timing (the screens' redraw cost, the meters' poll); build the text keyboard overlay; decide
 the owner's open questions (C20, the part's key, is an addition the JUCE page does not have; the `row:N` request;
 plugin views); and only then remove the JUCE Performance screens.

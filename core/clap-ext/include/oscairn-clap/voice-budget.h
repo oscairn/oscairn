@@ -37,7 +37,8 @@ extern "C" {
  *   set_limits [audio-thread, never during process()]: the voices the instance may keep from the
  *   next process() on (0: as many as its pool holds), and the settings of up to
  *   OSCAIRN_VOICE_BUDGET_MAX_CONTEXTS contexts. The host calls it between blocks whenever any of
- *   it changes; the plugin copies what it needs. Past the limit, the plugin gives up voices at
+ *   it changes; the plugin copies what it needs. It does not wake a sleeping plugin: the limits
+ *   apply on the next block that runs. Past the limit, the plugin gives up voices at
  *   the start of the next block, in its own order; a new note past it takes a voice the same way.
  *
  *   active_voices [audio-thread, after process()]: the voices sounding now (fading ones included),

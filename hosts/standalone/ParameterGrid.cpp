@@ -230,7 +230,7 @@ namespace oscairn::standalone
             if(p.view != view || !view) continue;
             if(p.field == OSCAIRN_FIELD_ALGORITHM) f.algorithm = int(i);
             if(p.field == OSCAIRN_FIELD_FEEDBACK) f.feedback = int(i);
-            if(p.index == 0) continue;
+            if(p.index == 0 || p.index > 8) continue; // operators are 1 to 8; an element's or a zone's index goes higher (draft 6)
             if(f.operators.size() < p.index) f.operators.resize(p.index);
             auto& op = f.operators[p.index - 1];
             switch(p.field)

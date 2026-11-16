@@ -21,6 +21,16 @@ extern "C" {
  * consumed. Voices, sustain and expression retain their owning context.
  * discard fails while selected, queued, sounding, or retaining a tail. IDs are
  * never reused during an instance lifetime. Unload invalidates all IDs.
+ * Wake contract: after a block that returned CLAP_PROCESS_SLEEP the host does not call process
+ * until something comes for the plugin: audio input that is not silent, an event, or a transport
+ * change. It also runs process on the block after an accepted select, a queued choke_retiring,
+ * request_process or request_flush from the plugin, a host command (a parameter set, a gesture,
+ * an event sent outside a block) or a panic, even if the last status was CLAP_PROCESS_SLEEP.
+ * set_limits (oscairn.voice-budget) does not wake a sleeping plugin; it is applied on the next
+ * block that runs. A plugin that owes CLAP_EVENT_NOTE_ENDs after a state load (notes it ended
+ * while asleep) calls request_process so it gets a block to send them in. While asleep the host
+ * does not call process, and steady_time keeps counting the skipped frames. A plugin in a worker
+ * may also not be called at all while asleep with silent input; the same wake rules apply.
  * prepare_preset (draft 5, optional) builds a patch from one of the presets the plugin lists
  * through CLAP preset discovery, with the same rules as prepare.
  * No format-level claim is made for plugins not implementing this extension.

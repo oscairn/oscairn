@@ -29,7 +29,7 @@ Checked when built and tested; the sections below say how.
 - [ ] 3. Auto-binding on open, the prompt when it is not obvious, `sections.auto`
 - [ ] 4. Sound select within a section: its category, favorites, the section display, the
       section's default Sound, an empty section's on/off creating a part, and locked sections
-- [ ] 5. `oscairn.ui` draft 7: the organ, piano and effect roles below; a test organ plugin
+- [ ] 5. `oscairn.ui` draft 8: the organ, piano and effect roles below; a test organ plugin
       declaring them
 - [ ] 6. Effects per section: insertion effects on and off, their amount, and sends to the
       Performance's reverb and variation buses
@@ -397,7 +397,7 @@ The section vocabulary of `functions`, by where each acts ([next section](#what-
 | `takePositions` | button | Sets each control of the section's groups to its physical position, ending pickup ([shared section controls](#shared-section-controls)) |
 | `select:<slot>` | button | Picks which slot of a [shared group](#shared-section-controls) its groups act on |
 | `level1` … `level9` | fader, knob | Entry *n* of the part's slider set, its drawbar or element level, a fader in the set's direction (RFC 0042) |
-| A role's name (`cutoff`, `resonance`, `attack`, `release`, `lowGain`, `midGain`, `highGain`, `level`, `mix`, and draft 7's below) | knob, fader, encoder, button | The part's parameter with that role |
+| A role's name (`cutoff`, `resonance`, `attack`, `release`, `lowGain`, `midGain`, `highGain`, `level`, `mix`, and draft 8's below) | knob, fader, encoder, button | The part's parameter with that role |
 | `effect:insertion-a`, `effect:insertion-b` | button | Switches the part's node with that node role on and off |
 | `effectAmount:insertion-a`, `effectAmount:insertion-b` | knob | That node's `mix` role |
 | `send:reverb`, `send:variation` | knob | The part's send level into the bus whose chain holds a node with that role |
@@ -474,7 +474,7 @@ Each part property and role, decided per row:
 | Section volume | Part property: `level` | `Part::level`, a live gain | Nothing |
 | Octave | Part property: every zone's `transpose`, moved together by 12 | `NoteZone::transpose` | Nothing; held notes keep the pitch they started at, as a zone edit does now (to check in the engine when step 1 builds) |
 | Split and layer buttons | Part property: zones | `PartInput::zones`, `parts.input` | Nothing in the format; a device default split key ([below](#split-and-layer-on-one-keybed)) |
-| Drawbars or element levels 1 to 9, direction | Declared: RFC 0042's slider set, `level1` to `level9`, and its direction | `LEVEL_1` to `LEVEL_8`; the ninth, the direction and the part's `roles` not built (RFC 0042's draft 6 and format change) | Nothing beyond RFC 0042 |
+| Drawbars or element levels 1 to 9, direction | Declared: RFC 0042's slider set, `level1` to `level9`, and its direction | `LEVEL_1` to `LEVEL_8`; the ninth, the direction and the part's `roles` not built (RFC 0042's draft 7 and format change) | Nothing beyond RFC 0042 |
 | Percussion on, level, decay, harmonic | Declared role | None | `PERCUSSION`, `PERCUSSION_LEVEL`, `PERCUSSION_DECAY`, `PERCUSSION_HARMONIC` |
 | Rotary slow/fast, stop | Declared role | None | `ROTARY_SPEED`, `ROTARY_STOP` |
 | Vibrato/chorus on, type | Declared role | None | `VIBRATO_CHORUS`, `VIBRATO_CHORUS_TYPE` |
@@ -488,10 +488,10 @@ Each part property and role, decided per row:
 | Effect sends | Part property: `sends`, to the bus whose chain holds a `reverb` or `variation` node | `parts.send` | Nothing |
 | Master effects | Not a section's: the Performance's master bus, played by `fixed` or assign controls as now | `master` | Nothing |
 
-### The roles to add: `oscairn.ui` draft 7
+### The roles to add: `oscairn.ui` draft 8
 
-Draft 7, after RFC 0042's draft 6 (if both build in one change, one draft). The header is not
-edited by this RFC. New `oscairn_role` values, continuing after draft 6's `LEVEL_9` (36):
+Draft 8, after RFC 0042's draft 7 (if both build in one change, one draft). The header is not
+edited by this RFC. New `oscairn_role` values, continuing after draft 7's `LEVEL_9` (36):
 
 | Role | Value | Meaning |
 | --- | --- | --- |
@@ -510,7 +510,7 @@ Rules, in the header's own terms: a stepped role's values run from off or slow a
 button playing a two-value role toggles it; a button playing a stepped role of more values steps
 to the next and wraps. A plugin whose percussion is one parameter of several values (off, second,
 third) declares it as `PERCUSSION` with its value texts, and the section's `percussion` button
-then steps it; to check against the first organ plugin. A host that does not know draft 7
+then steps it; to check against the first organ plugin. A host that does not know draft 8
 reads these as `NONE`, as the header already says for unknown values. A Sound can give these
 roles to a plugin that does not declare them, through its part's `roles` (RFC 0042), so a
 converted organ Sound's percussion and rotary reach the section without the plugin changing.
@@ -896,7 +896,7 @@ or a control moves (`controllers`), and clients read it again then.
 | 2. Roles and RFC 0042's mechanisms | Declared-role functions with today's roles; dark controls; guessed roles; shared groups and `select:`; RFC 0042's slider set, direction, pickup and places on section controls; `takePositions` | `control-physical-controls`: a synth section's `cutoff` knob plays the bound part's cutoff role, whatever plugin; a part with no cutoff role leaves it dark and a move changes nothing; a rotary role on an effect after the instrument is found. With the Oscairn Organ and a part whose `roles` declare its drawbars as a reversed slider set (RFC 0042): the nine section faders play them, reversed; pickup holds a fader until it reaches the value and `places` reports it meanwhile; the shared sliders in `element` mode and the section faders drive the same parameters; a part whose `roles` name a parameter for `cutoff` plays it in place of the plugin's own cutoff role; a plugin with no declared roles gets its guessed cutoff, reported `guessed`; `takePositions` sets each drawbar to its fader's position and a following move plays at once, undone by one `edit.undo` |
 | 3. Auto-binding | The rule, the sheet, the compact list, the panel's blink and confirm, the banner, `sections.auto` | A new `control-sections` test: tables covering one obvious pair, two candidates, a part matching two sections, a part with no `from`, an audio part, and list order changed with the same result; the prompt is not opened while the transport runs at `instrument`; `desktop-gaps` renders the sheet at 1024 x 600 and the compact list at 320 x 240 |
 | 4. Sound select | Category browse, favorites first, subcategories, the default Sound, `sections.create`, `sections.setDefault`, locked sections | `control-library`: the `sound` encoder steps tagged Sounds favorites first and loads each into the bound part keeping its zones, level and binding; an empty section's `on` creates a bound part with the default; over the budget it is refused naming the shortfall. With a locked organ section: a new Performance has its organ part; loading a pad into it, removing it and unbinding it are refused naming the section; on the desktop the same Performance allows all three |
-| 5. Draft 7 roles | The roles in `ui.h` as draft 7; `roleName` and the role parser know them; a test organ plugin declares percussion, rotary, vibrato/chorus and drive | `control-physical-controls`: each section button toggles or steps its role's parameter; a draft-5 plugin reads as before; an unknown role value reads as none |
+| 5. Draft 8 roles | The roles in `ui.h` as draft 8; `roleName` and the role parser know them; a test organ plugin declares percussion, rotary, vibrato/chorus and drive | `control-physical-controls`: each section button toggles or steps its role's parameter; a draft-5 plugin reads as before; an unknown role value reads as none |
 | 6. Effects per section | `effect:`, `effectAmount:` and `send:` functions | `control-physical-controls`: the button switches the part's `insertion-a` node off and on, draining as `graph.enable` does; `send:reverb` moves the part's send into the bus with a `reverb` node; with no such node, dark |
 | 7. Play and feedback | The section row on panel and compact surfaces; lights and displays sent where a group's `midi` has `feedback: true` | `desktop-shell`: Play on the test profile in every built-in theme and both input modes, keyboard alone reaching every section control; a controller profile with a section's lights gets each light's state on its output when the state changes |
 | 8. Elsewhere | Labels on the desktop and on boards without the slot; a controller profile with a section | Opening a Performance saved on the test profile on the desktop shows the labels and saves them back unchanged; on a second test profile with only `piano` and `synth`, the organ binding is kept and the prompt offers that part for an unbound section; a controller profile with an `organ` section drives the bound part beside the device's |

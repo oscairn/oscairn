@@ -178,7 +178,7 @@ development; rebuild against the current headers.
 
 | Extension | Why | Reference | Bundled example |
 | --- | --- | --- | --- |
-| Editor hints (`oscairn.ui/draft-5`) | Puts the right parameters first on small screens and on the physical knobs, and draws envelopes, key maps and FM operator views to drag | [ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md) | Basic Synth (cutoff and level, its envelope as an ADSR view), Delay (Wet is its `mix`) |
+| Editor hints (`oscairn.ui/draft-6`) | Puts the right parameters first on small screens and on the physical knobs, and draws envelopes, key maps and FM operator views to drag | [ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md) | Basic Synth (cutoff and level, its envelope as an ADSR view), Delay (Wet is its `mix`) |
 | Declared memory (`oscairn.memory/draft`) | A device near its memory limit refuses the plugin before its large allocation, and a worker gets a memory limit that fits it | [memory](https://github.com/oscairn/oscairn-clap/blob/main/docs/memory.md) | KICK memory test fixture |
 | Native sound contexts (`oscairn.sound-contexts/draft-5`) | Multitimbral playing and instant switching: prepared sounds in one instance (up to the plugin's capacity, at most 256; the SDK's default is 8), each MIDI channel choosing one, held notes keeping theirs, presets prepared while playing | [sound-contexts](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-contexts.md), SDK [sound-contexts-plugin](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-contexts-plugin.md) | Basic Synth, Legacy Sampler |
 | Snapshots prepared beside (`oscairn.sound-snapshots/draft-4`) | Instant Performance changes without loading a snapshot into an instance; tails ringing out through the outgoing Performance's effects; parts sharing one instance | [sound-snapshots](https://github.com/oscairn/oscairn-clap/blob/main/docs/sound-snapshots.md) | Basic Synth |
@@ -373,6 +373,36 @@ declares no role gets roles guessed from exact parameter names, which misses mos
 declaring any role turns the guessing off for its other parameters, so declare every role it has.
 Every parameter stays reachable whatever its hint. The fields, the drafts and the view rules:
 [ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md).
+
+### Pages, tabs and value icons
+
+Draft 6 of `oscairn.ui` lets a plugin declare more than hints. With `tab_count`, `tab` and
+`param_tab` it names and orders its own pages and tabs (two levels: pages, and under each a row of
+tabs) and says which one each parameter is on, whatever its module path; with `value_icon` it names
+an icon, from a closed set of waveform shapes the host draws in its own style, for each value of a
+stepped parameter. All four are optional members after `seconds`, and a plugin gives names and
+ids, never a look.
+
+**Oscairn does not use them yet.** Both CLAP hosts ask for draft 6 first, then 5, 4 and 3, but read
+a draft 6 table only through the members of draft 5: the pages and tabs are still made from the
+module paths and the icons are still guessed from a value's text where it names a waveform. Declare
+them now and they take effect when the host draws them; nothing breaks before. The rules, so you
+can declare them correctly:
+
+- Entries are `oscairn_ui_tab_t` (an `id`, a `parent`, a name of at most 63 bytes). A page has
+  `parent` 0; a tab names its page. Ids are nonzero, unique and stable across rescans. The host
+  leaves out an entry with a bad id, an empty name or a parent that is not a page, and reads at
+  most 16 pages and 16 tabs under each.
+- A parameter on a tab is drawn on that tab; on a page itself, above its tabs. A page with fewer
+  than two tabs is drawn without tabs. A parameter you leave out, or a plugin that declares
+  nothing, is placed from its module path as today, so declaring is never required.
+- `value_icon` is asked only for stepped parameters of at most 128 values. Once any value has an
+  icon, the host guesses none for the others.
+- One table may answer the draft 6, 5, 4 and 3 IDs: a host reads only the members its draft has.
+  Answer only the draft 6 ID if you want no host older than it.
+
+The fields and rules in full:
+[ui](https://github.com/oscairn/oscairn-clap/blob/main/docs/ui.md#pages-and-tabs-tab_count-tab-param_tab-draft-6-each-may-be-null).
 
 ### Rich views for Oscairn's engines
 

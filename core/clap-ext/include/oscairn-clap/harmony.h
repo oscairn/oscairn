@@ -18,7 +18,8 @@
  *    event-registry extension gets an oscairn_event_harmony in the first block it processes
  *    and in each block where anything in oscairn_harmony_t changes, at the sample of the
  *    change: the sample of the note that changed the chord, before that note. A plugin that
- *    does not ask never gets one.
+ *    does not ask never gets one. Harmony events alone do not wake a plugin that returned
+ *    CLAP_PROCESS_SLEEP: it receives the current harmony with the next block that does wake it.
  *  - The host extension OSCAIRN_EXT_HARMONY, on the main thread: the harmony as of the last
  *    event the host delivered, so a plugin queries the event space to read it this way too.
  *

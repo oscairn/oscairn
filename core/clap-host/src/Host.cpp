@@ -655,6 +655,7 @@ struct Host::Impl {
             throw std::runtime_error("Incomplete CLAP plugin interface");
         s.params = static_cast<const clap_plugin_params_t*>(s.plugin->get_extension(s.plugin, CLAP_EXT_PARAMS));
         s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI));
+        if (!s.ui) s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI_DRAFT_5)); // its prefix: no tabs or icons (not read yet)
         s.uiSeconds = s.ui != nullptr;
         if (!s.ui) s.ui = static_cast<const oscairn_plugin_ui_t*>(s.plugin->get_extension(s.plugin, OSCAIRN_EXT_UI_DRAFT_4)); // its prefix: no seconds()
         s.uiViews = s.ui != nullptr;
@@ -764,7 +765,8 @@ struct Host::Impl {
             const bool field = (f >= OSCAIRN_FIELD_DELAY && f <= OSCAIRN_FIELD_RELEASE) || (f >= OSCAIRN_FIELD_LEVEL_0 && f <= OSCAIRN_FIELD_LEVEL_8) ||
                                (f >= OSCAIRN_FIELD_TIME_1 && f <= OSCAIRN_FIELD_RATE_8) || (f >= OSCAIRN_FIELD_KEY_LOW && f <= OSCAIRN_FIELD_VELOCITY_CURVE) ||
                                (f >= OSCAIRN_FIELD_ALGORITHM && f <= OSCAIRN_FIELD_FIXED);
-            const bool inView = hint.view && field && hint.index <= 8 && (f != OSCAIRN_FIELD_ALGORITHM || (stepped && values >= 1 && values <= 128));
+            const uint32_t last = f >= OSCAIRN_FIELD_ALGORITHM ? 8 : 32; // an operator's index is 1 to 8, an element's or a zone's to 32 (draft 6)
+            const bool inView = hint.view && field && hint.index <= last && (f != OSCAIRN_FIELD_ALGORITHM || (stepped && values >= 1 && values <= 128));
             p.view = inView ? hint.view : 0; p.field = inView ? f : 0; p.index = inView ? hint.index : 0;
             readSeconds(p, values);
             if (p.field != OSCAIRN_FIELD_ALGORITHM || !ui->algorithm) continue;

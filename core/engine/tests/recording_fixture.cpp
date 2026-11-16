@@ -7,7 +7,7 @@
 // output. At init it asks the host's extensions everything they answer (thread check, event spaces, note dialects,
 // a timer, a callback) and keeps the answers' hash as its read-only parameter 3. It sleeps when a block brings nothing.
 // Note input 0 takes CLAP notes, note input 1 MIDI only, so the host translates both ways; its time parameter's texts
-// ("12.5 ms", "1.2 s") are what the host reads seconds from (oscairn.ui draft 4, without seconds()).
+// ("12.5 ms", "1.2 s") are what the host reads seconds from (oscairn.ui draft 6 with seconds() null, which reads as draft 4's).
 // It also has native sounds (oscairn.sound-contexts draft 5 with their own state, sound-snapshots draft 4 with a
 // ring-out buffer), effect contexts (two), presets inside it ("first" loads, anything else is refused without a word),
 // and a state that refuses bytes not its own, logging why; a sound's name may fill its 64 bytes without a NUL.
@@ -118,7 +118,13 @@ namespace
         if(id == 2) { *h = {OSCAIRN_WIDGET_SLIDER, 2, CLAP_INVALID_ID, 1, OSCAIRN_ROLE_NONE, 1, OSCAIRN_FIELD_ATTACK, 0}; return true; }
         return false;
     }
-    const oscairn_plugin_ui_t ui{hint, nullptr, nullptr}; // offered as draft 4: no seconds(), so the host reads the texts
+    // Draft 6's four new members mark the hash when called, which no host does yet: a host that read them would differ from the recording.
+    uint32_t tabCount(const clap_plugin_t* p) { fold(self(p).hash, uint32_t(0x7ab5)); return 0; }
+    bool tab(const clap_plugin_t* p, uint32_t, oscairn_ui_tab_t*) { fold(self(p).hash, uint32_t(0x7ab6)); return false; }
+    bool paramTab(const clap_plugin_t* p, clap_id, uint32_t*) { fold(self(p).hash, uint32_t(0x7ab7)); return false; }
+    bool valueIcon(const clap_plugin_t* p, clap_id, double, uint32_t*) { fold(self(p).hash, uint32_t(0x7ab8)); return false; }
+    // Offered as draft 6 with seconds() null, so the host reads the value texts as it does for a draft 4 table.
+    const oscairn_plugin_ui_t ui{hint, nullptr, nullptr, tabCount, tab, paramTab, valueIcon};
     void onTimer(const clap_plugin_t* p, clap_id id) { fold(self(p).init, id); }
     const clap_plugin_timer_support_t timers{onTimer};
 
@@ -253,7 +259,7 @@ namespace
         if(!std::strcmp(id, CLAP_EXT_PARAMS)) return &params;
         if(!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &audio;
         if(!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &notes;
-        if(!std::strcmp(id, OSCAIRN_EXT_UI_DRAFT_4)) return &ui;
+        if(!std::strcmp(id, OSCAIRN_EXT_UI)) return &ui;
         if(!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &timers;
         return nullptr;
     }

@@ -43,13 +43,26 @@ extern "C" {
  *   zero; it holds at the end of segment n - 1 until the note ends, and segment n is its
  *   release.
  * - A key or velocity map: map fields. Each index is a zone (an element's or a layer's key
- *   and velocity range); the breakpoint, depths and curves scale a level across the keys
+ *   and velocity range, 1 to 32); the breakpoint, depths and curves scale a level across the keys
  *   (DX7's keyboard level scaling, with the curves' value texts saying their shape: "-LIN",
  *   "+EXP"); velocity depth and curve scale it by velocity. A host lays key parameters across
  *   their ranges, as their value texts name the keys.
  *
  * A host draws a view where its parameters' tiles are, beside them: views add a way to edit,
  * they never take a parameter's tile or physical control away.
+ *
+ * A plugin may also name and order its own pages and tabs: two levels, as a host draws them (a
+ * first level of pages, and under each a second level, a row of tabs), each with a display
+ * name, and say which page or tab each parameter is on, whatever its CLAP module path and its
+ * place in the parameters' order. The host draws tabs in one style of its own, themed with the
+ * rest of its interface: a plugin says what the tabs are, never how they look. A plugin that
+ * declares none, and a parameter it leaves out, get the host's own pages and tabs from the
+ * module paths: the first level of a path is a page, the second a tab.
+ *
+ * A stepped parameter's values may each name an icon from a closed set of the host's own
+ * (a waveform's shape, for an oscillator's or an LFO's Wave): the host draws the icon in its
+ * own style, beside or instead of the value's text. A plugin gives no picture, only which icon;
+ * a host that does not know it, or a value without one, draws as it would without.
  *
  * Hints only shape the editor; every parameter stays reachable whatever its hint. A host
  * that does not know this extension ignores it, and a parameter without a hint is drawn as
@@ -60,11 +73,19 @@ extern "C" {
  * ignores this extension when param_hint is null.
  *
  * Draft 4 added the view, field and index at the end of the hint, and algorithm(); draft 5
- * added seconds(). Oscairn still reads a draft 4 extension, without seconds() (an envelope's
- * times then come from value texts with units, "31 ms" or "1.2 s", or are drawn by each
- * parameter's range), and a draft 3 one, without views.
+ * added seconds(); draft 6 added tab_count(), tab(), param_tab() and value_icon(), and left the
+ * hint as it was. Oscairn still reads a draft 5 extension, without tabs and icons (pages and
+ * tabs then come from the module paths, and an icon from a value's text where it names a
+ * waveform), a draft 4 one, without seconds() (an envelope's times then come from value texts
+ * with units, "31 ms" or "1.2 s", or are drawn by each parameter's range), and a draft 3 one,
+ * without views. A draft 6 table is a draft 5 table with members after its last, so a plugin
+ * may return it for the older IDs as well: a host reads only the members its draft has. Draft 6
+ * also lets an element's or a zone's index go to 32 (an operator's stays 1 to 8): a draft 5 host
+ * keeps a field only with an index up to 8 and ignores the others, so a view with more elements
+ * or zones shows its first eight there, and every parameter stays a tile.
  */
-static const char OSCAIRN_EXT_UI[] = "oscairn.ui/draft-5";
+static const char OSCAIRN_EXT_UI[] = "oscairn.ui/draft-6";
+static const char OSCAIRN_EXT_UI_DRAFT_5[] = "oscairn.ui/draft-5";
 static const char OSCAIRN_EXT_UI_DRAFT_4[] = "oscairn.ui/draft-4";
 static const char OSCAIRN_EXT_UI_DRAFT_3[] = "oscairn.ui/draft-3";
 
@@ -156,6 +177,20 @@ enum oscairn_field
     OSCAIRN_FIELD_FIXED = 102,         /* two values: ratio, or a fixed frequency */
 };
 
+/* The icons a value may name: a waveform's shape. Values a host does not know mean NONE. */
+enum oscairn_icon
+{
+    OSCAIRN_ICON_NONE = 0,
+    OSCAIRN_ICON_SINE = 1,
+    OSCAIRN_ICON_TRIANGLE = 2,
+    OSCAIRN_ICON_SAW = 3,           /* a ramp up, then a drop */
+    OSCAIRN_ICON_SAW_DOWN = 4,      /* a ramp down, then a jump up; the same wave as SAW upside down */
+    OSCAIRN_ICON_SQUARE = 5,        /* half high, half low */
+    OSCAIRN_ICON_PULSE = 6,         /* a narrow pulse, high for a quarter of the cycle or less */
+    OSCAIRN_ICON_NOISE = 7,
+    OSCAIRN_ICON_SAMPLE_AND_HOLD = 8, /* random steps */
+};
+
 typedef struct oscairn_param_hint
 {
     uint32_t widget;    /* enum oscairn_widget; values a host does not know mean AUTO */
@@ -166,7 +201,8 @@ typedef struct oscairn_param_hint
     /* Draft 4: */
     uint32_t view;      /* nonzero: the rich view this parameter is part of, with every parameter of the same view */
     uint32_t field;     /* enum oscairn_field: its place in the view */
-    uint32_t index;     /* whose field it is, 1 to 8: an operator's, an element's or a zone's; 0: the view's own */
+    uint32_t index;     /* whose field it is: an operator's, 1 to 8; an element's or a zone's, 1 to 32 (draft 6; a draft 5
+                           host draws only 1 to 8 and ignores a field with a larger index); 0: the view's own */
 } oscairn_param_hint_t;
 
 /* One algorithm of an FM operator view: which operators modulate which, and which are heard.
@@ -178,6 +214,14 @@ typedef struct oscairn_fm_algorithm
     uint8_t feedback_from; /* feedback runs from this operator back into feedback_to; 0: none */
     uint8_t feedback_to;   /* the same operator: self feedback */
 } oscairn_fm_algorithm_t;
+
+/* One page or tab of the editor, from tab(). Ids are the plugin's own and nonzero. */
+typedef struct oscairn_ui_tab
+{
+    uint32_t id;     /* unique among all the entries */
+    uint32_t parent; /* 0: a page; else the id of a page, and this is a tab under it */
+    char name[64];   /* UTF-8, NUL-terminated: the display name, at most 63 bytes */
+} oscairn_ui_tab_t;
 
 typedef struct oscairn_plugin_ui
 {
@@ -194,6 +238,32 @@ typedef struct oscairn_plugin_ui
      * value of a stepped parameter of at most 128 values, else at 33 evenly spaced values, so the
      * host draws stages by time; it drops them all if one is missing. Approximate is enough. */
     bool(CLAP_ABI* seconds)(const clap_plugin_t* plugin, clap_id param_id, double value, double* seconds);
+    /* [main-thread] Draft 6, may be null: how many entries tab() has, pages and tabs together;
+     * 0 declares none. Asked with the hints. The host reads at most 16 pages and 16 tabs under
+     * each, and skips any entry past them. */
+    uint32_t(CLAP_ABI* tab_count)(const clap_plugin_t* plugin);
+    /* [main-thread] Draft 6, may be null: fill `tab` with entry `index`, below tab_count(); false
+     * when it has none. The pages are the entries with parent 0, in the order they come; a page's
+     * tabs are the entries naming it as parent, in the order they come, wherever they are among
+     * the others. A tab under anything but a page, an id used twice and an empty name leave an
+     * entry out. A page with fewer than two tabs is drawn without them. Asked with the hints. */
+    bool(CLAP_ABI* tab)(const clap_plugin_t* plugin, uint32_t index, oscairn_ui_tab_t* tab);
+    /* [main-thread] Draft 6, may be null: set `tab_id` to the page or tab the parameter `param_id`
+     * is on, the id of an entry of tab(); false when it has none, and the host puts it where its
+     * module path does. A parameter on a page itself, not a tab, is drawn on that page above its
+     * tabs, whichever tab is open; one on a tab is drawn on that tab only. The host sets no limit
+     * on how many parameters a plugin puts on a page itself: they take room from the tabs' area on
+     * a small screen (a host may scroll the page), and keeping them few is the plugin's lookout. A view is drawn once,
+     * on the first of its parameters' tabs in the order of tab(), beside the tiles there; its
+     * parameters stay on their own tabs. Asked with the hints, for every parameter. */
+    bool(CLAP_ABI* param_tab)(const clap_plugin_t* plugin, clap_id param_id, uint32_t* tab_id);
+    /* [main-thread] Draft 6, may be null: set `icon` (enum oscairn_icon) to the icon of the stepped
+     * parameter `param_id` at `value`: its plain value, the same number the plugin's value_to_text
+     * takes (a stepped parameter's integers, from its own minimum, which may be negative); false
+     * when it has none. Asked with the hints, only for stepped parameters of at most 128 values,
+     * at each of their step values. Where any value has an icon the host draws no icons it
+     * guesses for the others. */
+    bool(CLAP_ABI* value_icon)(const clap_plugin_t* plugin, clap_id param_id, double value, uint32_t* icon);
 } oscairn_plugin_ui_t;
 
 #ifdef __cplusplus

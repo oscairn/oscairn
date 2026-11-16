@@ -185,6 +185,25 @@ int main(int argc, char** argv) {
               "draft 4 is still read: its views, and its times from value texts with units");
         four.unload();
         unsetenv("KICK_FIXTURE_UI_DRAFT_4");
+        // Indexes past eight: a zone's or an element's, up to 32, stay in their view; an operator's, and any past 32, leave it.
+        setenv("KICK_FIXTURE_UI_INDEX", "1", 1);
+        Host wide;
+        check(wide.load(catalog.plugins[8], 48000, 128), "load the stepped fixture with indexes past eight");
+        auto at = [&](clap_id id) { for (const auto& p : wide.parameters()) if (p.id == id) return p; return Parameter{}; };
+        check(at(7).view == 3 && at(7).field == OSCAIRN_FIELD_KEY_LOW && at(7).index == 12 && at(8).view == 3 && at(8).index == 32 &&
+              at(9).view == 0 && at(9).field == 0 && at(9).index == 0 && at(99).view == 0 && at(99).index == 0,
+              "a zone's index 12 and 32 are kept, an operator's 12 and a zone's 33 leave the view");
+        wide.unload();
+        unsetenv("KICK_FIXTURE_UI_INDEX");
+        // Built against draft 5: seconds(), and no tabs or icons.
+        setenv("KICK_FIXTURE_UI_DRAFT_5", "1", 1);
+        Host five;
+        check(five.load(catalog.plugins[8], 48000, 128), "load the stepped fixture offering draft 5");
+        auto in5 = [&](clap_id id) { for (const auto& p : five.parameters()) if (p.id == id) return p; return Parameter{}; };
+        check(in5(8).field == OSCAIRN_FIELD_TIME_1 && in5(9).algorithms.size() == 5 && in5(8).seconds == std::vector<double>{.25, 2},
+              "draft 5 is still read: its views and its times from seconds()");
+        five.unload();
+        unsetenv("KICK_FIXTURE_UI_DRAFT_5");
     }
     {
         setenv("KICK_FIXTURE_LATE_FUNCTIONS", "1", 1);

@@ -226,6 +226,22 @@ int main(int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI gui;
     int failures = 0;
     auto check = [&](bool ok, const std::string& what) { if(!ok) { std::fprintf(stderr, "FAIL: %s\n", what.c_str()); ++failures; } };
+    {
+        // A key map of twelve zones and an operator view with an operator past the eighth (oscairn.ui draft 6): every zone is
+        // kept and in order, and the operator view keeps its eight and leaves the rest.
+        std::vector<standalone::Engine::ParamInfo> params;
+        auto add = [&](uint32_t view, uint32_t field, uint32_t index) { standalone::Engine::ParamInfo p; p.id = uint32_t(params.size()); p.view = view; p.field = field; p.index = index; params.push_back(p); };
+        for(uint32_t z = 12; z >= 1; --z) { add(7, OSCAIRN_FIELD_KEY_LOW, z); add(7, OSCAIRN_FIELD_KEY_HIGH, z); }
+        add(7, OSCAIRN_FIELD_BREAKPOINT, 12);
+        const auto map = standalone::mapOf(params, 7, 12);
+        bool ordered = map.zones.size() == 12;
+        for(size_t z = 0; ordered && z < map.zones.size(); ++z) ordered = map.zones[z].index == z + 1 && map.zones[z].keyLow >= 0 && map.zones[z].keyHigh >= 0;
+        check(ordered && map.breakpoint >= 0, "a key map of twelve zones keeps all twelve, in order, and the last one's scaling");
+        std::vector<standalone::Engine::ParamInfo> fm; params.swap(fm);
+        add(8, OSCAIRN_FIELD_ALGORITHM, 0);
+        for(uint32_t n : {1u, 8u, 9u, 32u}) add(8, OSCAIRN_FIELD_OPERATOR_LEVEL, n);
+        check(standalone::fmOf(params, 8).operators.size() == 8, "an operator view keeps operators 1 to 8 and leaves out a ninth or a thirty-second");
+    }
     const auto socket = std::filesystem::temp_directory_path() / ("oscairn-gaps-" + std::to_string(::getpid()) + ".sock");
     // A data folder of its own, so the user's library and keys are never read or written.
     const auto data = juce::File::createTempFile("oscairn-gaps-data");

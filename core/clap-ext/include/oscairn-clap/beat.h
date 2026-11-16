@@ -13,7 +13,11 @@
  *
  * A plugin asks for these events by querying the event space OSCAIRN_EVENT_SPACE_BEAT through
  * CLAP's event-registry extension. The host then sends an oscairn_event_beat at sample 0 of
- * every block, before the block's other events; a plugin that does not ask never gets one.
+ * every block that runs, before the block's other events; a plugin that does not ask never gets
+ * one. Beat and harmony events alone do not wake a plugin that returned CLAP_PROCESS_SLEEP: it
+ * receives the current beat with the next block that does wake it. Transport changes (start,
+ * stop, relocation, a tempo change with the transport) do wake it. A plugin that must act on
+ * beats while it holds nothing must not return CLAP_PROCESS_SLEEP in that state.
  * When the host splits a block into several process calls, only the first carries it: the
  * position moves on at `tempo` from there.
  *

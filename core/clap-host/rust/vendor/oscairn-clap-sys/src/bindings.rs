@@ -943,7 +943,8 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_plugin_sound_snapshots, sound_values) - 32usize];
 };
 pub type oscairn_plugin_sound_snapshots_t = oscairn_plugin_sound_snapshots;
-pub const OSCAIRN_EXT_UI: &[u8; 19] = b"oscairn.ui/draft-5\0";
+pub const OSCAIRN_EXT_UI: &[u8; 19] = b"oscairn.ui/draft-6\0";
+pub const OSCAIRN_EXT_UI_DRAFT_5: &[u8; 19] = b"oscairn.ui/draft-5\0";
 pub const OSCAIRN_EXT_UI_DRAFT_4: &[u8; 19] = b"oscairn.ui/draft-4\0";
 pub const OSCAIRN_EXT_UI_DRAFT_3: &[u8; 19] = b"oscairn.ui/draft-3\0";
 pub mod oscairn_widget {
@@ -1029,6 +1030,20 @@ pub mod oscairn_field {
     pub const OSCAIRN_FIELD_DETUNE: Type = 101;
     pub const OSCAIRN_FIELD_FIXED: Type = 102;
 }
+pub mod oscairn_icon {
+    #[allow(unused_imports)]
+    use super::*;
+    pub type Type = ::std::os::raw::c_uint;
+    pub const OSCAIRN_ICON_NONE: Type = 0;
+    pub const OSCAIRN_ICON_SINE: Type = 1;
+    pub const OSCAIRN_ICON_TRIANGLE: Type = 2;
+    pub const OSCAIRN_ICON_SAW: Type = 3;
+    pub const OSCAIRN_ICON_SAW_DOWN: Type = 4;
+    pub const OSCAIRN_ICON_SQUARE: Type = 5;
+    pub const OSCAIRN_ICON_PULSE: Type = 6;
+    pub const OSCAIRN_ICON_NOISE: Type = 7;
+    pub const OSCAIRN_ICON_SAMPLE_AND_HOLD: Type = 8;
+}
 #[repr(C)]
 pub struct oscairn_param_hint {
     pub widget: u32,
@@ -1094,6 +1109,33 @@ const _: () = {
 };
 pub type oscairn_fm_algorithm_t = oscairn_fm_algorithm;
 #[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct oscairn_ui_tab {
+    pub id: u32,
+    pub parent: u32,
+    pub name: [::std::os::raw::c_char; 64usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of oscairn_ui_tab"][::std::mem::size_of::<oscairn_ui_tab>() - 72usize];
+    ["Alignment of oscairn_ui_tab"][::std::mem::align_of::<oscairn_ui_tab>() - 4usize];
+    ["Offset of field: oscairn_ui_tab::id"][::std::mem::offset_of!(oscairn_ui_tab, id) - 0usize];
+    ["Offset of field: oscairn_ui_tab::parent"]
+        [::std::mem::offset_of!(oscairn_ui_tab, parent) - 4usize];
+    ["Offset of field: oscairn_ui_tab::name"]
+        [::std::mem::offset_of!(oscairn_ui_tab, name) - 8usize];
+};
+impl Default for oscairn_ui_tab {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+pub type oscairn_ui_tab_t = oscairn_ui_tab;
+#[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct oscairn_plugin_ui {
     pub param_hint: ::std::option::Option<
@@ -1119,10 +1161,33 @@ pub struct oscairn_plugin_ui {
             seconds: *mut f64,
         ) -> bool,
     >,
+    pub tab_count: ::std::option::Option<unsafe extern "C" fn(plugin: *const clap_plugin_t) -> u32>,
+    pub tab: ::std::option::Option<
+        unsafe extern "C" fn(
+            plugin: *const clap_plugin_t,
+            index: u32,
+            tab: *mut oscairn_ui_tab_t,
+        ) -> bool,
+    >,
+    pub param_tab: ::std::option::Option<
+        unsafe extern "C" fn(
+            plugin: *const clap_plugin_t,
+            param_id: clap_id,
+            tab_id: *mut u32,
+        ) -> bool,
+    >,
+    pub value_icon: ::std::option::Option<
+        unsafe extern "C" fn(
+            plugin: *const clap_plugin_t,
+            param_id: clap_id,
+            value: f64,
+            icon: *mut u32,
+        ) -> bool,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of oscairn_plugin_ui"][::std::mem::size_of::<oscairn_plugin_ui>() - 24usize];
+    ["Size of oscairn_plugin_ui"][::std::mem::size_of::<oscairn_plugin_ui>() - 56usize];
     ["Alignment of oscairn_plugin_ui"][::std::mem::align_of::<oscairn_plugin_ui>() - 8usize];
     ["Offset of field: oscairn_plugin_ui::param_hint"]
         [::std::mem::offset_of!(oscairn_plugin_ui, param_hint) - 0usize];
@@ -1130,6 +1195,14 @@ const _: () = {
         [::std::mem::offset_of!(oscairn_plugin_ui, algorithm) - 8usize];
     ["Offset of field: oscairn_plugin_ui::seconds"]
         [::std::mem::offset_of!(oscairn_plugin_ui, seconds) - 16usize];
+    ["Offset of field: oscairn_plugin_ui::tab_count"]
+        [::std::mem::offset_of!(oscairn_plugin_ui, tab_count) - 24usize];
+    ["Offset of field: oscairn_plugin_ui::tab"]
+        [::std::mem::offset_of!(oscairn_plugin_ui, tab) - 32usize];
+    ["Offset of field: oscairn_plugin_ui::param_tab"]
+        [::std::mem::offset_of!(oscairn_plugin_ui, param_tab) - 40usize];
+    ["Offset of field: oscairn_plugin_ui::value_icon"]
+        [::std::mem::offset_of!(oscairn_plugin_ui, value_icon) - 48usize];
 };
 pub type oscairn_plugin_ui_t = oscairn_plugin_ui;
 pub const OSCAIRN_EXT_VOICE_BUDGET: &[u8; 29] = b"oscairn.voice-budget/draft-1\0";
@@ -1254,6 +1327,7 @@ pub mod ids {
     pub const OSCAIRN_EXT_SOUND_CONTEXTS: &CStr = crate::id(crate::OSCAIRN_EXT_SOUND_CONTEXTS);
     pub const OSCAIRN_EXT_SOUND_SNAPSHOTS: &CStr = crate::id(crate::OSCAIRN_EXT_SOUND_SNAPSHOTS);
     pub const OSCAIRN_EXT_UI: &CStr = crate::id(crate::OSCAIRN_EXT_UI);
+    pub const OSCAIRN_EXT_UI_DRAFT_5: &CStr = crate::id(crate::OSCAIRN_EXT_UI_DRAFT_5);
     pub const OSCAIRN_EXT_UI_DRAFT_4: &CStr = crate::id(crate::OSCAIRN_EXT_UI_DRAFT_4);
     pub const OSCAIRN_EXT_UI_DRAFT_3: &CStr = crate::id(crate::OSCAIRN_EXT_UI_DRAFT_3);
     pub const OSCAIRN_EXT_VOICE_BUDGET: &CStr = crate::id(crate::OSCAIRN_EXT_VOICE_BUDGET);

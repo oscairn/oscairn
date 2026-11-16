@@ -23,7 +23,7 @@ oscairn-clap-sys's bindings are written against.
 
 Raw bindings for Oscairn's CLAP extensions (`core/clap-ext/include/oscairn-clap`), from the oscairn-clap repository
 (`https://github.com/oscairn/oscairn-clap`, MIT, `LICENSE`), its `rust/oscairn-clap-sys` at commit
-`c2119dbe992ce7551f49fb5efa49fe48e93cfe34`.
+`87753302b8012b60a70005d887fa169cd347073a`.
 
 - `src/lib.rs` and `src/bindings.rs` as they are there; `Cargo.toml` is its manifest without the bindgen feature (and
   its build script, which only regenerates), with clap-sys taken from beside it instead of crates.io.

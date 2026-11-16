@@ -382,6 +382,15 @@ struct Plugin {
         // Toggle the time of operator 2's first envelope stage: 250 ms off and 2 s on (its value
         // text says 1.5 s, so a host reading seconds() and one reading the texts differ).
         static const oscairn_plugin_ui_t ui{[](const clap_plugin_t*, clap_id id, oscairn_param_hint_t* hint) {
+            if (std::getenv("KICK_FIXTURE_UI_INDEX")) { // indexes past an operator's eighth: a zone's or an element's to 32 are kept, an operator's and any past 32 are not
+                switch (id) {
+                case 7: *hint = {OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, 0, 3, OSCAIRN_FIELD_KEY_LOW, 12}; return true;
+                case 8: *hint = {OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, 0, 3, OSCAIRN_FIELD_LEFT_CURVE, 32}; return true;
+                case 9: *hint = {OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, 0, 3, OSCAIRN_FIELD_OPERATOR_LEVEL, 12}; return true;
+                case 99: *hint = {OSCAIRN_WIDGET_AUTO, 0, CLAP_INVALID_ID, 0, 0, 3, OSCAIRN_FIELD_BREAKPOINT, 33}; return true;
+                default: return false;
+                }
+            }
             switch (id) {
             case 7: *hint = {OSCAIRN_WIDGET_RANGE, 1, 99, 0, OSCAIRN_ROLE_CUTOFF, 2, 4242, 0}; return true; // a range up to "Read only": fits; the cutoff; no such field
             case 8: *hint = {OSCAIRN_WIDGET_SWITCH, 2, CLAP_INVALID_ID, 5, 0, 1, OSCAIRN_FIELD_TIME_1, 2}; return true; // two values: fits; grouped
@@ -397,10 +406,12 @@ struct Plugin {
             if (id != 8) return false;
             *seconds = value > .5 ? 2 : .25;
             return true;
-        }};
-        // KICK_FIXTURE_UI_DRAFT_3 and _4: offered as draft 3 or 4, as a plugin built before views
-        // or before seconds(); its prefix is the same.
-        const char* draft = std::getenv("KICK_FIXTURE_UI_DRAFT_3") ? OSCAIRN_EXT_UI_DRAFT_3 : std::getenv("KICK_FIXTURE_UI_DRAFT_4") ? OSCAIRN_EXT_UI_DRAFT_4 : OSCAIRN_EXT_UI;
+        }, [](const clap_plugin_t*) -> uint32_t { return 0; }, [](const clap_plugin_t*, uint32_t, oscairn_ui_tab_t*) { return false; },
+        [](const clap_plugin_t*, clap_id, uint32_t*) { return false; }, [](const clap_plugin_t*, clap_id, double, uint32_t*) { return false; }};
+        // KICK_FIXTURE_UI_DRAFT_3, _4 and _5: offered as draft 3, 4 or 5, as a plugin built before views,
+        // before seconds() or before tabs and icons (draft 6's members, not read yet); its prefix is the same.
+        const char* draft = std::getenv("KICK_FIXTURE_UI_DRAFT_3") ? OSCAIRN_EXT_UI_DRAFT_3 : std::getenv("KICK_FIXTURE_UI_DRAFT_4") ? OSCAIRN_EXT_UI_DRAFT_4
+                          : std::getenv("KICK_FIXTURE_UI_DRAFT_5") ? OSCAIRN_EXT_UI_DRAFT_5 : OSCAIRN_EXT_UI;
         if (!std::strcmp(id, draft)) return get(plugin).kind == 8 ? &ui : nullptr;
         if (!std::strcmp(id, CLAP_EXT_STATE)) return get(plugin).kind == 9 ? nullptr : &state;
         if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &latency;

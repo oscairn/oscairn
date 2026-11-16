@@ -20,7 +20,7 @@ Checked when built and tested; the sections below say how.
 - [ ] 2. The `element` fader mode follows its own part (`controllers.view`'s `faderPart`), a
       Play button switches the sliders between the mixer and it, part selection keeps up, and
       the default stays part levels
-- [ ] 3. The slider set: `oscairn.ui` draft 6 (`OSCAIRN_ROLE_LEVEL_9` and `reversed`), a part's
+- [ ] 3. The slider set: `oscairn.ui` draft 7 (`OSCAIRN_ROLE_LEVEL_9` and `reversed`), a part's
       `roles` and `slidersReversed` in the next format versions, `parts.roles`, the part
       editor's **Sliders** step; Play draws the slider row for the followed part, value and
       physical position each
@@ -29,6 +29,10 @@ Checked when built and tested; the sections below say how.
       puts them back
 - [ ] 5. A Performance and a scene can pin the sliders to one part; a nine-fader controller
       profile maps all nine; the slider row meets the design language's keyboard and touch rules
+- [ ] 6. `oscairn.ui` draft 6, a plugin's own pages and tabs and its values' icons: the header,
+      both CLAP hosts asking for draft 6 first and reading its table through the draft 5
+      members, and the vendored copies are in; the host does not yet call `tab_count`, `tab`,
+      `param_tab` or `value_icon`, nor draw declared tabs or icons
 
 ## Problem
 
@@ -83,7 +87,7 @@ What exists today, checked in the code:
   plans three values a mapping keeps apart: the physical position (what the hardware reported,
   before takeover), the accepted mapped value (after takeover, scaling and range conversion) and
   the destination value. Only the last is reported today.
-- `oscairn.ui` draft 5 (`core/clap-ext/include/oscairn-clap/ui.h`) is the plugin's say on how its
+- `oscairn.ui` draft 5 (draft 6 below adds no hint field; `core/clap-ext/include/oscairn-clap/ui.h`) is the plugin's say on how its
   parameters are shown and played: a widget, a priority, a group, a role, and a rich view with a
   field and an index (1 to 8) per parameter. `OSCAIRN_ROLE_LEVEL_1` to `LEVEL_8` (25 to 32) are
   "element, operator or oscillator levels, 1 to 8"; there is no ninth and no direction. The
@@ -156,16 +160,16 @@ This is the Levels bank and the `element` mode that exist, widened, not a second
 beside them. The `LEVEL_n` roles already mean "element, operator or oscillator levels", and an
 organ's drawbars are its footages' levels. What changes:
 
-- **A ninth level.** `oscairn.ui` draft 6 adds `OSCAIRN_ROLE_LEVEL_9` = 36, after `OUTPUT_BUS`
+- **A ninth level.** `oscairn.ui` draft 7 adds `OSCAIRN_ROLE_LEVEL_9` = 36, after `OUTPUT_BUS`
   (35): `LEVEL_1` to `LEVEL_8` stay 25 to 32, so the ninth cannot follow them. The Levels bank
   becomes nine wide (`RoleBank`'s array grows to nine; the other banks keep a blank ninth, never
   shown, since a bank takes as many roles as its group is wide).
-- **A direction.** Draft 6 adds one field at the end of the hint, the way drafts 4 and 5 added
+- **A direction.** Draft 7 adds one field at the end of the hint, the way drafts 4 and 5 added
   theirs: `reversed`, nonzero for a level a slider plays upside down, pulled down for more of
   it, the tonewheel convention; the parameter's own value still runs from low to high. The set
   has one direction, so the host reads it from the set's first parameter (`level1`'s hint), and
   a plugin sets it the same on all of them.
-- A host that does not know draft 6 reads `LEVEL_9` as `NONE`, as the header already says for
+- A host that does not know draft 7 reads `LEVEL_9` as `NONE`, as the header already says for
   unknown values, and ignores `reversed`.
 
 No drawbar view or drawbar roles: a drawbar is a level, and the screen draws the set the same way
@@ -183,7 +187,7 @@ offer drawbars.
 - `roles`: a list of `{role, node, param}`, each naming a parameter by its node key and CLAP
   parameter ID and the role it plays in this part. `role` is any role name the host knows, as
   `params.list` spells them (`cutoff`, `attack`, `mix`, `level1` to `level9`, and RFC 0044's
-  draft 7 names once they exist), except `outputBus`, which is the plugin's wiring and not a
+  draft 8 names once they exist), except `outputBus`, which is the plugin's wiring and not a
   Sound's to change. Each role at most once in a part, each parameter at most once; the
   `levelN` entries run from `level1` with no gap, so slider *n* is always `level`*n*.
 - `slidersReversed`: true when the slider set is reversed; absent, false.
@@ -314,7 +318,7 @@ it cannot read from the source:
   manual's IDs 1 to 9 (the lower's and pedal's are not in the set; a source whose drawbars play
   the lower manual names IDs 10 to 18). `slidersReversed: true`, the tonewheel convention and
   the owner's MODX setting, unless the source stores a normal direction. Organ switches
-  (percussion, vibrato and chorus, rotary) go in `roles` too once RFC 0044's draft 7 names
+  (percussion, vibrato and chorus, rotary) go in `roles` too once RFC 0044's draft 8 names
   them; a converter before that writes none.
 - **An AWM2-class voice:** `level1` to `level`*n* for the elements the voice uses, in element
   order, each the Sampler's Element *n* Level parameter (IDs to check, above); an element the
@@ -509,11 +513,54 @@ mouse; each entry's accessible title is its name and value ("Upper 16', 7").
   Refused as the reader refuses. Permission `edit`, as `parts.*`.
 - **`graph.get`:** each part gains `roles`, `slidersReversed`, and `sliders`, the resolved set in
   order, each `{node, param, from}`, `from` being `part` or `plugin`, and `reversed`.
-  `params.list`'s `role` stays the plugin's declaration, and gains `reversed` from draft 6.
+  `params.list`'s `role` stays the plugin's declaration, and gains `reversed` from draft 7.
 - **`parts.loadSound`** replaces the part's `roles` and `slidersReversed` with the Sound's, as it
   replaces the part's own assignments; `parts.saveSound` writes them.
 - **`controllers.view`:** optional `faderPart`, as above.
 - **`controllers.get` and the `controllers` topic:** `places`, as above.
+
+### Tabs and icons: `oscairn.ui` draft 6
+
+Draft 6 is not the slider set's. The slider set's additions (the ninth level and the direction,
+above) moved to draft 7, and RFC 0044's roles to draft 8, because the plugin-declared pages and
+tabs and the value icons, built in oscairn-clap first, took draft 6. Draft 6 appends four optional
+members to `oscairn_plugin_ui_t`, after `seconds`, and changes nothing in the hint:
+
+- **Pages and tabs:** `tab_count`, `tab` and `param_tab`. A plugin names and orders its own two
+  levels, a first level of pages and under each a second of tabs, as `oscairn_ui_tab_t` entries
+  (`id`, `parent`, a name of at most 63 bytes), and says which entry each parameter is on,
+  whatever its module path. The host draws them in its one style, themed with the rest of the
+  interface: the plugin says what the tabs are, never how they look. Ids are the plugin's,
+  nonzero, unique and stable across rescans. An entry with a bad id, an empty name or a parent
+  that is not a page is left out; the host reads at most 16 pages and 16 tabs under each. A
+  parameter on a tab is drawn on that tab only, on a page itself above its tabs; a page with fewer
+  than two tabs is drawn without them. A parameter left out, and a plugin declaring none, get
+  the pages and tabs from the module paths as before (a declared page takes the left-out
+  parameters whose first module level is its name). A view is drawn once, on the first of its
+  parameters' tabs in the declared order.
+- **Icons:** `value_icon`. A stepped parameter's values (at most 128) may each name an
+  `enum oscairn_icon` (sine, triangle, saw, saw down, square, pulse, noise, sample and hold) that
+  the host draws in its own style beside the value's text. A plugin gives no picture. Where any
+  value has an icon, the host guesses none for the others; where none has, it guesses from a
+  value's text as it does today.
+- **Indexes:** an operator's index stays 1 to 8; an element's or a zone's (an envelope's or a key
+  or velocity map's) goes to 32. The hosts keep an envelope or map field with an index up to 32
+  and leave a field past its limit out of its view (an operator field with an index past 8, any
+  field past 32), never drawing it wrongly; the desktop editor's key map draws every zone it
+  gets and its operator view keeps operators 1 to 8. A draft 5 host keeps only indexes up to 8.
+- **Older drafts:** the host asks for draft 6, then 5, 4 and 3, and reads only the members the
+  answering draft has. A draft 6 table is a draft 5 table with members after its last, so a
+  plugin may return one table for all four IDs, and a draft 6 plugin on a host that knows only
+  draft 5 behaves as a draft 5 plugin.
+
+**What is built.** The header (oscairn-clap's `ui-tabs-icons` work, vendored under
+`core/clap-ext`) and the Rust bindings; the C++ and the Rust CLAP host ask for draft 6 first and
+fall back to 5, 4 and 3, and read a draft 6 table through its older members exactly as before
+(the host's tests offer a draft 6 table and a draft 5 one). **What is not:** the host does not call
+`tab_count`, `tab`, `param_tab` or `value_icon`, and draws no declared tabs or icons, so a plugin
+that declares them is drawn from its module paths and the host's guessed icons until that work
+lands. The porting guide ([plugin-porting.md](../plugin-porting.md#pages-tabs-and-value-icons))
+says so to plugin authors.
 
 ## Build order and gates
 
@@ -521,7 +568,7 @@ mouse; each entry's accessible title is its name and value ("Upper 16', 7").
 | --- | --- |
 | 1 | `controllers.get` and the `controllers` topic carry each moved control's raw position; a test moves a fader, changes its target from another client, and reads both the held position and the moved value while pickup is waiting; pickup itself still behaves as `control-physical-controls` and `control-controller-input` say. |
 | 2 | On the `modx-m` layout with three parts: the sliders play part levels by default; the Play button (or the profile's mode position) switches them to `element` mode; with `faderPart` set, the sliders follow it while the knobs follow the Performance, and without it they follow `part` as today; a resolved assignment test names each `fader:N`'s target in each mode. |
-| 3 | With the Oscairn Organ, whose hints give its drawbars no role: a part with no `roles` has no slider set and its sliders in `element` mode are dark; `parts.roles` naming the upper drawbars `level1` to `level9` makes Play draw nine entries, each showing its value and, for a fader under pickup, its marker, and the sliders play them; saved as a Sound and loaded into another part, the set comes with it; a plugin with draft-6 level hints and no part declaration fills the set from its hints, and a part declaring two levels on it shows two, the rest dark. `control-performance-format`: `roles` and `slidersReversed` save and reload, and each refusal above is refused. |
+| 3 | With the Oscairn Organ, whose hints give its drawbars no role: a part with no `roles` has no slider set and its sliders in `element` mode are dark; `parts.roles` naming the upper drawbars `level1` to `level9` makes Play draw nine entries, each showing its value and, for a fader under pickup, its marker, and the sliders play them; saved as a Sound and loaded into another part, the set comes with it; a plugin with draft-7 level hints and no part declaration fills the set from its hints, and a part declaring two levels on it shows two, the rest dark. `control-performance-format`: `roles` and `slidersReversed` save and reload, and each refusal above is refused. |
 | 4 | On the eight-slider layout, sliders 1–8 drive drawbars 1–8 and one assignable knob drives the 9th, both it and the slider's screen copy reading the same target value; following the organ part reverses the sliders (a full-down fader plays the drawbar at its most, pickup catches it from that side, and `places` still reports the fader's raw position) while the knob is not reversed; following a piano part un-reverses them; checked in `control-physical-controls` and by rendering. |
 | 5 | A Performance pinned to the organ part opens in `element` mode on a second engine over the socket, and selecting a scene pinned to another part hands the sliders to it; a controller profile with nine faders maps all nine with none to a knob; the slider row is reachable and operable by keyboard alone, and `desktop-gaps` renders it at the FANTOM-0's 1280 × 720 with 6.5 mm targets. |
 

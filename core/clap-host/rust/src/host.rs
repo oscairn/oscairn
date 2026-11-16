@@ -1308,6 +1308,9 @@ pub fn initialize(s: H, rate: f64, frames: u32) -> R<()> {
     }
     s.params.set(ext(&s, CLAP_EXT_PARAMS));
     s.ui.set(ext(&s, ids::OSCAIRN_EXT_UI));
+    if s.ui.is_null() {
+        s.ui.set(ext(&s, ids::OSCAIRN_EXT_UI_DRAFT_5)); // its prefix: no tabs or icons (not read yet)
+    }
     s.ui_seconds.set(!s.ui.is_null());
     if s.ui.is_null() {
         s.ui.set(ext(&s, ids::OSCAIRN_EXT_UI_DRAFT_4)); // its prefix: no seconds()
@@ -1685,7 +1688,8 @@ fn apply_hints(s: H, list: &mut [Parameter]) {
             || (OSCAIRN_FIELD_TIME_1..=OSCAIRN_FIELD_RATE_8).contains(&f)
             || (OSCAIRN_FIELD_KEY_LOW..=OSCAIRN_FIELD_VELOCITY_CURVE).contains(&f)
             || (OSCAIRN_FIELD_ALGORITHM..=OSCAIRN_FIELD_FIXED).contains(&f);
-        let in_view = hint.view != 0 && field && hint.index <= 8 && (f != OSCAIRN_FIELD_ALGORITHM || (stepped && (1..=128).contains(&values)));
+        let last = if f >= OSCAIRN_FIELD_ALGORITHM { 8 } else { 32 }; // an operator's index is 1 to 8, an element's or a zone's to 32 (draft 6)
+        let in_view = hint.view != 0 && field && hint.index <= last && (f != OSCAIRN_FIELD_ALGORITHM || (stepped && (1..=128).contains(&values)));
         q.view = if in_view { hint.view } else { 0 };
         q.field = if in_view { f } else { 0 };
         q.index = if in_view { hint.index } else { 0 };

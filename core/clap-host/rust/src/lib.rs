@@ -431,7 +431,7 @@ mod tests {
         names.sort();
         let fnv = names.iter().flat_map(|p| std::fs::read(p).unwrap()).fold(0xcbf29ce484222325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
         assert_eq!(
-            fnv, 0x7ab8_910a_98b4_5f79,
+            fnv, 0xf60b_9d0f_4000_3e94,
             "core/clap-ext/include/oscairn-clap changed: re-vendor oscairn-clap-sys (vendor/README.md) and update this hash"
         );
     }

@@ -198,6 +198,40 @@ int main(int argc, char** argv)
             std::printf("under-declared, %s a context: estimate %s, not measured\n", megabytes(perContext).c_str(), megabytes(unlearned.memory).c_str());
             check(unlearned.memory + slack >= heldUnder, "not measured, the estimate is not below what the workers hold: " + megabytes(unlearned.memory) + " against " + megabytes(heldUnder));
         }
+
+        // The sampler never played alone: its five parts only ever loaded together, in one instance (a stage Performance on the
+        // unit). Once it has been open its estimate is measured: the instance as it held its sounds, its parts measured, the
+        // estimate not below what the workers held nor more than a margin above it.
+        {
+            const auto together = temp.path / "together";
+            fs::create_directories(together / "home");
+            ::setenv("OSCAIRN_DATA_HOME", (together / "home").c_str(), 1);
+            ::unsetenv("OSCAIRN_HOLDER_CONTEXT_BYTES");
+            { Session s(rate, frames); build(s, 5); s.savePerformance((together / "performance").string()); }
+            ::setenv("OSCAIRN_HOLDER_CONTEXT_BYTES", std::to_string(2 * mib).c_str(), 1);
+            uint64_t heldTogether = 0;
+            {
+                Session s(rate, frames);
+                s.setBudget({.9, 0});
+                s.loadPerformance((together / "performance").string());
+                play(s);
+                heldTogether = workers(s).first;
+                s.saveMeasurementsNow();
+            }
+            std::string text;
+            { std::ifstream in(together / "home" / "measurements.json"); text.assign(std::istreambuf_iterator<char>(in), {}); }
+            check(std::regex_search(text, std::regex("pack-holder[^}]*\"memory\":[1-9][^}]*\"sounds\":5")), "the instance's memory measured with its five sounds");
+            Session s(rate, frames);
+            s.setBudget({.9, 0});
+            const auto e = s.estimate((together / "performance").string());
+            int measured = 0, parts = 0;
+            for(const auto& c : e.plugins) if(c.plugin == holderId) { ++parts; measured += c.measured; }
+            constexpr uint64_t margin = 4 * mib;
+            std::printf("together: estimate %s, %d of %d sampler parts measured; the workers hold %s\n", megabytes(e.memory).c_str(), measured, parts, megabytes(heldTogether).c_str());
+            check(parts == 5 && measured == 5, "the sampler's parts measured: " + std::to_string(measured) + " of " + std::to_string(parts));
+            check(e.memory + slack >= heldTogether, "the estimate is not below what the workers hold: " + megabytes(e.memory) + " against " + megabytes(heldTogether));
+            check(e.memory <= heldTogether + margin, "nor more than " + megabytes(margin) + " above it: " + megabytes(e.memory) + " against " + megabytes(heldTogether));
+        }
     }
     catch(const std::exception& x) { std::fprintf(stderr, "FAIL: %s\n", x.what()); return 1; }
     return failures ? 1 : 0;

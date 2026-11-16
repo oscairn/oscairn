@@ -118,6 +118,17 @@ voices. Now:
   priced at the plugin's word alone came in up to 3.5 MB low over 8 parts. Never more than an
   instance of its own as measured, never less than the declaration (`control-multi-sampler-load`,
   with a fixture that under-declares).
+- **An instance whose parts only ever loaded together** (2026-11-16) is measured as it held them: a
+  shared instance's memory is kept with the fewest sounds it was seen holding (`sounds` in
+  `measurements.json`; 1 for a plugin playing alone, which it replaces), so a Performance whose
+  sampler parts always open in one instance is estimated from measurement, not guesses (on the
+  unit, five Sampler parts were charged 53.6 MB guessed while their instance held 42.9 MB). Its
+  further parts count nothing up to that many sounds (they are in the instance's figure), then
+  `perContext` each; `perContext` is learned from an instance holding more sounds than that figure,
+  at least a byte when they added nothing within a reading's noise (so its further parts count their
+  declaration, not a whole instance each, as they did when the noise went the other way).
+  The instance's sounds are asked of its worker once a memory reading (every 200 ticks), by its
+  first node, not every tick for each part (RFC 0045's one ask per shared instance).
 - **The test for "fits"** is per core. Plugins in workers render in parallel on the audio cores,
   all but one (`usableCores() - 1`, at least one: one is left to the system and the display); a
   part's chain renders one plugin after another within a block. A Performance fits when its total

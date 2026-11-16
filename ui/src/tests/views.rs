@@ -32,7 +32,7 @@ fn an_envelope_node_is_dragged_by_touch() {
     let (x, y) = node(1);
     assert!(p.view_down(0, x + 3., y - 2.));
     p.view_move(0, 1000., -100.);
-    p.view_up(0);
+    p.view_up(0, 0., 0.);
     let out = sent(&mut p.out);
     assert_eq!(out.first().unwrap(), &gesture(10, true));
     assert!(out.contains(&gesture(11, true)));
@@ -44,14 +44,14 @@ fn an_envelope_node_is_dragged_by_touch() {
     let (x, y) = node(1);
     assert!(p.view_down(0, x, y));
     p.view_move(0, -1000., 1000.);
-    p.view_up(0);
+    p.view_up(0, 0., 0.);
     let out = sent(&mut p.out);
     assert!(out.contains(&set(10, 0.)) && out.contains(&set(11, 0.)), "{out:?}");
     // A node with only a time (the attack: its level is fixed at full) sets only the time.
     let (x, y) = node(0);
     assert!(p.view_down(0, x, y));
     p.view_move(0, -1000., 0.);
-    p.view_up(0);
+    p.view_up(0, 0., 0.);
     let out = sent(&mut p.out);
     assert_eq!(out.iter().filter(|o| o.0 == "params.set").collect::<Vec<_>>(), [&set(9, 0.)], "only the time: {out:?}");
     assert!(out.contains(&gesture(9, true)) && !out.iter().any(|o| o.1["param"] == 11), "no gesture on a parameter it does not stand for");
@@ -331,7 +331,7 @@ fn a_key_map_is_dragged_by_touch() {
     assert!(p.view_down(0, x + 2., y + 1.));
     p.view_move(0, l - 500., y);
     p.view_move(0, r + 500., y);
-    p.view_up(0);
+    p.view_up(0, 0., 0.);
     let out = sent(&mut p.out);
     assert_eq!(out.iter().filter(|o| o.0 == "params.set").map(|o| o.1.clone()).collect::<Vec<_>>(), [set(1, 0.).1, set(1, 127.).1]);
     assert_eq!((out.first().unwrap(), out.last().unwrap()), (&gesture(1, true), &gesture(1, false)));
@@ -340,7 +340,7 @@ fn a_key_map_is_dragged_by_touch() {
     assert!(p.view_down(0, x, y));
     p.view_move(0, x, b + 500.);
     p.view_move(0, x, t - 500.);
-    p.view_up(0);
+    p.view_up(0, 0., 0.);
     let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
     assert_eq!(sets, [set(4, 0.).1, set(4, 127.).1]);
     // The left depth (handle 5): the middle line is none, the top or bottom of the plane the most.
@@ -348,7 +348,7 @@ fn a_key_map_is_dragged_by_touch() {
     assert!(p.view_down(0, x + 1., y));
     p.view_move(0, x, mid);
     p.view_move(0, x, t);
-    p.view_up(0);
+    p.view_up(0, 0., 0.);
     let sets: Vec<f64> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1["values"][0]["value"].as_f64().unwrap()).collect();
     assert!(sets.len() == 2 && sets[0] == 0. && (sets[1] - 99.).abs() < 1e-3, "{sets:?}");
     // The velocity line's soft end (handle 7): down the box.
@@ -356,7 +356,7 @@ fn a_key_map_is_dragged_by_touch() {
     assert!(p.view_down(0, x + 1., y));
     p.view_move(0, x, t - 500.);
     p.view_move(0, x, b + 500.);
-    p.view_up(0);
+    p.view_up(0, 0., 0.);
     let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
     assert_eq!(sets, [set(12, 0.).1, set(12, 7.).1]);
     // The breakpoint marks its tile when the cursor is on it.
@@ -379,6 +379,177 @@ fn the_key_map_scaling_line_is_drawn_where_its_path_is() {
     println!("{report}");
 }
 
+// A four-operator FM synth: an algorithm of four routings (a chain, two stacks, all carriers, three into
+// one), the feedback, a level and a ratio per operator and the first two operators' envelopes.
+fn fm_plugin() -> serde_json::Value {
+    let routing = |inputs: [u8; 4], carriers: u8, from: u8, to: u8| json!({"inputs": [inputs[0], inputs[1], inputs[2], inputs[3], 0, 0, 0, 0], "carriers": carriers, "feedbackFrom": from, "feedbackTo": to});
+    let mut algorithm = viewed(1, "Algorithm", 3., true, 1, "algorithm", 0);
+    algorithm["algorithms"] = json!([
+        routing([0b10, 0b100, 0b1000, 0], 0b1, 4, 4),
+        routing([0b10, 0, 0b1000, 0], 0b101, 2, 2),
+        routing([0, 0, 0, 0], 0b1111, 0, 0),
+        routing([0b1110, 0, 0, 0], 0b1, 0, 0),
+    ]);
+    let mut p = vec![algorithm, viewed(2, "Feedback", 7., true, 1, "feedback", 0)];
+    for n in 1..=4u32 {
+        p.push(viewed(10 + n, &format!("Level {n}"), 99., false, 1, "operatorLevel", n));
+        p.push(viewed(20 + n, &format!("Ratio {n}"), 31., true, 1, "ratio", n));
+    }
+    for n in 1..=2u32 {
+        for (k, f) in ["attack", "decay", "sustain", "release"].iter().enumerate() {
+            p.push(viewed(40 + 4 * (n - 1) + k as u32, &format!("{f} {n}"), 1., false, 1, f, n));
+        }
+    }
+    json!({ "parameters": p })
+}
+
+fn fm_text(id: u32, v: f64) -> String {
+    match id {
+        1 => format!("{}", v as i64 + 1),
+        2 => format!("{}", v as i64),
+        11..=14 => format!("{v:.0}"),
+        21..=24 => format!("x{}", v as i64 / 2 + 1),
+        _ => format!("{:.0} %", v * 100.),
+    }
+}
+
+fn fm_values(algorithm: f64) -> Vec<(u32, f64)> {
+    let mut v = vec![(1, algorithm), (2, 5.), (11, 99.), (12, 70.), (13, 40.), (14, 10.), (21, 2.), (22, 4.), (23, 8.), (24, 1.)];
+    v.extend([(40, 0.05), (41, 0.4), (42, 0.5), (43, 0.3), (44, 0.2), (45, 0.5), (46, 0.7), (47, 0.4)]);
+    v
+}
+
+// The algorithm layouts of the reference: each carrier on the bottom row, each modulator above what it
+// modulates, centered, pushed right until none overlap.
+#[test]
+fn algorithms_are_laid_out_as_the_reference_does() {
+    use crate::views::algorithm_layout;
+    let pos = |r: [u8; 11], n| algorithm_layout(&r, n).iter().map(|p| (p.row, p.x)).collect::<Vec<_>>();
+    // 4 -> 3 -> 2 -> 1, feedback aside: a column of four.
+    assert_eq!(pos([0b10, 0b100, 0b1000, 0, 0, 0, 0, 0, 0b1, 4, 4], 4), [(0, 0.), (1, 0.), (2, 0.), (3, 0.)]);
+    // 2 -> 1 and 4 -> 3: two stacks, centered about the middle.
+    assert_eq!(pos([0b10, 0, 0b1000, 0, 0, 0, 0, 0, 0b101, 0, 0], 4), [(0, -0.5), (1, -0.5), (0, 0.5), (1, 0.5)]);
+    // All carriers: one row.
+    assert_eq!(pos([0; 11], 4), [(0, 0.); 4].iter().enumerate().map(|(i, _)| (0, i as f32 - 1.5)).collect::<Vec<_>>());
+    let mut all = [0u8; 11];
+    all[8] = 0b1111;
+    assert_eq!(pos(all, 4), [(0, -1.5), (0, -0.5), (0, 0.5), (0, 1.5)]);
+    // 2, 3 and 4 into 1: the three modulators side by side over it.
+    assert_eq!(pos([0b1110, 0, 0, 0, 0, 0, 0, 0, 0b1, 0, 0], 4), [(0, -1.), (1, -1.), (1, 0.), (1, 1.)]);
+    // More than eight are not drawn; a loop (1 and 2 into each other) is cut and every operator is placed.
+    assert_eq!(algorithm_layout(&[0; 11], 12).len(), 8);
+    assert_eq!(algorithm_layout(&[0b10, 0b01, 0, 0, 0, 0, 0, 0, 0b1, 0, 0], 2).len(), 2);
+}
+
+// The FM view is described by the plugin's data: found beside the algorithm, titled with its algorithm's
+// and feedback's text, with the routing drawn, a column per operator, and the operators' envelopes drawn
+// as views of their own too (as the reference does).
+#[test]
+fn an_fm_view_is_described_by_the_plugin_and_drawn() {
+    let mut s = Screen::new();
+    let ui = &s.ui.clone_strong();
+    let _p = open_with(&mut s, fm_plugin(), &fm_values(0.), &fm_text);
+    let all = panels(ui);
+    assert_eq!(all.len(), 3, "the operators, then each described envelope (the first two operators')");
+    assert_eq!((all[0].title.as_str(), all[0].h), ("Algorithm 1  \u{b7}  Feedback 5", 300.));
+    assert_eq!(all[1].title.as_str(), "Envelope");
+    let boxes: Vec<crate::GridBox> = all[0].boxes.iter().collect();
+    let numbered: Vec<(&str, i32)> = boxes.iter().take(4).map(|b| (b.text.as_str(), b.fill)).collect();
+    assert_eq!(numbered, [("1", 0), ("2", 4), ("3", 4), ("4", 4)], "operator 1 is the carrier of the chain, filled in the accent");
+    // Operator 4's ratio shows the plugin's text; a column per operator named Op n.
+    let ratios: Vec<String> = boxes.iter().filter(|b| b.fill == 4 && b.text.starts_with('x')).map(|b| b.text.to_string()).collect();
+    assert_eq!(ratios, ["x2", "x3", "x5", "x1"]);
+    let names: Vec<String> = all[0].labels.iter().filter(|l| l.text.starts_with("Op ")).map(|l| l.text.to_string()).collect();
+    assert_eq!(names, ["Op 1", "Op 2", "Op 3", "Op 4"]);
+    // The routing: wires (the chain's three), the feedback loop, the output line; the first two columns carry an envelope.
+    let ink = |k: usize| all[0].shapes.row_data(k).map(|s| (s.ink, s.width));
+    assert_eq!((ink(1), ink(2)), (Some((1, 1)), Some((0, 1))), "the wires in the muted ink, then the feedback in the accent");
+    assert_eq!(all[0].shapes.row_count(), 4 + 2 * 2, "frame, wires, feedback, output line, and a frame and line for two envelopes");
+    // Another algorithm: a different routing (four carriers, no wires or feedback).
+    let mut s = Screen::new();
+    let _q = open_with(&mut s, fm_plugin(), &fm_values(2.), &fm_text);
+    let all = panels(&s.ui);
+    assert_eq!(all[0].title.as_str(), "Algorithm 3  \u{b7}  Feedback 5");
+    assert!(all[0].boxes.iter().take(4).all(|b| b.fill == 0), "four carriers");
+    // A plugin that gives no routings: the operators in a row, nothing but the frame to say how they connect.
+    let mut list = fm_plugin();
+    list["parameters"][0]["algorithms"] = json!([]);
+    let mut s = Screen::new();
+    let _r = open_with(&mut s, list, &fm_values(0.), &fm_text);
+    let all = panels(&s.ui);
+    assert!(all[0].boxes.iter().take(4).all(|b| b.fill == 4));
+    let xs: Vec<f32> = all[0].boxes.iter().take(4).map(|b| b.x).collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]) && (xs[1] - xs[0] - (xs[2] - xs[1])).abs() < 0.01, "in a row, evenly: {xs:?}");
+}
+
+// Touch: dragging across the routing steps the algorithm (24 px a step, whole steps), a tap on its left or
+// right half steps it back or on; a level bar sets its level where it is touched and as it is dragged; a
+// ratio steps by 12 px up or down; each inside gestures; values stop at the ends.
+#[test]
+fn an_fm_view_is_edited_by_touch() {
+    let mut s = Screen::new();
+    let ui = &s.ui.clone_strong();
+    let mut p = open_with(&mut s, fm_plugin(), &fm_values(1.), &fm_text);
+    sent(&mut p.out);
+    let routing = {
+        let v = super::envelope::vertices(&panels(ui)[0].shapes.row_data(0).unwrap().commands);
+        ((v[0].0 - 0.5) as f32, (v[0].1 - 0.5) as f32, (v[2].0 + 0.5) as f32, (v[2].1 + 0.5) as f32)
+    };
+    let mid = ((routing.0 + routing.2) / 2., (routing.1 + routing.3) / 2.);
+    // Across the routing: 30 px right is one step on, 60 px two, back past the start one step off.
+    assert!(p.view_down(0, mid.0, mid.1));
+    p.view_move(0, mid.0 + 30., mid.1);
+    p.view_move(0, mid.0 + 60., mid.1);
+    p.view_move(0, mid.0 - 30., mid.1);
+    p.view_move(0, mid.0 + 1000., mid.1);
+    p.view_up(0, mid.0 + 1000., mid.1);
+    let out = sent(&mut p.out);
+    let sets: Vec<serde_json::Value> = out.iter().filter(|o| o.0 == "params.set").map(|o| o.1.clone()).collect();
+    assert_eq!(sets, [set(1, 2.).1, set(1, 3.).1, set(1, 0.).1, set(1, 3.).1], "1 + 1, 1 + 2, 1 - 1, and the end");
+    assert_eq!((out.first().unwrap(), out.last().unwrap()), (&gesture(1, true), &gesture(1, false)));
+    // A tap on the left half steps back, on the right half on.
+    p.view_down(0, routing.0 + 20., mid.1);
+    p.view_up(0, routing.0 + 20., mid.1);
+    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
+    assert_eq!(sets, [set(1, 2.).1], "from 3 back to 2");
+    p.view_down(0, routing.2 - 20., mid.1);
+    p.view_up(0, routing.2 - 20., mid.1);
+    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
+    assert_eq!(sets, [set(1, 3.).1], "from 2 on to 3");
+    // The level bars and ratios, found as the view drew them.
+    let boxes: Vec<crate::GridBox> = panels(ui)[0].boxes.iter().collect();
+    let bar = boxes.iter().filter(|b| b.fill == 4 && b.text.is_empty()).nth(1).expect("operator 2's level bar").clone();
+    assert!(p.view_down(0, bar.x + bar.w / 2., bar.y + bar.h * 0.25));
+    let sets: Vec<f64> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1["values"][0]["value"].as_f64().unwrap()).collect();
+    assert!(sets.len() == 1 && (sets[0] - 74.25).abs() < 0.01, "touched a quarter of the way down: {sets:?}");
+    p.view_move(0, bar.x, bar.y - 500.);
+    p.view_up(0, bar.x, bar.y - 500.);
+    let out = sent(&mut p.out);
+    assert!(out.contains(&set(12, 99.)) && out.contains(&gesture(12, false)), "dragged up past the top: {out:?}");
+    let ratio = boxes.iter().filter(|b| b.fill == 4 && b.text.starts_with('x')).nth(3).expect("operator 4's ratio").clone();
+    assert!(p.view_down(0, ratio.x + 2., ratio.y + ratio.h / 2.));
+    p.view_move(0, ratio.x + 2., ratio.y + ratio.h / 2. - 25.);
+    p.view_up(0, ratio.x + 2., ratio.y + ratio.h / 2. - 25.);
+    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
+    assert_eq!(sets, [set(24, 3.).1], "25 px up is two steps: 1 + 2");
+    assert!(!p.view_down(0, routing.0 + 5., routing.1 - 30.), "away from the routing and every bar takes nothing");
+}
+
+// The FM view's lines in the accent (the feedback loop, each operator's envelope) are drawn where their
+// paths are, unscaled, at two sizes and two scales; they are short, so measured every 2 px.
+#[test]
+fn the_fm_lines_are_drawn_where_their_paths_are() {
+    // Shapes: the routing's frame, the wires, the feedback loop, the output line, then a frame and a line
+    // for each of the first two operators' envelopes.
+    // The panel is 300 high: windows that hold it (1280x720 at 2 shows 360).
+    let m = Measure { step: 2., least: 6, sizes: &[((1280, 720), 1.), ((1920, 1080), 1.), ((1920, 1080), 2.)] };
+    let mut report = String::new();
+    for (name, shape) in [("feedback loop", 2), ("operator 1's envelope", 5), ("operator 2's envelope", 7)] {
+        report += &check_line_with(name, &fm_plugin(), &fm_values(0.), &fm_text, 0, shape, &m);
+    }
+    println!("{report}");
+}
+
 /// A page's picture under the default theme at 1 and at the FANTOM's 1.55 (target/screens) and under the odd
 /// theme (target/theme-shots), as NAME, NAME@1.55 and NAME-odd.
 fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String) {
@@ -395,12 +566,39 @@ fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &d
     shot(&s, &format!("{name}-odd"));
 }
 
+// Every view's page in every theme (the built-in ones and the two odd ones): drawn, laid out again for the
+// theme's spacing, pictures in target/theme-shots.
+#[test]
+fn the_views_draw_in_every_theme() {
+    fit_to_window();
+    type Page = (&'static str, serde_json::Value, Vec<(u32, f64)>, fn(u32, f64) -> String);
+    let pages: [Page; 4] = [
+        ("lfo", lfo_plugin(), lfo_values(0.), lfo_text),
+        ("filter", filter_plugin(), filter_values(1.), filter_text),
+        ("keymap", map_plugin(), map_values(), map_text),
+        ("fm", fm_plugin(), fm_values(0.), fm_text),
+    ];
+    for (name, list, values, text) in pages {
+        let mut s = Screen::new();
+        let mut p = open_with(&mut s, list, &values, &text);
+        for t in &all_themes() {
+            theme::apply(&s.ui, t);
+            s.frame();
+            p.shown();
+            assert!(s.frame().is_some(), "{name} in {}: drawn", t.id);
+            assert!(!panels(&s.ui).is_empty());
+            shot(&s, &format!("grid-{name}-{}", t.id));
+        }
+    }
+}
+
 // Pictures for a look by eye: each view's page.
 #[test]
 fn view_pictures() {
     pictures("grid-lfo", lfo_plugin(), &lfo_values(0.), &lfo_text);
     pictures("grid-filter", filter_plugin(), &filter_values(1.), &filter_text);
     pictures("grid-keymap", map_plugin(), &map_values(), &map_text);
+    pictures("grid-fm", fm_plugin(), &fm_values(0.), &fm_text);
 }
 
 // The wave's line is drawn from its own points, unscaled: the pixels of the line lie on the path at two

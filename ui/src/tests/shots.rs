@@ -133,9 +133,9 @@ impl Shot {
 /// How far, in pixels, the drawn line lies from the path it was drawn from, at points along the path where it
 /// runs straight (not at a corner or a step): the centroid of the green across the path's normal, measured
 /// there. Returns how many places were measured and the worst offset.
-pub(super) fn line_offsets(shot: &Shot, path: &str) -> (usize, f64) {
+pub(super) fn line_offsets(shot: &Shot, path: &str, step: f64) -> (usize, f64, (f64, f64)) {
     let v: Vec<(f64, f64)> = super::envelope::vertices(path).into_iter().map(|q| shot.screen(q)).collect();
-    // Resampled every 4 pixels along the path.
+    // Resampled every `step` pixels along the path.
     let mut at: Vec<(f64, f64)> = Vec::new();
     let mut along = 0.;
     let mut next = 0.;
@@ -144,14 +144,28 @@ pub(super) fn line_offsets(shot: &Shot, path: &str) -> (usize, f64) {
         while next <= along + len {
             let t = if len > 0. { (next - along) / len } else { 0. };
             at.push((pair[0].0 + (pair[1].0 - pair[0].0) * t, pair[0].1 + (pair[1].1 - pair[0].1) * t));
-            next += 4.;
+            next += step;
         }
         along += len;
     }
     let handles: Vec<(f64, f64)> = shot.panel.points.iter().map(|p| shot.screen((f64::from(p.x), f64::from(p.y)))).collect();
-    let (mut count, mut worst) = (0, 0f64);
-    for j in 2..at.len().saturating_sub(2) {
-        let (a, b, c) = (at[j - 2], at[j], at[j + 2]);
+    // The path's corners (a turn of more than 10 degrees) and how near one the window sees the other
+    // segment: within the window's reach where the turn is at most a right angle, farther where it doubles back.
+    let reach = 3. * shot.k;
+    let corners: Vec<((f64, f64), f64)> = v
+        .windows(3)
+        .filter_map(|w| {
+            let (d1, d2) = ((w[1].0 - w[0].0, w[1].1 - w[0].1), (w[2].0 - w[1].0, w[2].1 - w[1].1));
+            let (l1, l2) = (d1.0.hypot(d1.1), d2.0.hypot(d2.1));
+            let cos = (d1.0 * d2.0 + d1.1 * d2.1) / (l1 * l2);
+            (l1 > 1e-6 && l2 > 1e-6 && cos < 0.985).then(|| (w[1], if cos >= 0. { 1.5 * reach } else { (1.5 * reach / (1. - cos * cos).sqrt()).min(20. * reach) }))
+        })
+        .collect();
+    let (mut count, mut worst, mut at_worst) = (0, 0f64, (0., 0.));
+    // Straight over 8 pixels each way (a corner nearer than that has the next segment in the window).
+    let lag = ((8. / step).round() as usize).max(2);
+    for j in lag..at.len().saturating_sub(lag) {
+        let (a, b, c) = (at[j - lag], at[j], at[j + lag]);
         let (d1, d2) = ((b.0 - a.0, b.1 - a.1), (c.0 - b.0, c.1 - b.1));
         let (l1, l2) = (d1.0.hypot(d1.1), d2.0.hypot(d2.1));
         if l1 < 1e-6 || l2 < 1e-6 || (d1.0 * d2.0 + d1.1 * d2.1) / (l1 * l2) < 0.98 {
@@ -160,12 +174,15 @@ pub(super) fn line_offsets(shot: &Shot, path: &str) -> (usize, f64) {
         if handles.iter().any(|h| (h.0 - b.0).hypot(h.1 - b.1) < 9. * shot.k) {
             continue; // under a handle's ring
         }
+        if corners.iter().any(|(q, near)| (q.0 - b.0).hypot(q.1 - b.1) < *near) {
+            continue; // near a corner
+        }
         let t = (c.0 - a.0, c.1 - a.1);
         let tl = t.0.hypot(t.1);
         let n = (-t.1 / tl, t.0 / tl);
         let (mut sum, mut weighted) = (0., 0.);
-        let mut o = -4.;
-        while o <= 4. {
+        let mut o = -reach;
+        while o <= reach {
             let g = shot.green_at(b.0 + n.0 * o, b.1 + n.1 * o);
             sum += g;
             weighted += g * o;
@@ -175,29 +192,52 @@ pub(super) fn line_offsets(shot: &Shot, path: &str) -> (usize, f64) {
             continue; // not drawn here (under a handle, say)
         }
         count += 1;
-        worst = worst.max((weighted / sum).abs());
+        if (weighted / sum).abs() > worst {
+            worst = (weighted / sum).abs();
+            at_worst = b;
+        }
     }
-    (count, worst)
+    (count, worst, at_worst)
+}
+
+/// How a line is measured: every `step` pixels along it, at `least` places, at these window sizes and scales
+/// (a tall view needs windows it fits in).
+pub(super) struct Measure<'a> {
+    pub step: f64,
+    pub least: usize,
+    pub sizes: &'a [((usize, usize), f32)],
 }
 
 /// The four window sizes and scales the views are measured at.
 pub(super) const SIZES: [((usize, usize), f32); 4] = [((1280, 720), 1.), ((1280, 720), 2.), ((1920, 1080), 1.), ((1920, 1080), 2.)];
 
-/// Measures the path number `shape` of panel `which` of a page at every size and scale: it must have been
+/// Every 4 pixels, at 20 places at least, at every size.
+pub(super) const LONG: Measure = Measure { step: 4., least: 20, sizes: &SIZES };
+
+/// Measures the path number `shape` of panel `which` of a page at the sizes and scales: it must have been
 /// measured at enough places, the drawn line within 0.6 px of it, and the same path a pixel lower must be
 /// found off (so the measure can fail). Returns a line of the report per size.
-pub(super) fn check_line(name: &str, list: &serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String, which: usize, shape: usize) -> String {
+pub(super) fn check_line_with(name: &str, list: &serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String, which: usize, shape: usize, m: &Measure) -> String {
     let mut report = String::new();
-    for (size, scale) in SIZES {
+    for &(size, scale) in m.sizes {
         let (shot, _p) = view_shot(list, values, text, which, size, scale);
         let path = shot.panel.shapes.iter().nth(shape).expect("the path").commands.to_string();
-        let (count, off) = line_offsets(&shot, &path);
-        report += &format!("{name} {size:?}@{scale}: {count} places, worst {off:.2} px\n");
-        assert!(count >= 20, "the line was measured at enough places:\n{report}");
+        let (count, off, at) = line_offsets(&shot, &path, m.step);
+        report += &format!("{name} {size:?}@{scale}: {count} places, worst {off:.2} px (at {at:.1?})\n");
+        if off > 0.6 {
+            super::png(&shot.s, &format!("failed-{}-{}x{}@{scale}", name.replace(' ', "-").replace('\'', ""), size.0, size.1)); // to look at
+        }
+        assert!(count >= m.least, "the line was measured at enough places:\n{report}");
         assert!(off <= 0.6, "the line is off its path by up to {off:.2} px:\n{report}");
         let lower: Vec<(f32, f32)> = super::envelope::vertices(&path).into_iter().map(|(x, y)| (x as f32, y as f32 + 1.)).collect();
-        let (_, wrong) = line_offsets(&shot, &crate::views::poly(&lower));
+        let (_, wrong, _) = line_offsets(&shot, &crate::views::poly(&lower), m.step);
         assert!(wrong > 0.7 * f64::from(scale), "a path a pixel off is seen as {wrong:.2} px off:\n{report}");
     }
     report
 }
+
+/// `check_line_with` at every size, every 4 pixels.
+pub(super) fn check_line(name: &str, list: &serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String, which: usize, shape: usize) -> String {
+    check_line_with(name, list, values, text, which, shape, &LONG)
+}
+

@@ -98,7 +98,7 @@ key map, FM operators.
 | Filter response | `Filter` L359-415 | none (a preview) | views.rs `draw_filter`, `filter_of`, `filter_named`, `filter_db`; pixel test tests/views.rs | done |
 | LFO waveform | `Lfo` L419-473 | none (a preview) | views.rs `draw_lfo`, `lfo_of`, `wave_named`; pixel test tests/views.rs | done |
 | Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | views.rs `draw_map`, `map_of`, `map_drag`; tests/views.rs | done |
-| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | | not yet |
+| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | views.rs `draw_fm`, `fm_of`, `algorithm_layout`, `fm_grab`/`fm_drag`/`release`; tests/views.rs | done (two guards the reference lacks: operators past 8 are skipped, and a feedback with no target operator is not drawn: it indexes boxes[-1]) |
 
 ## Checklist (shell)
 
@@ -115,7 +115,8 @@ Control kinds:
 - [x] value display: read-only and every tile's plugin text
 - [x] envelope view (named stages and points)
 - [x] key or velocity map view (used by the FM and sample engines; touch: zone edges, the breakpoint, the depths and the velocity line are dragged)
-- [ ] FM operator view with algorithm diagram (FM, VA's and PCM's FM-style views)
+- [x] FM operator view with algorithm diagram (FM, VA's and PCM's FM-style views; touch: drag across the routing or tap
+      its halves for the algorithm, a level bar, a ratio up or down; `algorithms` of `params.list` parsed)
 - [x] filter response view (recognized by name: Cutoff + Resonance + Type; a preview, its tiles edit it)
 - [x] LFO waveform view (recognized by name: Wave/Shape + Rate/Speed; a preview, its tiles edit it)
 - [x] dragging an envelope's points (touch: a node within 24 px is taken, its time across and its level up

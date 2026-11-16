@@ -20,7 +20,8 @@ pub enum Ink {
     Accent = 0,
     Muted = 1,
     Border = 2,
-    // 3, 4: text, raised (slint/grid.slint `ViewPanel.ink`).
+    Text = 3,
+    Raised = 4,
     /// The border faintly: a plot's frame and baselines.
     Frame = 5,
     Background = 6,
@@ -31,6 +32,8 @@ pub enum Ink {
     /// The zone a key map is for, and the others.
     Zone = 9,
     ZoneFaint = 10,
+    /// Text on an accent fill (a carrier operator's number).
+    OnAccent = 11,
 }
 
 /// A path in the panel's pixels: stroked (`width`: 0 a hairline, 1 thin, 2 the cursor's) or filled.
@@ -73,6 +76,7 @@ pub struct BoxDraw {
     pub edge: Option<Ink>,
     pub text: String,
     pub text_ink: Ink,
+    pub bold: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -93,6 +97,7 @@ pub enum View {
     Lfo(LfoShape),
     /// A key or velocity map, and the index (zone, element) it is for.
     Map(MapShape, u64),
+    Fm(FmShape),
 }
 
 /// What a view reads: the grid's parameters and their values, the panel's size, and the parameter the
@@ -114,8 +119,14 @@ pub struct Ctx<'a> {
 /// A handle taken by touch, and what it set at the start.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Held {
-    /// An envelope's point.
+    /// A handle (an envelope's point, a map's edge).
     Node(usize),
+    /// An FM view's algorithm: dragged across the routing, a step per 24 px; its value and where the touch began.
+    Algorithm { param: usize, start: f64, from: (f32, f32) },
+    /// An operator's level bar.
+    Level { param: usize },
+    /// An operator's ratio: dragged up or down, a step per 12 px.
+    Ratio { param: usize, start: f64, from: (f32, f32) },
 }
 
 fn nearest(handles: &[Handle], at: (f32, f32)) -> Option<usize> {
@@ -137,6 +148,7 @@ pub fn draw(view: &View, c: &Ctx) -> Drawn {
         View::Filter(f) => draw_filter(f, c),
         View::Lfo(l) => draw_lfo(l, c),
         View::Map(m, index) => draw_map(m, *index, c),
+        View::Fm(f) => draw_fm(f, c),
     }
 }
 
@@ -145,6 +157,7 @@ pub fn draw(view: &View, c: &Ctx) -> Drawn {
 pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
     match view {
         View::Envelope(_) | View::Map(..) => nearest(&draw(view, c).handles, at).map(Held::Node),
+        View::Fm(f) => fm_grab(f, c, at),
         View::Filter(_) | View::Lfo(_) => None,
     }
 }
@@ -153,6 +166,7 @@ pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
 pub fn touched(view: &View, c: &Ctx, held: &Held) -> Vec<usize> {
     match held {
         Held::Node(k) => draw(view, c).handles.get(*k).map(|h| h.params.clone()).unwrap_or_default(),
+        Held::Algorithm { param, .. } | Held::Level { param } | Held::Ratio { param, .. } => vec![*param],
     }
 }
 
@@ -161,6 +175,25 @@ pub fn drag(view: &View, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f6
     match (view, held) {
         (View::Envelope(e), Held::Node(k)) => envelope_drag(e, c, *k, at),
         (View::Map(m, index), Held::Node(k)) => map_drag(m, *index, c, *k, at),
+        (View::Fm(f), held) => fm_drag(f, c, held, at),
+        _ => vec![],
+    }
+}
+
+/// Whether a touch sets its parameter where it lands, before it moves: an operator's level bar does.
+pub fn drags_on_grab(held: &Held) -> bool {
+    matches!(held, Held::Level { .. })
+}
+
+/// What letting go at `at` sets: a tap on the routing steps the algorithm, back on its left half, on on its right.
+pub fn release(view: &View, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f64)> {
+    match (view, held) {
+        (View::Fm(f), Held::Algorithm { param, start, from }) if (at.0 - from.0).hypot(at.1 - from.1) < 4. => {
+            let g = fm_geometry(f, c);
+            let p = &c.params[*param];
+            let step = if at.0 < (g.routing.0 + g.routing.2) / 2. { -1. } else { 1. };
+            vec![(*param, (start + step).clamp(p.min, p.max))]
+        }
         _ => vec![],
     }
 }
@@ -434,6 +467,345 @@ fn map_drag(m: &MapShape, index: u64, c: &Ctx, k: usize, at: (f32, f32)) -> Vec<
         Pull::Velocity => g.velocity.map_or(0., |v| ((at.1 - v.1) / height_of(v)).clamp(0., 1.)),
     };
     vec![(param, c.params[param].denorm(f64::from(v)))]
+}
+
+// The FM operator view (ParameterGrid::Operators): its algorithm's routing on the left (carriers on the
+// bottom row, filled; each modulator above what it modulates; feedback as a loop), and a column per
+// operator with its level as a bar, its ratio and its envelope's shape. Drag across the routing (or tap
+// either half) to choose the algorithm, a level bar to set the level, a ratio up or down to step it.
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Operator {
+    pub level: Option<usize>,
+    pub ratio: Option<usize>,
+    pub fine: Option<usize>,
+    pub detune: Option<usize>,
+    pub fixed: Option<usize>,
+    /// The operator's envelope parameters (the grid's), in the plugin's order.
+    pub envelope: Vec<usize>,
+}
+
+/// An FM operator view a plugin describes: the algorithm, feedback, and each operator's parameters
+/// (operators 1 to 8, as the view's indexes). Indexes are the grid's parameters'.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FmShape {
+    pub algorithm: Option<usize>,
+    pub feedback: Option<usize>,
+    /// Operator n at n - 1.
+    pub operators: Vec<Operator>,
+}
+
+pub fn fm_of(params: &[Param], view: u64) -> FmShape {
+    let mut f = FmShape::default();
+    if view == 0 {
+        return f;
+    }
+    for (i, p) in params.iter().enumerate().filter(|(_, p)| p.view == view) {
+        match p.field.as_str() {
+            "algorithm" => f.algorithm = Some(i),
+            "feedback" => f.feedback = Some(i),
+            _ => {}
+        }
+        // Operators 1 to 8 (the reference grows the list to any index; the diagram holds eight).
+        if p.index == 0 || p.index > 8 {
+            continue;
+        }
+        if f.operators.len() < p.index as usize {
+            f.operators.resize(p.index as usize, Operator::default());
+        }
+        let op = &mut f.operators[p.index as usize - 1];
+        match p.field.as_str() {
+            "operatorLevel" => op.level = Some(i),
+            "ratio" => op.ratio = Some(i),
+            "fine" => op.fine = Some(i),
+            "detune" => op.detune = Some(i),
+            "fixed" => op.fixed = Some(i),
+            field if grid::is_envelope(field) => op.envelope.push(i),
+            _ => {}
+        }
+    }
+    f
+}
+
+/// Where each operator of a routing sits in its diagram: its row (0 the carriers', at the bottom) and across,
+/// in operators' widths from the diagram's middle.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Place {
+    pub row: i32,
+    pub x: f32,
+}
+
+/// The places of the first `count` (at most 8) operators of `routing` (eight operators' input masks, the
+/// carriers' mask, the feedback's operator from and to): a carrier's row is 0, a modulator's one above the
+/// highest of the operators it modulates (a loop is cut after eight passes), each over the middle of what
+/// it modulates (a carrier, or an operator nothing reaches, in number order), then pushed right until none
+/// overlap. Feedback is not an input: drawn apart.
+pub fn algorithm_layout(routing: &[u8; 11], count: usize) -> Vec<Place> {
+    let count = count.min(8);
+    let mut row = vec![-1i32; count];
+    for (n, r) in row.iter_mut().enumerate() {
+        if routing[8] & (1 << n) != 0 {
+            *r = 0;
+        }
+    }
+    for _ in 0..8 {
+        for target in 0..count {
+            for m in 0..count {
+                if row[target] >= 0 && routing[target] & (1 << m) != 0 && m != target && row[m] < row[target] + 1 {
+                    row[m] = (row[target] + 1).min(7);
+                }
+            }
+        }
+    }
+    let mut places = vec![Place::default(); count];
+    let mut rows = 0;
+    for n in 0..count {
+        places[n].row = row[n].max(0);
+        rows = rows.max(places[n].row + 1);
+    }
+    let mut next = 0f32;
+    for r in 0..rows {
+        let mut in_row: Vec<usize> = Vec::new();
+        for n in 0..count {
+            if places[n].row != r {
+                continue;
+            }
+            let (mut sum, mut targets) = (0f32, 0);
+            for t in 0..count {
+                if t != n && routing[t] & (1 << n) != 0 && places[t].row < r {
+                    sum += places[t].x;
+                    targets += 1;
+                }
+            }
+            places[n].x = if targets > 0 {
+                sum / targets as f32
+            } else {
+                next += 1.;
+                next - 1.
+            };
+            in_row.push(n);
+        }
+        in_row.sort_by(|&a, &b| places[a].x.total_cmp(&places[b].x));
+        for k in 1..in_row.len() {
+            places[in_row[k]].x = places[in_row[k]].x.max(places[in_row[k - 1]].x + 1.);
+        }
+    }
+    let (mut low, mut high) = (0f32, 0f32);
+    for p in &places {
+        low = low.min(p.x);
+        high = high.max(p.x);
+    }
+    for p in &mut places {
+        p.x -= (low + high) / 2.;
+    }
+    places
+}
+
+struct Column {
+    name: Area,
+    level: Area,
+    level_text: Area,
+    ratio: Area,
+    envelope: Area,
+}
+
+struct FmGeometry {
+    routing: Area,
+    /// Where the carriers' outputs join, down the routing.
+    output: f32,
+    boxes: Vec<Area>,
+    columns: Vec<Column>,
+    route: Option<[u8; 11]>,
+}
+
+/// The algorithm's routing at its value, when the plugin gives one.
+fn fm_route(f: &FmShape, c: &Ctx) -> Option<[u8; 11]> {
+    let a = &c.params[f.algorithm?];
+    let at = ((c.norm)(f.algorithm?) * (a.max - a.min)).round() as usize;
+    a.algorithms.get(at).copied()
+}
+
+fn contains(a: Area, at: (f32, f32), grow: f32) -> bool {
+    at.0 >= a.0 - grow && at.0 <= a.2 + grow && at.1 >= a.1 - grow && at.1 <= a.3 + grow
+}
+
+fn fm_geometry(f: &FmShape, c: &Ctx) -> FmGeometry {
+    let (left, top, right, bottom) = plot(c);
+    let routing = (left, top, left + (0.36 * (right - left)).min(360.), bottom);
+    let area = (routing.2 + 14., top, right, bottom);
+    let count = f.operators.len();
+    let route = fm_route(f, c);
+    // The routing's operators: rows from the bottom, each row centered; no routing: one row.
+    let mut places: Vec<Place> = (0..count).map(|n| Place { row: 0, x: n as f32 - (count as f32 - 1.) / 2. }).collect();
+    if let Some(r) = &route {
+        places = algorithm_layout(r, count);
+    }
+    let (mut rows, mut span) = (1, 1f32);
+    for p in &places {
+        rows = rows.max(p.row + 1);
+        span = span.max(p.x.abs() * 2. + 1.);
+    }
+    let output = routing.3 - 10.;
+    let row_height = 46f32.min((height_of(routing) - 24.) / rows as f32);
+    let side = (row_height - 12.).min(30.);
+    let column_width = 48f32.min((width_of(routing) - 24.) / span);
+    let centre = (routing.0 + routing.2) / 2.;
+    let boxes = places
+        .iter()
+        .map(|p| {
+            let (x, y) = (centre + p.x * column_width, output - 12. - row_height * p.row as f32 - side / 2.);
+            (x - side / 2., y - side / 2., x + side / 2., y + side / 2.)
+        })
+        .collect();
+    let width = if count > 0 { width_of(area) / count as f32 } else { 0. };
+    let columns = (0..count)
+        .map(|n| {
+            let (x, r) = (area.0 + width * n as f32 + 4., area.0 + width * (n + 1) as f32 - 4.);
+            let name = (x, area.1, r, area.1 + 18.);
+            let rest_top = name.3;
+            let envelope = (x, area.3 - (area.3 - rest_top) * 0.26, r, area.3);
+            let mut below = envelope.1 - 6.; // what is left above the ratio
+            let ratio = (x, below - 30., r, below);
+            below = ratio.1 - 6.;
+            let level_text = (x, below - 16., r, below);
+            let rest = (x, rest_top, r, level_text.1);
+            let bar_width = width_of(rest).min(36.);
+            let level = ((rest.0 + rest.2 - bar_width) / 2., rest.1, (rest.0 + rest.2 + bar_width) / 2., rest.3);
+            Column { name, level, level_text, ratio, envelope }
+        })
+        .collect();
+    FmGeometry { routing, output, boxes, columns, route }
+}
+
+fn fm_text(f: &FmShape, c: &Ctx) -> String {
+    let mut title = format!("Algorithm {}", f.algorithm.map(|a| (c.text)(a)).unwrap_or_default());
+    if let Some(k) = f.feedback {
+        title += &format!("  \u{b7}  Feedback {}", (c.text)(k));
+    }
+    title
+}
+
+fn line(a: (f32, f32), b: (f32, f32)) -> String {
+    poly(&[a, b])
+}
+
+fn draw_fm(f: &FmShape, c: &Ctx) -> Drawn {
+    let g = fm_geometry(f, c);
+    let mut d = Drawn { title: fm_text(f, c), ..Default::default() };
+    d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: inner_rect(g.routing, 1.) });
+    // The routing: lines first, then the operators over them.
+    if let Some(r) = &g.route {
+        let mut wires = String::new();
+        for t in 0..g.boxes.len() {
+            for m in 0..g.boxes.len() {
+                if r[t] & (1 << m) != 0 && m != t {
+                    wires += &(line(((g.boxes[m].0 + g.boxes[m].2) / 2., g.boxes[m].3), ((g.boxes[t].0 + g.boxes[t].2) / 2., g.boxes[t].1)) + " ");
+                }
+            }
+            if r[8] & (1 << t) != 0 {
+                let x = (g.boxes[t].0 + g.boxes[t].2) / 2.;
+                wires += &(line((x, g.boxes[t].3), (x, g.output)) + " ");
+            }
+        }
+        d.shapes.push(Shape { ink: Ink::Muted, fill: false, width: 1, commands: wires });
+        // Feedback: out of its operator's right side, up and over into the operator it feeds.
+        let n = g.boxes.len();
+        if r[9] != 0 && usize::from(r[9]) <= n && r[10] != 0 && usize::from(r[10]) <= n {
+            let (from, to) = (g.boxes[usize::from(r[9]) - 1], g.boxes[usize::from(r[10]) - 1]);
+            let side = from.2.max(to.2) + 6.;
+            let up = from.1.min(to.1) - 6.;
+            let to_x = (to.0 + to.2) / 2.;
+            let path = poly(&[(from.2, (from.1 + from.3) / 2.), (side, (from.1 + from.3) / 2.), (side, up), (to_x, up), (to_x, to.1)]);
+            d.shapes.push(Shape { ink: Ink::Accent, fill: false, width: 1, commands: path });
+        }
+        let y = crisp(g.output);
+        d.shapes.push(Shape { ink: Ink::Muted, fill: false, width: 0, commands: line((g.routing.0 + 12., y), (g.routing.2 - 12., y)) });
+    }
+    let carrier = |n: usize| g.route.is_some_and(|r| r[8] & (1 << n) != 0);
+    for (n, b) in g.boxes.iter().enumerate() {
+        let (fill, ink) = if carrier(n) { (Ink::Accent, Ink::OnAccent) } else { (Ink::Raised, Ink::Text) };
+        d.boxes.push(BoxDraw { x: b.0, y: b.1, w: width_of(*b), h: height_of(*b), fill, edge: Some(Ink::Border), text: (n + 1).to_string(), text_ink: ink, bold: true });
+    }
+    // A column per operator: its number, its level as a bar and text, its ratio, and its envelope.
+    for (n, (col, op)) in g.columns.iter().zip(&f.operators).enumerate() {
+        d.labels.push(Label { x: col.name.0, y: col.name.1, w: width_of(col.name), h: height_of(col.name), text: format!("Op {}", n + 1), ink: if carrier(n) { Ink::Accent } else { Ink::Text }, bold: true, align: 1 });
+        d.boxes.push(BoxDraw { x: col.level.0, y: col.level.1, w: width_of(col.level), h: height_of(col.level), fill: Ink::Raised, edge: None, text: String::new(), text_ink: Ink::Text, bold: false });
+        if let Some(l) = op.level {
+            let v = (c.norm)(l) as f32 * height_of(col.level);
+            d.boxes.push(BoxDraw { x: col.level.0, y: col.level.3 - v, w: width_of(col.level), h: v, fill: Ink::Accent, edge: None, text: String::new(), text_ink: Ink::Text, bold: false });
+            d.labels.push(Label { x: col.level_text.0, y: col.level_text.1, w: width_of(col.level_text), h: height_of(col.level_text), text: (c.text)(l), ink: Ink::Text, bold: false, align: 1 });
+        }
+        let mut ratio = op.ratio.map(|r| (c.text)(r)).unwrap_or_default();
+        if let Some(fine) = op.fine {
+            ratio += &format!(" {}", (c.text)(fine));
+        }
+        if let Some(fixed) = op.fixed.filter(|&x| (c.norm)(x) > 0.5) {
+            ratio = format!("{} {ratio}", (c.text)(fixed));
+        }
+        d.boxes.push(BoxDraw { x: col.ratio.0, y: col.ratio.1, w: width_of(col.ratio), h: height_of(col.ratio), fill: Ink::Raised, edge: None, text: ratio, text_ink: Ink::Text, bold: false });
+        if !op.envelope.is_empty() {
+            let fields: Vec<&str> = op.envelope.iter().map(|&i| c.params[i].field.as_str()).collect();
+            let e = grid::envelope_of_fields(&fields);
+            let refs: Vec<&Param> = op.envelope.iter().map(|&i| &c.params[i]).collect();
+            let times: Vec<&Param> = e.points.iter().filter_map(|p| p.time).map(|t| refs[t]).collect();
+            let longest = grid::longest_stage(&times);
+            let env = col.envelope;
+            let level = |k: Option<usize>, fixed: f64| env.3 - k.map_or(fixed, |k| (c.norm)(op.envelope[k])) as f32 * height_of(env);
+            let segment = width_of(env) * 0.8 / e.points.len().max(1) as f32;
+            let hold = width_of(env) * 0.2;
+            let mut x = env.0;
+            let mut points = vec![(x, level(e.start, 0.))];
+            for p in &e.points {
+                if let Some(t) = p.time {
+                    x += grid::stage_across(refs[t], (c.norm)(op.envelope[t]), p.rate, longest) as f32 * segment;
+                }
+                points.push((x, level(p.level, p.fixed)));
+                if p.sustain {
+                    x += hold;
+                    points.push((x, level(p.level, p.fixed)));
+                }
+            }
+            d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: inner_rect(env, 1.) });
+            d.shapes.push(Shape { ink: Ink::Accent, fill: false, width: 1, commands: poly(&points) });
+        }
+    }
+    d
+}
+
+fn fm_grab(f: &FmShape, c: &Ctx, at: (f32, f32)) -> Option<Held> {
+    let g = fm_geometry(f, c);
+    let raw = |p: usize| c.params[p].min + (c.norm)(p) * (c.params[p].max - c.params[p].min);
+    let mut held = None;
+    if let (true, Some(a)) = (contains(g.routing, at, 0.), f.algorithm) {
+        held = Some(Held::Algorithm { param: a, start: raw(a), from: at });
+    }
+    for (col, op) in g.columns.iter().zip(&f.operators) {
+        if let (true, Some(l)) = (contains(col.level, at, 4.), op.level) {
+            held = Some(Held::Level { param: l });
+        }
+        if let (true, Some(r)) = (contains(col.ratio, at, 4.), op.ratio) {
+            held = Some(Held::Ratio { param: r, start: raw(r), from: at });
+        }
+    }
+    held
+}
+
+fn fm_drag(f: &FmShape, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f64)> {
+    match held {
+        Held::Level { param } => {
+            let g = fm_geometry(f, c);
+            let Some(col) = f.operators.iter().position(|o| o.level == Some(*param)).and_then(|n| g.columns.get(n)) else { return vec![] };
+            vec![(*param, c.params[*param].denorm(f64::from(((col.level.3 - at.1) / height_of(col.level)).clamp(0., 1.))))]
+        }
+        Held::Algorithm { param, start, from } | Held::Ratio { param, start, from } => {
+            // A step per 24 pixels across the routing, or up a ratio; a continuous ratio by its range.
+            let steps = if matches!(held, Held::Algorithm { .. }) { f64::from(at.0 - from.0) / 24. } else { f64::from(from.1 - at.1) / 12. };
+            let p = &c.params[*param];
+            let v = if p.stepped { start + steps.trunc() } else { start + steps / 100. * (p.max - p.min) };
+            vec![(*param, v.clamp(p.min, p.max))]
+        }
+        Held::Node(_) => vec![],
+    }
 }
 
 // The filter (ParameterGrid::Filter): its response across the audio range, from its cutoff (across) and

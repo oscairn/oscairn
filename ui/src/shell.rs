@@ -295,7 +295,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
         taken
     });
     grid.on_view_move(|v, x, y| with_app(|a| a.on_params(|p| p.view_move(v, x, y))));
-    grid.on_view_up(|v| with_app(|a| a.on_params(|p| p.view_up(v))));
+    grid.on_view_up(|v, x, y| with_app(|a| a.on_params(|p| p.view_up(v, x, y))));
     grid.on_back(|| with_app(|a| a.back()));
     grid.on_resized(|| with_app(|a| a.on_params(crate::params::Screen::shown)));
     let keys = ui.global::<KeyboardState>();

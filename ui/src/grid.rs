@@ -26,6 +26,7 @@ const ENVELOPE: f32 = 180.;
 const LFO: f32 = 140.;
 const FILTER: f32 = 160.;
 const MAP: f32 = 180.;
+const FM: f32 = 300.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
@@ -263,10 +264,14 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
         let mut described: Vec<Vec<usize>> = Vec::new();
         let mut keys: Vec<(u64, u64)> = Vec::new();
         let mut maps: Vec<(u64, u64)> = Vec::new(); // views and indexes of key and velocity maps
+        let mut operators: Vec<u64> = Vec::new(); // views with an FM algorithm
         for &i in members {
             let p = &params[i];
             if p.view == 0 {
                 continue;
+            }
+            if p.field == "algorithm" && !operators.contains(&p.view) {
+                operators.push(p.view);
             }
             let list = if is_envelope(&p.field) { &mut keys } else { &mut maps };
             if (is_envelope(&p.field) || views::is_map_field(&p.field)) && !list.contains(&(p.view, p.index)) {
@@ -277,6 +282,10 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
             out.panels.push(Panel { rect: Rect { x: 0., y: *y, w: width, h: high }, view, params: list });
             *y += high + gap;
         };
+        // The FM operator view where its algorithm is, then an envelope per view and index.
+        for view in operators {
+            panel(&mut out, &mut y, View::Fm(views::fm_of(params, view)), FM, vec![]);
+        }
         for (view, index) in keys {
             let list: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == index && is_envelope(&params[i].field)).collect();
             let fields: Vec<&str> = list.iter().map(|&i| params[i].field.as_str()).collect();
@@ -457,7 +466,7 @@ pub struct Envelope {
     pub points: Vec<Point>,
 }
 
-fn is_envelope(field: &str) -> bool {
+pub fn is_envelope(field: &str) -> bool {
     matches!(field, "delay" | "attack" | "hold" | "decay" | "sustain" | "release") || ["level", "time", "rate"].iter().any(|k| field.strip_prefix(k).is_some_and(|n| n.parse::<u8>().is_ok()))
 }
 
@@ -592,6 +601,27 @@ pub fn envelope_curve(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> f
     (l.line, l.fill, points)
 }
 
+/// The longest any of the time or rate parameters' stages can take, in seconds; 0 when one gives no seconds
+/// (the stages are then drawn by the parameters' ranges).
+pub fn longest_stage(params: &[&Param]) -> f64 {
+    if params.iter().any(|p| p.seconds.len() < 2) {
+        return 0.;
+    }
+    params.iter().flat_map(|p| p.seconds.iter().copied()).fold(0., f64::max)
+}
+
+/// How far across its room (0 to 1) the stage of a time or rate parameter at `v` (0 to 1) reaches: by its
+/// seconds on the log axis up to `longest`, or by its range when that is 0 (a rate reversed).
+pub fn stage_across(p: &Param, v: f64, rate: bool, longest: f64) -> f64 {
+    if longest > 0. {
+        time_across(seconds_at(&p.seconds, v), longest)
+    } else if rate {
+        1. - v
+    } else {
+        v
+    }
+}
+
 /// An envelope's seconds-axis position (0 to 1) of a time of `seconds` when the longest stage is `longest`.
 fn time_across(seconds: f64, longest: f64) -> f64 {
     (seconds / SHORT_STAGE).ln_1p() / (longest / SHORT_STAGE).ln_1p()
@@ -663,18 +693,9 @@ pub fn envelope_layout(e: &Envelope, params: &[&Param], norm: &dyn Fn(usize) -> 
     let hold = aw * 0.14;
     let segment = (aw - hold) / e.points.len().max(1) as f32;
     let least = (20f32).min(segment / 4.);
-    let times: Vec<usize> = e.points.iter().filter_map(|p| p.time).collect();
-    let longest = if times.iter().all(|&t| params[t].seconds.len() >= 2) { times.iter().flat_map(|&t| params[t].seconds.iter().copied()).fold(0., f64::max) } else { 0. };
-    let across = |t: usize, rate: bool| -> f64 {
-        let v = norm(t);
-        if longest > 0. {
-            time_across(seconds_at(&params[t].seconds, v), longest)
-        } else if rate {
-            1. - v
-        } else {
-            v
-        }
-    };
+    let times: Vec<&Param> = e.points.iter().filter_map(|p| p.time).map(|t| params[t]).collect();
+    let longest = longest_stage(&times);
+    let across = |t: usize, rate: bool| stage_across(params[t], norm(t), rate, longest);
     let level = |p: Option<usize>, fixed: f64| bottom - norm_or(p, fixed, norm) as f32 * ah;
     let mut x = left;
     let start = level(e.start, 0.);

@@ -409,7 +409,7 @@ impl Screen {
         let shapes: Vec<GridShape> = d.shapes.into_iter().map(|s| GridShape { ink: s.ink as i32, fill: s.fill, width: s.width, commands: s.commands.into() }).collect();
         let points: Vec<GridPoint> = d.handles.iter().map(|h| GridPoint { x: h.at.0, y: h.at.1, lit: focus.is_some_and(|f| h.params.contains(&f)), held: !taken.is_empty() && h.params == taken }).collect();
         let labels: Vec<GridLabel> = d.labels.into_iter().map(|l| GridLabel { x: l.x, y: l.y, w: l.w, h: l.h, text: l.text.into(), ink: l.ink as i32, bold: l.bold, align: l.align }).collect();
-        let boxes: Vec<GridBox> = d.boxes.into_iter().map(|b| GridBox { x: b.x, y: b.y, w: b.w, h: b.h, fill: b.fill as i32, edge: b.edge.map_or(-1, |e| e as i32), text: b.text.into(), text_ink: b.text_ink as i32 }).collect();
+        let boxes: Vec<GridBox> = d.boxes.into_iter().map(|b| GridBox { x: b.x, y: b.y, w: b.w, h: b.h, fill: b.fill as i32, edge: b.edge.map_or(-1, |e| e as i32), text: b.text.into(), text_ink: b.text_ink as i32, bold: b.bold }).collect();
         GridPanel {
             x: panel.rect.x,
             y: panel.rect.y,
@@ -706,9 +706,23 @@ impl Screen {
         for i in ids {
             self.begin(self.params[i].id);
         }
+        let on_grab = views::drags_on_grab(&held);
         self.view_held = Some((k, held));
+        if on_grab {
+            self.view_move(panel, x, y);
+        }
         self.show();
         true
+    }
+
+    /// Sets what a view says (each parameter, its value), but not what already is.
+    fn view_sets(&mut self, sets: Vec<(usize, f64)>) {
+        for (i, to) in sets {
+            let param = self.params[i].clone();
+            if to != self.value(&param) {
+                self.set(&param, to);
+            }
+        }
     }
 
     pub fn view_move(&mut self, panel: i32, x: f32, y: f32) {
@@ -717,16 +731,20 @@ impl Screen {
         if held_panel != k {
             return;
         }
-        for (i, to) in self.with_view(p, |c| views::drag(&p.view, c, &held, (x, y))) {
-            let param = self.params[i].clone();
-            if to != self.value(&param) {
-                self.set(&param, to);
-            }
-        }
+        let sets = self.with_view(p, |c| views::drag(&p.view, c, &held, (x, y)));
+        self.view_sets(sets);
         self.show();
     }
 
-    pub fn view_up(&mut self, _panel: i32) {
+    /// The touch ends at (x, y): what letting go sets (a tap on the routing), then the gestures end.
+    pub fn view_up(&mut self, panel: i32, x: f32, y: f32) {
+        let k = panel as usize;
+        if let (Some(p), Some((held_panel, held))) = (self.laid.panels.get(k), self.view_held.clone()) {
+            if held_panel == k {
+                let sets = self.with_view(p, |c| views::release(&p.view, c, &held, (x, y)));
+                self.view_sets(sets);
+            }
+        }
         self.view_held = None;
         self.end_gestures();
         self.show();

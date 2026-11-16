@@ -79,6 +79,7 @@ export struct GridBox {
     edge: int, // -1 none
     text: string,
     text-ink: int,
+    bold: bool,
 }
 
 export struct GridPanel {
@@ -124,7 +125,7 @@ export global GridState {
     // A touch on a view's panel (its index, the place in the panel's pixels): down says whether it took a handle.
     callback view-down(int, length, length) -> bool;
     callback view-move(int, length, length);
-    callback view-up(int);
+    callback view-up(int, length, length);
     callback show-page(int);
     callback show-tab(int);
     callback scrolled(length);
@@ -434,7 +435,7 @@ component ViewPanel inherits Section {
     property <length> last;
     // The theme's color for a view's ink (src/views.rs `Ink`).
     pure function ink(i: int) -> color {
-        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : i == 7 ? Theme.accent.with-alpha(Theme.wash-light) : i == 8 ? Theme.keys-white : i == 9 ? Theme.wash-color : Theme.zone-faint;
+        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : i == 7 ? Theme.accent.with-alpha(Theme.wash-light) : i == 8 ? Theme.keys-white : i == 9 ? Theme.wash-color : i == 10 ? Theme.zone-faint : Theme.on-accent;
     }
     pure function stroke(w: int) -> length {
         return w == 0 ? Theme.hair : w == 1 ? Theme.thin : Theme.cursor-width;
@@ -473,7 +474,7 @@ component ViewPanel inherits Section {
             text: b.text;
             color: root.ink(b.text-ink);
             font-size: Theme.small;
-            font-weight: 700;
+            font-weight: b.bold ? 700 : 400;
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: elide;
@@ -509,7 +510,7 @@ component ViewPanel inherits Section {
                 root.taken = GridState.view-down(root.index, self.mouse-x, self.mouse-y);
                 root.last = self.absolute-position.y + self.mouse-y;
             } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
-                if (root.taken) { GridState.view-up(root.index); }
+                if (root.taken) { GridState.view-up(root.index, self.mouse-x, self.mouse-y); }
                 root.taken = false;
             }
         }

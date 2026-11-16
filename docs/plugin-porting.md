@@ -1123,9 +1123,11 @@ writing tests:
   waveforms are supported as assets, found through `resolve_sample` or `resolve` with an empty
   library; a plugin that reads files from an asset library by path is not covered.
   `--library FILE --sound ITEM` installs a library archive as a locked library and opens its
-  Sound in the part as the library does; the sound opens only when the plugin it names is
-  here at the version it names (found by its `pathHint` from the working folder, or in the
-  plugin store), else it is a stand-in and the check fails saying so. An archive checked with
+  Sound in the part as the library does. The check first installs the plugin under check in
+  its temporary store as a plugin package, as a user has it, then the library; the Sound opens
+  only when its node names that plugin ID and version, the audio ports the plugin reports and a
+  `pathHint` that misses or names this build (the store finds it by ID and version). The export
+  then carries the plugin, the Sound, its samples and the types. An archive checked with
   `--install` needs no content options: it holds the content.
 - `core/lv2-host/tests/production/run.py PROBE OUT --case NAME,PATH,ID,synth|effect,PARAM,VALUE`:
   renders at 44.1 and 48 kHz, 37- and 512-frame blocks, offline and realtime, a fresh-instance

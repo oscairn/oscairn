@@ -47,6 +47,7 @@ namespace
 {
     int failures = 0;
     void check(bool ok, const std::string& what) { std::printf("%s: %s\n", ok ? "ok" : "FAIL", what.c_str()); if(!ok) ++failures; }
+    bool inSound = false; // --sound: the part came from a library Sound
     bool content = false; // --state or --asset given: a silent render says the content made no sound
     std::string read(const fs::path& f) { std::ifstream in(f, std::ios::binary); std::ostringstream out; out << in.rdbuf(); return out.str(); }
     void write(const fs::path& f, const std::string& text) { std::ofstream(f, std::ios::binary | std::ios::trunc) << text; }
@@ -135,6 +136,17 @@ namespace
         }
         writePackage(archive, p, stage);
     }
+    // The plugin as a plugin package, as oscairn-sign plugin-package makes one (its license is a stand-in: only this check installs it).
+    void pluginPackage(const fs::path& archive, const std::string& plugin, const std::string& id, const std::string& version, const fs::path& stage)
+    {
+        const fs::path build = plugin;
+        const auto inside = fs::path("Plugins") / "clap" / pluginFolderName(id, version) / platform() / build.filename();
+        fs::create_directories((stage / inside).parent_path());
+        fs::copy(build, stage / inside, fs::copy_options::recursive);
+        Package p; p.kind = "plugin"; p.id = id; p.name = id; p.license = "MIT";
+        p.plugins.push_back({"clap", id, version, id, {{platform(), inside.generic_string(), bundleDigest(build), {}, 0, 0}}});
+        writePackage(archive, p, stage);
+    }
     // Opened without a stand-in: the plugin itself, not a silent placeholder.
     void opened(Session& s, const std::string& what)
     {
@@ -177,7 +189,8 @@ std::vector<float> installAndOpen(const fs::path& archive, const fs::path& home,
     const auto there = render(b, synth || noteEffect);
     plays(there, noteEffect, "plays there");
     const auto store = b.installedPlugins();
-    check(store.size() == 1 && store[0].open && store[0].usedBy.size() == 1, "the store says the open Performance plays it");
+    // The Sound a --sound opened from is an item of the export too: it uses the plugin as the Performance does.
+    check(store.size() == 1 && store[0].open && store[0].usedBy.size() == (inSound ? 2u : 1u), "the store says the open Performance plays it" + std::string(store.empty() ? "" : " (used by " + std::to_string(store[0].usedBy.size()) + ")"));
     std::string platforms;
     for(const auto& s : store.empty() ? std::vector<std::string>{} : store[0].platforms) platforms += " " + s;
     std::printf("builds in the store:%s\n", platforms.c_str());
@@ -207,7 +220,7 @@ int main(int argc, char** argv)
         const std::string option = argv[i], value = argv[i + 1];
         if(option == "--keep-archive") { keep = fs::absolute(value); continue; }
         if(option == "--library") { libraries.push_back(fs::absolute(value)); continue; }
-        if(option == "--sound") { sound = value; continue; }
+        if(option == "--sound") { sound = value; inSound = true; continue; }
         if(option == "--state") { stateFile = fs::absolute(value); continue; }
         const auto eq = value.find('=');
         if(eq == std::string::npos) { std::fprintf(stderr, "%s needs NAME=VALUE\n", option.c_str()); return 2; }
@@ -237,6 +250,16 @@ int main(int argc, char** argv)
         bool noteEffect = false;
         // Device A: played in a part, saved, opened again, exported.
         {
+            // --sound: its plugin is found as a user's is, in the plugin store, so the plugin is installed first as a package.
+            fs::path pluginArchive;
+            if(!sound.empty())
+            {
+                device(temp.path / "probe");
+                Session probe(rate, block, {}, stereoIn);
+                probe.add("plugin", plugin, id);
+                pluginArchive = temp.path / "plugin.olib";
+                pluginPackage(pluginArchive, plugin, id, probe.graphState().topology.nodes.at(0).plugin.version, temp.path / "plugin.stage");
+            }
             device(temp.path / "a");
             Session a(rate, block, {}, stereoIn);
             a.setBudget({64, 0}); // measured as it plays (RFC 0025), never refused: 64 blocks' time
@@ -247,6 +270,11 @@ int main(int argc, char** argv)
                 sampleArchive(made, assets, temp.path / "content.stage");
                 const auto done = a.installArchive(made.string(), false, {}, true);
                 check(done.notes.empty(), "the assets install as a sample package does: " + std::to_string(assets.size()) + " files");
+            }
+            if(!pluginArchive.empty())
+            {
+                const auto done = a.installArchive(pluginArchive.string(), false, {}, true);
+                check(done.notes.empty(), "the plugin installs in the store as a package");
             }
             for(const auto& library : libraries)
             {

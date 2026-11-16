@@ -5,7 +5,12 @@
 // and that sample as --asset it passes every step, the export carrying the sample to a fresh
 // device (so the check's own "plays there" has it); a state naming a sample that was not given
 // fails, saying the content made no sound; an asset that is not a sample or waveform is refused.
+// --library and --sound: a Sound of the fixture, exported with its sample and the types, installed as a
+// library; the check installs the plugin as a package, opens the Sound in a part and plays it through
+// the save, the export and the fresh device.
 //   oscairn-plugin-check-content-test CHECK_TOOL FIXTURE.clap SAMPLEPACK_CLI
+#include "oscairn/session.h"
+#include "oscairn/package.h"
 #include "../../engine/tests/sample_source.h"
 #include "../../plugin-host/src/StateFiles.h"
 #include <cstdio>
@@ -52,6 +57,37 @@ int main(int argc, char** argv)
     const auto text = temp.path / "notes.txt";
     std::ofstream(text) << "x";
     check(run(tool + " " + fixture + " --asset notes=\"" + text.string() + "\"", out, log) != 0 && out.find("only samples (.osp) and waveforms (.owf)") != std::string::npos, "another kind of file is refused, saying so\n" + out);
+
+    // A Sound of the fixture made on a device of its own: the samples as a sample package installs them, the fixture
+    // loaded with a state naming the sample (OSCAIRN_SAMPLE_FIXTURE_REFS), the part saved as a Sound and exported.
+    using namespace oscairn;
+    const auto soundArchive = temp.path / "sound.olib";
+    std::string soundId;
+    {
+        const auto stage = temp.path / "stage";
+        fs::create_directories(stage / "Types");
+        fs::copy(OSCAIRN_SAMPLE_TYPES_DIR, stage / "Types" / "org.oscairn.sample-types", fs::copy_options::recursive);
+        const auto entry = "Samples/" + sample.pack.filename().string();
+        fs::create_directories(stage / "Samples"); fs::copy_file(sample.pack, stage / entry);
+        Package p; p.id = "samples"; p.name = "samples"; p.kind = "library"; p.contents.push_back(entry);
+        writePackage(temp.path / "samples.olib", p, stage);
+        fs::create_directories(temp.path / "mk");
+        ::setenv("OSCAIRN_DATA_HOME", (temp.path / "mk").c_str(), 1);
+        Session mk(48000, 256);
+        mk.installArchive((temp.path / "samples.olib").string(), false, {}, true);
+        ::setenv("OSCAIRN_SAMPLE_FIXTURE_REFS", ("sample:" + sample.id).c_str(), 1);
+        const auto node = mk.add("plugin", argv[2], "org.oscairn.test.sample-fixture");
+        ::unsetenv("OSCAIRN_SAMPLE_FIXTURE_REFS");
+        const auto part = mk.addPart("Keys"); mk.insertIntoPart(part, 0, node); mk.commit();
+        soundId = mk.savePartAsSound(part, "Init").id;
+        mk.exportLibraryItem(soundId, soundArchive.string());
+    }
+    check(!soundId.empty(), "a Sound of the fixture is made");
+    check(run(tool + " " + fixture + " --library \"" + soundArchive.string() + "\" --sound " + soundId, out, log) == 0 && out.find("PASSED") != std::string::npos
+          && out.find("ok: the plugin installs in the store as a package") != std::string::npos && out.find("ok: the library installs") != std::string::npos
+          && out.find("ok: plays: rms") != std::string::npos && out.find("ok: plays as saved: rms") != std::string::npos && out.find("ok: plays there: rms") != std::string::npos,
+          "--library and --sound: the Sound plays, as saved and from a fresh store\n" + out);
+    check(run(tool + " " + fixture + " --library \"" + soundArchive.string() + "\" --sound 0000000000000000", out, log) != 0 && out.find("no such Sound") != std::string::npos, "a Sound the library lacks is refused\n" + out);
     if(failures) return 1;
     std::puts("plugin check content: ok");
     return 0;

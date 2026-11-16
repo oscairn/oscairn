@@ -1497,8 +1497,9 @@ void Session::open(Prepared& p,bool seamless) {
     // Compilation and all allocating preparation precede publication. The audio thread
     // adopts at one boundary; old plans and their hosts are reclaimed by service().
     auto history=history_;
-    if(history.size()==historyCapacity)history.pop_front();
-    history.push_back({sequence_+1,ChangeKind::Resync,0,0,0,false});
+    // A resync for the values, and the graph itself changed: a graph.changed subscriber hears the load too.
+    while(history.size()+2>historyCapacity)history.pop_front();
+    history.push_back({sequence_+1,ChangeKind::Resync,0,0,0,false});history.push_back({sequence_+2,ChangeKind::Graph,0,0,0,false});
     next->setControlTargets(deliver(*next,p.macros,p.mappingScene)); // the lanes' controls (RFC 0011)
     graph_.publishReplacement(*next,[&]() noexcept {
         // Their channels select the incoming sounds, queued for the plugin's next block: the plan's first,
@@ -1516,7 +1517,7 @@ void Session::open(Prepared& p,bool seamless) {
         p.claimed.sounds.clear();
         nodes_.swap(p.names);observed_.swap(observed);parts_.swap(p.parts);wires_.swap(wires);disabled_.swap(disabled);rungOut_.swap(rungOut);leaving_.swap(leaving);nextPart_=p.nextPart;nextWire_=p.nextWire;padMap_=p.pads;key_=p.key;masterLevel_=p.masterLevel;masterPan_=p.masterPan;roles_.swap(p.roles);notices_.swap(p.notices);heldPads_={};scenes_.swap(p.scenes);untouched_.swap(p.untouched);scene_=p.selectedScene;mappingScene_=p.mappingScene;transition_.reset();pendingScene_.reset();nextScene_=p.nextScene;macros_.swap(p.macros);assignments_.swap(p.assignments);nextMacro_=p.nextMacro;pending_.clear();commandCount_=0;outputDrops_.clear();parameterRevisions_.clear();staged_=false;
         tempo_.store(p.tempo);clockSource_.store(p.clock);playing_.store(false);loaded_.swap(loaded);reused_+=p.reused;keptStates_+=p.kept;
-        ++revision_;++sequence_;history_.swap(history);
+        ++revision_;sequence_+=2;history_.swap(history);
     });
     std::erase_if(loaded_,[&](const auto& l){return !graph_.contains(l.first);});
     std::erase_if(reusedBase_,[&](const auto& b){return std::none_of(nodes_.begin(),nodes_.end(),[&](const auto& n){return &graph_.host(n.first)==b.first;});});

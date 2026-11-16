@@ -4,8 +4,10 @@
 #include "AllocationGuard.h"
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace
 {
@@ -122,6 +124,16 @@ namespace
         check(audio.l[0]==0,"removing instrument silences graph");
         const auto next=s.add("a",plugin); check(next>b,"node IDs not reused");
         s.service();
+
+        // A Performance loaded (by any client) is a graph resync: a graph.changed subscriber hears it, not only the history's.
+        s.connectNotes(oscairn::graphInput,next); s.connectAudio(next,oscairn::graphOutput); s.commit();
+        const auto saved=std::filesystem::temp_directory_path()/("oscairn-control-flow-"+std::to_string(getpid()));
+        std::filesystem::remove_all(saved); s.savePerformance(saved.string());
+        one.notifications(100000000);
+        s.loadPerformance(saved.string()); s.service();
+        const auto announced=one.notifications(200000000);
+        std::filesystem::remove_all(saved);
+        check(contains(announced,"graph.changed"),"a loaded Performance notifies graph.changed subscribers");
     }
 }
 int main(int argc,char** argv)

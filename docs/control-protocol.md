@@ -1066,7 +1066,8 @@ a Sound saves its sound on its own, and `parts.saveSound` no longer refuses one 
 returns are `{"saved":true}` and `{"loaded":true}`. Both are advertised by `session.hello`.
 Files use the [Performance version 13 format/schema](performance-format.md). Saving refuses
 existing directories and staged graph edits. Loading validates a complete replacement;
-a load failure leaves the playing graph intact. Successful publication emits a graph resync,
+a load failure leaves the playing graph intact. Successful publication emits a graph resync (a
+`graph.changed` to its subscribers, a `session.resync` to the `params.changed` ones),
 invalidates old node/context references, and starts stopped at beat zero on adoption. The
 change is seamless: the previous Performance's plugins ring out (held notes until released,
 tails until idle) and are hidden from `graph.get` meanwhile.

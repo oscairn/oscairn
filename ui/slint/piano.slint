@@ -87,6 +87,7 @@ export component Piano inherits Rectangle {
         clicked => { PianoState.control(i); }
         Cursor {
             shown: c.cursor;
+            always: true;
             corner: Theme.button-radius(parent.height);
         }
     }

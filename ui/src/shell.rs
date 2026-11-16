@@ -264,6 +264,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     play.on_held(|i, down| with_app(|a| a.on_play(|p| p.hold(i, down))));
     play.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
     play.on_edit(|| with_app(|a| a.hand_over(&home::APPS[0])));
+    play.on_resized(|| with_app(|a| a.on_play(play::Screen::shown)));
     play.on_hint_keys(|| with_app(|a| a.hint_tap(0)));
     play.on_hint_dismiss(|| with_app(|a| a.hint_tap(1)));
     play.on_knob_grab(|t, _| with_app(|a| a.on_play(|p| p.knob_grab(t))));
@@ -288,6 +289,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     part.on_step(|i, by| with_app(|a| a.list_step(i, by)));
     part.on_info_scroll(|by| with_app(|a| a.list_scroll(by)));
     part.on_back(|| with_app(|a| a.back()));
+    part.on_resized(|| with_app(|a| a.refit()));
     let grid = ui.global::<GridState>();
     grid.on_grab(|t, part| with_app(|a| a.on_params(|p| p.grab(t, part))));
     grid.on_drag(|t, part, n| with_app(|a| a.on_params(|p| p.drag(t, part, n))));
@@ -831,6 +833,7 @@ impl App {
         let rows: Vec<BarAction> =
             self.bar_list.iter().enumerate().map(|(i, (_, label, enabled))| BarAction { label: label.as_str().into(), enabled: *enabled, cursor: self.bar_at == Some(i + pill) }).collect();
         crate::setlist::update(&self.bar_rows, rows);
+        ui.global::<crate::Theme>().set_bar_cursor(self.bar_at.is_some());
         let bar = ui.global::<Bar>();
         let on_pill = pill == 1 && self.bar_at == Some(0);
         if bar.get_pill_cursor() != on_pill {
@@ -1151,6 +1154,17 @@ impl App {
             params::Outcome::Back => self.go(Screen::Chain),
             params::Outcome::Prompt(title, text) => self.open_keyboard(Screen::Params, &title, &text),
             params::Outcome::Stay => {}
+        }
+    }
+
+    /// The list screen shown, laid out again for the rows its window now holds.
+    fn refit(&mut self) {
+        match self.screen {
+            Screen::Part => self.on_part(part::Screen::shown),
+            Screen::Chain => self.on_chain(chain::Screen::shown),
+            Screen::Sounds => self.on_sounds(sounds::Screen::shown),
+            Screen::Scene => self.on_scene(scene::Screen::shown),
+            _ => {}
         }
     }
 

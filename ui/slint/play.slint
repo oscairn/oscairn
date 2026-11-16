@@ -75,6 +75,7 @@ export global PlayState {
     callback hint-dismiss();
     // How many part strips the screen holds besides the master: set by the screen.
     in-out property <int> strips-per-view: 1;
+    callback resized(); // the strips' count changed (the window, or the theme's paddings): shown again
     callback scene-tapped(int);
     callback part-tapped(int); // a strip's name: select the part
     callback mute-tapped(int);
@@ -281,7 +282,9 @@ export component Play inherits Rectangle {
     property <length> knob-button-width: Theme.button-width * 1.3;
     property <length> step-width: PlayState.can-step ? Theme.button-width + Theme.gap : 0px;
     property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * gap) / 8;
-    changed across => { PlayState.strips-per-view = across - 1; }
+    // Where the recording mark stands: left of Edit, in the footer.
+    property <length> rec-x: root.width - Theme.margin - root.edit-width - Theme.gap - Bar.recording-width;
+    changed across => { PlayState.strips-per-view = across - 1; PlayState.resized(); }
     changed knob-w => {
         PlayState.knob-width = self.knob-w;
         PlayState.knob-resized();

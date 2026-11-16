@@ -155,9 +155,12 @@ pages column 180, cursor and hairline widths, mark 6, thumb 16, knob arc 6, a kn
 150, the switch 38 x 24, the heading 28, a strip's meters 7 and pitch 10, the top bar's columns (they
 follow the type), a Setlist slot row 56, list width 280, the piano's bands, the grid's tile 84, knob
 extra 36, heading 30 and envelope 180. A screen that counts how many rows or strips a view holds
-reads it when it is shown; the Setlist is shown again when that count changes (`SetlistState.resized`),
-the grid's `resized` as before; Part, Chain, Sounds and Play are not (a window resize has the same
-gap), so a live theme switch on one of those screens keeps its old row count until it is shown again.
+reads it when it is shown, and again when that count changes: the Setlist (`SetlistState.resized`), the
+grid (`GridState.resized`), Play (`PlayState.resized`) and the Part, Chain, Sounds and Scene lists
+(`PartState.resized`, which the shell hands to the one shown), so a live theme switch or a window resize
+lays them out again at once (src/tests/layout.rs). The cursor drawn is one: while the top bar has it
+(`Theme.bar-cursor`, set by the shell, not by a theme) a `Cursor` draws nothing unless it is the bar's
+own or an overlay's (`always`).
 
 JUCE app: `spaced(px)` in Theme.cpp scales a padding by the theme's `spacing`. Applied to `sectionGap`
 (so the gaps between sections in PlayView, PartsView and the parameter grid) and Play's outer

@@ -106,6 +106,7 @@ export component Keyboard inherits Rectangle {
         }
         Cursor {
             shown: key.cursor;
+            always: true;
             corner: Theme.button-radius(parent.height);
         }
     }

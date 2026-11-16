@@ -79,6 +79,9 @@ export global Theme {
     // A list row's color blended into its background, as much as text still reads on it (theme.rs).
     // Arguments: the row's own color, its background, the text's color, whether it is an odd row.
     pure callback row-fill(color, color, color, bool) -> color;
+    // Not a theme setting but the window's state: the top bar has the cursor, so no screen draws its
+    // own (only one cursor shows); set by the shell, never by a theme.
+    in-out property <bool> bar-cursor: false;
 
     // The type scale: the JUCE touch scale (Theme.cpp `textSize`) times the font scale.
     out property <length> small: 13px * font-scale;
@@ -194,10 +197,13 @@ export component Section inherits Rectangle {
 export component Cursor inherits Rectangle {
     in property <bool> shown;
     in property <bool> editing;
+    // Drawn even while the top bar has the cursor: the bar's own, and an overlay's (the keyboards).
+    in property <bool> always;
     in property <length> corner: Theme.section-radius;
     in property <length> stroke: Theme.cursor-width;
+    property <bool> visible-now: (root.shown || root.editing) && (root.always || !Theme.bar-cursor);
     border-radius: root.corner;
-    border-width: root.shown || root.editing ? root.stroke : 0px;
+    border-width: root.visible-now ? root.stroke : 0px;
     border-color: root.editing ? Theme.accent : Theme.focus;
 }
 

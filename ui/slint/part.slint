@@ -32,6 +32,7 @@ export global PartState {
     // How many lines of the read-only panel fit, and whether more are out of view: set by the screen.
     in-out property <int> info-per-view: 1;
     in property <bool> info-more;
+    callback resized(); // the views' sizes changed (the window, or the theme's paddings and type): shown again
     callback info-scroll(int); // a view up (-1) or down (1)
     callback tapped(int);
     callback step(int, int); // a row and -1 or 1
@@ -121,8 +122,8 @@ export component Part inherits Rectangle {
     property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
     property <length> line: Theme.body + Theme.margin;
     property <int> info-lines: max(1, floor((list-height - 2 * Theme.pad-narrow) / line));
-    changed per-view => { PartState.rows-per-view = per-view; }
-    changed info-lines => { PartState.info-per-view = info-lines; }
+    changed per-view => { PartState.rows-per-view = per-view; PartState.resized(); }
+    changed info-lines => { PartState.info-per-view = info-lines; PartState.resized(); }
     init => {
         PartState.rows-per-view = per-view;
         PartState.info-per-view = info-lines;

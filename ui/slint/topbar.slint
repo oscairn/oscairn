@@ -153,6 +153,7 @@ component ActionButton inherits Rectangle {
         height: Columns.action;
         corner: Theme.button-radius(Columns.action);
         shown: root.data.cursor;
+        always: true;
     }
 }
 
@@ -244,6 +245,7 @@ export component TopBar inherits Rectangle {
                 Cursor {
                     corner: Theme.field-radius(parent.height);
                     shown: Bar.pill-cursor;
+                    always: true;
                 }
             }
         }

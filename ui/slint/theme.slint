@@ -372,13 +372,18 @@ component TabItem inherits Rectangle {
     // A row's tab is as wide as its name in bold needs, at most four and a half touch targets; a longer name
     // shrinks to 70% of the type and is then cut (FitText).
     preferred-width: min(Theme.touch * 4.5, max(Theme.touch, probe.preferred-width + 2 * (Theme.pad-wide + Theme.tab-pad)));
+    min-width: self.vertical ? 0px : self.preferred-width;
+    max-width: self.vertical ? 100000px : self.preferred-width;
     changed active => { if self.active { root.reveal(); } }
     changed x => { if self.active { root.reveal(); } }
     changed y => { if self.active { root.reveal(); } }
     changed width => { if self.active { root.reveal(); } }
     changed height => { if self.active { root.reveal(); } }
+    // The name's width in bold; sized apart so that it does not make the tab at least as wide as the name.
     probe := Text {
         visible: false;
+        width: 0px;
+        height: 0px;
         text: root.text;
         font-size: Theme.button;
         font-weight: 700;

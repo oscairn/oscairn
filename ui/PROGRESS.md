@@ -359,7 +359,7 @@ appended entries kept; after the join 221 tests passed and `cargo clippy --all-t
   fixtures) or from declared data (draft 6; PROVISIONAL fields `uiTabs`, `uiTab`, `valueIcons` of `params.list`, listed in PERFORMANCE-APP.md "Items
   without a request"); `grid::icon` takes a declared icon first. Cursor: the dial walks search, pages, tabs, tiles; a press opens; the tiles stop at their
   end (they used to turn the page); Page keys step at once.
-- Tests: the model (tests/tabs_model.rs), cursor, press, column, contrast per theme in pixels, overflow scrolling (tests/tabs.rs), Play's column
+- Tests: the model (tests/tabs_model.rs), cursor, press, column, contrast per theme in pixels, overflow scrolling and a long name's cap (tests/tabs.rs), Play's column
   (tests/row.rs). Pictures: ui/target/theme-shots/tabs-*, tabrows-* (enlarged), play-tabs-*.
 - Not done or not verified: not run on a unit; no device profile has a page key, so on a unit stepping tabs is the dial (back, along, press); a view whose
-  parameters a plugin spreads over tabs is drawn from the tab shown, not once on the first (ui.h); the 70% rule is FitText's, looked at not pixel-tested.
+  parameters a plugin spreads over tabs is drawn from the tab shown, not once on the first (ui.h); a long name's tab is capped at four and a half touch targets (measured in pixels, tests/tabs.rs), the shrink to 70% and the cut are FitText's and looked at in the pictures (tabs-long-*), not measured.

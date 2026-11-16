@@ -329,6 +329,46 @@ fn the_selected_tab_is_told_by_its_fill_in_every_theme() {
     println!("least contrast between a selected and an unselected tab's fill over all themes and styles: {least:.2} to 1");
 }
 
+// A long name does not stretch its tab past four and a half touch targets, shrinks to 70% of the type and is then
+// cut; a short one is not narrower than a touch target. Measured on the selected tab's fill
+// in the strip's middle row; pictures tabs-long-*.
+#[test]
+fn a_long_name_shrinks_to_seventy_percent_and_is_then_cut() {
+    let mut list = Vec::new();
+    for (page, name) in ["A", "A page named for everything it holds, and then some", "Filter", "Amp"].iter().enumerate() {
+        for k in 0..3 {
+            list.push(p(page as u32 * 10 + k, &format!("P{k}"), name, "knob"));
+        }
+    }
+    let list = json!({"parameters": list});
+    for t in &all_themes()[..2] {
+        for (style, label) in [(TabStyle::Folder, "folder"), (TabStyle::Segmented, "segmented")] {
+            let (mut s, mut screen) = shown(&list, (1280, 720), 1.55, t, style);
+            let on = s.ui.global::<Theme>().get_tab_on();
+            let (strip, _) = bars(&s, 1.55, false);
+            let touch = s.ui.global::<Theme>().get_touch() * 1.55;
+            // The middle row of the strip: from the first to the last pixel of the selected fill, the tab's width
+            // (the text in between is not the fill).
+            let row = (strip.1 + strip.3) / 2;
+            let width = |s: &Screen| {
+                let xs: Vec<usize> = (0..s.w).filter(|&x| (s.pixels[row * s.w + x].r, s.pixels[row * s.w + x].g, s.pixels[row * s.w + x].b) == (on.red(), on.green(), on.blue())).collect();
+                (xs.last().copied().unwrap_or(0) - xs.first().copied().unwrap_or(0) + 1) as f32
+            };
+            let short = width(&s);
+            screen.show_page(1);
+            s.frame();
+            let long = width(&s);
+            shot(&s, &format!("tabs-long-{}-{label}@1.55", t.id));
+            println!("{} {label}: the selected tab of the short name {short:.0} px wide, of the long one {long:.0} (a touch target is {touch:.0}, four and a half {:.0})", t.id, 4.5 * touch);
+            // The fill is the box less the cursor's ring and a hair on each side.
+            let fill = 2. * 3. * 1.55;
+            assert!(short >= touch - fill - 1., "a short name's tab is a touch target: {short}");
+            assert!(long <= 4.5 * touch - fill + 1., "a long name's tab stops at four and a half touch targets: {long}");
+            assert!(long > 3. * touch, "and is wide, not squeezed: {long}");
+        }
+    }
+}
+
 /// A plugin of twelve pages of three parameters (the pages overflow a column of a short window).
 fn twelve_pages() -> serde_json::Value {
     let mut list = Vec::new();

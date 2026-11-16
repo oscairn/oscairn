@@ -21,6 +21,7 @@
 #include <span>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -475,6 +476,9 @@ namespace
 int main(int argc, char** argv)
 {
     if(argc < 5) { std::fprintf(stderr, "usage: %s SEQUENCER FIXTURE LFO BASIC_SYNTH\n", argv[0]); return 2; }
+    // These blocks are rendered as fast as they run, not at a device's pace, and compared sample for sample: on a machine too slow for real time
+    // (a sanitizer build) the load guard gives a note up, and the rest of the take reads as silence.
+    ::setenv("OSCAIRN_LOAD_GUARD", "off", 1);
     try
     {
         state_files::TemporaryDirectory temp;

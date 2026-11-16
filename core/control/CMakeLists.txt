@@ -403,6 +403,7 @@ target_compile_options(oscairn-installed-play PRIVATE -Wall -Wextra)
 # Sessions, native sounds and effects and Performances again with every CLAP plugin in a worker (RFC 0010 step 5).
 set(control_worker_tests
     "control-sound-presets|oscairn-sound-presets-test|$<TARGET_FILE:oscairn_basic_synth>"
+    "control-worker-count|oscairn-worker-count-test|$<TARGET_FILE:oscairn_delay>|$<TARGET_FILE:oscairn_basic_synth>"
     "control-scene-save|oscairn-scene-save-test|$<TARGET_FILE:oscairn_step_sequencer>|$<TARGET_FILE:oscairn_basic_synth>"
     "control-shared-parts|oscairn-shared-parts-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:kick-clap-fixture-normal>"
     "control-json-audio|oscairn-json-rpc-test|$<TARGET_FILE:oscairn_basic_synth>"
@@ -443,6 +444,9 @@ add_executable(oscairn-edit-steps-test tests/edit_steps.cpp)
 target_link_libraries(oscairn-edit-steps-test PRIVATE oscairn_control_json)
 add_test(NAME control-edit-steps COMMAND oscairn-edit-steps-test $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-edit-steps PROPERTIES TIMEOUT 60)
+
+add_executable(oscairn-worker-count-test tests/worker_count.cpp)
+target_link_libraries(oscairn-worker-count-test PRIVATE oscairn_control)
 
 add_executable(oscairn-recording-test tests/recording.cpp)
 target_include_directories(oscairn-recording-test PRIVATE ../clap-host/tests)

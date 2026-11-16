@@ -925,7 +925,13 @@ namespace oscairn
     {
         while( Plan* p = retired_.pop() )
             delete p;
-        std::erase_if(removedHosts_,[](const auto& host){return host.use_count()==1;});
+        // A host is let go once only this list holds it. It may be listed twice (removed, put back by an undo,
+        // removed again): each entry is a count of the list's own.
+        std::map<const PluginHost*,long> listed;
+        for(const auto& host:removedHosts_)++listed[host.get()];
+        std::set<const PluginHost*> alone; // decided before erasing: the counts change as entries go
+        for(const auto& host:removedHosts_)if(host.use_count()==listed.at(host.get()))alone.insert(host.get());
+        std::erase_if(removedHosts_,[&](const auto& host){return alone.count(host.get())!=0;});
     }
 
     void Graph::service()

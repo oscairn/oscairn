@@ -343,7 +343,8 @@ report the compiled per-channel routes.
   `edit.history` always names the latest edit), and so are the values of one `params.set` and a part made by `parts.fromSound`; repeated changes to the same thing within
   1.5 seconds (a fader drag, a knob turn) are one step. Undo changes only what the step
   changed, so a scene switched since keeps its levels. A removed plugin is held by the
-  history and comes back with its state and prepared sounds. Playing is not an edit:
+  history and comes back with its state and prepared sounds; the history holds at most 8 such
+  plugins (each a worker process where plugins run in workers), the oldest steps going first. Playing is not an edit:
   notes, transport, `scenes.select`, `controls.set`, sound selection and preparation.
   Opening a Performance starts a new history.
 - **Devices** ([RFC 0012](rfcs/0012-sync-external-midi-and-multi-device.md#choosing-devices-selectors))

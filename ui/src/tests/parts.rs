@@ -43,6 +43,7 @@ pub fn parts_screen(s: &mut Screen, graph: &serde_json::Value) -> Parts {
     s.frame();
     parts.graph(graph);
     s.frame();
+    parts.shown(); // as the shell does when the window's size is known
     parts
 }
 
@@ -308,6 +309,43 @@ fn touch_opens_a_part_drags_the_sliders_and_taps_mute() {
     // The Parts' own headings and the sends' columns are the buses'.
     assert_eq!(state.get_bus_names().iter().map(|n| n.to_string()).collect::<Vec<_>>(), ["Reverb", "Delay"]);
     assert_eq!(state.get_rows().iter().map(|r| r.heading).collect::<Vec<_>>(), [false, false, false, false, true, false, false], "Shared buses above the first bus");
+}
+
+// The rows a view holds fill the height, whatever it is: a short window shows two at a time (the heading above
+// the first bus costs a row's room, so it takes none from a view that does not hold it), the cursor going past
+// a view turns it, Page Up and Down turn it with no cursor, and a taller window shows more at once.
+#[test]
+fn the_rows_a_view_holds_fill_the_height_and_the_cursor_turns_the_view() {
+    let mut s = Screen::sized(1280, 360);
+    let mut p = parts_screen(&mut s, &parts_graph());
+    let ui = &s.ui;
+    let names = |ui: &Shell| rows(ui).into_iter().map(|r| r.0).collect::<Vec<_>>();
+    let view = |ui: &Shell| ui.global::<PartsState>().get_view().to_string();
+    assert_eq!((names(ui), view(ui).as_str()), (vec!["Keys".to_string(), "Low".to_string()], "Parts 1–2 of 7"));
+    p.act(Action::Page(1));
+    assert_eq!((names(ui), view(ui).as_str()), (vec!["Pad".to_string(), "Empty".to_string()], "Parts 3–4 of 7"));
+    p.act(Action::Page(1));
+    assert_eq!(names(ui), ["Reverb", "Delay"]);
+    assert_eq!(ui.global::<PartsState>().get_rows().iter().map(|r| r.heading).collect::<Vec<_>>(), [true, false], "the heading above the first bus");
+    p.act(Action::Page(1));
+    assert_eq!(names(ui), ["Shared · Master FX"]);
+    p.act(Action::Page(1));
+    assert_eq!(names(ui), ["Shared · Master FX"], "held at the last view");
+    p.act(Action::Page(-3));
+    assert_eq!(names(ui)[0], "Keys");
+    // The cursor down the rows: past the second row it turns the view, and the cell is kept.
+    p.act(Action::Move { pane: Some(0), by: 1 });
+    mv(&mut p, Some(0), 2);
+    p.act(Action::Arrow { dx: 0, dy: 1 });
+    assert_eq!(cursor(ui), Some((1, 2)));
+    p.act(Action::Arrow { dx: 0, dy: 1 });
+    assert_eq!((names(ui), cursor(ui)), (vec!["Pad".to_string(), "Empty".to_string()], Some((0, 2))), "the next view, the cursor on its first row");
+    p.act(Action::End(-1));
+    assert_eq!((names(ui)[0].as_str(), cursor(ui)), ("Keys", Some((0, 0))));
+    // A view with the cursor in it stays when the window changes size: the rows it holds follow the height.
+    let mut tall = Screen::sized(1280, 1000);
+    let _ = parts_screen(&mut tall, &parts_graph());
+    assert_eq!(rows(&tall.ui).len(), 7, "all of them in a tall window");
 }
 
 // No parts: the words the JUCE page has, the buttons stay.

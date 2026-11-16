@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <fcntl.h>
+#include <iterator>
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
@@ -61,10 +62,18 @@ namespace oscairn
             return ports;
         }
 
-        // A worker's memory (macOS: its physical footprint, compressed pages included; Linux: resident)
+        // A /proc file of the worker's, read whole; empty where it cannot be read.
+        [[maybe_unused]] std::string procText(pid_t pid, const char* name)
+        {
+            std::ifstream f("/proc/" + std::to_string(pid) + "/" + name);
+            return std::string(std::istreambuf_iterator<char>(f), {});
+        }
+
+        // A worker's memory (macOS: its physical footprint, compressed pages included, clean code not; Linux:
+        // resident less the file pages it held at its start, `startFile`, which all workers share: workerOwnBytes)
         // and CPU time in seconds; zero memory when it cannot be read.
         struct Usage { uint64_t memory = 0; double cpu = 0; };
-        Usage usage(pid_t pid)
+        Usage usage(pid_t pid, [[maybe_unused]] uint64_t startFile)
         {
             Usage u;
 #ifdef __APPLE__
@@ -74,7 +83,7 @@ namespace oscairn
             u.memory = ri.ri_phys_footprint;
             u.cpu = double(ri.ri_user_time + ri.ri_system_time) * base.numer / base.denom * 1e-9;
 #else
-            u.memory = residentBytes(long(pid));
+            u.memory = workerOwnBytes(procText(pid, "statm"), startFile, uint64_t(sysconf(_SC_PAGESIZE)));
             // Nanoseconds; /proc's clock ticks are too coarse for a light plugin.
             clockid_t clock; timespec t{};
             if(clock_getcpuclockid(pid, &clock) == 0 && clock_gettime(clock, &t) == 0) u.cpu = double(t.tv_sec) + t.tv_nsec * 1e-9;
@@ -149,6 +158,7 @@ namespace oscairn
             std::filesystem::path cgroup; // Linux, with OSCAIRN_CGROUP: this worker's cgroup
             // The supervisor's latest reading of the worker, and the CPU time of the workers it replaced.
             std::atomic<uint64_t> memory{0};
+            std::atomic<uint64_t> startFile{0}; // Linux: its file pages before any plugin loaded (usage), read at its start
             std::atomic<double> cpu{0}, cpuBefore{0};
             std::mutex control;
             int socket = -1; pid_t pid = 0;
@@ -275,6 +285,9 @@ namespace oscairn
                 send(socket, Writer().u8(uint8_t(Op::Init)).f64(rate).u32(frames).u8(uint8_t(mode)).data);
                 sendDescriptor(socket, bellFd);
                 try { expect(receive(socket)); } catch(const WorkerTimeout& e) { lost(e); }
+#ifdef __linux__
+                startFile.store(residentFileBytes(procText(pid, "status"))); // initialized, its memory locked, no plugin yet
+#endif
             }
             // Loads a plugin into the worker. The reply is its node's index and description; the caller
             // then attaches it. A load gets the full 30 s, whatever the requests' timeout. Under control.
@@ -1969,7 +1982,7 @@ namespace oscairn
             const auto limit = fitted(true);
             if(!limit) return;
             auto to = *limit;
-            if(const auto now = memoryLimit.load(); !fresh && to < now) to = std::min(now, std::max(to, usage(pid).memory + (uint64_t(64) << 20)));
+            if(const auto now = memoryLimit.load(); !fresh && to < now) to = std::min(now, std::max(to, usage(pid, startFile.load()).memory + (uint64_t(64) << 20)));
             memoryLimit.store(to); limitCgroup();
         }
         // A node is about to activate: its limit is raised, if its declaration needs it, before the
@@ -2020,7 +2033,7 @@ namespace oscairn
                 // Its memory and CPU time every 100 ms, not each 10 ms tick: reading them (/proc on Linux) was most of
                 // the supervisor's cost, about 1 % of a core a worker at rest in the Linux container. A crash, a hang
                 // and blocks too slow are still seen at the tick.
-                if(const auto u = tick++ % 10 ? Usage{} : usage(pid); u.memory)
+                if(const auto u = tick++ % 10 ? Usage{} : usage(pid, startFile.load()); u.memory)
                 {
                     memory.store(u.memory); cpu.store(u.cpu);
                     if(memoryLimit && u.memory > memoryLimit)

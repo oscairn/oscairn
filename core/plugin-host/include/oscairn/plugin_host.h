@@ -11,6 +11,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <pthread.h>
@@ -242,6 +243,17 @@ namespace oscairn
     };
     // A process's resident memory in bytes (0: this one); 0 when it cannot be read.
     uint64_t residentBytes(long pid = 0);
+    // RFC 0025, Linux: a worker's own memory, in bytes, from its /proc/PID/statm text: its resident memory less
+    // `startFile`, the file pages it held at its start, before any plugin (its binary and the libraries the binary
+    // links, which a locked worker holds whole and every worker shares), and never less than its anonymous pages.
+    // 0 where the text cannot be read.
+    uint64_t workerOwnBytes(std::string_view statm, uint64_t startFile, uint64_t pageSize);
+    // The RssFile of /proc/PID/status text, in bytes; 0 where it has none.
+    uint64_t residentFileBytes(std::string_view status);
+    // RFC 0025: the worker binary's code, which all workers share, counted once for the engine: on Linux the
+    // bytes its loadable segments map from `program`, page-rounded; 0 on macOS (its footprint leaves clean code
+    // out) or where the file cannot be read.
+    uint64_t workerCodeBytes(const std::string& program);
     // RFC 0025, Linux only: what the reliability level in OSCAIRN_RELIABILITY (set by the app from
     // its profile; workers inherit it) asks of an Oscairn process at its start. At instrument and
     // pass-through: every page locked (mlockall; future pages too only under an unlimited

@@ -820,7 +820,8 @@ stepped, hidden and read-only flags. How the editors use them:
   cost at rest (no key held and its output silent for half a second: a release tail is not rest) and a cost per sounding note, with the busiest
   recent load for a part with no note limit; in a part with a note limit, the estimate is at rest plus that many
   notes, so keep your per-voice cost proportional to the voices actually sounding. In a worker,
-  memory is what the worker holds; in the engine's process, it is what the process grew by
+  memory is what the worker holds of its own (on Linux, not the worker binary and libraries every
+  worker shares, which count once); in the engine's process, it is what the process grew by
   while the plugin loaded. A plugin never measured on the device counts as 2% of the block's
   time until it is, and as memory what it declared through `oscairn.memory` when it last played
   on the device, else its package's estimate, else 8 MiB plus the size of its binary (a locked
@@ -871,7 +872,8 @@ What changes for the plugin:
   the plugin among `failures` until its output is back in range. A sample that is NaN or infinite
   stops the plugin at once, as before.
 - **Memory limit:** 4 GiB by default (`OSCAIRN_WORKER_MEMORY_MB` changes it; 0 is none), read
-  every 10 ms as the physical footprint on macOS and resident memory on Linux. When every
+  every 10 ms as the physical footprint on macOS and on Linux as resident memory less what the
+  worker held at its start, before your plugin loaded. When every
   plugin in the worker declares its memory (`oscairn.memory`), the limit is what they declare
   plus half again and 64 MiB. Before each activation the worker sends the engine the new
   declaration and waits while the engine raises the limit, so a mode that needs more (a restart

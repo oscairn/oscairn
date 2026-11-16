@@ -1501,6 +1501,22 @@ fn real_library() {
     eprintln!("\nFINDINGS ({}):\n{}", r.findings.len(), r.findings.join("\n"));
 }
 
+mod settings;
+
+// The Settings app against the same engine (ui/SETTINGS-APP.md): `OSCAIRN_REAL_PROFILE` is the shell's profile (a built-in's id,
+// or `desktop` for a computer's, the default), run once for each kind against an engine of its own with `--audio null`.
+#[test]
+#[ignore = "needs a running engine: OSCAIRN_REAL_SOCKET"]
+fn real_settings() {
+    let profile = std::env::var("OSCAIRN_REAL_PROFILE").ok().filter(|p| p != "desktop");
+    let Some((mut r, config)) = settings::start_on(profile.as_deref()) else {
+        eprintln!("real_settings: OSCAIRN_REAL_SOCKET is not set");
+        return;
+    };
+    settings::settings(&mut r, &config, profile.as_deref());
+    eprintln!("\nFINDINGS ({}):\n{}", r.findings.len(), r.findings.join("\n"));
+}
+
 #[test]
 #[ignore = "needs a running engine: OSCAIRN_REAL_SOCKET"]
 fn real_engine() {

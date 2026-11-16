@@ -1864,6 +1864,7 @@ uint32_t Session::partFromSound(const std::string& id) {
     const auto* item=l.find(id);
     if(!item || item->kind!="sound")bad("no such Sound in the library");
     const auto name=item->name;
+    Together one(*this,"Add "+name);
     const auto part=addPart(name,{},std::nullopt);commit();
     try{loadSound(part,id);}catch(...){removePart(part);commit();throw;}
     return part;

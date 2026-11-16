@@ -5,9 +5,11 @@
 //   oscairn-edit-steps-test BASIC_SYNTH.clap
 #include "oscairn/json_rpc.h"
 #include "oscairn/session.h"
+#include "../../plugin-host/src/StateFiles.h"
 #include <array>
 #include <iostream>
 #include <string>
+#include <cstdlib>
 
 using namespace oscairn;
 
@@ -88,15 +90,35 @@ namespace
         f.call("edit.redo");
         check(f.session.parameter(node, ids[0]) == .35 && f.session.parameter(node, ids[1]) == .65, "and one redo puts both back");
     }
+
+    // A part made from a Sound is one step, though it adds the part and its plugins.
+    void fromSoundOneStep(const std::string& synth)
+    {
+        Fixture f(synth); f.render();
+        const auto part = f.session.parts().front().id;
+        const auto saved = f.call("parts.saveSound", "{\"part\":" + std::to_string(part) + R"(,"name":"Check Lead","new":true})");
+        const auto id = Fixture::field(saved, "id");
+        check(!id.empty(), "the Sound saved: " + saved);
+        const auto before = f.undo();
+        f.call("parts.fromSound", "{\"id\":\"" + id + "\"}");
+        check(f.session.parts().size() == 2 && f.undo() != before, "a part from the Sound is a step: " + f.undo());
+        f.call("edit.undo");
+        check(f.session.parts().size() == 1 && f.undo() == before, "one undo takes the whole part back: " + std::to_string(f.session.parts().size()) + " parts, " + f.undo());
+        f.call("edit.redo");
+        check(f.session.parts().size() == 2, "and one redo puts it back");
+    }
 }
 
 int main(int argc, char** argv)
 {
     if(argc != 2) return 2;
+    state_files::TemporaryDirectory home;
+    ::setenv("OSCAIRN_DATA_HOME", home.path.c_str(), 1); // a library of its own
     try
     {
         historyIsCurrent(argv[1]);
         oneRequestOneStep(argv[1]);
+        fromSoundOneStep(argv[1]);
     }
     catch(const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
     std::cout << "ok: edit steps over the protocol\n";

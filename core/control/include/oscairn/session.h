@@ -529,6 +529,16 @@ namespace oscairn
             explicit Quiet(Session& session);
             ~Quiet();
         };
+        // The edits made while one is alive, however many commits, are one step with this label (a part made from a
+        // Sound adds the part, then its plugins); nothing is one when they come to no change.
+        struct Together
+        {
+            Session& s;
+            std::shared_ptr<const Model> start;
+            std::string label;
+            Together(Session& session, std::string name);
+            ~Together();
+        };
         Model model() const;
         static std::pair<std::string, std::string> summarize(const Model& before, const Model& after);
         void record();                                         // a step for what changed since the baseline
@@ -561,6 +571,7 @@ namespace oscairn
         };
         std::optional<Auditioning> audition_;
         int quiet_ = 0;
+        int together_ = 0; // Together objects alive: record() waits for the last
         bool mergeable_ = false; // the last step may take in the next
         uint32_t grouping_ = 0; // beginStep() calls open: parameter values wait in grouped_ for one step
         std::vector<ParameterChange> grouped_;

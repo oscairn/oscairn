@@ -337,7 +337,7 @@ report the compiled per-channel routes.
   `params.set` can be undone and redone, up to 100 steps. Everything up to a `graph.commit`
   is one step, as is a change that needs no commit (taken as a step when `edit.history`
   or `edit.undo` is asked, or at the next control tick, whichever comes first, so
-  `edit.history` always names the latest edit), and so are the values of one `params.set`; repeated changes to the same thing within
+  `edit.history` always names the latest edit), and so are the values of one `params.set` and a part made by `parts.fromSound`; repeated changes to the same thing within
   1.5 seconds (a fader drag, a knob turn) are one step. Undo changes only what the step
   changed, so a scene switched since keeps its levels. A removed plugin is held by the
   history and comes back with its state and prepared sounds. Playing is not an edit:

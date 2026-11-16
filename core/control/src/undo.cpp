@@ -91,6 +91,25 @@ namespace oscairn
         try { s.baseline_ = std::make_shared<const Model>(s.model()); } catch(...) {}
     }
 
+    Session::Together::Together(Session& session, std::string name) : s(session), label(std::move(name))
+    {
+        s.record(); // an edit waiting for its step comes first
+        if(!s.together_++) start = s.baseline_;
+    }
+    Session::Together::~Together()
+    {
+        if(--s.together_) return;
+        if(s.quiet_ || !start) return;
+        try
+        {
+            s.baseline_ = start; // what Quiet or a commit moved it to meanwhile is part of the step
+            const auto steps = s.undo_.size();
+            s.record();
+            if(s.undo_.size() > steps && !label.empty()) s.undo_.back().label = label;
+        }
+        catch(...) {}
+    }
+
     Session::Model Session::model() const
     {
         Model m{parts_, wires_, scenes_, untouched_, macros_, padMap_, assignments_, graph_.describe().mappings, {}, disabled_, key_, {masterLevel_, masterPan_}, roles_};
@@ -100,7 +119,7 @@ namespace oscairn
 
     void Session::record()
     {
-        if(quiet_) return;
+        if(quiet_ || together_) return;
         if(baseline_) markEdited(*baseline_);
         auto now = std::make_shared<const Model>(model());
         if(!baseline_) { baseline_ = now; return; }

@@ -758,12 +758,12 @@ impl App {
     }
 
     /// What a status says to the bar and the screens: what the shell reads of it (the inputs and outputs, the failures,
-    /// the keys held, the audio device, the memory the workers hold in whole MiB) and its load as the whole percent the
+    /// the keys held, the audio device, the counter of the MIDI ports (the Settings page reads its list again when it moves), the memory the workers hold in whole MiB) and its load as the whole percent the
     /// bar shows. The engine's status carries figures that move every time (each worker's CPU and block times): two
     /// that agree here change nothing anyone can see.
     fn status_key(status: &Value) -> Value {
         let mut key = serde_json::Map::new();
-        for field in ["audioDevice", "midiInputs", "midiOutputs", "failures", "heldNotes"] {
+        for field in ["audioDevice", "midiInputs", "midiOutputs", "midiPortList", "failures", "heldNotes"] {
             if let Some(v) = status.get(field) {
                 key.insert(field.into(), v.clone());
             }

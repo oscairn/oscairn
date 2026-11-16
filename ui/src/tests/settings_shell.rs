@@ -105,7 +105,7 @@ fn the_tile_opens_the_rust_app_only_when_it_is_switched_on() {
     assert!(ui.global::<Bar>().get_back() && ui.global::<Bar>().get_home_button());
     assert_eq!(tabs(&ui), ["Appearance", "Top bar", "MIDI controllers", "Package repositories", "Signing keys", "About"], "the keyboard's profile fixes its audio device");
     let actions: Vec<String> = ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect();
-    assert_eq!(actions, ["Install..."], "the page's own action; Undo, Redo and Save are the Performance app's");
+    assert_eq!(actions, ["Install...", "Record", "Capture"], "the page's own action and the two every screen has; Undo, Redo and Save are the Performance app's");
     // Back goes Home.
     assert!(ui.invoke_key(slint::SharedString::from(slint::platform::Key::Escape)));
     assert_eq!(ui.get_screen(), 0);
@@ -202,9 +202,10 @@ fn the_status_reaches_the_page_shown() {
     ui.global::<crate::SettingsState>().invoke_show_page(2);
     s.serve();
     s.e.calls.clear();
-    s.push_status(); // what the page has
+    s.push_status(); // what the page has (the first status of a connection also asks for the takes, once)
     s.push_status();
-    assert!(s.e.calls.is_empty(), "{:?}", s.e.methods());
+    assert!(s.e.methods().iter().all(|m| m == "record.get"), "{:?}", s.e.methods());
+    s.e.calls.clear();
     s.e.ports.push(super::settings_fake::port("Late Surface", &[]));
     s.e.midi_list += 1;
     s.push_status();

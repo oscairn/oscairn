@@ -26,7 +26,7 @@ pub fn start_on(profile: Option<&str>) -> Option<(Real, std::path::PathBuf)> {
     let _ = std::fs::remove_dir_all(&config);
     std::fs::create_dir_all(&config).unwrap();
     shell::settings_folders(Some(config.clone()), crate::theme::Places { built_in: None, installed: Some(config.join("themes")) });
-    Some((Real { screen, events, trace, engine, findings: vec![], mark: 0 }, config))
+    Some((Real { screen, events, trace, engine, findings: vec![], mark: 0, frames: 0, figures: 0, shown_figures: (-1, -1) }, config))
 }
 
 /// A finding when `ok` is not so, the message made from what the shell shows then.

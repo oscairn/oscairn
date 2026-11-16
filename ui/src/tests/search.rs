@@ -251,3 +251,30 @@ fn the_search_on_the_shell_uses_the_keyboard() {
     assert!(!ui.global::<crate::KeyboardState>().get_open());
     assert_eq!(ui.global::<crate::GridState>().get_search().as_str(), "cut");
 }
+
+fn view_of(out: &[(&'static str, serde_json::Value)]) -> Option<(String, Vec<u64>)> {
+    out.iter().rfind(|o| o.0 == "controllers.view").map(|o| (o.1["screen"]["name"].as_str().unwrap().to_string(), o.1["screen"]["params"].as_array().unwrap().iter().map(|a| a["param"].as_u64().unwrap()).collect()))
+}
+
+// What the device's screen knobs play follows what the page shows (ParameterGrid::publishScreen, run at the end
+// of every build): the page, another page, a search's matches; nothing is sent again while it is the same, and
+// the knobs let go when the page hides and take it again when it shows.
+#[test]
+fn the_screen_knobs_follow_the_page_the_search_and_the_screen() {
+    let mut s = Screen::new();
+    let mut p = open_with(&mut s, big_plugin(), &[], &text);
+    p.hidden();
+    sent(&mut p.out);
+    p.shown();
+    assert_eq!(view_of(&sent(&mut p.out)), Some(("Oscillator".into(), (0..10).collect())), "shown again: the first page, in the plugin's order");
+    p.show_page(1);
+    let page = view_of(&sent(&mut p.out)).expect("another page is published");
+    assert_eq!(page.0, "Filter");
+    assert_eq!(page.1.len(), 10);
+    p.shown();
+    assert!(sent(&mut p.out).is_empty(), "the same page is not sent again");
+    p.entered("pan");
+    assert_eq!(view_of(&sent(&mut p.out)).map(|v| v.1), Some(vec![4, 18, 26]), "a search: its matches");
+    p.hidden();
+    assert_eq!(view_of(&sent(&mut p.out)), Some((String::new(), vec![])));
+}

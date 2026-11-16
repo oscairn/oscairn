@@ -25,6 +25,10 @@ impl Kind {
         }
     }
 
+    pub fn from_key(key: &str) -> Option<Kind> {
+        Kind::ALL.into_iter().find(|k| k.key() == key)
+    }
+
     pub fn plural(self) -> &'static str {
         match self {
             Kind::Performance => "Performances",

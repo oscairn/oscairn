@@ -953,6 +953,7 @@ impl App {
             }
             Request::Graph => {
                 self.last_graph = r.clone();
+                self.library.graph(&r); // the plugins the Performance uses, for the Libraries menu
                 self.on_piano(|p| p.graph(&r));
                 self.on_play(|p| p.graph(&r));
                 self.on_part(|p| p.graph(&r));

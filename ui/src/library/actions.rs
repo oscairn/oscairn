@@ -91,7 +91,7 @@ impl Screen {
         colors.extend(COLORS.iter().enumerate().map(|(i, (name, hex))| menu::Item::ticked(*name, entry::COLOR + 1 + i, item.color == *hex)));
         items.push(menu::Item::sub("Color", colors).enabled(writable));
         items.push(menu::Item::choice(if item.own() { "Duplicate" } else { "Copy into my own, to edit" }, entry::COPY).enabled(!item.read_only));
-        items.push(menu::Item::choice("Export...", entry::EXPORT).enabled(false));
+        items.push(menu::Item::choice("Export...", entry::EXPORT).enabled(!item.in_place));
         items.push(menu::Item::choice("Delete...", entry::DELETE).enabled(!item.in_place));
         self.menu = Some((item.title().to_string(), items));
         self.menu_for = Some(MenuFor::Item(item.id));
@@ -123,6 +123,7 @@ impl Screen {
                 self.query();
                 Outcome::Stay
             }
+            MenuFor::Library(menus) => self.library_chosen(menus, choice),
             MenuFor::Item(id) => {
                 let Some(item) = self.items.iter().find(|i| i.id == id).cloned() else { return Outcome::Stay };
                 match choice {
@@ -138,6 +139,10 @@ impl Screen {
                         self.b.reset_cursor();
                     }
                     entry::COPY => self.push(Request::Do(Do::Copy(item.title().into(), item.own())), "library.copy", json!({"id": id})),
+                    entry::EXPORT => {
+                        let name = item.title().to_string();
+                        self.files_open(super::files::Want::Save, "olib", &name, super::files::After::ExportItem(id), &format!("Export {name}"), false);
+                    }
                     entry::DELETE => {
                         let message = if item.own() { "It is removed from your library. Performances that used it keep their parts." } else { "It is removed. Installing its library again brings it back." };
                         self.notice = Some((format!("Delete {}?", item.title()), message.into(), vec!["Delete".into(), "Cancel".into()]));
@@ -172,6 +177,11 @@ impl Screen {
     pub fn noticed(&mut self, choice: Option<usize>) -> Outcome {
         let outcome = match self.notice_for.take() {
             Some(NoticeFor::SaveFirst) => self.save_first(choice),
+            Some(NoticeFor::Alert) => Outcome::Stay,
+            Some(other @ (NoticeFor::Overwrite(..) | NoticeFor::RemovePlugin(_) | NoticeFor::Uninstall(..))) => {
+                self.library_noticed(other, choice);
+                Outcome::Stay
+            }
             Some(NoticeFor::Delete(id)) => {
                 if choice == Some(0) {
                     if let Some(item) = self.items.iter().find(|i| i.id == id) {

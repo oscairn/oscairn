@@ -173,7 +173,7 @@ fn an_item_is_tried_in_place() {
     assert_eq!(footer(r.ui()).0, "Auditioning Brass Corner in place of the open Performance.");
     assert_eq!(value_of(r.ui(), "Brass Corner"), "Auditioning  ·  brass  ·  warm");
     let tools: Vec<String> = r.c.bar_tools().into_iter().map(|t| t.label).collect();
-    assert_eq!(tools, ["Search", "Stop", "Keep", "Options"]);
+    assert_eq!(tools, ["Search", "Stop", "Keep", "Options", "Install...", "Libraries..."]);
     // Browsing while one is tried: a press tries that one.
     r.press_row("Evening Strings");
     assert_eq!(r.e.called("audition.start").last().unwrap(), &json!({"id": "p1"}));
@@ -181,7 +181,7 @@ fn an_item_is_tried_in_place() {
     r.tool("Keep");
     assert_eq!(r.e.called("audition.stop"), [json!({"keep": true})]);
     assert_eq!(footer(r.ui()).0, "Kept.");
-    assert_eq!(r.c.bar_tools().iter().map(|t| t.label.clone()).collect::<Vec<_>>(), ["Search", "Audition", "Options"]);
+    assert_eq!(r.c.bar_tools().iter().map(|t| t.label.clone()).collect::<Vec<_>>(), ["Search", "Audition", "Options", "Install...", "Libraries..."]);
     // Stop puts it back.
     r.tool("Audition");
     r.tool("Stop");

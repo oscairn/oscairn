@@ -7,7 +7,7 @@ use super::*;
 use crate::library::Outcome;
 
 /// The menu Options opens for the row `label`: the cursor goes there first.
-fn options_for(r: &mut Rig, label: &str) -> Vec<(String, bool)> {
+pub fn options_for(r: &mut Rig, label: &str) -> Vec<(String, bool)> {
     let target = labels(r.ui()).iter().position(|l| l == label).unwrap();
     let now = rows(r.ui()).iter().position(|x| x.cursor);
     match now {
@@ -24,7 +24,7 @@ fn options_for(r: &mut Rig, label: &str) -> Vec<(String, bool)> {
     items.iter().map(|i| (i.label.clone(), i.enabled)).collect()
 }
 
-fn on(menu: &[(String, bool)]) -> Vec<&str> {
+pub fn on(menu: &[(String, bool)]) -> Vec<&str> {
     menu.iter().filter(|m| m.1).map(|m| m.0.as_str()).collect()
 }
 
@@ -36,7 +36,7 @@ fn the_menu_is_by_kind_and_ownership() {
     let mut r = Rig::new(library());
     let own = options_for(&mut r, "Brass Corner");
     assert_eq!(own.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(), ["Open", "Add to setlist", "Audition", "Add to favorites", "Edit name, description and tags...", "Color", "Duplicate", "Export...", "Delete..."]);
-    assert_eq!(on(&own), ["Open", "Add to setlist", "Audition", "Add to favorites", "Edit name, description and tags...", "Color", "Duplicate", "Delete..."], "Export waits for the second cut");
+    assert_eq!(on(&own), ["Open", "Add to setlist", "Audition", "Add to favorites", "Edit name, description and tags...", "Color", "Duplicate", "Export...", "Delete..."]);
     let locked = options_for(&mut r, "Untitled");
     assert_eq!(locked[6].0, "Copy into my own, to edit");
     assert!(!locked[4].1 && !locked[5].1, "a locked library's item cannot be edited or colored");

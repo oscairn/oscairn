@@ -16,13 +16,20 @@
 //! opening is asked again until it is not refused, and the screen shows what is loading.
 
 mod actions;
+mod export;
+mod files;
 mod filters;
+mod install;
 mod item;
+mod jobs;
+mod libraries;
 mod open;
 mod setlist;
 
 pub use filters::Installed;
 pub use item::{count, empty_saying, library_line, wrap, Item, Kind};
+#[cfg(test)]
+pub use libraries::platform;
 #[cfg(test)]
 pub use open::Step;
 
@@ -53,6 +60,10 @@ pub enum Request {
     Open(open::Step),
     /// A step of adding a Performance to a setlist.
     Setlist(setlist::Step),
+    /// What installing, exporting and managing ask (libraries.rs).
+    Lib(libraries::Req),
+    /// A long request: an install, an export, a build copied in (jobs.rs).
+    Job(jobs::Job),
     /// audition.start, audition.stop, audition.get.
     Audition(open::Aud),
     /// An edit of an item or a tag: the answer says what happened.
@@ -95,6 +106,8 @@ pub enum Outcome {
 enum Row {
     Filters,
     Item(usize),
+    /// Row `n` of the page the mode shows (the file chooser, the install and export choices).
+    Page(usize),
     Favorites,
     Recent,
     Library,
@@ -127,6 +140,14 @@ enum Mode {
     Sources,
     Tags,
     Edit(Draft),
+    /// The file chooser (files.rs).
+    Files(files::Files),
+    /// An archive's contents and what to do with it (install.rs).
+    Install(Box<install::Install>),
+    /// An item's export (export.rs).
+    Export(export::Export),
+    /// The library's export.
+    ExportLibrary(export::Whole),
 }
 
 /// What the keyboard is open for.
@@ -138,6 +159,12 @@ enum Asking {
     EditTags,
     /// The name a Performance never saved is saved under before another is opened.
     SaveName,
+    /// A file's name, in the file chooser.
+    FileName,
+    /// A new signing key's name.
+    KeyName,
+    /// The exported library's name.
+    LibraryName,
 }
 
 /// What a menu the screen asked for is about.
@@ -145,6 +172,8 @@ enum Asking {
 enum MenuFor {
     Item(String),
     Tag(String),
+    /// A menu of libraries.rs.
+    Library(libraries::Menus),
 }
 
 /// What a question the screen asked for is about.
@@ -152,6 +181,13 @@ enum MenuFor {
 enum NoticeFor {
     SaveFirst,
     Delete(String),
+    /// A problem, with one answer.
+    Alert,
+    /// A file that exists is to be written over: the path and what it is for.
+    Overwrite(std::path::PathBuf, files::After),
+    RemovePlugin(Box<libraries::PluginRef>),
+    /// A library to uninstall: its ID and name.
+    Uninstall(String, String),
 }
 
 /// What the top bar's actions are, in order.
@@ -161,6 +197,8 @@ enum Act {
     Audition,
     Keep,
     Options,
+    Install,
+    Libraries,
 }
 
 /// The Performance or Sound being tried, as `audition.get` says.
@@ -213,6 +251,18 @@ pub struct Screen {
     tabs_shown: Option<(bool, usize, Option<usize>)>,
     /// The Setlist app's state file, which says which setlist is open (setlist.rs).
     state_file: Option<std::path::PathBuf>,
+    /// The modes this one was entered from (libraries.rs `enter`, `leave`).
+    stack: Vec<Mode>,
+    /// The folder the file chooser last chose in.
+    files_dir: Option<std::path::PathBuf>,
+    /// The archive whose contents were asked for.
+    install_file: Option<std::path::PathBuf>,
+    /// The key being made.
+    made_key: Option<String>,
+    /// What the Libraries menu waits for.
+    waiting_menu: Option<libraries::Waiting>,
+    /// The Performance's graph, for the plugins it uses.
+    graph: Value,
     pub out: Vec<Out>,
 }
 
@@ -248,6 +298,12 @@ impl Screen {
             active: false,
             tabs_shown: None,
             state_file: None,
+            stack: vec![],
+            files_dir: None,
+            install_file: None,
+            made_key: None,
+            waiting_menu: None,
+            graph: Value::Null,
             out: vec![],
         }
     }
@@ -270,6 +326,7 @@ impl Screen {
     /// The screen opens: what it lists, which libraries are installed, what is installing.
     pub fn open(&mut self) {
         self.mode = Mode::List;
+        self.stack.clear();
         self.tab_at = None;
         self.b.reset();
         self.query();
@@ -318,6 +375,10 @@ impl Screen {
             Mode::Sources => path.extend([self.kind.plural().to_string(), "Filters".into(), "Library".into()]),
             Mode::Tags => path.extend([self.kind.plural().to_string(), "Filters".into(), "Tags".into()]),
             Mode::Edit(d) => path.extend([self.kind.plural().to_string(), format!("Edit {}", if d.name.is_empty() { "Untitled" } else { &d.name })]),
+            Mode::Files(f) => path.extend([self.kind.plural().to_string(), f.title.clone()]),
+            Mode::Install(i) => path.extend([self.kind.plural().to_string(), format!("Install {}", if i.name.is_empty() { "an archive" } else { &i.name })]),
+            Mode::Export(e) => path.extend([self.kind.plural().to_string(), format!("Export {}", if e.name.is_empty() { "Untitled" } else { &e.name })]),
+            Mode::ExportLibrary(_) => path.extend([self.kind.plural().to_string(), "Export library".into()]),
         }
         path
     }
@@ -330,6 +391,8 @@ impl Screen {
         self.menu = None;
         self.menu_for = None;
         self.asking = None;
+        self.stack.clear();
+        self.waiting_menu = None;
     }
 
     pub fn shown(&mut self) {
@@ -420,6 +483,10 @@ impl Screen {
                     })
                     .collect()
             }
+            Mode::Files(f) => f.rows().into_iter().enumerate().map(|(i, r)| (Row::Page(i), r)).collect(),
+            Mode::Install(i) => i.rows().into_iter().enumerate().map(|(k, r)| (Row::Page(k), r)).collect(),
+            Mode::Export(e) => e.rows().into_iter().enumerate().map(|(k, r)| (Row::Page(k), r)).collect(),
+            Mode::ExportLibrary(w) => w.rows().into_iter().enumerate().map(|(k, r)| (Row::Page(k), r)).collect(),
             Mode::Edit(d) => {
                 let shown = |s: &str| if s.is_empty() { "none ›".to_string() } else { format!("{s} ›") };
                 vec![
@@ -445,6 +512,13 @@ impl Screen {
     fn info(&self) -> Vec<InfoLine> {
         let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
+        match &self.mode {
+            Mode::Files(f) => return f.info(),
+            Mode::Install(i) => return i.info(),
+            Mode::Export(e) => return e.info(),
+            Mode::ExportLibrary(w) => return w.info(),
+            _ => {}
+        }
         let mut lines = Vec::new();
         if let (Mode::List, Some(item)) = (&self.mode, self.cursor_item().and_then(|i| self.items.get(i))) {
             lines.push(head(self.kind.singular()));
@@ -529,6 +603,8 @@ impl Screen {
             Mode::Sources => "Libraries",
             Mode::Tags => "Tags",
             Mode::Edit(_) => "Fields",
+            Mode::Files(_) => "Files",
+            Mode::Install(_) | Mode::Export(_) | Mode::ExportLibrary(_) => "Choices",
         };
         let n = rows.len();
         let info = self.info();
@@ -557,7 +633,7 @@ impl Screen {
         if !self.auditioning.id.is_empty() {
             acts.push(Act::Keep);
         }
-        acts.push(Act::Options);
+        acts.extend([Act::Options, Act::Install, Act::Libraries]);
         acts
     }
 
@@ -574,6 +650,8 @@ impl Screen {
                 Act::Audition => Tool { label: if self.auditioning.id.is_empty() { "Audition" } else { "Stop" }.into(), enabled: !self.auditioning.id.is_empty() || self.can_audition(), on: !self.auditioning.id.is_empty() },
                 Act::Keep => Tool::new("Keep"),
                 Act::Options => Tool { label: "Options".into(), enabled: target, on: false },
+                Act::Install => Tool::new("Install..."),
+                Act::Libraries => Tool::new("Libraries..."),
             })
             .collect()
     }
@@ -599,6 +677,8 @@ impl Screen {
                     self.item_menu(&id);
                 }
             }
+            Act::Install => self.install_menu(),
+            Act::Libraries => self.libraries_menu_start(),
         }
         self.show();
         Outcome::Stay
@@ -666,6 +746,11 @@ impl Screen {
             }
             Request::Open(step) => self.opened(step, result),
             Request::Setlist(step) => self.setlisted(step, result),
+            Request::Lib(r) => {
+                self.lib_reply(r, result);
+                false
+            }
+            Request::Job(job) => self.job_reply(job, result),
             Request::Audition(what) => self.auditioned(what, result),
             Request::Do(what) => self.done(what, result),
         };
@@ -759,6 +844,7 @@ impl Screen {
                 }
             }
             Row::Item(i) => return self.item_pressed(i),
+            Row::Page(i) => return self.page_press(i),
             Row::EditName => return self.ask(Asking::EditName),
             Row::EditDescription => return self.ask(Asking::EditDescription),
             Row::EditTags => return self.ask(Asking::EditTags),
@@ -768,6 +854,18 @@ impl Screen {
                 self.b.reset_cursor();
             }
             Row::Nothing => {}
+        }
+        Outcome::Stay
+    }
+
+    /// A row of the page a mode shows (files, install, export).
+    fn page_press(&mut self, at: usize) -> Outcome {
+        match &self.mode {
+            Mode::Files(_) => return self.files_press(at),
+            Mode::Install(_) => self.install_press(at),
+            Mode::Export(_) => self.export_press(at),
+            Mode::ExportLibrary(_) => return self.export_library_press(at),
+            _ => {}
         }
         Outcome::Stay
     }
@@ -805,6 +903,10 @@ impl Screen {
             Mode::Filters | Mode::Edit(_) => {
                 self.mode = Mode::List;
                 self.b.reset_cursor();
+                Outcome::Stay
+            }
+            Mode::Files(_) | Mode::Install(_) | Mode::Export(_) | Mode::ExportLibrary(_) => {
+                self.leave();
                 Outcome::Stay
             }
         }
@@ -915,6 +1017,7 @@ impl Screen {
                 }
             }
             Some(Asking::SaveName) => self.save_named(text.trim()),
+            Some(other) => self.text_entered(other, text),
             None => {}
         }
         self.show();
@@ -929,7 +1032,7 @@ impl Screen {
 
     /// Whether `request` is a long one: the engine may take seconds, and the musician waits on it.
     pub fn waits(request: &Request) -> bool {
-        matches!(request, Request::Open(open::Step::Prepare | open::Step::Load | open::Step::Estimate | open::Step::Save) | Request::Audition(open::Aud::Start | open::Aud::Stop(_)) | Request::Do(Do::NewPart(_)))
+        matches!(request, Request::Open(open::Step::Prepare | open::Step::Load | open::Step::Estimate | open::Step::Save) | Request::Audition(open::Aud::Start | open::Aud::Stop(_)) | Request::Do(Do::NewPart(_)) | Request::Job(_))
     }
 
     /// The menu the screen has ready, to open over it.

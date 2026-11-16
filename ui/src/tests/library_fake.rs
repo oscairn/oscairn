@@ -100,6 +100,14 @@ pub struct Library {
     pub fail: Vec<(String, String)>,
     /// The setlists' documents, by their info's id.
     pub docs: Vec<Value>,
+    /// Archives that can be read, by their file: what `library.contents` says of each.
+    pub archives: Vec<(String, Value)>,
+    /// The folders indexed in place.
+    pub folders: Vec<String>,
+    /// The plugin store (`plugins.list`).
+    pub plugins: Vec<Value>,
+    /// Signing keys: name, ID.
+    pub keys: Vec<(String, String)>,
     next: u32,
     recents: u32,
 }
@@ -121,6 +129,10 @@ impl Library {
             notifications: vec![],
             fail: vec![],
             docs: vec![],
+            archives: vec![],
+            folders: vec![],
+            plugins: vec![],
+            keys: vec![],
             next: 100,
             recents: 0,
         }
@@ -176,7 +188,21 @@ impl Library {
         let recent = p.get("recent").and_then(Value::as_bool).unwrap_or(false);
         let source = p.get("source").and_then(Value::as_str).unwrap_or_default();
         let id = p.get("id").and_then(Value::as_str).unwrap_or_default();
-        let kind = p.get("kind").and_then(Value::as_str).unwrap_or_default();
+        let mut kind = p.get("kind").and_then(Value::as_str).unwrap_or_default();
+        // `type`: item types by ID, one or a list (docs: RFC 0023); a setlist's is oscairn.setlist.
+        let types: Vec<&str> = match p.get("type") {
+            Some(Value::String(t)) => vec![t.as_str()],
+            Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).collect(),
+            _ => vec![],
+        };
+        for t in &types {
+            if !["oscairn.performance", "oscairn.sound", "oscairn.setlist"].contains(t) {
+                return Err(refused(-32602, "Unknown item type"));
+            }
+        }
+        if types.len() == 1 {
+            kind = types[0].trim_start_matches("oscairn.");
+        }
         let mut hits: Vec<&Stored> = self
             .items
             .iter()
@@ -315,6 +341,119 @@ impl Library {
                 self.auditioning = None;
                 self.changed();
                 Ok(json!({"loaded": true}))
+            }
+            "library.contents" => {
+                self.fields(p, &["file"], &["file"])?;
+                let file = p["file"].as_str().unwrap_or_default();
+                self.archives.iter().find(|a| a.0 == file).map(|a| a.1.clone()).ok_or_else(|| refused(-32005, &format!("Cannot read {file}: no such archive")))
+            }
+            "library.install" => {
+                self.fields(p, &["file", "asLibrary", "items", "acceptUnsignedCode"], &["file"])?;
+                let file = p["file"].as_str().unwrap_or_default();
+                let contents = self.archives.iter().find(|a| a.0 == file).map(|a| a.1.clone()).ok_or_else(|| refused(-32005, "no such archive"))?;
+                let accept = p["acceptUnsignedCode"] == true;
+                let code: Vec<Value> = contents["code"].as_array().cloned().unwrap_or_default();
+                // Plugin code from a key not trusted, or unsigned, is refused unless the user saw it and said yes (RFC 0006).
+                if !accept && code.iter().any(|c| c["status"] == "unknown" || c["status"] == "unsigned") {
+                    return Err(refused(-32005, "The plugins in this archive run code from an unknown source"));
+                }
+                let wanted: Vec<String> = p["items"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+                let locked = p["asLibrary"] == true;
+                let library_id = contents["id"].as_str().unwrap_or_default().to_string();
+                let (mut added, mut skipped) = (0, 0);
+                for i in contents["items"].as_array().into_iter().flatten() {
+                    let id = i["id"].as_str().unwrap_or_default().to_string();
+                    if !wanted.is_empty() && !wanted.contains(&id) {
+                        continue;
+                    }
+                    if self.items.iter().any(|x| x.id == id) {
+                        skipped += 1;
+                        continue;
+                    }
+                    let mut item = stored(i["kind"].as_str().unwrap_or("performance"), &id, i["name"].as_str().unwrap_or_default());
+                    if locked {
+                        item.library = library_id.clone();
+                        if !self.libraries.iter().any(|l| l.0 == library_id) {
+                            self.libraries.push((library_id.clone(), contents["name"].as_str().unwrap_or_default().to_string()));
+                        }
+                    }
+                    self.items.push(item);
+                    added += 1;
+                }
+                Ok(json!({"added": added, "skipped": skipped, "notes": [], "code": code}))
+            }
+            "library.export" | "library.exportLibrary" => {
+                let export = method == "library.export";
+                if export {
+                    self.fields(p, &["id", "file", "editedSounds", "sign"], &["id", "file"])?;
+                    self.find(p["id"].as_str().unwrap_or_default())?;
+                } else {
+                    self.fields(p, &["file", "name", "setlists", "sign"], &["file"])?;
+                }
+                if let Some(s) = p.get("sign") {
+                    self.fields(s, &["key", "items", "archive"], &["key"])?;
+                    if !self.keys.iter().any(|k| s["key"] == k.0) {
+                        return Err(refused(-32005, "No such signing key"));
+                    }
+                }
+                let file = std::path::PathBuf::from(p["file"].as_str().unwrap_or_default());
+                // It refuses a file that exists (docs: performance.export).
+                if file.exists() {
+                    return Err(refused(-32005, &format!("{} exists already", file.display())));
+                }
+                std::fs::write(&file, b"an archive").map_err(|e| refused(-32005, &e.to_string()))?;
+                Ok(json!({"exported": true, "notes": []}))
+            }
+            "library.folders" => {
+                self.fields(p, &[], &[])?;
+                Ok(json!({"folders": self.folders}))
+            }
+            "library.addFolder" | "library.removeFolder" => {
+                self.fields(p, &["folder"], &["folder"])?;
+                let folder = p["folder"].as_str().unwrap_or_default().to_string();
+                if method == "library.addFolder" {
+                    self.folders.push(folder);
+                } else {
+                    self.folders.retain(|f| *f != folder);
+                }
+                Ok(json!({"accepted": true}))
+            }
+            "plugins.list" => {
+                self.fields(p, &[], &[])?;
+                Ok(json!({"plugins": self.plugins}))
+            }
+            "plugins.remove" | "plugins.addBuild" => {
+                let add = method == "plugins.addBuild";
+                if add {
+                    self.fields(p, &["format", "id", "version", "platform", "path"], &["format", "id", "version", "path"])?;
+                } else {
+                    self.fields(p, &["format", "id", "version", "platform"], &["format", "id", "version"])?;
+                    let (id, version) = (p["id"].as_str().unwrap_or_default().to_string(), p["version"].as_str().unwrap_or_default().to_string());
+                    self.plugins.retain(|x| !(x["id"] == id && x["version"] == version));
+                }
+                Ok(json!({"accepted": true}))
+            }
+            "library.uninstall" => {
+                self.fields(p, &["library"], &["library"])?;
+                let id = p["library"].as_str().unwrap_or_default().to_string();
+                self.libraries.retain(|l| l.0 != id);
+                self.items.retain(|i| i.library != id);
+                Ok(json!({"accepted": true}))
+            }
+            "keys.list" => {
+                self.fields(p, &[], &[])?;
+                Ok(json!({"keys": self.keys.iter().map(|(n, id)| json!({"name": n, "id": id, "key": format!("pub-{id}")})).collect::<Vec<_>>()}))
+            }
+            "keys.make" => {
+                self.fields(p, &["name"], &["name"])?;
+                let name = p["name"].as_str().unwrap_or_default().to_string();
+                if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c)) {
+                    return Err(refused(-32602, "A key's name is letters, digits, '.', '-' and '_'"));
+                }
+                self.next += 1;
+                let id = format!("{:016x}", u64::from(self.next).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                self.keys.push((name.clone(), id.clone()));
+                Ok(json!({"name": name, "id": id, "key": format!("pub-{id}")}))
             }
             "setlists.get" => {
                 self.fields(p, &["id"], &["id"])?;

@@ -9,7 +9,7 @@ use crate::nav::Action;
 use crate::params::Outcome;
 
 /// Thirty parameters on three pages: Oscillator, Filter, and Amp (its Env module under it).
-fn big_plugin() -> serde_json::Value {
+pub(super) fn big_plugin() -> serde_json::Value {
     let names = [
         ("Oscillator", ["Pitch", "Fine", "Wave", "Level", "Pan", "Sync", "Phase", "Shape", "Detune", "Unison"]),
         ("Filter", ["Cutoff", "Resonance", "Drive", "Type", "Keytrack", "Envelope amount", "Mix", "Slope", "Pan", "Level"]),
@@ -84,12 +84,14 @@ fn the_search_lists_matches_from_every_page() {
     assert!(!s.ui.global::<crate::GridState>().get_search_shown());
 }
 
-// Without touch: back from the first tile (or up from the first row) the cursor is on the field, a press
-// asks for the text, forward goes to the first tile; Cancel backs out one layer at a time: the field, the
-// cursor, the search, then the screen.
+// Without touch: back from the first tile the cursor is on the row of pages and, back once more, on the search
+// (up from the first row twice does the same), a press asks for the text, down goes to the pages and the first
+// tile; Cancel backs out one layer at a time: the cursor, the search, then the screen.
 #[test]
 fn the_search_by_the_cursor() {
     let mut s = Screen::new();
+    // The keyboard's arrangement, the pages a strip over the tiles (tabs.rs has the column's).
+    s.ui.global::<crate::Theme>().set_column_from(100000.);
     let ui = &s.ui.clone_strong();
     let g = ui.global::<crate::GridState>();
     let mut p = open_with(&mut s, big_plugin(), &[], &text);
@@ -97,14 +99,19 @@ fn the_search_by_the_cursor() {
     p.act(Action::Move { pane: None, by: 1 });
     assert_eq!((on_tile(), g.get_search_cursor()), (Some(0), false));
     p.act(Action::Move { pane: None, by: -1 });
-    assert_eq!((on_tile(), g.get_search_cursor()), (None, true), "before the first tile: the field");
+    assert_eq!((on_tile(), g.get_page_cursor(), g.get_search_cursor()), (None, 0, false), "before the first tile: the pages, on the one shown");
+    p.act(Action::Move { pane: None, by: -1 });
+    assert_eq!((on_tile(), g.get_page_cursor(), g.get_search_cursor()), (None, -1, true), "before the pages: the search");
     assert_eq!(p.act(Action::Confirm(None)), Outcome::Prompt("Search parameters".into(), String::new()));
     p.entered("res");
     assert_eq!(names(ui), ["Resonance"]);
-    assert!(g.get_search_cursor(), "the cursor stays on the field");
-    // On to the first tile, and up from the first row to the field again.
-    p.act(Action::Move { pane: None, by: 1 });
+    assert!(g.get_search_cursor(), "the cursor stays on the search");
+    // Down to the pages and to the first tile, and up from the first row to the search again.
+    p.act(Action::Arrow { dx: 0, dy: 1 });
+    assert_eq!((on_tile(), g.get_page_cursor(), g.get_search_cursor()), (None, 0, false));
+    p.act(Action::Arrow { dx: 0, dy: 1 });
     assert_eq!((on_tile(), g.get_search_cursor()), (Some(0), false));
+    p.act(Action::Arrow { dx: 0, dy: -1 });
     p.act(Action::Arrow { dx: 0, dy: -1 });
     assert_eq!((on_tile(), g.get_search_cursor()), (None, true));
     assert_eq!(p.act(Action::Confirm(None)), Outcome::Prompt("Search parameters".into(), "res".into()), "the text now is the keyboard's start");
@@ -114,16 +121,19 @@ fn the_search_by_the_cursor() {
     assert_eq!(p.act(Action::Cancel(None)), Outcome::Stay);
     assert_eq!((g.get_search().as_str(), names(ui).len()), ("", 10), "the search ended");
     assert_eq!(p.act(Action::Cancel(None)), Outcome::Back);
-    // Turning the page ends a search, too; the field is reached from a later page's first tile as well.
+    // Turning the page ends a search, too; the search is reached from a later page's first tile as well:
+    // back to the pages (on the second), along to the first, then the search.
     p.entered("pan");
     p.act(Action::Page(1));
     assert_eq!((g.get_search().as_str(), g.get_page()), ("", 1));
     p.act(Action::Move { pane: None, by: 1 });
-    p.act(Action::Move { pane: None, by: -1 });
+    for _ in 0..3 {
+        p.act(Action::Move { pane: None, by: -1 });
+    }
     assert!(g.get_search_cursor(), "{:?}", names(ui));
 }
 
-// Pictures for a look by eye: the field above the pages, with a search and the cursor on it, at 1 and at the
+// Pictures for a look by eye: the search button in the header, with a search and the cursor on it, at 1 and at the
 // FANTOM's 1.55, and under the odd theme.
 #[test]
 fn search_pictures() {
@@ -133,7 +143,8 @@ fn search_pictures() {
     s.frame();
     png(&s, "grid-search-empty");
     p.act(Action::Move { pane: None, by: 1 });
-    p.act(Action::Move { pane: None, by: -1 });
+    p.act(Action::Arrow { dx: 0, dy: -1 });
+    p.act(Action::Arrow { dx: 0, dy: -1 });
     p.entered("pan");
     s.frame();
     png(&s, "grid-search");
@@ -219,9 +230,10 @@ fn the_search_on_the_shell_uses_the_keyboard() {
     assert_eq!(ui.get_screen(), 7);
     answer(&mut f, "params.list", big_plugin());
     assert!(ui.global::<crate::GridState>().get_search_shown());
-    // The field: the cursor back from the first tile, a press, the keyboard is open over the page.
+    // The search: the cursor up from the first row (the pages, then the search), a press, the keyboard is open over the page.
     shell::act(Action::Move { pane: None, by: 1 });
-    shell::act(Action::Move { pane: None, by: -1 });
+    shell::act(Action::Arrow { dx: 0, dy: -1 });
+    shell::act(Action::Arrow { dx: 0, dy: -1 });
     shell::act(Action::Confirm(None));
     assert!(ui.global::<crate::KeyboardState>().get_open());
     assert_eq!(ui.global::<crate::KeyboardState>().get_title().as_str(), "Search parameters");

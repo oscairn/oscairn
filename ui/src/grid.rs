@@ -53,6 +53,11 @@ pub struct Param {
     /// An algorithm's routing at each value from its minimum: eight operators' input masks, the
     /// carriers' mask, and the feedback's operator from and to (1 to 8; 0 none).
     pub algorithms: Vec<[u8; 11]>,
+    /// PROVISIONAL (draft 6's `param_tab`, not yet in the engine's `params.list`; docs/control-protocol.md and
+    /// ui/PERFORMANCE-APP.md "Items without a request"): the id of the page or tab the plugin puts this on.
+    pub declared_tab: Option<u32>,
+    /// PROVISIONAL (draft 6's `value_icon`): the `enum oscairn_icon` of each value from the minimum, 0 none.
+    pub icons: Vec<u32>,
 }
 
 impl Param {
@@ -111,6 +116,8 @@ pub fn parse(list: &Value) -> Vec<Param> {
             index: p["index"].as_u64().unwrap_or(0),
             seconds: p["seconds"].as_array().into_iter().flatten().filter_map(Value::as_f64).collect(),
             algorithms: p["algorithms"].as_array().into_iter().flatten().map(routing).collect(),
+            declared_tab: p["uiTab"].as_u64().map(|v| v as u32),
+            icons: p["valueIcons"].as_array().into_iter().flatten().map(|v| v.as_u64().unwrap_or(0) as u32).collect(),
         })
         .collect()
 }
@@ -682,8 +689,45 @@ pub fn envelope_top(scale: f32, spacing: f32) -> f32 {
 /// An envelope node's radius (the widget draws 12 across).
 pub const NODE_RADIUS: f32 = 6.;
 
+/// The widget's icon number for the icon a plugin declares for a value (draft 6's `enum oscairn_icon`, ui.h):
+/// 1 saw, 2 square, 3 sine, 4 triangle, 5 noise, 6 pulse, 7 saw down, 8 sample and hold; 0 for none or an
+/// icon this host does not know.
+pub fn declared_icon(icon: u32) -> i32 {
+    match icon {
+        1 => 3,
+        2 => 4,
+        3 => 1,
+        4 => 7,
+        5 => 2,
+        6 => 6,
+        7 => 5,
+        8 => 8,
+        _ => 0,
+    }
+}
+
+/// A value's icon: the one the plugin declares for it where it declares one, else the name rule (`wave_icon`).
+pub fn icon(declared: Option<u32>, name: &str) -> i32 {
+    match declared.map(declared_icon) {
+        Some(i) if i > 0 => i,
+        _ => wave_icon(name),
+    }
+}
+
+/// The icons of a stepped parameter's values, `labels` being their texts from the minimum. Where the plugin
+/// declares an icon for any value, the host guesses none for the others (ui.h `value_icon`); else every value
+/// has its name's.
+pub fn icons_for(p: &Param, labels: &[String]) -> Vec<i32> {
+    let declared = |k: usize| p.icons.get(k).copied().filter(|&i| declared_icon(i) > 0);
+    if (0..labels.len()).any(|k| declared(k).is_some()) {
+        (0..labels.len()).map(|k| icon(declared(k), "")).collect()
+    } else {
+        labels.iter().map(|l| icon(None, l)).collect()
+    }
+}
+
 /// A waveform icon for a value's label, by the well-known names (any case): 1 saw, 2 square, 3 sine,
-/// 4 triangle, 5 noise, 6 pulse; 0 for any other name. The plugin data has no icon hint (GRID.md).
+/// 4 triangle, 5 noise, 6 pulse; 0 for any other name. The fallback where a plugin declares no icon.
 pub fn wave_icon(name: &str) -> i32 {
     match name.trim().to_lowercase().as_str() {
         "saw" | "sawtooth" => 1,

@@ -524,6 +524,11 @@ pub fn apply(window: &Shell, theme: &Loaded) {
     let operators = crate::palette::operators(c("accent"), c("surface"), c("background"), c("text"));
     g.set_operators(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.fill).collect::<Vec<_>>())));
     g.set_operators_on(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.on).collect::<Vec<_>>())));
+    let tabs = crate::palette::tabs(c("accent"), c("text"), c("surface"), c("background"), c("raised"), c("muted"));
+    g.set_tab_on(tabs.on);
+    g.set_tab_on_ink(tabs.on_ink);
+    g.set_tab_off(tabs.off);
+    g.set_tab_off_ink(tabs.off_ink);
     let (text, surface) = (c("text"), c("surface"));
     let brighter = |a: Color, b: Color| brightness(a) > brightness(b);
     g.set_key_light(if brighter(text, surface) { text } else { surface });

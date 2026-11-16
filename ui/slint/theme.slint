@@ -42,6 +42,11 @@ export global Theme {
     in property <color> warning: #e8c547;
     // The cursor's border (the accent unless the theme says).
     in property <color> focus: accent;
+    // Tabs (src/palette.rs `tabs`): the selected tab's fill and its text, an unselected tab's fill and its text.
+    in property <color> tab-on: accent;
+    in property <color> tab-on-ink: on-accent;
+    in property <color> tab-off: raised;
+    in property <color> tab-off-ink: muted;
     // Text on the accent (JUCE's `contrasting`): black on a bright accent, white on a dark one.
     in property <color> on-accent: #000000;
     // The FM view's eight operator colors and the text that reads on each (src/palette.rs).
@@ -106,10 +111,14 @@ export global Theme {
     out property <length> button-width: 110px;
     out property <length> overlay-width: 420px;
     out property <length> pages-width: 180px;
+    // A window at least this tall has room for the pages as a column beside the tiles (ui/TABS.md).
+    in property <length> column-from: 560px;
     // A cursor's border and a cursor on the piano keys; the rule between neighbors.
     out property <length> cursor-width: 2px;
     out property <length> key-cursor-width: 3px;
     out property <length> hair: 1px;
+    // A tab's fill from its box: room for the cursor's ring and a hair of gap.
+    out property <length> tab-pad: cursor-width + hair;
     // A graph view's thin line (an operator's envelope, a routing wire) and a handle's diameter.
     out property <length> thin: 1.5px;
     out property <length> node: 12px;
@@ -339,45 +348,121 @@ export component Thumb inherits Rectangle {
     }
 }
 
-// One tab (DesktopShell's TabStrip): segmented, the selected one lifted out of the track; folder,
-// rounded at the top and open at the bottom, an accent bar across its top.
+// The shell's one family of tabs (ui/TABS.md): TabBar is a row of tabs or a column of them, TabPages the
+// two-level arrangement (pages, and under or beside them each page's tabs). Drawn only from the theme: the
+// `tabs` style (segmented, a track with the selected tab lifted out of it; folder, tabs joined to the page
+// they open), the colors, the radius, the spacing and the type.
+//
+// The selected tab is told by its fill (Theme.tab-on: 3 to 1 against an unselected tab's fill in every theme,
+// src/palette.rs `tabs`), by bold type and by the text color that reads on the fill, never by an outline
+// alone. The cursor is a ring round the whole box with a gap between it and the fill.
 component TabItem inherits Rectangle {
     in property <string> text;
     in property <bool> selected;
+    in property <bool> cursor;
+    in property <bool> vertical;
+    // The tab the strip keeps in view (the cursor's, else the selected one).
+    in property <bool> active;
     callback clicked();
+    callback reveal();
     property <bool> segmented: Theme.tabs == TabStyle.segmented;
-    min-width: label.preferred-width + 2 * Theme.pad-wide + Theme.pad-narrow;
+    property <length> inset: Theme.tab-pad;
+    // A folder's unselected tab sits back from the edge the selected one reaches.
+    property <length> back: 4px;
+    // A row's tab is as wide as its name in bold needs, at most four and a half touch targets; a longer name
+    // shrinks to 70% of the type and is then cut (FitText).
+    preferred-width: min(Theme.touch * 4.5, max(Theme.touch, probe.preferred-width + 2 * (Theme.pad-wide + Theme.tab-pad)));
+    changed active => { if self.active { root.reveal(); } }
+    changed x => { if self.active { root.reveal(); } }
+    changed y => { if self.active { root.reveal(); } }
+    changed width => { if self.active { root.reveal(); } }
+    changed height => { if self.active { root.reveal(); } }
+    probe := Text {
+        visible: false;
+        text: root.text;
+        font-size: Theme.button;
+        font-weight: 700;
+    }
     if root.segmented && root.selected && Theme.depth == DepthStyle.soft: Rectangle {
-        y: 1px;
+        x: root.inset;
+        y: root.inset + 1px;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - 2 * root.inset;
         border-radius: Theme.radius + 1px;
         background: Theme.shadow;
     }
     if root.segmented && root.selected: Rectangle {
+        x: root.inset;
+        y: root.inset;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - 2 * root.inset;
         border-radius: Theme.radius + 1px;
-        background: Theme.dark ? Theme.raised.brighter(0.25) : Theme.surface;
+        background: Theme.tab-on;
     }
-    if !root.segmented && root.selected: Rectangle {
-        y: 0px;
-        height: parent.height + 2px;
-        border-top-left-radius: Theme.radius;
-        border-top-right-radius: Theme.radius;
-        background: Theme.background;
-        border-width: Theme.hair;
+    // A folder: every tab is a piece; the selected one reaches the rule (and the page past it), the others stop
+    // short of it and sit back.
+    if !root.segmented && !root.vertical: Rectangle {
+        x: root.inset;
+        y: root.selected ? root.inset : root.inset + root.back;
+        width: parent.width - 2 * root.inset;
+        height: (root.selected ? parent.height : parent.height - Theme.hair) - self.y;
+        border-top-left-radius: Theme.radius + 1px;
+        border-top-right-radius: Theme.radius + 1px;
+        background: root.selected ? Theme.tab-on : Theme.tab-off;
+        border-width: root.selected ? 0px : Theme.hair;
         border-color: Theme.rule;
     }
-    if !root.segmented && root.selected: Rectangle {
-        x: Theme.radius;
-        width: parent.width - 2 * Theme.radius;
-        height: 2px;
-        background: Theme.accent;
+    if !root.segmented && root.vertical: Rectangle {
+        x: root.selected ? root.inset : root.inset + root.back;
+        y: root.inset;
+        width: (root.selected ? parent.width : parent.width - Theme.hair) - self.x;
+        height: parent.height - 2 * root.inset;
+        border-top-left-radius: Theme.radius + 1px;
+        border-bottom-left-radius: Theme.radius + 1px;
+        background: root.selected ? Theme.tab-on : Theme.tab-off;
+        border-width: root.selected ? 0px : Theme.hair;
+        border-color: Theme.rule;
     }
-    label := Text {
-        width: parent.width;
+    FitText {
+        x: root.inset + Theme.pad-wide;
+        width: parent.width - 2 * (root.inset + Theme.pad-wide);
         height: parent.height;
         text: root.text;
-        color: root.selected ? Theme.text : Theme.muted;
+        ink: root.selected ? Theme.tab-on-ink : Theme.tab-off-ink;
+        size: Theme.button;
+        bold: root.selected;
+        align: root.vertical ? TextHorizontalAlignment.left : TextHorizontalAlignment.center;
+    }
+    Cursor {
+        shown: root.cursor;
+        corner: Theme.radius + 2px;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// The end of a strip that goes on: a box over the tabs cut there with an arrow, a touch scrolls toward them.
+component TabMore inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> last; // at the far end: its rule is on the side facing the tabs
+    in property <bool> vertical;
+    callback clicked();
+    background: Theme.surface;
+    Rectangle {
+        x: root.vertical ? 0px : root.last ? 0px : parent.width - Theme.hair;
+        y: root.vertical ? root.last ? 0px : parent.height - Theme.hair : 0px;
+        width: root.vertical ? parent.width : Theme.hair;
+        height: root.vertical ? Theme.hair : parent.height;
+        background: Theme.rule;
+    }
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.glyph;
+        color: Theme.text;
         font-size: Theme.button;
-        font-weight: root.selected ? 700 : 400;
+        font-weight: 700;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -386,32 +471,232 @@ component TabItem inherits Rectangle {
     }
 }
 
-export component TabStrip inherits Rectangle {
+component HTabs inherits Rectangle {
     in property <[string]> names;
     in property <int> current;
-    in property <string> empty-name: "General";
+    in property <int> cursor;
+    in property <string> empty-name;
     callback picked(int);
     property <bool> segmented: Theme.tabs == TabStyle.segmented;
+    property <int> keep: root.cursor >= 0 ? root.cursor : root.current;
+    property <length> more: Theme.touch * 0.6;
+    property <length> content: row.preferred-width;
+    out property <bool> over: root.content > root.width + 0.5px;
+    function settle() {
+        flick.content-x = min(0px, max(root.width - root.content, flick.content-x));
+    }
+    function reveal(x: length, w: length) {
+        let margin = root.over ? root.more : 0px;
+        if (x + flick.content-x < margin) {
+            flick.content-x = min(0px, margin - x);
+        } else if (x + w + flick.content-x > root.width - margin) {
+            flick.content-x = max(root.width - root.content, root.width - margin - x - w);
+        }
+    }
+    changed width => { root.settle(); }
+    changed content => { root.settle(); }
     if !root.segmented: Rectangle {
         y: parent.height - Theme.hair;
         height: Theme.hair;
         background: Theme.rule;
     }
-    HorizontalLayout {
-        alignment: start;
-        Rectangle {
+    flick := Flickable {
+        width: parent.width;
+        height: parent.height;
+        content-width: root.content;
+        interactive: root.over;
+        if root.segmented: Rectangle {
+            x: 0px;
+            width: root.content;
+            height: parent.height;
             border-radius: Theme.radius + 4px;
-            background: root.segmented ? Theme.raised : transparent;
-            HorizontalLayout {
-                padding: root.segmented ? 3px : 0px;
-                spacing: 2px;
-                for name[i] in root.names: TabItem {
-                    text: name == "" ? root.empty-name : name;
-                    selected: i == root.current;
-                    clicked => { root.picked(i); }
-                }
+            background: Theme.tab-off;
+        }
+        row := HorizontalLayout {
+            x: 0px;
+            width: self.preferred-width;
+            height: parent.height;
+            alignment: start;
+            for name[i] in root.names: TabItem {
+                text: name == "" ? root.empty-name : name;
+                selected: i == root.current;
+                cursor: i == root.cursor;
+                active: i == root.keep;
+                clicked => { root.picked(i); }
+                reveal => { root.reveal(self.x, self.width); }
             }
         }
+    }
+    if root.over && flick.content-x < -0.5px: TabMore {
+        x: 0px;
+        width: root.more;
+        height: parent.height;
+        glyph: "‹";
+        clicked => { flick.content-x = min(0px, flick.content-x + root.width * 0.7); }
+    }
+    if root.over && flick.content-x > root.width - root.content + 0.5px: TabMore {
+        x: parent.width - root.more;
+        width: root.more;
+        height: parent.height;
+        glyph: "›";
+        last: true;
+        clicked => { flick.content-x = max(root.width - root.content, flick.content-x - root.width * 0.7); }
+    }
+}
+
+component VTabs inherits Rectangle {
+    in property <[string]> names;
+    in property <int> current;
+    in property <int> cursor;
+    in property <string> empty-name;
+    in property <length> item;
+    callback picked(int);
+    property <bool> segmented: Theme.tabs == TabStyle.segmented;
+    property <int> keep: root.cursor >= 0 ? root.cursor : root.current;
+    property <length> more: Theme.touch * 0.6;
+    property <length> content: root.names.length * root.item;
+    out property <bool> over: root.content > root.height + 0.5px;
+    function settle() {
+        flick.content-y = min(0px, max(root.height - root.content, flick.content-y));
+    }
+    function reveal(y: length, h: length) {
+        let margin = root.over ? root.more : 0px;
+        if (y + flick.content-y < margin) {
+            flick.content-y = min(0px, margin - y);
+        } else if (y + h + flick.content-y > root.height - margin) {
+            flick.content-y = max(root.height - root.content, root.height - margin - y - h);
+        }
+    }
+    changed height => { root.settle(); }
+    changed content => { root.settle(); }
+    if !root.segmented: Rectangle {
+        x: parent.width - Theme.hair;
+        width: Theme.hair;
+        background: Theme.rule;
+    }
+    flick := Flickable {
+        width: parent.width;
+        height: parent.height;
+        content-height: root.content;
+        interactive: root.over;
+        if root.segmented: Rectangle {
+            y: 0px;
+            width: parent.width;
+            height: root.content;
+            border-radius: Theme.radius + 4px;
+            background: Theme.tab-off;
+        }
+        col := VerticalLayout {
+            y: 0px;
+            width: parent.width;
+            height: root.content;
+            alignment: start;
+            for name[i] in root.names: TabItem {
+                vertical: true;
+                min-height: root.item;
+                max-height: root.item;
+                text: name == "" ? root.empty-name : name;
+                selected: i == root.current;
+                cursor: i == root.cursor;
+                active: i == root.keep;
+                clicked => { root.picked(i); }
+                reveal => { root.reveal(self.y, self.height); }
+            }
+        }
+    }
+    if root.over && flick.content-y < -0.5px: TabMore {
+        y: 0px;
+        width: parent.width;
+        height: root.more;
+        vertical: true;
+        glyph: "▲";
+        clicked => { flick.content-y = min(0px, flick.content-y + root.height * 0.7); }
+    }
+    if root.over && flick.content-y > root.height - root.content + 0.5px: TabMore {
+        y: parent.height - root.more;
+        width: parent.width;
+        height: root.more;
+        vertical: true;
+        last: true;
+        glyph: "▼";
+        clicked => { flick.content-y = max(root.height - root.content, flick.content-y - root.height * 0.7); }
+    }
+}
+
+// A strip of tabs, or with `vertical` a column of them (each `item` tall). `current` is the selected one (-1:
+// none), `cursor` the one the border cursor is on (-1: none); a tap says `picked`, nothing else changes.
+export component TabBar inherits Rectangle {
+    in property <[string]> names;
+    in property <int> current;
+    in property <int> cursor: -1;
+    in property <bool> vertical;
+    in property <length> item: Theme.touch;
+    in property <string> empty-name: "General";
+    callback picked(int);
+    if !root.vertical: HTabs {
+        width: parent.width;
+        height: parent.height;
+        names: root.names;
+        current: root.current;
+        cursor: root.cursor;
+        empty-name: root.empty-name;
+        picked(i) => { root.picked(i); }
+    }
+    if root.vertical: VTabs {
+        width: parent.width;
+        height: parent.height;
+        names: root.names;
+        current: root.current;
+        cursor: root.cursor;
+        empty-name: root.empty-name;
+        item: root.item;
+        picked(i) => { root.picked(i); }
+    }
+}
+
+// Two levels: pages, and under each the page's tabs (none for a page with fewer than two). The pages are a
+// column at the left with the tabs a strip over the content (`column`), or two strips stacked, the pages
+// over the tabs. The content goes where the out properties say, in this component's own pixels.
+export component TabPages inherits Rectangle {
+    in property <[string]> pages;
+    in property <int> page;
+    in property <int> page-cursor: -1;
+    in property <[string]> tabs;
+    in property <int> tab;
+    in property <int> tab-cursor: -1;
+    in property <bool> column;
+    in property <length> column-width: Theme.pages-width;
+    callback page-picked(int);
+    callback tab-picked(int);
+    property <bool> has-pages: root.pages.length > 1;
+    property <bool> has-tabs: root.tabs.length > 1;
+    property <length> side: root.column && root.has-pages ? root.column-width + Theme.gap : 0px;
+    property <length> pages-height: !root.column && root.has-pages ? Theme.touch + Theme.gap : 0px;
+    property <length> tabs-height: root.has-tabs ? Theme.touch + Theme.gap : 0px;
+    out property <length> content-x: root.side;
+    out property <length> content-y: root.pages-height + root.tabs-height;
+    out property <length> content-width: max(0px, root.width - root.side);
+    out property <length> content-height: max(0px, root.height - root.content-y);
+    if root.has-pages: TabBar {
+        x: 0px;
+        y: 0px;
+        width: root.column ? root.column-width : root.width;
+        height: root.column ? root.height : Theme.touch;
+        vertical: root.column;
+        names: root.pages;
+        current: root.page;
+        cursor: root.page-cursor;
+        picked(i) => { root.page-picked(i); }
+    }
+    if root.has-tabs: TabBar {
+        x: root.side;
+        y: root.pages-height;
+        width: root.width - root.side;
+        height: Theme.touch;
+        names: root.tabs;
+        current: root.tab;
+        cursor: root.tab-cursor;
+        picked(i) => { root.tab-picked(i); }
     }
 }
 

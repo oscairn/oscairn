@@ -126,3 +126,30 @@ pub fn operators(accent: Color, surface: Color, background: Color, text: Color) 
     }
     out
 }
+
+/// The colors of a selected tab and the text on it, and of an unselected tab and its text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TabColors {
+    pub on: Color,
+    pub on_ink: Color,
+    pub off: Color,
+    pub off_ink: Color,
+}
+
+/// The least contrast between a selected tab's fill and an unselected one's, in every theme (WCAG 1.4.11's
+/// 3 to 1 for graphics): the fill, not an outline, is what tells them apart.
+pub const TAB_CONTRAST: f32 = 3.;
+
+/// A selected tab's fill is the accent where the accent holds 3 to 1 against the unselected tab (the raised
+/// color), the surface and the background (a strip sits on either) and 4.5 to 1 against its text; else the
+/// theme's text color, which a theme file must keep 4.5 to 1 from all three, so the guarantee holds in any
+/// theme the loader accepts. The text on it is the text or background color, whichever contrasts more; an
+/// unselected tab is the raised color with the muted text.
+pub fn tabs(accent: Color, text: Color, surface: Color, background: Color, raised: Color, muted: Color) -> TabColors {
+    let ink_on = |fill: Color| if contrast(fill, text) >= contrast(fill, background) { text } else { background };
+    let fits = |fill: Color| {
+        [raised, surface, background].iter().all(|&against| contrast(fill, against) >= TAB_CONTRAST) && contrast(fill, ink_on(fill)) >= AGAINST_TEXT
+    };
+    let on = if fits(accent) { accent } else { text };
+    TabColors { on, on_ink: ink_on(on), off: raised, off_ink: muted }
+}

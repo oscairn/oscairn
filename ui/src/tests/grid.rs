@@ -62,7 +62,7 @@ pub(super) fn every_kind() -> serde_json::Value {
 }
 
 /// The Basic Synth's parameters and hints as plugins/basic-synth/basic_synth.cpp gives them.
-fn basic_synth() -> serde_json::Value {
+pub(super) fn basic_synth() -> serde_json::Value {
     let mut p = vec![
         param(100, "Brightness", "", 1., false, "knob", 1),
         param(101, "Level", "", 1., false, "knob", 2),
@@ -280,16 +280,14 @@ fn every_control_by_knobs_dial_and_buttons() {
     p.act(Action::Move { pane: None, by: 1 });
     p.act(Action::Confirm(None));
     assert!(sent(&mut p.out).is_empty() && !tiles(ui)[7].editing);
-    // Past the last tile: the next page, its values asked.
+    // Past the last tile the cursor stops: a page opens only by a press on its tab or a page key, its values asked.
     p.act(Action::End(1));
     p.act(Action::Move { pane: None, by: 1 });
-    assert_eq!(names(ui), ["Gain"]);
-    assert_eq!(cursor(ui).as_deref(), Some("Gain"));
-    assert!(sent(&mut p.out).iter().any(|o| o.0 == "params.get"));
-    p.act(Action::Move { pane: None, by: -1 });
-    assert_eq!(cursor(ui).as_deref(), Some("Release"), "back: the page before, at its last tile");
+    assert_eq!(cursor(ui).as_deref(), Some("Release"));
+    assert_ne!(names(ui), ["Gain"]);
     p.act(Action::Page(1));
     assert_eq!(names(ui), ["Gain"]);
+    assert!(sent(&mut p.out).iter().any(|o| o.0 == "params.get"));
     // A refusal is said.
     assert!(p.reply(Request::Set, Err(Error { code: -32602, message: "no such parameter".into() })));
     assert_eq!(ui.global::<crate::GridState>().get_message().as_str(), "The engine refused: no such parameter");
@@ -495,7 +493,7 @@ fn tile_density_follows_the_references_rules_and_has_more_room() {
             if name == "FANTOM-07" {
                 let numbers = (vw.round() as i32, vh.round() as i32, columns, in_view, reference_columns, reference_in_view);
                 let expected = match what {
-                    "knobs, two pages" => (628, 357, 2, 4, 2, 2),
+                    "knobs, two pages" => (814, 309, 3, 6, 2, 2),
                     "knobs, one page" => (814, 357, 3, 6, 3, 3),
                     _ => (814, 357, 3, 12, 3, 3),
                 };

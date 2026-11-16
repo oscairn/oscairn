@@ -808,14 +808,29 @@ fn shot(s: &Screen, name: &str) {
 }
 
 fn png_in(folder: &str, s: &Screen, name: &str) {
+    png_of(folder, &s.pixels, s.w, s.h, name);
+}
+
+/// A part of the picture, each of its pixels `zoom` across, in target/theme-shots/NAME.png: for looking closely.
+fn png_crop(s: &Screen, name: &str, r: Rect, zoom: usize) {
+    let (x0, y0, w, h) = (r.0 as usize, r.1 as usize, r.2 as usize, r.3 as usize);
+    let mut out = Vec::with_capacity(w * h * zoom * zoom);
+    for y in 0..h * zoom {
+        for x in 0..w * zoom {
+            out.push(s.pixels[(y0 + y / zoom) * s.w + x0 + x / zoom]);
+        }
+    }
+    png_of("target/theme-shots", &out, w * zoom, h * zoom, name);
+}
+
+fn png_of(folder: &str, pixels: &[Rgb8Pixel], w: usize, h: usize, name: &str) {
     use std::io::Write;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(folder);
     std::fs::create_dir_all(&dir).unwrap();
     let mut raw = Vec::new();
-    let (w, h) = (s.w, s.h);
     for y in 0..h {
         raw.push(0u8);
-        raw.extend(s.pixels[y * w..(y + 1) * w].iter().flat_map(|p| [p.r, p.g, p.b]));
+        raw.extend(pixels[y * w..(y + 1) * w].iter().flat_map(|p| [p.r, p.g, p.b]));
     }
     let mut z = vec![0x78, 0x01];
     let mut chunks = raw.chunks(65535).peekable();
@@ -1077,6 +1092,8 @@ mod fm_touch;
 mod fm_dots;
 mod fm_lines;
 mod grid;
+mod tabs;
+mod tabs_model;
 mod search;
 mod shots;
 mod views;

@@ -20,6 +20,7 @@ mod mixer;
 mod nav;
 mod palette;
 mod params;
+mod tabs;
 mod fm;
 mod piano;
 mod part;

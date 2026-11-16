@@ -21,6 +21,7 @@
 
 use crate::grid::{self, by_priority, Control, Laid, Param, FLAG_HIDDEN};
 use crate::nav::Action;
+use crate::tabs::{self, Entry, Model};
 use crate::views;
 use crate::{GridBox, GridCard, GridHeading, GridLabel, GridPanel, GridPoint, GridShape, GridState, GridTile, Shell};
 use serde_json::{json, Value};
@@ -54,6 +55,27 @@ pub enum Outcome {
     Prompt(String, String),
 }
 
+/// A row of tabs the cursor can be on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Strip {
+    Pages,
+    Tabs,
+}
+
+/// A stop of the cursor above the tiles: the search, or a row of tabs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Stop {
+    Search,
+    Row(Strip),
+}
+
+/// Where the cursor is: on a stop (and the entry in it), or on a tile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum At {
+    Bar(Stop, usize),
+    Tile(usize),
+}
+
 /// What the dial and a press do now.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Edit {
@@ -65,7 +87,7 @@ enum Edit {
 }
 
 /// The path below a module path's first n levels.
-fn after(module: &str, n: usize) -> String {
+pub fn after(module: &str, n: usize) -> String {
     module.split('/').skip(n).collect::<Vec<_>>().join("/")
 }
 
@@ -74,10 +96,15 @@ pub struct Screen {
     node: u64,
     name: String,
     params: Vec<Param>,
-    pages: Vec<(String, Vec<usize>)>,
-    /// What the pages step through: a page, or a tab of one.
-    entries: Vec<(usize, Option<String>)>,
+    /// The pages and their tabs, from the module paths or the plugin's declaration (src/tabs.rs).
+    model: Model,
+    /// What the page keys step through: a page, or a tab of one.
+    entries: Vec<Entry>,
     entry: usize,
+    /// The cursor on the pages' or the tabs' row (one cursor at a time with the tiles' and the search's).
+    strip: Option<(Strip, usize)>,
+    /// The pages are a column at the left (the window said so), not a strip over the tabs.
+    column: bool,
     values: HashMap<u32, f64>,
     /// The plugin's text for a parameter's value, by value's bits.
     texts: HashMap<(u32, u64), String>,
@@ -125,9 +152,11 @@ impl Screen {
             node: 0,
             name: String::new(),
             params: vec![],
-            pages: vec![],
+            model: Model::default(),
             entries: vec![],
             entry: 0,
+            strip: None,
+            column: false,
             values: HashMap::new(),
             texts: HashMap::new(),
             laid: Laid::default(),
@@ -153,8 +182,8 @@ impl Screen {
     /// The headings and parameters of the page (or tab) shown; while searching, the parameters of every
     /// page whose name or module has the text, each module's under its whole path.
     fn groups(&self) -> Vec<(String, Vec<usize>)> {
-        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
         if !self.search.is_empty() {
+            let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
             let query = self.search.to_lowercase();
             for (i, p) in self.params.iter().enumerate() {
                 if p.name.to_lowercase().contains(&query) || p.module.to_lowercase().contains(&query) {
@@ -167,20 +196,10 @@ impl Screen {
             }
             return groups;
         }
-        let Some((page, tab)) = self.entries.get(self.entry) else { return vec![] };
-        for &i in &self.pages[*page].1 {
-            let m = &self.params[i].module;
-            let heading = match tab {
-                None => after(m, 1),
-                Some(t) if level(m, 1) == t => after(m, 2),
-                Some(_) => continue,
-            };
-            match groups.iter_mut().find(|g| g.0 == heading) {
-                Some(g) => g.1.push(i),
-                None => groups.push((heading, vec![i])),
-            }
+        match self.entries.get(self.entry) {
+            Some(e) => self.model.groups(e.page, e.tab),
+            None => vec![],
         }
-        groups
     }
 
     /// The value texts of a stepped parameter's values: the plugin's where known, else the numbers;
@@ -261,7 +280,7 @@ impl Screen {
             first.extend(shown);
             shown = first;
         }
-        let name = self.entries.get(self.entry).map(|(p, _)| self.pages[*p].0.clone()).unwrap_or_default();
+        let name = self.entries.get(self.entry).map(|e| self.model.pages[e.page].name.clone()).unwrap_or_default();
         let params: Vec<Value> = shown.iter().take(64).map(|&i| json!({"kind": "parameter", "node": self.node, "param": self.params[i].id})).collect();
         let screen = json!({"name": name, "params": params});
         if screen != self.published {
@@ -294,20 +313,8 @@ impl Screen {
     /// params.list's answer: the pages, and the values of the first.
     fn listed(&mut self, list: &Value) {
         self.params = editor_parameters(grid::parse(list));
-        self.pages = editor_pages(&self.params);
-        self.entries = self
-            .pages
-            .iter()
-            .enumerate()
-            .flat_map(|(i, (_, members))| {
-                let tabs = tabs_for(&self.params, members);
-                if tabs.is_empty() {
-                    vec![(i, None)]
-                } else {
-                    tabs.into_iter().map(|t| (i, Some(t))).collect()
-                }
-            })
-            .collect();
+        self.model = Model::build(&self.params, tabs::declared_in(list).as_ref());
+        self.entries = self.model.entries();
         self.entry = 0;
         self.relayout();
         self.ask_values();
@@ -414,8 +421,13 @@ impl Screen {
             };
         }
         let labels: Vec<String> = if t.control == Control::Buttons { self.labels(p).0 } else { vec![] };
-        let icons: Vec<i32> = labels.iter().map(|l| grid::wave_icon(l)).collect();
-        let icon = if t.control == Control::List { grid::wave_icon(&value) } else { 0 };
+        let icons: Vec<i32> = grid::icons_for(p, &labels);
+        let icon = if t.control == Control::List {
+            let all = grid::icons_for(p, &self.labels(p).0);
+            all.get((v - p.min).round().max(0.) as usize).copied().unwrap_or_else(|| grid::icon(None, &value))
+        } else {
+            0
+        };
         let choices: Vec<slint::SharedString> = labels.into_iter().map(Into::into).collect();
         let (editing, part) = match self.edit {
             Edit::Value(e, part) if e == k => (true, part as i32),
@@ -520,12 +532,15 @@ impl Screen {
         }
         self.follow(g.get_view_height());
         g.set_name(self.name.as_str().into());
-        let page = self.entries.get(self.entry).map_or(0, |e| e.0);
+        self.column = g.get_column();
+        let page = self.entries.get(self.entry).map_or(0, |e| e.page);
         let searching = !self.search.is_empty();
-        let pages: Vec<slint::SharedString> = self.pages.iter().map(|p| p.0.as_str().into()).collect();
+        let pages: Vec<slint::SharedString> = self.model.pages.iter().map(|p| p.name.as_str().into()).collect();
         // A search has no tabs, and no page is the one shown.
-        let tabs: Vec<slint::SharedString> = if searching { vec![] } else { self.entries.iter().filter(|e| e.0 == page).filter_map(|e| e.1.as_deref().map(Into::into)).collect() };
-        let tab = self.entries.iter().filter(|e| e.0 == page).position(|e| *e == self.entries[self.entry]).unwrap_or(0);
+        let tabs: Vec<slint::SharedString> = if searching { vec![] } else { self.model.pages.get(page).map_or(vec![], |p| p.tabs.iter().map(|t| t.as_str().into()).collect()) };
+        let tab = self.entries.get(self.entry).and_then(|e| e.tab).unwrap_or(0);
+        g.set_page_cursor(self.strip.filter(|s| s.0 == Strip::Pages).map_or(-1, |s| s.1 as i32));
+        g.set_tab_cursor(self.strip.filter(|s| s.0 == Strip::Tabs).map_or(-1, |s| s.1 as i32));
         g.set_pages(ModelRc::new(VecModel::from(pages)));
         g.set_page(if searching { -1 } else { page as i32 });
         g.set_search_shown(self.search_shown());
@@ -554,7 +569,7 @@ impl Screen {
                     self.list_first = self.list_cursor + 1 - per;
                 }
                 let labels = self.labels(p).0;
-                g.set_list_icons(ModelRc::new(VecModel::from(labels.iter().map(|l| grid::wave_icon(l)).collect::<Vec<_>>())));
+                g.set_list_icons(ModelRc::new(VecModel::from(grid::icons_for(p, &labels))));
                 let list: Vec<slint::SharedString> = labels.into_iter().map(Into::into).collect();
                 g.set_list(ModelRc::new(VecModel::from(list)));
                 g.set_list_title(p.name.as_str().into());
@@ -636,9 +651,10 @@ impl Screen {
         }
     }
 
+    /// The page keys' step: to the entry `by` away, a page or a tab, at once (a key pressed for it, not a
+    /// cursor moved). A page chosen while searching ends the search, as the reference's showPage does.
     fn turn_page(&mut self, by: i32) -> bool {
         let to = (self.entry as i32 + by).clamp(0, self.entries.len() as i32 - 1) as usize;
-        // A page chosen while searching ends the search, as the reference's showPage does.
         let searching = !std::mem::take(&mut self.search).is_empty();
         if self.entries.is_empty() || (to == self.entry && !searching) {
             return false;
@@ -649,64 +665,229 @@ impl Screen {
         self.scroll = 0.;
         self.cursor = None;
         self.search_cursor = false;
+        self.strip = None;
         self.relayout();
         self.ask_values();
         true
     }
 
-    /// The cursor moved by `by` in reading order; past either end the page turns.
-    fn step(&mut self, by: i32) {
-        let n = self.laid.tiles.len() as i32;
-        let Some(c) = self.cursor else {
-            if n > 0 {
-                self.cursor = Some(if by > 0 { 0 } else { n as usize - 1 });
-            }
-            return;
-        };
-        let to = c as i32 + by;
-        if to >= n {
-            if self.turn_page(1) {
-                self.cursor = (!self.laid.tiles.is_empty()).then_some(0);
-            }
-        } else if to < 0 {
-            // Before the first tile: the search field, where there is one; before that, the page before.
-            if self.search_shown() {
-                self.cursor = None;
-                self.search_cursor = true;
-            } else if self.turn_page(-1) {
-                self.cursor = self.laid.tiles.len().checked_sub(1);
-            }
-        } else {
-            self.cursor = Some(to as usize);
+    /// The rows above the tiles, top to bottom, as they are drawn: the search, the pages, the tabs.
+    fn bars(&self) -> Vec<Stop> {
+        let mut out = Vec::new();
+        if self.search_shown() {
+            out.push(Stop::Search);
+        }
+        if self.model.pages.len() > 1 {
+            out.push(Stop::Row(Strip::Pages));
+        }
+        if self.tab_names().len() > 1 {
+            out.push(Stop::Row(Strip::Tabs));
+        }
+        out
+    }
+
+    fn tab_names(&self) -> &[String] {
+        match (self.entries.get(self.entry), self.search.is_empty()) {
+            (Some(e), true) => &self.model.pages[e.page].tabs,
+            _ => &[],
         }
     }
 
-    /// The cursor across (dx) or up and down (dy); past the last row down the page turns, past the first up.
+    /// The page shown (None while searching: no page is the one) and the tab of it.
+    fn shown_page(&self) -> Option<usize> {
+        self.entries.get(self.entry).map(|e| e.page).filter(|_| self.search.is_empty())
+    }
+
+    fn shown_tab(&self) -> usize {
+        self.entries.get(self.entry).and_then(|e| e.tab).unwrap_or(0)
+    }
+
+    /// Where the cursor is, among the stops above the tiles and the tiles.
+    fn at(&self) -> Option<At> {
+        if self.search_cursor {
+            Some(At::Bar(Stop::Search, 0))
+        } else if let Some((row, i)) = self.strip {
+            Some(At::Bar(Stop::Row(row), i))
+        } else {
+            self.cursor.map(At::Tile)
+        }
+    }
+
+    /// Puts the cursor on a stop (one cursor at a time).
+    fn go(&mut self, to: At) {
+        self.search_cursor = false;
+        self.strip = None;
+        self.cursor = None;
+        match to {
+            At::Bar(Stop::Search, _) => self.search_cursor = true,
+            At::Bar(Stop::Row(row), i) => self.strip = Some((row, i)),
+            At::Tile(t) => self.cursor = Some(t),
+        }
+    }
+
+    /// The row's stop on its selected entry.
+    fn selected(&self, stop: Stop) -> At {
+        match stop {
+            Stop::Search => At::Bar(stop, 0),
+            Stop::Row(Strip::Pages) => At::Bar(stop, self.shown_page().unwrap_or(0)),
+            Stop::Row(Strip::Tabs) => At::Bar(stop, self.shown_tab()),
+        }
+    }
+
+    /// How many entries a row has.
+    fn row_len(&self, row: Strip) -> usize {
+        match row {
+            Strip::Pages => self.model.pages.len(),
+            Strip::Tabs => self.tab_names().len(),
+        }
+    }
+
+    /// The cursor moved by `by` in reading order: the search, the pages, the tabs, then the tiles. Nothing is
+    /// chosen by it: a page or tab opens on a press, and the tiles stop at either end. Moving past a row's end
+    /// goes to the next row's selected entry.
+    fn step(&mut self, by: i32) {
+        let n = self.laid.tiles.len();
+        let Some(mut at) = self.at() else {
+            if n > 0 {
+                self.cursor = Some(if by > 0 { 0 } else { n - 1 });
+            }
+            return;
+        };
+        let bars = self.bars();
+        for _ in 0..by.abs() {
+            let forward = by > 0;
+            at = match at {
+                At::Tile(t) => {
+                    if forward {
+                        At::Tile((t + 1).min(n.saturating_sub(1)))
+                    } else if t > 0 {
+                        At::Tile(t - 1)
+                    } else {
+                        match bars.last() {
+                            Some(&stop) => self.selected(stop),
+                            None => At::Tile(0),
+                        }
+                    }
+                }
+                At::Bar(stop, i) => {
+                    let len = match stop {
+                        Stop::Search => 1,
+                        Stop::Row(row) => self.row_len(row),
+                    };
+                    let place = bars.iter().position(|s| *s == stop).unwrap_or(0);
+                    if forward && i + 1 < len {
+                        At::Bar(stop, i + 1)
+                    } else if !forward && i > 0 {
+                        At::Bar(stop, i - 1)
+                    } else if forward {
+                        match bars.get(place + 1) {
+                            Some(&next) => self.selected(next),
+                            None if n > 0 => At::Tile(0),
+                            None => at,
+                        }
+                    } else if place > 0 {
+                        self.selected(bars[place - 1])
+                    } else {
+                        at
+                    }
+                }
+            };
+        }
+        self.go(at);
+    }
+
+    /// The cursor across (dx) or up and down (dy): over the tiles by rows and columns, from the first row up
+    /// to the tabs, the pages and the search, along a row of tabs, and in a column of pages up and down.
     fn arrow(&mut self, dx: i32, dy: i32) {
-        let Some(c) = self.cursor else {
+        let Some(mut at) = self.at() else {
             self.cursor = (!self.laid.tiles.is_empty()).then_some(0);
             return;
         };
-        let mut c = c;
-        for _ in 0..(dx.abs() + dy.abs()) {
-            match grid::arrow(&self.laid.tiles, c, dx.signum(), dy.signum()) {
-                Some(to) => c = to,
-                None if dy < 0 && self.search_shown() => {
-                    // Up from the first row: the search field.
-                    self.cursor = None;
-                    self.search_cursor = true;
-                    return;
-                }
-                None if dy != 0 => {
-                    if self.turn_page(dy.signum()) {
-                        self.cursor = (!self.laid.tiles.is_empty()).then_some(if dy > 0 { 0 } else { self.laid.tiles.len() - 1 });
+        let bars = self.bars();
+        let pages = Stop::Row(Strip::Pages);
+        let tabs = Stop::Row(Strip::Tabs);
+        let column = self.column;
+        // The row above `from` (above the tiles when None) that is over the content: the pages' column is
+        // beside the tabs and the tiles, not over them.
+        let above = |from: Option<Stop>| -> Option<Stop> {
+            let place = from.and_then(|f| bars.iter().position(|s| *s == f)).unwrap_or(bars.len());
+            bars[..place].iter().rev().copied().find(|s| !(column && *s == pages))
+        };
+        let first_tile = |me: At| if self.laid.tiles.is_empty() { me } else { At::Tile(0) };
+        let (mut dx, mut dy) = (dx, dy);
+        while dx != 0 || dy != 0 {
+            let (sx, sy) = if dx != 0 { (dx.signum(), 0) } else { (0, dy.signum()) };
+            dx -= sx;
+            dy -= sy;
+            at = match at {
+                At::Tile(t) => match grid::arrow(&self.laid.tiles, t, sx, sy) {
+                    Some(to) => At::Tile(to),
+                    None if sy < 0 => above(None).map_or(at, |stop| self.selected(stop)),
+                    None if sx < 0 && column && bars.contains(&pages) => self.selected(pages),
+                    None => at,
+                },
+                At::Bar(Stop::Search, _) => {
+                    if sy > 0 {
+                        bars.get(1).map_or_else(|| first_tile(at), |&next| self.selected(next))
+                    } else {
+                        at
                     }
-                    return;
                 }
-                None => break,
-            }
+                At::Bar(stop @ Stop::Row(Strip::Pages), i) if column => {
+                    let len = self.row_len(Strip::Pages);
+                    if sy != 0 {
+                        let to = i as i32 + sy;
+                        if to < 0 {
+                            if bars.contains(&Stop::Search) {
+                                At::Bar(Stop::Search, 0)
+                            } else {
+                                at
+                            }
+                        } else {
+                            At::Bar(stop, (to as usize).min(len - 1))
+                        }
+                    } else if sx > 0 {
+                        if bars.contains(&tabs) {
+                            self.selected(tabs)
+                        } else {
+                            first_tile(at)
+                        }
+                    } else {
+                        at
+                    }
+                }
+                At::Bar(stop @ Stop::Row(row), i) => {
+                    let len = self.row_len(row);
+                    if sx != 0 {
+                        let to = i as i32 + sx;
+                        if to < 0 && row == Strip::Tabs && column && bars.contains(&pages) {
+                            self.selected(pages)
+                        } else {
+                            At::Bar(stop, to.clamp(0, len as i32 - 1) as usize)
+                        }
+                    } else if sy < 0 {
+                        above(Some(stop)).map_or(at, |up| self.selected(up))
+                    } else {
+                        // Down: the next row (in the column, the pages' own column is skipped), then the tiles.
+                        let place = bars.iter().position(|s| *s == stop).unwrap_or(0);
+                        match bars.get(place + 1).filter(|s| !(column && **s == pages)) {
+                            Some(&next) => self.selected(next),
+                            None => first_tile(at),
+                        }
+                    }
+                }
+            };
         }
-        self.cursor = Some(c);
+        self.go(at);
+    }
+
+    /// A press on the row's entry the cursor is on: the page or tab opens (the cursor stays on it).
+    fn open_entry(&mut self, row: Strip, i: usize) {
+        match row {
+            Strip::Pages => self.go_page(i),
+            Strip::Tabs => self.go_tab(i),
+        }
+        self.go(At::Bar(Stop::Row(row), i));
     }
 
     pub fn act(&mut self, action: Action) -> Outcome {
@@ -741,16 +922,13 @@ impl Screen {
                 self.end_gestures();
                 self.edit = Edit::None;
             }
-            // The cursor on the search field: on, or down, goes to the first tile; back, up or before it the page before.
-            (Edit::None, Action::Move { by, .. } | Action::Arrow { dy: by, dx: 0 }) if self.search_cursor => {
-                if by > 0 {
-                    self.search_cursor = false;
-                    self.cursor = (!self.laid.tiles.is_empty()).then_some(0);
-                } else if by < 0 && self.turn_page(-1) {
-                    self.cursor = self.laid.tiles.len().checked_sub(1);
+            // A press on the search opens its keyboard; on a page or a tab it opens that one, and the cursor stays on it.
+            (Edit::None, Action::Confirm(_)) if self.search_cursor => return Outcome::Prompt("Search parameters".into(), self.search.clone()),
+            (Edit::None, Action::Confirm(_)) if self.strip.is_some() => {
+                if let Some((row, i)) = self.strip {
+                    self.open_entry(row, i);
                 }
             }
-            (Edit::None, Action::Confirm(_)) if self.search_cursor => return Outcome::Prompt("Search parameters".into(), self.search.clone()),
             (Edit::None, Action::Move { pane: Some(0), by }) => self.arrow(by, 0),
             (Edit::None, Action::Move { pane: Some(1), by }) => self.arrow(0, by),
             (Edit::None, Action::Move { by, .. }) => self.step(by),
@@ -758,17 +936,22 @@ impl Screen {
             (_, Action::Page(by)) => {
                 self.turn_page(by);
             }
-            (Edit::None, Action::End(by)) => self.cursor = self.laid.tiles.len().checked_sub(1).map(|last| if by < 0 { 0 } else { last }),
+            (Edit::None, Action::End(by)) => {
+                let last = self.laid.tiles.len().checked_sub(1);
+                self.go(At::Tile(0));
+                self.cursor = last.map(|last| if by < 0 { 0 } else { last });
+            }
             (Edit::None, Action::Confirm(_)) => match self.cursor {
                 Some(c) => self.press(c),
                 None => self.cursor = (!self.laid.tiles.is_empty()).then_some(0),
             },
-            // Cancel backs out a layer: the cursor on the search field, the cursor, the search (the
+            // Cancel backs out a layer: the cursor on the search, a row of tabs or a tile, the search (the
             // reference's Escape), then the screen.
             (Edit::None, Action::Cancel(_)) => {
-                if self.search_cursor {
-                    self.search_cursor = false;
-                } else if self.cursor.take().is_none() {
+                if self.at().is_some() {
+                    self.go(At::Tile(0));
+                    self.cursor = None;
+                } else {
                     if self.search.is_empty() {
                         return Outcome::Back;
                     }
@@ -813,6 +996,7 @@ impl Screen {
         self.edit = Edit::None;
         self.cursor = None;
         self.search_cursor = true;
+        self.strip = None;
         self.show();
         Outcome::Prompt("Search parameters".into(), self.search.clone())
     }
@@ -823,6 +1007,7 @@ impl Screen {
         self.end_gestures();
         self.edit = Edit::None;
         self.search_cursor = false;
+        self.strip = None;
         self.cursor = Some(tile as usize);
         self.begin(p.id);
         self.show();
@@ -852,6 +1037,7 @@ impl Screen {
         self.edit = Edit::None;
         self.cursor = None;
         self.search_cursor = false;
+        self.strip = None;
         if let Some(n) = operator {
             self.operator = n;
             self.publish();
@@ -911,6 +1097,7 @@ impl Screen {
         self.edit = Edit::None;
         self.cursor = Some(k);
         self.search_cursor = false;
+        self.strip = None;
         let p = self.params[t.param].clone();
         if t.control == Control::Buttons && stop >= 0 {
             self.set_once(&p, p.min + stop as f64);
@@ -930,19 +1117,30 @@ impl Screen {
         self.show();
     }
 
+    /// A tap on a page.
     pub fn show_page(&mut self, page: i32) {
-        if let Some(e) = self.entries.iter().position(|e| e.0 == page as usize) {
-            self.turn_page(e as i32 - self.entry as i32);
-        }
+        self.go_page(page as usize);
         self.show();
     }
 
+    /// A tap on a tab of the page shown.
     pub fn show_tab(&mut self, tab: i32) {
-        let page = self.entries.get(self.entry).map_or(0, |e| e.0);
-        if let Some(e) = self.entries.iter().enumerate().filter(|e| e.1 .0 == page).nth(tab as usize).map(|e| e.0) {
+        self.go_tab(tab as usize);
+        self.show();
+    }
+
+    /// The first entry of a page (or of a search's end: the page chosen ends the search).
+    fn go_page(&mut self, page: usize) {
+        if let Some(e) = self.entries.iter().position(|e| e.page == page) {
             self.turn_page(e as i32 - self.entry as i32);
         }
-        self.show();
+    }
+
+    fn go_tab(&mut self, tab: usize) {
+        let page = self.entries.get(self.entry).map_or(0, |e| e.page);
+        if let Some(e) = self.entries.iter().position(|e| e.page == page && e.tab == Some(tab)) {
+            self.turn_page(e as i32 - self.entry as i32);
+        }
     }
 
     pub fn scrolled(&mut self, by: f32) {
@@ -969,7 +1167,7 @@ impl Screen {
 }
 
 /// The nth level of a module path, or "".
-fn level(module: &str, n: usize) -> &str {
+pub fn level(module: &str, n: usize) -> &str {
     module.split('/').nth(n).filter(|_| !module.is_empty()).unwrap_or("")
 }
 
@@ -1065,7 +1263,7 @@ pub fn editor_pages(params: &[Param]) -> Vec<(String, Vec<usize>)> {
 }
 
 /// The tabs of a page of more than 24 parameters: its second-level modules, when there are two or more.
-fn tabs_for(params: &[Param], page: &[usize]) -> Vec<String> {
+pub fn tabs_for(params: &[Param], page: &[usize]) -> Vec<String> {
     if page.len() <= TABBED_ABOVE {
         return vec![];
     }

@@ -584,8 +584,20 @@ impl App {
                 "params.changed" => {
                     self.on_params(|p| p.changed(&params));
                     self.on_play(|p| p.params_changed(&params)); // the knob row's values
+                    // A value set by a client is an edit the engine can undo, and no graph.changed
+                    // follows it: what undo names is asked here.
+                    let set = params["changes"].as_array().is_some_and(|c| c.iter().any(|c| c["source"] == "control" && c["kind"] == "value"));
+                    if set && has_actions(self.screen) {
+                        self.ask(Request::History, "edit.history");
+                    }
                 }
                 "controls.changed" => {
+                    // A live level, pan or master (parts.level, parts.pan, master.set) is an edit
+                    // with no graph.changed: what undo names is asked here.
+                    let moved = ["parts", "master"].iter().any(|k| params[k].as_array().is_some_and(|a| !a.is_empty()) || params[k].is_object());
+                    if moved && has_actions(self.screen) {
+                        self.ask(Request::History, "edit.history");
+                    }
                     self.on_play(|p| p.controls(&params));
                     self.on_part(|p| p.controls(&params));
                     self.on_parts(|p| p.controls(&params));
@@ -647,7 +659,14 @@ impl App {
     fn reply(&mut self, request: Request, result: Result<Value, Error>) {
         let request = match request {
             Request::Setlist(r) => return self.on_setlist(|s| s.reply(r, result)),
-            Request::Play(r) => return self.on_play(|p| p.reply(r, result)),
+            Request::Play(r) => {
+                let mut again = false;
+                self.on_play(|p| again = p.reply(r, result));
+                if again {
+                    self.ask_performance();
+                }
+                return;
+            }
             Request::Part(r) => {
                 if self.on_part(|p| p.reply(r, result)) {
                     self.ask_performance();

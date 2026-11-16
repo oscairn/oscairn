@@ -33,8 +33,11 @@ const SCENES: usize = 8;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
     Meters,
-    /// Any edit (a scene, a level, a mute, solo): its refusal is said.
+    /// Any edit (a level, a mute, solo): its refusal is said.
     Edit,
+    /// A scene selected or added: its refusal is said, and the graph is read again once it is
+    /// accepted, as neither commits (no `graph.changed` follows): the top bar's scene, the tiles.
+    Scenes,
     /// Something of the knob row's (row.rs).
     Knobs(row::Request),
 }
@@ -433,10 +436,12 @@ impl Screen {
         }
     }
 
-    pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) {
+    /// What the engine answered; true when the graph should be read again.
+    pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) -> bool {
         match (request, result) {
             (Request::Meters, Ok(r)) => self.meters(&r),
-            (Request::Edit, Err(e)) if e.code != 0 => {
+            (Request::Scenes, Ok(_)) => return true,
+            (Request::Edit | Request::Scenes, Err(e)) if e.code != 0 => {
                 self.say(format!("The engine refused: {}", e.message));
                 self.show();
             }
@@ -451,6 +456,7 @@ impl Screen {
             }
             _ => {}
         }
+        false
     }
 
     fn say(&self, text: String) {
@@ -572,10 +578,10 @@ impl Screen {
         if let Some((id, _)) = self.scenes.get(i).filter(|_| i < SCENES) {
             self.scene = *id; // shown now; graph.get confirms
             let id = *id;
-            self.edit("scenes.select", json!({"scene": id}));
+            self.out.push((Request::Scenes, "scenes.select", json!({"scene": id})));
         } else if i == self.scenes.len() && i < SCENES {
             let n = self.scenes.len() + 1;
-            self.edit("scenes.add", json!({"name": format!("Scene {n}")}));
+            self.out.push((Request::Scenes, "scenes.add", json!({"name": format!("Scene {n}")})));
         }
     }
 

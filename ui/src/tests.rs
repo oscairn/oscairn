@@ -955,6 +955,16 @@ fn play_by_panes_touch_and_meters() {
     assert_eq!((select["method"].as_str(), select["params"]["scene"].as_u64()), (Some("scenes.select"), Some(1)));
     assert_eq!(scenes(&f).iter().position(|s| s.on), Some(0), "shown at once");
     f.reply(&select, json!({"result": {"accepted": true}}));
+    // Accepted, the graph is read again: scenes.select commits nothing, so the real engine sends no
+    // graph.changed, and the top bar's scene would stay the one before.
+    let mut selected = play_graph();
+    selected["scene"] = json!(1);
+    for (method, result) in [("performance.info", json!({"id": "p1", "name": "Grand", "unsaved": false})), ("graph.get", selected)] {
+        let r = next_edit(&mut f);
+        assert_eq!(r["method"].as_str(), Some(method));
+        f.reply(&r, json!({ "result": result }));
+    }
+    assert_eq!(f.screen.ui.global::<Bar>().get_scene().as_str(), "Verse");
     // E6 (pane 1) twice: the cursor on the first part, then the second; M on it mutes.
     nav(&mut f, "move:1", 1);
     nav(&mut f, "move:1", 1);
@@ -999,8 +1009,15 @@ fn play_by_panes_touch_and_meters() {
     f.screen.frame();
     std::thread::sleep(std::time::Duration::from_millis(150));
     f.screen.frame();
+    let mut history = 0;
     let r = loop {
         let r = f.engine.request();
+        if r["method"] == "edit.history" {
+            // A level moved live is an undoable edit with no graph.changed: what undo names is asked.
+            history += 1;
+            f.reply(&r, json!({"result": {"undo": "Keys level", "redo": ""}}));
+            continue;
+        }
         if r["method"] != "graph.commit" {
             break r;
         }
@@ -1008,6 +1025,8 @@ fn play_by_panes_touch_and_meters() {
         f.reply(&r, json!({"result": {"revision": 1}}));
     };
     assert_eq!(r["method"], "parts.meters");
+    assert!(history >= 1, "controls.changed with a part's level asks edit.history");
+    f.screen.frame(); // the bar's Undo, named now
     // The scene select sent no commit (the engine does it); each mute, the solo, the level and the master did.
     assert_eq!(COMMITS.load(std::sync::atomic::Ordering::SeqCst), 5);
     f.reply(&r, json!({"result": {"meters": [{"part": 10, "peak": 0.5, "channels": [0.5, 1.0], "stolen": 0, "hardChokes": 0}]}}));

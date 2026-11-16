@@ -155,7 +155,7 @@ namespace oscairn
                 const auto& x = it->second;
                 if(!m) { m = x; continue; }
                 const auto contexts = x.contexts && (!m->contexts || x.contexts < m->contexts) ? x.contexts : m->contexts; // the fewest seen: never more sharing than was
-                m = Measurement{std::max(m->cpu, x.cpu), std::max(m->rest, x.rest), std::max(m->voice, x.voice), std::max(m->voices, x.voices), std::max(m->memory, x.memory), std::max(m->samples, x.samples), std::max(m->declared, x.declared), contexts};
+                m = Measurement{std::max(m->cpu, x.cpu), std::max(m->rest, x.rest), std::max(m->voice, x.voice), std::max(m->voices, x.voices), std::max(m->memory, x.memory), std::max(m->samples, x.samples), std::max(m->declared, x.declared), contexts, std::max(m->perContext, x.perContext)};
             }
         return m;
     }
@@ -243,17 +243,18 @@ namespace oscairn
                     const auto* v = detail::member(e->value, key);
                     return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : 0.0;
                 };
-                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples"), declared = number("declared"), contexts = number("contexts");
+                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples"), declared = number("declared"), contexts = number("contexts"), perContext = number("perContext");
                 if(!std::isfinite(memory) || memory < 0 || memory > double(1ull << 40)) continue;
                 const uint32_t shares = std::isfinite(contexts) && contexts >= 0 && contexts <= 32 ? uint32_t(contexts) : 0;
                 const auto said = std::isfinite(declared) && declared >= 0 && declared <= double(1ull << 40) ? uint64_t(declared) : 0;
+                const auto added = keepMemory && std::isfinite(perContext) && perContext >= 0 && perContext <= double(1ull << 40) ? uint64_t(perContext) : 0;
                 // An impossible cost (a share above the audio time itself, negative, not a number) is
                 // dropped and measured again; the memory stands (of this version).
                 const bool possible = !memoryOnly && std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
                 const std::string key(e->name->string, e->name->string_size);
                 const uint64_t kept = keepMemory ? uint64_t(memory) : 0;
-                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), kept, uint32_t(std::clamp(samples, 0.0, 1e9)), said, shares} : Measurement{0, 0, 0, 0, kept, 0, said, shares};
+                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), kept, uint32_t(std::clamp(samples, 0.0, 1e9)), said, shares, added} : Measurement{0, 0, 0, 0, kept, 0, said, shares, added};
                 if(possible) setPluginCost(key.substr(0, key.find('@')), cpu); // RFC 0045, before its instances play: as last measured here
             }
         }
@@ -267,7 +268,7 @@ namespace oscairn
         bool first = true;
         for(const auto& [key, m] : measured_)
         {
-            char numbers[270]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u,\"declared\":%llu,\"contexts\":%u}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples, static_cast<unsigned long long>(m.declared), m.contexts);
+            char numbers[320]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u,\"declared\":%llu,\"contexts\":%u,\"perContext\":%llu}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples, static_cast<unsigned long long>(m.declared), m.contexts, static_cast<unsigned long long>(m.perContext));
             text += std::string(first ? "" : ",") + detail::quote(key) + ":" + numbers; first = false;
         }
         text += "}}\n";
@@ -614,6 +615,11 @@ namespace oscairn
                     const auto& e = *shared->engine();
                     const auto carries = SoundContext::room(e) + uint32_t(std::popcount(e.buses));
                     if(carries != m.contexts) { m.contexts = carries; measurementsChanged_ = true; }
+                    // An instance holding several sounds: what each past the first adds to its memory with one, the most seen (an
+                    // under-declaring plugin's further parts are priced at it: estimate). Its lead node reads the instance's memory, the others 0.
+                    if(const auto bytes = memoryNow && m.memory ? host.residentBytes() : 0; bytes > m.memory)
+                        if(const auto held = e.host->soundContexts().size(); held > 1)
+                            if(const auto each = (bytes - m.memory) / (held - 1); each > m.perContext) { m.perContext = each; measurementsChanged_ = true; }
                 }
                 catch(const std::exception&) {}
             if(memoryNow && sounds == 1)
@@ -804,7 +810,7 @@ namespace oscairn
             }
         // Which nodes share an instance when it opens (performance.cpp): saved sharing (an engine of another node's key), and the nodes of a
         // plugin that carries several parts, `contexts` of them an instance, in the order saved. An instance's first node counts the
-        // memory its measurement holds; each other node what its plugin declared, a part's sound alone (as an open Performance counts it).
+        // memory its measurement holds; each other node a part's sound alone (as an open Performance counts it): see below.
         std::map<std::string, uint32_t> engines; // nodes by their saved engine
         std::set<std::string> offMain; // nodes with an audio wire from another of their outputs than the main one
         std::map<std::string, const json_value_s*> definitions;
@@ -834,7 +840,13 @@ namespace oscairn
             bool shares = engine != key; // saved sharing an engine's
             if(!shares && SoundContext::sharesOnItsOwn() && engines[engine] == 1 && !offMain.count(key) && (!sound || sound->type == json_type_null) && seen && seen->contexts > 1)
                 shares = formed[measuredKey]++ % seen->contexts != 0;
-            if(shares && seen && seen->declared) coming.back().memory = std::min(coming.back().memory, seen->declared);
+            // A further part: what a sound context was measured to add, else the plugin's word times 2.5 (plugins under-declare: the
+            // Sampler's 324 KiB context measured 433 to 753 KiB); never above an instance of its own as measured, never below its word.
+            if(shares && seen && seen->declared)
+            {
+                const auto guess = seen->perContext ? seen->perContext : seen->declared * 5 / 2;
+                coming.back().memory = std::max(seen->declared, seen->memory ? std::min(seen->memory, guess) : guess);
+            }
         }
         return estimateOf(coming, playing, its);
     }

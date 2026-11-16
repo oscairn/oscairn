@@ -110,6 +110,14 @@ voices. Now:
   the overstatement this leaves is the rest's share, not a bucket's top).
 - **A shared instance** (sound contexts) is counted once, on its lead context, live and in a saved
   Performance (a node whose `engine` is another node's key counts nothing).
+- **A further part of a shared instance in a Performance not open** (2026-11-16) counts what a sound
+  context was measured to add: an instance holding n > 1 sounds, less its memory measured with one,
+  over n - 1, the most seen (`perContext` in `measurements.json`). Until that is measured, its
+  `oscairn.memory` total times 2.5: plugins under-declare (the Sampler declared 331,656 bytes a
+  context where one measured 443,664, and 771,344 for one kind of sound, 2.3 times), and a part
+  priced at the plugin's word alone came in up to 3.5 MB low over 8 parts. Never more than an
+  instance of its own as measured, never less than the declaration (`control-multi-sampler-load`,
+  with a fixture that under-declares).
 - **The test for "fits"** is per core. Plugins in workers render in parallel on the audio cores,
   all but one (`usableCores() - 1`, at least one: one is left to the system and the display); a
   part's chain renders one plugin after another within a block. A Performance fits when its total

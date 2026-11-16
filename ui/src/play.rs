@@ -12,8 +12,8 @@
 //!
 //! The knob row under the scenes (what the knobs under the device's screen play, its banks, and Learn) is
 //! row.rs, drawn by the grid's tiles; this screen places it, moves the cursor into and out of it and names
-//! Learn's targets. Not here, handed to the JUCE app from the screen's "Edit" entry: Edit's other pages (the
-//! scene's setup is scene.rs, from the top bar; the bar's actions are shell.rs).
+//! Learn's targets. Edit is the top bar's last action, which opens the Parts list (parts.rs); the scene's
+//! setup is scene.rs, also from the top bar (the bar's actions are shell.rs).
 
 use crate::knobs::{self, Target};
 use crate::nav::{Action, Cursor};

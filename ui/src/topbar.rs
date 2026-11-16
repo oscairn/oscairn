@@ -121,6 +121,10 @@ pub enum Do {
     Scene,
     /// Learn (Play's, on a device with knobs): a control moved on the panel plays what is touched next.
     Learn,
+    /// Play's way into the Parts list: the Edit view of the JUCE app.
+    Edit,
+    /// The Parts list's way back to Play.
+    Play,
 }
 
 /// What undo and redo would now do, by the edit's name (edit.history; empty: nothing).
@@ -138,18 +142,31 @@ impl History {
 
 /// The actions the Performance app's screens offer, as the JUCE Edit view's header names them
 /// (PartsView.cpp: "Undo <edit>", Redo, Save): each with its label and whether it can be used now.
-/// Play also has "Scene": the setup of the scene playing (the JUCE menu, here a screen), and "Learn" where the
-/// device has knobs (`learn`: whether it is on now; none: the device has none).
-pub fn actions(history: &History, play: bool, learn: Option<bool>) -> Vec<(Do, String, bool)> {
+/// Play also has "Scene": the setup of the scene playing (the JUCE menu, here a screen), "Learn" where the
+/// device has knobs and "Edit", which opens the Parts list; the Parts list has "Play", which goes back (the
+/// JUCE Edit / Play toggle). See `then`.
+pub fn actions(history: &History, then: Vec<(Do, String)>) -> Vec<(Do, String, bool)> {
     let named = |what: &str, name: &str| if name.is_empty() { what.to_string() } else { format!("{what} {name}") };
     let mut list = vec![(Do::Undo, named("Undo", &history.undo), !history.undo.is_empty()), (Do::Redo, named("Redo", &history.redo), !history.redo.is_empty()), (Do::Save, "Save".into(), true)];
-    if play {
-        list.push((Do::Scene, "Scene".into(), true));
-        if let Some(on) = learn {
-            list.push((Do::Learn, if on { "Learning" } else { "Learn" }.into(), true));
-        }
-    }
+    list.extend(then.into_iter().map(|(what, label)| (what, label, true)));
     list
+}
+
+/// The actions that follow Undo, Redo and Save: on Play Scene, Learn (`learn`: whether it is on now; none:
+/// the device has no knobs to learn) and, last, Edit; on the Parts list Play.
+pub fn then(play: bool, parts: bool, learn: Option<bool>) -> Vec<(Do, String)> {
+    match (play, parts) {
+        (true, _) => {
+            let mut list = vec![(Do::Scene, "Scene".to_string())];
+            if let Some(on) = learn {
+                list.push((Do::Learn, if on { "Learning" } else { "Learn" }.to_string()));
+            }
+            list.push((Do::Edit, "Edit".to_string()));
+            list
+        }
+        (_, true) => vec![(Do::Play, "Play".to_string())],
+        _ => vec![],
+    }
 }
 
 /// A take being recorded, as the JUCE record buttons (Recording.cpp, RecordButtons) show it: the

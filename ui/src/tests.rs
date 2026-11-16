@@ -883,7 +883,7 @@ static COMMITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize:
 // (pane 0) through the scenes and the right (pane 1) through the parts, a press selecting a scene
 // or a part (Part, below); touch on the scene tiles, M, S and the faders; levels moved live by
 // controls.changed; the meters asked only while Play is shown; Cancel drops the cursors, then goes
-// back; Edit hands the display to the JUCE app.
+// back; Edit opens the Parts list.
 #[test]
 fn play_by_panes_touch_and_meters() {
     let mut f = Fixture::new("play");
@@ -1009,11 +1009,11 @@ fn play_by_panes_touch_and_meters() {
     let r = next_edit(&mut f);
     assert_eq!((r["method"].as_str(), r["params"]["topics"][0].as_str()), (Some("unsubscribe"), Some("controls.changed")));
     f.reply(&r, json!({"result": {}}));
-    // Open Play again, and Edit: the display goes to the JUCE app's Performance.
+    // Open Play again, and Edit (the top bar's last action): the Parts list, in this UI, no handover.
     f.screen.ui.global::<HomeState>().invoke_tapped(0);
     assert_eq!(f.screen.ui.get_screen(), 3);
-    play.invoke_edit();
-    assert_eq!((f.screen.ui.get_screen(), shell::handover()), (2, Some("performance")));
+    f.screen.ui.global::<Bar>().invoke_action(5);
+    assert_eq!((f.screen.ui.get_screen(), shell::handover()), (9, None));
 }
 
 // Previous and Next on Play, the page keys, only while the Performance is the setlist's.
@@ -1074,6 +1074,7 @@ mod grid;
 mod search;
 mod shots;
 mod views;
+mod parts;
 mod layout;
 
 // `apply` puts every property of a theme in the window's `Theme` global: the nine colors and the

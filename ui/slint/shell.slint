@@ -8,10 +8,11 @@ import { Home, HomeState, TileData } from "home.slint";
 import { Setlist, SetlistState, SlotData, ListRow } from "setlist.slint";
 import { Play, PlayState, SceneData, StripData, KnobButton } from "play.slint";
 import { Part, PartState, SettingData, InfoLine } from "part.slint";
+import { Parts, PartsState, PartRowData, ChipData, SendData, ToolData } from "parts.slint";
 import { Grid, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint } from "grid.slint";
 import { Keyboard, KeyboardState, KeyData } from "keyboard.slint";
 import { Piano, PianoState, PianoKey, PianoBand, PianoControl } from "piano.slint";
-export { Theme, ButtonStyle, EdgeStyle, DepthStyle, SliderStyle, TabStyle, MarkStyle, SectionStyle, RowStyle, Bar, BarAction, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, KnobButton, PartState, SettingData, InfoLine, KeyboardState, KeyData, PianoState, PianoKey, PianoBand, PianoControl, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint }
+export { Theme, ButtonStyle, EdgeStyle, DepthStyle, SliderStyle, TabStyle, MarkStyle, SectionStyle, RowStyle, Bar, BarAction, HomeState, TileData, SetlistState, SlotData, ListRow, PlayState, SceneData, StripData, KnobButton, PartState, SettingData, InfoLine, PartsState, PartRowData, ChipData, SendData, ToolData, KeyboardState, KeyData, PianoState, PianoKey, PianoBand, PianoControl, GridState, GridTile, GridCard, GridHeading, GridPanel, GridPoint }
 
 export component Shell inherits Window {
     title: "Oscairn";
@@ -21,7 +22,7 @@ export component Shell inherits Window {
     default-font-family: Theme.font-family;
     // Empty while the engine answers; else what is wrong ("busy 3.2 s", "lost: ...").
     in property <string> engine;
-    // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening; 3 Play, 4 Part, 5 chain, 6 sounds, 7 a grid page, 8 a scene's setup (`opening` names a JUCE screen).
+    // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening; 3 Play, 4 Part, 5 chain, 6 sounds, 7 a grid page, 8 a scene's setup, 9 the Parts list (`opening` names a JUCE screen).
     in property <int> screen;
     in property <string> opening;
     in property <bool> hands-over; // false: this shell cannot hand the display over (a computer)
@@ -70,6 +71,12 @@ export component Shell inherits Window {
         width: parent.width;
         height: parent.height - Theme.bar-height;
         visible: (root.screen >= 4 && root.screen <= 6) || root.screen == 8;
+    }
+    Parts {
+        y: Theme.bar-height;
+        width: parent.width;
+        height: parent.height - Theme.bar-height;
+        visible: root.screen == 9;
     }
     Grid {
         y: Theme.bar-height;

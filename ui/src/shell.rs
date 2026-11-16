@@ -19,6 +19,7 @@ use crate::chain;
 use crate::keyboard;
 use crate::params;
 use crate::part;
+use crate::parts;
 use crate::piano;
 use crate::sounds;
 use crate::play;
@@ -26,7 +27,7 @@ use crate::profile::Profile;
 use crate::scene;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, BarAction, GridState, HomeState, KeyboardState, PartState, PianoState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, BarAction, GridState, HomeState, KeyboardState, PartState, PartsState, PianoState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -62,6 +63,7 @@ pub enum Request {
     Setlist(setlist::Request),
     Play(play::Request),
     Part(part::Request),
+    Parts(parts::Request),
     Chain(chain::Request),
     Sounds(sounds::Request),
     Params(params::Request),
@@ -117,6 +119,8 @@ pub enum Screen {
     Params = 7,
     /// The playing scene's setup (scene.rs), opened from Play's bar.
     Scene = 8,
+    /// The parts and buses of the Performance (parts.rs), opened from Play's Edit.
+    Parts = 9,
 }
 
 pub struct App {
@@ -143,6 +147,7 @@ pub struct App {
     setlist: setlist::Screen,
     play: play::Screen,
     part: part::Screen,
+    parts: parts::Screen,
     chain: chain::Screen,
     sounds: sounds::Screen,
     params: params::Screen,
@@ -163,6 +168,8 @@ pub struct App {
     repeat: slint::Timer,
     /// Where Play was opened from, which Cancel goes back to.
     play_from: Screen,
+    /// Where the Part screen was opened from (Play or the Parts list), which Back returns to.
+    part_from: Screen,
     /// Asks for the meters while Play is shown, and only then.
     meters: slint::Timer,
     /// The open Performance's library ID (performance.info), which the setlist's slot playing is compared with.
@@ -193,12 +200,12 @@ fn with_app(f: impl FnOnce(&mut App)) {
 
 /// The Performance app's screens, which carry the top bar's actions (undo, redo, save).
 fn has_actions(screen: Screen) -> bool {
-    matches!(screen, Screen::Play | Screen::Part | Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene)
+    matches!(screen, Screen::Play | Screen::Part | Screen::Parts | Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene)
 }
 
 /// The screens that follow levels and mutes moved live (controls.changed).
 fn live(screen: Screen) -> bool {
-    matches!(screen, Screen::Play | Screen::Part)
+    matches!(screen, Screen::Play | Screen::Part | Screen::Parts)
 }
 
 fn level(m: Meter) -> i32 {
@@ -263,7 +270,6 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     play.on_level(|i, f| with_app(|a| a.on_play(|p| p.level(i, f))));
     play.on_held(|i, down| with_app(|a| a.on_play(|p| p.hold(i, down))));
     play.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
-    play.on_edit(|| with_app(|a| a.hand_over(&home::APPS[0])));
     play.on_resized(|| with_app(|a| a.on_play(play::Screen::shown)));
     play.on_hint_keys(|| with_app(|a| a.hint_tap(0)));
     play.on_hint_dismiss(|| with_app(|a| a.hint_tap(1)));
@@ -290,6 +296,15 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     part.on_info_scroll(|by| with_app(|a| a.list_scroll(by)));
     part.on_back(|| with_app(|a| a.back()));
     part.on_resized(|| with_app(|a| a.refit()));
+    let list = ui.global::<PartsState>();
+    list.on_back(|| with_app(|a| a.go(Screen::Play)));
+    list.on_open(|i| with_app(|a| a.parts_act(|p| p.tap_open(i))));
+    list.on_mute(|i| with_app(|a| a.on_parts(|p| p.tap_mute(i))));
+    list.on_level(|i, f| with_app(|a| a.on_parts(|p| p.level(i, f))));
+    list.on_send(|i, k, f| with_app(|a| a.on_parts(|p| p.send(i, k, f))));
+    list.on_held(|i, cell, down| with_app(|a| a.on_parts(|p| p.hold(i, cell, down))));
+    list.on_tool(|i| with_app(|a| a.on_parts(|p| p.tap_tool(i))));
+    list.on_resized(|| with_app(|a| a.on_parts(parts::Screen::shown)));
     let grid = ui.global::<GridState>();
     grid.on_grab(|t, part| with_app(|a| a.on_params(|p| p.grab(t, part))));
     grid.on_drag(|t, part, n| with_app(|a| a.on_params(|p| p.drag(t, part, n))));
@@ -335,6 +350,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             setlist: setlist::Screen::new(ui, state),
             play: play::Screen::new(ui),
             part: part::Screen::new(ui),
+            parts: parts::Screen::new(ui),
             chain: chain::Screen::new(ui),
             sounds: sounds::Screen::new(ui),
             params: params::Screen::new(ui),
@@ -347,6 +363,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             text_on_screen: profile.text_on_screen,
             repeat: slint::Timer::default(),
             play_from: Screen::Home,
+            part_from: Screen::Play,
             meters: slint::Timer::default(),
             performance_id: String::new(),
             performance_name: String::new(),
@@ -502,6 +519,7 @@ impl App {
                 "controls.changed" => {
                     self.on_play(|p| p.controls(&params));
                     self.on_part(|p| p.controls(&params));
+                    self.on_parts(|p| p.controls(&params));
                 }
                 // Read always, so the totals stay current; acted on only by the screen shown, and
                 // by none while the display goes to the JUCE app (act drops them then).
@@ -527,6 +545,7 @@ impl App {
     fn status(&mut self, status: &Value) {
         self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
         self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
+        self.on_parts(|p| p.status(status)); // and the devices and failures the Parts list says
         if self.on_piano(|p| !p.status(status)) == Some(true) {
             self.close_piano(); // its input was unplugged
         }
@@ -557,6 +576,12 @@ impl App {
             Request::Play(r) => return self.on_play(|p| p.reply(r, result)),
             Request::Part(r) => {
                 if self.on_part(|p| p.reply(r, result)) {
+                    self.ask_performance();
+                }
+                return;
+            }
+            Request::Parts(r) => {
+                if self.on_parts(|p| p.reply(r, result)) {
                     self.ask_performance();
                 }
                 return;
@@ -615,6 +640,8 @@ impl App {
             Request::Info => {
                 self.performance_id = r["id"].as_str().unwrap_or_default().to_string();
                 self.performance_name = r["name"].as_str().unwrap_or_default().to_string();
+                let name = self.performance_name.clone();
+                self.on_parts(|p| p.performance(&name));
                 self.follow();
                 self.show(|s| s.performance = topbar::performance(&r))
             }
@@ -628,6 +655,7 @@ impl App {
                 self.on_piano(|p| p.graph(&r));
                 self.on_play(|p| p.graph(&r));
                 self.on_part(|p| p.graph(&r));
+                self.on_parts(|p| p.graph(&r));
                 self.on_chain(|c| c.graph(&r));
                 self.on_sounds(|c| c.graph(&r));
                 self.on_scene(|c| c.graph(&r));
@@ -648,7 +676,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
         }
     }
 
@@ -787,6 +815,7 @@ impl App {
                 }
             }
             (Screen::Part, _) => self.part_act(|p| p.act(action)),
+            (Screen::Parts, _) => self.parts_act(|p| p.act(action)),
             (Screen::Chain, _) => self.chain_act(|c| c.act(action)),
             (Screen::Sounds, _) => self.sounds_act(|c| c.act(action)),
             (Screen::Scene, _) => self.scene_act(|c| c.act(action)),
@@ -824,7 +853,7 @@ impl App {
     /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
     fn show_bar(&mut self) {
         let learn = (self.screen == Screen::Play && self.play.can_learn()).then(|| self.play.learning());
-        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, self.screen == Screen::Play, learn) } else { vec![] };
+        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, topbar::then(self.screen == Screen::Play, self.screen == Screen::Parts, learn)) } else { vec![] };
         if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
             self.bar_at = None;
         }
@@ -856,6 +885,8 @@ impl App {
             topbar::Do::Redo => self.send(Request::History, "edit.redo", json!({})),
             topbar::Do::Save => self.save(false),
             topbar::Do::Learn => self.on_play(|p| p.learn_toggle()),
+            topbar::Do::Edit => self.go(Screen::Parts),
+            topbar::Do::Play => self.go(Screen::Play),
             topbar::Do::Scene => {
                 if let Some(id) = self.last_graph["scene"].as_u64() {
                     self.scene.open(id);
@@ -941,6 +972,7 @@ impl App {
         match self.screen {
             Screen::Play => self.play.at_top(),
             Screen::Part => self.part.at_top(),
+            Screen::Parts => self.parts.at_top(),
             Screen::Chain => self.chain.at_top(),
             Screen::Sounds => self.sounds.at_top(),
             Screen::Scene => self.scene.at_top(),
@@ -1019,7 +1051,7 @@ impl App {
     /// A navigation action or tap for the Part screen, and where it takes the shell.
     fn part_act(&mut self, f: impl FnOnce(&mut part::Screen) -> part::Outcome) {
         match self.on_part(f) {
-            part::Outcome::Back => self.go(Screen::Play),
+            part::Outcome::Back => self.go(self.part_from),
             part::Outcome::Prompt(title, text) => self.open_keyboard(Screen::Part, &title, &text),
             part::Outcome::Chain => {
                 self.chain.open(self.part.id());
@@ -1032,6 +1064,25 @@ impl App {
                 self.go(Screen::Sounds);
             }
             part::Outcome::Stay => {}
+        }
+    }
+
+    /// Something for the Parts list, then what it asks the engine sent.
+    fn on_parts<R>(&mut self, f: impl FnOnce(&mut parts::Screen) -> R) -> R {
+        let r = f(&mut self.parts);
+        for (request, method, params) in std::mem::take(&mut self.parts.out) {
+            self.send(Request::Parts(request), method, params);
+        }
+        r
+    }
+
+    /// A navigation action or tap for the Parts list, and where it takes the shell.
+    fn parts_act(&mut self, f: impl FnOnce(&mut parts::Screen) -> parts::Outcome) {
+        match self.on_parts(f) {
+            parts::Outcome::Back => self.go(Screen::Play),
+            parts::Outcome::Open(id) => self.open_part(id),
+            parts::Outcome::Routing(_) => {} // the list says Routing is not in this shell yet
+            parts::Outcome::Stay => {}
         }
     }
 
@@ -1171,7 +1222,8 @@ impl App {
     /// Back at the top of the list screens: one screen up.
     fn back(&mut self) {
         match self.screen {
-            Screen::Part => self.go(Screen::Play),
+            Screen::Part => self.go(self.part_from),
+            Screen::Parts => self.go(Screen::Play),
             Screen::Chain | Screen::Sounds => self.go(Screen::Part),
             Screen::Scene => self.go(Screen::Play),
             Screen::Params => self.go(Screen::Chain),
@@ -1290,6 +1342,7 @@ impl App {
 
     /// A part selected in Play: its settings.
     fn open_part(&mut self, id: u32) {
+        self.part_from = if self.screen == Screen::Parts { Screen::Parts } else { Screen::Play };
         self.part.open(id);
         self.go(Screen::Part);
     }
@@ -1302,7 +1355,11 @@ impl App {
 
     /// The meters, asked unless the last answer is still out: a slow engine never piles them up.
     fn poll_meters(&mut self) {
-        if self.client.waiting(|r| matches!(r, Request::Play(play::Request::Meters))).is_none() {
+        if self.screen == Screen::Parts {
+            if self.client.waiting(|r| matches!(r, Request::Parts(parts::Request::Meters))).is_none() {
+                self.send(Request::Parts(parts::Request::Meters), "parts.meters", json!({}));
+            }
+        } else if self.client.waiting(|r| matches!(r, Request::Play(play::Request::Meters))).is_none() {
             self.send(Request::Play(play::Request::Meters), "parts.meters", json!({}));
         }
     }
@@ -1324,7 +1381,12 @@ impl App {
             }
             if self.screen == Screen::Play {
                 self.play.hidden();
+            }
+            if matches!(self.screen, Screen::Play | Screen::Parts) {
                 self.meters.stop();
+            }
+            if self.screen == Screen::Parts {
+                self.on_parts(parts::Screen::hidden);
             }
             if self.screen == Screen::Part {
                 self.on_part(part::Screen::hidden);
@@ -1345,7 +1407,7 @@ impl App {
             if live(self.screen) && !live(screen) {
                 self.send(Request::Subscribe, "unsubscribe", json!({"topics": ["controls.changed"]}));
             }
-            if screen == Screen::Play && self.screen != Screen::Part {
+            if screen == Screen::Play && matches!(self.screen, Screen::Home | Screen::Setlist) {
                 self.play_from = self.screen;
             }
         }
@@ -1366,6 +1428,7 @@ impl App {
                 Screen::Chain => "Insert effects".into(),
                 Screen::Sounds => "Sound".into(),
                 Screen::Scene => "Scene".into(),
+                Screen::Parts => "Edit".into(),
                 Screen::Params => "Parameters".into(),
                 Screen::Opening => ui.get_opening(),
             });
@@ -1381,8 +1444,13 @@ impl App {
         if screen == Screen::Scene {
             self.on_scene(scene::Screen::shown);
         }
-        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene) {
+        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene | Screen::Parts) {
             self.ask_performance();
+        }
+        if screen == Screen::Parts {
+            self.send(Request::Parts(parts::Request::Status), "session.status", json!({}));
+            self.on_parts(parts::Screen::shown);
+            self.meters.start(slint::TimerMode::Repeated, parts::METER_INTERVAL, || with_app(|a| a.poll_meters()));
         }
         if screen == Screen::Chain {
             self.on_chain(chain::Screen::shown);

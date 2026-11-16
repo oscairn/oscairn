@@ -272,3 +272,14 @@ clean.
   docs/rust-ui.md "The knob row". Tests: 147 passed, `cargo clippy --offline --all-targets` clean. Not run on a unit, and not
   against the real engine: what the engine plays on the knobs is the port's resolution (knobs.rs) against the cases of the engine's
   own test, not a comparison with the engine.
+
+Branch `rust-app-parts` (from `rust-app` 79a277ee; baseline 101 tests, clippy clean): the Parts list (B) and the Part page's rest (C).
+- Two defects of the last round, own commit (40ef8f64): Play, Part, Chain, Sounds and Scene lay out again when the theme or the window
+  changes (`PlayState.resized`, `PartState.resized`, the shell's `refit`; src/tests/layout.rs fails without it: Play kept 10 strips
+  where the roomy theme holds 9); only one cursor shows (`Theme.bar-cursor`, set by the shell while the bar has it; a `Cursor`
+  draws nothing then unless `always`, which the bar's own and the keyboards' do; counted in pixels of the odd theme).
+- Parts list (B1 to B3, B5, B6, B9, B10) and Edit (A14, J3): src/parts.rs, slint/parts.slint, tests/parts.rs. Edit is the last action of
+  Play's top bar, the footer's handover button is gone; the list's Play action goes back. B4 (a press on a shared row opens Routing)
+  and B8 (Mixer, Controls and Routing buttons) are built but disabled until I, H and G exist: `Page::built()` in parts.rs.
+- Seen, not fixed: the top bar at 800 px wide with a take recording and all five actions of Play (Undo, Redo, Save, Scene, Edit) is
+  wider than the window (the resource section is cut); with four it already was.

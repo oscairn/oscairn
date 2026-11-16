@@ -35,8 +35,8 @@ How (a) works:
   Today the JUCE app starts and owns its engine; on the Rust path it only connects to it.
 - **The Rust shell** (`oscairn-ui`) draws on the display with Slint's `linuxkms` backend and is
   a trusted client of `/run/oscairn/engine.sock`.
-- **A screen not yet ported** (Library, Groovebox, Recordings, Settings, and the Performance's
-  Edit, today; the Performance tile itself opens Play, in Rust):
+- **A screen not yet ported** (Library, Groovebox, Recordings and Settings, today; the Performance
+  tile opens Play and Play's Edit the Parts list, both in Rust):
   confirming its tile shows "Opening Settings..." for one frame, writes the app's name to the
   handover file and ends the shell (exit status 3). The start script's UI keeper then starts the
   bundle's Xorg and `Oscairn --connect /run/oscairn/engine.sock --app settings` with
@@ -235,7 +235,7 @@ Its Play button opens Play. Not yet: editing.
 
 `play.rs` and `slint/play.slint`: the JUCE Performance app's first view (PlayView.cpp) for the stage.
 Home's Performance tile and the Setlist's Play button open it (Cancel goes back to where it was
-opened from); Edit is the handover.
+opened from); Edit, the last action of the top bar, opens the Parts list (below).
 
 - **Shows:** the open Performance's name and scene in the top bar as everywhere; eight scene tiles
   along the top (the one playing filled in the accent with an accent border); below them a strip per
@@ -284,17 +284,53 @@ opened from); Edit is the handover.
   bar's action where the profile has an assign group of knobs (the JUCE condition, a panel with `row:N`
   knobs, holds on no profile): `controllers` says which control moved, a part's level (or its M, a
   second stop on each strip while Learn waits), a scene or a knob is the target (`assignments.set`).
-- **Still handed over to the JUCE app**, from the "Edit: Oscairn app" entry
-  (the display goes to the Performance app, which opens on its own Play): Edit itself (the Parts
-  list, Controls, Mixer, Routing). Not ported either: a part's pan and sends have no control in
-  Play (the JUCE Play has none; the Part screen has the pan), and meters past two channels show two bars.
+- **Nothing is handed over to the JUCE app from here any more:** Edit is a top bar action and opens the
+  Parts list in this UI (the footer's "Edit, knob banks, Learn: Oscairn app" button is gone). Not ported
+  either: a part's pan and sends have no control in Play (the JUCE Play has none; the Part screen has
+  the pan), and meters past two channels show two bars.
 - **Not measured:** the 100 ms meter poll's cost on a unit, and its look at the FANTOM-07's scale.
+
+## Parts list
+
+`parts.rs` and `slint/parts.slint`: page 0 of the JUCE Edit view (PartsView.cpp, PartsModel.cpp's
+`readParts`), opened by Edit on Play's top bar (the bar's last action on the list is Play, the Edit /
+Play toggle). Not handed over: the whole screen is Rust.
+
+- **Shows:** a row per part, then per bus ("Shared buses" above the first), then each node outside
+  the parts that several parts are wired into in Routing: its name and sound (the notes the shared
+  budget gave up, `· 3 stolen, 1 cut`, from `parts.meters`), where it plays from (`No device:` before it
+  when none of its devices is connected, from `session.status`) with its key range drawn as a bar, its
+  chain as one box per plugin (colored by role, faint when off, outlined in the danger color when
+  `session.status`'s `failures` name it; a split is one box named after its lanes), a level slider, mute
+  (M), and a send slider per bus on parts. A bus says who feeds it, a shared row "Fed by ... in Routing".
+  The line under the list says the first failed plugin ("X is silent: why") unless an edit was refused.
+  Under the rows: Mixer, Controls, Routing (disabled until those screens exist: pressing says so),
+  + Part and + Bus, named "Part N" and "Bus A" as the JUCE view names them (`parts.add`, `graph.commit`).
+  The scenes row of the JUCE page is Play's (A1 to A4). A part has no remove here: the JUCE page has it
+  on the part's own page, as the Part screen does.
+- **Layout:** columns by the room: the controls (level, mute, sends) take up to 60% of the width and
+  their sliders shrink to it; with 520 px (times the type scale) left for the part's words they get
+  columns (name, plays from, chain), else one column with the chain and input on the second line. The
+  rows a view holds fill the height: the screen reads the list's height and a row's pitch from its
+  component, so the window, the theme's spacing and the type scale decide (`PartsState.resized`);
+  a view is cut from the first row, the cursor's view shown.
+- **Without touch:** the cursor has two dimensions as the grid's: the dial goes cell by cell (the
+  part, its level, mute, each send), row by row, then through the buttons; the left knob moves along
+  the row, the right knob down the rows; arrows likewise; Page Up and Down turn a view, Home and End
+  the first and the last. A press on the part opens its Part screen, on a level or a send starts a
+  change the dial then makes (a fortieth of the slider a click), a press or Cancel ends it, on mute
+  toggles it, on a button does it; Cancel drops the cursor, then goes back to Play. Touch: a tap on the
+  words opens the part, sliders drag, M and the buttons tap.
+- **Requests:** `graph.get`, `session.status` (on opening, and its notifications), `parts.meters` every
+  200 ms while shown (the JUCE view's timer), `controls.changed` while shown; edits `parts.level`
+  (level, mute) and `parts.send` (no level removes it), each then `graph.commit`, and `parts.add`. None
+  new. A regular expression in a device rule cannot be tried here: such a part is taken as connected.
 
 ## Part
 
 `part.rs` and `slint/part.slint`: the JUCE Part page (PartsView.cpp, PartsModel.cpp's `partFields`)
-for one part, opened from Play by selecting it (a press on it, a tap on its name). Back returns to
-Play; Play's Cancel still goes to where Play was opened from.
+for one part, opened from Play by selecting it (a press on it, a tap on its name) or from the Parts
+list. Back returns to the one it was opened from; Play's Cancel goes to where Play was opened from.
 
 - **Settings** (a list with a border cursor, a view of as many rows as fit): Level (dB), Pan, Mute,
   Solo; for a part that plays notes also "Plays from" (the devices, below), Lowest key, Highest
@@ -336,8 +372,7 @@ Play; Play's Cancel still goes to where Play was opened from.
   pan, mute and solo are live and are not committed.
 - **Still handed over:** nothing in this screen: the handover row is gone. Not yet built here (the
   checklist is ui/PERFORMANCE-APP.md): splits and lanes, scenes editing, the knob row and Learn,
-  Save, undo and redo, the Parts list, Controls, Mixer and Routing; Play's "Edit" entry still hands
-  over until those are built.
+  Controls, Mixer and Routing (the Parts list has their buttons, disabled, saying so).
 
 ### Insert chain, parameter pages and the sound chooser
 

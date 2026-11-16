@@ -64,7 +64,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | A11 | Learn: move a knob, then touch a strip (level), its M (mute), a scene or a knob; Default removes the override; Done | `assignments.get`, `assignments.set`, `controllers.get` (the knob moved) | - | Learn in the top bar; then the cursor and press name the target | [x] src/row.rs, play.rs: `controllers` says the control moved, the strips, their M (a second stop on each strip while Learn waits), a scene or a knob is the target, Default (`assignments.set` none), Done, Cancel; the overrides are read again after |
 | A12 | The no-MIDI hint ("No MIDI device. Open the on-screen keyboard", Dismiss, kept) | `session.status` (`midiInputs`) | - | cursor on the link, press | [x] src/play.rs, settings.rs: shown when the profile offers the on-screen keyboard, the status notification's `midiInputs` has none but the built-in and it was not dismissed; its two links are the first stops of the right pane; Dismiss is kept in the JUCE app's keyboard.txt ("hint dismissed", the window places after it kept) |
 | A13 | Empty state: "No parts yet. Edit adds them." | - | - | - | [x] slint/play.slint, tested in tests/play.rs (the words are the JUCE ones, which name Edit: they stay until Edit is a screen of this app, A14) |
-| A14 | Edit / Play toggle in the top bar | - | - | top bar action | [ ] |
+| A14 | Edit / Play toggle in the top bar | - | - | top bar action | [x] src/topbar.rs, shell.rs: Edit is the last action of Play's top bar and opens the Parts list in this UI; the list's bar has Play, the toggle back (the list's Back and Cancel too); the footer's handover button is gone |
 | A15 | Save (to the library; names the Performance when it has no id, or Save As New) | `performance.info`, `library.save` | - | top bar action; keyboard (K1) for a new name | [x] src/shell.rs: the Save button saves a Performance in the library at once, asks the name of one that is not (K1), a blank name keeps its own; the Performance's name on the bar is Save As New (JUCE: a tap on it); the engine's refusal and "Performance saved." are said in the name's place for 4 s |
 | A16 | Learn in the top bar when the device has knobs | - | - | top bar action | [x] the bar's Learn action where the profile has an assign group of knobs (JUCE: `rowKnobs() > 0`, a panel with row:N knobs, true on no profile, so Learn would never show) |
 | A17 | Meters and live values while shown only | `parts.meters`, `controls.changed` | - | - | [x] |
@@ -73,16 +73,16 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
-| B1 | Rows per part: name, plays from, chain summary, level, mute, a send per bus | `graph.get` | - | list cursor, press opens the part | [ ] |
-| B2 | Level and mute on the row | `parts.level` | - | press then dial | [ ] |
-| B3 | A send's level per bus on the row | `parts.send` | - | press then dial | [ ] |
-| B4 | Shared buses under the parts; "Fed by ... in Routing" rows | `graph.get` | - | cursor, press opens Routing | [ ] |
-| B5 | + Add part, + Add bus (named "Part N", "Bus A..") | `parts.add`, `graph.commit` | - | cursor on the row, press | [ ] |
-| B6 | Remove part | `parts.remove` | - | action on the part | [ ] |
+| B1 | Rows per part: name, plays from, chain summary, level, mute, a send per bus | `graph.get` | - | list cursor, press opens the part | [x] src/parts.rs, slint/parts.slint: a row per part then per bus, as PartsModel.cpp's readParts reads graph.get (name, sound, input with "No device:", key bar, chain boxes, shared rows); the rows a view holds fill the height; the cursor is two-dimensional (dial cell by cell, left knob along the row, right knob down), a press on the part opens its Part screen |
+| B2 | Level and mute on the row | `parts.level` | - | press then dial | [x] src/parts.rs: a press on the level starts the change, the dial steps it a fortieth of the slider (the JUCE slider is linear, 0 to 1), `parts.level` then `graph.commit`; mute is a press; touch drags and taps |
+| B3 | A send's level per bus on the row | `parts.send` | - | press then dial | [x] src/parts.rs: the same on a send's cell; taken to 0 it is removed (`parts.send` with no level), as setSendLevel; buses have none |
+| B4 | Shared buses under the parts; "Fed by ... in Routing" rows | `graph.get` | - | cursor, press opens Routing | [ ] src/parts.rs: the shared rows and "Fed by ... in Routing" are built and tested; a press says "Routing is not in this shell yet" until Routing (I) exists, then `Page::Routing.built()` and the shell's `Outcome::Routing` take it there |
+| B5 | + Add part, + Add bus (named "Part N", "Bus A..") | `parts.add`, `graph.commit` | - | cursor on the row, press | [x] src/parts.rs: the + Part and + Bus buttons under the list, named "Part N" (N the parts after it) and "Bus A" and on, with the input the JUCE addPart gives (notes, or bus) |
+| B6 | Remove part | `parts.remove` | - | action on the part | [x] the JUCE page 0 has no remove: it is on the part's own page, the Part screen's Remove part (C18); the list opens it |
 | B7 | Reorder parts (move) | n/a: JUCE has no part reorder, only chain moves (see D3) | - | - | n/a |
-| B8 | Page switches: Parts, Controls, Mixer, Routing; Done | - | - | list of pages; Cancel | [ ] |
-| B9 | Failed plugins marked (plugin that failed and is silent) | `session.status` (`failures`) | - | - | [ ] |
-| B10 | Notes given up by the shared budget shown on the row | `graph.get` (`givenUp`) / `parts.meters` | - | - | [ ] |
+| B8 | Page switches: Parts, Controls, Mixer, Routing; Done | - | - | list of pages; Cancel | [ ] src/parts.rs: the buttons Mixer, Controls and Routing are built, disabled, and say "... is not in this shell yet" (`Page::built()`); Done is Back, Cancel, and the top bar's Play. Ticked when G, H and I exist |
+| B9 | Failed plugins marked (plugin that failed and is silent) | `session.status` (`failures`) | - | - | [x] src/parts.rs: the chain box of a plugin named in `failures` is outlined in the danger color and the line under the list says "X is silent: reason" (unless an edit was refused), as PartsView::refresh |
+| B10 | Notes given up by the shared budget shown on the row | `graph.get` (`givenUp`) / `parts.meters` | - | - | [x] src/parts.rs: `parts.meters` every 200 ms while the list shows (the JUCE timer): the second line gets "· N stolen, M cut" from `stolen` and `hardChokes` |
 
 ## C. Part page (PartsView page = part id)
 
@@ -189,7 +189,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 |---|---|---|---|---|---|
 | J1 | Undo / Redo with the edit's name on the button | `edit.undo`, `edit.redo`, `edit.history` | - | top bar actions | [x] src/shell.rs, slint/topbar.slint: on every screen of the app (Play, Part, Chain, Sounds, Parameters; the JUCE buttons are in the Edit view header only), "Undo <edit>" and "Redo <edit>" off when empty; edit.history asked on entering a screen and on each graph.changed. The bar's cursor (all of A14-A16's top bar actions): the third pane (`move:2`), Tab, or the dial moving up out of the first row of Play, Part, Chain and Sounds (not the parameter grid: it needs a hook in grid.rs); Confirm does it, past the last stop or Cancel gives the cursor back |
 | J2 | The refusal of an edit said on the screen | error replies | - | - | [x] |
-| J3 | The shell opens the Performance app everywhere (Home tile, Setlist's Play, Play's part press), the handover entries and "Oscairn app" rows for this app gone | - | - | - | [ ] |
+| J3 | The shell opens the Performance app everywhere (Home tile, Setlist's Play, Play's part press), the handover entries and "Oscairn app" rows for this app gone | - | - | - | [x] nothing of this app hands the display over now: Play's footer button went with A14 (the Part screen's row went with C19); tests.rs asserts Edit leaves no handover |
 | J4 | Recording indicator (owner, 2026-11-15): a take running and its time, on every screen's top bar, once (Play has no mark of its own: the reference draws it in the Launcher's RecordButtons over every app, and PlayView.cpp has none): a filled dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger color. Learned as the JUCE RecordButtons learn it (`Engine::takes`): `record.takes` polled every 250 ms (here with the `status` notifications, so nothing wakes at rest); the first take `waiting` or `recording`, its frames over its sample rate. Not built: the Record and Capture buttons themselves (the hardware REC button starts and ends a take in the engine) | `record.takes` | - | shown only | [x] |
 
 ## K. Text entry

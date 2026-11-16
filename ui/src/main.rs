@@ -19,6 +19,7 @@ mod params;
 mod piano;
 mod part;
 mod row;
+mod parts;
 mod play;
 mod profile;
 mod scan;

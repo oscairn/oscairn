@@ -234,3 +234,13 @@ colors, button styles and corner rounding, spacing, all that stuff". Checklist a
   pixels; both Paths are now `fit: preserve`. Pixel test (src/tests/envelope.rs): nodes' centroids against the fitted
   segments' meeting point, at 1280x720 and 1920x1080, scale 1 and 2: worst 7.68 px before, 0.50 px after. The reference's
   envelope (ParameterGrid.cpp `Envelope`) has a handle per timed stage end only, none at the start or the sustain's end; the same here.
+
+Branch `rust-app-play` (from `rust-app` 85ce5fd5; baseline 88 tests, clippy clean): the Performance app's Play (A) and the top bar (J).
+- Done (ticked in PERFORMANCE-APP.md): J4 the recording indicator (new: `record.takes` read with the status notifications every
+  250 ms as the JUCE RecordButtons poll it; top bar and Play), J1 undo/redo and A15 save as top bar actions with a cursor
+  (third pane, Tab, the dial up out of the list), A2-A4 the + Scene tile and the Scene screen (scene.rs), A6 the master by
+  cursor and dial, A12 the no-MIDI hint, A13 the empty state. 101 tests, clippy clean.
+- Left: A9, A10, A11, A16 (the knob row, banks and Learn: they need the grid's tiles and `row:N` knobs, which another branch
+  owns: what Play needs from the grid is a way to lay a row of knob tiles out in a given area and to publish the row as
+  `controllers.view`'s `screen` page), A14 and J3 (Edit needs the Parts list, B, which nothing builds yet: the footer button
+  that hands over to the JUCE app stays until it does).

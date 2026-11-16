@@ -11,7 +11,7 @@
 //! stay on the strip's M and S and on that screen.
 //!
 //! Not here, handed to the JUCE app from the screen's "Edit" entry: the knob row and its banks,
-//! Learn, Edit's other pages, adding a scene, the on-screen keyboard hint.
+//! Learn, Edit's other pages (the scene's setup is scene.rs, from the top bar; the bar's actions are shell.rs).
 
 use crate::nav::{Action, Cursor};
 use crate::setlist::update;

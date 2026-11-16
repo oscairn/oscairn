@@ -170,6 +170,24 @@ scene (`performance.info`, `graph.get`, asked again on each `graph.changed`), th
 (`transport.get`) and the resource section. Everything right of the Performance has a fixed
 width, so a changing figure never moves anything.
 
+A take recording (the hardware REC button, or any app's) shows between the Performance and the
+tempo on every screen: a dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger
+color, and on Play's footer too. It is what the JUCE record buttons show (`RecordButtons`), read as
+they read it: `record.takes` every 250 ms (here asked with the `status` notifications, which come
+at most four a second, so nothing wakes at rest), the first take `waiting` or `recording`, its
+`frames` over its `sampleRate`. The Record and Capture buttons themselves are not built.
+
+On the Performance app's screens (Play, Part, the chain, the sound chooser, the parameter pages, the
+scene's setup) the bar also has the screen's actions after the Performance's name: "Undo <edit>" and
+"Redo <edit>" (`edit.history`, asked on entering a screen and on each `graph.changed`; `edit.undo`,
+`edit.redo`), "Save" (`library.save`: over a Performance in the library at once, else the name asked
+on the text keyboard; the name on the bar is Save As New) and, on Play, "Scene". What an action says
+(Saved, the engine's refusal) replaces the Performance's name for four seconds. Without touch the
+bar has a cursor: the third list pane (`move:2`), Tab, or the dial moving up out of the first row of
+Play, Part, the chain or the sounds list; it moves along the name and the actions, Confirm does one,
+past the last or Cancel gives the cursor back to the screen. The parameter pages (grid.rs) are
+reached by `move:2` and Tab only: they need a hook for the dial.
+
 The resource section shows two meters, CPU over RAM:
 
 - **CPU** is how full the CPU is for the audio: `session.status`'s `cpuLoad`, the audio device
@@ -245,12 +263,17 @@ opened from); Edit is the handover.
   and ended on leaving, because it comes up to 60 times a second), and `parts.meters`, asked by a
   100 ms timer that runs only while Play is shown, one request at a time (a slow engine never gets
   a second). The shell at rest still wakes for nothing. No new engine request.
+- **In Play now** (ui/PERFORMANCE-APP.md): the "+ Scene" tile (`scenes.add`) and, from the top bar's
+  Scene action, the Scene screen (`scene.rs`: store, rename, the scope's six kinds, glide, curve and
+  launch); the master as the last stop of the right pane, a press then the dial moving its fader; the
+  "No MIDI device" line with its two links (the keyboard, Dismiss, kept in the JUCE app's
+  `keyboard.txt`), shown where the profile offers the on-screen keyboard; a take recording, in the
+  footer as in the top bar.
 - **Still handed over to the JUCE app**, from the "Edit, knob banks, Learn: Oscairn app" entry
   (the display goes to the Performance app, which opens on its own Play): the knob row and its
   banks (the Performance's controls or a part's, resolved through the panel's layers), Learn, the
-  Performance/part switch and bank button, Edit itself (the part pages, effects,
-  routing, saving), adding a scene (the "+ Scene" tile), the "No MIDI device" line with the
-  on-screen keyboard, and Save. Not ported either: a part's pan and sends have no control in
+  Performance/part switch and bank button, and Edit itself (the Parts list, Controls, Mixer,
+  Routing). Not ported either: a part's pan and sends have no control in
   Play (the JUCE Play has none; the Part screen has the pan), and meters past two channels show two bars.
 - **Not measured:** the 100 ms meter poll's cost on a unit, and its look at the FANTOM-07's scale.
 

@@ -4,6 +4,7 @@
 // dial an accent one), what the part is made of on the right, read only.
 
 import { Theme, Section, Button, Cursor, FitText, RowMark, RowStyle } from "theme.slint";
+import { KeyStrip, StripState } from "strip.slint";
 
 export struct SettingData {
     label: string,
@@ -136,7 +137,9 @@ export component Part inherits Rectangle {
     property <length> list-height: self.height - list-y - footer - Theme.margin - Theme.gap;
     property <int> per-view: max(1, floor((list-height + gap) / (Theme.touch + gap)));
     property <length> line: Theme.body + Theme.margin;
-    property <int> info-lines: max(1, floor((list-height - 2 * Theme.pad-narrow) / line));
+    // A lane's key range as the strip over the keyboard, over the panel's lines.
+    property <length> strip-height: StripState.shown ? Theme.body + Theme.pad-narrow + Theme.touch + Theme.pad : 0px;
+    property <int> info-lines: max(1, floor((list-height - root.strip-height - 2 * Theme.pad-narrow) / line));
     changed per-view => { PartState.rows-per-view = per-view; PartState.resized(); }
     changed info-lines => { PartState.info-per-view = info-lines; PartState.resized(); }
     init => {
@@ -159,9 +162,15 @@ export component Part inherits Rectangle {
         width: root.width - self.x - Theme.margin;
         height: root.list-height;
         clip: true;
+        if StripState.shown: KeyStrip {
+            x: Theme.pad;
+            y: Theme.pad-narrow;
+            width: parent.width - 2 * Theme.pad;
+            height: root.strip-height - Theme.pad;
+        }
         for line[i] in PartState.info: FitText {
             x: Theme.pad;
-            y: Theme.pad-narrow + i * root.line;
+            y: Theme.pad-narrow + root.strip-height + i * root.line;
             width: parent.width - 2 * Theme.pad;
             height: root.line;
             text: line.text;

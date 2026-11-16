@@ -375,6 +375,74 @@ fn a_lanes_settings_are_sent_whole() {
 
 // A band split's crossovers: read with params.get and shown in Hz, set with params.set a sixth of an octave a step
 // (a step is finer at the low end), with no commit after it, by the dial after a press and by - and +.
+// D9: a lane's key range as the reference's strip over the whole keyboard: an end dragged, the middle moving the whole range,
+// anywhere else bringing the nearer end there; one edit when the finger lifts (the whole lane, as the dial sends it), a
+// double tap the whole keyboard; the strip follows the dial's rows and shows only on a lane.
+#[test]
+fn a_lanes_keys_are_dragged_on_the_strip() {
+    use crate::StripState;
+    let s = Screen::new();
+    let ui = &s.ui;
+    let strip = ui.global::<StripState>();
+    crate::keystrip::install(ui);
+    let mut c = open(&s, &split_graph("bands", 3));
+    assert!(!strip.get_shown(), "not on the chain's list");
+    press_row(&mut c, ui, "2. Split");
+    assert!(!strip.get_shown(), "not on a split");
+    press_row(&mut c, ui, "Band 1");
+    assert!(strip.get_shown());
+    assert_eq!((strip.get_low(), strip.get_high(), strip.get_range().as_str()), (36, 60, "C2 – C4"));
+    sent(&mut c.out);
+    let width = 750.; // ten pixels a white key
+    let whole = |keys: serde_json::Value| {
+        let zones = if keys.is_null() { json!([]) } else { json!([{"keys": keys, "velocities": [0, 1], "channels": 65535, "transpose": 0, "curve": 1, "fixedVelocity": 0}]) };
+        [("parts.lane", json!({"part": 10, "split": 5, "lane": 0, "zones": zones, "level": 0.8, "pan": 0.0, "mute": false, "solo": false})), ("graph.commit", json!({}))]
+    };
+    // A white key's left edge, as a share of the width: the reference's keyBounds.
+    let white = |n: f64| n * 10. / width;
+    // The low end (C2, the 15th white key) taken and dragged to the 10th white key: nothing sent until the finger lifts.
+    c.strip_down(white(15.) + 0.003, width);
+    c.strip_move(white(12.) + 0.003);
+    c.strip_move(white(10.) + 0.003);
+    assert!(sent(&mut c.out).is_empty(), "a drag is one edit, sent at the end");
+    assert_eq!(strip.get_range().as_str(), "F0 – C4", "the strip follows the finger");
+    c.strip_up();
+    let got = sent(&mut c.out);
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0].1["zones"][0]["keys"], json!([17, 60]), "{got:?}");
+    // The middle moves the whole range as far as the finger.
+    let (low, high) = (17, 60);
+    let mid = |c: &Chain| {
+        let _ = c;
+        (white(9.) + white(35.)) / 2.
+    };
+    c.strip_down(mid(&c), width);
+    c.strip_move(mid(&c) + white(2.));
+    c.strip_up();
+    let got = sent(&mut c.out);
+    assert_eq!(got[0].1["zones"][0]["keys"].as_array().map(|k| k[1].as_i64().unwrap() - k[0].as_i64().unwrap()), Some(high - low), "the width is kept: {got:?}");
+    // Past the high end: the high end goes there. A finger that does not move changes nothing.
+    c.strip_down(white(70.), width);
+    c.strip_up();
+    let got = sent(&mut c.out);
+    assert!(got.is_empty() || got[0].1["zones"][0]["keys"][1].as_i64().unwrap() > 100, "{got:?}");
+    sent(&mut c.out);
+    // A double tap: the whole keyboard, which is no zone at all.
+    c.strip_reset();
+    assert_eq!(sent(&mut c.out), whole(json!(null)));
+    // The dial's row says which end the dial changes.
+    c.act(Action::End(-1));
+    press_row(&mut c, ui, "Lowest key");
+    assert_eq!(strip.get_end(), 1);
+    c.act(Action::Cancel(None));
+    press_row(&mut c, ui, "Highest key");
+    assert_eq!(strip.get_end(), 2);
+    // Back to the split: the strip goes.
+    c.back();
+    c.back();
+    assert!(!strip.get_shown());
+}
+
 #[test]
 fn crossovers_are_read_and_set_in_hertz() {
     let s = Screen::new();

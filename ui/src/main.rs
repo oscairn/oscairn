@@ -14,6 +14,7 @@ mod controls;
 mod grid;
 mod home;
 mod keyboard;
+mod keystrip;
 mod knobs;
 mod menu;
 mod mixer;

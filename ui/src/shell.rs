@@ -410,6 +410,12 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
         grid.on_resized(|| with_app(|a| a.on_params(crate::params::Screen::shown)));
     let keys = ui.global::<KeyboardState>();
     keys.on_pressed(|i| with_app(|a| a.keyboard_press(i)));
+    crate::keystrip::install(ui);
+    let strip = ui.global::<crate::StripState>();
+    strip.on_down(|share, width| with_app(|a| a.on_chain(|c| c.strip_down(share as f64, width as f64))));
+    strip.on_moved(|share| with_app(|a| a.on_chain(|c| c.strip_move(share as f64))));
+    strip.on_up(|| with_app(|a| a.on_chain(|c| c.strip_up())));
+    strip.on_reset(|| with_app(|a| a.on_chain(|c| c.strip_reset())));
     keys.on_released(|| with_app(|a| a.repeat.stop()));
     keys.on_cancel(|| with_app(|a| a.keyboard_act(Action::Cancel(None))));
     // The JUCE Setlist app's own state file, so either opens where the other left off.

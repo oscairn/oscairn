@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The key strip (src/keystrip.rs), the reference's ZoneEditor in its keys-only form (hosts/standalone/ZoneEditor.cpp): the
+// whole MIDI keyboard, 75 white keys across, with the range outlined in the accent and a handle at each end; the keys
+// outside the range are dimmed. A touch drags an end, the middle of the range (the whole range moves) or anywhere else
+// (the nearer end goes there); a double tap is the whole keyboard. A drag is one edit, sent when the finger lifts.
+
+import { Theme } from "theme.slint";
+
+export struct StripKey {
+    key: int,
+    x: float, // in white-key units from the left
+    w: float, // in white-key units
+    black: bool,
+}
+
+export global StripState {
+    in property <bool> shown;
+    in property <string> range; // "C-1 - B3", or "All keys"
+    in property <[StripKey]> keys;
+    in property <int> low;
+    in property <int> high;
+    in property <int> end; // the end the dial changes: 1 the lowest key, 2 the highest, 0 none
+    in property <float> whites: 75;
+    callback down(float, float); // a finger down, at this share of the strip's width, which is this many pixels
+    callback moved(float);
+    callback up();
+    callback reset(); // a double tap: the whole keyboard
+}
+
+export component KeyStrip inherits Rectangle {
+    // The range in words over the keys, then the keys as tall as the strip leaves (a touch target at the least).
+    property <length> caption: Theme.body + Theme.pad-narrow;
+    property <length> white: root.width / StripState.whites;
+    property <length> board-y: root.caption;
+    property <length> board-h: max(Theme.touch, root.height - root.caption);
+    // White keys first, black over them; a key outside the range is dimmed.
+    for k in StripState.keys: Rectangle {
+        if !k.black: Rectangle {
+            x: k.x * root.white;
+            y: root.board-y;
+            width: max(1px, k.w * root.white - Theme.hair);
+            height: root.board-h;
+            background: Theme.white-key;
+            opacity: k.key >= StripState.low && k.key <= StripState.high ? 1 : 0.4;
+        }
+    }
+    for k in StripState.keys: Rectangle {
+        if k.black: Rectangle {
+            x: k.x * root.white;
+            y: root.board-y;
+            width: k.w * root.white;
+            height: root.board-h * 0.6;
+            background: Theme.black-key;
+            opacity: k.key >= StripState.low && k.key <= StripState.high ? 1 : 0.4;
+        }
+    }
+    // The range: an outline around its keys and a handle at each end (the end the dial changes in the focus color).
+    property <length> zone-x: StripState.keys[StripState.low].x * root.white;
+    property <length> zone-end: (StripState.keys[StripState.high].x + StripState.keys[StripState.high].w) * root.white;
+    property <length> handle: max(4px, Theme.cursor-width * 2);
+    if StripState.shown && StripState.keys.length > 0: Rectangle {
+        x: root.zone-x;
+        y: root.board-y;
+        width: max(root.handle, root.zone-end - root.zone-x);
+        height: root.board-h;
+        border-width: Theme.cursor-width;
+        border-color: Theme.accent;
+    }
+    if StripState.shown && StripState.keys.length > 0: Rectangle {
+        x: root.zone-x - root.handle / 2;
+        y: root.board-y - Theme.pad-tight;
+        width: root.handle;
+        height: root.board-h + 2 * Theme.pad-tight;
+        background: StripState.end == 1 ? Theme.focus : Theme.accent;
+    }
+    if StripState.shown && StripState.keys.length > 0: Rectangle {
+        x: root.zone-end - root.handle / 2;
+        y: root.board-y - Theme.pad-tight;
+        width: root.handle;
+        height: root.board-h + 2 * Theme.pad-tight;
+        background: StripState.end == 2 ? Theme.focus : Theme.accent;
+    }
+    Text {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.caption;
+        text: StripState.range;
+        color: Theme.text;
+        font-size: Theme.small;
+        font-weight: 700;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    TouchArea {
+        y: root.board-y - Theme.pad-tight;
+        height: root.board-h + 2 * Theme.pad-tight;
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                StripState.down(self.mouse-x / self.width, self.width / 1px);
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                StripState.up();
+            }
+        }
+        moved => { StripState.moved(self.mouse-x / self.width); }
+        double-clicked => { StripState.reset(); }
+    }
+}

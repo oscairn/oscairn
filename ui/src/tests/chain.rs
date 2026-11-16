@@ -111,6 +111,7 @@ pub(super) fn pictures(name: &str, graph: &serde_json::Value, setup: &dyn Fn(&mu
     for ((w, h), scale, size) in [((1280, 720), 1.0, "1280x720"), ((1280, 720), 1.55, "1280x720@1.55"), ((800, 480), 1.0, "800x480")] {
         let mut s = Screen::sized(w, h);
         s.set_scale(scale);
+        crate::keystrip::install(&s.ui);
         s.ui.set_screen(5);
         for (t, id) in [(&dark, "dark"), (&odd_theme(), "odd"), (&joined_theme(), "joined")] {
             theme::apply(&s.ui, t);

@@ -64,6 +64,11 @@ impl Browser {
     }
 
     /// Starts over on a new list (the cursor on none, the first view).
+    /// Whether this screen is the one shown (its models are the window's).
+    pub fn active(&self) -> bool {
+        self.active
+    }
+
     pub fn reset(&mut self) {
         self.cursor = Cursor::new(0, 1);
         self.info_cursor = Cursor::new(0, 1);

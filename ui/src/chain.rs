@@ -32,6 +32,7 @@
 //! change it, a second press or Cancel lets go), Cancel goes back one layer (actions or plugins, a lane, a split,
 //! then the chain, then the Part screen); the right knob scrolls the read-only panel.
 
+use slint::ComponentHandle;
 use crate::browser::{Browser, Nav};
 use crate::menu::Item;
 use crate::nav::Action;
@@ -232,6 +233,9 @@ pub struct Screen {
     /// The presets of the plugin whose presets show (uri and name), or why they could not be listed.
     presets: Vec<(String, String)>,
     presets_error: String,
+    /// A finger on the lane's key strip, and the window's state it draws on.
+    drag: Option<crate::keystrip::Drag>,
+    ui: slint::Weak<Shell>,
     /// The preset a plugin is being reloaded with.
     reloading: String,
     pub out: Vec<Out>,
@@ -257,9 +261,84 @@ impl Screen {
             crossovers: HashMap::new(),
             presets: vec![],
             presets_error: String::new(),
+            drag: None,
+            ui: ui.as_weak(),
             reloading: String::new(),
             out: vec![],
         }
+    }
+
+    /// A lane's keys set on the graph as read, and sent: the whole lane, as `editLane` sends it.
+    fn set_lane_keys(&mut self, s: u64, k: usize, l: i64, h: i64) {
+        if let Some(lane) = self.lane_mut(s, k) {
+            let zones = lane["zones"].as_array().cloned().unwrap_or_default();
+            lane["zones"] = Value::Array(edit_zones(zones, |z| z["keys"] = json!([l, h])));
+        }
+        self.send_lane(s, k);
+    }
+
+    /// The key strip of the lane open, over the panel (the reference's ZoneEditor): the range as the lane has it, or as
+    /// a finger drags it, and the end the cursor's row changes.
+    fn show_strip(&self) {
+        let Some(ui) = self.ui.upgrade().filter(|_| self.b.active()) else { return };
+        let state = ui.global::<crate::StripState>();
+        let Mode::Lane(s, k) = self.mode else {
+            if state.get_shown() {
+                state.set_shown(false);
+            }
+            return;
+        };
+        let (low, high) = self.drag.map_or_else(|| self.lane_keys(s, k), |d| d.now);
+        let end = match self.b.cursor.at.and_then(|at| self.rows().get(at).map(|r| r.0)) {
+            Some(Row::LowKey) => 1,
+            Some(Row::HighKey) => 2,
+            _ => 0,
+        };
+        state.set_low(low as i32);
+        state.set_high(high as i32);
+        state.set_end(end);
+        state.set_range(crate::keystrip::range_text(low, high).into());
+        if !state.get_shown() {
+            state.set_shown(true);
+        }
+    }
+
+    /// A finger down on the strip at `share` of its `width` pixels.
+    pub fn strip_down(&mut self, share: f64, width: f64) {
+        if let Mode::Lane(s, k) = self.mode {
+            let (low, high) = self.lane_keys(s, k);
+            self.drag = Some(crate::keystrip::Drag::begin(low, high, share, width));
+            self.show_strip();
+        }
+    }
+
+    pub fn strip_move(&mut self, share: f64) {
+        if let Some(d) = self.drag.as_mut() {
+            d.to(share);
+            self.show_strip();
+        }
+    }
+
+    /// The finger lifts: one edit for the whole drag.
+    pub fn strip_up(&mut self) {
+        let Some(d) = self.drag.take() else { return };
+        if let Mode::Lane(s, k) = self.mode {
+            if d.now != self.lane_keys(s, k) {
+                self.set_lane_keys(s, k, d.now.0, d.now.1);
+            }
+        }
+        self.show();
+    }
+
+    /// A double tap: the whole keyboard.
+    pub fn strip_reset(&mut self) {
+        self.drag = None;
+        if let Mode::Lane(s, k) = self.mode {
+            if self.lane_keys(s, k) != (0, 127) {
+                self.set_lane_keys(s, k, 0, 127);
+            }
+        }
+        self.show();
     }
 
     pub fn at_top(&self) -> bool {
@@ -702,6 +781,7 @@ impl Screen {
             Mode::Presets(..) => "Presets",
         };
         self.b.show(&name, &title, noun, rows, info);
+        self.show_strip();
     }
 
     /// Whether an edit was refused: the shell then asks the graph again.
@@ -908,11 +988,7 @@ impl Screen {
                     (low, (high + by).clamp(low, 127))
                 };
                 if (l, h) != (low, high) {
-                    if let Some(lane) = self.lane_mut(s, k) {
-                        let zones = lane["zones"].as_array().cloned().unwrap_or_default();
-                        lane["zones"] = Value::Array(edit_zones(zones, |z| z["keys"] = json!([l, h])));
-                    }
-                    self.send_lane(s, k);
+                    self.set_lane_keys(s, k, l, h);
                 }
             }
             (Row::Level | Row::Pan, Mode::Lane(s, k)) => {
@@ -1165,6 +1241,10 @@ impl Screen {
 
     pub fn hidden(&mut self) {
         self.b.hidden();
+        self.drag = None;
+        if let Some(ui) = self.ui.upgrade() {
+            ui.global::<crate::StripState>().set_shown(false);
+        }
         self.show();
     }
 

@@ -17,6 +17,19 @@ pub(super) fn set(id: u32, value: f64) -> (&'static str, serde_json::Value) {
     ("params.set", json!({"values": [{"node": 2, "param": id, "value": value}]}))
 }
 
+/// What was sent with each request of several values made one request for each value: a drag's single `params.set` carrying the
+/// two values a handle stands for, read as the values it sets.
+pub(super) fn one_by_one(out: Vec<(&'static str, serde_json::Value)>) -> Vec<(&'static str, serde_json::Value)> {
+    let mut all = Vec::new();
+    for (method, params) in out {
+        match (method, params["values"].as_array()) {
+            ("params.set", Some(values)) => all.extend(values.iter().map(|v| (method, json!({"values": [v]})))),
+            _ => all.push((method, params)),
+        }
+    }
+    all
+}
+
 pub(super) fn gesture(id: u32, begin: bool) -> (&'static str, serde_json::Value) {
     ("params.gesture", json!({"node": 2, "param": id, "begin": begin}))
 }

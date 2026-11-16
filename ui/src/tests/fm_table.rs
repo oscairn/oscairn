@@ -337,7 +337,7 @@ fn param_ids(sent: &[(&str, Value)]) -> Vec<u64> {
 }
 
 fn sets(sent: &[(&str, Value)]) -> Vec<(u64, f64)> {
-    sent.iter().filter(|o| o.0 == "params.set").map(|o| (o.1["values"][0]["param"].as_u64().unwrap(), o.1["values"][0]["value"].as_f64().unwrap())).collect()
+    sent.iter().filter(|o| o.0 == "params.set").flat_map(|o| o.1["values"].as_array().unwrap().iter().map(|v| (v["param"].as_u64().unwrap(), v["value"].as_f64().unwrap()))).collect()
 }
 
 /// The cursor on the table's cell (row 1 to 8, column among the table's) by the keys: up from the first tile to the table, then along.
@@ -713,6 +713,14 @@ fn the_screens_hold_all_rows_the_stage_rows_and_a_row_of_controls() {
                 let (time, level) = stage_tiles(&s);
                 assert_eq!((time.len(), level.len()), (5, 4), "the Time and Level rows {at}");
                 let graph = all.get(2).map_or(0., |p| if p.points.row_count() == 0 { 0. } else { p.h });
+                // The selected operator's envelope is drawn above its Time and Level rows at eight operators too, wherever the
+                // two levels of tabs do not take the height (the strips over the page at the keyboard's size and under).
+                if name != "strips over" {
+                    let first_row = time.iter().map(|t| t.y).fold(f32::MAX, f32::min);
+                    let room = first_row - all[2].y;
+                    assert!(all[2].points.row_count() > 0 && room >= 3. * small - 0.5, "the detail's graph above the Time row at {at}: {room}");
+                    assert!(all[2].points.iter().all(|q| all[2].y + q.y < first_row), "its handles are above the Time row at {at}");
+                }
                 report += &format!("{at}: area {w:.0}x{h:.0}; overview {:.0} (rows {:.1}), detail graph {}, rows 2, controls {compact} compact of {:.0}x{:.0}; block ends {bottom:.0}\n", top.h, chips[0].h, if graph > 0. { format!("{:.0}", graph) } else { "none".into() }, tl.iter().find(|t| t.compact).map_or(0., |t| t.w), tl.iter().find(|t| t.compact).map_or(0., |t| t.h));
             }
         }
@@ -788,4 +796,121 @@ fn the_detail_graphs_handles_are_dragged_by_touch() {
     p.view_up(2, x + 10., y + 30.);
     let ids: Vec<u64> = sets(&sent(&mut p.out)).iter().map(|q| q.0).collect();
     assert!(!ids.is_empty() && ids.iter().all(|&i| i == u64::from(id(1, ENV))), "the hold's time only: {ids:?}");
+}
+
+// The overview's graph has at least a third of the overview's width and at least what the diagram has; the diagram shrinks
+// first, the table's columns are tightened before the graph gives up width (the keyboard's size and the two others).
+#[test]
+fn the_graph_has_a_third_of_the_overview_and_at_least_the_diagrams_width() {
+    let t = dark();
+    for ops in [8usize, 6, 4] {
+        for (size, scale, placement) in [((1280, 720), 1.55f32, Side), ((1280, 720), 1.55, Top), ((1280, 720), 1., Side), ((800, 480), 1., Top)] {
+            let (s, _p) = open_at(Spec { ops, ..ENGINE }, size, scale, &t, placement, 1);
+            let panel = panels(&s.ui)[0].clone();
+            let sp = s.ui.global::<crate::Theme>().get_spacing();
+            let at = format!("{ops} operators {size:?}@{scale}");
+            let (pad, gap) = (12. * sp, 12. * sp);
+            let table_x = panel.labels.iter().find(|l| l.text == "Op").expect("the table's heading").x;
+            let diagram_x = panel.labels.iter().find(|l| l.text.starts_with("Algorithm")).expect("the algorithm's head").x;
+            let (graph_w, diagram_w, avail) = (table_x - gap - pad, panel.w - pad - diagram_x, panel.w - 2. * pad);
+            assert!(graph_w >= avail / 3. - 1., "the graph has a third of the overview ({graph_w:.0} of {avail:.0}) {at}");
+            assert!(graph_w >= diagram_w - 1., "the graph is at least as wide as the diagram ({graph_w:.0} against {diagram_w:.0}) {at}");
+        }
+    }
+}
+
+// The compact controls say the operator once, in the heading: "Level" under "Operator 5", not "Level 5"; the knobs (and so the
+// cursor's readout) keep the plugin's full name.
+#[test]
+fn the_detail_does_not_repeat_the_operators_number() {
+    use crate::grid::without_index;
+    assert_eq!(without_index("Level 5", 5), "Level");
+    assert_eq!(without_index("Coarse 5", 5), "Coarse");
+    assert_eq!(without_index("5 Fine", 5), "Fine");
+    assert_eq!(without_index("Op 5 Detune", 5), "Detune");
+    assert_eq!(without_index("Op5 Mode", 5), "Mode");
+    assert_eq!(without_index("Level 6", 5), "Level 6", "another operator's number stays");
+    assert_eq!(without_index("Level vel 5", 5), "Level vel");
+    assert_eq!(without_index("5", 5), "5", "a name that is only the number stays");
+    assert_eq!(without_index("Level 0", 5), "Level 0");
+    let (s, mut p) = open_at(Spec { ops: 8, ..ENGINE }, (1280, 720), 1.55, &dark(), Side, 1);
+    select(&mut p, &s, 5);
+    let mut s = s;
+    s.frame();
+    let shown = names(&tiles(&s));
+    assert!(shown.iter().skip(8).all(|n| !n.ends_with(" 5")), "no number under the heading: {shown:?}");
+    assert!(shown.iter().skip(8).any(|n| n == "Level"), "{shown:?}");
+}
+
+// A compact knob under 28 px is a value cell with a thin bar and still the tile's whole touch target.
+#[test]
+fn a_compact_knob_too_small_to_be_one_is_a_value_cell() {
+    use crate::grid::{compact_height, knob_is_cell, KNOB_LEAST};
+    assert!(knob_is_cell(115., compact_height(1., 1.), 1., 1.), "at the touch target's height the knob would be 21 px");
+    assert!(!knob_is_cell(115., 80., 1., 1.), "a tile high enough keeps its knob");
+    assert!(KNOB_LEAST >= 28.);
+    let (s, _p) = open_at(Spec { ops: 8, ..ENGINE }, (1280, 720), 1.55, &dark(), Side, 1);
+    let all = tiles(&s);
+    let knobs: Vec<&crate::GridTile> = all.iter().filter(|t| t.compact && t.kind == crate::grid::Control::Knob as i32).collect();
+    assert!(!knobs.is_empty() && knobs.iter().all(|t| t.cell && t.h >= compact_height(1., 1.)), "every compact knob is a cell, a touch target high");
+    assert!(all.iter().filter(|t| !t.compact).all(|t| !t.cell));
+}
+
+// The one-request rule: a handle that moves two parameters is one `params.set` carrying both, so the engine makes one undo
+// step of it.
+#[test]
+fn a_handle_drag_is_one_request_with_both_values() {
+    let (s, mut p) = open_at(Spec { ops: 4, ..ENGINE }, (1280, 720), 1.55, &dark(), Side, 1);
+    let points: Vec<(f32, f32)> = panels(&s.ui)[2].points.iter().map(|q| (q.x, q.y)).collect();
+    let (x, y) = points[1];
+    sent(&mut p.out);
+    assert!(p.view_down(2, x, y));
+    p.view_move(2, x + 14., y + 9.);
+    p.view_move(2, x + 20., y + 12.);
+    p.view_up(2, x + 20., y + 12.);
+    let out = sent(&mut p.out);
+    let requests: Vec<&(&str, Value)> = out.iter().filter(|o| o.0 == "params.set").collect();
+    assert_eq!(requests.len(), 2, "one request for each move of the handle, not one for each value: {out:?}");
+    for r in requests {
+        let ids: Vec<u64> = r.1["values"].as_array().unwrap().iter().map(|v| v["param"].as_u64().unwrap()).collect();
+        assert_eq!(ids, [u64::from(id(1, ENV + 1)), u64::from(id(1, ENV + 11))], "the rate and the level together: {r:?}");
+    }
+    assert_eq!(out.iter().filter(|o| o.0 == "params.gesture" && o.1["begin"] == true).count(), 2, "inside the gesture of the two parameters");
+}
+
+// A page higher than its view (the odd theme's large type at the keyboard's size) is cut at the bottom and scrolls: a mark at the
+// right edge says so, and where the view is; a page that fits is not marked.
+#[test]
+fn a_page_that_scrolls_has_a_mark_and_one_that_fits_has_none() {
+    let themes = all_themes();
+    let odd = themes.iter().find(|t| t.id == "odd").expect("the odd theme");
+    let mark_in = |s: &Screen| -> bool {
+        let accent = s.ui.global::<crate::Theme>().get_accent();
+        let (r, g, b) = (accent.red(), accent.green(), accent.blue());
+        // Some column in the last 40 pixels has a vertical run of 8 or more pixels of the accent.
+        (s.w - 40..s.w).any(|x| {
+            let mut run = 0;
+            (0..s.h).any(|y| {
+                let p = s.pixels[y * s.w + x];
+                run = if (p.r, p.g, p.b) == (r, g, b) { run + 1 } else { 0 };
+                run >= 8
+            })
+        })
+    };
+    let (mut s, mut p) = open_at(Spec { ops: 8, ..ENGINE }, (1280, 720), 1.55, odd, Side, 1);
+    s.frame();
+    let g = s.ui.global::<GridState>();
+    assert!(g.get_content() > g.get_view_height() + 1., "the odd theme's page is higher than its view: {} of {}", g.get_content(), g.get_view_height());
+    assert!(mark_in(&s), "a mark at the right edge says the page goes on");
+    // Scrolled to the end, the mark has moved down with it.
+    let before = s.pixels.clone();
+    p.scrolled(10000.);
+    p.shown();
+    s.frame();
+    assert_ne!(before, s.pixels, "the page moved");
+    assert!(mark_in(&s), "and the mark is still there");
+    let (s, _p) = open_at(Spec { ops: 4, ..ENGINE }, (1280, 720), 1., &dark(), Side, 1);
+    let g = s.ui.global::<GridState>();
+    assert!(g.get_content() <= g.get_view_height() + 1., "a page that fits: {} of {}", g.get_content(), g.get_view_height());
+    // (The mark is drawn only while the page is higher than its view: the property says the two.)
 }

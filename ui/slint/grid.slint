@@ -29,6 +29,7 @@ export struct GridTile {
     editing: bool,
     part: int, // a range being changed: 0 its low end, 1 its high end
     linked: bool,
+    cell: bool, // a compact knob too small to be one (src/grid.rs `knob_is_cell`): a value and a thin bar instead
     compact: bool, // a compact control of a master's detail (Theme.compact-height): the name over a small control and its value
 }
 
@@ -123,6 +124,7 @@ export global GridState {
     in property <[GridHeading]> headings;
     in property <[GridPanel]> panels;
     in property <length> scroll; // how far the tiles are scrolled up
+    in property <length> content; // how high the page is in all: a mark at the right edge says where the view is when it is more
     in property <string> message;
     // The search button in the header (a plugin of more than 24 parameters): the text searched for, and the cursor on it.
     in property <bool> search-shown;
@@ -346,7 +348,36 @@ component Tile inherits Rectangle {
     }
     property <length> knob-side: min(min(self.height - self.control-y - (self.compact ? Theme.pad-tight : Theme.margin), self.width - 2 * self.pad), self.knob-max);
     property <length> knob-x: self.compact ? self.pad : (self.width - self.knob-side) / 2;
-    if data.kind == 1: Knob {
+    // A compact knob under 28 px is a value cell instead: the value and a thin bar of where it stands (the operator table's
+    // level bar); the whole tile stays the touch target.
+    property <bool> cell: data.cell;
+    property <length> cell-bar: Theme.pad-tight;
+    if root.cell: FitText {
+        x: root.pad;
+        y: root.control-y;
+        width: parent.width - 2 * root.pad;
+        height: max(0px, root.control-h - root.cell-bar - Theme.hair);
+        text: data.value;
+        ink: data.editing ? Theme.accent : Theme.text;
+        size: Theme.small;
+        bold: true;
+        align: TextHorizontalAlignment.left;
+    }
+    if root.cell: Rectangle {
+        x: root.pad;
+        y: root.control-y + root.control-h - root.cell-bar;
+        width: parent.width - 2 * root.pad;
+        height: root.cell-bar;
+        border-radius: root.cell-bar / 2;
+        background: Theme.slider-track;
+        Rectangle {
+            x: data.bipolar ? min(parent.width / 2, parent.width * data.norm) : 0px;
+            width: data.bipolar ? abs(data.norm - 0.5) * parent.width : parent.width * data.norm;
+            border-radius: parent.border-radius;
+            background: root.lit ? Theme.accent : Theme.accent-dim;
+        }
+    }
+    if data.kind == 1 && !root.cell: Knob {
         x: root.knob-x;
         y: root.control-y;
         width: root.knob-side;
@@ -356,7 +387,7 @@ component Tile inherits Rectangle {
         lit: root.lit;
     }
     // A compact knob's value beside it, shrunk to 70% before it is cut.
-    if data.kind == 1 && root.compact: FitText {
+    if data.kind == 1 && root.compact && !root.cell: FitText {
         x: root.knob-x + root.knob-side + root.pad;
         y: root.control-y;
         width: max(0px, parent.width - self.x - root.pad);
@@ -742,6 +773,21 @@ export component Grid inherits Rectangle {
             drag(k, part, norm) => { GridState.drag(k, part, norm); }
             release(k) => { GridState.release(k); }
             tap(k, stop) => { GridState.tap(k, stop); }
+        }
+        // The page is higher than its view: a track at the right edge and in it where the view is, so nothing is cut without a mark.
+        if GridState.content > root.area-height + 0.5px: Rectangle {
+            x: parent.width - Theme.pad-tight;
+            width: Theme.pad-tight;
+            height: parent.height;
+            background: Theme.track;
+            border-radius: self.width / 2;
+            Rectangle {
+                property <length> thumb: max(Theme.pad-tight * 3, parent.height * root.area-height / GridState.content);
+                y: (parent.height - self.height) * GridState.scroll / max(1px, GridState.content - root.area-height);
+                height: self.thumb;
+                background: Theme.accent;
+                border-radius: parent.border-radius;
+            }
         }
         // Lines between a card's tiles.
         for t in GridState.tiles: Rectangle {

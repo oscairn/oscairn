@@ -36,7 +36,7 @@ fn param_ids(sent: &[(&str, serde_json::Value)]) -> Vec<u64> {
 }
 
 fn set_ids(sent: &[(&str, serde_json::Value)]) -> Vec<u64> {
-    sent.iter().filter(|o| o.0 == "params.set").map(|o| o.1["values"][0]["param"].as_u64().unwrap()).collect()
+    sent.iter().filter(|o| o.0 == "params.set").map(|o| o.1["values"].as_array().unwrap().iter().map(|v| v["param"].as_u64().unwrap()).collect::<Vec<_>>()).flatten().collect()
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn the_cursor_on_the_overview_chooses_an_operator_and_rings_its_line() {
     assert_eq!(rings(&s), 1, "the cell the cursor is on");
     assert_ne!(nodes(&panels(&s.ui)[0]), first, "operator 3 is the one chosen");
     let names: Vec<String> = s.ui.global::<crate::GridState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
-    assert!(names.contains(&"Ratio 3".to_string()) && !names.contains(&"Ratio 1".to_string()), "its tiles: {names:?}");
+    assert!(names.contains(&"Ratio".to_string()) && !names.iter().any(|t| t.ends_with(" 3") || t.ends_with(" 1")), "its tiles, with no operator number: {names:?}");
     let out = sent(&mut p.out);
     assert_eq!(&param_ids(&out)[..2], [13, 23], "the knobs play it");
     p.act(Action::Move { pane: Some(1), by: -2 });

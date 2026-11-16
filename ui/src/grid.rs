@@ -607,7 +607,7 @@ fn master_block(out: &mut Laid, params: &[Param], members: &[usize], view: u64, 
     let detail_h = |graph: f32, r: usize| DETAIL_HEAD + if env_rows > 0 { cg + stages_h(graph) } else { 0. } + if r > 0 { cg + params_h(r) } else { 0. };
     let area = (master.height - y).max(0.);
     let (least, pref, greatest) = (crate::fm::least_height(count, scale, spacing), crate::fm::preferred_height(count, scale, spacing), crate::fm::greatest_height(count, scale, spacing));
-    let (gmin, gmax) = (4. * small, 9. * small);
+    let (gmin, gmax) = (3. * small, 9. * small);
     // Rows of the other controls: one, and more while the overview keeps what it prefers and the graph its least.
     let mut per = rest_rows.min(1);
     for r in 2..=rest_rows {
@@ -708,6 +708,7 @@ pub fn row_tile(rect: Rect, face: &Face) -> crate::GridTile {
         editing: face.editing,
         part: 0,
         linked: false,
+        cell: false,
         compact: false,
     }
 }
@@ -1195,6 +1196,50 @@ pub const TOUCH: f32 = 44.;
 /// need at the theme's type scale and spacing, whichever is more. Never less than the touch target.
 pub fn compact_height(scale: f32, spacing: f32) -> f32 {
     (2. * 4. * spacing + 1.15 * 13. * scale + 0.45 * TOUCH).max(TOUCH)
+}
+
+/// A control's name inside a detail that is headed "Operator N": the operator's number is left off ("Level 5" is "Level",
+/// "Op 5 Coarse" is "Coarse"). A name that is only the number, or has another, stays as it is.
+pub fn without_index(name: &str, index: u64) -> String {
+    let n = index.to_string();
+    let found = |rest: &str| -> Option<String> {
+        let rest = rest.trim();
+        (!rest.is_empty()).then(|| rest.to_string())
+    };
+    let words: Vec<&str> = name.split_whitespace().collect();
+    if words.len() > 1 {
+        if words.last() == Some(&n.as_str()) {
+            if let Some(r) = found(&words[..words.len() - 1].join(" ")) {
+                return r;
+            }
+        }
+        if words[0] == n {
+            if let Some(r) = found(&words[1..].join(" ")) {
+                return r;
+            }
+        }
+        if words.len() > 2 && words[1] == n && matches!(words[0].to_lowercase().as_str(), "op" | "operator") {
+            if let Some(r) = found(&words[2..].join(" ")) {
+                return r;
+            }
+        }
+        if let Some(r) = words[0].to_lowercase().strip_prefix("op").filter(|d| *d == n).and_then(|_| found(&words[1..].join(" "))) {
+            return r;
+        }
+    }
+    name.to_string()
+}
+
+/// Under this a compact knob is not drawn as one.
+pub const KNOB_LEAST: f32 = 28.;
+
+/// Whether a compact knob in a tile `w` by `h` is too small to be a knob (under `KNOB_LEAST`) and is drawn as a value cell
+/// with a thin bar instead (slint/grid.slint `Tile`): the knob's side is what is left of the tile under the name line and
+/// the tight paddings, across the tile, and at most a touch target. The tile itself stays the touch target.
+pub fn knob_is_cell(w: f32, h: f32, scale: f32, spacing: f32) -> bool {
+    let tight = 4. * spacing;
+    let under_name = tight + 1.15 * 13. * scale;
+    (h - under_name - tight).min(w - 2. * tight).min(TOUCH) < KNOB_LEAST
 }
 
 /// A compact control's least width (`Theme.compact-width`): 1.9 touch targets, which puts eight across the narrowest of the

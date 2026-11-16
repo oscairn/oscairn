@@ -492,8 +492,17 @@ impl Screen {
         let p = &self.params[t.param];
         let v = self.value(p);
         let norm = p.norm(v);
+        let (scale, spacing) = self.ui.upgrade().map_or((1., 1.), |ui| {
+            let theme = ui.global::<crate::Theme>();
+            (theme.get_font_scale(), theme.get_spacing())
+        });
         let mut value = self.value_text(p);
         let mut name = p.name.clone();
+        // Under the heading "Operator 5" a control's own name does not say the number again; the cursor's readout and the
+        // knobs keep the full name.
+        if let (true, Some(d)) = (t.compact, &self.laid.detail) {
+            name = grid::without_index(&name, d.index);
+        }
         if let Some(stage) = &t.stage {
             name = stage.name.clone();
             value = match stage.kind {
@@ -555,6 +564,7 @@ impl Screen {
             editing,
             part,
             linked: t.linked,
+            cell: t.control == Control::Knob && t.compact && grid::knob_is_cell(t.rect.w, t.rect.h, scale, spacing),
             compact: t.compact,
         }
     }
@@ -674,6 +684,7 @@ impl Screen {
         let panels: Vec<GridPanel> = (0..self.laid.panels.len()).map(|k| self.panel_data(k)).collect();
         g.set_panels(Rc::new(VecModel::from(panels)).into());
         g.set_scroll(self.scroll);
+        g.set_content(self.laid.height);
         let message = if self.params.is_empty() && self.entries.is_empty() && self.message.is_empty() { "Reading the parameters...".to_string() } else { self.message.clone() };
         g.set_message(message.into());
         match self.edit {
@@ -1466,12 +1477,21 @@ impl Screen {
     }
 
     /// Sets what a view says (each parameter, its value), but not what already is.
+    /// All of it is one `params.set`: the engine makes one undo step of the values of one request, so a handle that moves
+    /// two parameters (a stage's rate and its level) is one step, not two.
     fn view_sets(&mut self, sets: Vec<(usize, f64)>) {
-        for (i, to) in sets {
-            let param = self.params[i].clone();
-            if to != self.value(&param) {
-                self.set(&param, to);
-            }
+        let changed: Vec<(Param, f64)> = sets.into_iter().map(|(i, to)| (self.params[i].clone(), to)).filter(|(p, to)| *to != self.value(p)).collect();
+        if changed.is_empty() {
+            return;
+        }
+        self.message.clear();
+        let values: Vec<Value> = changed.iter().map(|(p, to)| json!({"node": self.node, "param": p.id, "value": to})).collect();
+        for (p, to) in &changed {
+            self.values.insert(p.id, *to);
+        }
+        self.out.push((Request::Set, "params.set", json!({ "values": values })));
+        for (p, to) in &changed {
+            self.ask_text(p.id, *to);
         }
     }
 

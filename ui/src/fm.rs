@@ -702,12 +702,17 @@ fn bold_width(text: &str, small: f32) -> f32 {
     text.chars().count() as f32 * 0.6 * small * 1.06
 }
 
+/// A mute or solo mark's width: a little narrower than the row is high, never under a line of type.
+fn mark_width(row: f32, small: f32) -> f32 {
+    (row * 0.85).max(small * 1.2)
+}
+
 /// The widths of a table's columns at the type size `small` and a row `row` high: marks are square, the chip is a
 /// little wider than high, the rest by what they hold ("Ratio/Hz" and "12.34 Hz" are the widest texts).
 fn column_width(column: Column, small: f32, row: f32) -> f32 {
     match column {
-        Column::Mute | Column::Solo => row,
-        Column::Level => 6. * small,
+        Column::Mute | Column::Solo => mark_width(row, small),
+        Column::Level => 5. * small,
         Column::Coarse | Column::Fine => 3.7 * small,
         Column::Ratio => 5. * small,
         Column::Mode => 3.6 * small,
@@ -763,7 +768,7 @@ fn geometry(f: &FmShape, c: &Ctx) -> Geometry {
     let chip_w = row.max(small * 1.7);
     let cell_gap = 3. * sp;
     let pane_gap = 12. * sp;
-    let fixed: f32 = chip_w + columns.iter().filter(|k| matches!(k, Column::Mute | Column::Solo)).map(|_| cell_gap + row).sum::<f32>();
+    let fixed: f32 = chip_w + columns.iter().filter(|k| matches!(k, Column::Mute | Column::Solo)).map(|_| cell_gap + mark_width(row, small)).sum::<f32>();
     let flexible: f32 = columns.iter().filter(|k| !matches!(k, Column::Mute | Column::Solo)).map(|&k| cell_gap + column_width(k, small, row)).sum();
     let avail = right - left;
     // The least the diagram is given: nine lines of type across, and the room its heads (the view's own parameters named
@@ -772,16 +777,14 @@ fn geometry(f: &FmShape, c: &Ctx) -> Geometry {
     let head_widths: Vec<f32> = texts.iter().map(|(_, t)| bold_width(t, small) + 1.).collect();
     let min_diagram = (9. * small).max(head_widths.iter().sum::<f32>() + 12. * sp * head_widths.len().saturating_sub(1) as f32) + 2.;
     let min_pane = 9. * small;
-    let fit = |panes: usize| -> f32 {
-        let room = avail - fixed - panes as f32 * pane_gap - (panes - 1) as f32 * min_pane - min_diagram;
-        (room / flexible.max(1.)).clamp(0.8, 1.)
-    };
-    let graph_shown = has_graph && avail - (fixed + flexible * 0.8) - 2. * pane_gap >= min_pane + min_diagram;
-    let stretch = fit(if graph_shown { 2 } else { 1 });
+    // The graph gets at least a third of the overview and at least what the diagram has: the diagram shrinks first (to its
+    // least), then the table's columns are tightened (to 0.7 of their widths), and only then does the graph give up width.
+    let graph_least = (avail / 3.).max(min_pane);
+    let graph_shown = has_graph && avail - (fixed + flexible * 0.7) - 2. * pane_gap >= min_pane + min_diagram;
+    let stretch = if graph_shown { ((avail - 2. * pane_gap - graph_least - min_diagram - fixed) / flexible.max(1.)).clamp(0.7, 1.) } else { ((avail - pane_gap - min_diagram - fixed) / flexible.max(1.)).clamp(0.8, 1.) };
     let table_w = fixed + flexible * stretch;
     let rest = (avail - table_w - if graph_shown { 2. } else { 1. } * pane_gap).max(0.);
-    let diagram_w = if graph_shown { (rest * 0.55).max(min_diagram).min(rest) } else { rest };
-    let graph_w = if graph_shown { rest - diagram_w } else { 0. };
+    let graph_w = if graph_shown { (rest / 2.).max(graph_least.min(rest - min_diagram)).max(min_pane).min(rest) } else { 0. };
     let table_x = left + if graph_shown { graph_w + pane_gap } else { 0. };
     let diagram_x = table_x + table_w + pane_gap;
     let diagram_area = (diagram_x.min(right), top, right, bottom);
@@ -815,7 +818,7 @@ fn geometry(f: &FmShape, c: &Ctx) -> Geometry {
         x += w + gap;
     }
     // The table: the chip, then a cell for each column, on one line for each operator.
-    let widths: Vec<f32> = columns.iter().map(|&k| if matches!(k, Column::Mute | Column::Solo) { row } else { column_width(k, small, row) * stretch }).collect();
+    let widths: Vec<f32> = columns.iter().map(|&k| if matches!(k, Column::Mute | Column::Solo) { mark_width(row, small) } else { column_width(k, small, row) * stretch }).collect();
     let rows = (0..count)
         .map(|n| {
             let y = top + (row + m.gap) * n as f32;

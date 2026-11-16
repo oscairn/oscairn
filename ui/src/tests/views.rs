@@ -34,6 +34,8 @@ fn an_envelope_node_is_dragged_by_touch() {
     p.view_move(0, 1000., -100.);
     p.view_up(0, 0., 0.);
     let out = sent(&mut p.out);
+    assert_eq!(out.iter().filter(|o| o.0 == "params.set").count(), 1, "one request for the two values, so one undo step: {out:?}");
+    let out = one_by_one(out);
     assert_eq!(out.first().unwrap(), &gesture(10, true));
     assert!(out.contains(&gesture(11, true)));
     assert!(out.contains(&set(10, 1.)), "the time at the end of its segment: {out:?}");
@@ -45,7 +47,7 @@ fn an_envelope_node_is_dragged_by_touch() {
     assert!(p.view_down(0, x, y));
     p.view_move(0, -1000., 1000.);
     p.view_up(0, 0., 0.);
-    let out = sent(&mut p.out);
+    let out = one_by_one(sent(&mut p.out));
     assert!(out.contains(&set(10, 0.)) && out.contains(&set(11, 0.)), "{out:?}");
     // A node with only a time (the attack: its level is fixed at full) sets only the time.
     let (x, y) = node(0);

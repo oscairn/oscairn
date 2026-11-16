@@ -205,7 +205,8 @@ fn selecting_an_operator_reaches_the_diagram_the_graph_the_table_and_the_detail(
     for n in [5, 8, 3] {
         tap_operator(&mut p, &s, n);
         let names = tile_names(&s);
-        assert!(names.contains(&format!("Ratio {n}")) && (1..=8).filter(|&m| m != n).all(|m| !names.contains(&format!("Ratio {m}"))), "the detail holds operator {n}'s parameters only: {names:?}");
+        // The heading says which operator; the controls under it do not say the number again.
+        assert!(names.contains(&"Ratio".to_string()) && (1..=8).all(|m| !names.iter().skip(8).any(|t| t.ends_with(&format!(" {m}")))), "the detail's controls carry no operator number ({n}): {names:?}");
         assert_eq!(facts(&s, n), (true, true, true, true), "diagram ring, thick line, table row and detail heading of operator {n}");
     }
     assert!(s.ui.global::<GridState>().get_tabs().row_count() == 0, "no tab for an operator");
@@ -231,7 +232,7 @@ fn the_detail_lists_the_selected_operators_parameters_and_the_knobs_play_its_row
     tap_operator(&mut p, &s, 5);
     let out = sent(&mut p.out);
     // 13 parameters: the four rates and four levels (their stages, in two rows), then the others by priority.
-    assert_eq!(tile_names(&s), ["Attack", "Decay 1", "Decay 2", "Release", "Attack", "Decay 1", "Decay 2", "Release", "Ratio 5", "Level 5", "Fine 5", "Detune 5", "Level 0 5"], "operator 5's, stages by name");
+    assert_eq!(tile_names(&s), ["Attack", "Decay 1", "Decay 2", "Release", "Attack", "Decay 1", "Decay 2", "Release", "Ratio", "Level", "Fine", "Detune", "Level 0"], "operator 5's, stages by name");
     let tiles: Vec<crate::GridTile> = s.ui.global::<GridState>().get_tiles().iter().collect();
     assert!(tiles.iter().all(|t| t.compact && t.h >= 44.), "compact controls, never below a touch target");
     assert_eq!(param_ids(&out)[..5], [105, 205, 305, 355, 654], "the table's row (level, ratio, fine, detune), then the rest by priority");

@@ -110,7 +110,7 @@ namespace
     void identical()
     {
         auto build = [](Player& p, uint32_t hosts) {
-            placeIn(hosts);
+            placeIn(hosts, uint64_t(5) << 30); // hosts apart from the earlier cases', which read the allowance below as they start
             const auto a = p.add(normal, "org.kick.test.midi", 0); p.add(normal, "org.kick.test.midi", 0); p.add(normal, "org.kick.test.midi", 1);
             const auto fx = p.graph.add(normal, "org.kick.test.effect");
             p.graph.host(a).setParameter(7, .3);
@@ -118,15 +118,20 @@ namespace
             p.graph.connectAudio(oscairn::AudioConnection{{fx, 0, 0}, {oscairn::graphOutput, 1, 0}, 2});
             p.graph.commit();
         };
+        // Identical sound, not timing: the blocks are played as fast as they run, and a host's block is waited for however long a loaded machine
+        // (a sanitizer build) holds it up. At a device's pace a block past its allowance is silence, which is the engine's wanted behavior and not what is compared.
+        // A host reads the allowance as it starts, so these are hosts of their own, started with it set.
+        setenv("OSCAIRN_WORKER_BUDGET_US", "500000", 1);
         Player hosted, engine;
         build(hosted, 2); build(engine, 0);
         bool same = true; double energy = 0;
         for(uint32_t block = 0; block < 400; ++block)
         {
-            hosted.play(notes(block)); engine.play(notes(block));
+            hosted.playUnbounded(notes(block)); engine.playUnbounded(notes(block));
             same = same && hosted.buffer == engine.buffer;
             for(float x : engine.buffer) energy += double(x) * x;
         }
+        unsetenv("OSCAIRN_WORKER_BUDGET_US");
         check(energy > 0 && same, "three instruments and an effect in plugin hosts sound as in the engine");
     }
 

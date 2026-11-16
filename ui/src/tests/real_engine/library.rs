@@ -224,7 +224,7 @@ pub(super) fn library(r: &mut Real) {
     r.check(now["name"] == "Glass Choir", || format!("Open: the engine's Performance is {}", now["name"]));
     let line = said(r);
     r.check(line.starts_with("Performance opened."), || format!("Open: the line says {line:?}"));
-    let notes: Vec<String> = r.lines().iter().skip(r.mark).filter_map(|l| if let Line::Note { method } = l { Some(method.clone()) } else { None }).filter(|m| m != "status" && m != "controllers").collect();
+    let notes: Vec<String> = r.lines().iter().skip(r.mark).filter_map(|l| if let Line::Note { method, .. } = l { Some(method.clone()) } else { None }).filter(|m| m != "status" && m != "controllers").collect();
     eprintln!("   notifications after the load: {notes:?}");
     r.check(notes.iter().any(|n| n == "graph.changed"), || format!("Open: the engine pushed no graph.changed after the load (notifications {notes:?})"));
     r.png("lib-07-opened");

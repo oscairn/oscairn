@@ -124,6 +124,20 @@ namespace
               "graph.get names a scene that is there, or none: " + std::to_string(selected));
         check(Fixture::number(f.call("graph.get"), "scene") == selected, "as the protocol reads it");
     }
+
+    // A commit with nothing staged compiles a plan and is a new revision; one that only commits a live level
+    // compiles none and leaves the revision (RFC 0011: the move reaches clients as controls.changed).
+    void revisions(const std::string& synth)
+    {
+        Fixture f(synth); f.render();
+        const auto first = Fixture::number(f.call("graph.commit"), "revision");
+        const auto second = Fixture::number(f.call("graph.commit"), "revision");
+        check(second == first + 1, "an unchanged commit is a new revision: " + std::to_string(first) + " then " + std::to_string(second));
+        const auto part = f.session.parts().front().id;
+        f.call("parts.level", "{\"part\":" + std::to_string(part) + R"(,"level":0.5,"mute":false})");
+        const auto live = Fixture::number(f.call("graph.commit"), "revision");
+        check(live == second, "a commit of a live level compiles no plan and keeps the revision: " + std::to_string(second) + " then " + std::to_string(live));
+    }
 }
 
 int main(int argc, char** argv)
@@ -137,6 +151,7 @@ int main(int argc, char** argv)
         oneRequestOneStep(argv[1]);
         fromSoundOneStep(argv[1]);
         sceneAfterUndo(argv[1]);
+        revisions(argv[1]);
     }
     catch(const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
     std::cout << "ok: edit steps over the protocol\n";

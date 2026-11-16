@@ -244,7 +244,10 @@ returns `-32005` if its boundary cannot be retained. Use requests to detect refu
 Graph operations stage changes on the single control thread; they share one staging area
 across clients. `graph.get` describes that staging area, not the currently rendered plan.
 `revision` counts successful commits, and `staged` indicates edits since the last commit.
-Even an unchanged commit produces a new revision. A successful commit publishes a complete
+Even an unchanged commit produces a new revision, except one that only commits a live
+level, pan or master move (`parts.level`, `parts.pan`, `master.set`): it compiles no plan and
+keeps the revision, the move having reached clients as `controls.changed` (a live mute is a new
+revision). A successful commit publishes a complete
 plan for the audio thread to adopt at a block boundary; it does not wait for adoption.
 
 `graph.add` loads a native CLAP plugin in the engine process. Its optional name must be unique

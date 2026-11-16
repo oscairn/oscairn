@@ -798,18 +798,7 @@ fn plugin_pages(r: &mut Real) {
     plugin_page(r, 4, &["Bus Echo"], "Bus Echo");
 }
 
-/// The check's Performance opened again by another client (the harness's connection): after a
-/// scenes.select the engine refuses saves until then (REAL-ENGINE.md), and the UI must follow a load.
-fn reload(r: &mut Real) {
-    let found = r.engine.call("library.query", json!({"text": "Real Engine Check", "kind": "performance"}));
-    if let Some(id) = found["items"][0]["id"].as_str() {
-        r.engine.call("library.load", json!({"id": id}));
-    }
-    r.run(1000);
-}
-
 fn sounds(r: &mut Real) {
-    reload(r);
     r.step("Sounds: Lead's Sound row");
     r.screen.ui.global::<crate::PlayState>().invoke_part_tapped(0);
     r.settle();
@@ -820,18 +809,15 @@ fn sounds(r: &mut Real) {
     eprintln!("   rows {rows:?}");
     r.png("50-sounds");
     r.sent("Sounds open");
-    // With no Sound in the library the list has no Sound to open, and the save actions are only in a
-    // Sound's actions: the first Sound is made by another client (noted in REAL-ENGINE.md).
-    r.check(rows.len() > 2, || "Sounds: an empty library offers no way to save the part as a Sound from this screen".into());
-    for _ in 0..30 {
-        // refused while parameter edits are pending (-32005, "retry after processing")
-        let got = r.engine.raw("parts.saveSound", json!({"part": 1, "name": "Check Lead", "new": true}));
-        if got.get("error").is_none() {
-            break;
-        }
-        eprintln!("   parts.saveSound: {}", got["error"]);
-        r.run(200);
-    }
+    // With no Sound in the library the list offers saving the part as the first one.
+    r.check(rows.iter().any(|x| x.0 == "Save this part as the first Sound"), || format!("Sounds: an empty library offers no way to save the part as a Sound from this screen: {rows:?}"));
+    r.edit("Sounds: Save this part as the first Sound", false, |r| {
+        r.press("Save this part as the first Sound");
+        type_text(r, "Check Lead");
+        r.run(1500);
+    });
+    let found = r.engine.call("library.query", json!({"kind": "sound"}));
+    r.check(found["items"].as_array().is_some_and(|i| i.iter().any(|x| x["name"] == "Check Lead")), || format!("Sounds: the first Sound is not in the library: {}", found["total"]));
     r.act(Action::Cancel(None)); // EXIT: back to the Part screen
     r.press("Sound");
     r.on(6, "Sounds again");
@@ -931,10 +917,15 @@ impl Real {
 }
 
 fn scene(r: &mut Real) {
-    // A scene that is there: after an undone scenes.add the engine's `scene` still names the removed one.
+    // After the undone + Scene the engine's `scene` is 0 (none): the Scene action is off then, and a tap on a scene turns it on.
+    let none = r.engine.graph()["scene"] == 0;
+    let enabled = |r: &Real| r.screen.ui.global::<Bar>().get_actions().iter().any(|a| a.label == "Scene" && a.enabled);
+    eprintln!("   engine scene none: {none}, Scene action enabled: {}", enabled(r));
+    let on = enabled(r);
+    r.check(none != on, || format!("Scene: the engine's scene is {} and the action is {}", if none { "none" } else { "there" }, if on { "on" } else { "off" }));
     r.screen.ui.global::<crate::PlayState>().invoke_scene_tapped(0);
     r.settle();
-    r.step("Scene: Play's top bar Scene");
+    r.step("Scene: the top bar's Scene");
     r.bar("Scene");
     r.on(8, "Scene");
     let rows = r.rows_all();
@@ -1221,7 +1212,6 @@ fn routing(r: &mut Real) {
 }
 
 fn top_bar(r: &mut Real) {
-    reload(r);
     r.step("Top bar: an edit, Undo, Redo");
     r.screen.ui.global::<crate::PlayState>().invoke_mute_tapped(1);
     r.settle();

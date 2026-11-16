@@ -1206,7 +1206,9 @@ impl App {
         let mut list: Vec<topbar::Act> = self.screen_tools().into_iter().enumerate().map(|(i, t)| topbar::Act { what: topbar::Do::Tool(i), label: t.label, enabled: t.enabled, on: t.on }).collect();
         if has_actions(self.screen) {
             let then = topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing), learn);
-            list.extend(topbar::actions(&self.history, then).into_iter().map(|(what, label, enabled)| topbar::Act { what, label, enabled, on: false }));
+            // The scene's setup needs a scene playing: none is (the engine says 0) after an undone `scenes.add` left none selected.
+            let scene = self.last_graph["scenes"].as_array().is_some_and(|s| s.iter().any(|s| s["id"] == self.last_graph["scene"]));
+            list.extend(topbar::actions(&self.history, then).into_iter().map(|(what, label, enabled)| topbar::Act { what, label, enabled: enabled && (what != topbar::Do::Scene || scene), on: false }));
         }
         // Record and Capture, on every screen as the JUCE bar has them over every app: icons, and in More as words.
         let recording = self.shown.recording.clone();
@@ -1786,6 +1788,8 @@ impl App {
             chain::Outcome::Back => self.go(Screen::Part),
             chain::Outcome::Params(node, name) => {
                 self.params.open(node, &name);
+                let shared = self.last_graph["nodes"].as_array().is_some_and(|n| n.iter().any(|n| n["id"].as_u64() == Some(node) && n["shared"].is_object()));
+                self.params.set_shared(shared);
                 self.go(Screen::Params);
             }
             chain::Outcome::Routing(node) => {

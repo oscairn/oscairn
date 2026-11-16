@@ -116,6 +116,7 @@ pub fn after(module: &str, n: usize) -> String {
 }
 
 pub struct Screen {
+    shared: bool,
     ui: slint::Weak<Shell>,
     node: u64,
     name: String,
@@ -171,7 +172,7 @@ impl Screen {
 
     pub fn open(&mut self, node: u64, name: &str) {
         let ui = self.ui.clone();
-        *self = Screen { ui, node, name: name.into(), ..Screen::new_detached() };
+        *self = Screen { ui, node, name: name.into(), shared: false, ..Screen::new_detached() };
         self.out.push((Request::List, "params.list", json!({"node": node})));
         self.show();
     }
@@ -179,6 +180,7 @@ impl Screen {
     fn new_detached() -> Screen {
         Screen {
             ui: slint::Weak::default(),
+            shared: false,
             node: 0,
             name: String::new(),
             params: vec![],
@@ -364,9 +366,20 @@ impl Screen {
         }
     }
 
+    /// The plugin plays one sound of an instance other nodes share (`graph.get`'s `shared`): the host sets its Output bus, and
+    /// the engine puts back a value a client sets, so the parameter is shown and not offered.
+    pub fn set_shared(&mut self, shared: bool) {
+        self.shared = shared;
+    }
+
     /// params.list's answer: the pages, and the values of the first.
     fn listed(&mut self, list: &Value) {
         self.params = editor_parameters(grid::parse(list));
+        if self.shared {
+            for p in self.params.iter_mut().filter(|p| p.role == "outputBus") {
+                p.flags |= grid::FLAG_READONLY;
+            }
+        }
         self.model = Model::build(&self.params, tabs::declared_in(list).as_ref());
         self.entries = self.model.entries();
         self.entry = 0;

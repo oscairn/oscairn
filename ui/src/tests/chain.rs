@@ -148,7 +148,6 @@ fn the_ends_say_the_devices_and_the_sends() {
     assert_eq!(lines.iter().filter(|l| l.3).map(|l| l.0.as_str()).collect::<Vec<_>>(), ["All external · C2–C5 · −12", "→ Hall"]);
     drop(c);
     // A bus: what feeds it, and where it plays through.
-    let mut g = g;
     g["parts"][1]["chain"] = json!([]);
     let mut c = Chain::new(ui);
     c.graph(&g);

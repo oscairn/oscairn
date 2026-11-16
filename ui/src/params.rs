@@ -60,6 +60,8 @@ pub enum Outcome {
 enum Strip {
     Pages,
     Tabs,
+    /// The master's overview: the view's own parameters, then its operators, in the order they are drawn.
+    Overview,
 }
 
 /// A stop of the cursor above the tiles: a row of tabs (the search is the top bar's).
@@ -75,6 +77,13 @@ enum At {
     Tile(usize),
 }
 
+/// What an entry of the overview's row is: one of the view's own parameters, or an operator.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Over {
+    Param(usize),
+    Operator(usize),
+}
+
 /// What the dial and a press do now.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Edit {
@@ -83,6 +92,8 @@ enum Edit {
     Value(usize, usize),
     /// A tile's dropdown is open.
     List(usize),
+    /// One of the overview's own parameters (the algorithm) takes the dial.
+    Param(usize),
 }
 
 /// The labels of a row or rail of tabs: each name's short form on one and on two lines, and the heading the names share
@@ -139,8 +150,15 @@ pub struct Screen {
     message: String,
     /// The page last published to the screen knobs.
     published: Value,
-    /// The FM view's operator last chosen by touch (0 to 7); the cursor's tile overrides it.
+    /// The master's selected one (0 to 7): the detail shows it, the knobs play it, the overview marks it.
     operator: usize,
+    /// The first row of the detail's tiles in view, and the area's height it was laid out for.
+    detail_row: usize,
+    height: f32,
+    /// What the master's indexes are called (the folded tabs' names).
+    names: Vec<(u64, String)>,
+    /// The detail tile the cursor left upward, which a step down from the overview comes back to.
+    memory: Option<usize>,
     /// Where each FM operator's most recent voice is on its envelope (the dots), when the plugin says.
     positions: Vec<Option<views::Along>>,
     pub out: Vec<Out>,
@@ -185,6 +203,10 @@ impl Screen {
             message: String::new(),
             published: Value::Null,
             operator: 0,
+            detail_row: 0,
+            height: 0.,
+            names: vec![],
+            memory: None,
             positions: vec![],
             out: vec![],
         }
@@ -237,7 +259,16 @@ impl Screen {
 
     fn relayout(&mut self) {
         let groups = self.groups();
-        self.laid = grid::layout(&self.params, &groups, self.width, self.gap, &|i| self.control(i));
+        let (scale, spacing) = self.ui.upgrade().map_or((1., 1.), |ui| {
+            let theme = ui.global::<crate::Theme>();
+            (theme.get_font_scale(), theme.get_spacing())
+        });
+        self.names = self.entries.get(self.entry).and_then(|e| self.model.pages[e.page].indexed.as_ref()).map(|i| i.names.clone()).unwrap_or_default();
+        let master = grid::Master { height: if self.height > 0. { self.height } else { 405. }, selected: self.operator, row: self.detail_row, scale, spacing, names: &self.names };
+        self.laid = grid::layout_with(&self.params, &groups, self.width, self.gap, &|i| self.control(i), &master);
+        if let Some(d) = &self.laid.detail {
+            self.detail_row = d.row;
+        }
         if self.cursor.is_some_and(|c| c >= self.laid.tiles.len()) {
             self.cursor = None;
         }
@@ -252,10 +283,20 @@ impl Screen {
         })
     }
 
-    /// The FM view's selected operator (0 to 7): the one whose parameter the cursor's tile is, else the one last touched.
+    /// The master's selected operator (0 to 7).
     fn selected_operator(&self) -> usize {
-        let on_cursor = self.cursor.and_then(|c| self.laid.tiles.get(c)).and_then(|t| self.fm()?.operator_of(t.param));
-        on_cursor.unwrap_or(self.operator)
+        self.operator
+    }
+
+    /// Selects an operator: the detail shows its parameters (the row kept, as the sweep of one parameter across
+    /// operators wants), the knobs play them. Selecting is not an edit: nothing is sent but the knobs' page.
+    fn select(&mut self, n: usize) {
+        let count = self.laid.detail.as_ref().map_or(0, |d| d.count);
+        let n = n.min(count.saturating_sub(1));
+        if n != self.operator {
+            self.operator = n;
+            self.relayout();
+        }
     }
 
     /// Where each FM operator's most recent voice is on its envelope line, from the plugin (`None`: no dot for
@@ -283,11 +324,13 @@ impl Screen {
         if self.params.is_empty() {
             return;
         }
-        let mut shown: Vec<usize> = self.laid.tiles.iter().map(|t| t.param).collect();
+        let detail = self.laid.detail.as_ref().map_or(0, |d| d.tiles);
+        let mut shown: Vec<usize> = self.laid.tiles.iter().skip(detail).map(|t| t.param).collect();
         by_priority(&self.params, &mut shown);
-        if let Some(own) = self.fm().and_then(|f| f.operators.get(self.selected_operator())).map(|o| o.params()) {
-            let mut first: Vec<usize> = own.into_iter().filter(|p| shown.contains(p)).collect();
-            shown.retain(|p| !first.contains(p));
+        // The selected one's parameters, all of them in the plugin's priority order, then the view's own, then the rest.
+        if let Some(d) = &self.laid.detail {
+            let mut first = d.params.clone();
+            first.extend(d.own.iter().copied());
             first.extend(shown);
             shown = first;
         }
@@ -483,13 +526,18 @@ impl Screen {
             members: &panel.params,
             norm: &norm,
             text: &text,
-            focus: self.cursor.and_then(|c| self.laid.tiles.get(c)).map(|t| t.param),
+            focus: self.cursor.and_then(|c| self.laid.tiles.get(c)).map(|t| t.param).or_else(|| match self.over() {
+                Some(Over::Param(p)) => Some(p),
+                _ => None,
+            }),
             w: panel.rect.w,
             h: panel.rect.h,
             top: grid::envelope_top(scale, spacing),
             scale,
             spacing,
             selected: self.selected_operator(),
+            over: self.over_operator(),
+            editing: matches!(self.edit, Edit::Param(_)),
             positions: &self.positions,
         };
         f(&ctx)
@@ -536,8 +584,10 @@ impl Screen {
         // Laid out again when the area's width changed, or the theme's gap between sections (a theme
         // whose sections join has none).
         let gap = crate::theme::section_gap(&ui, grid::SECTION_GAP);
-        if (width - self.width).abs() > 0.5 || gap != self.gap {
+        let height = g.get_view_height();
+        if (width - self.width).abs() > 0.5 || (height - self.height).abs() > 0.5 || gap != self.gap {
             self.width = width;
+            self.height = height;
             self.gap = gap;
             self.relayout();
         }
@@ -646,6 +696,20 @@ impl Screen {
         }
     }
 
+    /// A parameter of the overview's stepped `by`, as a tile's value is.
+    fn dial_param(&mut self, i: usize, by: i32) {
+        let p = self.params[i].clone();
+        let now = self.value(&p);
+        let step = if p.stepped { 1. } else { (p.max - p.min) / 100. };
+        let mut to = (now + step * by as f64).clamp(p.min.min(p.max), p.max.max(p.min));
+        if p.stepped {
+            to = to.round();
+        }
+        if to != now {
+            self.set(&p, to);
+        }
+    }
+
     /// A press on the cursor's tile.
     fn press(&mut self, k: usize) {
         let Some(t) = self.laid.tiles.get(k).cloned() else { return };
@@ -696,6 +760,9 @@ impl Screen {
         if self.tab_names().len() > 1 {
             out.push(Stop::Row(Strip::Tabs));
         }
+        if self.laid.detail.is_some() {
+            out.push(Stop::Row(Strip::Overview));
+        }
         out
     }
 
@@ -726,12 +793,72 @@ impl Screen {
 
     /// Puts the cursor on a stop (one cursor at a time).
     fn go(&mut self, to: At) {
+        let left = self.cursor.filter(|&c| self.laid.detail.as_ref().is_some_and(|d| c < d.tiles));
         self.strip = None;
         self.cursor = None;
         match to {
-            At::Bar(Stop::Row(row), i) => self.strip = Some((row, i)),
+            At::Bar(Stop::Row(row), i) => {
+                self.strip = Some((row, i));
+                if left.is_some() {
+                    self.memory = left;
+                }
+                // Looking at an operator is not an edit: the detail follows the cursor along the overview.
+                if let Some(Over::Operator(n)) = self.over() {
+                    self.select(n);
+                }
+            }
             At::Tile(t) => self.cursor = Some(t),
         }
+    }
+
+    /// What the cursor is on in the overview's row, if it is on it.
+    fn over(&self) -> Option<Over> {
+        let (Strip::Overview, i) = self.strip? else { return None };
+        let own = &self.laid.detail.as_ref()?.own;
+        Some(if i < own.len() { Over::Param(own[i]) } else { Over::Operator(i - own.len()) })
+    }
+
+    fn over_operator(&self) -> Option<usize> {
+        match self.over() {
+            Some(Over::Operator(n)) => Some(n),
+            _ => None,
+        }
+    }
+
+    /// Whether the cursor's tile `t` is on the detail's last (`by` 1) or first (`by` -1) row shown and rows go on that way.
+    fn can_page(&self, t: usize, by: i32) -> bool {
+        let Some(d) = &self.laid.detail else { return false };
+        t < d.tiles && if by > 0 { t / d.columns == (d.tiles - 1) / d.columns && d.row + d.per < d.rows } else { t < d.columns && d.row > 0 }
+    }
+
+    /// The detail's rows turned by `by`, one row at a time: whether they moved.
+    fn page_rows(&mut self, by: i32) -> bool {
+        let Some(d) = &self.laid.detail else { return false };
+        let to = (d.row as i32 + by).clamp(0, d.rows.saturating_sub(d.per) as i32) as usize;
+        if to == d.row {
+            return false;
+        }
+        self.detail_row = to;
+        self.relayout();
+        true
+    }
+
+    /// The page keys' step on a page with a master: the selected one `by` on, the cursor staying on its place in the
+    /// detail (so one parameter is swept across the operators). False at either end: the keys then turn the page.
+    fn step_operator(&mut self, by: i32) -> bool {
+        let Some(d) = &self.laid.detail else { return false };
+        let to = self.operator as i32 + by;
+        if to < 0 || to >= d.count as i32 {
+            return false;
+        }
+        self.end_gestures();
+        self.edit = Edit::None;
+        self.select(to as usize);
+        if let Some((Strip::Overview, _)) = self.strip {
+            let own = self.laid.detail.as_ref().map_or(0, |d| d.own.len());
+            self.strip = Some((Strip::Overview, own + self.operator));
+        }
+        true
     }
 
     /// The row's stop on its selected entry.
@@ -739,6 +866,7 @@ impl Screen {
         match stop {
             Stop::Row(Strip::Pages) => At::Bar(stop, self.shown_page().unwrap_or(0)),
             Stop::Row(Strip::Tabs) => At::Bar(stop, self.shown_tab()),
+            Stop::Row(Strip::Overview) => At::Bar(stop, self.laid.detail.as_ref().map_or(0, |d| d.own.len()) + self.operator),
         }
     }
 
@@ -747,6 +875,7 @@ impl Screen {
         match row {
             Strip::Pages => self.model.pages.len(),
             Strip::Tabs => self.tab_names().len(),
+            Strip::Overview => self.laid.detail.as_ref().map_or(0, |d| d.own.len() + d.count),
         }
     }
 
@@ -766,8 +895,16 @@ impl Screen {
             let forward = by > 0;
             at = match at {
                 At::Tile(t) => {
-                    if forward {
-                        At::Tile((t + 1).min(n.saturating_sub(1)))
+                    let (columns, per) = self.laid.detail.as_ref().map_or((1, 1), |d| (d.columns, d.per));
+                    if forward && self.can_page(t, 1) && t + 1 == self.laid.detail.as_ref().map_or(0, |d| d.tiles) {
+                        // Past the last tile of the rows in view the rows go on: a row on, the cursor at its start.
+                        self.page_rows(1);
+                        At::Tile(((per - 1) * columns).min(self.laid.tiles.len().saturating_sub(1)))
+                    } else if forward {
+                        At::Tile((t + 1).min(self.laid.tiles.len().saturating_sub(1)))
+                    } else if t == 0 && self.can_page(0, -1) {
+                        self.page_rows(-1);
+                        At::Tile((columns - 1).min(self.laid.tiles.len().saturating_sub(1)))
                     } else if t > 0 {
                         At::Tile(t - 1)
                     } else {
@@ -820,13 +957,21 @@ impl Screen {
             let place = from.and_then(|f| bars.iter().position(|s| *s == f)).unwrap_or(bars.len());
             bars[..place].iter().rev().copied().find(|s| !side || *s != pages && *s != tabs)
         };
-        let first_tile = |me: At| if self.laid.tiles.is_empty() { me } else { At::Tile(0) };
+        let no_tiles = self.laid.tiles.is_empty();
+        let first_tile = |me: At| if no_tiles { me } else { At::Tile(0) };
         let (mut dx, mut dy) = (dx, dy);
         while dx != 0 || dy != 0 {
             let (sx, sy) = if dx != 0 { (dx.signum(), 0) } else { (0, dy.signum()) };
             dx -= sx;
             dy -= sy;
             at = match at {
+                At::Tile(t) if sy != 0 && self.can_page(t, sy) => {
+                    // Down from the last row in view or up from the first, where rows go on: a row on, the same column.
+                    let (columns, per) = self.laid.detail.as_ref().map_or((1, 1), |d| (d.columns, d.per));
+                    self.page_rows(sy);
+                    let row = if sy > 0 { per - 1 } else { 0 };
+                    At::Tile((row * columns + t % columns).min(self.laid.tiles.len().saturating_sub(1)))
+                }
                 At::Tile(t) => match grid::arrow(&self.laid.tiles, t, sx, sy) {
                     Some(to) => At::Tile(to),
                     None if sy < 0 => above(None).map_or(at, |stop| self.selected(stop)),
@@ -875,11 +1020,14 @@ impl Screen {
                     } else if sy < 0 {
                         above(Some(stop)).map_or(at, |up| self.selected(up))
                     } else {
-                        // Down: the next row, then the tiles.
+                        // Down: the next row, then the tiles (from the overview, the tile it left).
                         let place = bars.iter().position(|s| *s == stop).unwrap_or(0);
                         match bars.get(place + 1) {
                             Some(&next) => self.selected(next),
-                            None => first_tile(at),
+                            None => match self.memory.filter(|&m| row == Strip::Overview && m < self.laid.tiles.len()) {
+                                Some(m) => At::Tile(m),
+                                None => first_tile(at),
+                            },
                         }
                     }
                 }
@@ -893,13 +1041,29 @@ impl Screen {
         match row {
             Strip::Pages => self.go_page(i),
             Strip::Tabs => self.go_tab(i),
+            // A press on one of the view's own parameters gives it the dial; on an operator it takes the cursor into
+            // that operator's tiles (the operator is already the one in view).
+            Strip::Overview => {
+                match self.over() {
+                    Some(Over::Param(p)) => {
+                        self.edit = Edit::Param(p);
+                        self.begin(self.params[p].id);
+                    }
+                    _ => {
+                        let m = self.memory.filter(|&m| m < self.laid.tiles.len()).unwrap_or(0);
+                        if !self.laid.tiles.is_empty() {
+                            self.go(At::Tile(m));
+                        }
+                    }
+                }
+                return;
+            }
         }
         self.go(At::Bar(Stop::Row(row), i));
     }
 
     pub fn act(&mut self, action: Action) -> Outcome {
         let outcome = self.handle(action);
-        self.operator = self.selected_operator();
         self.publish();
         self.show();
         outcome
@@ -917,6 +1081,12 @@ impl Screen {
                 self.edit = Edit::None;
             }
             (Edit::List(_), Action::Cancel(_)) => self.edit = Edit::None,
+            (Edit::Param(p), Action::Move { by, .. }) => self.dial_param(p, by),
+            (Edit::Param(p), Action::Arrow { dx, dy }) => self.dial_param(p, dx - dy),
+            (Edit::Param(_), Action::Confirm(_) | Action::Cancel(_)) => {
+                self.end_gestures();
+                self.edit = Edit::None;
+            }
             (Edit::Value(k, part), Action::Move { by, .. }) => self.dial(k, part, by),
             (Edit::Value(k, part), Action::Arrow { dx, dy }) => self.dial(k, part, dx - dy),
             (Edit::Value(k, 0), Action::Confirm(_)) if self.laid.tiles[k].control == Control::Range => {
@@ -940,7 +1110,7 @@ impl Screen {
             (Edit::None, Action::Move { by, .. }) => self.step(by),
             (Edit::None, Action::Arrow { dx, dy }) => self.arrow(dx, dy),
             (_, Action::Page(by)) => {
-                self.turn_page(by);
+                let _ = self.step_operator(by) || self.turn_page(by);
             }
             (Edit::None, Action::End(by)) => {
                 let last = self.laid.tiles.len().checked_sub(1);
@@ -1077,8 +1247,12 @@ impl Screen {
         self.cursor = None;
         self.strip = None;
         if let Some(n) = operator {
-            self.operator = n;
-            self.publish();
+            self.select(n);
+        }
+        if let views::Held::Rows(by) = held {
+            self.page_rows(by);
+            self.show();
+            return true;
         }
         for i in ids {
             self.begin(self.params[i].id);
@@ -1270,7 +1444,7 @@ fn natural(s: &str) -> Vec<(String, u64)> {
 }
 
 /// "Operator 12" is ("Operator", 12); a name without a trailing number has none.
-fn numbered(name: &str) -> (String, i64) {
+pub fn numbered(name: &str) -> (String, i64) {
     let end = name.trim_end_matches(|c: char| c.is_ascii_digit()).len();
     if end == name.len() || end == 0 || !name[..end].ends_with(' ') {
         return (name.to_string(), -1);

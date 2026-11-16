@@ -392,3 +392,9 @@ that share leading or trailing words show them once as a heading (src/tabs.rs `a
 the whole names overflow; `auto` is the placement with the larger content area; the pages-column arrangement and `Theme.column-from`
 are gone. Now 274 passed, 1 ignored, `cargo clippy --offline --all-targets` clean. Pictures in ui/target/theme-shots: tabs-*,
 tabrows-*, rail-*. Not run on a unit. docs/design-language.md (outside ui/) still describes `auto` as "by the screen's height".
+
+Branch `rust-app-opdetail` (from `rust-app` 3de97271; baseline 274 passed, 1 ignored): the FM operators view as a master and detail on one page
+(owner, 2026-11-16; ui/GRID.md "Master and detail", ui/TABS.md "Tabs that are indexes"). The overview (diagram, shared graph, a list line per
+operator) over the selected operator's own tiles under a heading in its color; a page whose tabs are the indexes of one view folds into it
+(no tab per operator); selection by the dial (the detail follows the cursor along the overview), by touch, and the page keys; rows paged;
+the knobs under the screen follow the selection; fixtures' tab and page names made neutral. Tests: tests/fm_master.rs.

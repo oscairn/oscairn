@@ -21,12 +21,12 @@ pub const SECTION_GAP: f32 = 6.;
 const TILE: f32 = 84.;
 const KNOB_EXTRA: f32 = 36.;
 const HEADING: f32 = 30.;
-/// The views' heights in touch mode (ParameterGrid.cpp build): envelope, LFO, filter, key map, FM operators.
+/// The views' heights in touch mode (ParameterGrid.cpp build): envelope, LFO, filter, key map. The FM operator
+/// view has no fixed one: it is the top pane of a master and detail block that fills the area.
 const ENVELOPE: f32 = 180.;
 const LFO: f32 = 140.;
 const FILTER: f32 = 160.;
 const MAP: f32 = 180.;
-const FM: f32 = 350.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
@@ -229,6 +229,61 @@ pub struct Laid {
     pub cards: Vec<Rect>,
     pub panels: Vec<Panel>,
     pub height: f32,
+    /// The page's master and detail, when a view on it has an overview (ui/GRID.md "Master and detail").
+    pub detail: Option<Detail>,
+}
+
+/// A master and detail block of a page: the view's overview on top (panel 0), under it the heading of the one
+/// selected (panel 1) and that one's parameters as the page's tiles (the first `tiles` of `Laid::tiles`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Detail {
+    pub view: u64,
+    /// The selected one's index in the view (1 to 8).
+    pub index: u64,
+    /// How many there are to select (the overview's lines).
+    pub count: usize,
+    /// The view's own parameters (index 0), which the overview carries.
+    pub own: Vec<usize>,
+    /// Every parameter of the selected one in the plugin's priority order (the knobs play these first).
+    pub params: Vec<usize>,
+    pub columns: usize,
+    /// Rows of tiles it has in all, the first shown, and how many are.
+    pub rows: usize,
+    pub row: usize,
+    pub per: usize,
+    /// The tiles of the detail in view: the first of the page's.
+    pub tiles: usize,
+}
+
+/// What a page with a master and detail is laid out for.
+#[derive(Clone, Copy)]
+pub struct Master<'a> {
+    /// The area's height: the block fills it (and goes past it only when the overview's least does not fit).
+    pub height: f32,
+    /// The one selected (0 for the first) and the first row of its tiles shown.
+    pub selected: usize,
+    pub row: usize,
+    /// The theme's type scale and spacing, which the overview's sizes follow.
+    pub scale: f32,
+    pub spacing: f32,
+    /// What each index is called ("Operator 3"), where the plugin names them (its tabs, before they were folded in).
+    pub names: &'a [(u64, String)],
+}
+
+impl Default for Master<'_> {
+    fn default() -> Self {
+        Master { height: 405., selected: 0, row: 0, scale: 1., spacing: 1., names: &[] }
+    }
+}
+
+/// The detail heading's height.
+pub const DETAIL_HEAD: f32 = views::DETAIL_HEAD;
+
+/// The view on a page whose indexed siblings it shows as master and detail: the first with an overview (an FM
+/// operator view: the one with an algorithm). A key map's zones or a sampler's elements are views that could have
+/// one; only this has an overview built.
+pub fn master_view(params: &[Param], members: &[usize]) -> Option<u64> {
+    members.iter().map(|&i| &params[i]).find(|p| p.view != 0 && p.field == "algorithm").map(|p| p.view)
 }
 
 /// How many columns a width holds: two to six, a tile about 210 across.
@@ -249,7 +304,13 @@ pub fn by_priority(params: &[Param], indices: &mut [usize]) {
 /// The tiles, headings, cards and view panels of `groups` (each a heading and its parameters) at
 /// `width`, as `ParameterGrid::build`: views first across the row, then runs of linked tiles (a
 /// hint's group, an envelope's stages) kept together, the rest one tile each, by priority.
+#[cfg(test)]
 pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap: f32, control_of: &dyn Fn(usize) -> Control) -> Laid {
+    layout_with(params, groups, width, gap, control_of, &Master::default())
+}
+
+/// `layout` with what a master and detail block needs: the area's height, the one selected and the row shown.
+pub fn layout_with(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap: f32, control_of: &dyn Fn(usize) -> Control, master: &Master) -> Laid {
     let mut out = Laid::default();
     let cols = columns(width);
     let tile_w = (width - gap * (cols - 1) as f32) / cols as f32;
@@ -270,18 +331,63 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
             out.headings.push((y, heading.replace('/', " › ")));
             y += HEADING;
         }
+        // A view with an overview: its siblings are a master and a detail, not tiles (once on a page).
+        let rest: Vec<usize>;
+        let mut members = members;
+        let mut block = false;
+        if let (None, Some(view)) = (&out.detail, master_view(params, members)) {
+            let fm = views::fm_of(params, view);
+            let (count, selected) = (fm.operators.len(), master.selected.min(fm.operators.len().saturating_sub(1)));
+            let index = selected as u64 + 1;
+            let mut own: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == 0).collect();
+            by_priority(params, &mut own);
+            let of = |n: u64| -> Vec<usize> {
+                let mut v: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == n && !drawn_by_another(params, i)).collect();
+                by_priority(params, &mut v);
+                v
+            };
+            let (list, most) = (of(index), (1..=count as u64).map(|n| of(n).len()).max().unwrap_or(0));
+            let rows_of = |n: usize| n.div_ceil(cols);
+            let (rows, max_rows) = (rows_of(list.len()), rows_of(most).max(1));
+            let area = (master.height - y).max(0.);
+            let detail_h = |r: usize| DETAIL_HEAD + gap + r as f32 * height + r.saturating_sub(1) as f32 * gap;
+            let pref = crate::fm::preferred_height(count, master.scale, master.spacing);
+            let mut per = 1;
+            for r in 2..=max_rows {
+                if area - gap - detail_h(r) >= pref {
+                    per = r;
+                }
+            }
+            let top = (area - gap - detail_h(per)).max(crate::fm::least_height(count, master.scale, master.spacing));
+            let row = master.row.min(rows.saturating_sub(per));
+            let title = master.names.iter().find(|n| n.0 == index).map_or_else(|| format!("Operator {index}"), |n| n.1.clone());
+            out.panels.push(Panel { rect: Rect { x: 0., y, w: width, h: top }, view: View::Fm(fm), params: vec![] });
+            let head = Rect { x: 0., y: y + top + gap, w: width, h: DETAIL_HEAD };
+            out.panels.push(Panel { rect: head, view: View::Detail(views::DetailHead { color: selected, title, rows, row, per }), params: vec![] });
+            let first = head.y + DETAIL_HEAD + gap;
+            let shown: Vec<usize> = list.iter().copied().skip(row * cols).take(per * cols).collect();
+            for (k, &param) in shown.iter().enumerate() {
+                let rect = Rect { x: (k % cols) as f32 * (tile_w + gap), y: first + (k / cols) as f32 * (height + gap), w: tile_w, h: height };
+                out.tiles.push(Tile { param, rect, control: control_of(param), linked: false });
+            }
+            out.detail = Some(Detail { view, index, count, own, params: list, columns: cols, rows, row, per, tiles: shown.len() });
+            y += top + gap + detail_h(per);
+            rest = members.iter().copied().filter(|&i| !(params[i].view == view && params[i].index <= 8)).collect();
+            members = &rest;
+            block = true;
+        }
+        if block && !members.is_empty() {
+            y += gap + 6.;
+        }
+        let members = members;
         // The envelopes the plugin describes, each a panel across the row, then one recognized by name.
         let mut described: Vec<Vec<usize>> = Vec::new();
         let mut keys: Vec<(u64, u64)> = Vec::new();
         let mut maps: Vec<(u64, u64)> = Vec::new(); // views and indexes of key and velocity maps
-        let mut operators: Vec<u64> = Vec::new(); // views with an FM algorithm
         for &i in members {
             let p = &params[i];
             if p.view == 0 {
                 continue;
-            }
-            if p.field == "algorithm" && !operators.contains(&p.view) {
-                operators.push(p.view);
             }
             let list = if is_envelope(&p.field) { &mut keys } else { &mut maps };
             if (is_envelope(&p.field) || views::is_map_field(&p.field)) && !list.contains(&(p.view, p.index)) {
@@ -293,9 +399,7 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
             *y += high + gap;
         };
         // The FM operator view where its algorithm is, then an envelope per view and index.
-        for view in operators {
-            panel(&mut out, &mut y, View::Fm(views::fm_of(params, view)), FM, vec![]);
-        }
+        // (A second operator view on a page is not a master: it keeps no panel, its parameters stay tiles.)
         for (view, index) in keys {
             let list: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == index && is_envelope(&params[i].field)).collect();
             let fields: Vec<&str> = list.iter().map(|&i| params[i].field.as_str()).collect();

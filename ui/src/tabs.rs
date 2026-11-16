@@ -27,6 +27,16 @@ pub struct Page {
     pub tabs: Vec<String>,
     /// The page's parameters in the plugin's order.
     pub params: Vec<Placed>,
+    /// The page's tabs were the indexes of one view: they are not tabs, the view shows its siblings as a master and
+    /// a detail (`Model::fold_indexed`), and these are what its indexes were called.
+    pub indexed: Option<Indexed>,
+}
+
+/// The view a page's former tabs were the indexes of, and the tabs' names by index ("Operator 3" for 3).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Indexed {
+    pub view: u64,
+    pub names: Vec<(u64, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -70,9 +80,28 @@ pub struct Entry {
 impl Model {
     /// The model a plugin gets: its declared pages and tabs where it declares any, else the inferred ones.
     pub fn build(params: &[Param], declared: Option<&Declared>) -> Model {
-        match declared {
+        let mut model = match declared {
             Some(d) => Model::declared(params, d),
             None => Model::inferred(params),
+        };
+        model.fold_indexed(params);
+        model
+    }
+
+    /// A page whose tabs are exactly the indexes of one view that has an overview is not a page of tabs: the tabs go
+    /// and the view shows its indexes as a master and detail (ui/TABS.md "Tabs that are indexes"). The rule: two or
+    /// more tabs; every tab but at most one with no name (the page's own, which keeps its parameters above where
+    /// the tabs were) is a name ending in a number, all with the same words before it and no number twice; every
+    /// parameter on such a tab is of one and the same view and carries the tab's number as its index; and that view
+    /// has an overview (an algorithm: `grid::master_view`). Anything else stays tabs.
+    pub fn fold_indexed(&mut self, params: &[Param]) {
+        for page in &mut self.pages {
+            let Some(found) = indexed_view(params, page) else { continue };
+            page.tabs.clear();
+            for x in &mut page.params {
+                x.tab = None;
+            }
+            page.indexed = Some(found);
         }
     }
 
@@ -95,7 +124,7 @@ impl Model {
                         }
                     })
                     .collect();
-                Page { name, tabs, params: placed }
+                Page { name, tabs, params: placed, indexed: None }
             })
             .collect();
         Model { pages }
@@ -172,7 +201,7 @@ impl Model {
                 })
                 .collect();
             if !params_on.is_empty() {
-                model.pages.push(Page { name, tabs: page_tabs, params: params_on });
+                model.pages.push(Page { name, tabs: page_tabs, params: params_on, indexed: None });
             }
         }
         model
@@ -202,6 +231,42 @@ impl Model {
         }
         groups
     }
+}
+
+/// The view a page's tabs are the indexes of, with their names, when they are (`Model::fold_indexed`).
+pub fn indexed_view(params: &[Param], page: &Page) -> Option<Indexed> {
+    if page.tabs.len() < 2 {
+        return None;
+    }
+    let mut stem: Option<String> = None;
+    let mut view: Option<u64> = None;
+    let mut names: Vec<(u64, String)> = Vec::new();
+    let mut numbered_tabs = 0;
+    for (t, name) in page.tabs.iter().enumerate() {
+        let on: Vec<&Param> = page.params.iter().filter(|x| x.tab == Some(t)).map(|x| &params[x.param]).collect();
+        if on.is_empty() {
+            return None;
+        }
+        if name.is_empty() {
+            continue; // the page's own tab ("General"): kept above where the tabs were
+        }
+        let (words, number) = crate::params::numbered(name);
+        if number < 1 || stem.as_ref().is_some_and(|s| *s != words) || names.iter().any(|n| n.0 == number as u64) {
+            return None;
+        }
+        stem = Some(words);
+        for p in &on {
+            if p.view == 0 || p.index != number as u64 || view.is_some_and(|v| v != p.view) {
+                return None;
+            }
+            view = Some(p.view);
+        }
+        names.push((number as u64, name.clone()));
+        numbered_tabs += 1;
+    }
+    let view = view?;
+    let members: Vec<usize> = page.params.iter().map(|x| x.param).collect();
+    (numbered_tabs >= 2 && crate::grid::master_view(params, &members) == Some(view)).then_some(Indexed { view, names })
 }
 
 /// What is left of a module path below a declared page and tab: the page's name and the tab's name drop off its

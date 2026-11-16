@@ -92,7 +92,7 @@ fn the_model_inferred_from_module_paths_is_the_pages_and_tabs_of_today() {
     // of 24 or fewer has none.
     let params = editor_parameters(grid::parse(&super::tabs::five_pages()));
     let model = Model::inferred(&params);
-    assert_eq!(model.pages.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Operators", "Filter", "Amp", "Effects", "Global"]);
+    assert_eq!(model.pages.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Operators", "Filter", "Amp", "Voicing", "Global"]);
     assert_eq!(model.pages[0].tabs, (1..=8).map(|n| format!("Operator {n}")).collect::<Vec<_>>());
     assert!(model.pages[1..].iter().all(|p| p.tabs.is_empty()));
     assert_eq!(model.entries().len(), 8 + 4);
@@ -242,7 +242,7 @@ fn shared_words_are_taken_off_the_names_of_a_row_and_shown_once() {
     let a = abbreviate(&names(&["Filter A Cutoff", "Filter A Reso", "Filter A Drive"]));
     assert_eq!((a.heading.as_str(), a.shorts), ("Filter A", names(&["Cutoff", "Reso", "Drive"])));
     // A mixed rail is not abbreviated, nor is a single tab, nor an empty list.
-    for row in [names(&["Operator 1", "Operator 2", "LFO"]), names(&["Operator 1"]), names(&["Filter", "Amp", "Effects"]), names(&[])] {
+    for row in [names(&["Operator 1", "Operator 2", "LFO"]), names(&["Operator 1"]), names(&["Filter", "Amp", "Output"]), names(&[])] {
         let a = abbreviate(&row);
         assert_eq!((a.heading.as_str(), &a.shorts), ("", &row), "{row:?}");
     }
@@ -262,7 +262,7 @@ fn a_label_has_a_second_line_where_it_has_a_space() {
     use crate::tabs::two_lines;
     let two = |a: &str, b: &str| (a.to_string(), b.to_string());
     assert_eq!(two_lines("Modulation Matrix"), two("Modulation", "Matrix"));
-    assert_eq!(two_lines("Effects A"), two("Effects", "A"));
+    assert_eq!(two_lines("Macro Controls"), two("Macro", "Controls"));
     assert_eq!(two_lines("Global"), two("Global", ""));
     assert_eq!(two_lines("A B C D"), two("A B", "C D"), "the space that leaves the lines the most even");
     assert_eq!(two_lines(""), two("", ""));
@@ -278,7 +278,7 @@ fn the_screen_keeps_the_whole_names_and_gives_the_short_forms_besides() {
     let _p = open_with(&mut s, list.clone(), &super::tabs::values_of(&list), &super::tabs::percent);
     let g = ui.global::<GridState>();
     let strings = |m: slint::ModelRc<slint::SharedString>| m.iter().map(|n| n.to_string()).collect::<Vec<_>>();
-    assert_eq!(strings(g.get_pages()), ["Operators", "Filter", "Amp", "Effects", "Global"]);
+    assert_eq!(strings(g.get_pages()), ["Operators", "Filter", "Amp", "Voicing", "Global"]);
     assert_eq!(g.get_page_heading().as_str(), "", "the pages share nothing");
     assert_eq!(strings(g.get_tabs()), (1..=8).map(|n| format!("Operator {n}")).collect::<Vec<_>>(), "whole names");
     assert_eq!(g.get_tab_heading().as_str(), "Operator");

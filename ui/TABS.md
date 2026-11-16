@@ -72,7 +72,7 @@ So the family has three users today: the parameter pages (two levels), and Play'
   theme's gap; the content starts one margin after the last rail.
 - **Text** (src/tabs.rs `abbreviate`, `two_lines`; slint/theme.slint `Rail`): every label of a rail is horizontal.
   (a) At the small type, on one line, or on two where it has a space to break at, when every label fits the rail's width that
-  way ("Operators", "Effects A": the keyboard's rails). (b) *Rotated text (reading bottom to top) was not built: Slint 1.18.1's
+  way ("Operators", "Voice Shaping": the keyboard's rails). (b) *Rotated text (reading bottom to top) was not built: Slint 1.18.1's
   software renderer, the one the device and the headless tests use, does not rotate text.* Checked by rendering: a `Text`
   given `transform-rotation: -90deg` (its `rotation-angle` is the deprecated alias) came out upright and unchanged, and
   i-slint-renderer-software's `rotate` is `// TODO (#6068)`. A rotated label would need its own glyph drawing. (c) Otherwise the
@@ -80,7 +80,7 @@ So the family has three users today: the parameter pages (two levels), and Play'
   reference's `drawFittedText` rule), then each line cut with an ellipsis. One rail never mixes sizes. Each rail reports its
   factor (`GridState.page-fit`, `tab-fit`). On the keyboard's screen at 1.55: the five pages ("Operators" in bold, the widest,
   is 4% too wide for the rail) 0.95, the eight tabs "1" to "8" 1.0, "Voice" and "Output" 1.0, "Sound" and "Output" 1.0, and the
-  unrelated names "Modulation Matrix", "Arpeggiator", "Effects A", "Global" 0.70 ("Arpeggiator" is the one that sets it).
+  unrelated names "Modulation Matrix", "Voice Shaping", "Macro Controls", "Global" 0.70 (the names are neutral long labels of one plugin's tabs, chosen only to be long; the test prints the factor).
   Shrunk text is as crisp as full-size text (compared enlarged: `rail-long-names-*`).
 - **Shapes** follow the `tabs` style. `segmented`: the track is the raised color, edge to edge; the selected tab is a cell
   lifted out of it (the soft shadow where `depth` is soft), inset by the tab padding, rounded by the radius + 1. `folder`:
@@ -176,6 +176,35 @@ dial: one step back from the first tile is the tabs, on the tab shown, then a st
 Unverified on a unit.
 
 Touch: a tap on a tab opens it and lets the cursor go (one cursor at a time).
+
+## Tabs that are indexes (owner, 2026-11-16)
+
+Numbered siblings of one structure are not pages or tabs. The owner, on seeing a tab per FM operator: "I think there's got to
+be an interface design that would keep all operators on the same page." When a page's tabs are exactly the indexes of one
+view, the host does not draw them as a tab row or rail: the page is that view's master and detail (GRID.md "Master and
+detail"), the tab names are never shown as tabs (the detail's heading uses them: "Operator 5"), and the tab family shows
+only what is left (the pages, if there are two or more).
+
+**The rule** (src/tabs.rs `indexed_view`, `Model::fold_indexed`, run on every model, inferred from module paths or declared):
+a page with tabs is folded when
+- it has two or more tabs, and every one of them has a parameter;
+- every tab but at most one with no name (the page's own tab, "General": its parameters stay on the page, above where the
+  tabs were) has a name ending in a number, all with the same words before the number ("Operator 1", "Operator 2", ...), no
+  number twice;
+- every parameter on such a tab belongs to one view (the same for all the tabs) and carries the tab's number as its index
+  (every parameter under tab "Operator k" has that view and index k);
+- that view has an overview: today an FM operator view, one with an `algorithm` field (`grid::master_view`). A view without
+  one (an envelope per index, a key map's zones: no overview is built for them yet) keeps its tabs.
+
+Anything else stays tabs: a tab whose parameters have another index, names without numbers or with different words before
+them, parameters in no view, two views among the tabs, a tab that is not an index ("Routing" beside "Operator 1" to 8).
+Tested positive and negative: tests/fm_master.rs `tabs_that_are_the_indexes_of_one_view_fold_into_it_and_others_stay_tabs`.
+A page that is folded has no tabs (`Page::tabs` is empty, every parameter on the page, `Page::indexed` has the view and the
+names by index); a page of the view that was never tabs (a plugin of at most 24 parameters on one page, or without module
+paths) is the same master and detail from the view's presence alone, with the heading "Operator N".
+
+The same rule's dial order: pages' rail or strip, the master's overview, the tiles: the overview's row is one more stop
+above the tiles (`Strip::Overview`), after the tabs' row where a page has one.
 
 ## What a plugin can declare (draft 6 of the layout extension)
 

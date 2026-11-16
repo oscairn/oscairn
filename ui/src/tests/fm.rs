@@ -8,9 +8,9 @@ use super::views::{fm8_plugin, fm8_text, fm8_values, fm_plugin, fm_text, fm_valu
 use super::*;
 use crate::fm::{algorithm_layout, Flow};
 
-type Routing = [u8; 11];
+pub(super) type Routing = [u8; 11];
 
-fn routing(inputs: [u8; 8], carriers: u8, from: u8, to: u8) -> Routing {
+pub(super) fn routing(inputs: [u8; 8], carriers: u8, from: u8, to: u8) -> Routing {
     [inputs[0], inputs[1], inputs[2], inputs[3], inputs[4], inputs[5], inputs[6], inputs[7], carriers, from, to]
 }
 

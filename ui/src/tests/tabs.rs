@@ -23,7 +23,7 @@ pub(super) fn five_pages() -> serde_json::Value {
             list.push(p(n * 10 + k as u32, name, &format!("Operators/Operator {n}"), if k % 2 == 0 { "knob" } else { "slider" }));
         }
     }
-    for (page, names) in [("Filter", vec!["Cutoff", "Resonance", "Drive", "Keytrack"]), ("Amp", vec!["Level", "Pan", "Velocity"]), ("Effects", vec!["Chorus", "Delay", "Reverb", "Mix", "Width"]), ("Global", vec!["Tune", "Glide", "Bend"])] {
+    for (page, names) in [("Filter", vec!["Cutoff", "Resonance", "Drive", "Keytrack"]), ("Amp", vec!["Level", "Pan", "Velocity"]), ("Voicing", vec!["Glide", "Unison", "Spread", "Mix", "Width"]), ("Global", vec!["Tune", "Glide", "Bend"])] {
         for (k, name) in names.iter().enumerate() {
             list.push(p(1000 + list.len() as u32 + k as u32, name, page, if k % 2 == 0 { "knob" } else { "slider" }));
         }
@@ -90,7 +90,7 @@ fn operators(n: u32) -> serde_json::Value {
 }
 
 /// Pages and tabs whose names share nothing and are long: the rail cannot show them horizontally at the small size.
-const UNRELATED: [&str; 4] = ["Modulation Matrix", "Arpeggiator", "Effects A", "Global"];
+const UNRELATED: [&str; 4] = ["Modulation Matrix", "Voice Shaping", "Macro Controls", "Global"];
 
 /// A plugin of two pages: one with four tabs of long unrelated names (more than 24 parameters on it), one without.
 fn long_names() -> serde_json::Value {
@@ -486,7 +486,7 @@ fn a_strip_that_overflows_scrolls_with_visible_continuation() {
         let box4 = if last { (x1 - more + 2, y0, x1, y1) } else { (x0, y0, x0 + more - 2, y1) };
         count(s, box4, surface) * 100 / ((box4.2 - box4.0) * (box4.3 - box4.1)).max(1)
     };
-    let list = named(&["Modulation Matrix", "Arpeggiator", "Effects A", "Global", "Oscillators", "Envelopes", "Filters", "Keyboard", "Mixer", "Performance", "Voicing", "Macros"]);
+    let list = named(&["Modulation Matrix", "Voice Shaping", "Macro Controls", "Global", "Oscillators", "Envelopes", "Filters", "Keyboard", "Mixer", "Performance", "Voicing", "Macros"]);
     let (mut s, mut p) = shown(&list, (800, 480), 1., t, TabStyle::Segmented);
     let (strip, _) = bars(&s, 1.);
     let (left, right) = (end(&s, strip, false), end(&s, strip, true));
@@ -731,11 +731,11 @@ fn a_rails_text_is_the_small_type_where_it_fits_else_shrunk_alike_down_to_sevent
     let (pages, tabs) = fits(&five_pages());
     println!("five pages: the pages' rail {pages:.2}, the tabs' rail {tabs:.2}");
     assert_eq!(tabs, 1., "the digits of the operators");
-    assert!(pages >= 0.9, "Operators, Filter, Amp, Effects, Global: the small type, or all but: {pages}");
+    assert!(pages >= 0.9, "Operators, Filter, Amp, Voicing, Global: the small type, or all but: {pages}");
     let (pages, tabs) = fits(&long_names());
     println!("long names: the pages' rail {pages:.2}, the tabs' rail {tabs:.2}");
     assert_eq!(pages, 1., "Sound, Output");
-    assert!((0.7..1.).contains(&tabs),"Modulation Matrix, Arpeggiator, Effects A, Global: shrunk alike, not below 70%: {tabs}");
+    assert!((0.7..1.).contains(&tabs),"Modulation Matrix, Voice Shaping, Macro Controls, Global: shrunk alike, not below 70%: {tabs}");
     let (pages, _) = fits(&named(&["A page named for everything it holds, and then some", "Filter"]));
     assert_eq!(pages, 0.7, "a name that does not fit even then is shrunk to 70% and cut");
     let (pages, _) = fits(&super::grid::every_kind());

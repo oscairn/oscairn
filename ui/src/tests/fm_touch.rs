@@ -121,7 +121,7 @@ fn the_chosen_operators_nodes_are_dragged_and_no_other_operators_envelope_change
 }
 
 #[test]
-fn the_cursor_on_an_operators_tile_chooses_it_and_rings_the_field_in_its_cell() {
+fn the_cursor_on_the_overview_chooses_an_operator_and_rings_its_line() {
     fit_to_window();
     let mut s = Screen::sized(1280, 720);
     theme::apply(&s.ui, &all_themes()[0]);
@@ -130,18 +130,18 @@ fn the_cursor_on_an_operators_tile_chooses_it_and_rings_the_field_in_its_cell() 
     let rings = |s: &Screen| panels(&s.ui)[0].shapes.iter().filter(|x| x.ink == 12).count();
     assert_eq!(rings(&s), 0, "no cursor, no ring");
     let first = nodes(&panels(&s.ui)[0]);
-    let names: Vec<String> = s.ui.global::<crate::GridState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
-    let tile = names.iter().position(|n| n == "Ratio 3").expect("operator 3's ratio tile");
+    // The first move is the first tile; one back is the overview on operator 1; two on is operator 3.
     p.act(Action::Move { pane: None, by: 1 });
-    p.act(Action::Move { pane: None, by: tile as i32 });
+    p.act(Action::Move { pane: None, by: -1 });
+    p.act(Action::Move { pane: None, by: 2 });
     s.frame();
-    assert_eq!(rings(&s), 1, "the field the cursor is on");
+    assert_eq!(rings(&s), 1, "the line the cursor is on");
     assert_ne!(nodes(&panels(&s.ui)[0]), first, "operator 3 is the one chosen");
+    let names: Vec<String> = s.ui.global::<crate::GridState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
+    assert!(names.contains(&"Ratio 3".to_string()) && !names.contains(&"Ratio 1".to_string()), "its tiles: {names:?}");
     let out = sent(&mut p.out);
     assert_eq!(&param_ids(&out)[..2], [13, 23], "the knobs play it");
-    // Back to a tile of operator 1: its handles again.
-    let level1 = names.iter().position(|n| n == "Level 1").unwrap();
-    p.act(Action::Move { pane: None, by: level1 as i32 - tile as i32 });
+    p.act(Action::Move { pane: None, by: -2 });
     assert_eq!(nodes(&panels(&s.ui)[0]), first);
 }
 

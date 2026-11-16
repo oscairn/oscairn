@@ -86,7 +86,7 @@ fn text_width(text: &str, bold: bool, small: f32) -> f32 {
     text.chars().count() as f32 * 0.6 * small * if bold { 1.06 } else { 1. }
 }
 
-fn check_panel(panel: &crate::GridPanel, ops: usize, small: f32, at: &str) {
+pub(super) fn check_panel(panel: &crate::GridPanel, ops: usize, small: f32, at: &str) {
     let (w, h) = (panel.w, panel.h);
     let d = drawn(panel);
     assert_eq!(d.boxes.len(), ops, "a box for each operator {at}");

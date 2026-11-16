@@ -47,7 +47,7 @@ the parameter pages on it are `ui/src/params.rs`.
   (the numbers at the devices' screens, Rust and reference: "Tile density" below).
 - Tile height: 84 in touch mode (64 with a mouse); a page with any knob gets +36 (+30).
 - Rich views first, across the full width, each a panel, in this order: an FM operator view where its
-  algorithm parameter is (300 high touch), an envelope per (view, index) (180), a key map per
+  algorithm parameter is (the top pane of a master and detail: it and the detail fill the area, see below), an envelope per (view, index) (180), a key map per
   (view, index) (180); then among parameters in no view, by name: a filter (160), an LFO (140), an
   envelope (180).
 - Runs: a group (hint `group`), then each described envelope's parameters in linked order, then a
@@ -102,7 +102,7 @@ key map, FM operators.
 | Filter response | `Filter` L359-415 | none (a preview) | views.rs `draw_filter`, `filter_of`, `filter_named`, `filter_db`; pixel test tests/views.rs | done |
 | LFO waveform | `Lfo` L419-473 | none (a preview) | views.rs `draw_lfo`, `lfo_of`, `wave_named`; pixel test tests/views.rs | done |
 | Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | views.rs `draw_map`, `map_of`, `map_drag`; tests/views.rs | done |
-| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | src/fm.rs (the owner's own design, below: not the reference's) with views.rs `View::Fm`; tests/fm*.rs | done, differing from the reference by the owner's decision (2026-11-15); the reference's two guards stay (operators past 8 are skipped, a feedback with no target operator is not drawn) |
+| FM operators | `Operators` L731-916 | algorithm, level bars, ratio | src/fm.rs (the owner's own design, below: not the reference's) with views.rs `View::Fm`; tests/fm*.rs | done, differing from the reference by the owner's decision (2026-11-15); since 2026-11-16 the top pane of a master and detail ("Master and detail"); the reference's two guards stay (operators past 8 are skipped, a feedback with no target operator is not drawn) |
 
 ## The FM operator view: the owner's design (2026-11-15), a difference from the reference
 
@@ -110,8 +110,8 @@ The owner looked at the reference's layout (the algorithm as a vertical stack in
 operator with a level bar, a ratio box and a tiny envelope) and asked: "fm algos should be horizontal, next to a
 graph with different color lines for each operator to show their config. not sure if theres a way to show dots
 moving along those lines as a note is played, some synth software does that." So this view is Oscairn's own
-(src/fm.rs); the JUCE `Operators` (ParameterGrid.cpp ~731) is not matched, on purpose. The panel is 350 high in
-touch mode (300 in the reference): the diagram and the graph side by side over a strip of operator cells.
+(src/fm.rs); the JUCE `Operators` (ParameterGrid.cpp ~731) is not matched, on purpose. Since the master and detail (below) the panel is the top pane of a block that
+fills the area: the diagram, the graph and a list of the operators side by side.
 
 - Flow convention, kept for every algorithm: signal runs left to right. An operator's column is its distance from
   the output: the carriers in the last column, what modulates a carrier one column left, and so on; the carriers'
@@ -137,20 +137,89 @@ touch mode (300 in the reference): the diagram and the graph side by side over a
   operators (the longest of all), else each uses its own normalized axis. The selected operator's line is thicker,
   on top, and the only one with handles (touch drags a node: its time across, its level up, for that operator
   only); the others are thin.
-- Strip: a cell per operator (number chip and level text, level bar, ratio (edged in the accent while the fixed
-  switch is on, with the switch's text before the ratio's when the box is wide enough for both at 70% type), fine and detune), in the operator's color.
-- Choosing an operator, without touch: the dial and arrows move the cursor over the page's tiles as before; the
-  operator whose parameter the cursor's tile is becomes the selected one, its field in the strip gets the
-  cursor's border, its handles show, and the knobs under the screen play its parameters first (`controllers.view`
-  `screen` lists the selected operator's level, ratio, fine, detune, fixed and envelope parameters before the rest,
-  republished when the choice changes). With touch: a tap on a box, a cell or a line chooses it; the level bar,
-  ratio, fine and detune boxes are dragged as before; a drag across the diagram steps the algorithm, a tap on its
-  left or right half steps it back or on.
+- List (the strip of the first version is gone: it was a row of cells under the diagram and the graph): one line per
+  operator at the right of the overview, as many lines as the plugin has operators (none for a missing one), each its
+  number chip in the operator's color, its level (the plugin's text over a thin bar in the operator's color) and its ratio
+  (edged in the accent while the fixed switch is on, with the switch's text before the ratio's when the box is wide enough
+  for both at 70% type). Fine, detune and every other parameter of an operator are in the detail (below), not here.
+- Choosing an operator, a master and detail: see "Master and detail". The selected operator is told in four places at
+  once: the ring round its box in the diagram, its thick line (the only one with handles) in the graph, its raised line
+  with the text-colored edge in the list, and the detail's heading in its color. By touch a tap on its box, its line or its
+  list line chooses it, the level bar and ratio box of a line are dragged as before, a drag across the diagram steps the
+  algorithm and a tap on its left or right half steps it back or on; a tap on the algorithm's or feedback's name above the
+  diagram steps it by its halves too.
 - Dots (`Screen::set_positions`, `fm::Along`): the graph draws a dot (a halo and a dot in the operator's color)
   at a position along each operator's line when it is given: a fraction of the line's length or of one segment.
   Nothing calls it yet and no plugin gives positions (the layout extension has no such data;
   notes/ui-live-positions-proposal.md, outside the repository, proposes one). The view is whole without dots;
   with none given nothing runs: no timer, no repaint.
+
+## Master and detail (owner, 2026-11-16: "an interface design that would keep all operators on the same page. Maybe a top
+pane with the lines and the list of 8, and a pane under that with controls for the selected op")
+
+The FM operators view is the full form of a master and detail on one page (src/grid.rs `layout_with`, `Master`, `Detail`;
+src/fm.rs the overview; src/params.rs the selection and the cursor). Numbered siblings of one structure are not pages or
+tabs: the rule that folds a page of tabs that are the indexes of one view into it is in TABS.md "Tabs that are indexes".
+
+- **The block.** Where a page has a view with an overview (`grid::master_view`: a view with an `algorithm`), its parameters
+  with an index of 1 to 8 are not tiles of the page: they are the detail. The block fills the area (the page's view height)
+  and is, top to bottom: the overview (panel 0, the view's own panel), the detail's heading (panel 1: a bar in the selected
+  operator's color with "Operator N" or the folded tab's name, the rows it shows and two arrows that page them), and the
+  selected operator's tiles. Parameters of the page that are in no view, and the view's with an index past 8, stay ordinary
+  tiles under the block, by the rules above (the page scrolls to them).
+- **Overview** (always all operators): at the left the horizontal algorithm diagram, then the shared graph, then the list.
+  Under the page's tabs the view's own parameters (index 0: algorithm, feedback, any other) are named in a line over the
+  diagram ("Algorithm 3", "Feedback 5"), and are cursor stops and touch targets there; they are not tiles anywhere.
+- **Detail.** Every parameter that carries the view and the selected operator's index, in the plugin's priority order
+  (numbered first, then the plugin's own), as the grid's own tiles (knob, slider, switch, dropdown, split buttons at their
+  usual size: a tile is 84 high, 120 with a knob on the page, a column at least 210 wide), row by row at the page's
+  column count. Switching operator keeps the row.
+- **Split.** The detail gets as many full rows as leave the overview its preferred height (14 lines of the small type, at
+  least 1.6 lines for each operator's list line: `fm::preferred_height`), at least one and at most what the operator
+  with most parameters needs; the overview gets the rest, never less than `fm::least_height` (a list line 1.1 lines of type
+  high). Only when even one row does not leave the least does the block go past the area and the page scroll. Measured
+  (tests/fm_master.rs `the_overview_and_the_detail_share_the_area_at_the_three_screens`, dark theme, tiles with knobs;
+  area width x height, overview height, then the detail is the heading 26 and the row 120 and the gaps):
+
+  | Screen | pages | area | overview | detail rows in view |
+  |---|---|---|---|---|
+  | 826 x 465 (1280 x 720 at 1.55) | none | 814 x 405 | 259 | 1 (3 tiles) |
+  | | rail at the side | 743 x 405 | 259 | 1 (3 tiles) |
+  | | strip over | 814 x 357 | 211 | 1 (3 tiles) |
+  | 1280 x 720 at 1 | none | 1268 x 660 | 274 (8 and 6 operators), 394 (4) | up to 3 (6 tiles) |
+  | | rail at the side | 1197 x 660 | 274, 394 | up to 3 |
+  | | strip over | 1268 x 612 | 226, 346 | up to 3 |
+  | 800 x 480 at 1 | none | 788 x 420 | 274 | 1 (3 tiles) |
+  | | rail at the side | 717 x 420 | 274 | 1 |
+  | | strip over | 788 x 372 | 226 | 1 |
+
+  The overview is that tall because one row of knob tiles is 120 and the heading 26: with the preferred height at 8
+  operators (220 at the small type's 13) a second row would cost more than the overview can give up at 405. Where an
+  operator has more parameters than the rows in view, the rest are paged by row (below).
+- **Rows.** One row at a time. The heading's arrows (touch) and the dial or an arrow key (without touch) move the first
+  row in view by one; past the last tile in view the dial goes to the start of the next row, and back from the first to the
+  end of the row before; down from the last row in view or up from the first with the arrow keys keeps the column.
+- **Without touch.** The dial walks, in this order: the page rail (when there is one), the tabs of the page when it has
+  tabs, the overview's row (the view's own parameters, then operators 1 to N), then the detail's tiles (and the page's
+  ordinary tiles after them). Which operator to look at is not an edit: the detail and the knobs follow the cursor along the
+  operators at once (a relayout of the detail and, when it changed, one `controllers.view`; no parameter is set). A view's own
+  parameter is reached the same way but nothing changes until a press gives it the dial (a gesture begins) and a press or
+  Cancel ends it. A press on an operator takes the cursor to the detail tile it last left (else the first). Quick operator
+  step: from the detail the cursor up (an arrow key, CURSOR UP on a unit) goes to the operator's line, the dial steps the
+  operator, the cursor down returns to the same tile, so one parameter is swept across the operators; the page keys
+  (Page Up, Page Down) step the operator at once, keeping the cursor on its tile and the row, and turn the page only
+  past either end.
+- **The knobs under the screen** play the detail's whole list for the selected operator in the order of the detail (not only
+  the tiles in view), then the view's own parameters, then the page's other tiles by priority: `controllers.view` `screen` is
+  published again when the selection changes. Without a row of eight in view the knobs still play eight: the first row of
+  tiles is a prefix of what they play.
+- **What an element overview would plug into.** The mechanism is shared and not FM's: `grid::Master` (the area, the
+  selected index, the first row) in, `grid::Detail` out (the view, the index, its parameters, the rows), `Screen::operator`
+  (the selection), `select`, `page_rows`, the overview's cursor stops (`Strip::Overview`) and a page's folded tabs
+  (`tabs::Indexed`). A key map's zones or a sampler's elements would add: a view with an overview panel for the
+  zones or elements (drawn as panel 0 in place of the FM's), `grid::master_view` choosing it (today: has an `algorithm`),
+  the entries of its overview row (today the view's own parameters and the operators) and the heading's color and noun (today
+  the operator's color and "Operator"). Nothing else changes; no such overview is built now.
 
 ## Checklist (shell)
 

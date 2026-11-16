@@ -115,6 +115,21 @@ pub enum View {
     /// A key or velocity map, and the index (zone, element) it is for.
     Map(MapShape, u64),
     Fm(FmShape),
+    /// The heading of a master and detail page's detail pane (ui/GRID.md "Master and detail").
+    Detail(DetailHead),
+}
+
+/// The detail pane's heading: a bar in the selected one's color with its name; when the detail has more rows of
+/// tiles than it shows, which rows these are, and two arrows that page them one row at a time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetailHead {
+    /// The color (0 to 7) of the one selected, as the overview draws it.
+    pub color: usize,
+    pub title: String,
+    /// Rows of tiles in all, the first one shown, and how many are.
+    pub rows: usize,
+    pub row: usize,
+    pub per: usize,
 }
 
 /// What a view reads: the grid's parameters and their values, the panel's size, and the parameter the
@@ -136,6 +151,11 @@ pub struct Ctx<'a> {
     pub spacing: f32,
     /// The FM view's selected operator (0 to 7): the one the cursor is on, else the last touched.
     pub selected: usize,
+    /// The operator whose line of the overview's list the cursor is on, if it is on one (the cursor on an overview
+    /// stop: `focus` is then the view's own parameter it is on, if it is on one).
+    pub over: Option<usize>,
+    /// The dial has the parameter `focus` is (a press, then the dial): its ring is the accent's.
+    pub editing: bool,
     /// Where each operator's most recent voice is on its envelope, when the plugin says (`None`: no dot).
     pub positions: &'a [Option<Along>],
 }
@@ -153,6 +173,11 @@ pub enum Held {
     Select(usize),
     /// An operator's ratio: dragged up or down, a step per 12 px.
     Ratio { param: usize, start: f64, from: (f32, f32) },
+    /// One of the view's own parameters named at the top (the algorithm, the feedback): a tap on its left half steps it
+    /// back, on its right half on (`mid` is the cell's middle).
+    Nudge { param: usize, start: f64, from: (f32, f32), mid: f32 },
+    /// The detail's rows paged by this many (a tap on its heading's arrows).
+    Rows(i32),
 }
 
 fn nearest(handles: &[Handle], at: (f32, f32)) -> Option<usize> {
@@ -175,7 +200,46 @@ pub fn draw(view: &View, c: &Ctx) -> Drawn {
         View::Lfo(l) => draw_lfo(l, c),
         View::Map(m, index) => draw_map(m, *index, c),
         View::Fm(f) => crate::fm::draw(f, c),
+        View::Detail(h) => draw_detail(h, c),
     }
+}
+
+/// The detail heading's height (a heading of the grid, a little less: it is a bar).
+pub const DETAIL_HEAD: f32 = 26.;
+
+/// The heading's arrows: the (up, down) boxes at its right, each a touch target as high as the heading.
+fn detail_arrows(c: &Ctx) -> (Area, Area) {
+    let side = c.h;
+    ((c.w - 2. * side, 0., c.w - side, c.h), (c.w - side, 0., c.w, c.h))
+}
+
+fn draw_detail(h: &DetailHead, c: &Ctx) -> Drawn {
+    let mut d = Drawn::default();
+    let (fill, text) = (Ink::operator(h.color), Ink::on_operator(h.color));
+    // A shape, not a box: shapes are drawn before boxes and labels, and the arrows are shapes too.
+    d.shapes.push(Shape { ink: fill, fill: true, width: 0, commands: rect_path(1., 1., c.w - 2., c.h - 2.) });
+    let small = 13. * c.scale;
+    let pad = 8. * c.spacing;
+    let paged = h.rows > h.per;
+    let right = if paged { c.w - 2. * c.h - pad } else { c.w - pad };
+    d.labels.push(Label { x: pad, y: 1., w: (right - pad).max(0.), h: c.h - 2., text: h.title.clone(), ink: text, bold: true, align: 0 });
+    if paged {
+        let shown = if h.per == 1 { format!("Row {} of {}", h.row + 1, h.rows) } else { format!("Rows {} to {} of {}", h.row + 1, h.row + h.per, h.rows) };
+        let room = 0.6 * small * 1.06 * shown.chars().count() as f32;
+        d.labels.push(Label { x: (right - room).max(c.w * 0.3), y: 1., w: room.min(right - c.w * 0.3), h: c.h - 2., text: shown, ink: text, bold: false, align: 2 });
+        let (up, down) = detail_arrows(c);
+        let mid = |a: Area| ((a.0 + a.2) / 2., (a.1 + a.3) / 2.);
+        let r = (c.h * 0.22).max(3.);
+        for (a, dir, on) in [(up, -1., h.row > 0), (down, 1., h.row + h.per < h.rows)] {
+            let (x, y) = mid(a);
+            let tip = (x, y + dir * r * 0.8);
+            let base = y - dir * r * 0.8;
+            let tri = poly(&[tip, (x - r, base), (x + r, base)]) + " Z";
+            // An arrow that cannot go further is a hairline outline.
+            d.shapes.push(Shape { ink: text, fill: on, width: 1, commands: tri });
+        }
+    }
+    d
 }
 
 /// The handle under a touch at `at` (the panel's pixels), if one is within reach: the views that are
@@ -184,7 +248,18 @@ pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
     match view {
         View::Envelope(_) | View::Map(..) => nearest(&draw(view, c).handles, at).map(Held::Node),
         View::Fm(f) => crate::fm::grab(f, c, at),
-        View::Filter(_) | View::Lfo(_) => None,
+        View::Detail(h) if h.rows > h.per => {
+            let (up, down) = detail_arrows(c);
+            let inside = |a: Area| at.0 >= a.0 && at.0 <= a.2 && at.1 >= a.1 && at.1 <= a.3;
+            if inside(up) {
+                Some(Held::Rows(-1))
+            } else if inside(down) {
+                Some(Held::Rows(1))
+            } else {
+                None
+            }
+        }
+        View::Detail(_) | View::Filter(_) | View::Lfo(_) => None,
     }
 }
 
@@ -192,8 +267,8 @@ pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
 pub fn touched(view: &View, c: &Ctx, held: &Held) -> Vec<usize> {
     match held {
         Held::Node(k) => draw(view, c).handles.get(*k).map(|h| h.params.clone()).unwrap_or_default(),
-        Held::Select(_) => vec![],
-        Held::Algorithm { param, .. } | Held::Level { param } | Held::Ratio { param, .. } => vec![*param],
+        Held::Select(_) | Held::Rows(_) => vec![],
+        Held::Algorithm { param, .. } | Held::Level { param } | Held::Ratio { param, .. } | Held::Nudge { param, .. } => vec![*param],
     }
 }
 
@@ -227,7 +302,7 @@ pub fn operator_held(view: &View, c: &Ctx, held: &Held) -> Option<usize> {
         Held::Select(n) => Some(*n),
         Held::Level { param } | Held::Ratio { param, .. } => f.operator_of(*param),
         Held::Node(k) => draw(view, c).handles.get(*k).and_then(|h| h.params.first()).and_then(|&p| f.operator_of(p)),
-        Held::Algorithm { .. } => None,
+        Held::Algorithm { .. } | Held::Nudge { .. } | Held::Rows(_) => None,
     }
 }
 

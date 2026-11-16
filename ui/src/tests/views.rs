@@ -602,6 +602,145 @@ fn the_fm_view_lies_inside_its_panel() {
     }
 }
 
+// An FM-X-like synth: eight operators, each with a level, a ratio, a fine ratio and an envelope (the last
+// three also a fixed-frequency switch), and an algorithm of two routings with three carriers (1, 5 and 8): a
+// stack four deep (4 into 3 into 2 into 1), operator 5 modulated by 6 and 7, operator 8 alone. The first
+// routing feeds back from operator 7 into operator 6 (a different one), the second from operator 4 into itself.
+// Every parameter has a module path: a plugin of more than 24 without one is split by its names' first words.
+fn fm8_plugin() -> serde_json::Value {
+    let routing = |inputs: [u8; 8], from: u8, to: u8| json!({"inputs": inputs, "carriers": 0b1001_0001, "feedbackFrom": from, "feedbackTo": to});
+    let inputs = [0b10, 0b100, 0b1000, 0, 0b110_0000, 0, 0, 0];
+    let mut algorithm = viewed(1, "Algorithm", 1., true, 1, "algorithm", 0);
+    algorithm["algorithms"] = json!([routing(inputs, 7, 6), routing(inputs, 4, 4)]);
+    let mut p = vec![algorithm, viewed(2, "Feedback", 7., true, 1, "feedback", 0)];
+    for n in 1..=8u32 {
+        p.push(viewed(100 + n, &format!("Level {n}"), 99., false, 1, "operatorLevel", n));
+        p.push(viewed(200 + n, &format!("Ratio {n}"), 31., true, 1, "ratio", n));
+        p.push(viewed(300 + n, &format!("Fine {n}"), 99., false, 1, "fine", n));
+        if n >= 6 {
+            p.push(viewed(400 + n, &format!("Fixed {n}"), 1., true, 1, "fixed", n));
+        }
+        for (k, f) in ["attack", "decay", "release"].iter().enumerate() {
+            p.push(viewed(500 + 3 * (n - 1) + k as u32, &format!("{f} {n}"), 1., false, 1, f, n));
+        }
+    }
+    for q in &mut p {
+        q["module"] = json!("FM");
+    }
+    json!({ "parameters": p })
+}
+
+fn fm8_text(id: u32, v: f64) -> String {
+    match id {
+        1 => format!("{}", v as i64 + 1),
+        2 => format!("{}", v as i64),
+        101..=108 => format!("{v:.0}"),
+        201..=208 => format!("x{}", v as i64 / 2 + 1),
+        301..=308 => format!("{:+.0}", v - 50.),
+        406..=408 => if v > 0.5 { "Fixed" } else { "Ratio" }.into(),
+        _ => format!("{:.0} %", v * 100.),
+    }
+}
+
+fn fm8_values(algorithm: f64) -> Vec<(u32, f64)> {
+    let mut v = vec![(1, algorithm), (2, 5.), (406, 0.), (407, 1.), (408, 1.)];
+    for n in 1..=8u32 {
+        v.push((100 + n, 99. - 11. * f64::from(n - 1)));
+        v.push((200 + n, f64::from(2 * n)));
+        v.push((300 + n, 50. + f64::from(n) * 3.));
+        for k in 0..3 {
+            v.push((500 + 3 * (n - 1) + k, [0.05 + 0.05 * f64::from(n), 0.5 - 0.04 * f64::from(n), 0.3][k as usize]));
+        }
+    }
+    v
+}
+
+// What the reference does at eight operators (ParameterGrid::Operators::layout): the same as at four: the routing
+// keeps its share (36% of the width, at most 360) and the columns divide what is left equally, narrower, none
+// wrapped or scrolled. So at eight everything must still lie inside its column and the panel, the operators of the
+// diagram (eight, on rows by their routing) must not overlap, and the columns must not overlap each other.
+#[test]
+fn eight_operators_lie_inside_their_columns_and_the_panel() {
+    fit_to_window();
+    for (size, scale) in [((1280, 720), 1.), ((1280, 720), 1.55)] {
+        for algorithm in [0., 1.] {
+            let mut s = Screen::sized(size.0, size.1);
+            s.set_scale(scale);
+            s.frame();
+            let mut p = open_with(&mut s, fm8_plugin(), &fm8_values(algorithm), &fm8_text);
+            for t in &all_themes() {
+                theme::apply(&s.ui, t);
+                s.frame();
+                p.shown();
+                s.frame();
+                let panel = &panels(&s.ui)[0];
+                let (w, h) = (panel.w, panel.h);
+                let at = format!("in {} at {scale}, algorithm {algorithm}", t.id);
+                let boxes: Vec<crate::GridBox> = panel.boxes.iter().collect();
+                for b in &boxes {
+                    assert!(b.x >= 0. && b.y >= 0. && b.x + b.w <= w && b.y + b.h <= h, "box {:?} outside the panel {at}", b.text);
+                }
+                let names: Vec<crate::GridLabel> = panel.labels.iter().filter(|l| l.text.starts_with("Op ")).collect();
+                assert_eq!(names.len(), 8, "a column for each operator {at}");
+                for l in panel.labels.iter() {
+                    assert!(l.x >= 0. && l.y >= 0. && l.x + l.w <= w && l.y + l.h <= h, "label {:?} outside the panel {at}", l.text);
+                }
+                // The routing's eight boxes: numbered, none over another.
+                let diagram: Vec<&crate::GridBox> = boxes.iter().filter(|b| b.text.len() == 1 && b.text.chars().all(|c| c.is_ascii_digit())).collect();
+                assert_eq!(diagram.len(), 8, "eight operators in the diagram {at}");
+                let apart = |a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)| a.2 <= b.0 || b.2 <= a.0 || a.3 <= b.1 || b.3 <= a.1;
+                for (i, a) in diagram.iter().enumerate() {
+                    for b in &diagram[i + 1..] {
+                        assert!(apart((a.x, a.y, a.x + a.w, a.y + a.h), (b.x, b.y, b.x + b.w, b.y + b.h)), "operators {} and {} overlap {at}", a.text, b.text);
+                    }
+                }
+                // The columns: each name, ratio and its envelope's frame inside its own column, which are in order and apart.
+                let ratios: Vec<&crate::GridBox> = boxes.iter().filter(|b| b.text.starts_with('x') || b.text.starts_with("Fixed")).collect();
+                assert_eq!(ratios.len(), 8, "a ratio for each operator {at}");
+                let frames: Vec<(f64, f64)> = panel
+                    .shapes
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k >= 4 && k % 2 == 0)
+                    .map(|(_, s)| {
+                        let (xs, _): (Vec<f64>, Vec<f64>) = super::envelope::vertices(&s.commands).into_iter().unzip();
+                        (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max))
+                    })
+                    .collect();
+                assert_eq!(frames.len(), 8, "an envelope for each operator {at}");
+                for n in 0..8 {
+                    let r = ratios[n];
+                    assert!(f64::from(r.x) - 0.6 <= frames[n].0 && frames[n].1 <= f64::from(r.x + r.w) + 0.6, "operator {}'s envelope lies in its column {at}", n + 1);
+                    assert!(names[n].x + names[n].w <= r.x + r.w + 0.6 && names[n].x >= r.x - 0.6, "operator {}'s name lies in its column {at}", n + 1);
+                    if n > 0 {
+                        assert!(ratios[n - 1].x + ratios[n - 1].w <= r.x, "columns {} and {} are apart {at}", n, n + 1);
+                    }
+                }
+                // Nothing the reference would show is shortened: ratio texts fit their boxes.
+                assert!(ratios.iter().all(|r| !r.text.is_empty()), "every ratio says something {at}");
+            }
+        }
+    }
+}
+
+// The eight-operator view's lines (the feedback loop from one operator to another, and each envelope) are drawn
+// where their paths are, at two sizes.
+#[test]
+fn the_eight_operator_lines_are_drawn_where_their_paths_are() {
+    let m = Measure { step: 2., least: 4, sizes: &[((1280, 720), 1.), ((1920, 1080), 1.), ((1920, 1080), 2.)] };
+    let mut report = String::new();
+    for (name, shape) in [("feedback loop 7 into 6", 2), ("operator 1's envelope", 5), ("operator 8's envelope", 19)] {
+        report += &check_line_with(name, &fm8_plugin(), &fm8_values(0.), &fm8_text, 0, shape, &m);
+    }
+    println!("{report}");
+}
+
+#[test]
+fn eight_operator_pictures() {
+    pictures("grid-fm8", fm8_plugin(), &fm8_values(0.), &fm8_text);
+    pictures("grid-fm8-self", fm8_plugin(), &fm8_values(1.), &fm8_text);
+}
+
 /// A page's picture under the default theme at 1 and at the FANTOM's 1.55 (target/screens) and under the odd
 /// theme (target/theme-shots), as NAME, NAME@1.55 and NAME-odd.
 fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String) {
@@ -624,11 +763,12 @@ fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &d
 fn the_views_draw_in_every_theme() {
     fit_to_window();
     type Page = (&'static str, serde_json::Value, Vec<(u32, f64)>, fn(u32, f64) -> String);
-    let pages: [Page; 4] = [
+    let pages: [Page; 5] = [
         ("lfo", lfo_plugin(), lfo_values(0.), lfo_text),
         ("filter", filter_plugin(), filter_values(1.), filter_text),
         ("keymap", map_plugin(), map_values(), map_text),
         ("fm", fm_plugin(), fm_values(0.), fm_text),
+        ("fm8", fm8_plugin(), fm8_values(0.), fm8_text),
     ];
     for (name, list, values, text) in pages {
         let mut s = Screen::new();

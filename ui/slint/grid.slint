@@ -478,7 +478,14 @@ component ViewPanel inherits Section {
             height: parent.height;
             text: b.text;
             color: root.ink(b.text-ink);
+        // As drawFittedText with a least scale of 0.7: a text too wide for its box shrinks to 70% before it is cut.
+        measure := Text {
+            visible: false;
+            text: b.text;
             font-size: Theme.small;
+            font-weight: b.bold ? 700 : 400;
+        }
+            font-size: Theme.small * max(0.7, min(1.0, (parent.width - 2 * Theme.pad-tight) / max(1px, measure.preferred-width)));
             font-weight: b.bold ? 700 : 400;
             horizontal-alignment: center;
             vertical-alignment: center;

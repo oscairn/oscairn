@@ -1035,7 +1035,8 @@ defaults) on its own MIDI channel and output bus. The node is staged like `graph
 a part and commit as usual. Its one audio output is its bus, under the instance's main port's ID
 whatever the bus, so its wires hold wherever it plays; its parameters are its sound's, shown as
 the plugin gives them (edits reach the instance on its channel; its output bus parameter keeps
-its bus); `sounds.get` lists its own sounds only, the one its channel selects as selected on
+its bus: a value asked of it is accepted and the node stays where it is, so a scene stored
+with another bus recalls without leaving edits pending); `sounds.get` lists its own sounds only, the one its channel selects as selected on
 every channel, and `sounds.prepare`, `sounds.select` and `sounds.discard` on it prepare a sound on
 its bus, select it on its channel and discard one of its own. A `source` with an instance of its
 own (playing one sound on every channel) becomes the engine's first node, on channel 0

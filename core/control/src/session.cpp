@@ -809,6 +809,13 @@ namespace oscairn
     }
 
     // The parameter values and gestures waiting, to their plugins: what each takes now.
+    // The Output bus of a node sharing an instance: its place in the engine, not a value to set (SoundContext::setParameter).
+    bool Session::keepsBus( NodeId node, uint32_t param ) const
+    {
+        const auto* context = dynamic_cast<const SoundContext*>( graph_.node(node).host.get() );
+        return context && context->engine()->busParameter == param;
+    }
+
     void Session::sendParameters()
     {
         for( auto it = pending_.begin(); it != pending_.end(); )
@@ -829,7 +836,17 @@ namespace oscairn
                 const auto command = commands.front();
                 if( command.kind == ChangeKind::Value )
                 {
-                    if( sentValue || !host.setParameter(param,command.value) ) break;
+                    if( sentValue ) break;
+                    if( !host.setParameter(param,command.value) )
+                    {
+                        // A node that shares an instance keeps its bus: that refusal is for good, not a full queue
+                        // to retry, and waiting on it would leave every save refused (a scene stored with another bus).
+                        if( !keepsBus(node,param) ) break;
+                        publish(ChangeKind::Resync,node,param); // clients read the bus it has
+                        commands.pop_front();
+                        --commandCount_;
+                        continue;
+                    }
                     sentValue = true;
                     observed_[{node,param}] = command.value;
                 }

@@ -641,6 +641,7 @@ namespace oscairn
         // keeps at most one waiting value, so they never outnumber the parameters.
         bool queue( NodeId node, uint32_t param, ChangeKind kind, double value, bool bounded = true );
         void sendParameters(); // service(): the commands waiting, to their plugins
+        bool keepsBus( NodeId node, uint32_t param ) const; // a shared node's Output bus: its refusal is for good
         void publish( ChangeKind kind, NodeId node = 0, uint32_t param = 0, double value = 0, bool plugin = false );
 
         double sampleRate_;

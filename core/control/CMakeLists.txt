@@ -403,6 +403,7 @@ target_compile_options(oscairn-installed-play PRIVATE -Wall -Wextra)
 # Sessions, native sounds and effects and Performances again with every CLAP plugin in a worker (RFC 0010 step 5).
 set(control_worker_tests
     "control-sound-presets|oscairn-sound-presets-test|$<TARGET_FILE:oscairn_basic_synth>"
+    "control-scene-save|oscairn-scene-save-test|$<TARGET_FILE:oscairn_step_sequencer>|$<TARGET_FILE:oscairn_basic_synth>"
     "control-shared-parts|oscairn-shared-parts-test|$<TARGET_FILE:oscairn_basic_synth>|$<TARGET_FILE:kick-clap-fixture-normal>"
     "control-json-audio|oscairn-json-rpc-test|$<TARGET_FILE:oscairn_basic_synth>"
     "control-hostile-notes|oscairn-hostile-notes-test|$<TARGET_FILE:oscairn-hostile-notes-fixture>|$<TARGET_FILE:kick-clap-fixture-normal>|$<TARGET_FILE:oscairn_basic_synth>"
@@ -432,6 +433,11 @@ foreach(entry IN LISTS control_worker_tests)
     add_test(NAME ${name}-hosts COMMAND ${parts})
     set_tests_properties(${name}-hosts PROPERTIES TIMEOUT ${switch_timeout} ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000;OSCAIRN_PLUGIN_HOSTS=3")
 endforeach()
+
+add_executable(oscairn-scene-save-test tests/scene_save.cpp)
+target_link_libraries(oscairn-scene-save-test PRIVATE oscairn_control)
+add_test(NAME control-scene-save COMMAND oscairn-scene-save-test $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_basic_synth>)
+set_tests_properties(control-scene-save PROPERTIES TIMEOUT 60)
 
 add_executable(oscairn-recording-test tests/recording.cpp)
 target_include_directories(oscairn-recording-test PRIVATE ../clap-host/tests)

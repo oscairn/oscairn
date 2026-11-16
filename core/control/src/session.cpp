@@ -593,7 +593,7 @@ namespace oscairn
         for(auto it=pending_.begin();it!=pending_.end();)
             if(it->first.first==node){commandCount_-=it->second.size();it=pending_.erase(it);}else ++it;
         std::erase_if(observed_,[&](const auto& entry){return entry.first.first==node;});
-        outputDrops_.erase(node);parameterRevisions_.erase(node);++revision_;publish(ChangeKind::Graph);
+        outputDrops_.erase(node);parameterRevisions_.erase(node);valueRevisions_.erase(node);++revision_;publish(ChangeKind::Graph);
     }
 
     // Removes a node from the graph and the Session's records of it; its wires are the caller's.
@@ -603,7 +603,7 @@ namespace oscairn
         nodes_.erase(node); roles_.erase(node);
         disabled_.erase(node); rungOut_.erase(node); loadedBytes_.erase(node);
         std::erase_if(untouched_, [&](const SceneParameter& at) { return at.node == node; });
-        outputDrops_.erase(node); parameterRevisions_.erase(node);
+        outputDrops_.erase(node); parameterRevisions_.erase(node); valueRevisions_.erase(node);
         for( auto it = pending_.begin(); it != pending_.end(); )
             if( it->first.first == node ) { commandCount_ -= it->second.size(); it = pending_.erase(it); }
             else ++it;
@@ -748,7 +748,8 @@ namespace oscairn
         for( const auto& [node,name] : nodes_ )
         {
             auto& host = graph_.host(node);
-            if( outputDrops_[node] != host.outputEventDrops() )
+            const bool lost = outputDrops_[node] != host.outputEventDrops(); // values whose events were dropped
+            if( lost )
             {
                 outputDrops_[node] = host.outputEventDrops();
                 publish(ChangeKind::Resync,node,0,0,true);
@@ -779,10 +780,17 @@ namespace oscairn
                     publish(type == CLAP_EVENT_PARAM_GESTURE_BEGIN ? ChangeKind::GestureBegin : ChangeKind::GestureEnd,node,p->param_id,0,true);
                 }
             }
-            // Rescans may update a value without emitting an event.
-            // One lookup a parameter: this runs every tick over every parameter of every node.
+            // Values that changed with no event and not by a set of this Session's (a values rescan, a preset, a
+            // sound selected, a worker restarted) are compared when the host says they may have (valueRevision),
+            // every tick where it cannot tell, at a node's first tick and after lost events: not every parameter every
+            // tick, which cost 38 percent of a core on the FANTOM for 6,118 parameters.
+            const auto values = host.valueRevision();
+            const auto [known,fresh] = valueRevisions_.try_emplace(node,values);
+            if( !fresh && !lost && values != PluginHost::unreportedValues && known->second == values ) continue;
+            known->second = values;
             for( const auto& p : host.parameters() )
             {
+                ++parametersCompared_;
                 const auto value = host.parameterValue(p.id);
                 if( const auto [seen,added] = observed_.try_emplace(Address{node,p.id},value); added || seen->second != value )
                 {
@@ -854,7 +862,10 @@ namespace oscairn
                         continue;
                     }
                     sentValue = true;
-                    observed_[{node,param}] = command.value;
+                    // The value the plugin took (clamped, stepped) where it differs from the one asked.
+                    const auto taken = host.parameterValue(param);
+                    if( taken != command.value ) publish(ChangeKind::Value,node,param,taken,true);
+                    observed_[{node,param}] = taken;
                 }
                 else if( !host.parameterGesture(param,command.kind == ChangeKind::GestureBegin) ) break;
                 commands.pop_front();

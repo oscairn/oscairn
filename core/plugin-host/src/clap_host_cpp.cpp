@@ -216,6 +216,7 @@ bool cpp_clap_parameter_text(const oscairn_clap_host* h, uint32_t id, double val
 bool cpp_clap_set_parameter(oscairn_clap_host* h, uint32_t id, double value) { return h->host.setParameter(id, value); }
 bool cpp_clap_parameter_gesture(oscairn_clap_host* h, uint32_t id, bool begin) { return h->host.parameterGesture(id, begin); }
 uint64_t cpp_clap_parameter_reports(const oscairn_clap_host* h) { return h->host.parameterReports(); }
+uint64_t cpp_clap_value_rescans(const oscairn_clap_host* h) { return h->host.valueRescans(); }
 bool cpp_clap_send_event(oscairn_clap_host* h, const oscairn_clap_event* e) { return h->host.enqueue(*e); }
 bool cpp_clap_pop_output(oscairn_clap_host* h, oscairn_clap_event* e) { return h->host.popOutput(*e); }
 uint64_t cpp_clap_output_event_drops(const oscairn_clap_host* h) { return h->host.outputEventDrops(); }

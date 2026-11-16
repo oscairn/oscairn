@@ -5,6 +5,8 @@
 // every 5 ms) measured in thread CPU time, as the unit's "Sick tines" held it at 73 to 89 percent of a core. Run with
 // OSCAIRN_PLUGIN_WORKER, OSCAIRN_PLUGIN_SCAN and OSCAIRN_WORKER_SERVICE_MS=20 as a device sets them; STUCK=1 leaves
 // a value pending that a shared node refuses for good; TICKS the number of ticks (400); BUDGET=1 measures under a budget.
+// Any parameter count: the control fixture (oscairn-control-fixture) as both plugins with OSCAIRN_CONTROL_FIXTURE_PARAMETERS=N
+// gives 25 plugins of N parameters each (an instrument that cannot share its instance takes one a part).
 //   oscairn-service-cost INSTRUMENT.clap EFFECT.clap
 #include "oscairn/session.h"
 #include "oscairn/plugin_host.h"
@@ -37,7 +39,12 @@ int main(int argc, char** argv)
     std::vector<NodeId> nodes;
     for(uint32_t p = 0; p < 5; ++p)
     {
-        const auto n = p ? s.shareInstrument("instrument " + std::to_string(p), first) : (first = s.add("instrument 0", argv[1])); // one instance, five sounds, as Sick tines
+        const auto name = "instrument " + std::to_string(p);
+        auto instrument = [&] {
+            if(!p) return first = s.add(name, argv[1]);
+            try { return s.shareInstrument(name, first); } catch(const std::runtime_error&) { return s.add(name, argv[1]); }
+        };
+        const auto n = instrument(); // one instance, five sounds, as Sick tines
         PartInput keys; keys.zones = {NoteZone{uint8_t(24 * p), uint8_t(24 * p + 23)}};
         const auto part = s.addPart("Part " + std::to_string(p), keys);
         s.insertIntoPart(part, 0, n); nodes.push_back(n);
@@ -60,10 +67,12 @@ int main(int argc, char** argv)
     }
     const int ticks = std::getenv("TICKS") ? std::atoi(std::getenv("TICKS")) : 400;
     const auto requests = workerRequests();
+    const auto compared = s.parametersCompared();
     const double before = threadSeconds();
     for(int i = 0; i < ticks; ++i) { s.service(); std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
     const double cpu = threadSeconds() - before;
     std::printf("%zu parameters over 25 plugins: %.1f us of CPU a service tick, %.1f%% of a core at one tick every 5 ms; %.0f requests to workers a second\n", parameters, 1e6 * cpu / ticks, 100 * cpu / ticks / .005, double(workerRequests() - requests) / (ticks * .005));
+    std::printf("%.0f parameter values compared a second\n", double(s.parametersCompared() - compared) / (ticks * .005));
     if(std::getenv("STUCK")) { try { s.savePerformance((home.path / "saved").string()); std::printf("a save is taken\n"); } catch(const std::exception& e) { std::printf("a save is refused: %s\n", e.what()); } }
     return 0;
 }

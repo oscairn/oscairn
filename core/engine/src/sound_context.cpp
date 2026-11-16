@@ -87,6 +87,7 @@ namespace oscairn
     void SoundContext::showValues(uint32_t sound)
     {
         for(const auto& v : engine_->host->soundValues(sound)) if(values_.count(v.id)) values_[v.id] = v.value;
+        ++shown_;
     }
 
     SoundContext::~SoundContext() { engine_->channels &= ~(1u << channel_); engine_->buses &= ~(1u << bus_); }
@@ -115,6 +116,7 @@ namespace oscairn
     void SoundContext::setValues(const std::map<clap_id, double>& values)
     {
         for(const auto& [id, value] : values) if(values_.count(id) && id != engine_->busParameter) values_[id] = value;
+        ++shown_;
     }
 
     uint32_t SoundContext::prepareSound(const std::string& name, const std::vector<oscairn_sound_parameter_t>& parameters, const std::string& state, const std::string& preset,

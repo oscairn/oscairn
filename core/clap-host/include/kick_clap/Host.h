@@ -333,6 +333,9 @@ public:
     bool stateDirty() const noexcept;
     // Counts parameter values the plugin reported while processing; any thread.
     uint64_t parameterReports() const noexcept;
+    // Counts the times the host read the plugin's values again with no output events (a values
+    // rescan, a preset loaded); any thread.
+    uint64_t valueRescans() const noexcept;
     uint32_t latency() const noexcept;
     Statistics statistics() const noexcept;
     // Audio thread: the plugin's last process() asked to sleep (CLAP_PROCESS_SLEEP): it makes no

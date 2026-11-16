@@ -449,7 +449,14 @@ the first poll. Re-subscribing does not discard already unread changes.
 - `params.changed`: `params.changes` contains `sequence`, `node`, `param`, `kind` (`value`,
   `begin`, `end`), `source` (`control` or `plugin`), and `value` for value changes. Every
   accepted control value is recorded, including a client's own writes. Plugin-emitted
-  parameter/gesture events and cached values changed by rescans are also recorded.
+  parameter/gesture events and cached values changed by rescans are also recorded, as the
+  plugin's: values read again with no event (a values rescan, a preset, a sound selected on a
+  shared instance, a restarted worker's values) and a value the plugin's host stepped or clamped
+  from the one set. The engine does not poll every value: it compares a plugin's values when its
+  host says they were read again, at the next service tick (a plugin in a worker, with the
+  worker's next service: within 20 ms on a device, 100 ms once it had nothing to say for half a
+  second), always for a host that cannot say (LV2, a prepared instrument's pool), and after its
+  output events were dropped (with `session.resync`).
 - Default parameter notifications are sent at most 60 times per second per client. Within
   each interval the latest value per parameter is retained, preserving gesture boundaries.
   Several gestures in one interval can therefore include several final values. `allChanges:

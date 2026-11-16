@@ -250,6 +250,7 @@ pub fn load_preset(s: H, kind: u32, location: &CStr, key: &CStr) -> bool {
     }
     // The preset changed the plugin's parameters: read them back.
     read_values(&s);
+    s.value_rescans.fetch_add(1, Release);
     s.dirty_set();
     true
 }

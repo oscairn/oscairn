@@ -85,6 +85,20 @@ enum Edit {
     List(usize),
 }
 
+/// The labels of a row or rail of tabs: each name's short form on one and on two lines, and the heading the names share
+/// (src/tabs.rs `abbreviate`); the names themselves stay what the path, the cursor and a screen reader use.
+fn labels(names: &[String]) -> (Vec<crate::TabLabel>, String) {
+    let tabs::Abbreviated { heading, shorts } = tabs::abbreviate(names);
+    let labels = shorts
+        .into_iter()
+        .map(|short| {
+            let (top, bottom) = tabs::two_lines(&short);
+            crate::TabLabel { short: short.into(), top: top.into(), bottom: bottom.into() }
+        })
+        .collect();
+    (labels, heading)
+}
+
 /// The path below a module path's first n levels.
 pub fn after(module: &str, n: usize) -> String {
     module.split('/').skip(n).collect::<Vec<_>>().join("/")
@@ -102,10 +116,8 @@ pub struct Screen {
     entry: usize,
     /// The cursor on the pages' or the tabs' row (one cursor at a time with the tiles' and the search's).
     strip: Option<(Strip, usize)>,
-    /// The pages are a column at the left (the window said so), not a strip over the tabs.
-    column: bool,
-    /// The tabs are a column too (the side arrangement): beside the pages' column, not over the tiles.
-    tabs_column: bool,
+    /// The pages and the tabs are rails at the left (the side placement), not strips over the tiles.
+    side: bool,
     values: HashMap<u32, f64>,
     /// The plugin's text for a parameter's value, by value's bits.
     texts: HashMap<(u32, u64), String>,
@@ -156,8 +168,7 @@ impl Screen {
             entries: vec![],
             entry: 0,
             strip: None,
-            column: false,
-            tabs_column: false,
+            side: false,
             values: HashMap::new(),
             texts: HashMap::new(),
             laid: Laid::default(),
@@ -532,8 +543,7 @@ impl Screen {
         }
         self.follow(g.get_view_height());
         g.set_name(self.name.as_str().into());
-        self.column = g.get_column();
-        self.tabs_column = g.get_layout() == 2;
+        self.side = g.get_layout() == 1;
         let page = self.entries.get(self.entry).map_or(0, |e| e.page);
         let searching = !self.search.is_empty();
         let pages: Vec<slint::SharedString> = self.model.pages.iter().map(|p| p.name.as_str().into()).collect();
@@ -542,6 +552,13 @@ impl Screen {
         let tab = self.entries.get(self.entry).and_then(|e| e.tab).unwrap_or(0);
         g.set_page_cursor(self.strip.filter(|s| s.0 == Strip::Pages).map_or(-1, |s| s.1 as i32));
         g.set_tab_cursor(self.strip.filter(|s| s.0 == Strip::Tabs).map_or(-1, |s| s.1 as i32));
+        let (page_names, tab_names): (Vec<String>, Vec<String>) = (self.model.pages.iter().map(|p| p.name.clone()).collect(), tabs.iter().map(|t| t.to_string()).collect());
+        let (page_labels, page_heading) = labels(&page_names);
+        let (tab_labels, tab_heading) = labels(&tab_names);
+        g.set_page_labels(ModelRc::new(VecModel::from(page_labels)));
+        g.set_page_heading(page_heading.into());
+        g.set_tab_labels(ModelRc::new(VecModel::from(tab_labels)));
+        g.set_tab_heading(tab_heading.into());
         g.set_pages(ModelRc::new(VecModel::from(pages)));
         g.set_page(if searching { -1 } else { page as i32 });
         g.set_search_shown(self.search_shown());
@@ -796,12 +813,12 @@ impl Screen {
         let bars = self.bars();
         let pages = Stop::Row(Strip::Pages);
         let tabs = Stop::Row(Strip::Tabs);
-        let (column, tabs_column) = (self.column, self.tabs_column);
-        // The row above `from` (above the tiles when None) that is over the content: the pages' column is
-        // beside the tabs and the tiles, not over them.
+        let side = self.side;
+        // The row above `from` (above the tiles when None) that is over the content: the rails are beside the
+        // tiles, not over them.
         let above = |from: Option<Stop>| -> Option<Stop> {
             let place = from.and_then(|f| bars.iter().position(|s| *s == f)).unwrap_or(bars.len());
-            bars[..place].iter().rev().copied().find(|s| !(column && *s == pages || tabs_column && *s == tabs))
+            bars[..place].iter().rev().copied().find(|s| !side || *s != pages && *s != tabs)
         };
         let first_tile = |me: At| if self.laid.tiles.is_empty() { me } else { At::Tile(0) };
         let (mut dx, mut dy) = (dx, dy);
@@ -813,11 +830,12 @@ impl Screen {
                 At::Tile(t) => match grid::arrow(&self.laid.tiles, t, sx, sy) {
                     Some(to) => At::Tile(to),
                     None if sy < 0 => above(None).map_or(at, |stop| self.selected(stop)),
-                    None if sx < 0 && tabs_column && bars.contains(&tabs) => self.selected(tabs),
-                    None if sx < 0 && column && bars.contains(&pages) => self.selected(pages),
+                    None if sx < 0 && side && bars.contains(&tabs) => self.selected(tabs),
+                    None if sx < 0 && side && bars.contains(&pages) => self.selected(pages),
                     None => at,
                 },
-                At::Bar(stop @ Stop::Row(Strip::Pages), i) if column => {
+                // The pages' rail beside the tabs' and the tiles: up and down along it, right to the tabs (or the tiles).
+                At::Bar(stop @ Stop::Row(Strip::Pages), i) if side => {
                     let len = self.row_len(Strip::Pages);
                     if sy != 0 {
                         let to = i as i32 + sy;
@@ -836,8 +854,8 @@ impl Screen {
                         at
                     }
                 }
-                // The tabs a column beside the pages' column: up and down along it, left to the pages, right to the tiles.
-                At::Bar(stop @ Stop::Row(Strip::Tabs), i) if tabs_column => {
+                // The tabs' rail beside the pages': up and down along it, left to the pages, right to the tiles.
+                At::Bar(stop @ Stop::Row(Strip::Tabs), i) if side => {
                     let len = self.row_len(Strip::Tabs);
                     if sy != 0 {
                         At::Bar(stop, (i as i32 + sy).clamp(0, len as i32 - 1) as usize)
@@ -853,17 +871,13 @@ impl Screen {
                     let len = self.row_len(row);
                     if sx != 0 {
                         let to = i as i32 + sx;
-                        if to < 0 && row == Strip::Tabs && column && bars.contains(&pages) {
-                            self.selected(pages)
-                        } else {
-                            At::Bar(stop, to.clamp(0, len as i32 - 1) as usize)
-                        }
+                        At::Bar(stop, to.clamp(0, len as i32 - 1) as usize)
                     } else if sy < 0 {
                         above(Some(stop)).map_or(at, |up| self.selected(up))
                     } else {
-                        // Down: the next row (in the column, the pages' own column is skipped), then the tiles.
+                        // Down: the next row, then the tiles.
                         let place = bars.iter().position(|s| *s == stop).unwrap_or(0);
-                        match bars.get(place + 1).filter(|s| !(column && **s == pages)) {
+                        match bars.get(place + 1) {
                             Some(&next) => self.selected(next),
                             None => first_tile(at),
                         }

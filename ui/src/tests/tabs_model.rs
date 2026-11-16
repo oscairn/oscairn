@@ -219,3 +219,69 @@ fn a_declared_icon_comes_before_the_name_rule() {
     let tile = ui.global::<GridState>().get_tiles().row_data(0).unwrap();
     assert_eq!(tile.icons.iter().collect::<Vec<_>>(), [3, 4, 1, 2]);
 }
+
+fn names(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+// The words a row of names all begin or end with are taken off and shown once, as the row's heading: "Operator 1" to "Operator 8" are
+// 1 to 8 under "Operator". A mixed row, a single name, names that would be left the same, and a name that would be used up are not
+// abbreviated; the names themselves are not changed (the screen keeps them whole).
+#[test]
+fn shared_words_are_taken_off_the_names_of_a_row_and_shown_once() {
+    use crate::tabs::abbreviate;
+    let eight: Vec<String> = (1..=8).map(|n| format!("Operator {n}")).collect();
+    let a = abbreviate(&eight);
+    assert_eq!((a.heading.as_str(), a.shorts), ("Operator", (1..=8).map(|n| n.to_string()).collect::<Vec<_>>()), "digits alone are fine");
+    // A common word at the end, and at both ends.
+    let a = abbreviate(&names(&["Cutoff Level", "Resonance Level", "Drive Level"]));
+    assert_eq!((a.heading.as_str(), a.shorts), ("Level", names(&["Cutoff", "Resonance", "Drive"])));
+    let a = abbreviate(&names(&["Operator 1 Level", "Operator 2 Level"]));
+    assert_eq!((a.heading.as_str(), a.shorts), ("Operator \u{2026} Level", names(&["1", "2"])));
+    // Several shared leading words.
+    let a = abbreviate(&names(&["Filter A Cutoff", "Filter A Reso", "Filter A Drive"]));
+    assert_eq!((a.heading.as_str(), a.shorts), ("Filter A", names(&["Cutoff", "Reso", "Drive"])));
+    // A mixed rail is not abbreviated, nor is a single tab, nor an empty list.
+    for row in [names(&["Operator 1", "Operator 2", "LFO"]), names(&["Operator 1"]), names(&["Filter", "Amp", "Effects"]), names(&[])] {
+        let a = abbreviate(&row);
+        assert_eq!((a.heading.as_str(), &a.shorts), ("", &row), "{row:?}");
+    }
+    // A name keeps a word: "Operator" and "Operator 2" share only a word one of them is made of.
+    let a = abbreviate(&names(&["Operator", "Operator 2"]));
+    assert_eq!((a.heading.as_str(), a.shorts), ("", names(&["Operator", "Operator 2"])));
+    // What is left must tell the names apart.
+    let a = abbreviate(&names(&["Osc 1", "Osc 1"]));
+    assert_eq!(a.heading, "");
+    // An empty name is drawn as General.
+    let a = abbreviate(&names(&["", "Amp"]));
+    assert_eq!(a.shorts, names(&["General", "Amp"]));
+}
+
+#[test]
+fn a_label_has_a_second_line_where_it_has_a_space() {
+    use crate::tabs::two_lines;
+    let two = |a: &str, b: &str| (a.to_string(), b.to_string());
+    assert_eq!(two_lines("Modulation Matrix"), two("Modulation", "Matrix"));
+    assert_eq!(two_lines("Effects A"), two("Effects", "A"));
+    assert_eq!(two_lines("Global"), two("Global", ""));
+    assert_eq!(two_lines("A B C D"), two("A B", "C D"), "the space that leaves the lines the most even");
+    assert_eq!(two_lines(""), two("", ""));
+}
+
+// On the screen: the names stay whole (what a screen reader reads, what the cursor's readout and any path use); the short
+// forms and the heading are what the rails and an overflowing strip draw.
+#[test]
+fn the_screen_keeps_the_whole_names_and_gives_the_short_forms_besides() {
+    let mut s = Screen::new();
+    let ui = s.ui.clone_strong();
+    let list = super::tabs::five_pages();
+    let _p = open_with(&mut s, list.clone(), &super::tabs::values_of(&list), &super::tabs::percent);
+    let g = ui.global::<GridState>();
+    let strings = |m: slint::ModelRc<slint::SharedString>| m.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+    assert_eq!(strings(g.get_pages()), ["Operators", "Filter", "Amp", "Effects", "Global"]);
+    assert_eq!(g.get_page_heading().as_str(), "", "the pages share nothing");
+    assert_eq!(strings(g.get_tabs()), (1..=8).map(|n| format!("Operator {n}")).collect::<Vec<_>>(), "whole names");
+    assert_eq!(g.get_tab_heading().as_str(), "Operator");
+    assert_eq!(g.get_tab_labels().iter().map(|l| l.short.to_string()).collect::<Vec<_>>(), (1..=8).map(|n| n.to_string()).collect::<Vec<_>>());
+    assert_eq!(g.get_page_labels().row_count(), 5);
+}

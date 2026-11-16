@@ -216,3 +216,54 @@ fn heading_below(module: &str, page: &str, tab: Option<&str>) -> String {
     }
     after(module, skip)
 }
+
+/// The names of one row or rail of tabs without what they all share: `heading` is the shared leading and trailing
+/// words (shown once, where the tabs are), `shorts` what differs, one per name in order. The full names stay the
+/// tabs' names everywhere else (the path in the top bar, what a screen reader says).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Abbreviated {
+    pub heading: String,
+    pub shorts: Vec<String>,
+}
+
+/// The words every name begins with, and those every name ends with, taken off the names: "Operator 1" to
+/// "Operator 8" are "1" to "8" under the heading "Operator". Two or more names are needed, a name keeps at least one
+/// word, and what is left must still tell the names apart (else nothing is taken off). An empty name is "General".
+pub fn abbreviate(names: &[String]) -> Abbreviated {
+    let whole = || Abbreviated { heading: String::new(), shorts: names.iter().map(|n| if n.is_empty() { "General".to_string() } else { n.clone() }).collect() };
+    let words: Vec<Vec<&str>> = names.iter().map(|n| n.split_whitespace().collect()).collect();
+    let least = words.iter().map(Vec::len).min().unwrap_or(0);
+    if names.len() < 2 || least < 2 {
+        return whole();
+    }
+    let same_from_front = |k: usize| words.iter().all(|w| w[k] == words[0][k]);
+    let same_from_back = |k: usize| words.iter().all(|w| w[w.len() - 1 - k] == words[0][words[0].len() - 1 - k]);
+    let lead = (0..least - 1).take_while(|&k| same_from_front(k)).count();
+    let trail = (0..least - 1 - lead).take_while(|&k| same_from_back(k)).count();
+    if lead + trail == 0 {
+        return whole();
+    }
+    let shorts: Vec<String> = words.iter().map(|w| w[lead..w.len() - trail].join(" ")).collect();
+    if (1..shorts.len()).any(|i| shorts[..i].contains(&shorts[i])) {
+        return whole();
+    }
+    let first = words[0][..lead].join(" ");
+    let last = words[0][words[0].len() - trail..].join(" ");
+    let heading = match (lead, trail) {
+        (0, _) => last,
+        (_, 0) => first,
+        _ => format!("{first} \u{2026} {last}"),
+    };
+    Abbreviated { heading, shorts }
+}
+
+/// A label on two lines: split at the space that leaves the two the most even, or on one line (the second empty)
+/// where there is no space.
+pub fn two_lines(label: &str) -> (String, String) {
+    let chars: Vec<char> = label.chars().collect();
+    let at = chars.iter().enumerate().filter(|(_, c)| **c == ' ').min_by_key(|(i, _)| (*i as i64 - (chars.len() - 1 - *i) as i64).abs()).map(|(i, _)| i);
+    match at {
+        Some(i) => (chars[..i].iter().collect(), chars[i + 1..].iter().collect()),
+        None => (label.to_string(), String::new()),
+    }
+}

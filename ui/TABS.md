@@ -46,19 +46,61 @@ So the family has three users today: the parameter pages (two levels), and Play'
   (`TabMore`, the surface color, an arrow in the text color) sits over the cut end with the cut tab behind it,
   and a touch on it scrolls most of a view. The tab the cursor is on (else the selected one) is kept in view
   clear of the arrow boxes.
-- `TabPages`: the two-level arrangement, from `pages`, `tabs` and their selection and cursors. `column` puts
-  the pages as a column at the left with the tabs a strip over the content; otherwise the pages are a strip and
-  the tabs a strip under it. A page with fewer than two tabs has no second row; a plugin with one page has
-  neither (no empty row). The content goes where `content-x`, `content-y`, `content-width` and
-  `content-height` say.
-- The arrangement is the theme's `tabPlacement` (THEME.md): `top` two strips, `side` two columns at the left (pages, then
-  tabs), `auto` the size rule that was the only rule before: `Theme.column-from` (560 logical px) of height or more is the
-  pages' column with the tabs a strip over the tiles, else two strips (at 826 x 465, the keyboard at 1.55, and 800 x 480 it is two
-  strips). `TabPages` takes it as `mode` (0 strips, 1 the pages' column, 2 two columns); the Grid publishes it as `GridState.layout`.
-- In `side` each column is as wide as its longest name in bold needs plus the tab's padding, at least 1.6 touch targets and at
-  most `Theme.side-share` (22%) of the screen's width, so at 826 across one column is at most 179 px (138 at 640); a longer name
-  shrinks to 70% and is then cut. A column with more entries than fit scrolls down (touch drags it) with an arrow box over the cut
-  end, as the strips do. A plugin with one page has no pages' column and a page with fewer than two tabs has no tabs' column.
+- `TabPages`: the two-level arrangement, from `pages`, `tabs` and their selection and cursors, over the whole of the screen
+  below the top bar. The pages are a strip with the tabs a strip under it (`top`), or two rails at the left (`side`, below). A
+  page with fewer than two tabs has no second row or rail; a plugin with one page has neither (no empty row). The content goes
+  where `content-x`, `content-y`, `content-width` and `content-height` say.
+- The arrangement is the theme's `tabPlacement` (THEME.md): `top` two strips, `side` two rails, `auto` whichever of the two
+  leaves the content the larger area at the size at hand (two strips where they are equal: a plugin of one page). `TabPages`
+  publishes it as `mode` (0 strips, 1 rails), the Grid as `GridState.layout`. The old third arrangement (the pages a column
+  beside the tiles, the tabs a strip over them, chosen on a window 560 or more tall) is gone: a rail does what it did, narrower.
+- A strip whose whole names do not fit (and whose names share a word) shows the shared word once at its start, in the dim
+  color, and each tab only what differs: see "Shared words" below.
+
+### Rails (`side`)
+
+- **Height.** A rail runs from just under the top bar to the bottom of the screen, edge to edge, one continuous track (the
+  screen's left edge to the content, the first rail from `x = 0`). Its tabs share that height equally: each is the rail's height
+  (less its heading, if it has one) over the number of tabs, at least a touch target (`Theme.touch`); with more tabs than
+  that, the rail scrolls (a touch drags it, the cursor's tab is kept in view) with an arrow box over each cut end, as the
+  strips do. With 5 pages on the keyboard's screen each page tab is 83 logical px tall; that is intended.
+- **Width, fixed by the theme and not by the names.** `Theme.rail-width` = 5 x the small type's size + 1.5 x the tight padding
+  (13 x 5 + 1.5 x 4 = **71 logical px** at the touch scale, 110 physical px on the keyboard at 1.55), at most
+  `Theme.side-share` (**12%**) of the screen's width (99 at 826, 77 at 640, 48 at 400). It grows with `fontScale` and
+  `spacing` (74.6 at spacing 1.6, 97 at font 1.4, 55.6 at spacing 0.6 and font 0.8, tests/tabs.rs
+  `a_rails_width_is_the_themes_and_at_most_twelve_percent_of_the_screen`). Between the pages' rail and the tabs' there is the
+  theme's gap; the content starts one margin after the last rail.
+- **Text** (src/tabs.rs `abbreviate`, `two_lines`; slint/theme.slint `Rail`): every label of a rail is horizontal.
+  (a) At the small type, on one line, or on two where it has a space to break at, when every label fits the rail's width that
+  way ("Operators", "Effects A": the keyboard's rails). (b) *Rotated text (reading bottom to top) was not built: Slint 1.18.1's
+  software renderer, the one the device and the headless tests use, does not rotate text.* Checked by rendering: a `Text`
+  given `transform-rotation: -90deg` (its `rotation-angle` is the deprecated alias) came out upright and unchanged, and
+  i-slint-renderer-software's `rotate` is `// TODO (#6068)`. A rotated label would need its own glyph drawing. (c) Otherwise the
+  same horizontal text, uniformly for the whole rail, shrunk by the least that fits every label and at most to 70% (the
+  reference's `drawFittedText` rule), then each line cut with an ellipsis. One rail never mixes sizes. Each rail reports its
+  factor (`GridState.page-fit`, `tab-fit`). On the keyboard's screen at 1.55: the five pages ("Operators" in bold, the widest,
+  is 4% too wide for the rail) 0.95, the eight tabs "1" to "8" 1.0, "Voice" and "Output" 1.0, "Sound" and "Output" 1.0, and the
+  unrelated names "Modulation Matrix", "Arpeggiator", "Effects A", "Global" 0.70 ("Arpeggiator" is the one that sets it).
+  Shrunk text is as crisp as full-size text (compared enlarged: `rail-long-names-*`).
+- **Shapes** follow the `tabs` style. `segmented`: the track is the raised color, edge to edge; the selected tab is a cell
+  lifted out of it (the soft shadow where `depth` is soft), inset by the tab padding, rounded by the radius + 1. `folder`:
+  the track is the surface color with the rule along its right edge; every tab is a piece rounded at the left, the unselected
+  ones 4 px back from the rule, the selected one reaching over the rule to the page it opens (the first rail's selected tab
+  to the second rail, the last rail's to the content). The cursor is the same ring round the tab's own part, in both.
+- **Gap to the content, and the tile area** (826 x 465 logical, segmented, dark; tests/tabs.rs): see "Placement" below.
+
+### Shared words
+
+When all labels of a rail share their leading words ("Operator 1" to "Operator 8") or their trailing words, the shared part
+is shown **once** as a heading at the top of the rail (a strip: a short cell at its start), in the dim color, and each tab
+shows what differs ("1" to "8"). `abbreviate` takes off the longest common run of leading words and then of trailing words,
+only with two or more names, never a name's last word, and only if what is left still tells the names apart; both ends
+show as "Operator … Level". A mixed rail ("Operator 1", "Operator 2", "LFO"), a single tab and a rail of unrelated names are
+not abbreviated. The names themselves are not changed: the model, `GridState.pages` and `GridState.tabs`, and anything that
+reads them (the cursor's readout, a screen reader) keep the whole names; the short forms are `page-labels`, `tab-labels`
+and the headings. A rail is always abbreviated; a strip only when its whole names would overflow (the eight operators then
+fit: the shared word at the start, then 1 to 8). (The top bar's path today names the plugin, not the page or the tab; that
+is unchanged.)
 
 ### The theme
 
@@ -67,9 +109,9 @@ is a literal.
 
 - `segmented`: the tabs lie in a track (the raised color, the radius + 4); the selected one is a piece lifted
   out of it (the soft shadow where `depth` is soft), rounded by the radius + 1. In a column the track is a
-  column.
+  column; in a rail it is the rail, edge to edge.
 - `folder`: every tab is a folder piece, rounded at the side away from the page (the top of a row's tabs, the
-  left of a column's); a rule runs along the page side. The selected one reaches the rule and the page past it;
+  left of a column's or rail's); a rule runs along the page side. The selected one reaches the rule and the page past it;
   the others stop short of it and sit 4 px back, outlined by the hairline.
 - The selected tab is told by its fill, not an outline: `Theme.tab-on` with its text `Theme.tab-on-ink` in
   bold, against an unselected tab's `Theme.tab-off` with `Theme.tab-off-ink` in regular weight. They are set
@@ -96,11 +138,10 @@ is a literal.
 - The search is a button of the top bar (the screen's own action, with Back and the path title: docs/rust-ui.md "The top bar
   carries the chrome") for a plugin of more than 24 parameters; while a search is on it reads "Search: " and the text (not lit: the cursor's ring would vanish on the accent). It no longer costs a column.
 
-### The arrangement for the keyboard's screen
+### The arrangement for the keyboard's screen (history: the first choice, since replaced by "Placement" below)
 
-826 x 465 logical (1280 x 720 at 1.55), the shell's top bar 48 above, measured by rendering both
-(tests/tabs.rs `the_arrangements_on_the_keyboards_screen`, pictures `tabs-arrangement-*`), the tile area in logical
-pixels (width x height):
+826 x 465 logical (1280 x 720 at 1.55), the shell's top bar 48 above, measured by rendering both (a test since removed with
+the arrangement it measured), the tile area in logical pixels (width x height):
 
 | Plugin | Before (a plain list at the left, 180 wide) | Pages as a column | Two strips stacked (chosen) |
 |---|---|---|---|
@@ -110,21 +151,20 @@ pixels (width x height):
 (The "before" numbers are the old layout's: GRID.md "Tile density" pinned 628 x 357; the tab row took 48 more of the
 height, so 309 is derived, the rest measured.) The strips leave 9% to 12% more area and a third column (tiles
 267 wide instead of 311, three to a row instead of two); the pages are all in view at once, and the eight operators
-scroll in one strip. The
-column stays for windows 560 or more tall, where the height is spare and a long page list reads best: a 1280 x 720
-window at scale 1 gets the column.
+scroll in one strip. (The column arrangement was kept then for windows 560 or more tall; it
+is gone now, a rail is the column made narrow and the full height.)
 
 ## Without touch
 
 The border cursor walks the rows above the tiles in reading order, then the tiles: the search, the pages, the
 tabs, the tiles. The dial (and DEC/INC, CURSOR UP/DOWN: one step) moves it by one; leaving a row at its end goes
 to the next row's *selected* entry. Left and right (or the right knob, up and down) move along a row and
-between rows: in a strip, left and right along it, up and down to the row above and below; in the pages'
-column, up and down along it, right to the tabs (or the tiles), left from the first tab or the first column of
-tiles back to the pages. Nothing opens by being moved to: a press opens the page or tab under the cursor (the
-cursor stays on it), the tiles stop at either end and no longer turn the page. In `side` the tabs are a column beside the
-pages': up and down along each, right to the next column or the tiles, left from the first column of tiles to the tabs and from the
-tabs to the pages (the dial's order is the same: pages, tabs, tiles). Cancel is Back, the screen's one step up, from anywhere; the search
+between rows: in a strip, left and right along it, up and down to the row above and below. Nothing opens by being moved to: a
+press opens the page or tab under the cursor (the cursor stays on it), the tiles stop at either end and no longer turn the
+page. In `side` the pages' and the tabs' rails are two columns: up and down along each, right to the next rail or the tiles,
+left from the first column of tiles to the tabs and from the tabs to the pages (the dial's order is the same: pages, tabs,
+tiles). The ring is round the tab's own part, two logical pixels thick, and shows on a narrow tab (tests/tabs.rs
+`the_cursor_in_the_rails` counts it in the pixels, both styles). Cancel is Back, the screen's one step up, from anywhere; the search
 is the top bar's, reached by its own cursor stop.
 
 A direct way to step tabs from inside a page: the page keys (Page Up and Page Down on a computer keyboard,
@@ -169,16 +209,35 @@ instead, from `ui.h` (`oscairn_ui_tab_t`), without writing a line of drawing.
 
 With the screen's header row gone to the top bar (the grid starts under the bar), 826 x 465 logical (1280 x 720 at 1.55), the tile
 area in logical pixels, measured by rendering both (tests/tabs.rs
-`the_placements_on_the_keyboards_screen_leave_the_tiles_their_room`, pictures `tabs-placement-*`; segmented style, dark theme):
+`the_placements_on_the_keyboards_screen_leave_the_tiles_their_room`; segmented style, dark theme). `side` before is the first
+version (two columns as wide as the longest name, 104 and 109 for the five pages, which was rejected), after is the rails:
 
-| Plugin | `top` (two strips) | `side` (two columns) |
-|---|---|---|
-| 5 pages, the first of 8 tabs | 814 x 309 = 251 072, 3 columns of tiles (rows: 44 + 4 + 44 + 4) | 593 x 405 = 239 800, 2 columns (pages 104 wide, tabs 109) |
-| 2 pages, no tabs | 814 x 357 = 290 135 | 729 x 405 = 294 814 (pages 81 wide) |
-| the FM fixture (one page) | 814 x 405 = 329 198 (no rows: nothing to switch) | 814 x 405 = 329 198 (no columns) |
+| Plugin | `top` (two strips) | `side` before (wide columns) | `side` after (rails, 71 wide each) |
+|---|---|---|---|
+| 5 pages, the first of 8 tabs | 814 x 309 = 251 072, 3 columns of tiles | 593 x 405 = 239 800, 2 columns | **668 x 405 = 270 138, 3 columns** |
+| 2 pages, no tabs | 814 x 357 = 290 135, 3 columns | 729 x 405 = 294 814 | **743 x 405 = 300 477, 3 columns** |
+| the FM fixture (one page) | 814 x 405 = 329 198 (no rows: nothing to switch) | 814 x 405 = 329 198 | 814 x 405 = 329 198 (no rails) |
 
-`side` leaves the tiles the full height (465 less the bar's 48 and the 6 px margin above and below) at the price of width: with eight
-tabs the strips' three columns of tiles become two, and the area is 5% smaller; with two pages and no tabs it is the larger. Both
-forms were looked at in both tab styles in every theme (pictures `tabs-side-*` and `tabs-placement-*` in target/theme-shots): the folder
-style's pieces are rounded at the left with a rule at the right edge of each column, the segmented style's tracks are two columns, the selected tab
-is the same fill in both (tested in the pixels of both columns).
+The strips' numbers did not change. `side` leaves the tiles the full height (465 less the bar's 48 and the 6 px margin above and
+below) and now costs 142 + 4 + 6 + 6 of the width with both rails (the rails 2 x 71, the gap between them, the margin after
+them and at the right edge): the content is 668 wide, three columns of 210 or more (the reference's rule, GRID.md), where the first
+version's 593 had two. The rails leave 8% more area than two strips for the five pages and 4% more for two pages, and the tabs are
+as tall as the screen.
+
+**`auto`** is the placement that leaves the content the larger area at the size at hand (src/theme.slint `TabPages`: the content's
+width times its height in each placement, from the screen's size and which rails there would be; two strips where they are
+equal). Measured (tests/tabs.rs `auto_is_the_placement_with_the_larger_tile_area`, logical px, segmented, dark):
+
+| Plugin | 826 x 465 (1280 x 720 at 1.55) top / side | 1280 x 720 at 1 top / side | 800 x 480 top / side |
+|---|---|---|---|
+| 5 pages, 8 tabs | 251 072 / 270 138: **side** (3 columns both) | 715 152 (4 columns) / 740 520 (4): **side** | 255 312 / 269 640 (3 both): **side** |
+| 2 pages, no tabs | 290 135 / 300 477: **side** (3 both) | 776 016 (6) / 790 020 (5): **side** | 293 136 / 301 140: **side** |
+| FM, one page | 329 198 / 329 198: **top** (equal) | 836 880 / 836 880: **top** | 330 960 / 330 960: **top** |
+
+(Before, `auto` chose the strips at 826 x 465 and at 800 x 480, and the wide pages' column at 1280 x 720 at 1, whichever the plugin.)
+Area alone decides; where `side` costs a column of tiles (the two pages at 1280 x 720 at 1: 5 columns against 6) it still wins on area. A
+theme that wants the strips says `top`.
+
+Both forms were looked at in both tab styles in the dark, light and the two odd themes at 826 x 465, 1280 x 720 at 1 and 800 x 480
+(pictures `tabs-PLUGIN-PLACEMENT-THEME-STYLE@*` in target/theme-shots, rails enlarged `tabrows-*-rails@*`, the 14-tab and long-name
+rails `rail-*`).

@@ -110,14 +110,13 @@ export global Theme {
     out property <length> pad-wide: 12px * spacing;
     out property <length> pad-narrow: 8px * spacing;
     out property <length> pad-tight: 4px * spacing;
-    // A small button's width ("Back", "Previous"), the dropdown overlay's width, the pages column.
+    // A small button's width ("Back", "Previous") and the dropdown overlay's width.
     out property <length> button-width: 110px;
     out property <length> overlay-width: 420px;
-    out property <length> pages-width: 180px;
-    // The most of a screen's width one column of tabs takes in the side arrangement (ui/TABS.md).
-    out property <float> side-share: 0.22;
-    // A window at least this tall has room for the pages as a column beside the tiles (ui/TABS.md).
-    in property <length> column-from: 560px;
+    // A rail of tabs (the side placement, ui/TABS.md): fixed by the type and the spacing, five of the small type's size
+    // and one and a half tight paddings across (71 at the touch scale), never more than a share of the screen's width.
+    out property <length> rail-width: 5 * small + 1.5 * pad-tight;
+    out property <float> side-share: 0.12;
     // A cursor's border and a cursor on the piano keys; the rule between neighbors.
     out property <length> cursor-width: 2px;
     out property <length> key-cursor-width: 3px;
@@ -361,6 +360,77 @@ export component Thumb inherits Rectangle {
 // The selected tab is told by its fill (Theme.tab-on: 3 to 1 against an unselected tab's fill in every theme,
 // src/palette.rs `tabs`), by bold type and by the text color that reads on the fill, never by an outline
 // alone. The cursor is a ring round the whole box with a gap between it and the fill.
+// A tab's label in a rail: its short form (what its name has that the rail's other names do not: ui/TABS.md) and
+// that on two lines (the second empty where there is no space to break at).
+export struct TabLabel {
+    short: string,
+    top: string,
+    bottom: string,
+}
+
+// A tab's box by the theme's `tabs` style, over the whole of its parent: segmented, the selected one a piece lifted
+// out of the track; folder, every tab a piece, rounded at the side away from the page (the top of a row's tabs, the
+// left of a column's, rail's included), the selected one reaching the rule and the page past it, the others
+// stopping short of it and sitting back. The cursor is a ring round the whole box.
+component TabShape inherits Rectangle {
+    in property <bool> selected;
+    in property <bool> cursor;
+    in property <bool> vertical;
+    // How far the box goes past the edge the tab's own part ends at: a vertical folder's selected piece reaches over it,
+    // to the page it opens, and the ring stays round the tab's own part.
+    in property <length> reach;
+    property <bool> segmented: Theme.tabs == TabStyle.segmented;
+    property <length> inset: Theme.tab-pad;
+    // A folder's unselected tab sits back from the edge the selected one reaches.
+    property <length> back: 4px;
+    if root.segmented && root.selected && Theme.depth == DepthStyle.soft: Rectangle {
+        x: root.inset;
+        y: root.inset + 1px;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - 2 * root.inset;
+        border-radius: Theme.radius + 1px;
+        background: Theme.shadow;
+    }
+    if root.segmented && root.selected: Rectangle {
+        x: root.inset;
+        y: root.inset;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - 2 * root.inset;
+        border-radius: Theme.radius + 1px;
+        background: Theme.tab-on;
+    }
+    if !root.segmented && !root.vertical: Rectangle {
+        x: root.inset;
+        y: root.selected ? root.inset : root.inset + root.back;
+        width: parent.width - 2 * root.inset;
+        height: (root.selected ? parent.height : parent.height - Theme.hair) - self.y;
+        border-top-left-radius: Theme.radius + 1px;
+        border-top-right-radius: Theme.radius + 1px;
+        background: root.selected ? Theme.tab-on : Theme.tab-off;
+        border-width: root.selected ? 0px : Theme.hair;
+        border-color: Theme.rule;
+    }
+    if !root.segmented && root.vertical: Rectangle {
+        x: root.selected ? root.inset : root.inset + root.back;
+        y: root.inset;
+        width: (root.selected ? parent.width : parent.width - root.reach - Theme.hair) - self.x;
+        height: parent.height - 2 * root.inset;
+        border-top-left-radius: Theme.radius + 1px;
+        border-bottom-left-radius: Theme.radius + 1px;
+        background: root.selected ? Theme.tab-on : Theme.tab-off;
+        border-width: root.selected ? 0px : Theme.hair;
+        border-color: Theme.rule;
+    }
+    Cursor {
+        x: 0px;
+        y: 0px;
+        width: parent.width - root.reach;
+        height: parent.height;
+        shown: root.cursor;
+        corner: Theme.radius + 2px;
+    }
+}
+
 component TabItem inherits Rectangle {
     in property <string> text;
     in property <bool> selected;
@@ -370,10 +440,7 @@ component TabItem inherits Rectangle {
     in property <bool> active;
     callback clicked();
     callback reveal();
-    property <bool> segmented: Theme.tabs == TabStyle.segmented;
     property <length> inset: Theme.tab-pad;
-    // A folder's unselected tab sits back from the edge the selected one reaches.
-    property <length> back: 4px;
     // A row's tab is as wide as its name in bold needs, at most four and a half touch targets; a longer name
     // shrinks to 70% of the type and is then cut (FitText).
     preferred-width: min(Theme.touch * 4.5, max(Theme.touch, probe.preferred-width + 2 * (Theme.pad-wide + Theme.tab-pad)));
@@ -393,45 +460,10 @@ component TabItem inherits Rectangle {
         font-size: Theme.button;
         font-weight: 700;
     }
-    if root.segmented && root.selected && Theme.depth == DepthStyle.soft: Rectangle {
-        x: root.inset;
-        y: root.inset + 1px;
-        width: parent.width - 2 * root.inset;
-        height: parent.height - 2 * root.inset;
-        border-radius: Theme.radius + 1px;
-        background: Theme.shadow;
-    }
-    if root.segmented && root.selected: Rectangle {
-        x: root.inset;
-        y: root.inset;
-        width: parent.width - 2 * root.inset;
-        height: parent.height - 2 * root.inset;
-        border-radius: Theme.radius + 1px;
-        background: Theme.tab-on;
-    }
-    // A folder: every tab is a piece; the selected one reaches the rule (and the page past it), the others stop
-    // short of it and sit back.
-    if !root.segmented && !root.vertical: Rectangle {
-        x: root.inset;
-        y: root.selected ? root.inset : root.inset + root.back;
-        width: parent.width - 2 * root.inset;
-        height: (root.selected ? parent.height : parent.height - Theme.hair) - self.y;
-        border-top-left-radius: Theme.radius + 1px;
-        border-top-right-radius: Theme.radius + 1px;
-        background: root.selected ? Theme.tab-on : Theme.tab-off;
-        border-width: root.selected ? 0px : Theme.hair;
-        border-color: Theme.rule;
-    }
-    if !root.segmented && root.vertical: Rectangle {
-        x: root.selected ? root.inset : root.inset + root.back;
-        y: root.inset;
-        width: (root.selected ? parent.width : parent.width - Theme.hair) - self.x;
-        height: parent.height - 2 * root.inset;
-        border-top-left-radius: Theme.radius + 1px;
-        border-bottom-left-radius: Theme.radius + 1px;
-        background: root.selected ? Theme.tab-on : Theme.tab-off;
-        border-width: root.selected ? 0px : Theme.hair;
-        border-color: Theme.rule;
+    TabShape {
+        selected: root.selected;
+        cursor: root.cursor;
+        vertical: root.vertical;
     }
     FitText {
         x: root.inset + Theme.pad-wide;
@@ -442,10 +474,6 @@ component TabItem inherits Rectangle {
         size: Theme.button;
         bold: root.selected;
         align: root.vertical ? TextHorizontalAlignment.left : TextHorizontalAlignment.center;
-    }
-    Cursor {
-        shown: root.cursor;
-        corner: Theme.radius + 2px;
     }
     TouchArea {
         clicked => { root.clicked(); }
@@ -481,8 +509,34 @@ component TabMore inherits Rectangle {
     }
 }
 
+// What the names of a row of tabs share (the heading), shown once at the start of the row in the dim color, when the
+// whole names do not fit the row: a short cell, not a tab.
+component TabHeading inherits Rectangle {
+    in property <string> text;
+    preferred-width: probe.preferred-width + 2 * Theme.pad-wide;
+    probe := Text {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        text: root.text;
+        font-size: Theme.small;
+    }
+    Text {
+        x: Theme.pad-wide;
+        width: parent.width - 2 * Theme.pad-wide;
+        height: parent.height;
+        text: root.text;
+        color: Theme.muted;
+        font-size: Theme.small;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
 component HTabs inherits Rectangle {
     in property <[string]> names;
+    in property <[TabLabel]> labels;
+    in property <string> heading;
     in property <int> current;
     in property <int> cursor;
     in property <string> empty-name;
@@ -490,6 +544,8 @@ component HTabs inherits Rectangle {
     property <bool> segmented: Theme.tabs == TabStyle.segmented;
     property <int> keep: root.cursor >= 0 ? root.cursor : root.current;
     property <length> more: Theme.touch * 0.6;
+    // A row whose whole names do not fit shows what they share once and each tab what differs.
+    property <bool> short: root.heading != "" && root.labels.length == root.names.length && whole.preferred-width > root.width + 0.5px;
     property <length> content: row.preferred-width;
     out property <bool> over: root.content > root.width + 0.5px;
     function settle() {
@@ -505,6 +561,16 @@ component HTabs inherits Rectangle {
     }
     changed width => { root.settle(); }
     changed content => { root.settle(); }
+    // The row with the whole names, unseen: how wide it would be.
+    whole := HorizontalLayout {
+        visible: false;
+        width: self.preferred-width;
+        height: 0px;
+        alignment: start;
+        for name in root.names: TabItem {
+            text: name == "" ? root.empty-name : name;
+        }
+    }
     if !root.segmented: Rectangle {
         y: parent.height - Theme.hair;
         height: Theme.hair;
@@ -527,8 +593,11 @@ component HTabs inherits Rectangle {
             width: self.preferred-width;
             height: parent.height;
             alignment: start;
+            if root.short: TabHeading {
+                text: root.heading;
+            }
             for name[i] in root.names: TabItem {
-                text: name == "" ? root.empty-name : name;
+                text: root.short ? root.labels[i].short : name == "" ? root.empty-name : name;
                 selected: i == root.current;
                 cursor: i == root.cursor;
                 active: i == root.keep;
@@ -633,26 +702,245 @@ component VTabs inherits Rectangle {
     }
 }
 
-// A strip of tabs, or with `vertical` a column of them (each `item` tall). `current` is the selected one (-1:
-// none), `cursor` the one the border cursor is on (-1: none); a tap says `picked`, nothing else changes.
+// How wide a rail's label needs to be at the small type in bold: on one line, or where it has a space to break at, on
+// the wider of its two lines when that is narrower.
+component RailNeed inherits Rectangle {
+    in property <TabLabel> label;
+    preferred-width: root.label.bottom == "" ? whole.preferred-width : min(whole.preferred-width, max(top.preferred-width, bottom.preferred-width));
+    whole := Text {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        text: root.label.short;
+        font-size: Theme.small;
+        font-weight: 700;
+    }
+    top := Text {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        text: root.label.top;
+        font-size: Theme.small;
+        font-weight: 700;
+    }
+    bottom := Text {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        text: root.label.bottom;
+        font-size: Theme.small;
+        font-weight: 700;
+    }
+}
+
+// A tab of a rail: the whole width of the rail and its share of the height, its label horizontal, at the small type
+// on one line or two (`fit` of it: 1 down to 70%, each line cut where it still does not fit).
+component RailItem inherits Rectangle {
+    in property <TabLabel> label;
+    in property <bool> selected;
+    in property <bool> cursor;
+    in property <bool> active;
+    in property <float> fit: 1.0;
+    // The room for the text across, and for it on one line.
+    in property <length> inner;
+    // How far a folder's selected piece reaches past the rail's edge (this box is that much wider).
+    in property <length> reach;
+    callback clicked();
+    callback reveal();
+    property <length> size: Theme.small * root.fit;
+    property <bool> one: root.label.bottom == "" || measure.preferred-width * root.fit <= root.inner + 0.5px;
+    changed active => { if self.active { root.reveal(); } }
+    changed y => { if self.active { root.reveal(); } }
+    changed height => { if self.active { root.reveal(); } }
+    measure := Text {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        text: root.label.short;
+        font-size: Theme.small;
+        font-weight: 700;
+    }
+    TabShape {
+        selected: root.selected;
+        cursor: root.cursor;
+        vertical: true;
+        reach: root.reach;
+    }
+    // One line in the middle, or two meeting in it.
+    Text {
+        x: (root.width - root.reach - root.inner) / 2;
+        y: 0px;
+        width: root.inner;
+        height: root.one ? parent.height : parent.height / 2;
+        text: root.one ? root.label.short : root.label.top;
+        color: root.selected ? Theme.tab-on-ink : Theme.tab-off-ink;
+        font-size: root.size;
+        font-weight: root.selected ? 700 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: root.one ? TextVerticalAlignment.center : TextVerticalAlignment.bottom;
+        overflow: elide;
+    }
+    if !root.one: Text {
+        x: (root.width - root.reach - root.inner) / 2;
+        y: parent.height / 2;
+        width: root.inner;
+        height: parent.height / 2;
+        text: root.label.bottom;
+        color: root.selected ? Theme.tab-on-ink : Theme.tab-off-ink;
+        font-size: root.size;
+        font-weight: root.selected ? 700 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: TextVerticalAlignment.top;
+        overflow: elide;
+    }
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width - root.reach;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A rail: the side placement's column of tabs, from the top of its parent to the bottom, one continuous track. Its
+// tabs share the height equally (each at least a touch target tall: with more than fit, the rail scrolls, an arrow box
+// over each cut end). What the labels share is its heading at the top. The label is horizontal in the small type when
+// every label fits the rail's width that way, else in 70% of it (a rotated label is not drawn: the software renderer
+// does not rotate text, ui/TABS.md).
+component Rail inherits Rectangle {
+    in property <[TabLabel]> labels;
+    in property <string> heading;
+    in property <int> current;
+    in property <int> cursor;
+    // A folder's selected tab reaches this far past the rail's right edge, to the page it opens.
+    in property <length> reach;
+    callback picked(int);
+    property <bool> segmented: Theme.tabs == TabStyle.segmented;
+    property <length> over-edge: root.segmented ? 0px : root.reach;
+    property <int> keep: root.cursor >= 0 ? root.cursor : root.current;
+    property <length> more: Theme.touch * 0.6;
+    out property <length> head: root.heading == "" ? 0px : Theme.small * 2;
+    out property <length> room: max(0px, root.height - root.head);
+    out property <length> item: max(Theme.touch, root.room / max(1, root.labels.length));
+    property <length> content: root.labels.length * root.item;
+    out property <bool> over: root.content > root.room + 0.5px;
+    // The room for a label across: the rail less the tab's inset and a little air each side.
+    property <length> inner: root.width - 2 * (Theme.tab-pad + Theme.pad-tight / 2);
+    // 1: the small type fits every label's width; else the least shrink that fits them all, at most to 70%.
+    out property <float> fit: max(0.7, min(1.0, root.inner / max(1px, need.preferred-width)));
+    callback fitted(float);
+    changed fit => { root.fitted(root.fit); }
+    init => { root.fitted(root.fit); }
+    function settle() {
+        flick.content-y = min(0px, max(root.room - root.content, flick.content-y));
+    }
+    function reveal(y: length, h: length) {
+        let margin = root.over ? root.more : 0px;
+        if (y + flick.content-y < margin) {
+            flick.content-y = min(0px, margin - y);
+        } else if (y + h + flick.content-y > root.room - margin) {
+            flick.content-y = max(root.room - root.content, root.room - margin - y - h);
+        }
+    }
+    changed room => { root.settle(); }
+    changed content => { root.settle(); }
+    need := VerticalLayout {
+        width: 0px;
+        height: 0px;
+        for l in root.labels: RailNeed {
+            label: l;
+        }
+    }
+    // The track: a raised column where the tabs are lifted out of it, else the rule along the page's side.
+    Rectangle {
+        background: root.segmented ? Theme.tab-off : Theme.surface;
+    }
+    if !root.segmented: Rectangle {
+        x: parent.width - Theme.hair;
+        width: Theme.hair;
+        background: Theme.rule;
+    }
+    if root.heading != "": FitText {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: root.head;
+        text: root.heading;
+        ink: Theme.muted;
+        size: Theme.small;
+    }
+    flick := Flickable {
+        x: 0px;
+        y: root.head;
+        width: parent.width + root.over-edge;
+        height: root.room;
+        content-height: root.content;
+        interactive: root.over;
+        for l[i] in root.labels: RailItem {
+            x: 0px;
+            y: i * root.item;
+            width: root.width + root.over-edge;
+            height: root.item;
+            label: l;
+            inner: root.inner;
+            reach: root.over-edge;
+            fit: root.fit;
+            selected: i == root.current;
+            cursor: i == root.cursor;
+            active: i == root.keep;
+            clicked => { root.picked(i); }
+            reveal => { root.reveal(self.y, self.height); }
+        }
+    }
+    if root.over && flick.content-y < -0.5px: TabMore {
+        y: root.head;
+        width: parent.width;
+        height: root.more;
+        vertical: true;
+        glyph: "▲";
+        clicked => { flick.content-y = min(0px, flick.content-y + root.room * 0.7); }
+    }
+    if root.over && flick.content-y > root.room - root.content + 0.5px: TabMore {
+        y: parent.height - root.more;
+        width: parent.width;
+        height: root.more;
+        vertical: true;
+        last: true;
+        glyph: "▼";
+        clicked => { flick.content-y = max(root.room - root.content, flick.content-y - root.room * 0.7); }
+    }
+}
+
+// A strip of tabs, or with `vertical` a column of them (each `item` tall), or with `rail` the side placement's rail
+// (the full height of this component, the tabs sharing it). `current` is the selected one (-1: none), `cursor` the one
+// the border cursor is on (-1: none); a tap says `picked`, nothing else changes. `labels` and `heading` (what the names
+// share, shown once) are the short forms of a strip that overflows and of a rail, one label per name.
 export component TabBar inherits Rectangle {
     in property <[string]> names;
+    in property <[TabLabel]> labels;
+    in property <string> heading;
     in property <int> current;
     in property <int> cursor: -1;
     in property <bool> vertical;
+    in property <bool> rail;
+    in property <length> reach;
     in property <length> item: Theme.touch;
     in property <string> empty-name: "General";
     callback picked(int);
-    if !root.vertical: HTabs {
+    // A rail says how much of the small type its labels got (1, or down to 0.7).
+    callback fitted(float);
+    if !root.vertical && !root.rail: HTabs {
         width: parent.width;
         height: parent.height;
         names: root.names;
+        labels: root.labels;
+        heading: root.heading;
         current: root.current;
         cursor: root.cursor;
         empty-name: root.empty-name;
         picked(i) => { root.picked(i); }
     }
-    if root.vertical: VTabs {
+    if root.vertical && !root.rail: VTabs {
         width: parent.width;
         height: parent.height;
         names: root.names;
@@ -662,74 +950,92 @@ export component TabBar inherits Rectangle {
         item: root.item;
         picked(i) => { root.picked(i); }
     }
+    if root.rail: Rail {
+        width: parent.width;
+        height: parent.height;
+        labels: root.labels;
+        heading: root.heading;
+        current: root.current;
+        cursor: root.cursor;
+        reach: root.reach;
+        picked(i) => { root.picked(i); }
+        fitted(f) => { root.fitted(f); }
+    }
 }
 
-// Two levels: pages, and under each the page's tabs (none for a page with fewer than two). `mode` is the arrangement:
-// 0 two strips stacked, the pages over the tabs; 1 the pages a column at the left with the tabs a strip over the
-// content; 2 two columns at the left, the pages and then the tabs beside them, each as wide as its longest name needs
-// (at most `Theme.side-share` of the width). The content goes where the out properties say, in this component's own
-// pixels.
+// Two levels: pages, and under each the page's tabs (none for a page with fewer than two), placed as the theme says
+// (`Theme.tab-placement`): `top` two strips stacked, the pages over the tabs, over the content; `side` two rails
+// at the left, from the top of this component to its bottom, the pages' and then the tabs', the content after them;
+// `auto` whichever of the two leaves the content the larger area at this size. This component is the whole of the
+// screen below the bar; `reserve` is a height at the bottom the content leaves free (a message), not the rails.
+// The content goes where the out properties say, in this component's own pixels.
 export component TabPages inherits Rectangle {
     in property <[string]> pages;
+    in property <[TabLabel]> page-labels;
+    in property <string> page-heading;
     in property <int> page;
     in property <int> page-cursor: -1;
     in property <[string]> tabs;
+    in property <[TabLabel]> tab-labels;
+    in property <string> tab-heading;
     in property <int> tab;
     in property <int> tab-cursor: -1;
-    in property <int> mode;
-    in property <length> column-width: Theme.pages-width;
+    in property <length> reserve;
     callback page-picked(int);
     callback tab-picked(int);
+    // How much of the small type each rail's labels got: 1, or down to 0.7 (a rail the labels of which do not fit across).
+    out property <float> pages-fit: 1.0;
+    out property <float> tabs-fit: 1.0;
     property <bool> has-pages: root.pages.length > 1;
     property <bool> has-tabs: root.tabs.length > 1;
-    property <bool> side: root.mode == 2;
-    // A column of the side arrangement: its longest name in bold with the tab's own padding, between a touch target
-    // and a share of the width.
-    property <length> pad: 2 * (Theme.pad-wide + Theme.tab-pad);
-    property <length> cap: max(Theme.touch * 1.6, root.width * Theme.side-share);
-    property <length> pages-need: pages-probe.preferred-width + root.pad;
-    property <length> tabs-need: tabs-probe.preferred-width + root.pad;
-    out property <length> pages-column: root.side ? min(root.cap, max(Theme.touch * 1.6, root.pages-need)) : root.column-width;
-    out property <length> tabs-column: min(root.cap, max(Theme.touch * 1.6, root.tabs-need));
-    property <length> pages-side: root.mode >= 1 && root.has-pages ? root.pages-column + Theme.gap : 0px;
-    property <length> tabs-side: root.side && root.has-tabs ? root.tabs-column + Theme.gap : 0px;
-    property <length> pages-height: root.mode == 0 && root.has-pages ? Theme.touch + Theme.gap : 0px;
-    property <length> tabs-height: !root.side && root.has-tabs ? Theme.touch + Theme.gap : 0px;
-    out property <length> content-x: root.pages-side + root.tabs-side;
-    out property <length> content-y: root.pages-height + root.tabs-height;
-    out property <length> content-width: max(0px, root.width - root.content-x);
-    out property <length> content-height: max(0px, root.height - root.content-y);
-    pages-probe := VerticalLayout {
-        width: 0px;
-        height: 0px;
-        for name in root.pages: Text { text: name; font-size: Theme.button; font-weight: 700; }
-    }
-    tabs-probe := VerticalLayout {
-        width: 0px;
-        height: 0px;
-        for name in root.tabs: Text { text: name; font-size: Theme.button; font-weight: 700; }
-    }
+    // A rail's width: fixed by the theme's type and spacing, at most a share of the width.
+    out property <length> rail: min(Theme.rail-width, root.width * Theme.side-share);
+    property <length> rails: (root.has-pages ? root.rail : 0px) + (root.has-tabs ? root.rail : 0px) + (root.has-pages && root.has-tabs ? Theme.gap : 0px);
+    property <length> rows: (root.has-pages ? Theme.touch + Theme.gap : 0px) + (root.has-tabs ? Theme.touch + Theme.gap : 0px);
+    // The content's room in each placement, and the one that has more of it.
+    property <length> side-x: root.rails > 0px ? root.rails + Theme.margin : Theme.margin;
+    property <length> side-w: max(0px, root.width - root.side-x - Theme.margin);
+    property <length> side-h: max(0px, root.height - 2 * Theme.margin - root.reserve);
+    property <length> top-w: max(0px, root.width - 2 * Theme.margin);
+    property <length> top-h: max(0px, root.height - 2 * Theme.margin - root.reserve - root.rows);
+    out property <float> side-area: root.side-w / 1px * (root.side-h / 1px);
+    out property <float> top-area: root.top-w / 1px * (root.top-h / 1px);
+    // 0 two strips, 1 two rails.
+    out property <int> mode: Theme.tab-placement == TabPlacement.top ? 0 : Theme.tab-placement == TabPlacement.side ? 1 : root.side-area > root.top-area ? 1 : 0;
+    property <bool> side: root.mode == 1;
+    out property <length> content-x: root.side ? root.side-x : Theme.margin;
+    out property <length> content-y: root.side ? Theme.margin : Theme.margin + root.rows;
+    out property <length> content-width: root.side ? root.side-w : root.top-w;
+    out property <length> content-height: root.side ? root.side-h : root.top-h;
     if root.has-pages: TabBar {
-        x: 0px;
-        y: 0px;
-        width: root.mode >= 1 ? root.pages-column : root.width;
-        height: root.mode >= 1 ? root.height : Theme.touch;
-        vertical: root.mode >= 1;
+        x: root.side ? 0px : Theme.margin;
+        y: root.side ? 0px : Theme.margin;
+        width: root.side ? root.rail : root.width - 2 * Theme.margin;
+        height: root.side ? root.height : Theme.touch;
+        rail: root.side;
+        reach: root.has-tabs ? Theme.gap : Theme.margin;
         names: root.pages;
+        labels: root.page-labels;
+        heading: root.page-heading;
         current: root.page;
         cursor: root.page-cursor;
         picked(i) => { root.page-picked(i); }
+        fitted(f) => { root.pages-fit = f; }
     }
     if root.has-tabs: TabBar {
-        x: root.side ? root.pages-side : root.pages-side;
-        y: root.side ? 0px : root.pages-height;
-        width: root.side ? root.tabs-column : root.width - root.pages-side;
+        x: root.side ? (root.has-pages ? root.rail + Theme.gap : 0px) : Theme.margin;
+        y: root.side ? 0px : Theme.margin + (root.has-pages ? Theme.touch + Theme.gap : 0px);
+        width: root.side ? root.rail : root.width - 2 * Theme.margin;
         height: root.side ? root.height : Theme.touch;
-        vertical: root.side;
+        rail: root.side;
+        reach: Theme.margin;
         names: root.tabs;
+        labels: root.tab-labels;
+        heading: root.tab-heading;
         current: root.tab;
         cursor: root.tab-cursor;
         picked(i) => { root.tab-picked(i); }
+        fitted(f) => { root.tabs-fit = f; }
     }
 }
 

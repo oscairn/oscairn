@@ -382,3 +382,13 @@ that says what the last said costs no request and no frame, and the theme's `tab
 the side form of the tab family. Now 268 passed, 1 ignored, `cargo clippy --offline --all-targets` clean. The JUCE `desktop-theme`
 test passed on the Mac (build-th). Not run on a unit; the ignored real-engine harness was not run and its Cancel sequences assume
 the old layered Cancel.
+
+Branch `rust-app-rails` (from `rust-app` 521cfe0b; baseline 268 passed, 1 ignored, clippy clean, confirmed): the `side` placement
+redone as rails (ui/TABS.md "Rails"): each rail from under the top bar to the screen's bottom, its tabs sharing the height (a touch
+target at least, then it scrolls), 71 logical px wide by the theme's type and spacing (at most 12% of the width) so the keyboard's
+screen keeps three columns of tiles with both rails (668 x 405, was 593 x 405 and two), horizontal labels (the small type, or shrunk
+alike to 70%): rotated text was not built because Slint 1.18.1's software renderer does not rotate it (rendered and checked); names
+that share leading or trailing words show them once as a heading (src/tabs.rs `abbreviate`), in a rail always and in a strip when
+the whole names overflow; `auto` is the placement with the larger content area; the pages-column arrangement and `Theme.column-from`
+are gone. Now 274 passed, 1 ignored, `cargo clippy --offline --all-targets` clean. Pictures in ui/target/theme-shots: tabs-*,
+tabrows-*, rail-*. Not run on a unit. docs/design-language.md (outside ui/) still describes `auto` as "by the screen's height".

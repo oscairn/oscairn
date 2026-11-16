@@ -331,8 +331,10 @@ fn every_control_by_touch() {
 // The columns follow the width the grid is given: two to six.
 #[test]
 fn the_grid_reflows_for_the_width() {
-    for (w, columns) in [(700usize, 2usize), (1100, 4), (1600, 6)] {
+    for (w, columns) in [(600usize, 2usize), (700, 3), (1100, 5), (1600, 6)] {
         let mut s = Screen::sized(w, 700);
+        // The width the tiles are given, not the rails': two strips.
+        s.ui.global::<crate::Theme>().set_tab_placement(crate::TabPlacement::Top);
         let p = open(&mut s, every_kind(), &[]);
         drop(p);
         let t = tiles(&s.ui);
@@ -493,7 +495,8 @@ fn tile_density_follows_the_references_rules_and_has_more_room() {
             if name == "FANTOM-07" {
                 let numbers = (vw.round() as i32, vh.round() as i32, columns, in_view, reference_columns, reference_in_view);
                 let expected = match what {
-                    "knobs, two pages" => (814, 357, 3, 6, 2, 2),
+                    // Two pages: `auto` puts the pages in a rail at the left (one rail, 71 wide), which leaves more area.
+                    "knobs, two pages" => (743, 405, 3, 8, 2, 2),
                     "knobs, one page" => (814, 405, 3, 9, 3, 3),
                     _ => (814, 405, 3, 12, 3, 3),
                 };

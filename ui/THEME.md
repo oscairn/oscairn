@@ -37,7 +37,7 @@ audit made at 3a97dd63 (before the work) and, further down, what the work did.
 | `style.depth` | choice | soft | flat, soft | 1 px shadow under buttons, thumbs | no | no | none |
 | `style.sliders` | choice | line | filled, line, cap | slider and knob look | no | no | none |
 | `style.tabs` | choice | segmented | folder, segmented | tab strips | no | no | none |
-| `style.tabPlacement` | choice, optional | auto | auto, top, side | where two levels of tabs go: two strips, two columns at the left, or by the window's height | no (its own layouts do not follow it; it reads, validates and keeps it) | no | none |
+| `style.tabPlacement` | choice, optional | auto | auto, top, side | where two levels of tabs go: two strips, two rails the height of the screen at the left, or whichever leaves the content more room | no (its own layouts do not follow it; it reads, validates and keeps it) | no | none |
 | `style.marks` | choice | square | square, round | mute and solo | no | no | none |
 | `style.sections` | choice | separate | separate, joined | cards apart or joined | no | no | none |
 | `style.rows` | choice | left | left, right, dot, fill | where a row's color goes | no | no | none |
@@ -215,11 +215,11 @@ colors, least contrast against the panel, least text on a fill; the test fails u
 ## Tab placement (`style.tabPlacement`)
 
 A look-and-layout preference like `spacing`, next to the `tabs` style: where a screen with two levels of tabs (the parameter
-pages: pages, then a page's tabs) puts them. `top`: two strips, the pages over the tabs. `side`: two columns at the left, the pages
-and then the tabs beside them, each as wide as its longest name needs (a touch target at least, at most `Theme.side-share`, 22%, of
-the width; a longer name shrinks to 70% and is then cut), scrolling down with an arrow box where there are more entries than fit.
-`auto` (the default, and what a theme that leaves it out has): the size rule, the pages a column with the tabs a strip over the tiles
-on a window `Theme.column-from` (560) or more tall, else two strips. Optional in the format: absent is `auto`, a value that is not
+pages: pages, then a page's tabs) puts them. `top`: two strips, the pages over the tabs. `side`: two rails at the left, the pages
+and then the tabs beside them, each from just under the top bar to the bottom of the screen with its tabs sharing that height; a rail's
+width is fixed by the theme's type and spacing (`Theme.rail-width`: five of the small type's size and one and a half tight paddings, 71
+logical px at the touch scale), at most `Theme.side-share` (12%) of the width (ui/TABS.md "Rails"). `auto` (the default, and what a theme
+that leaves it out has): whichever of the two leaves the content the larger area at the size at hand. Optional in the format: absent is `auto`, a value that is not
 one of the three refuses the theme, in both readers (src/theme.rs; hosts/standalone/Theme.cpp, tested by `desktop-theme`). The JUCE
 app's own layouts (its parameter grid lists pages as buttons down the left) do not follow it: it parses, validates and keeps the choice
 and draws as before. The two odd test themes differ (`odd`: `side`, `odd-joined`: `top`), so every render over all themes covers both.

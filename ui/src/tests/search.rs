@@ -90,8 +90,8 @@ fn the_search_lists_matches_from_every_page() {
 #[test]
 fn the_search_by_the_cursor() {
     let mut s = Screen::new();
-    // The keyboard's arrangement, the pages a strip over the tiles (tabs.rs has the column's).
-    s.ui.global::<crate::Theme>().set_column_from(100000.);
+    // The pages a strip over the tiles (tabs.rs has the rails').
+    s.ui.global::<crate::Theme>().set_tab_placement(crate::TabPlacement::Top);
     let ui = &s.ui.clone_strong();
     let g = ui.global::<crate::GridState>();
     let mut p = open_with(&mut s, big_plugin(), &[], &text);

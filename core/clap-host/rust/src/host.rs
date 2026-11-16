@@ -2437,6 +2437,10 @@ pub fn voice_report(s: &Host, cost: &mut f64, notes: &mut *const oscairn_voice_b
         0
     }
 }
+/// The events of Oscairn's the plugin asked for: bit 0 oscairn.beat's, bit 1 oscairn.harmony's (Host::wantsEvents). Any thread.
+pub fn wants_events(s: &Host) -> u32 {
+    u32::from(s.wants_beat.load(Relaxed)) | u32::from(s.wants_harmony.load(Relaxed)) << 1
+}
 /// The audio thread's, between blocks.
 pub fn restful(s: &Host) -> bool {
     // carry_count is written under the gate and read here without. A stale read is harmless: 0 where events were just carried

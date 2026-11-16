@@ -186,6 +186,10 @@ namespace oscairn
         // transport to wake it (kick::clap::Host::restful); rested: the blocks its caller left it uncalled since its
         // last; mirrorWake: a word set while a wake is pending, read in another process (kick::clap::Host::mirrorWake).
         virtual bool restful() const noexcept { return false; }
+        // The events of Oscairn's the plugin asked for (kick::clap::Host::wantsEvents: bit 0 oscairn.beat, bit 1
+        // oscairn.harmony), once it is loaded. A plugin's host drops the others' on arrival; a worker's engine does not
+        // send them. Both for a plugin whose host does not say.
+        virtual uint32_t wantsEvents() const noexcept { return 3; }
         virtual void rested(uint32_t, uint32_t) noexcept {}
         virtual void mirrorWake(std::atomic<uint32_t>*) noexcept {}
         // Audio thread, in place of process() for a block with no events, silent input and the transport as it

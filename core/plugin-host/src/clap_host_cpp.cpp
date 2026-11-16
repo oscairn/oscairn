@@ -277,6 +277,7 @@ bool cpp_clap_sound_values(const oscairn_clap_host* h, uint32_t id, void (*each)
     return true;
 }
 bool cpp_clap_rings_out(const oscairn_clap_host* h) { return h->host.ringsOut(); }
+uint32_t cpp_clap_wants_events(const oscairn_clap_host* h) { return h->host.wantsEvents(); }
 int cpp_clap_choke_retiring(oscairn_clap_host* h) { return guardInt([&]{ return h->host.chokeRetiringSounds(); }); }
 
 bool cpp_clap_process(oscairn_clap_host* h, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames,

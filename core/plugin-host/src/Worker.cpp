@@ -292,6 +292,7 @@ namespace oscairn::worker
             w.u8(host.preparesSnapshots()); w.u8(host.ringsOut()); w.u8(host.savesSounds());
             w.u8(host.voiceBudget()); w.u8(host.honorsVolume());
             w.u8(host.takesSysex()); w.u8(host.emitsSysex());
+            w.u8(uint8_t(host.wantsEvents()));
         }
 
         // A crashing worker may take longer to exit than the hang limit (sanitizers report first), so

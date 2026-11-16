@@ -159,6 +159,7 @@ typedef void (*oscairn_clap_text)(void* context, const char* text, size_t size);
     bool p##clap_save_sound(oscairn_clap_host* host, uint32_t id, const char* directory); \
     bool p##clap_sound_values(const oscairn_clap_host* host, uint32_t id, void (*each)(void* context, const oscairn_sound_parameter_t* value), void* context); \
     bool p##clap_rings_out(const oscairn_clap_host* host); \
+    uint32_t p##clap_wants_events(const oscairn_clap_host* host); \
     int p##clap_choke_retiring(oscairn_clap_host* host); \
     /* Audio thread */ \
     bool p##clap_process(oscairn_clap_host* host, const float* const* inputs, uint32_t ni, float* const* outputs, uint32_t no, uint32_t frames, \

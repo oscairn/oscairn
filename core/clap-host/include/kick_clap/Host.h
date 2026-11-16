@@ -294,6 +294,9 @@ public:
     // sound-snapshots' ring_out (RFC 0005): process() given four output channels after the ports'
     // passes them to the plugin as its ring-out buffer, where it renders its retiring sounds.
     bool ringsOut() const noexcept;
+    // The events the plugin asked for through event-registry (once it is loaded): bit 0 oscairn.beat's, bit 1
+    // oscairn.harmony's. process() drops the others' as they come, so a caller need not send them.
+    uint32_t wantsEvents() const noexcept;
     // Its choke_retiring, queued before the selections made after it: the sounds retiring then fade
     // out into the buffer's last two channels. False when the plugin does not ring out or its queue is full.
     bool chokeRetiringSounds();

@@ -259,6 +259,7 @@ exports! {
     fn rust_clap_prepares_snapshots(h) -> bool { !h.sound_snapshots.is_null() }
     fn rust_clap_saves_sounds(h) -> bool { more::saves_sounds(&h) }
     fn rust_clap_rings_out(h) -> bool { h.ring_out_channels.get() != 0 }
+    fn rust_clap_wants_events(h) -> u32 { wants_events(&h) }
     fn rust_clap_process(h, inputs: *const *const f32, ni: u32, outputs: *const *mut f32, no: u32, frames: u32,
                          events: *const event::Event, count: u32, transport: *const clap_sys::events::clap_event_transport) -> bool {
         // SAFETY: the caller's: its audio thread, buffers and events as clap_host.h says.

@@ -195,6 +195,7 @@ namespace oscairn
             bool discardSound(uint32_t id,bool) override {return checked(OSCAIRN_CLAP(discard_sound)(host,id));}
             bool preparesSnapshots() const noexcept override {return OSCAIRN_CLAP(prepares_snapshots)(host);}
             bool ringsOut() const noexcept override {return OSCAIRN_CLAP(rings_out)(host);}
+            uint32_t wantsEvents() const noexcept override {return OSCAIRN_CLAP(wants_events)(host);}
             bool chokeRetiring() override {return checked(OSCAIRN_CLAP(choke_retiring)(host));}
             bool voiceBudget() const noexcept override {return OSCAIRN_CLAP(voice_budget)(host);}
             bool honorsVolume() const noexcept override {return OSCAIRN_CLAP(honors_volume)(host);}

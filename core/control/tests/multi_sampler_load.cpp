@@ -172,7 +172,10 @@ int main(int argc, char** argv)
             ::setenv("OSCAIRN_DATA_HOME", (under / "home").c_str(), 1); // measured afresh
             ::setenv("OSCAIRN_HOLDER_CONTEXT_BYTES", std::to_string(perContext).c_str(), 1);
             { Session s(rate, frames); s.setBudget({.9, 0}); build(s, 1); play(s); s.saveMeasurementsNow(); } // its memory with one sound
+            // Built without the contexts' own memory: building leaves sounds behind for a while, which its worker's limit would refuse.
+            ::unsetenv("OSCAIRN_HOLDER_CONTEXT_BYTES");
             { Session s(rate, frames); build(s, 5); s.savePerformance((under / "performance").string()); }
+            ::setenv("OSCAIRN_HOLDER_CONTEXT_BYTES", std::to_string(perContext).c_str(), 1);
             uint64_t heldUnder = 0; // the Performance opened, as the estimate prices it: the sounds made while building it gone
             {
                 Session s(rate, frames);

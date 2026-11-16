@@ -138,6 +138,28 @@ namespace
         const auto live = Fixture::number(f.call("graph.commit"), "revision");
         check(live == second, "a commit of a live level compiles no plan and keeps the revision: " + std::to_string(second) + " then " + std::to_string(live));
     }
+
+    // harmony.set is an edit (RFC 0033: undo covers both keys): undone, the key is back; redone, it is set again.
+    void harmonyUndo(const std::string& synth)
+    {
+        Fixture f(synth); f.render();
+        const auto part = f.session.parts().front().id;
+        const auto before = f.session.parts().front().key;
+        f.call("harmony.set", "{\"part\":" + std::to_string(part) + R"(,"key":{"root":2,"scale":"Minor"}})");
+        f.call("graph.commit");
+        const auto set = f.session.parts().front().key;
+        check(set && set->root == 2 && f.undo() != "Add synth", "the part's key is set: " + f.undo());
+        f.call("edit.undo");
+        check(f.session.parts().front().key == before, "undone, the part has its key back");
+        f.call("edit.redo");
+        check(f.session.parts().front().key == set, "and redone");
+        const auto whole = f.session.key();
+        f.call("harmony.set", R"({"key":{"root":7,"scale":"Major"}})");
+        f.call("graph.commit");
+        check(f.session.key().root == 7, "the Performance's key is set");
+        f.call("edit.undo");
+        check(f.session.key() == whole, "undone, the Performance has its key back");
+    }
 }
 
 int main(int argc, char** argv)
@@ -152,6 +174,7 @@ int main(int argc, char** argv)
         fromSoundOneStep(argv[1]);
         sceneAfterUndo(argv[1]);
         revisions(argv[1]);
+        harmonyUndo(argv[1]);
     }
     catch(const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
     std::cout << "ok: edit steps over the protocol\n";

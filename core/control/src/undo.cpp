@@ -368,7 +368,7 @@ namespace oscairn
                       field(n.name, f->name, t.name); field(n.input, f->input, t.input); field(n.chain, f->chain, t.chain);
                       field(n.splits, f->splits, t.splits); field(n.output, f->output, t.output); field(n.bus, f->bus, t.bus);
                       field(n.sends, f->sends, t.sends); field(n.level, f->level, t.level); field(n.pan, f->pan, t.pan); field(n.mute, f->mute, t.mute); field(n.solo, f->solo, t.solo);
-                      field(n.from, f->from, t.from);
+                      field(n.from, f->from, t.from); field(n.key, f->key, t.key);
                   });
             // User wires by ID; a part's own wires are rebuilt from it, keeping a changed Mix.
             auto user = userWires(wires_);

@@ -39,6 +39,8 @@ pub struct Param {
     pub stepped: bool,
     pub flags: u64,
     pub priority: u64,
+    /// The role the plugin declares (`cutoff`, `attack`, `mix`...), empty when it declares none.
+    pub role: String,
     /// The hint's widget as `params.list` names it ("" or "auto": the host decides).
     pub widget: String,
     pub group: u64,
@@ -100,6 +102,7 @@ pub fn parse(list: &Value) -> Vec<Param> {
             stepped: p["stepped"].as_bool().unwrap_or(false),
             flags: p["flags"].as_u64().unwrap_or(0),
             priority: p["priority"].as_u64().unwrap_or(0),
+            role: p["role"].as_str().unwrap_or_default().into(),
             widget: p["widget"].as_str().unwrap_or_default().into(),
             group: p["group"].as_u64().unwrap_or(0),
             range_high: p["rangeHigh"].as_u64().map(|v| v as u32),
@@ -405,6 +408,60 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
     }
     out.height = y.max(1.);
     out
+}
+
+/// What a row of knob tiles is as high as: a tile (84) and the knob's extra (36), as the pages' tiles with a knob.
+pub const KNOB_ROW: f32 = TILE + KNOB_EXTRA;
+
+/// `count` tiles side by side in an area `width` across with `gap` between them, each `height` high, the same
+/// size: a row of the grid's tiles for a screen that shows a few controls (Play's knob row). They are placed
+/// in the area's own pixels; a `Tile`'s insides (the name line, the control under it, a knob at most 76
+/// across) follow from its size.
+pub fn row_layout(count: usize, width: f32, height: f32, gap: f32) -> Vec<Rect> {
+    if count == 0 {
+        return vec![];
+    }
+    let w = ((width - gap * (count - 1) as f32) / count as f32).max(0.);
+    (0..count).map(|i| Rect { x: i as f32 * (w + gap), y: 0., w, h: height }).collect()
+}
+
+/// What a tile of a row shows: the control, its name and value as text, where it stands from 0 to 1.
+pub struct Face<'a> {
+    pub control: Control,
+    pub name: &'a str,
+    pub value: &'a str,
+    pub norm: f64,
+    /// A switch's state.
+    pub on: bool,
+    pub cursor: bool,
+    /// The dial has it (a press, then the dial), or a finger.
+    pub editing: bool,
+}
+
+/// A tile of a row as the widgets take it (`GridTile`), placed at `rect`.
+pub fn row_tile(rect: Rect, face: &Face) -> crate::GridTile {
+    crate::GridTile {
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        kind: face.control as i32,
+        name: face.name.into(),
+        value: face.value.into(),
+        norm: face.norm as f32,
+        high: 0.,
+        bipolar: false,
+        arc: arc(0., face.norm).into(),
+        choices: Default::default(),
+        icons: Default::default(),
+        icon: 0,
+        chosen: 0,
+        on: face.on,
+        cursor: face.cursor,
+        editing: face.editing,
+        part: 0,
+        linked: false,
+    }
 }
 
 /// The tile the cursor goes to from `at` by `dx` columns or `dy` rows: in the same row the next

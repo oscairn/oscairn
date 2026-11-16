@@ -266,6 +266,14 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     play.on_edit(|| with_app(|a| a.hand_over(&home::APPS[0])));
     play.on_hint_keys(|| with_app(|a| a.hint_tap(0)));
     play.on_hint_dismiss(|| with_app(|a| a.hint_tap(1)));
+    play.on_knob_grab(|t, _| with_app(|a| a.on_play(|p| p.knob_grab(t))));
+    play.on_knob_drag(|t, _, n| with_app(|a| a.on_play(|p| p.knob_drag(t, n))));
+    play.on_knob_release(|_| with_app(|a| a.on_play(|p| p.knob_release())));
+    play.on_knob_tap(|t, _| with_app(|a| a.on_play(|p| p.knob_tap(t))));
+    play.on_knob_resized(|| with_app(|a| a.on_play(play::Screen::shown)));
+    play.on_knob_button(|i| with_app(|a| a.on_play(|p| p.knob_button(i))));
+    play.on_learn_reset(|| with_app(|a| a.on_play(|p| p.learn_button(crate::row::Stop::Default))));
+    play.on_learn_done(|| with_app(|a| a.on_play(|p| p.learn_button(crate::row::Stop::Done))));
     play.on_part_tapped(|i| {
         with_app(|a| {
             let mut id = None;
@@ -349,6 +357,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
         };
         app.part.keys = profile.on_screen_keyboard;
         app.play.offer_keyboard(profile.on_screen_keyboard, crate::settings::keyboard_hint_dismissed());
+        app.play.knobs(profile.controls.clone());
         app.show_home();
         *a.borrow_mut() = Some(app);
     });
@@ -486,6 +495,7 @@ impl App {
                 }
                 "params.changed" => {
                     self.on_params(|p| p.changed(&params));
+                    self.on_play(|p| p.params_changed(&params)); // the knob row's values
                 }
                 "controls.changed" => {
                     self.on_play(|p| p.controls(&params));
@@ -494,6 +504,7 @@ impl App {
                 // Read always, so the totals stay current; acted on only by the screen shown, and
                 // by none while the display goes to the JUCE app (act drops them then).
                 "controllers" => {
+                    self.on_play(|p| p.controllers(&params)); // the control moved last, for Learn
                     for action in self.totals.read(&params["navigation"]) {
                         self.act(action);
                     }
@@ -810,7 +821,8 @@ impl App {
 
     /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
     fn show_bar(&mut self) {
-        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, self.screen == Screen::Play) } else { vec![] };
+        let learn = (self.screen == Screen::Play && self.play.can_learn()).then(|| self.play.learning());
+        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, self.screen == Screen::Play, learn) } else { vec![] };
         if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
             self.bar_at = None;
         }
@@ -840,6 +852,7 @@ impl App {
             topbar::Do::Undo => self.send(Request::History, "edit.undo", json!({})),
             topbar::Do::Redo => self.send(Request::History, "edit.redo", json!({})),
             topbar::Do::Save => self.save(false),
+            topbar::Do::Learn => self.on_play(|p| p.learn_toggle()),
             topbar::Do::Scene => {
                 if let Some(id) = self.last_graph["scene"].as_u64() {
                     self.scene.open(id);
@@ -961,10 +974,16 @@ impl App {
         }
     }
 
-    /// Tells the engine whether the screen shows lists: Home's tiles and the Setlist are; a JUCE
-    /// screen opening says its own once it runs.
+    /// Whether `screen` shows lists, so a device's navigate controls navigate: Home's tiles and the Setlist's
+    /// are; not where the knobs play what is shown (Play's knob row, a parameter page: its tiles by priority),
+    /// and a JUCE screen opening says its own once it runs.
+    fn shows_lists(&self, screen: Screen) -> bool {
+        screen != Screen::Opening && screen != Screen::Params && !(screen == Screen::Play && self.play.plays_row())
+    }
+
+    /// Tells the engine whether the screen shows lists.
     fn send_view(&mut self) {
-        let lists = self.screen != Screen::Opening;
+        let lists = self.shows_lists(self.screen);
         self.send(Request::View, "controllers.view", json!({"lists": lists}));
     }
 
@@ -1319,7 +1338,7 @@ impl App {
         let was = self.screen;
         self.screen = screen;
         self.bar_at = None;
-        if (was == Screen::Opening) != (screen == Screen::Opening) {
+        if self.shows_lists(was) != self.shows_lists(screen) {
             self.send_view();
         }
         if let Some(ui) = self.ui() {

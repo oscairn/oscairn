@@ -36,6 +36,8 @@ pub struct Profile {
     pub on_screen_keyboard: bool,
     /// panel.map: the panel map's file name (beside the program, in share/oscairn/panels) or path.
     pub panel_map: String,
+    /// The device's control groups (`controls`): what the knob row follows (knobs.rs).
+    pub controls: Vec<crate::knobs::Group>,
 }
 
 /// Profile.h's Screen::scale(): a touch target of 44 units at least 6.5 mm across, never below 1.
@@ -77,6 +79,7 @@ impl Profile {
             text_on_screen: screen["textEntry"] == "onScreen",
             on_screen_keyboard: doc["onScreenKeyboard"].as_bool().unwrap_or_else(|| !doc["controls"].as_array().is_some_and(|c| c.iter().any(|c| c["kind"] == "keys" && c["role"] == "notes"))),
             panel_map: doc["panel"]["map"].as_str().unwrap_or_default().into(),
+            controls: doc["controls"].as_array().into_iter().flatten().map(crate::knobs::Group::from_profile).collect(),
         })
     }
 

@@ -68,7 +68,7 @@ fn the_scene_screen_stores_renames_scopes_and_transitions() {
     let want = |f: &mut Fixture, method: &str| request_in(f, method, &none, &g);
     ui.global::<crate::Bar>().invoke_action(3); // Scene
     assert_eq!((ui.get_screen(), ui.global::<crate::Bar>().get_where().as_str()), (8, "Scene"));
-    for _ in 0..3 {
+    for _ in 0..4 {
         // The screen asks again for what it shows: the Performance, the graph, the history.
         let r = f.engine.request();
         let result = match r["method"].as_str().unwrap() {

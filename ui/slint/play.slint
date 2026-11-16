@@ -6,6 +6,7 @@
 // playing is an accent fill and edge. Colors, corners, edges, sliders and marks are the theme's.
 
 import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle } from "theme.slint";
+import { TileRow, GridTile } from "grid.slint";
 
 export struct SceneData {
     number: int,
@@ -25,9 +26,17 @@ export struct StripData {
     dim: bool, // muted, or silenced by another part's solo
     cursor: bool,
     editing: bool, // the dial changes its fader (the master's)
+    mark-cursor: bool, // Learn: the cursor is on its M, not the strip
     channels: int, // meter bars: 0 none (the master), 1 or 2
     peak-a: float, // each 0..1 along -60..+6 dB
     peak-b: float,
+}
+
+// A button of the knob row's header: what the knobs follow (the Performance's controls, the selected part's own) and the bank.
+export struct KnobButton {
+    text: string,
+    on: bool,
+    cursor: bool,
 }
 
 export global PlayState {
@@ -40,6 +49,28 @@ export global PlayState {
     in property <string> message;
     in property <bool> hint; // no MIDI device: the line offering the on-screen keyboard
     in property <int> hint-cursor: -1; // which of its two links has the cursor
+    // The knob row (src/row.rs): a tile for each knob under the device's screen, the bank's name and the buttons above it.
+    in property <bool> has-knobs;
+    in property <string> knob-bank;
+    in property <[GridTile]> knobs;
+    in property <[KnobButton]> knob-buttons;
+    in property <length> knob-tile: 120px; // the grid's knob tile height (grid::KNOB_ROW)
+    in-out property <length> knob-width: 300px; // the row's area, set by the screen: what the tiles are laid out for
+    in-out property <length> knob-height: 120px;
+    callback knob-grab(int, int); // a tile and its part: a drag begins
+    callback knob-drag(int, int, float); // a tile, its part and the value from 0 to 1
+    callback knob-release(int);
+    callback knob-tap(int, int);
+    callback knob-button(int);
+    callback knob-resized(); // the row's area changed size: its tiles are laid out again
+    // Learn: what to do next over the strips, with Default and Done.
+    in property <bool> learning;
+    in property <string> learn-text;
+    in property <bool> learn-reset-shown;
+    in property <bool> learn-reset-cursor;
+    in property <bool> learn-done-cursor;
+    callback learn-reset();
+    callback learn-done();
     callback hint-keys();
     callback hint-dismiss();
     // How many part strips the screen holds besides the master: set by the screen.
@@ -187,8 +218,16 @@ component Strip inherits Section {
         }
     }
     Cursor {
-        shown: data.cursor;
+        shown: data.cursor && !data.mark-cursor;
         editing: data.editing;
+    }
+    if data.mark-cursor: Cursor {
+        x: root.width / 2 - Theme.touch - Theme.pad-tight;
+        y: root.height - Theme.touch - Theme.pad-narrow;
+        width: Theme.touch;
+        height: Theme.touch;
+        corner: Theme.mark-radius(Theme.touch);
+        shown: true;
     }
 }
 
@@ -232,12 +271,30 @@ export component Play inherits Rectangle {
     // The line offering the on-screen keyboard when no MIDI device is connected, over the strips.
     property <length> hint-y: Theme.margin + scenes-height + Theme.gap;
     property <length> hint-height: PlayState.hint ? Theme.touch + Theme.gap : 0px;
-    property <length> strips-y: hint-y + hint-height;
+    // The knob row: its buttons' line, then the tiles (the grid's height, less on a short screen: a fifth of it, never under 70%), then Learn's line.
+    property <length> knobs-y: hint-y + hint-height;
+    property <length> knob-head: PlayState.has-knobs ? Theme.touch + Theme.gap : 0px;
+    property <length> knob-row: PlayState.has-knobs ? min(PlayState.knob-tile, max(PlayState.knob-tile * 0.7, self.height / 5)) : 0px;
+    property <length> knob-w: self.width - 2 * Theme.margin;
+    property <length> strips-y: knobs-y + knob-head + knob-row + (PlayState.has-knobs ? gap : 0px);
     property <length> strips-height: self.height - strips-y - footer - Theme.margin - Theme.gap;
+    property <length> knob-button-width: Theme.button-width * 1.3;
     property <length> step-width: PlayState.can-step ? Theme.button-width + Theme.gap : 0px;
     property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * gap) / 8;
     changed across => { PlayState.strips-per-view = across - 1; }
-    init => { PlayState.strips-per-view = across - 1; }
+    changed knob-w => {
+        PlayState.knob-width = self.knob-w;
+        PlayState.knob-resized();
+    }
+    changed knob-row => {
+        PlayState.knob-height = self.knob-row;
+        PlayState.knob-resized();
+    }
+    init => {
+        PlayState.strips-per-view = across - 1;
+        PlayState.knob-width = self.knob-w;
+        PlayState.knob-height = self.knob-row;
+    }
 
     if PlayState.can-step: Button {
         x: Theme.margin;
@@ -320,6 +377,86 @@ export component Play inherits Rectangle {
         }
     }
 
+    // The knob row: the bank, the buttons that choose what the knobs follow, and a tile for each knob.
+    if PlayState.has-knobs && !PlayState.learning: Text {
+        x: Theme.margin;
+        y: root.knobs-y;
+        width: max(0px, root.width - 2 * Theme.margin - PlayState.knob-buttons.length * (root.knob-button-width + root.gap));
+        height: Theme.touch;
+        text: PlayState.knob-bank;
+        color: Theme.muted;
+        font-size: Theme.small;
+        font-weight: 700;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    for b[i] in PlayState.knob-buttons: Button {
+        x: root.width - Theme.margin - (PlayState.knob-buttons.length - i) * root.knob-button-width - (PlayState.knob-buttons.length - 1 - i) * root.gap;
+        y: root.knobs-y;
+        width: root.knob-button-width;
+        height: Theme.touch;
+        text: b.text;
+        on: b.on;
+        clicked => { PlayState.knob-button(i); }
+        Cursor {
+            shown: b.cursor;
+            corner: Theme.button-radius(parent.height);
+        }
+    }
+    if PlayState.has-knobs: TileRow {
+        x: Theme.margin;
+        y: root.knobs-y + root.knob-head;
+        width: root.knob-w;
+        height: root.knob-row;
+        tiles: PlayState.knobs;
+        grab(k, part) => { PlayState.knob-grab(k, part); }
+        drag(k, part, norm) => { PlayState.knob-drag(k, part, norm); }
+        release(k) => { PlayState.knob-release(k); }
+        tap(k, stop) => { PlayState.knob-tap(k, stop); }
+    }
+    if PlayState.learning: Rectangle {
+        x: Theme.margin;
+        y: root.knobs-y;
+        width: root.width - 2 * Theme.margin;
+        height: Theme.touch;
+        background: Theme.accent.with-alpha(Theme.wash-light);
+        border-radius: Theme.section-radius;
+        Text {
+            x: Theme.pad-wide;
+            width: max(0px, parent.width - 2 * Theme.pad-wide - 2 * Theme.button-width - 2 * Theme.gap);
+            height: parent.height;
+            text: PlayState.learn-text;
+            color: Theme.text;
+            font-size: Theme.body;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        if PlayState.learn-reset-shown: Button {
+            x: parent.width - 2 * Theme.button-width - Theme.gap - Theme.pad-narrow;
+            y: Theme.pad-tight;
+            width: Theme.button-width;
+            height: parent.height - 2 * Theme.pad-tight;
+            text: "Default";
+            clicked => { PlayState.learn-reset(); }
+            Cursor {
+                shown: PlayState.learn-reset-cursor;
+                corner: Theme.button-radius(parent.height);
+            }
+        }
+        Button {
+            x: parent.width - Theme.button-width - Theme.pad-narrow;
+            y: Theme.pad-tight;
+            width: Theme.button-width;
+            height: parent.height - 2 * Theme.pad-tight;
+            text: "Done";
+            clicked => { PlayState.learn-done(); }
+            Cursor {
+                shown: PlayState.learn-done-cursor;
+                corner: Theme.button-radius(parent.height);
+            }
+        }
+    }
+
     for strip[i] in PlayState.strips: Strip {
         x: root.strips-x + i * (root.cell + root.gap);
         y: root.strips-y;
@@ -370,7 +507,7 @@ export component Play inherits Rectangle {
         y: root.height - Theme.margin - root.footer;
         width: root.edit-width;
         height: root.footer;
-        text: "Edit, knob banks, Learn: Oscairn app";
+        text: "Edit: Oscairn app";
         clicked => { PlayState.edit(); }
     }
 }

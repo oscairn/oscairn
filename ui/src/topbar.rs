@@ -119,6 +119,8 @@ pub enum Do {
     Save,
     /// The playing scene's setup (Play's only).
     Scene,
+    /// Learn (Play's, on a device with knobs): a control moved on the panel plays what is touched next.
+    Learn,
 }
 
 /// What undo and redo would now do, by the edit's name (edit.history; empty: nothing).
@@ -136,12 +138,16 @@ impl History {
 
 /// The actions the Performance app's screens offer, as the JUCE Edit view's header names them
 /// (PartsView.cpp: "Undo <edit>", Redo, Save): each with its label and whether it can be used now.
-/// Play also has "Scene": the setup of the scene playing (the JUCE menu, here a screen).
-pub fn actions(history: &History, play: bool) -> Vec<(Do, String, bool)> {
+/// Play also has "Scene": the setup of the scene playing (the JUCE menu, here a screen), and "Learn" where the
+/// device has knobs (`learn`: whether it is on now; none: the device has none).
+pub fn actions(history: &History, play: bool, learn: Option<bool>) -> Vec<(Do, String, bool)> {
     let named = |what: &str, name: &str| if name.is_empty() { what.to_string() } else { format!("{what} {name}") };
     let mut list = vec![(Do::Undo, named("Undo", &history.undo), !history.undo.is_empty()), (Do::Redo, named("Redo", &history.redo), !history.redo.is_empty()), (Do::Save, "Save".into(), true)];
     if play {
         list.push((Do::Scene, "Scene".into(), true));
+        if let Some(on) = learn {
+            list.push((Do::Learn, if on { "Learning" } else { "Learn" }.into(), true));
+        }
     }
     list
 }

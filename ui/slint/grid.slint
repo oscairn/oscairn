@@ -251,6 +251,11 @@ component Knob inherits Rectangle {
 component Tile inherits Rectangle {
     in property <GridTile> data;
     in property <int> index;
+    // What a touch does, said to whoever shows the tile: a page of the grid (`Grid`) or a row of tiles (`TileRow`).
+    callback grab(int, int);
+    callback drag(int, int, float);
+    callback release(int);
+    callback tap(int, int);
     // A tile's insides (ParameterGrid's): the name line, the control under it, a knob at most 76 wide, a drag of 150 for the whole range.
     property <length> pad: Theme.pad;
     property <length> control-y: Theme.pad-narrow + Theme.small + Theme.pad-narrow;
@@ -382,7 +387,7 @@ component Tile inherits Rectangle {
                 background: Theme.accent;
             }
             TouchArea {
-                clicked => { GridState.tap(root.index, k); }
+                clicked => { root.tap(root.index, k); }
             }
             Label {
                 x: Theme.pad-tight;
@@ -405,24 +410,24 @@ component Tile inherits Rectangle {
             if (e.kind == PointerEventKind.down) {
                 self.start = data.norm;
                 self.end = data.kind == 5 && abs(self.across - data.high) < abs(self.across - data.norm) ? 1 : 0;
-                GridState.grab(root.index, self.end);
+                root.grab(root.index, self.end);
             } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
-                GridState.release(root.index);
+                root.release(root.index);
             }
         }
         moved => {
             if (data.kind == 1) {
-                GridState.drag(root.index, 0, max(0, min(1, self.start + (self.pressed-y - self.mouse-y) / root.drag-span)));
+                root.drag(root.index, 0, max(0, min(1, self.start + (self.pressed-y - self.mouse-y) / root.drag-span)));
             } else if (data.kind == 7) {
-                GridState.drag(root.index, 0, max(0, min(1, self.up)));
+                root.drag(root.index, 0, max(0, min(1, self.up)));
             } else if (data.kind == 8) {
-                GridState.drag(root.index, 0, max(0, min(1, 1 - self.up)));
+                root.drag(root.index, 0, max(0, min(1, 1 - self.up)));
             } else if (data.kind == 0 || data.kind == 5) {
-                GridState.drag(root.index, self.end, max(0, min(1, self.across)));
+                root.drag(root.index, self.end, max(0, min(1, self.across)));
             }
         }
         clicked => {
-            if (data.kind == 3 || data.kind == 4) { GridState.tap(root.index, -1); }
+            if (data.kind == 3 || data.kind == 4) { root.tap(root.index, -1); }
         }
     }
     Cursor {
@@ -473,11 +478,6 @@ component ViewPanel inherits Section {
         background: root.ink(b.fill);
         border-width: b.edge >= 0 ? Theme.hair : 0px;
         border-color: b.edge >= 0 ? root.ink(b.edge) : transparent;
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: b.text;
-            color: root.ink(b.text-ink);
         // As drawFittedText with a least scale of 0.7: a text too wide for its box shrinks to 70% before it is cut.
         measure := Text {
             visible: false;
@@ -485,6 +485,11 @@ component ViewPanel inherits Section {
             font-size: Theme.small;
             font-weight: b.bold ? 700 : 400;
         }
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: b.text;
+            color: root.ink(b.text-ink);
             font-size: Theme.small * max(0.7, min(1.0, (parent.width - 2 * Theme.pad-tight) / max(1px, measure.preferred-width)));
             font-weight: b.bold ? 700 : 400;
             horizontal-alignment: center;
@@ -539,6 +544,29 @@ component ViewPanel inherits Section {
 }
 
 // A screen on the grid: Back and the title, the pages down the left, a row of tabs, the tiles.
+// A row of the grid's own tiles (src/grid.rs `row_layout` places them in the area): the same tiles,
+// theme and cursor as a page's, for a screen that shows a few controls (Play's knob row). Touch and
+// the callbacks are the page's, said to the screen that owns the row.
+export component TileRow inherits Rectangle {
+    in property <[GridTile]> tiles;
+    callback grab(int, int); // a tile and its part: a drag begins
+    callback drag(int, int, float); // a tile, its part and the value from 0 to 1
+    callback release(int);
+    callback tap(int, int); // a tile and a stop, or -1
+    for t[i] in root.tiles: Tile {
+        x: t.x;
+        y: t.y;
+        width: t.w;
+        height: t.h;
+        data: t;
+        index: i;
+        grab(k, part) => { root.grab(k, part); }
+        drag(k, part, norm) => { root.drag(k, part, norm); }
+        release(k) => { root.release(k); }
+        tap(k, stop) => { root.tap(k, stop); }
+    }
+}
+
 export component Grid inherits Rectangle {
     // The sections' gap (none in a theme whose sections join); a heading's height (ParameterGrid's).
     property <length> gap: Theme.gap-between(Theme.gap);
@@ -693,6 +721,10 @@ export component Grid inherits Rectangle {
             height: t.h;
             data: t;
             index: i;
+            grab(k, part) => { GridState.grab(k, part); }
+            drag(k, part, norm) => { GridState.drag(k, part, norm); }
+            release(k) => { GridState.release(k); }
+            tap(k, stop) => { GridState.tap(k, stop); }
         }
         // Lines between a card's tiles.
         for t in GridState.tiles: Rectangle {

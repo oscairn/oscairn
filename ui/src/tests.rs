@@ -256,7 +256,13 @@ impl Fixture {
 
     /// The next request, answered with `result`.
     fn answer(&mut self, method: &str, result: serde_json::Value) {
-        let request = self.engine.request();
+        let mut request = self.engine.request();
+        // What the shell tells the engine of what the screen shows (lists, the knob row's part and page) is not what a test waits for.
+        while request["method"] == "controllers.view" && method != "controllers.view" {
+            self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": {"accepted": true}})));
+            self.pump();
+            request = self.engine.request();
+        }
         assert_eq!(request["method"], method);
         self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": result})));
         self.pump();
@@ -535,8 +541,8 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.engine.answer(); // session.hello
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
-    // Everything asked on connecting answered: the shell's eight, the Setlist's two, then the setlist.
-    f.serve(11, &content);
+    // Everything asked on connecting answered: the shell's eight, the Setlist's two, then the setlist (and the part the knob row follows).
+    f.serve(12, &content); // and the knob row's view
     let rows = |f: &Fixture| f.screen.ui.global::<SetlistState>().get_slots().iter().collect::<Vec<_>>();
     let per_view = f.screen.ui.global::<SetlistState>().get_slots_per_view() as usize;
     assert!(per_view >= 5, "a list view holds {per_view}");
@@ -860,6 +866,7 @@ fn next_edit(f: &mut Fixture) -> serde_json::Value {
         match r["method"].as_str() {
             Some("parts.meters") => f.reply(&r, json!({"result": {"meters": []}})),
             Some("edit.history") => f.reply(&r, json!({"result": {"undo": "", "redo": ""}})),
+            Some("controllers.view") => f.reply(&r, json!({"result": {"accepted": true}})), // what the knob row tells the engine
             // The JUCE strip commits after a level, solo or master edit; counted, answered.
             Some("graph.commit") => {
                 COMMITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1055,6 +1062,7 @@ fn play_draws_in_every_theme() {
 #[cfg(test)]
 mod bar;
 mod play;
+mod row;
 mod scene;
 mod part;
 mod keyboard;

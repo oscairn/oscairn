@@ -257,3 +257,18 @@ Branch `rust-app-grid` from `rust-app` (85ce5fd5): parameter pages, section F (u
   seen as that far off, so the measure can fail. Tile density (GRID.md): no change was needed.
 - Tests: `sh ui/target/test.sh test --offline` 111 passed (baseline 88), `cargo clippy --offline --all-targets` clean.
   Pictures: ui/target/screens/grid-{lfo,filter,keymap,fm,search}*.png, ui/target/theme-shots/grid-*-*.png. Not run on a unit.
+
+Branch `rust-app-knobs` (`rust-app` 79a277ee, then `rust-app-grid`'s seven commits cherry-picked on it; two conflicts, both
+resolved keeping both sides: shell.rs's keyboard owner arms (Scene and Params) and this file): 124 tests after the join, clippy
+clean.
+- FM view (grid): the reference lays each operator column out as the bottom 26% for its envelope inside the panel; nothing was
+  cut, and the operators without an envelope in the first fixture were the fixture's (two had parameters): the fixture now gives
+  all four, and a test measures every shape, box and label inside the panel at 1280x720 and 1.55 under every theme. An eight-operator
+  fixture (an FM-X-like routing: a stack four deep, an operator modulated by two, feedback into a different operator and into itself)
+  is measured inside its panel and columns; a box's text shrinks to 70% before it is cut, as drawFittedText does. The reference at
+  eight does what it does at four: the columns share the width, none wraps or scrolls.
+- The recording mark is in the top bar only (the JUCE Launcher draws it once over every app; PlayView.cpp has none).
+- Play's knob row (A9, A10, A11, A16; src/row.rs, src/knobs.rs, `TileRow` in slint/grid.slint, grid::row_layout): see
+  docs/rust-ui.md "The knob row". Tests: 147 passed, `cargo clippy --offline --all-targets` clean. Not run on a unit, and not
+  against the real engine: what the engine plays on the knobs is the port's resolution (knobs.rs) against the cases of the engine's
+  own test, not a comparison with the engine.

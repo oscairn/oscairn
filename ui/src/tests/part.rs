@@ -303,7 +303,7 @@ fn part_on_the_shell() {
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
             "graph.get" => graph.borrow().clone(),
             "session.status" => json!({"midiInputs": []}),
-            "unsubscribe" | "subscribe" => json!({}),
+            "unsubscribe" | "subscribe" | "controllers.view" => json!({}),
             "edit.history" => json!({"undo": "", "redo": ""}),
             "graph.commit" => json!({"revision": 1}),
             _ => return r,

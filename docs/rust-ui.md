@@ -268,12 +268,25 @@ opened from); Edit is the handover.
   launch); the master as the last stop of the right pane, a press then the dial moving its fader; the
   "No MIDI device" line with its two links (the keyboard, Dismiss, kept in the JUCE app's
   `keyboard.txt`), shown where the profile offers the on-screen keyboard; a take recording, in the
-  footer as in the top bar.
-- **Still handed over to the JUCE app**, from the "Edit, knob banks, Learn: Oscairn app" entry
-  (the display goes to the Performance app, which opens on its own Play): the knob row and its
-  banks (the Performance's controls or a part's, resolved through the panel's layers), Learn, the
-  Performance/part switch and bank button, and Edit itself (the Parts list, Controls, Mixer,
-  Routing). Not ported either: a part's pan and sends have no control in
+  top bar only (the JUCE Launcher draws it once over every app).
+- **The knob row** (`row.rs`, `knobs.rs`, drawn by the grid's tiles: `grid::row_layout`, `TileRow`): a
+  tile for each knob of the profile's screen group (else the first assign group, else a computer's
+  four), showing what the engine plays on it. The engine has no request that returns that, so the
+  shell resolves it as `core/control/src/physical_controls.cpp` does (`knobs.rs`: the banks, roles from
+  names, overrides) from `graph.get`, `params.list` (only the plugins of the part whose own controls
+  the knobs follow) and, for a group that is not a screen group, `assignments.get`; the part and the
+  group's page are published with `controllers.view` (`part`, `positions`), as the JUCE `Engine::
+  setKnobPart` and `setControlPosition` do, and the screen page stays empty (with none a device's
+  screen knobs play Play's row). Because the knobs then play, `lists` is false while Play (and a
+  parameter page) is shown: the panel's navigate controls (E1/E6) play knobs there, and the dial and
+  the cursor keys move the cursor (scenes, the knob row, parts). A part opened from Play is the one
+  selected: the Performance/part buttons and the bank button are stops of the row. Learn is the top
+  bar's action where the profile has an assign group of knobs (the JUCE condition, a panel with `row:N`
+  knobs, holds on no profile): `controllers` says which control moved, a part's level (or its M, a
+  second stop on each strip while Learn waits), a scene or a knob is the target (`assignments.set`).
+- **Still handed over to the JUCE app**, from the "Edit: Oscairn app" entry
+  (the display goes to the Performance app, which opens on its own Play): Edit itself (the Parts
+  list, Controls, Mixer, Routing). Not ported either: a part's pan and sends have no control in
   Play (the JUCE Play has none; the Part screen has the pan), and meters past two channels show two bars.
 - **Not measured:** the 100 ms meter poll's cost on a unit, and its look at the FANTOM-07's scale.
 

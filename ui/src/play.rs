@@ -10,12 +10,16 @@
 //! Selecting a part (a press on it, a tap on its name) opens the Part screen (part.rs); mute and solo
 //! stay on the strip's M and S and on that screen.
 //!
-//! Not here, handed to the JUCE app from the screen's "Edit" entry: the knob row and its banks,
-//! Learn, Edit's other pages (the scene's setup is scene.rs, from the top bar; the bar's actions are shell.rs).
+//! The knob row under the scenes (what the knobs under the device's screen play, its banks, and Learn) is
+//! row.rs, drawn by the grid's tiles; this screen places it, moves the cursor into and out of it and names
+//! Learn's targets. Not here, handed to the JUCE app from the screen's "Edit" entry: Edit's other pages (the
+//! scene's setup is scene.rs, from the top bar; the bar's actions are shell.rs).
 
+use crate::knobs::{self, Target};
 use crate::nav::{Action, Cursor};
+use crate::row::{self, Leave, Row, Stop};
 use crate::setlist::update;
-use crate::{PlayState, SceneData, Shell, StripData};
+use crate::{KnobButton, PlayState, SceneData, Shell, StripData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::collections::HashMap;
@@ -31,6 +35,8 @@ pub enum Request {
     Meters,
     /// Any edit (a scene, a level, a mute, solo): its refusal is said.
     Edit,
+    /// Something of the knob row's (row.rs).
+    Knobs(row::Request),
 }
 
 pub type Out = (Request, &'static str, Value);
@@ -207,8 +213,15 @@ pub struct Screen {
     midi_connected: bool,
     hint_dismissed: bool,
     hint_at: Option<u8>,
-    /// The pane the dial moves: the one last touched.
+    /// The pane the dial moves: the one last touched (0 the scenes, 1 the parts, 2 the knob row).
     touched: u8,
+    row: Row,
+    /// The row is shown (the shell told it the device's controls).
+    row_on: bool,
+    /// Learn waits for a target and the cursor is on a part's M, not its level.
+    learn_mute: bool,
+    row_tiles: Rc<VecModel<crate::GridTile>>,
+    row_buttons: Rc<VecModel<KnobButton>>,
     /// The part (-1 the master) whose fader a finger is on: the engine's own values for it wait.
     held: Option<i64>,
     follow: bool,
@@ -225,6 +238,11 @@ impl Screen {
         let state = window.global::<PlayState>();
         state.set_scenes(ModelRc::from(tiles.clone()));
         state.set_strips(ModelRc::from(rows.clone()));
+        let row_tiles = Rc::new(VecModel::default());
+        let row_buttons = Rc::new(VecModel::default());
+        state.set_knobs(ModelRc::from(row_tiles.clone()));
+        state.set_knob_buttons(ModelRc::from(row_buttons.clone()));
+        state.set_knob_tile(crate::grid::KNOB_ROW);
         Screen {
             ui: window.as_weak(),
             scenes: vec![],
@@ -241,6 +259,11 @@ impl Screen {
             hint_dismissed: false,
             hint_at: None,
             touched: 1,
+            row: Row::new(vec![]),
+            row_on: false,
+            learn_mute: false,
+            row_tiles,
+            row_buttons,
             held: None,
             follow: false,
             tiles,
@@ -271,11 +294,42 @@ impl Screen {
         if held != Some(-1) {
             self.master = graph["master"]["level"].as_f64().map(|l| (l, graph["master"]["pan"].as_f64().unwrap_or(0.)));
         }
+        self.row.graph(graph);
+        self.flush();
+        self.show();
+    }
+
+    /// What the knob row asked for, with the other requests.
+    fn flush(&mut self) {
+        for (request, method, params) in std::mem::take(&mut self.row.out) {
+            self.out.push((Request::Knobs(request), method, params));
+        }
+    }
+
+    /// The device's control groups (its profile's): the knob row follows the knobs among them; none, a computer's four.
+    /// Without this call there is no knob row.
+    pub fn knobs(&mut self, groups: Vec<knobs::Group>) {
+        self.row = Row::new(groups);
+        self.row_on = true;
+        self.show();
+    }
+
+    /// params.changed: the values that moved, for the knob row.
+    pub fn params_changed(&mut self, params: &Value) {
+        self.row.changed(params);
+        self.flush();
+        self.show();
+    }
+
+    /// controllers: the control moved last, for Learn.
+    pub fn controllers(&mut self, params: &Value) {
+        self.row.controllers(params);
         self.show();
     }
 
     /// controls.changed: levels and mutes moved live, and the master's.
     pub fn controls(&mut self, params: &Value) {
+        self.row.controls(params);
         for c in params["parts"].as_array().into_iter().flatten() {
             let Some(id) = c["part"].as_u64() else { continue };
             if let Some(p) = self.parts.iter_mut().find(|p| p.id as u64 == id) {
@@ -360,6 +414,15 @@ impl Screen {
                 self.say(format!("The engine refused: {}", e.message));
                 self.show();
             }
+            (Request::Knobs(r), result) => {
+                self.row.reply(r, result);
+                if !self.row.message.is_empty() {
+                    let said = std::mem::take(&mut self.row.message);
+                    self.say(said);
+                }
+                self.flush();
+                self.show();
+            }
             _ => {}
         }
     }
@@ -404,6 +467,7 @@ impl Screen {
                     dim: p.mute || p.silenced,
                     cursor: self.part_cursor.at == Some(i),
                     editing: false,
+                    mark_cursor: self.part_cursor.at == Some(i) && self.learn_mute && self.row.learning_from(),
                     channels: p.channels,
                     peak_a: p.peaks.0,
                     peak_b: p.peaks.1,
@@ -425,6 +489,37 @@ impl Screen {
         }
         state.set_hint(hint);
         state.set_hint_cursor(self.hint_at.map_or(-1, i32::from));
+        self.show_row(&ui);
+    }
+
+    /// The knob row: its tiles laid out in the area the window gave it (`grid::row_layout`), the bank's name, the
+    /// buttons and Learn's line.
+    fn show_row(&mut self, ui: &Shell) {
+        let state = ui.global::<PlayState>();
+        state.set_has_knobs(self.row_on);
+        if !self.row_on {
+            return;
+        }
+        let gap = crate::theme::section_gap(ui, crate::grid::SECTION_GAP);
+        let want = self.row.tiles(state.get_knob_width(), state.get_knob_height(), gap, &self.parts, self.scene);
+        update(&self.row_tiles, want);
+        let cursor = self.row.cursor;
+        let buttons: Vec<KnobButton> = self.row.buttons(&self.parts).into_iter().map(|(stop, text, on)| KnobButton { text: text.into(), on, cursor: cursor == Some(stop) }).collect();
+        update(&self.row_buttons, buttons);
+        state.set_knob_bank(self.row.bank().into());
+        state.set_learning(self.row.learning());
+        let learn = if self.row.learning_from() {
+            let control = self.row.learn_from().replace(':', " ");
+            let mut chars = control.chars();
+            let name: String = chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
+            format!("{name}: touch what it should play: a strip, its M, a scene or a knob")
+        } else {
+            "Learn: move a knob on the panel".to_string()
+        };
+        state.set_learn_text(learn.into());
+        state.set_learn_reset_shown(self.row.learning_from());
+        state.set_learn_reset_cursor(cursor == Some(Stop::Default));
+        state.set_learn_done_cursor(cursor == Some(Stop::Done));
     }
 
     fn edit(&mut self, method: &'static str, params: Value) {
@@ -472,11 +567,37 @@ impl Screen {
     fn move_in(&mut self, pane: u8, by: i64) {
         self.touched = pane;
         if pane == 0 {
-            self.scene_cursor = self.scene_cursor.moved(by);
+            // Past the last scene the dial goes on into the knob row.
+            let last = self.scene_cursor.count.saturating_sub(1);
+            if by > 0 && self.row_on && self.scene_cursor.at == Some(last) && self.row.enter(true, &self.parts) {
+                self.scene_cursor = self.scene_cursor.clear();
+                self.touched = 2;
+            } else {
+                self.scene_cursor = self.scene_cursor.moved(by);
+            }
+        } else if pane == 2 {
+            match self.row.move_by(by, &self.parts) {
+                Leave::Stay => {}
+                Leave::Up => {
+                    self.row.cursor = None;
+                    self.touched = 0;
+                    self.scene_cursor = self.scene_cursor.to(self.scene_cursor.count.saturating_sub(1));
+                }
+                Leave::Down => {
+                    self.row.cursor = None;
+                    self.touched = 1;
+                    self.enter_parts();
+                }
+            }
+            self.flush();
         } else if self.master_editing {
             self.step_master(by);
         } else if let Some(link) = self.hint_at {
             match (link, by.signum()) {
+                (0, -1) if self.row_on && self.row.enter(false, &self.parts) => {
+                    self.hint_at = None; // up out of the links into the knob row
+                    self.touched = 2;
+                }
                 (0, 1) => self.hint_at = Some(1),
                 (1, 1) => {
                     self.hint_at = None; // on to the first part (or the master)
@@ -502,8 +623,40 @@ impl Screen {
         } else if by > 0 && self.has_master() && self.part_cursor.at.is_some_and(|a| a + 1 >= self.parts.len()) {
             self.master_cursor = true; // past the last part
             self.part_cursor = self.part_cursor.clear();
+        } else if by < 0 && self.row_on && self.part_cursor.at == Some(0) && !self.learn_mute && self.row.enter(false, &self.parts) {
+            self.part_cursor = self.part_cursor.clear(); // up out of the first part into the knob row
+            self.touched = 2;
+        } else if self.row.learning_from() && self.part_cursor.at.is_some() {
+            // Learn: each part has two stops, its level and its M.
+            for _ in 0..by.unsigned_abs().min(64) {
+                let before = (self.part_cursor.at, self.learn_mute);
+                if by > 0 {
+                    if self.learn_mute {
+                        self.part_cursor = self.part_cursor.moved(1);
+                        self.learn_mute = self.part_cursor.at == before.0;
+                    } else {
+                        self.learn_mute = true;
+                    }
+                } else if self.learn_mute {
+                    self.learn_mute = false;
+                } else {
+                    self.part_cursor = self.part_cursor.moved(-1);
+                    self.learn_mute = self.part_cursor.at != before.0;
+                }
+            }
         } else {
             self.part_cursor = self.part_cursor.moved(by);
+        }
+    }
+
+    /// The cursor onto the first stop of the parts pane: the hint's first link, the first part, or the master.
+    fn enter_parts(&mut self) {
+        if self.hint_shown() {
+            self.hint_at = Some(0);
+        } else if self.parts.is_empty() {
+            self.master_cursor = self.has_master();
+        } else {
+            self.part_cursor = self.part_cursor.to(0);
         }
     }
 
@@ -530,37 +683,77 @@ impl Screen {
         let pane = |p: Option<u8>, touched: u8| p.map_or(touched, |p| p.min(1));
         match action {
             Action::Move { pane: p, by } => self.move_in(pane(p, self.touched), by as i64),
-            Action::Arrow { dx: 0, dy } => self.move_in(if dy < 0 { 0 } else { 1 }, 0),
+            // Up and down go from the scenes by the knob row (when there is one) to the parts.
+            Action::Arrow { dx: 0, dy } => {
+                let zones: &[u8] = if self.row_on { &[0, 2, 1] } else { &[0, 1] };
+                let at = zones.iter().position(|z| *z == self.touched).unwrap_or(zones.len() - 1);
+                let to = (at as i64 + i64::from(dy.signum())).clamp(0, zones.len() as i64 - 1) as usize;
+                self.move_in(zones[to], 0);
+            }
+            Action::Arrow { dx, .. } if self.touched == 2 => {
+                self.row.arrow(dx, &self.parts);
+                self.flush();
+            }
             Action::Arrow { dx, .. } => self.move_in(self.touched, dx as i64),
             Action::Page(by) => {
                 return if self.follow { Outcome::Step(by as i64) } else { Outcome::Stay };
+            }
+            Action::End(by) if self.touched == 2 => {
+                self.row.enter(by < 0, &self.parts);
             }
             Action::End(by) => self.move_in(self.touched, by as i64 * 10_000),
             Action::Confirm(p) => match pane(p, self.touched) {
                 0 => {
                     if let Some(at) = self.scene_cursor.at {
-                        self.select_scene(at);
+                        // Learn waiting for a target: the scene is it, and does not play.
+                        match self.scenes.get(at).map(|s| s.0 as u32) {
+                            Some(id) if self.row.learning_from() => {
+                                self.row.learn_target(Target::Scene(id));
+                                self.flush();
+                            }
+                            _ => self.select_scene(at),
+                        }
                     }
+                }
+                2 => {
+                    self.row.confirm(&self.parts, self.scene);
+                    self.flush();
                 }
                 _ if self.hint_at.is_some() => return self.hint_press(self.hint_at.unwrap_or(0)),
                 _ if self.master_cursor => self.master_editing = !self.master_editing, // a press, then the dial
                 _ => {
-                    if let Some(p) = self.part_cursor.at.and_then(|at| self.parts.get(at)) {
-                        return Outcome::Open(p.id);
+                    if let Some(id) = self.part_cursor.at.and_then(|at| self.parts.get(at)).map(|p| p.id) {
+                        if self.row.learning_from() {
+                            // Learn: the part's level, or its M.
+                            self.row.learn_target(if self.learn_mute { Target::PartMute(id) } else { Target::PartLevel(id) });
+                            self.learn_mute = false;
+                            self.flush();
+                        } else {
+                            self.row.select(id);
+                            self.flush();
+                            return Outcome::Open(id);
+                        }
                     }
                 }
             },
             Action::Cancel(_) => {
                 if self.master_editing {
                     self.master_editing = false; // ends the change, the cursor stays
+                } else if self.row.has_cursor() && self.row.cancel() {
+                    self.flush(); // a value being changed, or the cursor on the knob row
                 } else {
-                    if self.scene_cursor.at.is_none() && self.part_cursor.at.is_none() && !self.master_cursor && self.hint_at.is_none() {
+                    let idle = self.scene_cursor.at.is_none() && self.part_cursor.at.is_none() && !self.master_cursor && self.hint_at.is_none();
+                    if idle && self.row.cancel() {
+                        self.learn_mute = false; // Learn given up first
+                        self.flush();
+                    } else if idle {
                         return Outcome::Back;
+                    } else {
+                        self.scene_cursor = self.scene_cursor.clear();
+                        self.part_cursor = self.part_cursor.clear();
+                        self.master_cursor = false;
+                        self.hint_at = None;
                     }
-                    self.scene_cursor = self.scene_cursor.clear();
-                    self.part_cursor = self.part_cursor.clear();
-                    self.master_cursor = false;
-                    self.hint_at = None;
                 }
             }
         }
@@ -575,18 +768,40 @@ impl Screen {
 
     pub fn tap_scene(&mut self, i: i32) {
         self.scene_cursor = self.scene_cursor.clear();
-        self.select_scene(i.max(0) as usize);
+        // Learn waiting for a target: the scene is it, and does not play.
+        match self.scenes.get(i.max(0) as usize).map(|s| s.0 as u32) {
+            Some(id) if self.row.learning_from() => {
+                self.row.learn_target(Target::Scene(id));
+                self.flush();
+            }
+            _ => self.select_scene(i.max(0) as usize),
+        }
         self.show();
     }
 
-    /// A tap on a strip's name: that part selected, its Part screen.
+    /// A tap on a strip's name: that part selected, its Part screen; with Learn waiting for a target, its level is it.
     pub fn tap_open(&mut self, row: i32) -> Option<u32> {
-        self.parts.get(self.at(row)).map(|p| p.id)
+        let id = self.parts.get(self.at(row)).map(|p| p.id)?;
+        if self.row.learning_from() {
+            self.row.learn_target(Target::PartLevel(id));
+            self.flush();
+            self.show();
+            return None;
+        }
+        self.row.select(id);
+        self.flush();
+        Some(id)
     }
 
     pub fn tap_mute(&mut self, row: i32) {
         self.part_cursor = self.part_cursor.clear();
-        self.toggle_mute(self.at(row));
+        if let (true, Some(id)) = (self.row.learning_from(), self.parts.get(self.at(row)).map(|p| p.id)) {
+            // Learn: the mute is the target, and does not flip.
+            self.row.learn_target(Target::PartMute(id));
+            self.flush();
+        } else {
+            self.toggle_mute(self.at(row));
+        }
         self.show();
     }
 
@@ -627,6 +842,74 @@ impl Screen {
         }
     }
 
+    /// The device has knobs to Learn: a top bar action.
+    pub fn can_learn(&self) -> bool {
+        self.row_on && self.row.can_learn()
+    }
+
+    pub fn learning(&self) -> bool {
+        self.row.learning()
+    }
+
+    /// The Learn action of the top bar: on, or off.
+    pub fn learn_toggle(&mut self) {
+        let on = !self.row.learning();
+        self.row.learn(on);
+        self.learn_mute = false;
+        self.flush();
+        self.show();
+    }
+
+    /// Whether the device's knobs play the row (the engine is told the screen shows no lists then).
+    pub fn plays_row(&self) -> bool {
+        self.row_on
+    }
+
+    /// A finger on a knob's tile: a drag begins, or Learn names it.
+    pub fn knob_grab(&mut self, tile: i32) {
+        self.row.cursor = None;
+        self.row.grab(tile.max(0) as usize);
+        self.flush();
+        self.show();
+    }
+
+    pub fn knob_drag(&mut self, tile: i32, norm: f32) {
+        self.row.drag(tile.max(0) as usize, norm, &self.parts);
+        self.flush();
+        self.show();
+    }
+
+    pub fn knob_release(&mut self) {
+        self.row.release();
+        self.flush();
+        self.show();
+    }
+
+    pub fn knob_tap(&mut self, tile: i32) {
+        self.row.cursor = None;
+        self.row.tap(tile.max(0) as usize, &self.parts);
+        self.flush();
+        self.show();
+    }
+
+    /// A tap on one of the row's buttons (its place among those shown).
+    pub fn knob_button(&mut self, i: i32) {
+        self.row.cursor = None;
+        if let Some((stop, _, _)) = self.row.buttons(&self.parts).get(i.max(0) as usize).cloned() {
+            self.row.press_stop(stop, &self.parts, self.scene);
+        }
+        self.flush();
+        self.show();
+    }
+
+    /// A tap on Learn's Default or Done.
+    pub fn learn_button(&mut self, stop: Stop) {
+        self.row.cursor = None;
+        self.row.press_stop(stop, &self.parts, self.scene);
+        self.flush();
+        self.show();
+    }
+
     /// The scene cursor is on the first tile: moving up or left leaves for the top bar's actions.
     pub fn at_top(&self) -> bool {
         self.touched == 0 && self.scene_cursor.at == Some(0)
@@ -634,6 +917,10 @@ impl Screen {
 
     /// The cursors drop when the screen goes, as on focus loss in the JUCE lists.
     pub fn hidden(&mut self) {
+        self.row.hidden();
+        self.row.learn(false);
+        self.learn_mute = false;
+        self.flush();
         self.scene_cursor = self.scene_cursor.clear();
         self.part_cursor = self.part_cursor.clear();
         self.master_cursor = false;

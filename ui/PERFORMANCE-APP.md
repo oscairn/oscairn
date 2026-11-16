@@ -38,6 +38,13 @@ through `RemoteControl` to a method of the table. What is not an engine call at 
   offers its own view (`window.info` `available`), a disabled entry labeled "Plugin view: not
   available in this shell yet".
 
+- **What a device's knobs play now** (A9): no request returns the resolved slots of a control group.
+  The JUCE app resolves them in-process with the library (`resolveControls`, `knobBanks`,
+  `groupPositions`) from `graph.get`, `params.list` and `assignments.get`, which are requests; the
+  shell resolves them with a port of those rules (ui/src/knobs.rs, tested against the cases of
+  core/control/tests/physical_controls.cpp). A request such as `controllers.resolved` would make the
+  port unnecessary and the tiles exact by construction: a decision for core/control, not taken here.
+
 Items needing a new request: **0** (so no change in core/control or docs/control-protocol.md).
 
 ## A. Play (PlayView.cpp)
@@ -52,14 +59,14 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | A6 | Master strip: level, pan | `master.set` | - | cursor on it, press then dial | [x] src/play.rs: the master is the last stop of the right pane (after the last part), a press then the dial moves its fader 1/40 of its travel a click (`master.set` then `graph.commit`, as the JUCE slider). The JUCE Play strip has the level only (it keeps the pan); the pan is in the Mixer (H2) |
 | A7 | Selected part outline (press selects a part, Edit opens it) | - | - | press | [x] |
 | A8 | Previous / Next of the setlist (when opened from it) | setlist load (`performance.load`/`library.load`) | - | cursor on the button, press | [x] |
-| A9 | Knob row following the Performance's controls, or the selected part's own | `controls.set`, `params.set`, `params.gesture`, `params.text`, `controllers.view` | - | the device's knobs play it; shown with values | [ ] |
-| A10 | Banks of the knob row (page button, "Performance" / part controls switch) | `controllers.view` (positions), `controllers.get` | - | row buttons / press on the page button | [ ] |
-| A11 | Learn: move a knob, then touch a strip (level), its M (mute), a scene or a knob; Default removes the override; Done | `assignments.get`, `assignments.set`, `controllers.get` (the knob moved) | - | Learn in the top bar; then the cursor and press name the target | [ ] |
+| A9 | Knob row following the Performance's controls, or the selected part's own | `controls.set`, `params.set`, `params.gesture`, `params.text`, `controllers.view` | - | the device's knobs play it; shown with values | [x] src/row.rs, knobs.rs, slint/play.slint: a grid tile for each knob of the profile's screen group (else the first assign group, else four), what the engine plays on it resolved as physical_controls.cpp resolves it, the value text from params.text; touch turns a knob (gesture, params.set, controls.set, parts.level), a press then the dial changes it, Cancel ends. The part and page are published with controllers.view (`part`, `positions`), the screen page stays empty, as PlayView does; lists is false while Play shows the row so the panel's knobs play |
+| A10 | Banks of the knob row (page button, "Performance" / part controls switch) | `controllers.view` (positions), `controllers.get` | - | row buttons / press on the page button | [x] the Performance and part buttons (while a part opened from Play is selected) and the bank button (the row's name on a device with rows) are stops of the row and touch targets; the page is published |
+| A11 | Learn: move a knob, then touch a strip (level), its M (mute), a scene or a knob; Default removes the override; Done | `assignments.get`, `assignments.set`, `controllers.get` (the knob moved) | - | Learn in the top bar; then the cursor and press name the target | [x] src/row.rs, play.rs: `controllers` says the control moved, the strips, their M (a second stop on each strip while Learn waits), a scene or a knob is the target, Default (`assignments.set` none), Done, Cancel; the overrides are read again after |
 | A12 | The no-MIDI hint ("No MIDI device. Open the on-screen keyboard", Dismiss, kept) | `session.status` (`midiInputs`) | - | cursor on the link, press | [x] src/play.rs, settings.rs: shown when the profile offers the on-screen keyboard, the status notification's `midiInputs` has none but the built-in and it was not dismissed; its two links are the first stops of the right pane; Dismiss is kept in the JUCE app's keyboard.txt ("hint dismissed", the window places after it kept) |
 | A13 | Empty state: "No parts yet. Edit adds them." | - | - | - | [x] slint/play.slint, tested in tests/play.rs (the words are the JUCE ones, which name Edit: they stay until Edit is a screen of this app, A14) |
 | A14 | Edit / Play toggle in the top bar | - | - | top bar action | [ ] |
 | A15 | Save (to the library; names the Performance when it has no id, or Save As New) | `performance.info`, `library.save` | - | top bar action; keyboard (K1) for a new name | [x] src/shell.rs: the Save button saves a Performance in the library at once, asks the name of one that is not (K1), a blank name keeps its own; the Performance's name on the bar is Save As New (JUCE: a tap on it); the engine's refusal and "Performance saved." are said in the name's place for 4 s |
-| A16 | Learn in the top bar when the device has knobs | - | - | top bar action | [ ] |
+| A16 | Learn in the top bar when the device has knobs | - | - | top bar action | [x] the bar's Learn action where the profile has an assign group of knobs (JUCE: `rowKnobs() > 0`, a panel with row:N knobs, true on no profile, so Learn would never show) |
 | A17 | Meters and live values while shown only | `parts.meters`, `controls.changed` | - | - | [x] |
 
 ## B. Parts list (PartsView page 0)
@@ -213,7 +220,7 @@ The owner: "the grid of tiles and proper sliders is a part of the design that we
 ### Status of the correction (branch rust-grid, 2026-11-15)
 
 Done: (1) ui/GRID.md; (2) the grid module (src/grid.rs, slint/grid.slint); (3) the parameter pages on
-it (F4 redone; F7 partly: envelopes). Not done: the Play knob row and banks on grid tiles (A9-A11),
+it (F4 redone; F7 partly: envelopes). The Play knob row and banks are on grid tiles (A9-A11, done on rust-app-knobs). Not done:
 the mixer strips' faders as the grid's upright slider (H), the other views.
 
 ### Owner requirements received during rust-grid (2026-11-15), binding on every screen

@@ -502,7 +502,17 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   ported: a plugin's own view is drawn into a surface the shell hands it, a separate project). Inserting
   lists the plugins the scanner found and sends `graph.add` (named "Basic Synth", "Basic Synth 2"), then
   `parts.insert`, taking the node out again with `graph.remove` if the insert is refused. Every edit is
-  followed by `graph.commit`. Splits and lanes are listed read only (D7 to D9 are not built).
+  followed by `graph.commit`. A plugin's role word and color class are the reference's `roleOf`, it is faint when
+  off and outlined (and named in the message line) when `session.status` lists it as failed. An insert row of the
+  part's own chain lists the four kinds of split first (copy: `parts.addSplit`; left / right, mid / side, bands:
+  `graph.add` of the Split plugin, and of the Join plugin for the first two, then `parts.addSplit` with their nodes,
+  taken out again if it is refused). A split is a row opening its lanes, a band split's crossovers (`params.get`,
+  `params.set`, a sixth of an octave a step), Add lane or Add band (`parts.addLane`) and Remove split
+  (`parts.removeSplit`, then `graph.remove` of the other lanes' nodes); a lane opens its own plugins (inserted,
+  moved and removed with `split` and `lane` in the request) and its settings (lowest and highest key, level, pan,
+  mute, solo: `parts.lane` with the whole lane, as `editLane`) and Remove lane (`parts.removeLane`, then
+  `graph.remove` of its nodes). Like the reference, none of the removals asks first; Undo (`edit.undo`) takes them back.
+  Their tests are `src/tests/chain.rs` and `chain_splits.rs`.
 - **The plugin scanner** (`scan.rs`): as the JUCE app finds plugins, the helper `oscairn-plugin-scan`
   beside the program run once per plugin file (`--worker FILE`, 5 s, 4 MiB) over `--plugins DIR`
   (else `plugins` beside the program, else `../lib/clap`), CLAP then LV2, started the first time the

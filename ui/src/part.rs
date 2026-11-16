@@ -129,7 +129,7 @@ fn db(level: f64) -> String {
     if level > 0. { format!("{:.1} dB", 20. * level.log10()).replace('-', "−") } else { "−∞ dB".into() }
 }
 
-fn pan_text(pan: f64) -> String {
+pub(crate) fn pan_text(pan: f64) -> String {
     let n = (pan.abs() * 100.).round() as i64;
     match n {
         0 => "Center".into(),
@@ -659,20 +659,8 @@ impl Screen {
 
     /// A change to the first zone; a zone that passes everything is no zone, as the JUCE page's editZone has it.
     fn edit_zone(&mut self, change: impl FnOnce(&mut Value)) {
-        let mut list = self.part["input"]["zones"].as_array().cloned().unwrap_or_default();
-        let mut zone = list.first().cloned().unwrap_or_else(default_zone);
-        change(&mut zone);
-        let everything = zone == default_zone();
-        if list.is_empty() {
-            if !everything {
-                list.push(zone);
-            }
-        } else if everything && list.len() == 1 {
-            list.clear();
-        } else {
-            list[0] = zone;
-        }
-        self.part["input"]["zones"] = Value::Array(list);
+        let list = self.part["input"]["zones"].as_array().cloned().unwrap_or_default();
+        self.part["input"]["zones"] = Value::Array(edit_zones(list, change));
     }
 
     /// The first zone's keys and transpose set, the highest key never under the lowest.
@@ -1063,8 +1051,26 @@ impl Screen {
     }
 }
 
+/// A list of zones with a change to the first (a default zone when there is none); a zone that passes every
+/// note is no zone, as `editZone` and `setLaneKeys` have it.
+pub(crate) fn edit_zones(mut list: Vec<Value>, change: impl FnOnce(&mut Value)) -> Vec<Value> {
+    let mut zone = list.first().cloned().unwrap_or_else(default_zone);
+    change(&mut zone);
+    let everything = zone == default_zone();
+    if list.is_empty() {
+        if !everything {
+            list.push(zone);
+        }
+    } else if everything && list.len() == 1 {
+        list.clear();
+    } else {
+        list[0] = zone;
+    }
+    list
+}
+
 /// A zone that passes every note, as `graph.get` words it.
-fn default_zone() -> Value {
+pub(crate) fn default_zone() -> Value {
     json!({"keys": [0, 127], "velocities": [0, 1], "channels": 65535, "transpose": 0, "curve": 1, "fixedVelocity": 0})
 }
 

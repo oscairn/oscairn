@@ -1083,6 +1083,7 @@ mod part;
 mod keyboard;
 mod pages;
 mod chain;
+mod chain_splits;
 mod piano;
 mod shellpages;
 mod envelope;

@@ -127,7 +127,7 @@ fn chain_actions_and_requests() {
     // By touch: a tap on an insert row is a press.
     let mut t = chain_screen(&s);
     t.tap(0);
-    assert_eq!(labels(ui), ["Finding plugins..."], "the scanner has not answered");
+    assert_eq!(labels(ui)[4..], ["Finding plugins..."], "the scanner has not answered: the four kinds of split come before it");
 }
 
 // Inserting: the scanner's plugins listed (instruments and effects, by name); choosing one adds a node
@@ -140,11 +140,11 @@ fn chain_inserts_a_plugin() {
     let mut c = chain_screen(&s);
     c.plugins(vec![plugin("Reverb", "org.verb", &["audio-effect"]), plugin("Chorus", "org.chorus", &["audio-effect"]), plugin("Basic Synth", "org.synth", &["instrument"])]);
     assert_eq!(press(&mut c, 2), crate::chain::Outcome::Stay); // the insert row between the two
-    assert_eq!(labels(ui), ["Basic Synth", "Chorus", "Reverb"]);
-    assert_eq!(rows(ui)[0].1, "Instrument");
+    assert_eq!(labels(ui), ["Split here: layers", "Split here: left / right", "Split here: mid / side", "Split here: frequency bands", "Basic Synth", "Chorus", "Reverb"]);
+    assert_eq!(rows(ui)[4].1, "Instrument");
     // Chorus is taken: the new one is "Chorus 2".
     c.act(Action::Move { pane: None, by: 1 });
-    c.act(Action::Move { pane: None, by: 1 });
+    c.act(Action::Move { pane: None, by: 5 });
     c.act(Action::Confirm(None));
     let out = sent(&mut c.out);
     assert_eq!(out, [("graph.add", json!({"name": "Chorus 2", "path": "/p/Chorus.clap", "pluginId": "org.chorus"}))]);
@@ -163,7 +163,7 @@ fn chain_inserts_a_plugin() {
     let mut e = chain_screen(&s);
     e.plugins(vec![]);
     press(&mut e, 0);
-    assert_eq!(labels(ui), ["No plugins found"]);
+    assert_eq!(labels(ui)[4..], ["No plugins found"]);
     // Cancel goes back a layer: the list of plugins to the chain, the chain to the Part screen.
     assert_eq!(e.act(Action::Cancel(None)), crate::chain::Outcome::Stay);
     assert_eq!(labels(ui)[0], "+ Insert plugin here");

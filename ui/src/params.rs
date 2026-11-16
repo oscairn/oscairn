@@ -50,6 +50,8 @@ pub type Out = (Request, &'static str, Value);
 pub enum Outcome {
     Stay,
     Back,
+    /// The on-screen keyboard for the search: its title and the text now.
+    Prompt(String, String),
 }
 
 /// What the dial and a press do now.
@@ -88,6 +90,9 @@ pub struct Screen {
     scroll: f32,
     list_cursor: usize,
     list_first: usize,
+    /// The search text (a name or module on any page), and whether the cursor is on its field.
+    search: String,
+    search_cursor: bool,
     /// The parameters whose gestures are open.
     gestures: Vec<u32>,
     /// A view's handle held by touch: the panel and the handle.
@@ -129,6 +134,8 @@ impl Screen {
             scroll: 0.,
             list_cursor: 0,
             list_first: 0,
+            search: String::new(),
+            search_cursor: false,
             gestures: vec![],
             view_held: None,
             message: String::new(),
@@ -137,10 +144,24 @@ impl Screen {
         }
     }
 
-    /// The headings and parameters of the page (or tab) shown.
+    /// The headings and parameters of the page (or tab) shown; while searching, the parameters of every
+    /// page whose name or module has the text, each module's under its whole path.
     fn groups(&self) -> Vec<(String, Vec<usize>)> {
-        let Some((page, tab)) = self.entries.get(self.entry) else { return vec![] };
         let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+        if !self.search.is_empty() {
+            let query = self.search.to_lowercase();
+            for (i, p) in self.params.iter().enumerate() {
+                if p.name.to_lowercase().contains(&query) || p.module.to_lowercase().contains(&query) {
+                    let heading = if p.module.is_empty() { "Main".to_string() } else { p.module.clone() };
+                    match groups.iter_mut().find(|g| g.0 == heading) {
+                        Some(g) => g.1.push(i),
+                        None => groups.push((heading, vec![i])),
+                    }
+                }
+            }
+            return groups;
+        }
+        let Some((page, tab)) = self.entries.get(self.entry) else { return vec![] };
         for &i in &self.pages[*page].1 {
             let m = &self.params[i].module;
             let heading = match tab {
@@ -450,11 +471,16 @@ impl Screen {
         self.follow(g.get_view_height());
         g.set_name(self.name.as_str().into());
         let page = self.entries.get(self.entry).map_or(0, |e| e.0);
+        let searching = !self.search.is_empty();
         let pages: Vec<slint::SharedString> = self.pages.iter().map(|p| p.0.as_str().into()).collect();
-        let tabs: Vec<slint::SharedString> = self.entries.iter().filter(|e| e.0 == page).filter_map(|e| e.1.as_deref().map(Into::into)).collect();
+        // A search has no tabs, and no page is the one shown.
+        let tabs: Vec<slint::SharedString> = if searching { vec![] } else { self.entries.iter().filter(|e| e.0 == page).filter_map(|e| e.1.as_deref().map(Into::into)).collect() };
         let tab = self.entries.iter().filter(|e| e.0 == page).position(|e| *e == self.entries[self.entry]).unwrap_or(0);
         g.set_pages(ModelRc::new(VecModel::from(pages)));
-        g.set_page(page as i32);
+        g.set_page(if searching { -1 } else { page as i32 });
+        g.set_search_shown(self.search_shown());
+        g.set_search(self.search.as_str().into());
+        g.set_search_cursor(self.search_cursor);
         g.set_tabs(ModelRc::new(VecModel::from(tabs)));
         g.set_tab(tab as i32);
         let tiles: Vec<GridTile> = (0..self.laid.tiles.len()).map(|k| self.tile_data(k)).collect();
@@ -562,7 +588,9 @@ impl Screen {
 
     fn turn_page(&mut self, by: i32) -> bool {
         let to = (self.entry as i32 + by).clamp(0, self.entries.len() as i32 - 1) as usize;
-        if self.entries.is_empty() || to == self.entry {
+        // A page chosen while searching ends the search, as the reference's showPage does.
+        let searching = !std::mem::take(&mut self.search).is_empty();
+        if self.entries.is_empty() || (to == self.entry && !searching) {
             return false;
         }
         self.end_gestures();
@@ -570,6 +598,7 @@ impl Screen {
         self.entry = to;
         self.scroll = 0.;
         self.cursor = None;
+        self.search_cursor = false;
         self.relayout();
         self.ask_values();
         true
@@ -590,7 +619,11 @@ impl Screen {
                 self.cursor = (!self.laid.tiles.is_empty()).then_some(0);
             }
         } else if to < 0 {
-            if self.turn_page(-1) {
+            // Before the first tile: the search field, where there is one; before that, the page before.
+            if self.search_shown() {
+                self.cursor = None;
+                self.search_cursor = true;
+            } else if self.turn_page(-1) {
                 self.cursor = self.laid.tiles.len().checked_sub(1);
             }
         } else {
@@ -608,6 +641,12 @@ impl Screen {
         for _ in 0..(dx.abs() + dy.abs()) {
             match grid::arrow(&self.laid.tiles, c, dx.signum(), dy.signum()) {
                 Some(to) => c = to,
+                None if dy < 0 && self.search_shown() => {
+                    // Up from the first row: the search field.
+                    self.cursor = None;
+                    self.search_cursor = true;
+                    return;
+                }
                 None if dy != 0 => {
                     if self.turn_page(dy.signum()) {
                         self.cursor = (!self.laid.tiles.is_empty()).then_some(if dy > 0 { 0 } else { self.laid.tiles.len() - 1 });
@@ -650,6 +689,16 @@ impl Screen {
                 self.end_gestures();
                 self.edit = Edit::None;
             }
+            // The cursor on the search field: on, or down, goes to the first tile; back, up or before it the page before.
+            (Edit::None, Action::Move { by, .. } | Action::Arrow { dy: by, dx: 0 }) if self.search_cursor => {
+                if by > 0 {
+                    self.search_cursor = false;
+                    self.cursor = (!self.laid.tiles.is_empty()).then_some(0);
+                } else if by < 0 && self.turn_page(-1) {
+                    self.cursor = self.laid.tiles.len().checked_sub(1);
+                }
+            }
+            (Edit::None, Action::Confirm(_)) if self.search_cursor => return Outcome::Prompt("Search parameters".into(), self.search.clone()),
             (Edit::None, Action::Move { pane: Some(0), by }) => self.arrow(by, 0),
             (Edit::None, Action::Move { pane: Some(1), by }) => self.arrow(0, by),
             (Edit::None, Action::Move { by, .. }) => self.step(by),
@@ -662,19 +711,66 @@ impl Screen {
                 Some(c) => self.press(c),
                 None => self.cursor = (!self.laid.tiles.is_empty()).then_some(0),
             },
-            (Edit::None, Action::Cancel(_)) if self.cursor.take().is_none() => return Outcome::Back,
+            // Cancel backs out a layer: the cursor on the search field, the cursor, the search (the
+            // reference's Escape), then the screen.
+            (Edit::None, Action::Cancel(_)) => {
+                if self.search_cursor {
+                    self.search_cursor = false;
+                } else if self.cursor.take().is_none() {
+                    if self.search.is_empty() {
+                        return Outcome::Back;
+                    }
+                    self.set_search(String::new());
+                }
+            }
             _ => {}
         }
         Outcome::Stay
     }
 
+    /// Whether the page has a search field: a plugin of more than 24 parameters, as the reference's.
+    fn search_shown(&self) -> bool {
+        self.params.len() > TABBED_ABOVE
+    }
+
+    /// The search text changed: its matches from every page are laid out from the top.
+    fn set_search(&mut self, text: String) {
+        self.search = text.trim().to_string();
+        self.end_gestures();
+        self.edit = Edit::None;
+        self.scroll = 0.;
+        self.cursor = None;
+        self.relayout();
+        self.ask_values();
+    }
+
+    /// The keyboard's text for the search (Done): an empty one ends the search.
+    pub fn entered(&mut self, text: &str) {
+        self.set_search(text.to_string());
+        self.show();
+    }
+
+    /// The keyboard was closed with nothing (Cancel).
+    pub fn not_entered(&mut self) {}
+
     // Touch.
+
+    /// A tap on the search field: the keyboard for its text.
+    pub fn search_tap(&mut self) -> Outcome {
+        self.end_gestures();
+        self.edit = Edit::None;
+        self.cursor = None;
+        self.search_cursor = true;
+        self.show();
+        Outcome::Prompt("Search parameters".into(), self.search.clone())
+    }
 
     /// A drag begins on a tile's part.
     pub fn grab(&mut self, tile: i32, part: i32) {
         let Some(p) = self.param_of(tile as usize, part as usize) else { return };
         self.end_gestures();
         self.edit = Edit::None;
+        self.search_cursor = false;
         self.cursor = Some(tile as usize);
         self.begin(p.id);
         self.show();
@@ -703,6 +799,7 @@ impl Screen {
         self.end_gestures();
         self.edit = Edit::None;
         self.cursor = None;
+        self.search_cursor = false;
         for i in ids {
             self.begin(self.params[i].id);
         }
@@ -757,6 +854,7 @@ impl Screen {
         self.end_gestures();
         self.edit = Edit::None;
         self.cursor = Some(k);
+        self.search_cursor = false;
         let p = self.params[t.param].clone();
         if t.control == Control::Buttons && stop >= 0 {
             self.set_once(&p, p.min + stop as f64);

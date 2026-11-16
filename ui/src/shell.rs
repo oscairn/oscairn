@@ -289,6 +289,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     grid.on_show_page(|k| with_app(|a| a.on_params(|p| p.show_page(k))));
     grid.on_show_tab(|k| with_app(|a| a.on_params(|p| p.show_tab(k))));
     grid.on_scrolled(|by| with_app(|a| a.on_params(|p| p.scrolled(by))));
+    grid.on_search_tap(|| with_app(|a| a.params_act(|p| p.search_tap())));
     grid.on_view_down(|v, x, y| {
         let mut taken = false;
         with_app(|a| taken = a.on_params(|p| p.view_down(v, x, y)));
@@ -1127,8 +1128,10 @@ impl App {
     }
 
     fn params_act(&mut self, f: impl FnOnce(&mut params::Screen) -> params::Outcome) {
-        if self.on_params(f) == params::Outcome::Back {
-            self.go(Screen::Chain);
+        match self.on_params(f) {
+            params::Outcome::Back => self.go(Screen::Chain),
+            params::Outcome::Prompt(title, text) => self.open_keyboard(Screen::Params, &title, &text),
+            params::Outcome::Stay => {}
         }
     }
 
@@ -1246,6 +1249,8 @@ impl App {
             (Screen::Sounds, None) => self.on_sounds(sounds::Screen::not_entered),
             (Screen::Scene, Some(text)) => self.on_scene(|p| p.entered(&text)),
             (Screen::Scene, None) => self.on_scene(scene::Screen::not_entered),
+            (Screen::Params, Some(text)) => self.on_params(|p| p.entered(&text)),
+            (Screen::Params, None) => self.on_params(params::Screen::not_entered),
             _ => {}
         }
     }

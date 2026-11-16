@@ -132,7 +132,11 @@ Layout rules:
 - [x] screen page published (`controllers.view` screen) with the shown tiles by priority (the engine's
       screen knobs play the first N); withdrawn when the page hides. No knob badges drawn (the JUCE
       grid draws none for screen knobs)
-- [ ] search (F5)
+- [x] search (F5): the field above the page list for a plugin of more than 24 parameters; the parameters of every page
+      whose name or module has the text (any case, trimmed), under their module's whole path, no tabs, no page
+      marked; a page chosen or turned ends it. Touch: a tap on the field opens the on-screen keyboard (K1). Without
+      touch: back from the first tile or up from the first row is the field, a press opens the keyboard, Cancel backs
+      out the field, the cursor, the search (the reference's Escape), then the screen
 
 ## State (2026-11-15, branch rust-grid)
 

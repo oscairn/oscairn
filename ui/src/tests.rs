@@ -1059,6 +1059,7 @@ mod piano;
 mod shellpages;
 mod envelope;
 mod grid;
+mod search;
 mod shots;
 mod views;
 

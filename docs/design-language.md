@@ -199,6 +199,7 @@ fonts, so text never depends on what a device has installed.
 | `depth` | `flat`, `soft` | A small shadow under buttons, slider thumbs and the selected tab |
 | `sliders` | `filled`, `line`, `cap` | An accent thumb on a thick track, a thin track with a light round thumb, or with a square cap |
 | `tabs` | `folder`, `segmented` | Tabs joined to the view below, or a track with the selected tab lifted out |
+| `tabPlacement` | `auto`, `top`, `side` (optional; absent is `auto`) | Where a screen with two levels of tabs (pages, then tabs) puts them: `top`, two strips with the pages over the tabs; `side`, two columns at the left, the pages and then the tabs beside them; `auto`, by the screen's height (columns on a tall one). The Rust UI follows it; the JUCE app's own layouts do not, but both read and keep it |
 | `marks` | `square`, `round` | Mute and solo as squares (rounded up to the theme's radius) or circles |
 | `sections` | `separate`, `joined` | Cards, tiles and mixer strips with gaps between them, or edge to edge with one line between each and square corners, which uses small screens best |
 | `rows` | `left`, `right`, `dot`, `fill` | Where an item's color goes in a list row (the Library, setlists): a short bar at the left or right end, a dot at the left, or the whole row tinted. A tinted row is tinted only as far as primary text keeps 4.5:1 contrast on it, alternate rows less, with a line between rows so neighbors of one color stay apart |

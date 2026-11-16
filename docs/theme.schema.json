@@ -157,6 +157,14 @@
             "segmented"
           ]
         },
+        "tabPlacement": {
+          "description": "Optional, default auto. Where two levels of tabs (pages, then tabs) go on a screen: top (two strips, pages over tabs), side (two columns at the left, pages then tabs), auto (by the screen's size)",
+          "enum": [
+            "auto",
+            "top",
+            "side"
+          ]
+        },
         "marks": {
           "enum": [
             "square",

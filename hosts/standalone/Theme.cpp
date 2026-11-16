@@ -226,13 +226,14 @@ ThemeData ThemeData::parse(const juce::String& json) {
     fields(*wires,{"audio","notes","disabled","draining","unconnected","control"});
     t.wires={hex(wires->getProperty("audio")),hex(wires->getProperty("notes")),hex(wires->getProperty("disabled")),hex(wires->getProperty("draining")),hex(wires->getProperty("unconnected")),hex(wires->getProperty("control"))};
     const auto* style=value["style"].getDynamicObject();require(style,"Theme needs a style");
-    fields(*style,{"buttons","edges","depth","sliders","tabs","marks","sections","rows"});
+    fields(*style,{"buttons","edges","depth","sliders","tabs","tabPlacement","marks","sections","rows"});
     auto choice=[&](const char* key,const juce::StringArray& options){const auto v=style->getProperty(key);const int i=options.indexOf(v.toString());require(v.isString() && i>=0,"Theme style choice is not one of its options");return i;};
     t.style.buttons=ThemeStyle::Buttons(choice("buttons",{"rounded","pill"}));
     t.style.edges=ThemeStyle::Edges(choice("edges",{"none","hairline","outlined"}));
     t.style.depth=ThemeStyle::Depth(choice("depth",{"flat","soft"}));
     t.style.sliders=ThemeStyle::Sliders(choice("sliders",{"filled","line","cap"}));
     t.style.tabs=ThemeStyle::Tabs(choice("tabs",{"folder","segmented"}));
+    if(style->hasProperty("tabPlacement"))t.style.tabPlacement=ThemeStyle::TabPlacement(choice("tabPlacement",{"auto","top","side"})); // optional: absent is auto
     t.style.marks=ThemeStyle::Marks(choice("marks",{"square","round"}));
     t.style.sections=ThemeStyle::Sections(choice("sections",{"separate","joined"}));
     t.style.rows=ThemeStyle::Rows(choice("rows",{"left","right","dot","fill"}));

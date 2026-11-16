@@ -14,6 +14,7 @@ struct ThemeStyle {
     enum class Depth { Flat, Soft } depth=Depth::Soft;                    // a small shadow under buttons and thumbs
     enum class Sliders { Filled, Line, Cap } sliders=Sliders::Line;       // an accent thumb, a thin track with a light round thumb, or with a square cap
     enum class Tabs { Folder, Segmented } tabs=Tabs::Segmented;
+    enum class TabPlacement { Auto, Top, Side } tabPlacement=TabPlacement::Auto; // optional: where two levels of tabs go on a screen (the Rust UI's; the JUCE app's layouts do not follow it)
     enum class Marks { Square, Round } marks=Marks::Square;                // mute and solo
     enum class Sections { Separate, Joined } sections=Sections::Separate; // gaps between cards, or edge to edge with a line
     enum class Rows { Left, Right, Dot, Fill } rows=Rows::Left;           // where an item's color goes in a list row (theme format 6)

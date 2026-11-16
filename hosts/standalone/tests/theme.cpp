@@ -42,6 +42,13 @@ int main(int argc,char** argv){try{
     check(classic.style.buttons==ThemeStyle::Buttons::Rounded && classic.style.edges==ThemeStyle::Edges::Outlined && classic.style.depth==ThemeStyle::Depth::Flat &&
           classic.style.sliders==ThemeStyle::Sliders::Filled && classic.style.tabs==ThemeStyle::Tabs::Folder && classic.style.marks==ThemeStyle::Marks::Round && classic.style.sections==ThemeStyle::Sections::Joined,"every style choice parsed");
     check(ThemeData::parse(json.replace("\"line\"","\"cap\"")).style.sliders==ThemeStyle::Sliders::Cap,"slider caps parsed");
+    // tabPlacement: optional, auto when omitted, three choices, anything else refused (the style's other choices are refused alike).
+    check(theme.style.tabPlacement==ThemeStyle::TabPlacement::Auto,"tabPlacement defaults to auto");
+    for(const auto& [word,want]:{std::pair<const char*,ThemeStyle::TabPlacement>{"auto",ThemeStyle::TabPlacement::Auto},{"top",ThemeStyle::TabPlacement::Top},{"side",ThemeStyle::TabPlacement::Side}})
+        check(ThemeData::parse(json.replace("\"tabs\": \"segmented\"","\"tabs\": \"segmented\", \"tabPlacement\": \""+juce::String(word)+"\"")).style.tabPlacement==want,"tabPlacement parsed");
+    for(const char* bad:{"\"left\"","\"Side\"","\"\"","3","null","true","[\"side\"]"}){
+        bool rejected=false;try{ThemeData::parse(json.replace("\"tabs\": \"segmented\"","\"tabs\": \"segmented\", \"tabPlacement\": "+juce::String(bad)));}catch(const std::exception&){rejected=true;}check(rejected,"an unknown tabPlacement rejected");
+    }
     check(theme.style.rows==ThemeStyle::Rows::Dot && ThemeData::parse(json.replace("\"dot\"","\"fill\"")).style.rows==ThemeStyle::Rows::Fill,"row color placement parsed");
     // The ends of a range are in it: fontScale 0.8 and 1.4, radius 0 and 16.
     for(const char* ok:{"0.8","1.4"})check(ThemeData::parse(json.replace("\"fontScale\": 1.0","\"fontScale\": "+juce::String(ok))).fontScale==std::stof(ok),"fontScale at its bounds accepted");

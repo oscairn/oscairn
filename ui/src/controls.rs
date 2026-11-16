@@ -35,8 +35,11 @@ use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
-    /// Any edit: its refusal is said.
+    /// Any edit: its refusal is said; accepted, the graph is read again, as no controls.* request
+    /// commits and so no graph.changed follows one (a control added, renamed or removed shows then).
     Edit,
+    /// controls.set, a control's value moved: its refusal is said, nothing to read again.
+    Live,
     /// params.list of a node.
     List(u64),
     /// params.get of the parameter a Now... works from: the control, the target and which end.
@@ -517,11 +520,12 @@ impl Screen {
                     self.set_present(c, t, end, Some(value));
                 }
             }
-            (Request::Edit | Request::Value(..), Err(e)) if e.code != 0 => {
+            (Request::Edit | Request::Live | Request::Value(..), Err(e)) if e.code != 0 => {
                 self.said = format!("The engine refused: {}", e.message);
                 self.show();
                 return true;
             }
+            (Request::Edit, Ok(_)) => return true,
             _ => {}
         }
         false
@@ -844,7 +848,8 @@ impl Screen {
         }
         c.value = value;
         let id = c.id;
-        self.edit("controls.set", json!({"control": id, "value": value}));
+        self.said.clear();
+        self.out.push((Request::Live, "controls.set", json!({"control": id, "value": value})));
     }
 
     /// Sends control `ci`'s targets again, changed by `change` (the JUCE `setTargets`).

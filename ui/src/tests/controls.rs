@@ -311,6 +311,25 @@ fn controls_are_added_renamed_and_removed_and_targets_removed_and_made_relative(
     assert!(c.targets().len() == 2, "the screen waits for the engine's graph");
 }
 
+// No controls.* request commits, so the real engine sends no graph.changed after one (found against it,
+// ui/REAL-ENGINE.md: a control added or renamed never showed): an accepted edit has the graph read
+// again; a value moved (controls.set, live) does not.
+#[test]
+fn an_accepted_edit_has_the_graph_read_again_a_value_does_not() {
+    let mut s = Screen::new();
+    let mut c = controls_screen(&mut s, &graph());
+    answer(&mut c);
+    c.act(Action::End(1));
+    c.act(Action::Confirm(None)); // + Control
+    let (request, method, _) = std::mem::take(&mut c.out).into_iter().find(|o| o.1 == "controls.add").expect("controls.add");
+    assert_eq!(method, "controls.add");
+    assert!(c.reply(request, Ok(json!({"control": 3}))), "read the graph again: the new control shows from it");
+    c.level(0, 0.9); // Brightness, at 0.5
+    let (request, method, _) = std::mem::take(&mut c.out).into_iter().next().expect("the fader's request");
+    assert_eq!(method, "controls.set");
+    assert!(!c.reply(request, Ok(json!({"accepted": true}))), "a value moved live: nothing to read again");
+}
+
 // The curve menu has the six curves, the one the target has ticked; choosing one sends the list again with
 // it, the dB and power curves keeping their numbers; Scenes... lists the scenes ticked where the mapping works
 // and choosing one switches it there; Now... offers Start and End.

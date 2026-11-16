@@ -389,6 +389,11 @@ namespace oscairn
             for(const auto& w : wires_) nextWire_ = std::max(nextWire_, w.id + 1);
 
             patch(scenes_, from.scenes, to.scenes, [](const Scene& s) { return s.id; });
+            // A scene the step took away is not the selected one, as when it is removed (removeScene).
+            auto gone = [&](uint32_t id) { return id && std::none_of(scenes_.begin(), scenes_.end(), [&](const Scene& x) { return x.id == id; }); };
+            if(gone(scene_)) scene_ = 0;
+            if(gone(mappingScene_)) mappingScene_ = 0;
+            if(pendingScene_ && gone(pendingScene_->scene)) pendingScene_.reset();
             if(from.untouched != to.untouched) untouched_ = to.untouched;
             patch(macros_, from.macros, to.macros, [](const Macro& m) { return m.id; }, sameMacro,
                   [](Macro& n, const Macro*, const Macro& t) { const auto value = n.value; n = t; n.value = value; });

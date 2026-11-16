@@ -6,6 +6,7 @@
 #include "oscairn/json_rpc.h"
 #include "oscairn/session.h"
 #include "../../plugin-host/src/StateFiles.h"
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <string>
@@ -107,6 +108,22 @@ namespace
         f.call("edit.redo");
         check(f.session.parts().size() == 2, "and one redo puts it back");
     }
+
+    // The selected scene is one that is there: after an undone scenes.add it is not the removed one.
+    void sceneAfterUndo(const std::string& synth)
+    {
+        Fixture f(synth); f.render();
+        f.call("scenes.add", R"({"name":"One"})"); f.undo(); f.call("scenes.add", R"({"name":"Two"})"); f.undo(); // each a step of its own
+        const auto added = Fixture::number(f.call("scenes.add", R"({"name":"Three"})"), "scene");
+        check(f.session.graphState().scene == added, "the scene stored is selected");
+        f.call("edit.undo");
+        const auto now = f.session.graphState();
+        check(now.scenes.size() == 2, "the add is undone");
+        const auto selected = now.scene;
+        check(selected == 0 || std::any_of(now.scenes.begin(), now.scenes.end(), [&](const Scene& s) { return s.id == uint32_t(selected); }),
+              "graph.get names a scene that is there, or none: " + std::to_string(selected));
+        check(Fixture::number(f.call("graph.get"), "scene") == selected, "as the protocol reads it");
+    }
 }
 
 int main(int argc, char** argv)
@@ -119,6 +136,7 @@ int main(int argc, char** argv)
         historyIsCurrent(argv[1]);
         oneRequestOneStep(argv[1]);
         fromSoundOneStep(argv[1]);
+        sceneAfterUndo(argv[1]);
     }
     catch(const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
     std::cout << "ok: edit steps over the protocol\n";

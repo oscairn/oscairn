@@ -1,3 +1,40 @@
+# The three apps against the real engine: the joined branch (2026-11-16, third run)
+
+Branch `rust-ui-main`: the Performance app, the Library app, the FM operators view and the Settings app on main 40003f71.
+Engine built from this tree (`.scratch/build-real`, RelWithDebInfo, `-DOSCAIRN_ENGINE=ON`, `BUILD_TESTING=OFF`), Mac, no sound:
+each engine `--audio null --buffer-frames 128 --device-profile fantom-07` (the Settings run on a computer's profile without
+one), `HOME`, `OSCAIRN_DATA_HOME` and `OSCAIRN_CONFIG_HOME` under the worktree's `.scratch/`, its socket in a private 0700 folder in
+/tmp; every engine log said `audio output "null"` and `0 MIDI inputs open`. The Library's export writes to `Documents` under
+`HOME`: the harness is run with a `HOME` of its own (`ui/target/real.sh`), never the real one. Each harness ran against an engine
+of its own: the Performance "Real Engine Check" (built by documented requests), a small library (three Performances, a Sound and a
+setlist, invented names), and the Settings app twice (the keyboard's profile and a computer's).
+
+| Harness | Result |
+| --- | --- |
+| `real_engine` (the Performance app, all 12 sections) | 2 findings, one fixed (below), one the engine's known "Presets are being listed; ask again" that the screen asks again |
+| `real_library` (both cuts) | 0 findings |
+| `real_settings`, fantom-07 | 0 findings |
+| `real_settings`, desktop | 0 findings |
+
+Idle (nothing touched, 20 s, after the first 4 s of a load): **0 requests** on Home, on Play, on the Library's list and on the
+Settings' Appearance page; frames never exceed the changes of the CPU or RAM figure on the bar (Home 21 in 20 s, Play 19, Library
+10, Settings 16 and 31).
+
+Found and fixed in this run:
+
+1. **An envelope drag is one undo step** now: one `params.set` carries both values (`edit.history` says "synth Decay and 1 more";
+   one `edit.undo` returns both). The first run's "Left" item is done.
+2. **After the Undo of that request no `params.changed` came** (the engine sent none for the undo of a request of two values), so
+   the page showed the dragged values with the engine's back: the page reads its values again behind an Undo or a Redo shown on a
+   plugin page (`Screen::values_again`). The harness then ran clean.
+3. Joining: the shell's status key (the cost-at-rest compare) did not carry the MIDI port counter the Settings page watches; it does
+   now (`midiPortList`), and the Settings' test of it passes again.
+
+Not exercised: sound, a touch panel, a unit, a window size other than 1280x720 (scale 1) in the harness; the Settings harness leaves the
+engine's audio device alone (null) and never touches this Mac's audio or MIDI settings.
+
+---
+
 # The Performance app against the real engine
 
 Date: 2026-11-16, second run (the first is 2026-11-15, kept below as history). Branch `rust-perf-finish` (local
@@ -81,10 +118,6 @@ it: it is now shown and not offered (read only) for a node with `shared`.
 
 ## Left
 
-- **An envelope drag is two undo steps**: the view's drag sends one `params.set` for each parameter it moves (Decay, then
-  Sustain), and the engine takes the values of one request as one step. One request for what one move changes is the fix; it is
-  in the generic view-drag path of `src/params.rs`, whose tests (tests/views.rs, tests/fm_touch.rs) assert two requests and
-  belong to the FM view's branch, so it was not changed here.
 - **Meters and a short note**: asleep meters wake on a status that lists a key held, and a status comes at most four times a
   second; a note shorter than that and in no status is not metered until the next wake. Needs an engine push of the levels to
   be exact.

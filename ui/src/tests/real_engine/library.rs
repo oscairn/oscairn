@@ -95,6 +95,7 @@ pub(super) fn library(r: &mut Real) {
     let want: Vec<String> = items(r, "performance").into_iter().map(|i| i.0).collect();
     let got = shown(r);
     r.check(got == want, || format!("Library: the list shows {got:?}, the engine has {want:?}"));
+    super::idle(r, "the Library's list", 20);
     eprintln!("   rows {:?}; footer {:?}", r.rows(), ui.global::<crate::PartState>().get_view());
 
     // Search.

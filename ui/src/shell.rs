@@ -1391,8 +1391,14 @@ impl App {
     /// Does an action of the top bar.
     fn bar_run(&mut self, what: topbar::Do) {
         match what {
-            topbar::Do::Undo => self.send(Request::History, "edit.undo", json!({})),
-            topbar::Do::Redo => self.send(Request::History, "edit.redo", json!({})),
+            topbar::Do::Undo | topbar::Do::Redo => {
+                let method = if what == topbar::Do::Undo { "edit.undo" } else { "edit.redo" };
+                self.send(Request::History, method, json!({}));
+                // The values of a plugin page shown are read again behind it (in order on the same connection).
+                if self.screen == Screen::Params {
+                    self.on_params(|p| p.values_again());
+                }
+            }
             topbar::Do::Save => self.save(false),
             topbar::Do::Record => match self.shown.recording.as_ref().map(|r| r.take) {
                 Some(take) => self.send(Request::RecordDo("stop"), "record.stop", json!({"take": take})),

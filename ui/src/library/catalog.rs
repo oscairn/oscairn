@@ -519,6 +519,7 @@ mod tests {
         let o = &offers(&l, &BTreeMap::new(), &BTreeMap::new())[0];
         assert_eq!((o.version.version.as_str(), o.installable), ("2.0", true));
         assert_eq!(describe(o), "Quill  ·  Pads");
+        assert_eq!(columns(o), ["A".to_string(), "2.0".into(), "Quill".into(), "Pads".into()], "name, version, publisher, summary");
         // Nothing installable: the newest, with why.
         let l = listing(vec![package("a", "A", vec![{
             let mut v = version("2.2");
@@ -528,6 +529,8 @@ mod tests {
         let o = &offers(&l, &BTreeMap::new(), &BTreeMap::new())[0];
         assert_eq!((o.version.version.as_str(), o.installable), ("2.2", false));
         assert_eq!(describe(o), "Cannot be installed here: it has no build for this device (linux-arm64)");
+        assert_eq!(columns(o)[2], "", "no publisher where the whole line is a reason");
+        assert!(columns(o)[3].starts_with("Cannot be installed here"));
     }
 
     #[test]

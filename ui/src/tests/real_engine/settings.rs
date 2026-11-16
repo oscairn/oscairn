@@ -125,6 +125,7 @@ pub fn settings(r: &mut Real, config: &std::path::Path, profile: Option<&str>) {
     ensure(r, shown.contains(&"Audio".to_string()) == wants_audio, |_| format!("the Audio tab on {profile:?}: {shown:?}"));
     r.sent("open");
     r.png("settings-appearance");
+    super::idle(r, "the Settings' Appearance page", 20);
 
     r.step("Appearance: choose a theme");
     ensure(r, !r.rows().is_empty(), |_| "no themes listed".into());

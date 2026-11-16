@@ -386,6 +386,12 @@ impl Screen {
         }
     }
 
+    /// Every value read again: after an Undo or a Redo, which the engine does not always say with a `params.changed` (the undo of
+    /// a request that set two values said nothing against the real engine).
+    pub fn values_again(&mut self) {
+        self.ask_values();
+    }
+
     /// The plugin plays one sound of an instance other nodes share (`graph.get`'s `shared`): the host sets its Output bus, and
     /// the engine puts back a value a client sets, so the parameter is shown and not offered.
     pub fn set_shared(&mut self, shared: bool) {

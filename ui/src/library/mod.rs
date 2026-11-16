@@ -580,7 +580,7 @@ impl Screen {
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
         match &self.mode {
             Mode::Import(i) => return i.info(),
-            Mode::Catalog(c) => return c.info(),
+            Mode::Catalog(c) => return c.info_at(self.b.cursor.at),
             Mode::Package(o) => return self.package_info(o),
             Mode::Files(f) => return f.info(),
             Mode::Install(i) => return i.info(),

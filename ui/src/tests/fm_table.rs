@@ -914,3 +914,14 @@ fn a_page_that_scrolls_has_a_mark_and_one_that_fits_has_none() {
     assert!(g.get_content() <= g.get_view_height() + 1., "a page that fits: {} of {}", g.get_content(), g.get_view_height());
     // (The mark is drawn only while the page is higher than its view: the property says the two.)
 }
+
+// After an Undo or a Redo the page reads its values again: the engine's undo of a request that set two values sent no
+// `params.changed` (the real-engine run), so the tiles kept the dragged values.
+#[test]
+fn the_page_reads_its_values_again_after_an_undo() {
+    let (_s, mut p) = open_at(Spec { ops: 4, ..ENGINE }, (1280, 720), 1.55, &dark(), Side, 1);
+    sent(&mut p.out);
+    p.values_again();
+    let out = sent(&mut p.out);
+    assert_eq!(out.iter().filter(|o| o.0 == "params.get").count(), 1, "{out:?}");
+}

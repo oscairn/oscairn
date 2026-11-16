@@ -80,7 +80,7 @@ component Row inherits Section {
     property <bool> in-columns: data.columns.length == 4;
     property <length> col-gap: Theme.pad;
     property <length> col-room: root.width - 2 * Theme.pad - root.label-room - 3 * root.col-gap;
-    property <[float]> col-share: [0.31, 0.13, 0.22, 0.34];
+    property <[float]> col-share: [0.35, 0.10, 0.20, 0.35];
     for t[c] in data.columns: FitText {
         visible: root.in-columns;
         x: Theme.pad + root.label-room + (c > 0 ? root.col-share[0] * root.col-room + root.col-gap : 0px) + (c > 1 ? root.col-share[1] * root.col-room + root.col-gap : 0px) + (c > 2 ? root.col-share[2] * root.col-room + root.col-gap : 0px);

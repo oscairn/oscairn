@@ -179,7 +179,7 @@ tabs: the rule that folds a page of tabs that are the indexes of one view into i
   eight to a row, in the plugin's priority order (compact: "Compact control"). Every parameter carrying the view and the
   selected operator's index is there once; those of the envelope's stages are in its rows, not again below.
 - **Split.** One rule: the table's rows keep at least 1.3 lines of the small type; the detail's controls keep their size;
-  the detail's graph appears when at least four lines of type are left for it; then the table's rows grow up to 1.7 lines
+  the detail's graph appears when at least three lines of type are left for it; then the table's rows grow up to 1.7 lines
   of type, then the graph (to nine, then without limit), then the table's again (to 2.0). More rows of other controls
   than one are shown only while the table keeps 1.7 lines a row and the graph its four. Only when the table's least and the
   detail's two rows and one row do not fit does the block go past the area and the page scroll. Measured by

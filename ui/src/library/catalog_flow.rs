@@ -134,6 +134,22 @@ impl Catalog {
             .collect()
     }
 
+    /// The panel: the package under the cursor, what its details would say first (summary, version, license, what is
+    /// installed, publisher), then the Catalog's own state. Looking asks for nothing.
+    pub fn info_at(&self, at: Option<usize>) -> Vec<InfoLine> {
+        let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
+        let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
+        let mut lines = Vec::new();
+        if let Some(o) = at.and_then(|i| self.shown().into_iter().nth(i)) {
+            lines.push(head(o.title()));
+            for (name, value) in catalog::facts(o).into_iter().filter(|(_, v)| !v.is_empty()).take(5) {
+                lines.extend(wrap(&format!("{name}: {value}"), INFO_WIDTH).into_iter().map(line));
+            }
+        }
+        lines.extend(self.info());
+        lines
+    }
+
     pub fn info(&self) -> Vec<InfoLine> {
         let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
         let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };

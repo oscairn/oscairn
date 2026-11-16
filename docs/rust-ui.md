@@ -563,7 +563,12 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   list (the on-screen keyboard for its text; back from the first tile reaches it). An FM operator view is the
   top pane of a master and detail (an overview of every operator, with a table of them (mute, solo, level, coarse,
   fine, ratio or frequency, detune: each cell edited in place), over the selected one's envelope as named stages
-  in a Time row and a Level row and its other parameters as compact controls; a page whose tabs were the
+  in a Time row and a Level row under a larger graph of that operator (the others dim behind it, where the height allows
+  it: at eight operators on the keyboard's screen it is a few lines high) and its other parameters as compact controls
+  (a knob under 28 px is a value cell with a thin bar, the whole tile the touch target; the operator's number is left off
+  their names under the heading "Operator N"); the overview's graph has a third of the width at least and the diagram's
+  share before the table's columns give up theirs; a handle that moves two parameters is one `params.set`, so one undo
+  step; a page higher than its view shows a mark at its right edge; a page whose tabs were the
   operators' indexes is folded into it, no tab per operator: ui/GRID.md "Master and detail", "The operator table",
   "The detail", ui/TABS.md "Tabs that are indexes"). The grid framework and the views are in ui/GRID.md.
 - **Sound chooser** (`sounds.rs`): `library.query` of kind `sound` (a search typed on the keyboard
@@ -600,16 +605,16 @@ as proportions of the width, not fixed pixels.
 
 ## Library
 
-The Library app (`ui/src/library/`, `ui/slint/library.slint`, `ui/LIBRARY-APP.md` is the checklist, 45 rows) is being
-ported whole; **the tile still hands the display to the JUCE app** until it is judged whole (`library_glue.rs`
-`PORTED`), and `OSCAIRN_UI_LIBRARY=1` opens the Rust one for development. All 45 rows are built (43 ticked, 2 n/a). The first cut:
+The Library app (`ui/src/library/`, `ui/slint/library.slint`, `ui/LIBRARY-APP.md` is the checklist, 45 rows) is ported
+whole and **Home's tile opens it** (`library_glue.rs` `PORTED`). **To fall back to the JUCE Library app from the device,
+set `OSCAIRN_UI_LIBRARY=0`** (any other non-empty value opens the Rust one whatever `PORTED` says). All 45 rows are built (43 ticked, 2 n/a). The first cut:
 
 - **The screen** is the shared list screen (`browser.rs`, the Part screen's component laid by the shell in the area the
   tabs leave) under the shared tab family: Performances, Sounds and Setlists, in a strip or a rail as the theme's
   `tabPlacement` says. The first row is Filters (the sound chooser's Favorites, Recent, Library and Tags lists,
   `library/filters.rs`), then the items: name ("Untitled" without one), tags and description, "Locked",
   "Does not fit this device", "Opening", "Auditioning", a star, the item's color as the theme puts a row's. The panel
-  describes the item under the cursor. Search, Audition (Stop and Keep while one is tried) and Options are the top bar's
+  describes the item under the cursor (name, a favorite's star, tags, description, where it is from, why it does not fit, that it opens or is tried; with the cursor on Filters, the item chosen before or the first) and moving the cursor asks the engine for nothing. Search, Audition (Stop and Keep while one is tried) and Options are the top bar's
   actions; Options opens the item menu for the item under the cursor, or the one last pressed (touch leaves no cursor).
   Without touch the dial walks the tabs and then the rows; up from the first row reaches the tabs, up from the first tab
   the top bar; a press on a Performance opens it, on any other row lists what can be done with it.
@@ -641,8 +646,11 @@ by `packages.job`, tabs, a package's details, install and update, trust question
 ## Settings
 
 The Settings app (`ui/src/settings_app.rs` and `settings_*.rs`, `ui/slint/settings.slint`; `ui/SETTINGS-APP.md` is the
-checklist, 54 rows and 8 that are not in the app) is ported whole; **the tile still hands the display to the JUCE app**
-(`shell/settings_glue.rs` `PORTED`), and `OSCAIRN_UI_SETTINGS=1` opens the Rust one for development. It is the shared list
+checklist, 54 rows and 8 that are not in the app) is ported whole and **Home's tile opens it**
+(`shell/settings_glue.rs` `PORTED`); **`OSCAIRN_UI_SETTINGS=0` hands the tile back to the JUCE Settings app** (any other
+non-empty value opens the Rust one). Appearance writes `appearance.txt` and `themes/` in the configuration folder the JUCE
+app reads (Theme.cpp's root: `OSCAIRN_CONFIG_HOME`, else the platform's place), so a theme chosen in either shows in the
+other within a second. It is the shared list
 screen under the shared tab family (a strip or a rail by the theme's `tabPlacement`), as the Library is, one page a tab, each
 page a `Page` that makes its rows and the panel's lines and takes a press, a menu's choice, a question's answer and the
 keyboard's text.
@@ -691,6 +699,17 @@ keyboard's text.
   renderer into a buffer (no window opens), with data and configuration folders of their own;
   `OSCAIRN_ENGINE=…/oscairn-engine cargo test` adds the test against the real engine, started with
   `--audio null`. `cargo clippy --all-targets` is clean.
+
+## The three apps and Home's tiles
+
+The Performance app (Play, Part, the chain, the sound chooser, the parameter pages, Scene, Parts, Mixer, Controls, Routing),
+the Library app and the Settings app are in this shell, as is the Setlist: nothing in them hands the display over (the walk
+`tests/handover.rs` presses every stop and action of the three, from Home's tiles, with a handover file as on the device). The
+Groovebox tile (and Recordings, where a profile offers it) still hands over to the JUCE app. Each ported tile can be given back
+to its JUCE app by an environment variable of the UI process, for a fault found on a unit: `OSCAIRN_UI_LIBRARY=0` and
+`OSCAIRN_UI_SETTINGS=0` (a value other than `0` forces the Rust app on). A rail label of one word too wide for the rail at 70% of
+the type goes across two lines before it is cut; a list row keeps the theme's padding between its label and its value; the
+Catalog's rows are columns (name, version, publisher, state and summary) each shrunk and cut on its own.
 
 ## On a device: the run recipe (not yet run on a unit)
 

@@ -23,6 +23,7 @@ use crate::piano;
 use crate::sounds;
 use crate::play;
 use crate::profile::Profile;
+use crate::scene;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
 use crate::{Bar, BarAction, GridState, HomeState, KeyboardState, PartState, PianoState, PlayState, SetlistState, Shell, TileData};
@@ -64,6 +65,7 @@ pub enum Request {
     Chain(chain::Request),
     Sounds(sounds::Request),
     Params(params::Request),
+    Scene(scene::Request),
 }
 
 impl Request {
@@ -113,6 +115,8 @@ pub enum Screen {
     Sounds = 6,
     /// A plugin's parameter pages (params.rs), opened from the chain.
     Params = 7,
+    /// The playing scene's setup (scene.rs), opened from Play's bar.
+    Scene = 8,
 }
 
 pub struct App {
@@ -142,6 +146,7 @@ pub struct App {
     chain: chain::Screen,
     sounds: sounds::Screen,
     params: params::Screen,
+    scene: scene::Screen,
     /// Whether the plugin scanner has been started (the first time the chain is opened).
     scan_started: bool,
     /// The on-screen keyboard, open for the screen that asked for text.
@@ -188,7 +193,7 @@ fn with_app(f: impl FnOnce(&mut App)) {
 
 /// The Performance app's screens, which carry the top bar's actions (undo, redo, save).
 fn has_actions(screen: Screen) -> bool {
-    matches!(screen, Screen::Play | Screen::Part | Screen::Chain | Screen::Sounds | Screen::Params)
+    matches!(screen, Screen::Play | Screen::Part | Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene)
 }
 
 /// The screens that follow levels and mutes moved live (controls.changed).
@@ -313,6 +318,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             chain: chain::Screen::new(ui),
             sounds: sounds::Screen::new(ui),
             params: params::Screen::new(ui),
+            scene: scene::Screen::new(ui),
             scan_started: false,
             keyboard: None,
             piano: None,
@@ -548,6 +554,12 @@ impl App {
                 }
                 return;
             }
+            Request::Scene(r) => {
+                if self.on_scene(|c| c.reply(r, result)) {
+                    self.ask_performance();
+                }
+                return;
+            }
             other => other,
         };
         let r = match result {
@@ -593,6 +605,7 @@ impl App {
                 self.on_part(|p| p.graph(&r));
                 self.on_chain(|c| c.graph(&r));
                 self.on_sounds(|c| c.graph(&r));
+                self.on_scene(|c| c.graph(&r));
                 self.show(|s| s.scene = topbar::scene(&r))
             }
             Request::Transport => self.show(|s| s.tempo = topbar::tempo(&r)),
@@ -610,7 +623,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
         }
     }
 
@@ -749,6 +762,7 @@ impl App {
             (Screen::Part, _) => self.part_act(|p| p.act(action)),
             (Screen::Chain, _) => self.chain_act(|c| c.act(action)),
             (Screen::Sounds, _) => self.sounds_act(|c| c.act(action)),
+            (Screen::Scene, _) => self.scene_act(|c| c.act(action)),
             (Screen::Params, _) => self.params_act(|c| c.act(action)),
             (Screen::Setlist, _) => {
                 let mut back = false;
@@ -782,7 +796,7 @@ impl App {
 
     /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
     fn show_bar(&mut self) {
-        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history) } else { vec![] };
+        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, self.screen == Screen::Play) } else { vec![] };
         if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
             self.bar_at = None;
         }
@@ -812,6 +826,12 @@ impl App {
             topbar::Do::Undo => self.send(Request::History, "edit.undo", json!({})),
             topbar::Do::Redo => self.send(Request::History, "edit.redo", json!({})),
             topbar::Do::Save => self.save(false),
+            topbar::Do::Scene => {
+                if let Some(id) = self.last_graph["scene"].as_u64() {
+                    self.scene.open(id);
+                    self.go(Screen::Scene);
+                }
+            }
         }
     }
 
@@ -893,6 +913,7 @@ impl App {
             Screen::Part => self.part.at_top(),
             Screen::Chain => self.chain.at_top(),
             Screen::Sounds => self.sounds.at_top(),
+            Screen::Scene => self.scene.at_top(),
             _ => false,
         }
     }
@@ -1058,6 +1079,22 @@ impl App {
         }
     }
 
+    fn on_scene<R>(&mut self, f: impl FnOnce(&mut scene::Screen) -> R) -> R {
+        let r = f(&mut self.scene);
+        for (request, method, params) in std::mem::take(&mut self.scene.out) {
+            self.send(Request::Scene(request), method, params);
+        }
+        r
+    }
+
+    fn scene_act(&mut self, f: impl FnOnce(&mut scene::Screen) -> scene::Outcome) {
+        match self.on_scene(f) {
+            scene::Outcome::Back => self.go(Screen::Play),
+            scene::Outcome::Prompt(title, text) => self.open_keyboard(Screen::Scene, &title, &text),
+            scene::Outcome::Stay => {}
+        }
+    }
+
     fn params_act(&mut self, f: impl FnOnce(&mut params::Screen) -> params::Outcome) {
         if self.on_params(f) == params::Outcome::Back {
             self.go(Screen::Chain);
@@ -1069,6 +1106,7 @@ impl App {
         match self.screen {
             Screen::Part => self.go(Screen::Play),
             Screen::Chain | Screen::Sounds => self.go(Screen::Part),
+            Screen::Scene => self.go(Screen::Play),
             Screen::Params => self.go(Screen::Chain),
             _ => {}
         }
@@ -1079,6 +1117,7 @@ impl App {
             Screen::Part => self.part_act(|p| p.tap(i)),
             Screen::Chain => self.chain_act(|c| c.tap(i)),
             Screen::Sounds => self.sounds_act(|c| c.tap(i)),
+            Screen::Scene => self.scene_act(|c| c.tap(i)),
             _ => {}
         }
     }
@@ -1088,6 +1127,7 @@ impl App {
             Screen::Part => self.on_part(|p| p.step_row(i, by)),
             Screen::Chain => self.on_chain(|c| c.step_row(i, by)),
             Screen::Sounds => self.on_sounds(|c| c.step_row(i, by)),
+            Screen::Scene => self.on_scene(|c| c.step_row(i, by)),
             _ => {}
         }
     }
@@ -1097,6 +1137,7 @@ impl App {
             Screen::Part => self.on_part(|p| p.scroll_info(by)),
             Screen::Chain => self.on_chain(|c| c.scroll_info(by)),
             Screen::Sounds => self.on_sounds(|c| c.scroll_info(by)),
+            Screen::Scene => self.on_scene(|c| c.scroll_info(by)),
             _ => {}
         }
     }
@@ -1172,6 +1213,8 @@ impl App {
             (Screen::Part, None) => self.on_part(part::Screen::not_entered),
             (Screen::Sounds, Some(text)) => self.on_sounds(|p| p.entered(&text)),
             (Screen::Sounds, None) => self.on_sounds(sounds::Screen::not_entered),
+            (Screen::Scene, Some(text)) => self.on_scene(|p| p.entered(&text)),
+            (Screen::Scene, None) => self.on_scene(scene::Screen::not_entered),
             _ => {}
         }
     }
@@ -1223,6 +1266,9 @@ impl App {
             if self.screen == Screen::Sounds {
                 self.on_sounds(sounds::Screen::hidden);
             }
+            if self.screen == Screen::Scene {
+                self.on_scene(scene::Screen::hidden);
+            }
             if self.screen == Screen::Params {
                 self.on_params(params::Screen::hidden);
                 self.send(Request::Subscribe, "unsubscribe", json!({"topics": ["params.changed"]}));
@@ -1250,6 +1296,7 @@ impl App {
                 Screen::Part => "Part".into(),
                 Screen::Chain => "Insert effects".into(),
                 Screen::Sounds => "Sound".into(),
+                Screen::Scene => "Scene".into(),
                 Screen::Params => "Parameters".into(),
                 Screen::Opening => ui.get_opening(),
             });
@@ -1262,7 +1309,10 @@ impl App {
             // The first controls.changed after subscribing carries every level and mute.
             self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
         }
-        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params) {
+        if screen == Screen::Scene {
+            self.on_scene(scene::Screen::shown);
+        }
+        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene) {
             self.ask_performance();
         }
         if screen == Screen::Chain {

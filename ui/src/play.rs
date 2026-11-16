@@ -317,7 +317,8 @@ impl Screen {
         let Some(ui) = self.ui.upgrade() else { return };
         let state = ui.global::<PlayState>();
         let per_view = state.get_strips_per_view().max(1) as usize;
-        let scenes = self.scenes.len().min(SCENES);
+        // The tile after the last scene adds one, while there is room (the JUCE view shows eight tiles).
+        let scenes = (self.scenes.len() + 1).min(SCENES);
         self.scene_cursor = Cursor { count: scenes, at: self.scene_cursor.at.map(|a| a.min(scenes.saturating_sub(1))), ..self.scene_cursor };
         self.part_cursor = Cursor { count: self.parts.len(), per_page: per_view, at: self.part_cursor.at.map(|a| a.min(self.parts.len().saturating_sub(1))), ..self.part_cursor };
         self.part_cursor = match self.part_cursor.at {
@@ -326,8 +327,8 @@ impl Screen {
         };
         let tiles: Vec<SceneData> = (0..SCENES)
             .map(|i| match self.scenes.get(i) {
-                Some((id, name)) => SceneData { number: i as i32 + 1, name: name.as_str().into(), filled: true, on: *id == self.scene, cursor: self.scene_cursor.at == Some(i) },
-                None => SceneData { number: i as i32 + 1, ..Default::default() },
+                Some((id, name)) => SceneData { number: i as i32 + 1, name: name.as_str().into(), filled: true, add: false, on: *id == self.scene, cursor: self.scene_cursor.at == Some(i) },
+                None => SceneData { number: i as i32 + 1, add: i == self.scenes.len(), cursor: self.scene_cursor.at == Some(i), ..Default::default() },
             })
             .collect();
         update(&self.tiles, tiles);
@@ -372,11 +373,16 @@ impl Screen {
         self.edit("graph.commit", json!({}));
     }
 
+    /// A scene tile: the scene selected; the "+ Scene" tile after the last adds one, named as the
+    /// JUCE view names it ("Scene N", N the count it makes), captured from all of the state as it is now.
     fn select_scene(&mut self, i: usize) {
         if let Some((id, _)) = self.scenes.get(i).filter(|_| i < SCENES) {
             self.scene = *id; // shown now; graph.get confirms
             let id = *id;
             self.edit("scenes.select", json!({"scene": id}));
+        } else if i == self.scenes.len() && i < SCENES {
+            let n = self.scenes.len() + 1;
+            self.edit("scenes.add", json!({"name": format!("Scene {n}")}));
         }
     }
 

@@ -27,7 +27,7 @@ pub fn play_on_the_shell(name: &str, info: serde_json::Value, graph: serde_json:
 }
 
 /// The next request the test is waiting for; the shell's own polls are answered as an engine would.
-pub fn request(f: &mut Fixture, want: &str, history: &serde_json::Value) -> serde_json::Value {
+pub fn request_in(f: &mut Fixture, want: &str, history: &serde_json::Value, graph: &serde_json::Value) -> serde_json::Value {
     loop {
         let r = f.engine.request();
         let result = match r["method"].as_str().unwrap() {
@@ -35,12 +35,16 @@ pub fn request(f: &mut Fixture, want: &str, history: &serde_json::Value) -> serd
             "parts.meters" => json!({"meters": []}),
             "edit.history" => history.clone(),
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
-            "graph.get" => play_graph(),
+            "graph.get" => graph.clone(),
             "subscribe" | "unsubscribe" => json!({}),
             _ => return r,
         };
         f.reply(&r, json!({"result": result}));
     }
+}
+
+pub fn request(f: &mut Fixture, want: &str, history: &serde_json::Value) -> serde_json::Value {
+    request_in(f, want, history, &play_graph())
 }
 
 fn labels(f: &Fixture) -> Vec<(String, bool, bool)> {
@@ -55,7 +59,7 @@ fn undo_redo_and_save_on_the_top_bar() {
     let mut f = play_on_the_shell("bar", json!({"id": "p1", "name": "Grand", "unsaved": true}), play_graph());
     let ui = f.screen.ui.clone_strong();
     let none = json!({"undo": "", "redo": ""});
-    assert_eq!(labels(&f), [("Undo Volume of Keys".into(), true, false), ("Redo".into(), false, false), ("Save".into(), true, false)]);
+    assert_eq!(labels(&f), [("Undo Volume of Keys".into(), true, false), ("Redo".into(), false, false), ("Save".into(), true, false), ("Scene".into(), true, false)]);
     f.screen.frame();
     f.screen.save("bar-actions");
     png(&f.screen, "bar-actions");
@@ -63,14 +67,14 @@ fn undo_redo_and_save_on_the_top_bar() {
     ui.global::<Bar>().invoke_action(0);
     let r = request(&mut f, "edit.undo", &none);
     f.reply(&r, json!({"result": {"undo": "", "redo": "Volume of Keys"}}));
-    assert_eq!(labels(&f), [("Undo".into(), false, false), ("Redo Volume of Keys".into(), true, false), ("Save".into(), true, false)]);
+    assert_eq!(labels(&f), [("Undo".into(), false, false), ("Redo Volume of Keys".into(), true, false), ("Save".into(), true, false), ("Scene".into(), true, false)]);
     // A disabled one does nothing.
     ui.global::<Bar>().invoke_action(0);
     // The third pane enters the bar at the name (Save As New); the cursor then goes along the actions.
     shell::act(Action::Move { pane: Some(2), by: 1 });
     assert!(ui.global::<Bar>().get_pill_cursor());
     shell::act(Action::Move { pane: None, by: 1 });
-    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [true, false, false]);
+    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [true, false, false, false]);
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Confirm(None)); // Redo
     let r = request(&mut f, "edit.redo", &none);
@@ -85,6 +89,7 @@ fn undo_redo_and_save_on_the_top_bar() {
     f.reply(&r, json!({"result": {"id": "p1"}}));
     assert_eq!(ui.global::<Bar>().get_notice().as_str(), "Performance saved.");
     // Past the last stop the cursor goes back to the screen; Cancel gives it back at once.
+    shell::act(Action::Move { pane: None, by: 1 }); // Scene
     shell::act(Action::Move { pane: None, by: 1 });
     assert!(labels(&f).iter().all(|l| !l.2));
     shell::act(Action::Move { pane: Some(2), by: 0 });
@@ -94,7 +99,7 @@ fn undo_redo_and_save_on_the_top_bar() {
     // The dial moving up out of the first scene reaches the last stop; Tab reaches the first and gives it back.
     shell::act(Action::Move { pane: Some(0), by: 1 });
     shell::act(Action::Move { pane: None, by: -1 });
-    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [false, false, true]);
+    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [false, false, false, true]);
     assert!(shell::key("\t") && labels(&f).iter().all(|l| !l.2));
     assert!(shell::key("\t") && ui.global::<Bar>().get_pill_cursor());
     // The name: Save As New asks for the name on the keyboard, which starts as the Performance's.

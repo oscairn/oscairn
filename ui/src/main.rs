@@ -20,6 +20,7 @@ mod part;
 mod play;
 mod profile;
 mod scan;
+mod scene;
 mod sounds;
 mod setlist;
 mod settings;

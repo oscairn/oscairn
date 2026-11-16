@@ -45,9 +45,9 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | # | Item | Request | In-proc | No touch | Status |
 |---|---|---|---|---|---|
 | A1 | Scene tiles (eight), the current one marked; select | `scenes.select` | - | left pane cursor, press | [x] |
-| A2 | "+ Scene" tile after the last: add a scene (named "Scene N") | `scenes.add` | - | cursor on the tile, press | [ ] |
-| A3 | Capture (store) the current state into a scene | `scenes.store` | - | action in the scene menu (A4) | [ ] |
-| A4 | Rename a scene (and the scene menu: store, rename, remove, scope, transition) | `scenes.name`, `scenes.remove`, `scenes.scope`, `scenes.transition` | - | long press / the scene's Edit action; on-screen keyboard (K1) | [ ] |
+| A2 | "+ Scene" tile after the last: add a scene (named "Scene N") | `scenes.add` | - | cursor on the tile, press | [x] src/play.rs: the tile after the last scene (while there are fewer than eight) adds "Scene N" (JUCE PlayView mouseUp); the cursor reaches it, a press or a tap adds |
+| A3 | Capture (store) the current state into a scene | `scenes.store` | - | action in the scene menu (A4) | [x] src/scene.rs: the Scene action of Play's top bar opens the playing scene's setup, whose first row is Store (`scenes.store`) |
+| A4 | Rename a scene (and the scene menu: store, rename, remove, scope, transition) | `scenes.name`, `scenes.remove`, `scenes.scope`, `scenes.transition` | - | long press / the scene's Edit action; on-screen keyboard (K1) | [x] src/scene.rs: Rename (keyboard, K1), the six scope kinds switched, glide time, curve and "while playing" by a press and the dial or − and +, as the JUCE `sceneEditMenu`. CORRECTION: the JUCE menu has no remove and nothing in the JUCE app calls `scenes.remove`, so none is built; no long press either (the bar's action does it) |
 | A5 | Strip per part and bus: name, sound, input, level fader, meters, M, S | `parts.level`, `parts.solo`, `parts.meters` | - | right pane cursor, press opens the part; dial on a fader after press | [x] |
 | A6 | Master strip: level, pan | `master.set` | - | cursor on it, press then dial | [ ] |
 | A7 | Selected part outline (press selects a part, Edit opens it) | - | - | press | [x] |

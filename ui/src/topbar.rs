@@ -117,6 +117,8 @@ pub enum Do {
     Redo,
     /// Save to the library; the Performance's name on the bar is Save As New.
     Save,
+    /// The playing scene's setup (Play's only).
+    Scene,
 }
 
 /// What undo and redo would now do, by the edit's name (edit.history; empty: nothing).
@@ -134,9 +136,14 @@ impl History {
 
 /// The actions the Performance app's screens offer, as the JUCE Edit view's header names them
 /// (PartsView.cpp: "Undo <edit>", Redo, Save): each with its label and whether it can be used now.
-pub fn actions(history: &History) -> Vec<(Do, String, bool)> {
+/// Play also has "Scene": the setup of the scene playing (the JUCE menu, here a screen).
+pub fn actions(history: &History, play: bool) -> Vec<(Do, String, bool)> {
     let named = |what: &str, name: &str| if name.is_empty() { what.to_string() } else { format!("{what} {name}") };
-    vec![(Do::Undo, named("Undo", &history.undo), !history.undo.is_empty()), (Do::Redo, named("Redo", &history.redo), !history.redo.is_empty()), (Do::Save, "Save".into(), true)]
+    let mut list = vec![(Do::Undo, named("Undo", &history.undo), !history.undo.is_empty()), (Do::Redo, named("Redo", &history.redo), !history.redo.is_empty()), (Do::Save, "Save".into(), true)];
+    if play {
+        list.push((Do::Scene, "Scene".into(), true));
+    }
+    list
 }
 
 /// A take being recorded, as the JUCE record buttons (Recording.cpp, RecordButtons) show it: the

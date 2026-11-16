@@ -12,6 +12,7 @@ export struct SceneData {
     number: int,
     name: string,
     filled: bool,
+    add: bool, // the "+ Scene" tile after the last scene
     on: bool,
     cursor: bool,
 }
@@ -239,14 +240,16 @@ export component Play inherits Rectangle {
             color: Theme.muted;
             font-size: Theme.small;
         }
+        // Centered in what is left of the tile after the number's column on both sides, so a long name
+        // elides before it reaches the number (at a large type scale too).
         Text {
-            x: Theme.pad-narrow;
-            width: parent.width - 2 * Theme.pad-narrow;
+            x: Theme.pad-narrow + Theme.small * 1.6;
+            width: parent.width - 2 * (Theme.pad-narrow + Theme.small * 1.6);
             height: parent.height;
-            text: scene.name;
-            color: scene.on ? Theme.accent : Theme.text;
-            font-size: Theme.button;
-            font-weight: 700;
+            text: scene.add ? "+ Scene" : scene.name;
+            color: scene.on ? Theme.accent : scene.add ? Theme.muted : Theme.text;
+            font-size: scene.add ? Theme.small : Theme.button;
+            font-weight: scene.add ? 400 : 700;
             overflow: elide;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -254,7 +257,7 @@ export component Play inherits Rectangle {
         Cursor {
             shown: scene.cursor;
         }
-        if scene.filled: TouchArea {
+        if scene.filled || scene.add: TouchArea {
             clicked => { PlayState.scene-tapped(i); }
         }
     }

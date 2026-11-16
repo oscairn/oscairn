@@ -21,7 +21,7 @@ export component Shell inherits Window {
     default-font-family: Theme.font-family;
     // Empty while the engine answers; else what is wrong ("busy 3.2 s", "lost: ...").
     in property <string> engine;
-    // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening; 3 Play, 4 Part, 5 chain, 6 sounds, 7 a grid page (`opening` names a JUCE screen).
+    // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening; 3 Play, 4 Part, 5 chain, 6 sounds, 7 a grid page, 8 a scene's setup (`opening` names a JUCE screen).
     in property <int> screen;
     in property <string> opening;
     in property <bool> hands-over; // false: this shell cannot hand the display over (a computer)
@@ -69,7 +69,7 @@ export component Shell inherits Window {
         y: Theme.bar-height;
         width: parent.width;
         height: parent.height - Theme.bar-height;
-        visible: root.screen >= 4 && root.screen <= 6;
+        visible: (root.screen >= 4 && root.screen <= 6) || root.screen == 8;
     }
     Grid {
         y: Theme.bar-height;

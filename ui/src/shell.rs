@@ -264,6 +264,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     play.on_held(|i, down| with_app(|a| a.on_play(|p| p.hold(i, down))));
     play.on_step(|by| with_app(|a| a.on_setlist(|s| s.step_by(by as i64))));
     play.on_edit(|| with_app(|a| a.hand_over(&home::APPS[0])));
+    play.on_hint_keys(|| with_app(|a| a.hint_tap(0)));
+    play.on_hint_dismiss(|| with_app(|a| a.hint_tap(1)));
     play.on_part_tapped(|i| {
         with_app(|a| {
             let mut id = None;
@@ -338,6 +340,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             saving: None,
         };
         app.part.keys = profile.on_screen_keyboard;
+        app.play.offer_keyboard(profile.on_screen_keyboard, crate::settings::keyboard_hint_dismissed());
         app.show_home();
         *a.borrow_mut() = Some(app);
     });
@@ -502,6 +505,7 @@ impl App {
     /// The meters, at most every METER_INTERVAL: the CPU from this status, RAM and the tempo asked.
     fn status(&mut self, status: &Value) {
         self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
+        self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
         if self.on_piano(|p| !p.status(status)) == Some(true) {
             self.close_piano(); // its input was unplugged
         }
@@ -756,6 +760,8 @@ impl App {
                     }
                     play::Outcome::Step(by) => self.on_setlist(|s| s.step_by(by)),
                     play::Outcome::Open(id) => self.open_part(id),
+                    play::Outcome::Keys => self.open_piano(""),
+                    play::Outcome::Dismiss => self.keep_hint_dismissed(),
                     play::Outcome::Stay => {}
                 }
             }
@@ -915,6 +921,24 @@ impl App {
             Screen::Sounds => self.sounds.at_top(),
             Screen::Scene => self.scene.at_top(),
             _ => false,
+        }
+    }
+
+    /// Play's hint dismissed: kept in the JUCE app's keyboard.txt, so it stays so in either UI.
+    fn keep_hint_dismissed(&mut self) {
+        if let Err(e) = crate::settings::dismiss_keyboard_hint() {
+            eprintln!("oscairn-ui: cannot keep the hint dismissed: {e}");
+        }
+    }
+
+    /// A tap on one of Play's hint links.
+    fn hint_tap(&mut self, link: i32) {
+        let mut outcome = play::Outcome::Stay;
+        self.on_play(|p| outcome = p.tap_hint(link));
+        match outcome {
+            play::Outcome::Keys => self.open_piano(""),
+            play::Outcome::Dismiss => self.keep_hint_dismissed(),
+            _ => {}
         }
     }
 
@@ -1367,6 +1391,12 @@ impl App {
             });
         }
     }
+}
+
+/// Tests: Play's hint as a profile with no keys of its own has it (the FANTOM-07's has none).
+#[cfg(test)]
+pub fn offer_keyboard(offered: bool, dismissed: bool) {
+    with_app(|a| a.play.offer_keyboard(offered, dismissed))
 }
 
 /// Tests: the profile says text is typed on the on-screen keyboard's keys.

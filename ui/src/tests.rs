@@ -1050,6 +1050,7 @@ fn play_draws_in_every_theme() {
 
 #[cfg(test)]
 mod bar;
+mod play;
 mod scene;
 mod part;
 mod keyboard;

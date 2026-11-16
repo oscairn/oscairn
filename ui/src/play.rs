@@ -44,6 +44,10 @@ pub enum Outcome {
     Step(i64),
     /// A part selected (a press on it): its Part screen.
     Open(u32),
+    /// The hint's "Open the on-screen keyboard".
+    Keys,
+    /// The hint's "Dismiss": kept (the shell writes it down).
+    Dismiss,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -192,6 +196,17 @@ pub struct Screen {
     master: Option<(f64, f64)>, // level, pan
     scene_cursor: Cursor,       // pane 0
     part_cursor: Cursor,        // pane 1, a view of the parts at a time
+    /// Pane 1's cursor is on the master, after the last part; once pressed the dial changes its level.
+    master_cursor: bool,
+    master_editing: bool,
+    /// The no-MIDI hint: the profile offers the on-screen keyboard, session.status was read and
+    /// says no device but the built-in is connected, and it was not dismissed (kept in the
+    /// JUCE app's keyboard.txt). Its two links are the first stops of pane 1: 0 Open, 1 Dismiss.
+    keys_offered: bool,
+    midi_known: bool,
+    midi_connected: bool,
+    hint_dismissed: bool,
+    hint_at: Option<u8>,
     /// The pane the dial moves: the one last touched.
     touched: u8,
     /// The part (-1 the master) whose fader a finger is on: the engine's own values for it wait.
@@ -218,6 +233,13 @@ impl Screen {
             master: None,
             scene_cursor: Cursor::new(0, SCENES),
             part_cursor: Cursor::new(0, 1),
+            master_cursor: false,
+            master_editing: false,
+            keys_offered: false,
+            midi_known: false,
+            midi_connected: false,
+            hint_dismissed: false,
+            hint_at: None,
             touched: 1,
             held: None,
             follow: false,
@@ -287,6 +309,42 @@ impl Screen {
         self.show();
     }
 
+    /// The profile offers the on-screen keyboard (`onScreenKeyboard`), and the hint was dismissed before.
+    pub fn offer_keyboard(&mut self, offered: bool, dismissed: bool) {
+        self.keys_offered = offered;
+        self.hint_dismissed = dismissed;
+        self.show();
+    }
+
+    /// session.status (its notification): whether a MIDI input besides the built-in one is connected
+    /// (PlayView::showHint).
+    pub fn status(&mut self, status: &Value) {
+        if let Some(inputs) = status["midiInputs"].as_array() {
+            self.midi_known = true;
+            self.midi_connected = inputs.iter().any(|m| m["kind"] != "builtIn");
+            self.show();
+        }
+    }
+
+    fn hint_shown(&self) -> bool {
+        self.keys_offered && self.midi_known && !self.midi_connected && !self.hint_dismissed
+    }
+
+    /// A tap on one of the hint's links (0 the keyboard, 1 Dismiss).
+    pub fn tap_hint(&mut self, link: i32) -> Outcome {
+        self.hint_at = None;
+        self.hint_press(link.clamp(0, 1) as u8)
+    }
+
+    fn hint_press(&mut self, link: u8) -> Outcome {
+        if link == 0 {
+            return Outcome::Keys;
+        }
+        self.hint_dismissed = true;
+        self.show();
+        Outcome::Dismiss
+    }
+
     /// Whether the open Performance is the setlist's slot playing: Previous and Next show.
     pub fn follow(&mut self, follow: bool) {
         if self.follow != follow {
@@ -345,6 +403,7 @@ impl Screen {
                     solo: p.solo,
                     dim: p.mute || p.silenced,
                     cursor: self.part_cursor.at == Some(i),
+                    editing: false,
                     channels: p.channels,
                     peak_a: p.peaks.0,
                     peak_b: p.peaks.1,
@@ -355,11 +414,17 @@ impl Screen {
         let master = self.master.filter(|_| !self.parts.is_empty());
         state.set_has_master(master.is_some());
         if let Some((level, _)) = master {
-            state.set_master(StripData { name: "Master".into(), detail: "Performance".into(), fraction: fraction(level, 2.), ..Default::default() });
+            state.set_master(StripData { name: "Master".into(), detail: "Performance".into(), fraction: fraction(level, 2.), cursor: self.master_cursor, editing: self.master_editing, ..Default::default() });
         }
         state.set_can_step(self.follow);
         let view: SharedString = if self.parts.is_empty() { SharedString::new() } else { format!("Parts {}–{} of {}", first + 1, end, self.parts.len()).into() };
         state.set_view(view);
+        let hint = self.hint_shown();
+        if !hint {
+            self.hint_at = None;
+        }
+        state.set_hint(hint);
+        state.set_hint_cursor(self.hint_at.map_or(-1, i32::from));
     }
 
     fn edit(&mut self, method: &'static str, params: Value) {
@@ -402,13 +467,59 @@ impl Screen {
         }
     }
 
-    /// The pane's cursor moved by `by` steps, shown on the first item by the first move.
+    /// The pane's cursor moved by `by` steps, shown on the first item by the first move. The master,
+    /// pinned at the right, is the pane's last stop after the parts; once pressed, the dial moves its fader.
     fn move_in(&mut self, pane: u8, by: i64) {
         self.touched = pane;
         if pane == 0 {
             self.scene_cursor = self.scene_cursor.moved(by);
+        } else if self.master_editing {
+            self.step_master(by);
+        } else if let Some(link) = self.hint_at {
+            match (link, by.signum()) {
+                (0, 1) => self.hint_at = Some(1),
+                (1, 1) => {
+                    self.hint_at = None; // on to the first part (or the master)
+                    if self.parts.is_empty() {
+                        self.master_cursor = self.has_master();
+                    } else {
+                        self.part_cursor = self.part_cursor.to(0);
+                    }
+                }
+                (1, -1) => self.hint_at = Some(0),
+                _ => {}
+            }
+        } else if self.hint_shown() && by < 0 && self.part_cursor.at == Some(0) {
+            self.hint_at = Some(1); // up out of the first part onto the links
+            self.part_cursor = self.part_cursor.clear();
+        } else if self.hint_shown() && self.part_cursor.at.is_none() && !self.master_cursor {
+            self.hint_at = Some(0); // the first move shows the cursor on the first stop
+        } else if self.master_cursor {
+            if by < 0 {
+                self.master_cursor = false;
+                self.part_cursor = self.part_cursor.to(self.parts.len().saturating_sub(1));
+            }
+        } else if by > 0 && self.has_master() && self.part_cursor.at.is_some_and(|a| a + 1 >= self.parts.len()) {
+            self.master_cursor = true; // past the last part
+            self.part_cursor = self.part_cursor.clear();
         } else {
             self.part_cursor = self.part_cursor.moved(by);
+        }
+    }
+
+    fn has_master(&self) -> bool {
+        self.master.is_some() && !self.parts.is_empty()
+    }
+
+    /// The master's fader by `by` clicks of the dial, 1/40 of its travel each, held at the ends. Sent
+    /// as the fader sends, committed.
+    fn step_master(&mut self, by: i64) {
+        let Some((level, pan)) = self.master else { return };
+        let place = (fraction(level, 2.) as f64 + by.signum() as f64 * 0.025).clamp(0., 1.) as f32;
+        let want = level_at(place, 2.);
+        if want != level {
+            self.master = Some((want, pan));
+            self.edit_committed("master.set", json!({"level": want, "pan": pan}));
         }
     }
 
@@ -431,6 +542,8 @@ impl Screen {
                         self.select_scene(at);
                     }
                 }
+                _ if self.hint_at.is_some() => return self.hint_press(self.hint_at.unwrap_or(0)),
+                _ if self.master_cursor => self.master_editing = !self.master_editing, // a press, then the dial
                 _ => {
                     if let Some(p) = self.part_cursor.at.and_then(|at| self.parts.get(at)) {
                         return Outcome::Open(p.id);
@@ -438,11 +551,17 @@ impl Screen {
                 }
             },
             Action::Cancel(_) => {
-                if self.scene_cursor.at.is_none() && self.part_cursor.at.is_none() {
-                    return Outcome::Back;
+                if self.master_editing {
+                    self.master_editing = false; // ends the change, the cursor stays
+                } else {
+                    if self.scene_cursor.at.is_none() && self.part_cursor.at.is_none() && !self.master_cursor && self.hint_at.is_none() {
+                        return Outcome::Back;
+                    }
+                    self.scene_cursor = self.scene_cursor.clear();
+                    self.part_cursor = self.part_cursor.clear();
+                    self.master_cursor = false;
+                    self.hint_at = None;
                 }
-                self.scene_cursor = self.scene_cursor.clear();
-                self.part_cursor = self.part_cursor.clear();
             }
         }
         self.show();
@@ -501,6 +620,11 @@ impl Screen {
 
     pub fn hold(&mut self, row: i32, down: bool) {
         self.held = down.then(|| if row < 0 { -1 } else { self.parts.get(self.at(row)).map_or(-2, |p| p.id as i64) });
+        if down {
+            // A finger on a fader takes over from the cursor, as a tap drops the cursors.
+            self.master_cursor = false;
+            self.master_editing = false;
+        }
     }
 
     /// The scene cursor is on the first tile: moving up or left leaves for the top bar's actions.
@@ -512,6 +636,9 @@ impl Screen {
     pub fn hidden(&mut self) {
         self.scene_cursor = self.scene_cursor.clear();
         self.part_cursor = self.part_cursor.clear();
+        self.master_cursor = false;
+        self.master_editing = false;
+        self.hint_at = None;
         self.held = None;
         self.show();
     }

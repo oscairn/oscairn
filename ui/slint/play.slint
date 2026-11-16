@@ -25,6 +25,7 @@ export struct StripData {
     solo: bool,
     dim: bool, // muted, or silenced by another part's solo
     cursor: bool,
+    editing: bool, // the dial changes its fader (the master's)
     channels: int, // meter bars: 0 none (the master), 1 or 2
     peak-a: float, // each 0..1 along -60..+6 dB
     peak-b: float,
@@ -38,6 +39,10 @@ export global PlayState {
     in property <bool> can-step; // the Performance is the setlist's: Previous and Next
     in property <string> view; // which parts show: "1–5 of 9"
     in property <string> message;
+    in property <bool> hint; // no MIDI device: the line offering the on-screen keyboard
+    in property <int> hint-cursor: -1; // which of its two links has the cursor
+    callback hint-keys();
+    callback hint-dismiss();
     // How many part strips the screen holds besides the master: set by the screen.
     in-out property <int> strips-per-view: 1;
     callback scene-tapped(int);
@@ -184,6 +189,32 @@ component Strip inherits Section {
     }
     Cursor {
         shown: data.cursor;
+        editing: data.editing;
+    }
+}
+
+// A link of the hint line: its words in a tint, a touch target tall, a focus border for the cursor.
+component HintLink inherits Rectangle {
+    in property <string> text;
+    in property <color> tint;
+    in property <bool> cursor;
+    callback clicked();
+    width: label.preferred-width + 2 * Theme.pad-narrow;
+    label := Text {
+        x: Theme.pad-narrow;
+        height: parent.height;
+        vertical-alignment: center;
+        font-size: Theme.small;
+        font-weight: 700;
+        color: root.tint;
+        text: root.text;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Cursor {
+        shown: root.cursor;
+        corner: Theme.field-radius(root.height);
     }
 }
 
@@ -199,7 +230,10 @@ export component Play inherits Rectangle {
     // Strips across, the master's among them; the cell is the same whatever the parts shown.
     property <int> across: max(2, floor((strips-width + gap) / (strip-min + gap)));
     property <length> cell: (strips-width - (across - 1) * gap) / across;
-    property <length> strips-y: Theme.margin + scenes-height + Theme.gap;
+    // The line offering the on-screen keyboard when no MIDI device is connected, over the strips.
+    property <length> hint-y: Theme.margin + scenes-height + Theme.gap;
+    property <length> hint-height: PlayState.hint ? Theme.touch + Theme.gap : 0px;
+    property <length> strips-y: hint-y + hint-height;
     property <length> strips-height: self.height - strips-y - footer - Theme.margin - Theme.gap;
     property <length> step-width: PlayState.can-step ? Theme.button-width + Theme.gap : 0px;
     property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * gap) / 8;
@@ -259,6 +293,33 @@ export component Play inherits Rectangle {
         }
         if scene.filled || scene.add: TouchArea {
             clicked => { PlayState.scene-tapped(i); }
+        }
+    }
+
+    if PlayState.hint: HorizontalLayout {
+        x: Theme.margin;
+        y: root.hint-y;
+        width: root.width - 2 * Theme.margin;
+        height: Theme.touch;
+        spacing: Theme.pad-narrow;
+        alignment: start;
+        Text {
+            vertical-alignment: center;
+            font-size: Theme.small;
+            color: Theme.muted;
+            text: "No MIDI device.";
+        }
+        HintLink {
+            text: "Open the on-screen keyboard";
+            tint: Theme.accent;
+            cursor: PlayState.hint-cursor == 0;
+            clicked => { PlayState.hint-keys(); }
+        }
+        HintLink {
+            text: "Dismiss";
+            tint: Theme.muted;
+            cursor: PlayState.hint-cursor == 1;
+            clicked => { PlayState.hint-dismiss(); }
         }
     }
 

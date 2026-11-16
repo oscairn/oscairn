@@ -36,7 +36,7 @@ pub fn request_in(f: &mut Fixture, want: &str, history: &serde_json::Value, grap
             "edit.history" => history.clone(),
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
             "graph.get" => graph.clone(),
-            "subscribe" | "unsubscribe" => json!({}),
+            "subscribe" | "unsubscribe" | "record.takes" | "memory.state" | "transport.get" => json!({}),
             _ => return r,
         };
         f.reply(&r, json!({"result": result}));

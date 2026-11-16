@@ -44,6 +44,24 @@ pub fn chosen_theme() -> String {
     read("appearance.txt").unwrap_or_default().trim().to_string()
 }
 
+/// Whether the Play screen's "No MIDI device" hint was dismissed: the line "hint dismissed" of
+/// keyboard.txt, which the JUCE app's on-screen keyboards keep (KeyboardWindow.cpp, Keyboards).
+pub fn keyboard_hint_dismissed() -> bool {
+    read("keyboard.txt").is_some_and(|t| t.lines().any(|l| l.trim() == "hint dismissed"))
+}
+
+/// Keeps the hint dismissed: the line goes first, as the JUCE app writes it, and the windows' places
+/// after it stay.
+pub fn dismiss_keyboard_hint() -> std::io::Result<()> {
+    let Some(dir) = config_dir() else { return Ok(()) };
+    let rest = read("keyboard.txt").unwrap_or_default();
+    if rest.lines().any(|l| l.trim() == "hint dismissed") {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("keyboard.txt"), format!("hint dismissed\n{rest}"))
+}
+
 /// The profile's meter settings with the user's over them, each of `cpu` and `ram` on its own.
 pub fn top_bar(profile: MeterSettings) -> MeterSettings {
     let Some(doc) = read("top-bar.json").and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return profile };

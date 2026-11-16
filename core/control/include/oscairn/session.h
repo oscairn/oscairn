@@ -442,7 +442,7 @@ namespace oscairn
         // cpu: the busiest sustained load, falling; rest: with no note sounding or held; voice: added
         // per sounding note; voices: the most notes seen sounding at once. All shares of a block's
         // time, from blocks that ran undisturbed (budget.cpp, measure).
-        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; uint32_t contexts = 0; }; // samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here; contexts: the nodes one instance of it carried at most when parts shared it (0: not seen sharing)
+        struct Measurement { double cpu = 0, rest = 0, voice = 0; uint32_t voices = 0; uint64_t memory = 0; uint32_t samples = 0; uint64_t declared = 0; uint32_t contexts = 0; uint64_t perContext = 0; }; // samples: the blocks measured, at rest and voiced; declared: the plugin's oscairn.memory total, as last activated here; contexts: the nodes one instance of it carried at most when parts shared it (0: not seen sharing); perContext: what each sound past the first was measured to add to an instance (0: not measured)
         Budget budget_;
         uint64_t shell_ = 0; // the UI's own resident memory (setShellMemory), reserved beside budget_.system
         bool loadGuard_ = true; // OSCAIRN_LOAD_GUARD=off: a diagnostic and test setting, not a product mode

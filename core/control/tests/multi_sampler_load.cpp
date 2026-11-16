@@ -19,6 +19,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <regex>
 #include <string>
 #include <thread>
 
@@ -89,12 +92,12 @@ int main(int argc, char** argv)
             s.saveMeasurementsNow();
         }
         check(alone >= decoded, "a sampler alone holds its copy: " + megabytes(alone));
-        auto estimate = [&](const fs::path& performance, uint64_t& samplers) {
+        auto estimate = [&](const fs::path& performance, uint64_t& samplers, uint64_t least = decoded) {
             Session s(rate, frames);
             s.setBudget({.9, 0});
             const auto e = s.estimate(performance.string());
             samplers = 0;
-            for(const auto& c : e.plugins) if(c.plugin == holderId) { samplers += c.memory; check(c.memory >= decoded, "a sampler counts at least what it holds, " + megabytes(c.memory)); }
+            for(const auto& c : e.plugins) if(c.plugin == holderId) { samplers += c.memory; check(c.memory >= least, "a sampler counts at least what it holds, " + megabytes(c.memory)); }
             return e;
         };
         auto open = [&](const fs::path& performance, uint64_t allowance) {
@@ -154,6 +157,44 @@ int main(int argc, char** argv)
         check(f.memory + slack >= heldApart, "the estimate is not below what the workers hold: " + megabytes(f.memory) + " against " + megabytes(heldApart));
         check(f.memory > e.memory, "private copies cost more than a shared instance");
         check(open(apart, f.memory + 128 * mib).empty(), "and opens within its estimate");
+
+        // A sampler that under-declares its sound contexts (each holds `perContext`, declares 256 KiB): its further parts are priced
+        // at what a context was measured to add once that is known, and before at 2.5 times its word (with its 1 MiB of samples:
+        // 1.3 MiB), which covers `perContext` 2 MiB (a context then adds about 3 MB, 2.3 times its word) but not 6 MiB. At its
+        // word alone, as before, four further parts came in about 7 MB low.
+        ::unsetenv("OSCAIRN_SHARING");
+        ::setenv("OSCAIRN_HOLDER_BYTES", std::to_string(mib).c_str(), 1);
+        ::setenv("OSCAIRN_HOLDER_CONTEXT_DECLARED", std::to_string(256 * 1024).c_str(), 1);
+        for(const uint64_t perContext : {2 * mib, 6 * mib})
+        {
+            const auto under = temp.path / ("under-" + std::to_string(perContext / mib));
+            fs::create_directories(under / "home");
+            ::setenv("OSCAIRN_DATA_HOME", (under / "home").c_str(), 1); // measured afresh
+            ::setenv("OSCAIRN_HOLDER_CONTEXT_BYTES", std::to_string(perContext).c_str(), 1);
+            { Session s(rate, frames); s.setBudget({.9, 0}); build(s, 1); play(s); s.saveMeasurementsNow(); } // its memory with one sound
+            { Session s(rate, frames); build(s, 5); s.savePerformance((under / "performance").string()); }
+            uint64_t heldUnder = 0; // the Performance opened, as the estimate prices it: the sounds made while building it gone
+            {
+                Session s(rate, frames);
+                s.setBudget({.9, 0});
+                s.loadPerformance((under / "performance").string());
+                play(s);
+                heldUnder = workers(s).first;                s.saveMeasurementsNow();
+            }
+            const auto file = under / "home" / "measurements.json";
+            std::string text;
+            { std::ifstream in(file); text.assign(std::istreambuf_iterator<char>(in), {}); }
+            check(std::regex_search(text, std::regex("\"perContext\":[1-9]")), "a context's memory measured on the shared instance");
+            uint64_t ignored = 0;
+            const auto learned = estimate(under / "performance", ignored, mib);
+            std::printf("under-declared, %s a context: estimate %s, measured; the workers hold %s\n", megabytes(perContext).c_str(), megabytes(learned.memory).c_str(), megabytes(heldUnder).c_str());
+            check(learned.memory + slack >= heldUnder, "measured, the estimate is not below what the workers hold: " + megabytes(learned.memory) + " against " + megabytes(heldUnder));
+            if(perContext > 2 * mib) continue;
+            { std::ofstream out(file); out << std::regex_replace(text, std::regex("\"perContext\":[0-9]+"), "\"perContext\":0"); } // as before any was measured
+            const auto unlearned = estimate(under / "performance", ignored, mib);
+            std::printf("under-declared, %s a context: estimate %s, not measured\n", megabytes(perContext).c_str(), megabytes(unlearned.memory).c_str());
+            check(unlearned.memory + slack >= heldUnder, "not measured, the estimate is not below what the workers hold: " + megabytes(unlearned.memory) + " against " + megabytes(heldUnder));
+        }
     }
     catch(const std::exception& x) { std::fprintf(stderr, "FAIL: %s\n", x.what()); return 1; }
     return failures ? 1 : 0;

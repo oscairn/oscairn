@@ -150,7 +150,7 @@ fn a_split_lists_its_lanes_and_a_lane_its_plugins_and_settings() {
     let lines: Vec<String> = info(ui).iter().map(|l| l.text.to_string()).collect();
     assert_eq!(
         lines,
-        ["Chain", "In", "1. Chorus", "2. Split: frequency bands", "    Band 1: Rhodes", "    Band 2: Pad", "        Split", "    Band 3: Dry", "3. Reverb", "Out"],
+        ["Chain", "IN", "Any device · all keys", "1. Chorus", "2. Split: frequency bands", "    Band 1: Rhodes", "    Band 2: Pad", "        Split", "    Band 3: Dry", "3. Reverb", "OUT", "Main"],
         "the lanes under the split, a lane without plugins Dry, a split inside a lane listed"
     );
     // The split: its lanes first, the crossovers (asked of the engine), Add band, Remove split.

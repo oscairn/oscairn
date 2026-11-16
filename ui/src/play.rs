@@ -132,7 +132,7 @@ pub(crate) fn chain_nodes(chain: &Value, splits: &Value, depth: usize, out: &mut
     }
 }
 
-fn input_text(p: &Value) -> String {
+pub(crate) fn input_text(p: &Value) -> String {
     let input = &p["input"];
     match input["kind"].as_str() {
         Some("notes") => {

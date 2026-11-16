@@ -673,6 +673,81 @@ impl Screen {
         }
     }
 
+    /// An end of the chain as the reference draws it: its name small over what it holds, on one box.
+    fn end(name: &str, text: Vec<String>) -> Vec<InfoLine> {
+        let n = text.len() + 1;
+        std::iter::once((name.to_string(), true))
+            .chain(text.into_iter().map(|t| (t, false)))
+            .enumerate()
+            .map(|(i, (t, head))| InfoLine { head, text: t.into(), boxed: true, first: i == 0, last: i + 1 == n, ..Default::default() })
+            .collect()
+    }
+
+    /// What the part listens to and where it plays to, in words, as the reference's IN and OUT: the devices and the keys
+    /// (or what feeds a bus), then Main or the bus it plays through, a line for each send, and an arrow for each plugin
+    /// outside the parts its plugins are wired to in Routing.
+    fn ends(&self) -> (Vec<String>, Vec<String>) {
+        let Some(p) = self.part() else { return (vec![], vec![]) };
+        let parts = self.graph["parts"].as_array().cloned().unwrap_or_default();
+        let part_name = |id: u64| parts.iter().find(|q| q["id"].as_u64() == Some(id)).and_then(|q| q["name"].as_str()).map(String::from);
+        let input = if p["input"]["kind"] == "bus" {
+            let from: Vec<String> = parts
+                .iter()
+                .filter(|q| q["bus"].as_u64() == Some(self.id) || q["sends"].as_array().is_some_and(|s| s.iter().any(|s| s["bus"].as_u64() == Some(self.id))))
+                .filter_map(|q| q["name"].as_str().map(String::from))
+                .collect();
+            if from.is_empty() { "Nothing sends to it yet".to_string() } else { format!("From {}", from.join(", ")) }
+        } else {
+            crate::play::input_text(p)
+        };
+        let mut output = vec![match p["bus"].as_u64().filter(|b| *b != 0) {
+            Some(b) => part_name(b).unwrap_or_else(|| "a bus".into()),
+            None => "Main".into(),
+        }];
+        for s in p["sends"].as_array().into_iter().flatten() {
+            if let Some(name) = s["bus"].as_u64().and_then(part_name) {
+                output.push(format!("Send {name} {}%", (s["level"].as_f64().unwrap_or(0.) * 100.).round() as i64));
+            }
+        }
+        // The plugins outside every part that this part's plugins are wired into (Routing's user wires): shared when
+        // another part feeds them as well.
+        let mut owner: HashMap<u64, u64> = HashMap::new();
+        for q in &parts {
+            let qid = q["id"].as_u64().unwrap_or(0);
+            let mut flat = Vec::new();
+            crate::play::chain_nodes(&q["chain"], &q["splits"], 0, &mut flat);
+            for n in flat {
+                owner.insert(n, qid);
+            }
+            for s in q["splits"].as_array().into_iter().flatten() {
+                for key in ["splitter", "joiner"] {
+                    if let Some(n) = s[key].as_u64().filter(|n| *n != 0) {
+                        owner.insert(n, qid);
+                    }
+                }
+            }
+        }
+        let mut fed: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for w in self.graph["wires"].as_array().into_iter().flatten() {
+            let (Some(from), Some(to)) = (w["from"].as_u64(), w["to"].as_u64()) else { continue };
+            if w["owner"] == "part" || w["kind"] != "audio" || owner.contains_key(&to) || to == u64::from(u32::MAX) {
+                continue;
+            }
+            if let Some(q) = owner.get(&from) {
+                let list = fed.entry(to).or_default();
+                if !list.contains(q) {
+                    list.push(*q);
+                }
+            }
+        }
+        for (node, from) in fed {
+            if from.contains(&self.id) {
+                output.push(format!("→ {}{}", self.name_of(node), if from.len() > 1 { " (shared)" } else { "" }));
+            }
+        }
+        (vec![input], output)
+    }
+
     /// The part's signal path in the read-only panel, as the reference draws it left to right: In, each plugin
     /// or split, Out; a split's lanes under it, a lane without plugins "Dry".
     fn info(&self) -> Vec<InfoLine> {
@@ -682,7 +757,9 @@ impl Screen {
             let n = self.node(node);
             InfoLine { text: text.into(), role: role_color(n.map_or("Notes", role_of)), off: n.is_some_and(|n| n["enabled"] == false), failed: self.failed(node), ..Default::default() }
         };
-        let mut lines = vec![head("Chain"), plain("In".into())];
+        let mut lines = vec![head("Chain")];
+        let (input, output) = self.ends();
+        lines.extend(Self::end("IN", input));
         let entries = self.entries();
         if entries.is_empty() {
             lines.push(plain("Empty: the sound goes straight through".into()));
@@ -709,7 +786,7 @@ impl Screen {
                 }
             }
         }
-        lines.push(plain("Out".into()));
+        lines.extend(Self::end("OUT", output));
         if let Mode::Actions(place, i) | Mode::Presets(place, i) = self.mode {
             if let Some(Entry::Node(n)) = self.entries_at(place).get(i) {
                 lines.extend([head("Plugin"), plain(self.node(*n).and_then(|x| x["plugin"]["name"].as_str()).unwrap_or_default().to_string())]);

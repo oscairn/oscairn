@@ -27,6 +27,11 @@ export struct InfoLine {
     role: int,
     off: bool,
     failed: bool,
+    // A line of one of the chain's ends (In, Out): drawn on a raised box with the lines of its end, rounded at the first
+    // and the last.
+    boxed: bool,
+    first: bool,
+    last: bool,
 }
 
 export global PartState {
@@ -167,6 +172,17 @@ export component Part inherits Rectangle {
             y: Theme.pad-narrow;
             width: parent.width - 2 * Theme.pad;
             height: root.strip-height - Theme.pad;
+        }
+        for line[i] in PartState.info: Rectangle {
+            x: Theme.pad-tight;
+            y: Theme.pad-narrow + root.strip-height + i * root.line;
+            width: parent.width - 2 * Theme.pad-tight;
+            height: root.line;
+            background: line.boxed ? Theme.raised : transparent;
+            border-top-left-radius: line.first ? Theme.section-radius : 0px;
+            border-top-right-radius: line.first ? Theme.section-radius : 0px;
+            border-bottom-left-radius: line.last ? Theme.section-radius : 0px;
+            border-bottom-right-radius: line.last ? Theme.section-radius : 0px;
         }
         for line[i] in PartState.info: FitText {
             x: Theme.pad;

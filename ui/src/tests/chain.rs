@@ -69,11 +69,13 @@ fn plugins_are_marked_by_role_off_and_failure() {
         lines,
         [
             ("Chain".to_string(), 0, false, false),
-            ("In".to_string(), 0, false, false),
+            ("IN".to_string(), 0, false, false),
+            ("Any device · all keys".to_string(), 0, false, false),
             ("1. Chorus".to_string(), 2, true, false),
             ("2. Rhodes".to_string(), 1, false, false),
             ("3. Scope".to_string(), 3, false, false),
-            ("Out".to_string(), 0, false, false),
+            ("OUT".to_string(), 0, false, false),
+            ("Main".to_string(), 0, false, false),
         ]
     );
     assert_eq!(message(ui), "");
@@ -123,6 +125,38 @@ pub(super) fn pictures(name: &str, graph: &serde_json::Value, setup: &dyn Fn(&mu
             png(&s, &format!("{name}-{id}-{size}"));
         }
     }
+}
+
+// D6: the chain's In and Out ends say what the reference's say: the part's devices and keys (what feeds a bus), Main or the bus
+// it plays through, a line for each send, an arrow for each plugin outside the parts its plugins are wired to; each end is
+// one box (the lines marked first and last).
+#[test]
+fn the_ends_say_the_devices_and_the_sends() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut g = marks_graph();
+    g["nodes"].as_array_mut().unwrap().push(json!({"id": 20, "name": "Hall", "plugin": {"name": "Hall"}, "audioInputs": [{"channels": 2}], "audioOutputs": [{"channels": 2}], "noteInputs": 0, "noteOutputs": 0, "enabled": true}));
+    g["parts"][0]["input"] = json!({"kind": "notes", "port": 0, "devices": [{"kind": "external"}], "zones": [{"keys": [36, 72], "transpose": -12}]});
+    g["parts"][0]["sends"] = json!([{"bus": 11, "level": 0.5}]);
+    g["parts"].as_array_mut().unwrap().push(json!({"id": 11, "name": "Reverb bus", "level": 1.0, "pan": 0.0, "mute": false, "solo": false, "chain": [], "bus": 0, "sends": [], "splits": [], "input": {"kind": "bus", "port": 0}}));
+    g["wires"] = json!([{"id": 1, "owner": "user", "kind": "audio", "from": 3, "to": 20, "enabled": true}]);
+    let c = open(&s, &g);
+    let lines: Vec<(String, bool, bool, bool)> = info(ui).iter().map(|l| (l.text.to_string(), l.boxed, l.first, l.last)).collect();
+    assert_eq!(lines.iter().map(|l| l.0.as_str()).collect::<Vec<_>>(), ["Chain", "IN", "All external · C2–C5 · −12", "1. Chorus", "2. Rhodes", "3. Scope", "OUT", "Main", "Send Reverb bus 50%", "→ Hall"]);
+    assert_eq!(lines.iter().filter(|l| l.1).count(), 2 + 3 + 1, "the lines of the two ends are boxed");
+    assert_eq!(lines.iter().filter(|l| l.2).map(|l| l.0.as_str()).collect::<Vec<_>>(), ["IN", "OUT"]);
+    assert_eq!(lines.iter().filter(|l| l.3).map(|l| l.0.as_str()).collect::<Vec<_>>(), ["All external · C2–C5 · −12", "→ Hall"]);
+    drop(c);
+    // A bus: what feeds it, and where it plays through.
+    let mut g = g;
+    g["parts"][1]["chain"] = json!([]);
+    let mut c = Chain::new(ui);
+    c.graph(&g);
+    c.open(11);
+    c.shown();
+    let text: Vec<String> = info(ui).iter().map(|l| l.text.to_string()).collect();
+    assert_eq!(text, ["Chain", "IN", "From Keys", "Empty: the sound goes straight through", "OUT", "Main"]);
+    pictures("chain-ends", &g, &|_| {});
 }
 
 #[test]

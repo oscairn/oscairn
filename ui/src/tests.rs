@@ -281,7 +281,8 @@ impl Fixture {
     fn answer(&mut self, method: &str, result: serde_json::Value) {
         let mut request = self.engine.request();
         // What the shell tells the engine of what the screen shows (lists, the knob row's part and page) is not what a test waits for.
-        while request["method"] == "controllers.view" && method != "controllers.view" {
+        // (and the plugin packages installed, which Home's Library line counts)
+        while ["controllers.view", "packages.installed"].contains(&request["method"].as_str().unwrap_or_default()) && request["method"] != method {
             self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": {"accepted": true}})));
             self.pump();
             request = self.engine.request();
@@ -322,7 +323,7 @@ fn the_top_bar_follows_the_engine() {
     f.pump();
     assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 42, "within half a second of the last: not shown");
     let lines: Vec<String> = f.screen.ui.global::<HomeState>().get_tiles().iter().map(|t| t.line.to_string()).collect();
-    assert_eq!(lines, ["Grand Piano: play or edit it", "24 Performances, 1 Sound", "Songs in order, for the stage", "Patterns and steps", "No audio device (--audio null)"]);
+    assert_eq!(lines, ["Grand Piano: play or edit it", "24 Performances · 1 Sound", "Songs in order, for the stage", "Patterns and steps", "No audio device (--audio null)"]);
     f.screen.frame();
     f.screen.save("topbar-engine");
     f.engine.writer.shutdown(std::net::Shutdown::Both).unwrap();
@@ -341,7 +342,7 @@ fn an_unchanged_status_costs_no_request_and_no_frame() {
     let mut f = Fixture::new("idle");
     f.engine.answer(); // session.hello
     f.pump();
-    f.serve(10, &json!({}));
+    f.serve(11, &json!({}));
     let status = |f: &mut Fixture, load: f64| {
         f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": load, "audioDevice": "null", "sampleRate": 48000}})));
         f.pump();
@@ -380,7 +381,7 @@ fn a_take_recording_is_shown_in_the_top_bar_once() {
     let mut f = Fixture::new("record");
     f.engine.answer(); // session.hello
     f.pump();
-    f.serve(10, &json!({}));
+    f.serve(11, &json!({}));
     let status = |f: &mut Fixture| {
         f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.1}})));
         f.pump();
@@ -595,7 +596,7 @@ fn setlist_by_panes_pages_and_the_last_one_chosen() {
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(2); // Setlist
     // Everything asked on connecting answered: the shell's eight, the Setlist's two, then the setlist (and the part the knob row follows).
-    f.serve(12, &content); // and the knob row's view
+    f.serve(13, &content); // and the knob row's view
     let rows = |f: &Fixture| f.screen.ui.global::<SetlistState>().get_slots().iter().collect::<Vec<_>>();
     let per_view = f.screen.ui.global::<SetlistState>().get_slots_per_view() as usize;
     assert!(per_view >= 5, "a list view holds {per_view}");
@@ -957,9 +958,9 @@ fn play_by_panes_touch_and_meters() {
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play, no handover
     assert_eq!(f.screen.ui.get_screen(), 3);
-    // The shell's ten on connecting, then Play's controls.changed subscription.
+    // The shell's eleven on connecting, then Play's controls.changed subscription.
     let mut methods = vec![];
-    for _ in 0..12 {
+    for _ in 0..13 {
         let request = f.engine.request();
         let method = request["method"].as_str().unwrap().to_string();
         let result = match method.as_str() {
@@ -1154,6 +1155,14 @@ mod chain;
 mod chain_splits;
 mod chain_presets;
 mod sounds_filters;
+mod library_fake;
+mod library;
+mod library_list;
+mod library_open;
+mod library_items;
+mod library_setlist;
+mod library_shots;
+mod library_shell;
 mod piano;
 mod shellpages;
 mod envelope;

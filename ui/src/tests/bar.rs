@@ -11,7 +11,7 @@ pub fn play_on_the_shell(name: &str, info: serde_json::Value, graph: serde_json:
     f.engine.answer(); // session.hello
     f.pump();
     f.screen.ui.global::<HomeState>().invoke_tapped(0); // Performance: Play
-    for _ in 0..14 {
+    for _ in 0..15 {
         let request = f.engine.request();
         let result = match request["method"].as_str().unwrap() {
             "performance.info" => info.clone(),

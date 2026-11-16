@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// A question over the screen (src/notice.rs): what the JUCE app asks in an alert window ("Delete X?", "Save
+// changes before opening Y?", code from an unknown source): a title, a message that wraps, and the choices as
+// buttons down the panel, one under the border cursor. Cancel or a tap outside closes it.
+
+import { Theme, Section, Button, Cursor } from "theme.slint";
+
+export global NoticeState {
+    in property <bool> open;
+    in property <string> title;
+    in property <string> message;
+    in property <[string]> choices;
+    in property <int> cursor: -1;
+    callback tapped(int);
+    callback close();
+}
+
+export component Notice inherits Rectangle {
+    property <length> gap: Theme.gap-between(Theme.gap);
+    property <length> panel-width: min(Theme.overlay-width, self.width - 2 * Theme.margin);
+    background: Theme.scrim;
+    // A tap outside the panel closes it; one inside is the panel's own.
+    TouchArea {
+        clicked => { NoticeState.close(); }
+    }
+    panel := Section {
+        width: root.panel-width;
+        height: min(root.height - 2 * Theme.margin, layout.preferred-height);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        fill: Theme.raised;
+        clip: true;
+        TouchArea { }
+        layout := VerticalLayout {
+            padding: Theme.pad;
+            spacing: root.gap;
+            Text {
+                text: NoticeState.title;
+                color: Theme.text;
+                font-size: Theme.body;
+                font-weight: 700;
+                wrap: word-wrap;
+            }
+            if NoticeState.message != "": Text {
+                text: NoticeState.message;
+                color: Theme.muted;
+                font-size: Theme.small;
+                wrap: word-wrap;
+            }
+            for choice[i] in NoticeState.choices: Rectangle {
+                height: Theme.touch;
+                Button {
+                    text: choice;
+                    clicked => { NoticeState.tapped(i); }
+                }
+                Cursor {
+                    shown: NoticeState.cursor == i;
+                    always: true;
+                    corner: Theme.button-radius(parent.height);
+                }
+            }
+        }
+    }
+}

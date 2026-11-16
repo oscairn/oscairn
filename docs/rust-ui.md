@@ -596,6 +596,37 @@ as proportions of the width, not fixed pixels.
   request: every setting above has one. (The sound picker and plugin insertion go through the
   JUCE app's own scanner and library views, not tried here.)
 
+## Library
+
+The Library app (`ui/src/library/`, `ui/slint/library.slint`, `ui/LIBRARY-APP.md` is the checklist, 45 rows) is being
+ported whole; **the tile still hands the display to the JUCE app** until every row is built (`library_glue.rs`
+`PORTED`), and `OSCAIRN_UI_LIBRARY=1` opens the Rust one for development. Built so far, the first cut:
+
+- **The screen** is the shared list screen (`browser.rs`, the Part screen's component laid by the shell in the area the
+  tabs leave) under the shared tab family: Performances, Sounds and Setlists, in a strip or a rail as the theme's
+  `tabPlacement` says. The first row is Filters (the sound chooser's Favorites, Recent, Library and Tags lists,
+  `library/filters.rs`), then the items: name ("Untitled" without one), tags and description, "Locked",
+  "Does not fit this device", "Opening", "Auditioning", a star, the item's color as the theme puts a row's. The panel
+  describes the item under the cursor. Search, Audition (Stop and Keep while one is tried) and Options are the top bar's
+  actions; Options opens the item menu for the item under the cursor, or the one last pressed (touch leaves no cursor).
+  Without touch the dial walks the tabs and then the rows; up from the first row reaches the tabs, up from the first tab
+  the top bar; a press on a Performance opens it, on any other row lists what can be done with it.
+- **Requests:** `library.query` (`kind`, `limit` 1000, `text`, `tags`, `favorites`, `recent`, `source`), `library.libraries`,
+  `packages.installed` and `packages.preinstalled` on opening (the preinstall line is asked again each second only
+  while it runs); `library.favorite`, `library.tag`, `library.edit`, `library.copy`, `library.delete`, `parts.fromSound`,
+  `audition.start`, `audition.stop`, `audition.get`; `setlists.get` and `setlists.save` for Add to setlist.
+- **Opening a Performance** is the JUCE job's chain, `performance.info` (a question about unsaved changes, `notice.rs`),
+  `budget.estimate`, `performance.prepare` when it fits beside the open one, `library.load`. The engine answers every
+  other request as busy (-32009) while one of them runs, so each step is asked again after 100 ms; the line under the list
+  says "Opening X... N s", the row says "Opening", the top bar says the engine is busy past 400 ms, and the screen keeps
+  answering the dial. A Performance chosen meanwhile waits and replaces any waiting.
+- **A question over the screen** (`notice.rs`, `slint/notice.slint`): the JUCE app's alert window as a title, a wrapping
+  message and buttons down a panel; the border cursor starts nowhere, a press chooses, Cancel closes with no choice.
+- **Home's Library line** is the reference's ("5 instruments and effects · 24 Performances · 3 Sounds"): the shell asks
+  `packages.installed` on connecting.
+- Tests: `src/tests/library*.rs` against `library_fake.rs`, a fake engine that answers as the real handlers do
+  (`ui/LIBRARY-APP.md` "Verified shapes").
+
 ## Adding a screen
 
 1. **The view:** `slint/foo.slint` with a global `FooState` holding what it shows (its models,

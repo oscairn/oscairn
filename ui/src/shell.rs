@@ -19,7 +19,9 @@ use crate::nav::{self, Action};
 use crate::chain;
 use crate::controls;
 use crate::keyboard;
+use crate::library;
 use crate::menu;
+use crate::notice;
 use crate::mixer;
 use crate::params;
 use crate::part;
@@ -40,6 +42,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+mod library_glue;
 
 /// What each request is for, so its answer goes where it belongs.
 pub enum Request {
@@ -78,6 +82,7 @@ pub enum Request {
     Sounds(sounds::Request),
     Params(params::Request),
     Scene(scene::Request),
+    LibraryApp(library::Request),
 }
 
 impl Request {
@@ -86,6 +91,7 @@ impl Request {
         match self {
             Request::Reopen => true,
             Request::Setlist(r) => setlist::Screen::waits(r),
+            Request::LibraryApp(r) => library::Screen::waits(r),
             _ => false,
         }
     }
@@ -109,6 +115,8 @@ struct Shown {
     audio_device: String,
     performances: Option<u64>,
     sounds: Option<u64>,
+    /// The plugin packages installed, which Home's Library line counts.
+    plugins: usize,
 }
 
 /// The screen shown under the top bar.
@@ -138,6 +146,8 @@ pub enum Screen {
     Controls = 11,
     /// The real graph and its wires (routing.rs), opened from the Parts list.
     Routing = 12,
+    /// The Library app (library/), opened from Home.
+    Library = 13,
 }
 
 pub struct App {
@@ -192,6 +202,11 @@ pub struct App {
     sounds: sounds::Screen,
     params: params::Screen,
     scene: scene::Screen,
+    library: library::Screen,
+    /// A question over the screen that asked it (notice.rs).
+    question: Option<(Screen, notice::Notice)>,
+    /// The Library tile opens the Rust app (library_glue.rs: not yet, until every screen of it is built).
+    library_in_rust: bool,
     /// Whether the plugin scanner has been started (the first time the chain is opened).
     scan_started: bool,
     /// The on-screen keyboard, open for the screen that asked for text.
@@ -393,6 +408,10 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     menu.on_close(|| with_app(|a| a.close_menu()));
     menu.on_turn(|by| with_app(|a| a.menu_turn(by)));
     menu.on_resized(|| with_app(|a| a.menu_shown()));
+    ui.global::<crate::LibraryState>().on_show_page(|i| with_app(|a| a.on_library(|l| l.tap_page(i.max(0) as usize))));
+    let notice = ui.global::<crate::NoticeState>();
+    notice.on_tapped(|i| with_app(|a| a.notice_tap(i.max(0) as usize)));
+    notice.on_close(|| with_app(|a| a.notice_act(Action::Cancel(None))));
     let grid = ui.global::<GridState>();
     grid.on_grab(|t, part| with_app(|a| a.on_params(|p| p.grab(t, part))));
     grid.on_drag(|t, part, n| with_app(|a| a.on_params(|p| p.drag(t, part, n))));
@@ -461,6 +480,9 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             sounds: sounds::Screen::new(ui),
             params: params::Screen::new(ui),
             scene: scene::Screen::new(ui),
+            library: library::Screen::new(ui),
+            question: None,
+            library_in_rust: library_glue::in_rust(),
             scan_started: false,
             keyboard: None,
             piano: None,
@@ -509,6 +531,12 @@ pub fn key(text: &str) -> bool {
 #[cfg(test)]
 pub fn goto(screen: Screen) {
     with_app(|a| a.go(screen))
+}
+
+/// Tests: whether Home's Library tile opens the Rust app (it does not, until the whole app is built).
+#[cfg(test)]
+pub fn library_in_rust(on: bool) {
+    with_app(|a| a.library_in_rust = on)
 }
 
 /// A navigation action from any source, on the UI thread.
@@ -581,6 +609,7 @@ impl App {
     }
 
     fn watch(&mut self) {
+        self.on_library(library::Screen::tick);
         let Some(ui) = self.ui() else { return };
         match self.client.waiting(Request::waited_on) {
             Some(out) if out >= Duration::from_millis(400) => ui.set_engine(format!("busy {:.1} s", out.as_secs_f32()).into()),
@@ -616,6 +645,7 @@ impl App {
                 self.ask_performance();
                 self.send(Request::Library(false), "library.query", json!({"kind": "performance", "limit": 1}));
                 self.send(Request::Library(true), "library.query", json!({"kind": "sound", "limit": 1}));
+                self.send(Request::LibraryApp(library::Request::Plugins), "packages.installed", json!({}));
                 self.on_setlist(setlist::Screen::connected);
                 if live(self.screen) {
                     self.send(Request::Subscribe, "subscribe", json!({"topics": ["controls.changed"]}));
@@ -650,6 +680,7 @@ impl App {
                 "graph.changed" => {
                     self.wake_meters();
                     self.ask_performance();
+                    self.on_library(library::Screen::changed);
                     if has_actions(self.screen) {
                         self.ask(Request::History, "edit.history"); // an edit: what undo names changed
                     }
@@ -862,6 +893,17 @@ impl App {
                 }
                 return;
             }
+            Request::LibraryApp(r) => {
+                let plugins = matches!(r, library::Request::Plugins);
+                if self.on_library(|l| l.reply(r, result)) {
+                    self.ask_performance();
+                }
+                if plugins {
+                    let n = self.library.plugins();
+                    self.show(|s| s.plugins = n); // Home's line counts them
+                }
+                return;
+            }
             other => other,
         };
         let r = match result {
@@ -948,7 +990,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Routing(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Routing(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) | Request::LibraryApp(_) => {}
         }
     }
 
@@ -984,7 +1026,7 @@ impl App {
             bar.set_ram_known(next.ram.0.is_some());
             bar.set_ram_level(level(next.ram));
         }
-        let lines_changed = (&next.performance, &next.audio_device, next.performances, next.sounds) != (&was.performance, &was.audio_device, was.performances, was.sounds);
+        let lines_changed = (&next.performance, &next.audio_device, next.performances, next.sounds, next.plugins) != (&was.performance, &was.audio_device, was.performances, was.sounds, was.plugins);
         let named = (&next.performance, &next.scene) != (&was.performance, &was.scene); // Play's title, and the name is a stop of the bar's cursor
         self.shown = next;
         if named {
@@ -998,11 +1040,10 @@ impl App {
     /// A tile's line: what the JUCE Launcher says of each app, from what the shell knows.
     fn line(&self, app: &home::App) -> String {
         let s = &self.shown;
-        let plural = |n: u64, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
         match app.id {
             "oscairn.performance" if !s.performance.is_empty() => format!("{}: play or edit it", s.performance),
             "oscairn.library" => match (s.performances, s.sounds) {
-                (Some(p), Some(n)) => format!("{}, {}", plural(p, "Performance"), plural(n, "Sound")),
+                (Some(p), Some(n)) => library::library_line(s.plugins, p, n),
                 _ => app.line.into(),
             },
             "oscairn.settings" if s.audio_device == "null" => "No audio device (--audio null)".into(),
@@ -1051,6 +1092,9 @@ impl App {
         }
         if self.piano.is_some() {
             return self.piano_act(action);
+        }
+        if self.question.is_some() {
+            return self.notice_act(action);
         }
         if self.menu.is_some() {
             return self.menu_act(action);
@@ -1105,6 +1149,7 @@ impl App {
             (Screen::Chain, _) => self.chain_act(|c| c.act(action)),
             (Screen::Sounds, _) => self.sounds_act(|c| c.act(action)),
             (Screen::Scene, _) => self.scene_act(|c| c.act(action)),
+            (Screen::Library, _) => self.library_act(|c| c.act(action)),
             (Screen::Params, _) => self.params_act(|c| c.act(action)),
             (Screen::Setlist, _) => {
                 let mut back = false;
@@ -1202,6 +1247,7 @@ impl App {
             Screen::Mixer => parts.extend(["Parts", "Mixer"].map(String::from)),
             Screen::Controls => parts.extend(["Parts", "Controls"].map(String::from)),
             Screen::Routing => parts.extend(["Parts", "Routing"].map(String::from)),
+            Screen::Library => parts.extend(self.library.path()),
         }
         parts
     }
@@ -1212,6 +1258,7 @@ impl App {
             Screen::Routing => self.routing.bar_tools(),
             Screen::Mixer => self.mixer.bar_tools(),
             Screen::Params => self.params.bar_tools(),
+            Screen::Library => self.library.bar_tools(),
             _ => vec![],
         }
     }
@@ -1343,6 +1390,7 @@ impl App {
             Screen::Routing => self.on_routing(|r| r.tap_tool(i as i32)),
             Screen::Mixer => self.on_mixer(|m| m.bar_tool(i)),
             Screen::Params => self.params_act(|p| p.search_tap()),
+            Screen::Library => self.library_act(|l| l.tool(i)),
             _ => {}
         }
     }
@@ -1442,6 +1490,7 @@ impl App {
             Screen::Sounds => self.sounds.at_top(),
             Screen::Scene => self.scene.at_top(),
             Screen::Params => self.params.at_top(),
+            Screen::Library => self.library.at_top(),
             _ => false,
         }
     }
@@ -1677,6 +1726,9 @@ impl App {
                 if screen == Some(Screen::Chain) {
                     self.on_chain(|c| c.chosen(id));
                 }
+                if screen == Some(Screen::Library) {
+                    self.library_act(|l| l.chosen(id));
+                }
             }
             Some(menu::Outcome::Close) => {
                 self.menu = None;
@@ -1863,6 +1915,7 @@ impl App {
             Screen::Mixer => self.on_mixer(mixer::Screen::shown),
             Screen::Controls => self.on_controls(controls::Screen::shown),
             Screen::Routing => self.on_routing(routing::Screen::shown),
+            Screen::Library => self.on_library(library::Screen::show),
             _ => {}
         }
     }
@@ -1888,6 +1941,7 @@ impl App {
             Screen::Chain => self.chain_act(|c| c.back()),
             Screen::Sounds => self.sounds_act(|c| c.back()),
             Screen::Scene => self.go(Screen::Play),
+            Screen::Library => self.library_act(|l| l.back()),
             Screen::Params => self.params_act(|p| p.back()),
         }
     }
@@ -1898,6 +1952,7 @@ impl App {
             Screen::Chain => self.chain_act(|c| c.tap(i)),
             Screen::Sounds => self.sounds_act(|c| c.tap(i)),
             Screen::Scene => self.scene_act(|c| c.tap(i)),
+            Screen::Library => self.library_act(|c| c.tap(i)),
             _ => {}
         }
     }
@@ -1908,6 +1963,7 @@ impl App {
             Screen::Chain => self.on_chain(|c| c.step_row(i, by)),
             Screen::Sounds => self.on_sounds(|c| c.step_row(i, by)),
             Screen::Scene => self.on_scene(|c| c.step_row(i, by)),
+            Screen::Library => self.on_library(|c| c.step_row(i, by)),
             _ => {}
         }
     }
@@ -1918,6 +1974,7 @@ impl App {
             Screen::Chain => self.on_chain(|c| c.scroll_info(by)),
             Screen::Sounds => self.on_sounds(|c| c.scroll_info(by)),
             Screen::Scene => self.on_scene(|c| c.scroll_info(by)),
+            Screen::Library => self.on_library(|c| c.scroll_info(by)),
             _ => {}
         }
     }
@@ -1997,6 +2054,8 @@ impl App {
             (Screen::Sounds, None) => self.on_sounds(sounds::Screen::not_entered),
             (Screen::Scene, Some(text)) => self.on_scene(|p| p.entered(&text)),
             (Screen::Scene, None) => self.on_scene(scene::Screen::not_entered),
+            (Screen::Library, Some(text)) => self.on_library(|p| p.entered(&text)),
+            (Screen::Library, None) => self.on_library(library::Screen::not_entered),
             (Screen::Params, Some(text)) => self.on_params(|p| p.entered(&text)),
             (Screen::Params, None) => self.on_params(params::Screen::not_entered),
             _ => {}
@@ -2078,13 +2137,18 @@ impl App {
     fn go(&mut self, screen: Screen) {
         self.close_piano();
         self.close_menu();
+        self.close_notice();
         if let Some((_, k)) = self.keyboard.take() {
             k.close();
             self.saving = None;
             self.on_part(part::Screen::not_entered);
             self.on_sounds(sounds::Screen::not_entered);
+            self.on_library(library::Screen::not_entered);
         }
         if self.screen != screen {
+            if self.screen == Screen::Library {
+                self.on_library(library::Screen::hidden);
+            }
             // A cursor drops when its screen goes, as on focus loss in the JUCE lists.
             self.home.cursor = self.home.cursor.clear();
             self.show_home();
@@ -2174,6 +2238,12 @@ impl App {
         if screen == Screen::Chain {
             self.on_chain(chain::Screen::shown);
         }
+        if screen == Screen::Library && was != Screen::Library {
+            // The Setlist app's own state file, which says which setlist Add to setlist adds to.
+            self.library.set_state_file(crate::settings::data_dir().map(|d| d.join("AppData/oscairn.setlist/state.json")));
+            self.on_library(library::Screen::open);
+            self.on_library(library::Screen::shown);
+        }
         if screen == Screen::Sounds {
             self.on_sounds(sounds::Screen::shown);
         }
@@ -2204,6 +2274,7 @@ impl App {
         match app.id {
             "oscairn.setlist" => self.go(Screen::Setlist),
             "oscairn.performance" => self.go(Screen::Play),
+            "oscairn.library" if self.library_in_rust => self.go(Screen::Library),
             _ => self.hand_over(app),
         }
     }

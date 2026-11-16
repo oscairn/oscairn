@@ -112,7 +112,7 @@ and [documentation index](docs/README.md).
 ## Try it
 
 Needs CMake 3.21+, Ninja and a C++20 compiler (on macOS: Xcode command line tools, and
-`brew install cmake ninja`), and Rust 1.95.0 through rustup (`tools/install-rust.sh` installs it;
+`brew install cmake ninja`), and Rust 1.100.0 through rustup (`tools/install-rust.sh` installs it;
 configuring says so when it is missing). Every build needs Rust: the sample pack library and the
 engine core, which holds the engine thread's note routing and voice budget, the graph's audio
 (buffers, mixing, output guard, meters) and its run loop, are Rust by default. The engine core's

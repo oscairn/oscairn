@@ -69,7 +69,7 @@ the [LV2 guide](../core/lv2-host/README.md). The default build does not require 
 `-DOSCAIRN_MODULAR=ON` (implied by `OSCAIRN_STANDALONE`) also builds the
 [Modular instrument](../plugins/modular/README.md), which downloads and links JUCE.
 
-Every configuration needs Rust 1.95.0 through rustup (`tools/install-rust.sh`): the sample pack
+Every configuration needs Rust 1.100.0 through rustup (`tools/install-rust.sh`): the sample pack
 library and the engine core are built with cargo. The engine core, which holds the engine thread's
 note routing and voice budget and the graph's audio and run loop, is Rust by default; its C++
 reference is always compiled for the differential tests, and `-DOSCAIRN_ENGINE_CORE=cpp` makes the

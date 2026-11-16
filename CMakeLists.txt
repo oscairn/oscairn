@@ -55,7 +55,7 @@ FetchContent_Declare(JUCE
 # Its CMake module builds the static library with cargo, offline, at the Rust release its
 # rust-toolchain.toml pins; a local checkout can stand in with FETCHCONTENT_SOURCE_DIR_SAMPLEPACK.
 set(OSCAIRN_SAMPLEPACK_COMMIT c87aa70d2aec4445e70140172e7dfad038ae31d0)
-set(OSCAIRN_RUST_VERSION 1.95.0)
+set(OSCAIRN_RUST_VERSION 1.100.0)
 FetchContent_Declare(samplepack GIT_REPOSITORY https://github.com/oscairn/samplepack.git GIT_TAG ${OSCAIRN_SAMPLEPACK_COMMIT})
 FetchContent_MakeAvailable(samplepack)
 find_program(SAMPLEPACK_CARGO cargo HINTS "$ENV{CARGO_HOME}/bin" "$ENV{HOME}/.cargo/bin")

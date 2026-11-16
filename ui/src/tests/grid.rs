@@ -178,8 +178,8 @@ fn the_page_is_laid_out_from_the_plugins_data() {
     assert!((t[6].high - 84. / 127.).abs() < 1e-6);
     assert_eq!(t[7].value.as_str(), "50 %", "read only: the plugin's text alone");
     let g = ui.global::<crate::GridState>();
-    assert_eq!(g.get_panels().row_count(), 1, "the envelope");
-    assert_eq!(g.get_panels().row_data(0).unwrap().points.row_count(), 3);
+    assert_eq!(g.get_panels().row_count(), 2, "the filter (Cutoff and Resonance by name), then the envelope");
+    assert_eq!(g.get_panels().row_data(1).unwrap().points.row_count(), 3);
     assert_eq!(g.get_headings().iter().map(|h| h.text.to_string()).collect::<Vec<_>>(), ["Envelope"]);
     assert_eq!(g.get_pages().iter().map(|p| p.to_string()).collect::<Vec<_>>(), ["Voice", "Output"]);
     // Hidden: the screen knobs let go of the page.

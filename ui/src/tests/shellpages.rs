@@ -75,11 +75,12 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     f.reply(&r, json!({"result": super::pages::param_list()}));
     let r = next(&mut f, "params.get");
     f.reply(&r, json!({"result": {"values": [{"node": 2, "param": 1, "value": 0.25}]}}));
-    assert_eq!(tiles(&ui)[0].0, "Resonance");
+    // The filter by name (Cutoff, Resonance, Type) is one run, in the filter's order: Type first.
+    assert_eq!(tiles(&ui).iter().map(|t| t.0.as_str()).collect::<Vec<_>>(), ["Type", "Cutoff", "Resonance", "Bypass"]);
     // A change from the engine shows (the shell subscribed to params.changed on opening).
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "params.changed", "params": {"changes": [{"node": 2, "param": 1, "kind": "value", "value": 0.5}]}})));
     f.pump();
-    assert_eq!(tiles(&ui)[0].1, "0.5");
+    assert_eq!(tiles(&ui)[2], ("Resonance".to_string(), "0.5".to_string()));
     // Cancel: back to the chain, and params.changed let go.
     shell::act(Action::Cancel(None)); // the cursor was never put on a tile: back at once
     assert_eq!(ui.get_screen(), 5);

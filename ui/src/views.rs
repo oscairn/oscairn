@@ -82,6 +82,7 @@ pub struct Drawn {
 #[derive(Clone, Debug, PartialEq)]
 pub enum View {
     Envelope(Envelope),
+    Filter(FilterShape),
     Lfo(LfoShape),
 }
 
@@ -124,6 +125,7 @@ fn nearest(handles: &[Handle], at: (f32, f32)) -> Option<usize> {
 pub fn draw(view: &View, c: &Ctx) -> Drawn {
     match view {
         View::Envelope(e) => draw_envelope(e, c),
+        View::Filter(f) => draw_filter(f, c),
         View::Lfo(l) => draw_lfo(l, c),
     }
 }
@@ -133,7 +135,7 @@ pub fn draw(view: &View, c: &Ctx) -> Drawn {
 pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
     match view {
         View::Envelope(_) => nearest(&draw(view, c).handles, at).map(Held::Node),
-        View::Lfo(_) => None,
+        View::Filter(_) | View::Lfo(_) => None,
     }
 }
 
@@ -164,6 +166,133 @@ fn centered(text: &str, (l, t, r, b): (f32, f32, f32, f32)) -> Label {
 /// A one-pixel row or column of a frame sits on a pixel: `v` to the pixel's middle.
 fn crisp(v: f32) -> f32 {
     v.floor() + 0.5
+}
+
+// The filter (ParameterGrid::Filter): its response across the audio range, from its cutoff (across) and
+// resonance (the peak) for the type its value text names. A preview: its tiles edit it.
+
+/// A filter recognized from its parameters' names: Cutoff and Resonance, and its Type when it has one,
+/// whose value text gives the response. Indexes are places in the names given.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FilterShape {
+    pub cutoff: Option<usize>,
+    pub resonance: Option<usize>,
+    pub kind: Option<usize>,
+}
+
+impl FilterShape {
+    pub fn empty(&self) -> bool {
+        self.cutoff.is_none() || self.resonance.is_none()
+    }
+    /// The parameters in the order their tiles go when linked.
+    pub fn linked_order(&self) -> Vec<usize> {
+        [self.kind, self.cutoff, self.resonance].into_iter().flatten().collect()
+    }
+}
+
+/// By name only, as the reference does (Cutoff or Frequency, Resonance or Q, Type or Filter Type).
+pub fn filter_of(names: &[&str]) -> FilterShape {
+    let find = |options: &[&str]| options.iter().find_map(|o| names.iter().position(|n| n.eq_ignore_ascii_case(o)));
+    FilterShape { cutoff: find(&["Cutoff", "Frequency"]), resonance: find(&["Resonance", "Q"]), kind: find(&["Type", "Filter Type"]) }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Response {
+    None,
+    LowPass,
+    HighPass,
+    BandPass,
+    Notch,
+    Unknown,
+}
+
+/// A filter type's name as a response: "LP 24 dB" or "LPF24D" a four-pole low-pass; "Off" or "Thru" none.
+pub fn filter_named(text: &str) -> (Response, u32) {
+    let t: String = text.to_uppercase().chars().filter(|c| *c != ' ').collect();
+    if t == "OFF" || t == "THRU" {
+        return (Response::None, 2);
+    }
+    let (lp, hp, bp) = (t.contains("LP"), t.contains("HP"), t.contains("BP"));
+    let notch = t.contains("BEF") || t.contains("NOTCH") || t.starts_with('N');
+    let kind = if bp || (lp && hp) {
+        Response::BandPass
+    } else if notch {
+        Response::Notch
+    } else if hp {
+        Response::HighPass
+    } else if lp {
+        Response::LowPass
+    } else {
+        Response::Unknown
+    };
+    let poles = if t.contains("24") {
+        4
+    } else if t.contains("18") {
+        3
+    } else if t.contains("12") {
+        2
+    } else if t.contains('6') {
+        1
+    } else {
+        2
+    };
+    (kind, poles)
+}
+
+/// The response in dB (-48 to 24) at `x` times the cutoff for a resonant two-pole section of quality `q`
+/// raised to the type's order.
+pub fn filter_db(kind: Response, poles: u32, x: f64, q: f64) -> f64 {
+    let d = ((1. - x * x).powi(2) + (x / q).powi(2)).sqrt();
+    let gain = match kind {
+        Response::LowPass => 1. / d,
+        Response::HighPass => x * x / d,
+        Response::BandPass => (x / q) / d,
+        Response::Notch => (1. - x * x).abs() / d,
+        _ => 1.,
+    };
+    (20. * gain.powf(f64::from(poles) / 2.).max(1e-6).log10()).clamp(-48., 24.)
+}
+
+fn draw_filter(f: &FilterShape, c: &Ctx) -> Drawn {
+    let (Some(cutoff), Some(resonance)) = (f.cutoff, f.resonance) else { return Drawn::default() };
+    let mut title = "Filter".to_string();
+    let mut response = (Response::LowPass, 2);
+    if let Some(k) = f.kind {
+        let text = (c.text)(c.members[k]);
+        title += &format!("  \u{b7}  {text}");
+        response = filter_named(&text);
+    }
+    let area = plot(c);
+    let (left, top, right, bottom) = area;
+    let mut d = Drawn { title, ..Default::default() };
+    d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: rect_path(left + 0.5, top + 0.5, right - left - 1., bottom - top - 1.) });
+    if response.0 == Response::Unknown {
+        d.labels.push(centered("Drawn by the plugin", area));
+        return d;
+    }
+    // Across 20 Hz to 20 kHz on a log scale, the cutoff at its parameter's place, the top at +24 dB.
+    let hz = 1000f64.powf((c.norm)(c.members[cutoff])) * 20.;
+    let q = 0.707 + 8. * (c.norm)(c.members[resonance]);
+    let n = (right - left) as usize;
+    let points: Vec<(f32, f32)> = (0..=n)
+        .map(|i| {
+            let f = 1000f64.powf(i as f64 / n as f64) * 20.;
+            let db = filter_db(response.0, response.1, f / hz, q);
+            (left + i as f32, top + ((24. - db) / 72.) as f32 * (bottom - top))
+        })
+        .collect();
+    // The fill is the same points, closed down to the bottom under the first and the right edge.
+    let mut fill = vec![(points[0].0, bottom)];
+    fill.extend(&points);
+    fill.push((right, bottom));
+    d.shapes.push(Shape { ink: Ink::AccentWash, fill: true, width: 2, commands: poly(&fill) + " Z" });
+    d.shapes.push(Shape { ink: Ink::Accent, fill: false, width: 2, commands: poly(&points) });
+    d
+}
+
+/// A rectangle as path commands.
+pub fn rect_path(x: f32, y: f32, w: f32, h: f32) -> String {
+    poly(&[(x, y), (x + w, y), (x + w, y + h), (x, y + h)]) + " Z"
 }
 
 // The LFO (ParameterGrid::Lfo): its waveform over a few cycles (more when faster), after its delay and

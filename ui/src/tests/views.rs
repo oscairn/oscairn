@@ -13,7 +13,10 @@ use super::*;
 fn an_envelope_node_is_dragged_by_touch() {
     let mut s = Screen::new();
     let ui = &s.ui.clone_strong();
-    let mut p = super::grid::open(&mut s, super::grid::every_kind(), &[(9, 0.1), (10, 0.4), (11, 0.6), (12, 0.5)]);
+    // The envelope of the every-kind page alone (its Cutoff and Resonance would make a filter view too).
+    let mut list = super::grid::every_kind();
+    list["parameters"].as_array_mut().unwrap().retain(|p| p["view"] == json!(1));
+    let mut p = super::grid::open(&mut s, list, &[(9, 0.1), (10, 0.4), (11, 0.6), (12, 0.5)]);
     sent(&mut p.out);
     let before = panels(ui)[0].clone();
     assert_eq!(before.points.row_count(), 3, "attack, decay, release");
@@ -55,7 +58,6 @@ fn an_envelope_node_is_dragged_by_touch() {
     // The cursor's tile marks its node: nothing is marked until a tile with a node has the cursor.
     assert!(panels(ui)[0].points.iter().all(|q| !q.lit));
     p.act(crate::nav::Action::Move { pane: None, by: 1 });
-    p.act(crate::nav::Action::Move { pane: None, by: 8 });
     let tile = ui.global::<crate::GridState>().get_tiles().iter().find(|t| t.cursor).map(|t| t.name.to_string());
     assert_eq!(tile.as_deref(), Some("Attack"));
     let lit: Vec<bool> = panels(ui)[0].points.iter().map(|q| q.lit).collect();
@@ -156,23 +158,104 @@ fn the_lfo_waves_follow_the_reference() {
     }
 }
 
-// Pictures for a look by eye (target/screens, target/theme-shots): the LFO page under the default theme at
-// 1 and at the FANTOM's 1.55, and under the odd theme.
+// A synth's filter section: Cutoff, Resonance and a Type, found by their names among parameters in no view.
+fn filter_plugin() -> serde_json::Value {
+    json!({"parameters": [
+        plugin_param(1, "Cutoff", 1., false, "knob", 1, 0),
+        plugin_param(2, "Resonance", 1., false, "knob", 2, 0),
+        plugin_param(3, "Type", 5., true, "list", 3, 0),
+        plugin_param(4, "Drive", 1., false, "knob", 4, 0),
+    ]})
+}
+
+fn filter_text(id: u32, v: f64) -> String {
+    match id {
+        3 => ["LP 12 dB", "LP 24 dB", "HP 12 dB", "BPF", "Notch", "Mystery"].get(v as usize).copied().unwrap_or("?").into(),
+        1 => format!("{:.0} Hz", 20. * 1000f64.powf(v)),
+        _ => format!("{:.0} %", v * 100.),
+    }
+}
+
+fn filter_values(kind: f64) -> Vec<(u32, f64)> {
+    vec![(1, 0.55), (2, 0.4), (3, kind), (4, 0.)]
+}
+
+// A filter is drawn above the tiles, titled with its type's text; Type, Cutoff and Resonance are one
+// run; a type the reference cannot read as a response is said not drawn.
 #[test]
-fn view_pictures() {
+fn a_filter_is_recognized_by_name_and_drawn_from_its_type() {
+    let mut s = Screen::new();
+    let ui = &s.ui.clone_strong();
+    let _p = open_with(&mut s, filter_plugin(), &filter_values(0.), &filter_text);
+    let panel = &panels(ui)[0];
+    assert_eq!(panel.title.as_str(), "Filter  \u{b7}  LP 12 dB");
+    assert_eq!(panel.h, 160.);
+    assert_eq!(panel.shapes.row_count(), 3, "the frame, the fill and the response");
+    let tiles: Vec<crate::GridTile> = ui.global::<crate::GridState>().get_tiles().iter().collect();
+    let order: Vec<(String, bool)> = tiles.iter().map(|t| (t.name.to_string(), t.linked)).collect();
+    assert_eq!(order[..3], [("Type".to_string(), true), ("Cutoff".to_string(), true), ("Resonance".to_string(), true)], "the run, in the filter's order: {order:?}");
+    // The curve and its fill are one set of points: the fill is the line closed along the bottom.
+    let (line, fill) = (super::envelope::vertices(&panel.shapes.row_data(2).unwrap().commands), super::envelope::vertices(&panel.shapes.row_data(1).unwrap().commands));
+    assert_eq!(fill.len(), line.len() + 2);
+    assert_eq!(&fill[1..=line.len()], &line[..]);
+    assert_eq!((fill[0].1, fill[0].0), (fill[line.len() + 1].1, line[0].0), "closed along the bottom, from under its first point");
+    assert!(line[0].1 < fill[0].1 && line.iter().all(|p| p.1 >= 10. && p.1 <= fill[0].1), "inside the plot");
+    // A type that is no response: said so, and nothing is drawn but the frame.
+    let mut s = Screen::new();
+    let _q = open_with(&mut s, filter_plugin(), &filter_values(5.), &filter_text);
+    let odd = &panels(&s.ui)[0];
+    assert_eq!(odd.shapes.row_count(), 1);
+    assert_eq!(odd.labels.row_data(0).unwrap().text.as_str(), "Drawn by the plugin");
+    // With no Type parameter the response is a low-pass.
+    let mut list = filter_plugin();
+    list["parameters"].as_array_mut().unwrap().remove(2);
+    let mut s = Screen::new();
+    let _r = open_with(&mut s, list, &filter_values(0.), &filter_text);
+    assert_eq!(panels(&s.ui)[0].title.as_str(), "Filter");
+    assert_eq!(panels(&s.ui)[0].shapes.row_count(), 3);
+}
+
+// Type names as responses, and the response itself: the low-pass is down 3 dB at its cutoff at the
+// plain quality, the band-pass is flat there, the notch is deep, each pole adds a slope.
+#[test]
+fn the_filter_response_follows_the_reference() {
+    use crate::views::{filter_db, filter_named, Response as R};
+    for (text, kind, poles) in [("LP 24 dB", R::LowPass, 4), ("LPF24D", R::LowPass, 4), ("HP 12 dB", R::HighPass, 2), ("LP 18", R::LowPass, 3), ("BPF", R::BandPass, 2), ("LP+HP", R::BandPass, 2), ("BEF", R::Notch, 2), ("Notch", R::Notch, 2), ("Off", R::None, 2), ("Thru", R::None, 2), ("Comb", R::Unknown, 2), ("LP 6 dB", R::LowPass, 1)] {
+        assert_eq!(filter_named(text), (kind, poles), "{text}");
+    }
+    let q = 0.707;
+    assert!((filter_db(R::LowPass, 2, 1., q) + 3.0).abs() < 0.05, "-3 dB at the cutoff");
+    assert!(filter_db(R::LowPass, 2, 0.01, q).abs() < 0.01, "flat below");
+    assert!((filter_db(R::LowPass, 2, 10., q) + 40.).abs() < 0.5, "12 dB per octave: about -40 a decade up");
+    assert_eq!(filter_db(R::LowPass, 4, 10., q), -48., "four poles: past the floor");
+    assert!(filter_db(R::HighPass, 2, 0.1, q) < -35. && filter_db(R::HighPass, 2, 100., q).abs() < 0.01);
+    assert!(filter_db(R::BandPass, 2, 1., q).abs() < 1e-9, "flat at the center");
+    assert_eq!(filter_db(R::Notch, 2, 1., q), -48., "the notch is deep");
+    assert_eq!(filter_db(R::None, 2, 1., q), 0.);
+    assert_eq!(filter_db(R::LowPass, 2, 1., 80.), 24., "clamped at +24 dB");
+}
+
+/// A page's picture under the default theme at 1 and at the FANTOM's 1.55 (target/screens) and under the odd
+/// theme (target/theme-shots), as NAME, NAME@1.55 and NAME-odd.
+fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String) {
     fit_to_window();
     let mut s = Screen::new();
-    let mut p = open_with(&mut s, lfo_plugin(), &lfo_values(0.), &lfo_text);
+    let mut p = open_with(&mut s, list, values, text);
     s.frame();
-    png(&s, "grid-lfo");
-    let ui = s.ui.clone_strong();
-    at_fantom_scale(&mut s, "grid-lfo", || p.shown());
-    let _ = ui;
+    png(&s, name);
+    at_fantom_scale(&mut s, name, || p.shown());
     theme::apply(&s.ui, &odd_theme());
     s.frame();
     p.shown();
     assert!(s.frame().is_some());
-    shot(&s, "grid-lfo-odd");
+    shot(&s, &format!("{name}-odd"));
+}
+
+// Pictures for a look by eye: each view's page.
+#[test]
+fn view_pictures() {
+    pictures("grid-lfo", lfo_plugin(), &lfo_values(0.), &lfo_text);
+    pictures("grid-filter", filter_plugin(), &filter_values(1.), &filter_text);
 }
 
 // The wave's line is drawn from its own points, unscaled: the pixels of the line lie on the path at two
@@ -180,21 +263,19 @@ fn view_pictures() {
 #[test]
 fn the_lfo_line_is_drawn_where_its_path_is() {
     let mut report = String::new();
-    let mut worst = 0f64;
-    for shape in [0., 1., 4.] {
-        for (size, scale) in [((1280, 720), 1.), ((1280, 720), 2.), ((1920, 1080), 1.), ((1920, 1080), 2.)] {
-            let (shot, _p) = view_shot(&lfo_plugin(), &lfo_values(shape), &lfo_text, 0, size, scale);
-            let path = shot.panel.shapes.iter().nth(1).expect("the wave").commands.to_string();
-            let (count, off) = line_offsets(&shot, &path);
-            report += &format!("{size:?}@{scale} shape {shape}: {count} places, worst {off:.2} px\n");
-            assert!(count >= 20, "the line was measured at enough places:\n{report}");
-            worst = worst.max(off);
-            // The measure sees an offset: the same path a pixel lower is found that far off.
-            let lower: Vec<(f32, f32)> = super::envelope::vertices(&path).into_iter().map(|(x, y)| (x as f32, y as f32 + 1.)).collect();
-            let (_, wrong) = line_offsets(&shot, &crate::views::poly(&lower));
-            assert!(wrong > 0.7 * f64::from(scale), "a path a pixel off is seen as {wrong:.2} px off");
-        }
+    for (name, shape) in [("sine", 0.), ("triangle", 1.), ("sample and hold", 4.)] {
+        report += &check_line(name, &lfo_plugin(), &lfo_values(shape), &lfo_text, 0, 1);
     }
     println!("{report}");
-    assert!(worst <= 0.6, "the line is off its path by up to {worst:.2} px:\n{report}");
+}
+
+// The filter's response line, the same way: from the same points as its fill, drawn where the path is, at a
+// low-pass, a high-pass and a band-pass (the notch dips past the plot's floor, which is flat there).
+#[test]
+fn the_filter_line_is_drawn_where_its_path_is() {
+    let mut report = String::new();
+    for (name, kind) in [("low-pass", 0.), ("high-pass", 2.), ("band-pass", 3.)] {
+        report += &check_line(name, &filter_plugin(), &filter_values(kind), &filter_text, 0, 2);
+    }
+    println!("{report}");
 }

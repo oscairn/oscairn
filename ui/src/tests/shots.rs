@@ -105,13 +105,14 @@ pub(super) fn view_shot(list: &serde_json::Value, values: &[(u32, f64)], text: &
 }
 
 impl Shot {
-    /// The green of a pixel (the accent over gray): 0 none, 1 full.
+    /// The green of a pixel (the accent over gray): 0 none, 1 full; a light tint is none.
     fn green(&self, x: i64, y: i64) -> f64 {
         if x < 0 || y < 0 || x >= self.s.w as i64 || y >= self.s.h as i64 {
             return 0.;
         }
         let p = self.s.pixels[y as usize * self.s.w + x as usize];
-        (f64::from(p.g) - f64::from(p.r)) / 255.
+        // The fill under a curve is the accent lightly (about 0.17): not the line.
+        (((f64::from(p.g) - f64::from(p.r)) / 255. - 0.3) / 0.7).max(0.)
     }
     /// The green at a place between pixel centers (bilinear).
     fn green_at(&self, x: f64, y: f64) -> f64 {
@@ -171,4 +172,26 @@ pub(super) fn line_offsets(shot: &Shot, path: &str) -> (usize, f64) {
         worst = worst.max((weighted / sum).abs());
     }
     (count, worst)
+}
+
+/// The four window sizes and scales the views are measured at.
+pub(super) const SIZES: [((usize, usize), f32); 4] = [((1280, 720), 1.), ((1280, 720), 2.), ((1920, 1080), 1.), ((1920, 1080), 2.)];
+
+/// Measures the path number `shape` of panel `which` of a page at every size and scale: it must have been
+/// measured at enough places, the drawn line within 0.6 px of it, and the same path a pixel lower must be
+/// found off (so the measure can fail). Returns a line of the report per size.
+pub(super) fn check_line(name: &str, list: &serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String, which: usize, shape: usize) -> String {
+    let mut report = String::new();
+    for (size, scale) in SIZES {
+        let (shot, _p) = view_shot(list, values, text, which, size, scale);
+        let path = shot.panel.shapes.iter().nth(shape).expect("the path").commands.to_string();
+        let (count, off) = line_offsets(&shot, &path);
+        report += &format!("{name} {size:?}@{scale}: {count} places, worst {off:.2} px\n");
+        assert!(count >= 20, "the line was measured at enough places:\n{report}");
+        assert!(off <= 0.6, "the line is off its path by up to {off:.2} px:\n{report}");
+        let lower: Vec<(f32, f32)> = super::envelope::vertices(&path).into_iter().map(|(x, y)| (x as f32, y as f32 + 1.)).collect();
+        let (_, wrong) = line_offsets(&shot, &crate::views::poly(&lower));
+        assert!(wrong > 0.7 * f64::from(scale), "a path a pixel off is seen as {wrong:.2} px off:\n{report}");
+    }
+    report
 }

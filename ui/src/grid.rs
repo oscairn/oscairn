@@ -24,6 +24,7 @@ const HEADING: f32 = 30.;
 /// The views' heights in touch mode (ParameterGrid.cpp build): envelope, LFO, filter, key map, FM operators.
 const ENVELOPE: f32 = 180.;
 const LFO: f32 = 140.;
+const FILTER: f32 = 160.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
@@ -280,19 +281,28 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
             described.push(linked_order(&shape).into_iter().map(|k| list[k]).collect());
             panel(&mut out, &mut y, View::Envelope(shape), ENVELOPE, list);
         }
-        // Among the parameters in no view, by name: an LFO, then an envelope.
+        // Among the parameters in no view, by name: a filter, an LFO, then an envelope (their tiles' runs
+        // go envelope, LFO, filter).
         let plain: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == 0).collect();
         let names: Vec<&str> = plain.iter().map(|&i| params[i].name.as_str()).collect();
-        let mut recognized: Vec<Vec<usize>> = Vec::new();
-        let lfo = views::lfo_of(&names);
+        let (filter, lfo) = (views::filter_of(&names), views::lfo_of(&names));
+        if !filter.empty() {
+            panel(&mut out, &mut y, View::Filter(filter.clone()), FILTER, plain.clone());
+        }
         if !lfo.empty() {
-            recognized.push(lfo.linked_order().into_iter().map(|k| plain[k]).collect());
-            panel(&mut out, &mut y, View::Lfo(lfo), LFO, plain.clone());
+            panel(&mut out, &mut y, View::Lfo(lfo.clone()), LFO, plain.clone());
         }
         let named = envelope_of_names(&names);
         if !named.points.is_empty() {
             described.push(linked_order(&named).into_iter().map(|k| plain[k]).collect());
             panel(&mut out, &mut y, View::Envelope(named), ENVELOPE, plain.clone());
+        }
+        let mut recognized: Vec<Vec<usize>> = Vec::new();
+        if !lfo.empty() {
+            recognized.push(lfo.linked_order().into_iter().map(|k| plain[k]).collect());
+        }
+        if !filter.empty() {
+            recognized.push(filter.linked_order().into_iter().map(|k| plain[k]).collect());
         }
         // Runs: the plugin's groups, then each envelope's stages not already in one; others alone.
         let mut linked: Vec<Vec<usize>> = Vec::new();

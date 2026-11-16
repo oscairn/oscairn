@@ -1813,6 +1813,8 @@ namespace oscairn
                     changes.push_back({n,id,value});
                 }
                 std::vector<std::string> values;
+                struct Step { Control& c; bool open; ~Step() { if( open ) c.endStep(); } } step{ c, set };
+                if( set ) c.beginStep(); // the values of one request are one step to undo
                 for( const auto& change : changes )
                 {
                     if( set && !c.setParameter(change.node, change.param, change.value) )

@@ -198,6 +198,8 @@ namespace oscairn
         void setNodeRole(NodeId node, const std::string& role) override;
         History history() const override;
         void recordEdits() override { if(!staged_) record(); }
+        void beginStep() override; // undo.cpp
+        void endStep() override;
         bool undo() override;
         bool redo() override;
         /// Forgets every step, as opening a Performance does; a host calls it once its startup
@@ -510,12 +512,14 @@ namespace oscairn
             std::pair<double, double> master{1, 0};
             std::map<NodeId, std::string> roles;
         };
+        struct ParameterChange { NodeId node; uint32_t param; double from, to; };
         struct Step
         {
             std::string label, key; // key: the one thing it changed, for merging; empty when several
             std::chrono::steady_clock::time_point when;
             std::shared_ptr<const Model> before, after; // a model step; otherwise a parameter step:
             NodeId node = 0; uint32_t param = 0; double from = 0, to = 0;
+            std::vector<ParameterChange> changes; // else several values of one request: undone last to first
             uint64_t serial = 0; // the state it leads to, new at each change of it
         };
         // Changes made while one is alive are not edits (switching scenes, moving controls).
@@ -558,6 +562,9 @@ namespace oscairn
         std::optional<Auditioning> audition_;
         int quiet_ = 0;
         bool mergeable_ = false; // the last step may take in the next
+        uint32_t grouping_ = 0; // beginStep() calls open: parameter values wait in grouped_ for one step
+        std::vector<ParameterChange> grouped_;
+        std::string groupLabel_;
         void dropSplitNodes(const Split& split); // removes them from the graph, with their wires
         bool feeds(uint32_t from, uint32_t to);
         Part& findBus(uint32_t id);

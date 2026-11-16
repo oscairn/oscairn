@@ -126,7 +126,9 @@ namespace oscairn
             auto& last = undo_.back();
             if(last.key == step.key && step.when - last.when < mergeWindow)
             {
-                if(step.after) last.after = step.after; else last.to = step.to;
+                if(step.after) last.after = step.after;
+                else if(!step.changes.empty()) for(size_t i = 0; i < step.changes.size(); ++i) last.changes[i].to = step.changes[i].to; // the same values, in the same order
+                else last.to = step.to;
                 last.when = step.when; last.serial = ++serial_;
                 redo_.clear();
                 return;
@@ -157,17 +159,57 @@ namespace oscairn
         const bool ok = applyParameter(node, param, value, &applied);
         if(ok && !quiet_ && applied != before)
         {
-            record(); // an edit waiting for its step comes first
-            Step step;
+            if(!grouping_) record(); // an edit waiting for its step comes first (beginStep did, in a group)
             std::string name = std::to_string(param);
             for(const auto& p : parameters(node)) if(p.id == param) name = p.name;
-            step.label = (nodes_.count(node) ? nodes_.at(node) + " " : std::string()) + name;
-            step.key = "param:" + std::to_string(node) + ":" + std::to_string(param);
-            step.node = node; step.param = param; step.from = before; step.to = applied;
-            push(std::move(step));
+            const auto label = (nodes_.count(node) ? nodes_.at(node) + " " : std::string()) + name;
+            if(grouping_)
+            {
+                if(grouped_.empty()) groupLabel_ = label;
+                grouped_.push_back({node, param, before, applied});
+            }
+            else
+            {
+                Step step;
+                step.label = label;
+                step.key = "param:" + std::to_string(node) + ":" + std::to_string(param);
+                step.node = node; step.param = param; step.from = before; step.to = applied;
+                push(std::move(step));
+            }
             markEdited(node);
         }
         return ok;
+    }
+
+    // The values one request sets are one step: a drag of two parameters is undone with one undo.
+    void Session::beginStep()
+    {
+        if(grouping_++) return;
+        record(); // an edit waiting for its step comes first
+        grouped_.clear(); groupLabel_.clear();
+    }
+
+    void Session::endStep()
+    {
+        if(!grouping_ || --grouping_) return;
+        auto changes = std::move(grouped_); grouped_.clear();
+        if(changes.empty()) return;
+        Step step;
+        if(changes.size() == 1)
+        {
+            step.label = groupLabel_;
+            step.key = "param:" + std::to_string(changes[0].node) + ":" + std::to_string(changes[0].param);
+            step.node = changes[0].node; step.param = changes[0].param; step.from = changes[0].from; step.to = changes[0].to;
+        }
+        else
+        {
+            std::sort(changes.begin(), changes.end(), [](const ParameterChange& a, const ParameterChange& b) { return std::tie(a.node, a.param) < std::tie(b.node, b.param); });
+            step.label = groupLabel_ + " and " + std::to_string(changes.size() - 1) + " more";
+            step.key = "params";
+            for(const auto& c : changes) step.key += ":" + std::to_string(c.node) + "." + std::to_string(c.param);
+            step.changes = std::move(changes);
+        }
+        push(std::move(step));
     }
 
     // RFC 0021: a part loaded from a Sound shows when it has been edited since. A step that
@@ -246,6 +288,7 @@ namespace oscairn
         auto step = std::move(undo_.back()); undo_.pop_back();
         mergeable_ = false;
         if(step.before) apply(*step.after, *step.before);
+        else if(!step.changes.empty()) { for(auto c = step.changes.rbegin(); c != step.changes.rend(); ++c) if(graph_.contains(c->node)) applyParameter(c->node, c->param, c->from); }
         else if(graph_.contains(step.node)) applyParameter(step.node, step.param, step.from);
         redo_.push_back(std::move(step));
         return true;
@@ -258,6 +301,7 @@ namespace oscairn
         auto step = std::move(redo_.back()); redo_.pop_back();
         mergeable_ = false;
         if(step.before) apply(*step.before, *step.after);
+        else if(!step.changes.empty()) { for(const auto& c : step.changes) if(graph_.contains(c.node)) applyParameter(c.node, c.param, c.to); }
         else if(graph_.contains(step.node)) applyParameter(step.node, step.param, step.to);
         undo_.push_back(std::move(step));
         return true;

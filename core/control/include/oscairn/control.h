@@ -712,6 +712,9 @@ namespace oscairn
         // The step for what changed that needs no commit, taken now, not at the next tick: a request that
         // reads the history asks first. A session over a connection has the engine's.
         virtual void recordEdits() {}
+        // The parameter values set between these two are one step (one request's several values). Nests.
+        virtual void beginStep() {}
+        virtual void endStep() {}
         virtual bool undo() = 0; // false: nothing to undo
         virtual bool redo() = 0;
         // Each part's and bus's recent peak after its fader, held and falling, for the Mixer.

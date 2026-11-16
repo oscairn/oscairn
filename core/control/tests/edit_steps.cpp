@@ -64,6 +64,30 @@ namespace
         f.call("parts.level", "{\"part\":" + std::to_string(part) + R"(,"level":0.25,"mute":false})");
         check(f.undo().find("level") != std::string::npos, "a part's level shows in the history at once: " + f.undo());
     }
+
+    // One params.set of two values is one step: one undo takes both back, one redo puts both back.
+    void oneRequestOneStep(const std::string& synth)
+    {
+        Fixture f(synth); f.render();
+        const auto node = f.session.nodeId("synth");
+        std::vector<uint32_t> ids;
+        for(const auto& p : f.session.parameters(node)) if(!(p.flags & CLAP_PARAM_IS_READONLY) && !p.stepped && ids.size() < 2) ids.push_back(p.id);
+        check(ids.size() == 2, "two parameters to set");
+        const double was[]{f.session.parameter(node, ids[0]), f.session.parameter(node, ids[1])};
+        const auto before = f.undo();
+        auto set = [&](double a, double b) {
+            f.call("params.set", "{\"values\":[{\"node\":" + std::to_string(node) + ",\"param\":" + std::to_string(ids[0]) + ",\"value\":" + std::to_string(a) +
+                                 "},{\"node\":" + std::to_string(node) + ",\"param\":" + std::to_string(ids[1]) + ",\"value\":" + std::to_string(b) + "}]}");
+        };
+        set(.3, .6);
+        check(f.undo() != before, "the request is a step: " + f.undo());
+        set(.35, .65); // a drag: the same two again, merged
+        f.call("edit.undo");
+        check(f.undo() == before, "one undo takes back the step before it: " + f.undo());
+        check(f.session.parameter(node, ids[0]) == was[0] && f.session.parameter(node, ids[1]) == was[1], "both values are back");
+        f.call("edit.redo");
+        check(f.session.parameter(node, ids[0]) == .35 && f.session.parameter(node, ids[1]) == .65, "and one redo puts both back");
+    }
 }
 
 int main(int argc, char** argv)
@@ -72,6 +96,7 @@ int main(int argc, char** argv)
     try
     {
         historyIsCurrent(argv[1]);
+        oneRequestOneStep(argv[1]);
     }
     catch(const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
     std::cout << "ok: edit steps over the protocol\n";

@@ -247,10 +247,18 @@ impl Budget {
     /// within its limit too, whose limit `give_up` then lowers; and none from a part down to its last voice (the
     /// floor the loss and deadline rules hold: its limit at 1, or one note left).
     fn choose(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool) -> Victim {
-        self.choose_on(rs, lane, reserved, costed, owned, None)
+        self.choose_on(rs, lane, reserved, costed, owned, false, None)
     }
-    /// choose, from `node`'s connections alone when given.
-    fn choose_on(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool, node: Option<*const Activity>) -> Victim {
+    /// choose for the soft limit's fades (a note-on, a block past the limit, the lanes' total): a lane's estimate may
+    /// pass its soft limit whatever the part does (the time of the plugins beside it in the lane, not its notes), and
+    /// giving every note up would not bring it under, so a connection's last note is never chosen, as the loss rules
+    /// leave it (only `choke`, for a block that would be missed, takes it).
+    fn choose_soft(&mut self, rs: &Routes, lane: Option<usize>) -> Victim {
+        self.choose_on(rs, lane, false, true, false, true, None)
+    }
+    /// choose, from `node`'s connections alone when given; `last`: each connection keeps its last note.
+    #[allow(clippy::too_many_arguments)]
+    fn choose_on(&mut self, rs: &Routes, lane: Option<usize>, reserved: bool, costed: bool, owned: bool, last: bool, node: Option<*const Activity>) -> Victim {
         self.count_held(rs, None);
         let mut best: Victim = None;
         let (mut best_rank, mut best_priority, mut best_honors, mut best_velocity, mut best_id) = (0, 0u8, false, 0f32, 0i32);
@@ -261,7 +269,7 @@ impl Budget {
                 continue;
             }
             let (r, g) = (&rs[e.route], self.groups.get(e.group).copied().unwrap_or(NO_GROUP));
-            if owned && (if a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) != 0 { a.voice_limit.load(Relaxed) <= 1 } else { r.used.and_not(r.stolen).count() <= 1 }) {
+            if (owned || last) && (if owned && a.own_voices.load(Relaxed) && a.voice_limit.load(Relaxed) != 0 { a.voice_limit.load(Relaxed) <= 1 } else { r.used.and_not(r.stolen).count() <= 1 }) {
                 continue;
             }
             let honors = a.honors_volume.load(Relaxed);
@@ -369,7 +377,7 @@ impl Budget {
         // A plugin that gives up its own voices keeps the new note within its limit itself.
         let cost = if mine.cost.own_voices.load(Relaxed) { 0.0 } else { mine.cost.note_now() };
         while self.estimate(rs, lane, Counting::Kept) + cost > SOFT * limit {
-            let Some(v) = self.choose(rs, Some(lane), false, true, false) else { break };
+            let Some(v) = self.choose_soft(rs, Some(lane)) else { break };
             let at = if self.entries.get(v.0).is_some_and(|e| e.route == me) { time } else { 0 };
             if let Some(a) = self.steal(rs, v, at) {
                 a.stolen.fetch_add(1, Relaxed);
@@ -394,7 +402,7 @@ impl Budget {
             return;
         }
         while self.node_notes(rs, k) >= cap {
-            let Some(v) = self.choose_on(rs, None, false, false, false, Some(node)) else { break };
+            let Some(v) = self.choose_on(rs, None, false, false, false, false, Some(node)) else { break };
             let at = if self.entries.get(v.0).is_some_and(|e| e.route == self.entries[k].route) { time } else { 0 };
             if let Some(a) = self.steal(rs, v, at) {
                 a.stolen.fetch_add(1, Relaxed);
@@ -419,7 +427,7 @@ impl Budget {
         }
         let scale = (total / e).min(1.25);
         while self.estimate(rs, lane, Counting::Kept) * scale > SOFT * limit {
-            let Some(v) = self.choose(rs, Some(lane), false, true, false) else { break };
+            let Some(v) = self.choose_soft(rs, Some(lane)) else { break };
             if let Some(a) = self.steal(rs, v, 0) {
                 a.stolen.fetch_add(1, Relaxed);
             }
@@ -448,7 +456,7 @@ impl Budget {
             let mut best: Victim = None;
             let mut most = 0.0;
             for i in 0..self.lanes.len() {
-                if let Some(v) = self.choose(rs, Some(i), false, true, false) {
+                if let Some(v) = self.choose_soft(rs, Some(i)) {
                     let each = self.entries.get(v.0).map_or(0.0, |e| e.cost.note_now());
                     if each > most {
                         (best, most) = (Some(v), each);

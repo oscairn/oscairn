@@ -367,6 +367,9 @@ if(OSCAIRN_ENGINE_CORE STREQUAL "rust") # 12k is the Rust core's alone
     add_executable(oscairn-core-recovery-test engine/tests/core_recovery.cpp)
     target_link_libraries(oscairn-core-recovery-test PRIVATE oscairn_engine)
     add_test(NAME engine-core-recovery COMMAND oscairn-core-recovery-test)
+    add_executable(oscairn-core-pool-test engine/tests/core_pool.cpp)
+    target_link_libraries(oscairn-core-pool-test PRIVATE oscairn_engine)
+    add_test(NAME engine-core-pool COMMAND oscairn-core-pool-test)
 endif()
 set_tests_properties(engine-core-diff PROPERTIES TIMEOUT 300)
 # The plan's audio (buffers, mixing, output guard, meters) the same way; `bench cpp|rust` times each.

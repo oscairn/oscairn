@@ -214,7 +214,7 @@ pub(super) fn library(r: &mut Real) {
     r.goto("Glass Choir");
     r.run(100);
     let started = Instant::now();
-    r.act(Action::Confirm(None));
+    shell::act(Action::Confirm(None)); // not r.act, which settles 400 ms first: the chip is read from the first moment
     // A normal switch is a wait the player expects: the top bar's chip names it all along, and no banner is ever raised.
     let (mut chip, mut banner) = (String::new(), String::new());
     r.until(|ui| {

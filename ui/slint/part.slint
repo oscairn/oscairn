@@ -5,6 +5,7 @@
 
 import { Theme, Section, Button, Cursor, FitText, RowMark, RowStyle } from "theme.slint";
 import { KeyStrip, StripState } from "strip.slint";
+import { Loading } from "loading.slint";
 
 export struct SettingData {
     label: string,
@@ -17,6 +18,7 @@ export struct SettingData {
     role: int, // a plugin's role: 1 an instrument, 2 an effect, 3 the rest, 0 not a plugin (the value's color)
     off: bool, // a plugin switched off: faint
     failed: bool, // a plugin that failed and is silent: outlined in the danger color
+    busy: bool, // the engine is opening this item: a bar along the row's foot
     tint: color, // an item's own color, where the theme puts it (drawListRow): the whole row or a mark in it
     tinted: bool,
     columns: [string], // a row in columns (the Catalog's: name, version, publisher, state and summary), each shrunk then cut on its own
@@ -137,6 +139,11 @@ component Row inherits Section {
         height: parent.height;
         text: "+";
         clicked => { root.step(1); }
+    }
+    if data.busy: Loading {
+        x: Theme.pad-wide;
+        y: parent.height - self.height - Theme.hair - Theme.cursor-width;
+        width: parent.width - 2 * Theme.pad-wide;
     }
     if data.failed: Rectangle {
         border-width: Theme.cursor-width;

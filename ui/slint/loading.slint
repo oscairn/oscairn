@@ -2,50 +2,63 @@
 // A wait the player expects (a Performance opening, a package installing, an export): a line saying what, over a thin
 // bar that fills to `progress` when the engine reports one (0..1) and sweeps when it does not (negative). The only
 // moving thing in the UI: it is drawn while it exists, so it is shown only while the wait lasts (docs/rust-ui.md,
-// "Waits"). Its sizes, colors and the sweep's period are the theme's. With no text it is the bar alone (a tile's edge).
+// "Waits"). Its sizes, colors and the sweep's period are the theme's. `filled` is the top bar's chip: a pill in the
+// theme's loading colors with the bar inside it; else the bar alone (a tile's or a row's edge) when there is no text.
+// The text is cut with an ellipsis, never wrapped; `progress` can be fed in later without a change of layout.
 
 import { Theme } from "theme.slint";
 
 export component Loading inherits Rectangle {
     in property <string> text;
     in property <float> progress: -1;
-    // The text's width as it would be set whole, so a bar can make room for it.
-    out property <length> wanted: measure.preferred-width;
+    in property <bool> filled;
+    // The width the text wants set whole in a chip, so the bar can make room for it.
+    out property <length> wanted: measure.preferred-width + 2 * Theme.pad-wide;
+    property <color> ink: root.filled ? Theme.loading-text : Theme.text;
+    property <color> bar-ink: root.filled ? Theme.loading-text : Theme.accent;
+    property <color> track-ink: root.filled ? Theme.loading-text.with-alpha(Theme.loading-track-alpha) : Theme.track;
     // The sweep's place in its period, 0 to 1 and round again.
     property <float> phase: mod(animation-tick() / Theme.loading-period, 1.0);
     property <length> segment: track.width * Theme.loading-segment;
     // The text's line leaves room for its descenders before the bar.
-    property <length> line: Theme.small * 1.3;
-    height: root.text == "" ? Theme.loading-bar : line + Theme.pad-tight + Theme.loading-bar;
+    property <length> line: Theme.button * 1.3;
+    property <length> inset: root.filled ? Theme.pad-wide : 0px;
+    height: root.text == "" ? Theme.loading-bar : root.line + Theme.pad-tight + Theme.loading-bar;
+    background: root.filled ? Theme.loading-background : transparent;
+    border-radius: root.filled ? Theme.button-radius(root.height) : 0px;
     measure := Text {
         visible: false;
-        font-size: Theme.small;
+        font-size: Theme.button;
         text: root.text;
     }
     if root.text != "": Text {
-        width: parent.width;
+        x: root.inset;
+        y: (parent.height - root.line - Theme.pad-tight - Theme.loading-bar) / 2;
+        width: parent.width - 2 * root.inset;
         height: root.line;
         overflow: elide;
         vertical-alignment: center;
-        font-size: Theme.small;
-        color: Theme.text;
+        font-size: Theme.button;
+        color: root.ink;
         text: root.text;
     }
     track := Rectangle {
-        y: parent.height - Theme.loading-bar;
+        x: root.inset;
+        y: root.text == "" ? 0px : (parent.height + root.line + Theme.pad-tight - Theme.loading-bar) / 2;
+        width: parent.width - 2 * root.inset;
         height: Theme.loading-bar;
-        background: Theme.track;
+        background: root.track-ink;
         border-radius: self.height / 2;
         clip: true;
         if root.progress >= 0: Rectangle {
             width: parent.width * min(root.progress, 1.0);
-            background: Theme.accent;
+            background: root.bar-ink;
             border-radius: parent.border-radius;
         }
         if root.progress < 0: Rectangle {
             x: -root.segment + root.phase * (parent.width + root.segment);
             width: root.segment;
-            background: Theme.accent;
+            background: root.bar-ink;
             border-radius: parent.border-radius;
         }
     }

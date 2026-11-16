@@ -489,6 +489,18 @@ pub fn attach(window: &Shell) {
 }
 
 /// JUCE's `Colour::contrasting`: black on a bright color, white on a dark one.
+/// Black or white, whichever reads better on `c` by WCAG's contrast ratio (the chip's text: it must read on any warning color a
+/// theme chooses, which `contrasting`'s brightness rule does not hold for a saturated red).
+fn most_readable(c: Color) -> Color {
+    let lin = |v: u8| {
+        let v = f32::from(v) / 255.;
+        if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    let l = 0.2126 * lin(c.red()) + 0.7152 * lin(c.green()) + 0.0722 * lin(c.blue());
+    // Contrast with black is (l + .05) / .05, with white 1.05 / (l + .05): black wins above l = 0.179.
+    if l > 0.179 { Color::from_rgb_u8(0, 0, 0) } else { Color::from_rgb_u8(255, 255, 255) }
+}
+
 fn contrasting(c: Color) -> Color {
     if brightness(c) >= 0.5 {
         Color::from_rgb_u8(0, 0, 0)
@@ -528,6 +540,7 @@ pub fn apply(window: &Shell, theme: &Loaded) {
     g.set_focus(d.focus.unwrap_or(c("accent")));
     g.set_dark(dark(c("background")));
     g.set_on_accent(contrasting(c("accent")));
+    g.set_on_warning(most_readable(d.warning.unwrap_or(rgb(0xe8c547))));
     let operators = crate::palette::operators(c("accent"), c("surface"), c("background"), c("text"));
     g.set_operators(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.fill).collect::<Vec<_>>())));
     g.set_operators_on(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.on).collect::<Vec<_>>())));

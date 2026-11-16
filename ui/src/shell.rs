@@ -1602,6 +1602,9 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.setlist.out) {
             self.send(Request::Setlist(request), method, params);
         }
+        if self.setlist.take_retry() {
+            slint::Timer::single_shot(crate::client::BUSY_RETRY, || with_app(|a| a.on_setlist(setlist::Screen::retry)));
+        }
         self.follow();
         self.refresh_wait();
     }

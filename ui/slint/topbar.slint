@@ -331,8 +331,9 @@ export component TopBar inherits Rectangle {
         return root.width - Theme.margin - Theme.pad - (Bar.home-button ? Theme.touch : 0px) - back-w - actions - rec - tempo-width - meters - (items - 1) * gap;
     }
     // The wait's chip: as wide as its words, never more than half the title's room; the title gives it that room.
-    property <length> chip-width: Bar.loading == "" ? 0px : min(chip-measure.preferred-width, pill.width * 0.5);
-    property <length> chip-room: Bar.loading == "" ? 0px : chip-width + Theme.pad-wide;
+    property <length> chip-width: Bar.loading == "" ? 0px : min(chip-measure.preferred-width + 2 * Theme.pad-wide, pill.width * 0.5);
+    property <length> chip-room: Bar.loading == "" ? 0px : chip-width + Theme.pad-narrow;
+    out property <length> loading-width: chip-width;
     height: Theme.bar-height;
     background: Theme.background;
     changed actions-mode => { Bar.more = self.actions-mode == 2; Bar.more-changed(); }
@@ -345,7 +346,7 @@ export component TopBar inherits Rectangle {
     }
     chip-measure := Text {
         visible: false;
-        font-size: Theme.small;
+        font-size: Theme.button;
         text: Bar.loading;
     }
     back-measure := Text {
@@ -433,9 +434,11 @@ export component TopBar inherits Rectangle {
                 ink: Bar.notice == "" ? Theme.text : Theme.accent;
             }
             if Bar.loading != "": Loading {
-                x: parent.width - self.width - (Bar.title-field ? Theme.pad-wide : 0px);
+                x: parent.width - self.width - Theme.pad-tight / 2;
                 y: (parent.height - self.height) / 2;
                 width: root.chip-width;
+                height: Columns.pill - Theme.pad-tight;
+                filled: true;
                 text: Bar.loading;
                 progress: Bar.loading-progress;
             }

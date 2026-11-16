@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The shell's waits: what the player sees while the engine does something that takes a moment, and when something is
 //! wrong. Opening a Performance takes a fraction of a second to a few seconds (4 to 20 s for a big one on the FANTOM:
-//! docs/control-protocol.md, "Long requests") and is normal: the top bar shows a calm loading chip, "Loading NAME", from
+//! docs/control-protocol.md, "Long requests") and is normal: the top bar shows a calm loading chip (a yellow pill), "Loading NAME", from
 //! the moment the player asks until it has opened, and nothing else changes. The banner under the bar is only for what is
 //! unexplained: the engine not answering, a wait far past what it ever takes, the connection gone.
 //!
@@ -97,19 +97,19 @@ impl App {
     }
 
     /// The banner: the connection lost, a wait far past its usual, or a request no answer comes to.
-    fn banner(&self, expected: &Option<(String, String)>) -> (String, bool) {
+    fn banner(&self, expected: &Option<(String, String)>) -> String {
         if let Some(why) = &self.wait.lost {
-            return (format!("Lost contact with the sound engine ({why}). Trying again; if this stays, restart the instrument."), true);
+            return format!("Lost contact with the sound engine ({why}). Trying again; if this stays, restart the instrument.");
         }
         if let (Some((_, subject)), Some(since)) = (expected, self.wait.since) {
             if since.elapsed() >= self.wait.long() {
-                return (format!("{subject} is taking much longer than usual. Wait for it, or restart the instrument if it never ends."), false);
+                return format!("{subject} is taking much longer than usual. Wait for it, or restart the instrument if it never ends.");
             }
         }
         if self.client.waiting(|r| r.waited_on() && !r.expected()).is_some_and(|out| out >= self.wait.no_answer()) {
-            return ("The sound engine is slow to answer. This screen catches up when it does; restart the instrument if it never does.".into(), false);
+            return "The sound engine is slow to answer. This screen catches up when it does; restart the instrument if it never does.".into();
         }
-        (String::new(), false)
+        String::new()
     }
 
     /// Works out what the chip and the banner say from what is known now and sets what changed. Called whenever
@@ -121,18 +121,16 @@ impl App {
             (None, Some(_)) => self.wait.since = None,
             _ => {}
         }
-        let chip = expected.as_ref().map(|e| e.0.clone()).unwrap_or_default();
         let banner = self.banner(&expected);
+        // One message at a time: the banner says it all, the chip steps aside.
+        let chip = expected.as_ref().filter(|_| banner.is_empty()).map(|e| e.0.clone()).unwrap_or_default();
         // The window's own properties are what is compared, so a change reaches it once and nothing is set at rest.
         if let Some(ui) = self.ui() {
             if ui.global::<Bar>().get_loading() != chip.as_str() {
                 ui.global::<Bar>().set_loading(chip.as_str().into());
             }
-            if ui.get_engine() != banner.0.as_str() {
-                ui.set_engine(banner.0.as_str().into());
-            }
-            if ui.get_engine_lost() != banner.1 {
-                ui.set_engine_lost(banner.1);
+            if ui.get_engine() != banner.as_str() {
+                ui.set_engine(banner.as_str().into());
             }
         }
         // The watchdog ticks only while something is out or being waited on, so the shell does not wake at rest.

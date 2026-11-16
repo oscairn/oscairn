@@ -152,6 +152,8 @@ pub struct Screen {
     /// The slot the engine is opening (`current` may already be a later one waiting).
     opening_index: Option<usize>,
     queued: Option<usize>,
+    /// A load the engine refused as busy is to be asked again after `BUSY_RETRY` (the shell sets the timer).
+    retry_wanted: bool,
     names: Rc<VecModel<ListRow>>,
     rows: Rc<VecModel<SlotData>>,
     state_file: Option<PathBuf>,
@@ -207,6 +209,7 @@ impl Screen {
             opening: false,
             opening_index: None,
             queued: None,
+            retry_wanted: false,
             names,
             rows,
             state_file,
@@ -230,6 +233,7 @@ impl Screen {
     pub fn connected(&mut self) {
         self.opening = false;
         self.queued = None;
+        self.retry_wanted = false;
         self.out.push((Request::Setlists, "library.query", json!({"type": "oscairn.setlist", "limit": 1000})));
         self.out.push((Request::Performances, "library.query", json!({"kind": "performance", "limit": 1000})));
     }
@@ -244,15 +248,16 @@ impl Screen {
             Ok(r) => r,
             Err(e) => {
                 match request {
-                    Request::Load(i) => {
+                    Request::Load(i) if e.code == crate::client::BUSY => {
+                        // Another client's long request: this one waits its turn, asked again in a moment, as a newer
+                        // press would (the last chosen wins). It stays opening: the chip and the slot's bar stay.
+                        self.queued = self.queued.or(Some(i));
+                        self.retry_wanted = true;
+                    }
+                    Request::Load(_) => {
                         self.opening = false;
                         self.show();
-                        if e.code == crate::client::BUSY && self.queued.is_none() {
-                            // Another client's long request: this one waits its turn, as a newer press would.
-                            self.queued = Some(i);
-                        } else {
-                            self.say(format!("Did not open: {}", e.message));
-                        }
+                        self.say(format!("Did not open: {}", e.message));
                         self.next_queued();
                     }
                     Request::Prepare => {}
@@ -308,6 +313,19 @@ impl Screen {
                 }
             }
             Request::Prepare => {}
+        }
+    }
+
+    /// Whether a busy load is to be asked again in `BUSY_RETRY` (taken: the shell sets the timer).
+    pub fn take_retry(&mut self) -> bool {
+        std::mem::take(&mut self.retry_wanted)
+    }
+
+    /// The timer: the load the engine refused is asked again, or the slot chosen since.
+    pub fn retry(&mut self) {
+        self.opening = false;
+        if !self.next_queued() {
+            self.show();
         }
     }
 
@@ -428,6 +446,7 @@ impl Screen {
             self.queued = Some(index);
             self.say(format!("{}. {} opens once the last one has.", index + 1, self.title(index)));
         } else {
+            self.queued = None;
             self.opening = true;
             self.opening_index = Some(index);
             self.out.push((Request::Load(index), "library.load", json!({"id": slot.id})));

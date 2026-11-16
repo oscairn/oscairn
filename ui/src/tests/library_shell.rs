@@ -111,7 +111,8 @@ fn a_load_that_takes_seconds_leaves_the_screen_alive() {
     s.f.pump();
     s.f.pump(); // the busy answer is heard (Event::Busy), then its reply
     assert_eq!(footer(&ui).0, "Opening Brass Corner...");
-    assert_eq!(value_of(&ui, "Brass Corner"), "Opening  ·  brass  ·  warm");
+    assert_eq!(value_of(&ui, "Brass Corner"), "brass  ·  warm", "the row's bar says it opens, not its text");
+    assert_eq!(rows(&ui).iter().filter(|r| r.busy).map(|r| r.label.to_string()).collect::<Vec<_>>(), ["Brass Corner"]);
     shell::act(Action::Move { pane: None, by: 1 });
     assert!(rows(&ui).iter().any(|r| r.cursor), "a cursor move is answered while it loads");
     // The engine is free again: the step is asked again by the shell's own timer, and the chain runs.

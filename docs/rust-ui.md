@@ -255,24 +255,30 @@ normal wait (a fraction of a second to a few seconds; 4 to 20 s for a big one on
 "Long requests"), so it never reads as a fault.
 
 - **The indicator** is `slint/loading.slint`, one component with a text and an optional progress (0..1; negative: none,
-  and the bar sweeps), drawn in the theme's colors, its thickness and sweep period the theme's (`Theme.loading-bar`,
-  `loading-segment`, `loading-period`; a test reads the file for a literal). Others use it as is (a library opening, a package
+  and the bar sweeps; a progress fed in later needs no change of layout), its thickness and sweep period the theme's
+  (`Theme.loading-bar`, `loading-segment`, `loading-period`; a test reads the file for a literal). As the top bar's chip
+  (`filled`) it is a yellow pill: `Theme.loading-background` (the theme's `warning` unless a theme restyles it) with
+  `loading-text` (`on-warning`, black or white, whichever reads better: a test holds 4.5 to 1 in every theme) in the bar's
+  label size, the bar inside it in the text's color; unfilled it is the bar alone (a tile's or a row's foot). Others use it as is (a library opening, a package
   install, an export). It sweeps through `animation-tick()`, so the window redraws only while it exists: the shell makes it
   while a wait lasts and removes it when it ends, and a test holds that no frame follows (`tests/loading.rs`).
 - **Where:** the top bar's title area, as a chip at its right edge, "Loading NAME", beside the Performance that is still
-  shown (the title's room shortens for it, never to under half). On the Setlist the slot being opened also has the bar along
-  its foot. Nothing covers the screen, nothing blocks Back, EXIT or the dial.
+  shown (the title's room shortens for it; the chip is at most half of it and its name is cut with an ellipsis, never
+  wrapped, and nothing else on the bar moves). On the Setlist the slot being opened, and in the Library the row, also have the
+  bar along their foot (the row's old "Opening" text is gone). Nothing covers the screen, nothing blocks Back, EXIT or the dial.
 - **What names it** (`shell/wait_glue.rs`): the name the UI itself asked for (the Setlist's slot, the Library's row: not while
   the question about unsaved changes is open, as nothing has been asked of the engine); "Loading the last Performance" for
   `performance.reopen`; "Loading a Performance" when the engine's busy answer names a load another client asked for
   (`data.busy`, then `engine.busy` ends it: the engine tells no name); "Working" for another long request. The engine reports
   no progress, so the bar sweeps. A protocol addition that tells the name and progress is wanted (see ui/PROGRESS.md).
-- **Busy answers** during a load are never errors: reads and steps are asked again as before, and a screen that shows a refusal
+- **Busy answers** during a load are never errors: reads and steps are asked again as before (after `client::BUSY_RETRY`,
+  100 ms, the Library's and the Setlist's alike: the Setlist's refused load stays "opening" meanwhile), and a screen that shows a refusal
   says "Still opening a Performance. Try again in a moment." (`client::refusal`), not the engine's text. An edit refused during a
   load is not retried: it would land on the Performance that opens next.
-- **The banner** under the bar stays for three cases and says what is happening in plain words: the connection lost (danger
-  color), a wait far past its usual (30 s, half as long again as the slowest measured load; warning color: "Opening X is taking
-  much longer than usual. Wait for it, or restart the instrument if it never ends."), and a request that is no load, no
+- **The banner** under the bar stays for three cases and says what is happening in plain words, in the danger color so it
+  reads as something other than the yellow chip; it takes its own room (the screen starts under it, nothing is hidden) and the
+  chip steps aside while it shows: the connection lost, a wait far past its usual (30 s, half as long again as the slowest
+  measured load: "Opening X is taking much longer than usual. Wait for it, or restart the instrument if it never ends."), and a request that is no load, no
   install, with no answer after 2 s (reading a setlist: "The sound engine is slow to answer...").
 
 ## The Setlist

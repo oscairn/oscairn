@@ -41,6 +41,10 @@ pub struct Error {
 /// The engine is busy with a long request and refused this one (docs/control-protocol.md, "Long requests").
 pub const BUSY: i64 = -32009;
 
+/// How long a request the engine refused as busy waits before it is asked again: the pace of the JUCE job's wait, which the
+/// Library's opening and the Setlist both keep.
+pub const BUSY_RETRY: Duration = Duration::from_millis(100);
+
 /// The long requests that open a Performance: while one runs, the engine is busy with a load.
 pub fn is_load(method: &str) -> bool {
     ["library.load", "performance.load", "performance.prepare", "performance.reopen"].contains(&method)

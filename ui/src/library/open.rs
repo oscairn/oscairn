@@ -130,7 +130,7 @@ impl Screen {
         if let Err(e) = &result {
             if e.code == BUSY {
                 let (method, params) = self.step_request();
-                self.push_after(Duration::from_millis(100), Request::Open(step), method, params);
+                self.push_after(crate::client::BUSY_RETRY, Request::Open(step), method, params);
                 return false;
             }
         }

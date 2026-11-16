@@ -29,10 +29,9 @@ export component Shell inherits Window {
     background: Theme.background;
     default-font-family: Theme.font-family;
     // Empty while the engine is as it should be; else a sentence for what is wrong and unexplained (no answer, a wait far past
-    // its usual, the connection lost): a banner. An expected wait (a Performance opening) is never this: it is the top bar's
-    // loading chip (Bar.loading). `engine-lost` is the connection gone (danger); else a warning.
+    // its usual, the connection lost): a banner in the danger color that pushes the screen down, hiding none of it. An
+    // expected wait (a Performance opening) is never this: it is the top bar's loading chip (Bar.loading).
     in property <string> engine;
-    in property <bool> engine-lost;
     // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening; 3 Play, 4 Part, 5 chain, 6 sounds, 7 a grid page, 8 a scene's setup, 9 the Parts list, 10 the Mixer, 11 the Controls page, 12 Routing, 13 the Library, 14 the Settings app (`opening` names a JUCE screen).
     in property <int> screen;
     in property <string> opening;
@@ -48,6 +47,8 @@ export component Shell inherits Window {
     out property <bool> title-shrunk: bar.title-shrunk;
     out property <bool> title-cut: bar.title-cut;
     out property <length> rec-width: bar.rec-width;
+    out property <length> loading-width: bar.loading-width;
+    out property <length> content-top: Theme.bar-height + (root.engine != "" ? Theme.touch : 0px); // the banner takes its own room
     out property <int> actions-mode: bar.actions-mode;
     out property <int> meters-mode: bar.meters-mode;
     out property <int> home-columns: home.columns;
@@ -68,77 +69,77 @@ export component Shell inherits Window {
         width: parent.width;
     }
     home := Home {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 0;
     }
     Setlist {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 1;
     }
     Play {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 3;
     }
     // The Library's tabs, and the shared list screen in the area they leave.
     library := Library {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 13;
     }
     // The Settings app's tabs, the same way.
     settings := Settings {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 14;
     }
     Part {
         x: root.screen == 14 ? settings.content-x - Theme.margin : root.screen == 13 ? library.content-x - Theme.margin : 0px;
-        y: Theme.bar-height + (root.screen == 14 ? settings.content-y - Theme.margin : root.screen == 13 ? library.content-y - Theme.margin : 0px);
+        y: root.content-top + (root.screen == 14 ? settings.content-y - Theme.margin : root.screen == 13 ? library.content-y - Theme.margin : 0px);
         width: root.screen == 14 ? settings.content-width + 2 * Theme.margin : root.screen == 13 ? library.content-width + 2 * Theme.margin : parent.width;
-        height: root.screen == 14 ? settings.content-height + 2 * Theme.margin : root.screen == 13 ? library.content-height + 2 * Theme.margin : parent.height - Theme.bar-height;
+        height: root.screen == 14 ? settings.content-height + 2 * Theme.margin : root.screen == 13 ? library.content-height + 2 * Theme.margin : parent.height - root.content-top;
         visible: (root.screen >= 4 && root.screen <= 6) || root.screen == 8 || root.screen == 13 || root.screen == 14;
     }
     Parts {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 9;
     }
     Mixer {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 10;
     }
     Controls {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 11;
     }
     Routing {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 12;
     }
     Grid {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
         visible: root.screen == 7;
     }
     if root.screen == 2: Text {
-        y: Theme.bar-height;
-        height: parent.height - Theme.bar-height;
+        y: root.content-top;
+        height: parent.height - root.content-top;
         horizontal-alignment: center;
         vertical-alignment: center;
         font-size: Theme.title;
@@ -147,36 +148,36 @@ export component Shell inherits Window {
     }
     // The screen above the overlay takes no touch while the keyboard is open.
     if KeyboardState.open: TouchArea {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
     }
     if KeyboardState.open: Keyboard {
         width: parent.width;
-        height: KeyboardState.keys-shown ? min(KeyboardState.overlay-height, parent.height - Theme.bar-height) : parent.height - Theme.bar-height;
+        height: KeyboardState.keys-shown ? min(KeyboardState.overlay-height, parent.height - root.content-top) : parent.height - root.content-top;
         y: parent.height - self.height;
     }
     if PianoState.open: Piano {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
     }
     if MenuState.open: Menu {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
     }
     if NoticeState.open: Notice {
-        y: Theme.bar-height;
+        y: root.content-top;
         width: parent.width;
-        height: parent.height - Theme.bar-height;
+        height: parent.height - root.content-top;
     }
     if root.engine != "": Section {
         x: Theme.margin;
         y: Theme.bar-height + Theme.gap;
         width: parent.width - 2 * Theme.margin;
-        height: Theme.touch;
-        fill: root.engine-lost ? Theme.danger : Theme.warning;
+        height: Theme.touch - Theme.gap;
+        fill: Theme.danger;
         Text {
             x: Theme.pad-wide;
             width: parent.width - 2 * Theme.pad-wide;

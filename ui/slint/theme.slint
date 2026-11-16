@@ -44,6 +44,12 @@ export global Theme {
     in property <color> danger: #FF6B63;
     // A meter past three quarters (the JUCE meters' yellow unless the theme says).
     in property <color> warning: #e8c547;
+    // The text that reads on the warning color (black on a bright one, as `on-accent` is for the accent).
+    in property <color> on-warning: #000000;
+    // A wait the player expects (a Performance opening): its chip's fill and the text on it, the theme's attention color and
+    // the text paired with it unless a theme restyles the chip.
+    in property <color> loading-background: warning;
+    in property <color> loading-text: on-warning;
     // The cursor's border (the accent unless the theme says).
     in property <color> focus: accent;
     // Tabs (src/palette.rs `tabs`): the selected tab's fill and its text, an unselected tab's fill and its text.
@@ -132,6 +138,7 @@ export global Theme {
     // A wait's bar (loading.slint): its thickness, the share of its track the sweep covers, and the sweep's period.
     out property <length> loading-bar: 3px;
     out property <float> loading-segment: 0.3;
+    out property <float> loading-track-alpha: 0.3; // the bar's track on the chip: the chip's text color, this faint
     out property <duration> loading-period: 1600ms;
     // A tab's fill from its box: room for the cursor's ring and a hair of gap.
     out property <length> tab-pad: cursor-width + hair;

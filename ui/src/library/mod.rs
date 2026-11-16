@@ -483,9 +483,6 @@ impl Screen {
         if !item.unfit.is_empty() {
             detail = first("Does not fit this device", detail);
         }
-        if self.job.as_ref().is_some_and(|j| j.id == item.id) {
-            detail = first("Opening", detail);
-        }
         if item.id == self.auditioning.id && !item.id.is_empty() {
             detail = first("Auditioning", detail);
         }
@@ -507,7 +504,7 @@ impl Screen {
                 let mut rows = vec![(Row::Filters, row("Filters".into(), format!("{} ›", self.filters.summary(&self.libraries)), 2))];
                 rows.extend(self.items.iter().enumerate().map(|(i, item)| {
                     let tint = color(&item.color);
-                    (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..row(item.title().into(), self.detail(item), 2) })
+                    (Row::Item(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), busy: self.opening_name().is_some() && self.job.as_ref().is_some_and(|j| j.id == item.id), ..row(item.title().into(), self.detail(item), 2) })
                 }));
                 // Nothing of the kind and nothing narrowing it: a way to the Catalog (LibraryPane.cpp: "Browse the Catalog").
                 if self.total == 0 && !self.filters.narrowed() && self.kind != Kind::Setlist {

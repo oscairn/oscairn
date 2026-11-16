@@ -235,6 +235,117 @@ impl<T: Copy> Owned<T> {
     }
 }
 
+// ---- The plugin's calls ----
+
+/// The plugin a Host holds: made only from the Host's plugin field (instance, live) or a table it gave, used only while
+/// the Host holds it (close() destroys it and clears the field, with no Plugin of it kept past that).
+#[derive(Clone, Copy)]
+pub struct Plugin(NonNull<clap_plugin>);
+impl Plugin {
+    fn table(&self) -> &clap_plugin {
+        // SAFETY: Plugin's invariant: the live plugin's own clap_plugin.
+        unsafe { self.0.as_ref() }
+    }
+    pub fn raw(self) -> *const clap_plugin {
+        self.0.as_ptr()
+    }
+    /// A member of one of the plugin's tables called on it: its clap_plugin's (below), or one of its extension tables'.
+    pub fn call<F: Member>(self, f: F, args: F::Args) -> F::Out {
+        // SAFETY: the plugin is live (Plugin's invariant) and f is one of its own members (a None aborts, where Host.cpp's
+        // call through null would crash); each call is made on the thread and in the state CLAP names for it, as Host.cpp
+        // makes it, and its pointer arguments are references or the host's own buffers, valid for the call and sized as
+        // passed.
+        unsafe { f.invoke(self.raw(), args) }
+    }
+    pub fn init(self) -> bool {
+        self.call(self.table().init, ())
+    }
+    pub fn destroy(self) {
+        self.call(self.table().destroy, ())
+    }
+    pub fn activate(self, rate: f64, min: u32, max: u32) -> bool {
+        self.call(self.table().activate, (rate, min, max))
+    }
+    pub fn deactivate(self) {
+        self.call(self.table().deactivate, ())
+    }
+    pub fn start_processing(self) -> bool {
+        self.call(self.table().start_processing, ())
+    }
+    pub fn stop_processing(self) {
+        self.call(self.table().stop_processing, ())
+    }
+    pub fn reset(self) {
+        self.call(self.table().reset, ())
+    }
+    pub fn process(self, block: &clap_process) -> clap_process_status {
+        self.call(self.table().process, (block,))
+    }
+    pub fn on_main_thread(self) {
+        self.call(self.table().on_main_thread, ())
+    }
+    /// The plugin's extension table of type T for this ID, or null.
+    pub fn ext_ptr<T>(self, id: &CStr) -> *const T {
+        self.call(self.table().get_extension, (id.as_ptr(),)).cast()
+    }
+    pub fn ext<T>(&self, id: &CStr) -> Option<&T> {
+        // SAFETY: null, or the plugin's table of type T for this ID (CLAP), alive as long as the plugin.
+        unsafe { self.ext_ptr::<T>(id).as_ref() }
+    }
+}
+/// A function of one of the plugin's tables, its first argument the plugin; Plugin::call is its one caller.
+pub trait Member {
+    type Args;
+    type Out;
+    /// # Safety
+    /// Plugin::call's.
+    unsafe fn invoke(self, plugin: *const clap_plugin, args: Self::Args) -> Self::Out;
+}
+macro_rules! member { ($($a:ident)*) => {
+    impl<R, $($a),*> Member for unsafe extern "C" fn(*const clap_plugin $(, $a)*) -> R {
+        type Args = ($($a,)*);
+        type Out = R;
+        #[allow(non_snake_case)]
+        unsafe fn invoke(self, plugin: *const clap_plugin, ($($a,)*): Self::Args) -> R {
+            // SAFETY: the caller's.
+            unsafe { self(plugin $(, $a)*) }
+        }
+    }
+    impl<R, $($a),*> Member for Option<unsafe extern "C" fn(*const clap_plugin $(, $a)*) -> R> {
+        type Args = ($($a,)*);
+        type Out = R;
+        unsafe fn invoke(self, plugin: *const clap_plugin, args: Self::Args) -> R {
+            // SAFETY: the caller's.
+            unsafe { self.unwrap().invoke(plugin, args) }
+        }
+    }
+}}
+member!();
+member!(A);
+member!(A B);
+member!(A B C);
+member!(A B C D);
+member!(A B C D E);
+member!(A B C D E F);
+member!(A B C D E F G);
+/// One of the plugin's extension tables, as get_extension gave it: null, or the live plugin's own (cleared in close()
+/// with the plugin), in the group of the Host field it is.
+#[repr(transparent)]
+pub struct Ext<T>(Owned<*const T>);
+impl<T> Ext<T> {
+    pub fn get(&self) -> Option<&T> {
+        // SAFETY: null, or the live plugin's table of type T, alive as long as the plugin (CLAP) and so past this borrow
+        // of the Host: no borrow of a table outlives the call into the host it is made in.
+        unsafe { self.0.get().as_ref() }
+    }
+    pub fn set(&self, table: *const T) {
+        self.0.set(table)
+    }
+    pub fn is_null(&self) -> bool {
+        self.0.get().is_null()
+    }
+}
+
 pub struct Host {
     // ---- Fixed: written before the plugin is made, then only read, by any thread ----
     pub host: clap_host,
@@ -284,21 +395,21 @@ pub struct Host {
 
     // ---- The main thread's ----
     pub library: Owned<Option<Arc<Library>>>,
-    ui: Owned<*const oscairn_plugin_ui_t>,
+    ui: Ext<oscairn_plugin_ui_t>,
     ui_views: Owned<bool>,
     ui_seconds: Owned<bool>,
-    state: Owned<*const clap_plugin_state>,
+    state: Ext<clap_plugin_state>,
     exclusive_state: Owned<bool>,
-    pub sounds: Owned<*const oscairn_plugin_sound_contexts_t>,
+    pub sounds: Ext<oscairn_plugin_sound_contexts_t>,
     pub honors_volume: Owned<bool>,
-    asset_dependencies: Owned<*const oscairn_plugin_asset_dependencies_t>,
+    asset_dependencies: Ext<oscairn_plugin_asset_dependencies_t>,
     asset_optional: Owned<bool>,
     pub assets: Owned<Option<crate::bindings::oscairn_clap_assets>>,
     window: Owned<*mut crate::bindings::kick_clap_window>,
-    plugin_latency: Owned<*const clap_plugin_latency>,
-    timer_support: Owned<*const clap_plugin_timer_support>,
-    fd_support: Owned<*const clap_plugin_posix_fd_support>,
-    memory: Owned<*const oscairn_plugin_memory_t>,
+    plugin_latency: Ext<clap_plugin_latency>,
+    timer_support: Ext<clap_plugin_timer_support>,
+    fd_support: Ext<clap_plugin_posix_fd_support>,
+    memory: Ext<oscairn_plugin_memory_t>,
     pub has_declared: Owned<bool>,
     context: Owned<bool>,
     pub declared: Owned<oscairn_memory_t>,
@@ -312,18 +423,18 @@ pub struct Host {
     timers: Owned<Vec<Timer>>,
     next_timer: Owned<clap_id>,
     fds: Owned<Vec<Fd>>,
-    gui: Owned<*const clap_plugin_gui>,
+    gui: Ext<clap_plugin_gui>,
     pub gui_api: Owned<*const c_char>,
     gui_floating: Owned<bool>,
 
     // ---- Gated: written by the main thread holding the gate; read by the gate's holder, and by the main thread ----
     pub plugin: Owned<*const clap_plugin>,
-    params: Owned<*const clap_plugin_params>,
-    pub sound_snapshots: Owned<*const oscairn_plugin_sound_snapshots_t>,
+    params: Ext<clap_plugin_params>,
+    pub sound_snapshots: Ext<oscairn_plugin_sound_snapshots_t>,
     // Also read by the audio thread between blocks (set_voice_limits, voice_report): it is written only as the plugin
     // initializes, before any audio thread has the host.
-    pub voice_budget: Owned<*const oscairn_plugin_voice_budget_t>,
-    ports_activation: Owned<*const clap_plugin_audio_ports_activation>,
+    pub voice_budget: Ext<oscairn_plugin_voice_budget_t>,
+    ports_activation: Ext<clap_plugin_audio_ports_activation>,
     activate_while_processing: Owned<bool>,
     active: Owned<bool>,
     pub param_info: Owned<Vec<Parameter>>,
@@ -1029,11 +1140,19 @@ unsafe extern "C" fn extension(_: *const clap_host, id: *const c_char) -> *const
     }
 }
 
+impl Host {
+    /// The plugin, where there is one.
+    pub fn instance(&self) -> Option<Plugin> {
+        NonNull::new(self.plugin.get().cast_mut()).map(Plugin)
+    }
+    /// The plugin, which the caller knows there is (as Host.cpp's caller does, which would crash on none).
+    pub fn live(&self) -> Plugin {
+        self.instance().expect("the host's plugin")
+    }
+}
 /// The plugin's extension table of type T, or null.
 fn ext<T>(s: &Host, id: &CStr) -> *const T {
-    let p = s.plugin.get();
-    // SAFETY: the live plugin; get_extension checked at initialization or before.
-    unsafe { ((*p).get_extension.unwrap())(p, id.as_ptr()).cast() }
+    s.live().ext_ptr(id)
 }
 
 // ---- Loading, activation, the description ----
@@ -1046,9 +1165,7 @@ pub fn param_index(s: &Host, id: clap_id) -> usize {
 pub fn stop(s: H) {
     let _scope = AudioScope::new(s.ptr());
     if s.processing.load(SeqCst) {
-        let p = s.plugin.get();
-        // SAFETY: the live plugin, processing; its member checked at initialization.
-        unsafe { ((*p).stop_processing.unwrap())(p) };
+        s.live().stop_processing();
     }
     s.processing.store(false, SeqCst);
     s.sleeping.store(false, SeqCst);
@@ -1056,9 +1173,7 @@ pub fn stop(s: H) {
 pub fn deactivate(s: H) {
     stop(s);
     if s.active.get() {
-        let p = s.plugin.get();
-        // SAFETY: the live plugin, active; its member checked at initialization.
-        unsafe { ((*p).deactivate.unwrap())(p) };
+        s.live().deactivate();
     }
     s.active.set(false);
 }
@@ -1071,13 +1186,10 @@ pub fn close(s: H) {
     }
     s.gui.set(null());
     s.gui_api.set(null());
-    let p = s.plugin.get();
-    if !p.is_null() {
+    if let Some(p) = s.instance() {
         deactivate(s);
-        // SAFETY: the live plugin, destroyed once.
-        if let Some(destroy) = unsafe { (*p).destroy } {
-            // SAFETY: as above.
-            unsafe { destroy(p) };
+        if let Some(destroy) = p.table().destroy {
+            p.call(destroy, ()); // destroyed once: its field cleared below
         }
     }
     // SAFETY: this host as the owner of its leases.
@@ -1178,19 +1290,14 @@ pub fn describe(path: &str, d: &clap_sys::plugin::clap_plugin_descriptor) -> Des
 
 /// As load.
 pub fn initialize(s: H, rate: f64, frames: u32) -> R<()> {
-    let p = s.plugin.get();
-    // SAFETY: the plugin just made, or null; init called once its interface is checked.
-    unsafe {
-        if p.is_null() || (*p).init.is_none() || (*p).destroy.is_none() {
-            return Err("Incomplete CLAP plugin interface".into());
-        }
-        if !((*p).init.unwrap())(p) {
-            return Err("Plugin initialization failed".into());
-        }
+    let Some(p) = s.instance().filter(|p| p.table().init.is_some() && p.table().destroy.is_some()) else {
+        return Err("Incomplete CLAP plugin interface".into());
+    };
+    if !p.init() {
+        return Err("Plugin initialization failed".into());
     }
     // The rest only once initialized: plugins built on clap-helpers fill them in during init.
-    // SAFETY: as above.
-    let q = unsafe { &*p };
+    let q = p.table();
     if q.activate.is_none()
         || q.deactivate.is_none()
         || q.start_processing.is_none()
@@ -1204,77 +1311,60 @@ pub fn initialize(s: H, rate: f64, frames: u32) -> R<()> {
     }
     s.params.set(ext(&s, CLAP_EXT_PARAMS));
     s.ui.set(ext(&s, ids::OSCAIRN_EXT_UI));
-    s.ui_seconds.set(!s.ui.get().is_null());
-    if s.ui.get().is_null() {
+    s.ui_seconds.set(!s.ui.is_null());
+    if s.ui.is_null() {
         s.ui.set(ext(&s, ids::OSCAIRN_EXT_UI_DRAFT_4)); // its prefix: no seconds()
     }
-    s.ui_views.set(!s.ui.get().is_null());
-    if s.ui.get().is_null() {
+    s.ui_views.set(!s.ui.is_null());
+    if s.ui.is_null() {
         s.ui.set(ext(&s, ids::OSCAIRN_EXT_UI_DRAFT_3)); // its prefix: no views
     }
-    // SAFETY: (each table read and call in initialize): the live plugin's tables as get_extension gave them, each
-    // checked before its members are called, on the main thread.
-    if unsafe { s.ui.get().as_ref() }.is_some_and(|ui| ui.param_hint.is_none()) {
+    if s.ui.get().is_some_and(|ui| ui.param_hint.is_none()) {
         s.ui.set(null());
     }
-    // SAFETY: as above.
-    if let Some(params) = unsafe { s.params.get().as_ref() } {
+    if let Some(params) = s.params.get() {
         if params.count.is_none() || params.get_info.is_none() || params.get_value.is_none() || params.flush.is_none() {
             return Err("Incomplete CLAP parameter interface".into());
         }
     }
     s.sounds.set(ext(&s, ids::OSCAIRN_EXT_SOUND_CONTEXTS));
-    // SAFETY: as above.
-    if let Some(x) = unsafe { s.sounds.get().as_ref() } {
-        // SAFETY: as above.
-        if x.capacity.is_none()
-            || x.get.is_none()
-            || x.prepare.is_none()
-            || x.select.is_none()
-            || x.discard.is_none()
-            || unsafe { x.capacity.unwrap()(p) } > 256
-        {
+    if let Some(x) = s.sounds.get() {
+        if x.capacity.is_none() || x.get.is_none() || x.prepare.is_none() || x.select.is_none() || x.discard.is_none() || p.call(x.capacity, ()) > 256 {
             return Err("Invalid sound-context interface".into());
         }
     }
     s.state.set(ext(&s, CLAP_EXT_STATE));
-    // SAFETY: as above.
-    let sounds = unsafe { s.sounds.get().as_ref() };
+    let sounds = s.sounds.get();
     s.exclusive_state.set(sounds.is_some_and(|x| !x.state.is_null()));
     if s.exclusive_state.get() {
         s.state.set(sounds.map_or(null(), |x| x.state));
         s.sound_snapshots.set(ext(&s, ids::OSCAIRN_EXT_SOUND_SNAPSHOTS));
     }
-    // SAFETY: as above.
-    if let Some(x) = unsafe { s.sound_snapshots.get().as_ref() } {
+    if let Some(x) = s.sound_snapshots.get() {
         if x.prepare.is_none() || x.ring_out.is_none() != x.choke_retiring.is_none() {
             return Err("Invalid sound-snapshot interface".into());
         }
     }
     s.voice_budget.set(ext(&s, ids::OSCAIRN_EXT_VOICE_BUDGET));
-    // SAFETY: as above.
-    let budget = unsafe { s.voice_budget.get().as_ref() };
+    let budget = s.voice_budget.get();
     if let Some(x) = budget {
         if x.honors_volume.is_none() || x.set_limits.is_none() || x.active_voices.is_none() || x.notes.is_none() {
             return Err("Invalid voice-budget interface".into());
         }
     }
-    // SAFETY: as above.
-    s.honors_volume.set(budget.is_some_and(|x| unsafe { x.honors_volume.unwrap()(p) }));
-    // SAFETY: as above.
-    if let Some(x) = unsafe { s.state.get().as_ref() } {
+    s.honors_volume.set(budget.is_some_and(|x| p.call(x.honors_volume, ())));
+    if let Some(x) = s.state.get() {
         if x.save.is_none() || x.load.is_none() {
             return Err("Incomplete plugin state interface".into());
         }
     }
     s.asset_dependencies.set(ext(&s, ids::OSCAIRN_EXT_ASSET_DEPENDENCIES));
-    s.asset_optional.set(!s.asset_dependencies.get().is_null());
-    if s.asset_dependencies.get().is_null() {
+    s.asset_optional.set(!s.asset_dependencies.is_null());
+    if s.asset_dependencies.is_null() {
         s.asset_dependencies.set(ext(&s, ids::OSCAIRN_EXT_ASSET_DEPENDENCIES_DRAFT_1));
         // its first two members only
     }
-    // SAFETY: as above.
-    let dependencies = unsafe { s.asset_dependencies.get().as_ref() };
+    let dependencies = s.asset_dependencies.get();
     if let Some(x) = dependencies {
         if x.count.is_none() || x.get.is_none() {
             return Err("Incomplete asset-dependency interface".into());
@@ -1286,34 +1376,27 @@ pub fn initialize(s: H, rate: f64, frames: u32) -> R<()> {
     s.timer_support.set(ext(&s, CLAP_EXT_TIMER_SUPPORT));
     s.fd_support.set(ext(&s, CLAP_EXT_POSIX_FD_SUPPORT));
     s.memory.set(ext(&s, ids::OSCAIRN_EXT_MEMORY));
-    // SAFETY: as above.
-    if let Some(x) = unsafe { s.memory.get().as_ref() } {
+    if let Some(x) = s.memory.get() {
         if x.estimate.is_none() || x.current.is_none() {
             return Err("Incomplete memory interface".into());
         }
     }
     s.ports_activation.set(ext(&s, CLAP_EXT_AUDIO_PORTS_ACTIVATION));
-    if s.ports_activation.get().is_null() {
+    if s.ports_activation.is_null() {
         s.ports_activation.set(ext(&s, CLAP_EXT_AUDIO_PORTS_ACTIVATION_COMPAT));
     }
-    // SAFETY: as above.
-    if unsafe { s.ports_activation.get().as_ref() }.is_some_and(|x| x.set_active.is_none()) {
+    if s.ports_activation.get().is_some_and(|x| x.set_active.is_none()) {
         s.ports_activation.set(null()); // incomplete: told nothing
     }
-    // SAFETY: as above.
-    let while_processing = unsafe { s.ports_activation.get().as_ref() }.is_some_and(|x| x.can_activate_while_processing.is_some_and(|f| unsafe { f(p) }));
+    let while_processing = s.ports_activation.get().is_some_and(|x| x.can_activate_while_processing.is_some_and(|f| p.call(f, ())));
     s.activate_while_processing.set(while_processing);
     s.applied_told.set(false);
     find_gui(s);
     // Initialized and not yet processing, on the main thread, as clap.render asks.
-    let render: *const clap_plugin_render = ext(&s, CLAP_EXT_RENDER);
-    // SAFETY: as above.
-    if let Some(r) = unsafe { render.as_ref() } {
+    if let Some(r) = p.ext::<clap_plugin_render>(CLAP_EXT_RENDER) {
         if let Some(set) = r.set {
-            // SAFETY: as above.
-            let hard = r.has_hard_realtime_requirement.is_some_and(|f| unsafe { f(p) });
-            // SAFETY: as above.
-            unsafe { set(p, if s.offline.get() && !hard { CLAP_RENDER_OFFLINE } else { CLAP_RENDER_REALTIME }) };
+            let hard = r.has_hard_realtime_requirement.is_some_and(|f| p.call(f, ()));
+            p.call(set, (if s.offline.get() && !hard { CLAP_RENDER_OFFLINE } else { CLAP_RENDER_REALTIME },));
         }
     }
     s.sample_rate.set(rate);
@@ -1330,14 +1413,13 @@ fn find_gui(s: H) {
     s.gui.set(ext(&s, CLAP_EXT_GUI));
     s.gui_api.set(null());
     s.gui_floating.set(false);
-    // SAFETY: (each read and call in find_gui): the live plugin's gui table, its members checked before they are called.
-    let Some(g) = (unsafe { s.gui.get().as_ref() }) else { return };
+    let Some(g) = s.gui.get() else { return };
     if g.is_api_supported.is_none() || g.create.is_none() || g.destroy.is_none() || g.show.is_none() || g.hide.is_none() {
         s.gui.set(null());
         return;
     }
-    let p = s.plugin.get();
-    // SAFETY: a plain call; the API name is static.
+    let p = s.live();
+    // SAFETY: a plain call; the API name is static, NUL-terminated.
     let api = unsafe { bridge::kick_clap_window_api() };
     // SAFETY: as above.
     let window: Option<&CStr> = (!api.is_null()).then(|| unsafe { CStr::from_ptr(api) });
@@ -1348,16 +1430,11 @@ fn find_gui(s: H) {
     } else {
         CLAP_WINDOW_API_X11
     };
-    // SAFETY: as above.
-    let embedded = window.filter(|api| g.get_size.is_some() && g.set_parent.is_some() && unsafe { g.is_api_supported.unwrap()(p, api.as_ptr(), false) });
-    if let Some(api) = embedded {
+    if let Some(api) = window.filter(|api| g.get_size.is_some() && g.set_parent.is_some() && p.call(g.is_api_supported, (api.as_ptr(), false))) {
         s.gui_api.set(api.as_ptr());
-    } else {
-        // SAFETY: as above.
-        if unsafe { g.is_api_supported.unwrap()(p, platform.as_ptr(), true) } {
-            s.gui_api.set(platform.as_ptr());
-            s.gui_floating.set(true);
-        }
+    } else if p.call(g.is_api_supported, (platform.as_ptr(), true)) {
+        s.gui_api.set(platform.as_ptr());
+        s.gui_floating.set(true);
     }
 }
 /// Host.cpp's showGui: the editor made (embedded in a window of the host's own, or floating), titled and shown. The
@@ -1370,44 +1447,36 @@ pub fn show_gui(s: H, title: &CStr) -> R<()> {
     unsafe extern "C" fn resized(c: *mut c_void, w: *mut u32, h: *mut u32) {
         // SAFETY: as closing, on the main thread.
         let s = unsafe { H::new(c.cast()) };
-        let p = s.plugin.get();
-        // SAFETY: the live plugin's gui table (the window lives while the editor does); the window's own sizes.
-        unsafe {
-            let g = &*s.gui.get();
-            if let Some(adjust) = g.adjust_size {
-                adjust(p, w, h);
-            }
-            if let Some(set) = g.set_size {
-                set(p, *w, *h);
-            }
+        let (p, g) = (s.live(), s.gui.get().expect("the plugin's gui"));
+        if let Some(adjust) = g.adjust_size {
+            p.call(adjust, (w, h)); // the window's own sizes
+        }
+        if let Some(set) = g.set_size {
+            // SAFETY: the window's own sizes, for the call.
+            let (width, height) = unsafe { (*w, *h) };
+            p.call(set, (width, height));
         }
     }
-    let p = s.plugin.get();
-    // SAFETY: (each call in show_gui): the live plugin's gui table, checked complete by find_gui; the host's own window.
-    let g = unsafe { &*s.gui.get() };
+    let (p, g) = (s.live(), s.gui.get().expect("the plugin's gui"));
     if !s.gui_created.load(SeqCst) {
-        // SAFETY: as above.
+        // SAFETY: a plain call.
         unsafe { bridge::kick_clap_start_windows() };
-        // SAFETY: as above.
-        if !unsafe { g.create.unwrap()(p, s.gui_api.get(), s.gui_floating.get()) } {
+        if !p.call(g.create, (s.gui_api.get(), s.gui_floating.get())) {
             return Err("Plugin could not open its window".into());
         }
         s.gui_created.store(true, SeqCst);
         if !s.gui_floating.get() {
             let (mut width, mut height) = (0, 0);
-            // SAFETY: as above.
-            if !unsafe { g.get_size.unwrap()(p, &mut width, &mut height) } || width == 0 || height == 0 {
+            if !p.call(g.get_size, (&mut width, &mut height)) || width == 0 || height == 0 {
                 (width, height) = (640, 480);
             }
-            // SAFETY: as above.
-            let resizable = g.can_resize.is_some_and(|f| unsafe { f(p) });
-            // SAFETY: as above; the window calls back with this host, which outlives it (destroy_gui frees it).
+            let resizable = g.can_resize.is_some_and(|f| p.call(f, ()));
+            // SAFETY: the title NUL-terminated; the window calls back with this host, which outlives it (destroy_gui frees it).
             let window = unsafe { bridge::kick_clap_window_create(title.as_ptr(), width, height, resizable, s.ptr().cast(), Some(closing), Some(resized)) };
             s.window.set(window);
-            // SAFETY: as above.
+            // SAFETY: the host's own window (each window call below says the same).
             let parent = clap_window { api: s.gui_api.get(), specific: clap_window_handle { ptr: unsafe { bridge::kick_clap_window_view(window) } } };
-            // SAFETY: as above.
-            if !unsafe { g.set_parent.unwrap()(p, &parent) } {
+            if !p.call(g.set_parent, (&parent,)) {
                 return Err("Plugin could not open its window in the host's".into());
             }
         }
@@ -1417,12 +1486,10 @@ pub fn show_gui(s: H, title: &CStr) -> R<()> {
         // SAFETY: as above.
         unsafe { bridge::kick_clap_window_title(window, title.as_ptr()) };
     } else if let Some(suggest) = g.suggest_title {
-        // SAFETY: as above.
-        unsafe { suggest(p, title.as_ptr()) };
+        p.call(suggest, (title.as_ptr(),));
     }
     // An embedded editor shows with its window; a floating one must show itself.
-    // SAFETY: as above.
-    if !unsafe { g.show.unwrap()(p) } && s.gui_floating.get() {
+    if !p.call(g.show, ()) && s.gui_floating.get() {
         return Err("Plugin could not show its window".into());
     }
     if !window.is_null() {
@@ -1434,9 +1501,7 @@ pub fn show_gui(s: H, title: &CStr) -> R<()> {
 /// The main thread's.
 pub fn destroy_gui(s: H) {
     if s.gui_created.swap(false, SeqCst) {
-        let p = s.plugin.get();
-        // SAFETY: the live plugin's gui table, its editor made.
-        unsafe { ((*s.gui.get()).destroy.unwrap())(p) };
+        s.live().call(s.gui.get().expect("the plugin's gui").destroy, ());
     }
     let window = s.window.get();
     if !window.is_null() {
@@ -1458,32 +1523,29 @@ fn service_gui(s: H) {
         destroy_gui(s);
         return;
     }
-    let p = s.plugin.get();
-    // SAFETY: (each call in service_gui): the live plugin's gui table, its editor made; the host's own window.
-    let g = unsafe { &*s.gui.get() };
+    let (p, g) = (s.live(), s.gui.get().expect("the plugin's gui"));
     let w = s.window.get();
     let size = s.gui_size.swap(0, SeqCst);
     if size != 0 && !w.is_null() {
-        // SAFETY: as above.
+        // SAFETY: the host's own window (and so below).
         unsafe { bridge::kick_clap_window_size(w, (size >> 32) as u32, size as u32) };
     }
     if s.gui_hints.swap(false, SeqCst) && !w.is_null() {
         if let Some(f) = g.can_resize {
+            let resizable = p.call(f, ());
             // SAFETY: as above.
-            unsafe { bridge::kick_clap_window_resizable(w, f(p)) };
+            unsafe { bridge::kick_clap_window_resizable(w, resizable) };
         }
     }
     if s.gui_hide.swap(false, SeqCst) {
-        // SAFETY: as above.
-        unsafe { g.hide.unwrap()(p) };
+        p.call(g.hide, ());
         if !w.is_null() {
             // SAFETY: as above.
             unsafe { bridge::kick_clap_window_show(w, false) };
         }
     }
     if s.gui_show.swap(false, SeqCst) {
-        // SAFETY: as above.
-        unsafe { g.show.unwrap()(p) };
+        p.call(g.show, ());
         if !w.is_null() {
             // SAFETY: as above.
             unsafe { bridge::kick_clap_window_show(w, true) };
@@ -1499,19 +1561,16 @@ fn read_parameters(s: H) -> R<()> {
         value: f64,
     }
     let mut items = Vec::new();
-    // SAFETY: (each read and call in read_parameters): the live plugin's params table, checked complete at initialization.
-    if let Some(params) = unsafe { s.params.get().as_ref() } {
-        let p = s.plugin.get();
-        // SAFETY: as above.
-        let count = unsafe { params.count.unwrap()(p) };
+    if let Some(params) = s.params.get() {
+        let p = s.live();
+        let count = p.call(params.count, ());
         if count > 32768 {
             return Err("Plugin advertises too many parameters".into());
         }
         for i in 0..count {
             // SAFETY: plain old data, all zeros valid; then as above.
             let mut q: clap_param_info = unsafe { std::mem::zeroed() };
-            // SAFETY: as above.
-            if !unsafe { params.get_info.unwrap()(p, i, &mut q) } || q.id == CLAP_INVALID_ID {
+            if !p.call(params.get_info, (i, &mut q)) || q.id == CLAP_INVALID_ID {
                 return Err(format!("Invalid CLAP parameter metadata: parameter {i} has no info"));
             }
             if !q.min_value.is_finite() || !q.max_value.is_finite() || q.min_value > q.max_value {
@@ -1527,8 +1586,7 @@ fn read_parameters(s: H) -> R<()> {
             // refusing the plugin (Airwindows Consolidated reports garbage defaults for the controls an effect does not use).
             q.default_value = if q.default_value.is_finite() { q.default_value.clamp(q.min_value, q.max_value) } else { q.min_value };
             let mut value = q.default_value;
-            // SAFETY: as above.
-            unsafe { params.get_value.unwrap()(p, q.id, &mut value) };
+            p.call(params.get_value, (q.id, &mut value));
             if !value.is_finite() {
                 value = q.default_value;
             }
@@ -1589,10 +1647,9 @@ pub fn cpp_to_string(v: f64) -> String {
 
 /// Hints from oscairn.ui, each kept only where it fits its parameter (Host.cpp's applyHints). The main thread's.
 fn apply_hints(s: H, list: &mut [Parameter]) {
-    // SAFETY: (each read and call in apply_hints): the live plugin's ui table, param_hint checked at initialization, and
-    // algorithm() read only from draft 4 (ui_views).
-    let Some(ui) = (unsafe { s.ui.get().as_ref() }) else { return };
-    let p = s.plugin.get();
+    // algorithm() is read only from draft 4 (ui_views).
+    let Some(ui) = s.ui.get() else { return };
+    let p = s.live();
     let ids: Vec<clap_id> = list.iter().map(|q| q.id).collect();
     for q in list.iter_mut() {
         let mut hint = oscairn_param_hint_t {
@@ -1605,8 +1662,7 @@ fn apply_hints(s: H, list: &mut [Parameter]) {
             field: OSCAIRN_FIELD_NONE,
             index: 0,
         };
-        // SAFETY: as above.
-        if !unsafe { ui.param_hint.unwrap()(p, q.id, &mut hint) } {
+        if !p.call(ui.param_hint, (q.id, &mut hint)) {
             continue;
         }
         let stepped = q.flags & CLAP_PARAM_IS_STEPPED != 0;
@@ -1642,8 +1698,7 @@ fn apply_hints(s: H, list: &mut [Parameter]) {
         for v in 0..values {
             // SAFETY: plain old data, all zeros valid; then as above.
             let mut a: oscairn_fm_algorithm_t = unsafe { std::mem::zeroed() };
-            // SAFETY: as above.
-            if !unsafe { algorithm(p, q.id, (q.minimum.round() as i64 + v) as u32, &mut a) } {
+            if !p.call(algorithm, (q.id, (q.minimum.round() as i64 + v) as u32, &mut a)) {
                 q.algorithms.clear();
                 break;
             }
@@ -1665,12 +1720,10 @@ fn read_seconds(s: H, q: &mut Parameter, values: i64) {
     {
         return;
     }
-    let p = s.plugin.get();
-    // SAFETY: (each read and call in read_seconds): the live plugin's ui table (seconds() read only from draft 5) and
-    // params table, checked at initialization.
-    let asked = if s.ui_seconds.get() { unsafe { (*s.ui.get()).seconds } } else { None };
-    // SAFETY: as above.
-    let to_text = unsafe { s.params.get().as_ref() }.and_then(|x| x.value_to_text);
+    let p = s.live();
+    // seconds() is read only from draft 5.
+    let asked = if s.ui_seconds.get() { s.ui.get().expect("the plugin's ui").seconds } else { None };
+    let to_text = s.params.get().and_then(|x| x.value_to_text);
     if asked.is_none() && to_text.is_none() {
         return;
     }
@@ -1679,14 +1732,13 @@ fn read_seconds(s: H, q: &mut Parameter, values: i64) {
         let value = q.minimum + (q.maximum - q.minimum) * k as f64 / (n - 1) as f64;
         let mut seconds = -1.0;
         if let Some(f) = asked {
-            // SAFETY: as above.
-            if !unsafe { f(p, q.id, value, &mut seconds) } {
+            if !p.call(f, (q.id, value, &mut seconds)) {
                 seconds = -1.0;
             }
         } else {
             let mut text = [0 as c_char; 256];
-            // SAFETY: as above; the buffer holds 255 and a NUL.
-            if unsafe { to_text.unwrap()(p, q.id, value, text.as_mut_ptr(), 255) } {
+            // the buffer holds 255 and a NUL
+            if p.call(to_text, (q.id, value, text.as_mut_ptr(), 255)) {
                 seconds = parse_seconds(&text);
             }
         }
@@ -1733,11 +1785,9 @@ fn parse_seconds(text: &[c_char]) -> f64 {
 /// CLAP_PARAM_RESCAN_INFO taken in place (Host.cpp's readParameterInfo); false when more changed than it may change.
 /// The main thread's.
 fn read_parameter_info(s: H) -> bool {
-    // SAFETY: (each read and call in read_parameter_info): as read_parameters.
-    let Some(params) = (unsafe { s.params.get().as_ref() }) else { return false };
-    let p = s.plugin.get();
-    // SAFETY: as above.
-    if unsafe { params.count.unwrap()(p) } as usize != s.param_info.with(|v| v.len()) {
+    let Some(params) = s.params.get() else { return false };
+    let p = s.live();
+    if p.call(params.count, ()) as usize != s.param_info.with(|v| v.len()) {
         return false;
     }
     let mut next = s.param_info.with(|v| v.clone());
@@ -1745,8 +1795,7 @@ fn read_parameter_info(s: H) -> bool {
     for i in 0..next.len() as u32 {
         // SAFETY: plain old data, all zeros valid; then as above.
         let mut q: clap_param_info = unsafe { std::mem::zeroed() };
-        // SAFETY: as above.
-        if !unsafe { params.get_info.unwrap()(p, i, &mut q) } {
+        if !p.call(params.get_info, (i, &mut q)) {
             return false;
         }
         let at = param_index(&s, q.id);
@@ -1777,13 +1826,10 @@ fn read_parameter_info(s: H) -> bool {
 
 /// The main thread's.
 fn read_ports(s: H) -> R<()> {
-    let p = s.plugin.get();
+    let p = s.live();
     let (mut next_inputs, mut next_outputs) = (Vec::new(), Vec::new());
     // A plugin without the audio-ports extension has no audio ports: normal for note effects.
-    let audio: *const clap_plugin_audio_ports = ext(&s, CLAP_EXT_AUDIO_PORTS);
-    // SAFETY: (each read and call in read_ports): the live plugin's tables as get_extension gave them, each checked
-    // before its members are called.
-    let audio = unsafe { audio.as_ref() };
+    let audio = p.ext::<clap_plugin_audio_ports>(CLAP_EXT_AUDIO_PORTS);
     if let Some(a) = audio {
         if a.count.is_none() || a.get.is_none() {
             return Err("Incomplete CLAP audio-ports interface".into());
@@ -1791,8 +1837,7 @@ fn read_ports(s: H) -> R<()> {
     }
     for input in [true, false] {
         let ports: &mut Vec<Port> = if input { &mut next_inputs } else { &mut next_outputs };
-        // SAFETY: as above.
-        let count = audio.map_or(0, |a| unsafe { a.count.unwrap()(p, input) });
+        let count = audio.map_or(0, |a| p.call(a.count, (input,)));
         if count > MAX_AUDIO_CHANNELS {
             return Err("Audio bus count exceeds the 64-channel budget".into());
         }
@@ -1800,8 +1845,7 @@ fn read_ports(s: H) -> R<()> {
         for i in 0..count {
             // SAFETY: plain old data, all zeros valid.
             let mut q: clap_audio_port_info = unsafe { std::mem::zeroed() };
-            // SAFETY: as above (count is 0 without the table).
-            if !unsafe { audio.unwrap().get.unwrap()(p, i, input, &mut q) }
+            if !p.call(audio.expect("count is 0 without the table").get, (i, input, &mut q))
                 || q.channel_count == 0
                 || q.channel_count > MAX_AUDIO_CHANNELS
                 || channels + q.channel_count > MAX_AUDIO_CHANNELS
@@ -1820,20 +1864,16 @@ fn read_ports(s: H) -> R<()> {
     s.outputs.set(next_outputs);
     s.note_inputs.with(Vec::clear);
     s.note_outputs.with(Vec::clear);
-    let notes: *const clap_plugin_note_ports = ext(&s, CLAP_EXT_NOTE_PORTS);
-    // SAFETY: as above.
-    if let Some(n) = unsafe { notes.as_ref() }.filter(|n| n.count.is_some() && n.get.is_some()) {
+    if let Some(n) = p.ext::<clap_plugin_note_ports>(CLAP_EXT_NOTE_PORTS).filter(|n| n.count.is_some() && n.get.is_some()) {
         for input in [true, false] {
-            // SAFETY: as above.
-            let count = unsafe { n.count.unwrap()(p, input) };
+            let count = p.call(n.count, (input,));
             if count > 16 {
                 return Err("More than 16 note ports are unsupported".into());
             }
             for i in 0..count {
                 // SAFETY: plain old data, all zeros valid.
                 let mut q: clap_note_port_info = unsafe { std::mem::zeroed() };
-                // SAFETY: as above.
-                if !unsafe { n.get.unwrap()(p, i, input, &mut q) } {
+                if !p.call(n.get, (i, input, &mut q)) {
                     return Err("Invalid CLAP note port".into());
                 }
                 if input { &s.note_inputs } else { &s.note_outputs }.with(|v| v.push(q));
@@ -1841,16 +1881,13 @@ fn read_ports(s: H) -> R<()> {
         }
     }
     // A modulator may send only on parameter-target lanes (RFC 0002): those are its outputs.
-    let lanes: *const oscairn_plugin_param_target_lanes_t = ext(&s, ids::OSCAIRN_EXT_PARAM_TARGET_LANES);
+    let lanes = p.ext::<oscairn_plugin_param_target_lanes_t>(ids::OSCAIRN_EXT_PARAM_TARGET_LANES);
     s.info.with(|i| i.lanes.clear());
-    // SAFETY: as above.
-    if let Some(l) = unsafe { lanes.as_ref() }.filter(|l| l.count.is_some() && l.get.is_some()) {
-        // SAFETY: as above.
-        for i in 0..unsafe { l.count.unwrap()(p) }.min(64) {
+    if let Some(l) = lanes.filter(|l| l.count.is_some() && l.get.is_some()) {
+        for i in 0..p.call(l.count, ()).min(64) {
             // SAFETY: plain old data, all zeros valid.
             let mut lane: oscairn_param_target_lane_info_t = unsafe { std::mem::zeroed() };
-            // SAFETY: as above.
-            if unsafe { l.get.unwrap()(p, i, &mut lane) } {
+            if p.call(l.get, (i, &mut lane)) {
                 s.info.with(|info| info.lanes.push((lane.lane, field(&lane.name[..CLAP_NAME_SIZE]))));
             }
         }
@@ -1865,8 +1902,7 @@ fn read_ports(s: H) -> R<()> {
     let ni: usize = s.inputs.with(|v| v.iter().map(|q| q.channels as usize).sum());
     let no: usize = s.outputs.with(|v| v.iter().map(|q| q.channels as usize).sum());
     // The ring-out buffer is four more scratch channels after the ports', in no port.
-    // SAFETY: as above.
-    s.ring_out_channels.set(if unsafe { s.sound_snapshots.get().as_ref() }.is_some_and(|x| x.ring_out.is_some()) { 4 } else { 0 });
+    s.ring_out_channels.set(if s.sound_snapshots.get().is_some_and(|x| x.ring_out.is_some()) { 4 } else { 0 });
     let ring = s.ring_out_channels.get() as usize;
     s.input_pointers.with(|v| v.resize(ni, null_mut()));
     s.output_pointers.with(|v| v.resize(no + ring, null_mut()));
@@ -1899,18 +1935,16 @@ pub fn midi_port(ports: &[clap_note_port_info]) -> bool {
 
 /// The main thread's under the gate, or the audio thread's in process.
 fn apply_outputs(s: H) {
-    // SAFETY: the live plugin's ports-activation table, set_active checked at initialization.
-    let Some(pa) = (unsafe { s.ports_activation.get().as_ref() }) else { return };
+    let Some(pa) = s.ports_activation.get() else { return };
     if !s.outputs_told.load(Acquire) {
         return;
     }
     let want = s.wanted_outputs.load(Acquire);
-    let p = s.plugin.get();
+    let p = s.live();
     for i in 0..s.outputs.with(|v| v.len()).min(64) {
         let on = (want >> i) & 1 != 0;
         if !s.applied_told.get() || ((s.applied_outputs.get() >> i) & 1 != 0) != on {
-            // SAFETY: as above.
-            unsafe { pa.set_active.unwrap()(p, false, i as u32, on, 32) };
+            p.call(pa.set_active, (false, i as u32, on, 32));
         }
     }
     s.applied_outputs.set(want);
@@ -1928,11 +1962,9 @@ pub fn activate(s: H) -> R<()> {
     // Asked after the state is loaded and before activating, so a plugin that would not fit is refused before its
     // allocation (RFC 0025).
     s.has_declared.set(false);
-    let p = s.plugin.get();
-    // SAFETY: the live plugin's memory table, checked complete at initialization; the declaration the host's own.
-    if let Some(m) = unsafe { s.memory.get().as_ref() } {
-        // SAFETY: as above.
-        if unsafe { m.estimate.unwrap()(p, rate, s.max_frames.get(), s.declared.as_ptr()) } {
+    let p = s.live();
+    if let Some(m) = s.memory.get() {
+        if p.call(m.estimate, (rate, s.max_frames.get(), s.declared.as_ptr())) {
             s.has_declared.set(true);
             let d = s.declared.get();
             let mut bytes: u64 = 0;
@@ -1954,16 +1986,13 @@ pub fn activate(s: H) -> R<()> {
     s.hardware_epoch.fetch_add(1, SeqCst); // jobs from an earlier activation collect as stale
     s.applied_told.set(false);
     apply_outputs(s); // deactivated: told every port again
-    let frames = s.max_frames.get();
-    // SAFETY: the live plugin, inactive; its member checked at initialization.
-    if !unsafe { ((*p).activate.unwrap())(p, rate, 1, frames) } {
+    if !p.activate(rate, 1, s.max_frames.get()) {
         return Err("Plugin activation failed".into());
     }
     s.active.set(true);
     s.transport.with(TransportWatch::reset);
     s.have_harmony.set(false);
-    // SAFETY: the live plugin's latency table, as get_extension gave it.
-    let latency = unsafe { s.plugin_latency.get().as_ref() }.and_then(|l| l.get).map_or(0, |f| unsafe { f(p) });
+    let latency = s.plugin_latency.get().and_then(|l| l.get).map_or(0, |f| p.call(f, ()));
     s.latency_frames.store(latency, SeqCst);
     Ok(())
 }
@@ -2060,8 +2089,7 @@ unsafe extern "C" fn output_push(list: *const clap_output_events, e: *const clap
 }
 /// The main thread's under the gate, or the audio thread's in process.
 fn flush_parameters(s: H) {
-    // SAFETY: the live plugin's params table, flush checked at initialization.
-    let Some(flush) = (unsafe { s.params.get().as_ref() }).and_then(|p| p.flush) else { return };
+    let Some(flush) = s.params.get().and_then(|p| p.flush) else { return };
     let _scope = AudioScope::new(s.ptr());
     s.chunk_count.set(0);
     s.output_frame_offset.set(0);
@@ -2069,8 +2097,7 @@ fn flush_parameters(s: H) {
     // Only parameter events belong to flush(); service() never drains the command queue.
     let input = clap_input_events { ctx: s.ptr().cast(), size: Some(event_count), get: Some(event_get) };
     let output = clap_output_events { ctx: s.ptr().cast(), try_push: Some(output_push) };
-    // SAFETY: as above; the lists the host's own, for the call.
-    unsafe { flush(s.plugin.get(), &input, &output) };
+    s.live().call(flush, (&input, &output));
 }
 /// Audio thread, or main under the gate.
 pub fn translate(s: &Host, event: Event) -> Event {
@@ -2167,28 +2194,23 @@ pub fn service(s: H) {
     }
 }
 fn service_inner(s: H) -> R<()> {
-    let p = s.plugin.get();
+    let p = s.live();
     if s.callback.swap(false, SeqCst) {
-        // SAFETY: the live plugin, on its main thread; its member checked at initialization.
-        unsafe { ((*p).on_main_thread.unwrap())(p) };
+        p.on_main_thread();
     }
     let now = Instant::now();
     // Callbacks may register and unregister timers and fds, so iterate copies.
     let timers = s.timers.with(|t| t.clone());
-    // SAFETY: (each table read and call in service_inner): the live plugin's tables as get_extension gave them, on its
-    // main thread.
-    if let Some(on_timer) = unsafe { s.timer_support.get().as_ref() }.and_then(|t| t.on_timer) {
+    if let Some(on_timer) = s.timer_support.get().and_then(|t| t.on_timer) {
         for timer in timers.iter().filter(|t| now >= t.next) {
             let due = s.timers.with(|ts| ts.iter_mut().find(|t| t.id == timer.id).map(|t| t.next = now + Duration::from_millis(timer.period.into())));
             if due.is_some() {
-                // SAFETY: as above.
-                unsafe { on_timer(p, timer.id) };
+                p.call(on_timer, (timer.id,));
             }
         }
     }
     let fds = s.fds.with(|f| f.clone());
-    // SAFETY: as above.
-    if let Some(on_fd) = unsafe { s.fd_support.get().as_ref() }.and_then(|f| f.on_fd) {
+    if let Some(on_fd) = s.fd_support.get().and_then(|f| f.on_fd) {
         for item in &fds {
             let mut fd = PollFd { fd: item.fd, events: 0, revents: 0 };
             if item.flags & CLAP_POSIX_FD_READ != 0 {
@@ -2210,8 +2232,7 @@ fn service_inner(s: H) -> R<()> {
                     flags |= CLAP_POSIX_FD_ERROR;
                 }
                 if flags != 0 && s.fds.with(|f| f.iter().any(|f| f.fd == item.fd)) {
-                    // SAFETY: as above.
-                    unsafe { on_fd(p, item.fd, flags) };
+                    p.call(on_fd, (item.fd, flags));
                 }
             }
         }
@@ -2224,12 +2245,10 @@ fn service_inner(s: H) -> R<()> {
         deactivate(s);
         activate(s)?;
     } else if flags & CLAP_PARAM_RESCAN_VALUES != 0 {
-        // SAFETY: as above (a plugin asking for a rescan of values has the params table).
-        let get = unsafe { (*s.params.get()).get_value.unwrap() };
+        let get = s.params.get().expect("a plugin asking for a rescan of values has the params table").get_value;
         for i in 0..s.param_info.with(|v| v.len()) {
             let mut value = 0.0;
-            // SAFETY: as above.
-            if unsafe { get(p, s.param_info.with(|v| v[i].id), &mut value) } && value.is_finite() {
+            if p.call(get, (s.param_info.with(|v| v[i].id), &mut value)) && value.is_finite() {
                 s.param_values.with(|v| f64_store(&v[i], value));
             }
         }
@@ -2341,11 +2360,9 @@ pub fn pop_output(s: &Host) -> Option<Event> {
 }
 /// The main thread's.
 pub fn parameter_text(s: &Host, id: clap_id, value: f64) -> Vec<u8> {
-    // SAFETY: the live plugin's params table, as get_extension gave it; the buffer holds 256.
-    if let Some(f) = unsafe { s.params.get().as_ref() }.and_then(|p| p.value_to_text) {
+    if let Some(f) = s.params.get().and_then(|p| p.value_to_text) {
         let mut text = [0 as c_char; 256];
-        // SAFETY: as above.
-        if unsafe { f(s.plugin.get(), id, value, text.as_mut_ptr(), 256) } {
+        if s.live().call(f, (id, value, text.as_mut_ptr(), 256)) {
             return text.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
         }
     }
@@ -2363,9 +2380,7 @@ pub fn reset(s: H) {
     }
     let _gate = Gate::new(&s.gate);
     let _scope = AudioScope::new(s.ptr());
-    let p = s.plugin.get();
-    // SAFETY: the live plugin, in the exclusive audio scope; its member checked at initialization.
-    unsafe { ((*p).reset.unwrap())(p) };
+    s.live().reset();
     s.sleeping.store(false, SeqCst);
 }
 /// The main thread's.
@@ -2376,7 +2391,7 @@ pub fn set_active_outputs(s: &Host, ports: u64) {
     }
     s.wanted_outputs.store(ports, Release);
     s.outputs_told.store(true, Release);
-    if !s.ports_activation.get().is_null() && !s.activate_while_processing.get() && s.active.get() {
+    if !s.ports_activation.is_null() && !s.activate_while_processing.get() && s.active.get() {
         s.restart.store(true, SeqCst); // only while deactivated: service() activates it again
     }
 }
@@ -2385,7 +2400,7 @@ pub fn set_active_outputs(s: &Host, ports: u64) {
 /// # Safety
 /// contexts holds count, or is null.
 pub unsafe fn set_voice_limits(s: &Host, limit: u32, contexts: *const oscairn_voice_budget_context_t, count: u32) {
-    if s.voice_budget.get().is_null() {
+    if s.voice_budget.is_null() {
         return;
     }
     s.voice_limit.set(limit);
@@ -2402,7 +2417,7 @@ pub unsafe fn set_voice_limits(s: &Host, limit: u32, contexts: *const oscairn_vo
 pub fn voice_report(s: &Host, cost: &mut f64, notes: &mut *const oscairn_voice_budget_note_t, count: &mut u32) -> u32 {
     *cost = s.voice_cost.get();
     *notes = s.voice_notes.with(|n| n.as_ptr());
-    let budget = !s.voice_budget.get().is_null();
+    let budget = !s.voice_budget.is_null();
     *count = if budget { s.voice_note_count.get() } else { 0 };
     if budget {
         s.active_voices.get()
@@ -2533,15 +2548,14 @@ unsafe fn block(
     s.sysex_used.set(0);
     s.in_process.set(true);
     let _scope = AudioScope::new(s.ptr());
-    let p = s.plugin.get();
-    if p.is_null() || !s.active.get() || s.failed.load(SeqCst) {
+    let Some(p) = s.instance().filter(|_| s.active.get() && !s.failed.load(SeqCst)) else {
         silence();
         return false;
-    }
+    };
     let start = Instant::now();
     // Saving must wait until the plugin processed them, not just until they left the queue.
     let mut acknowledged = 0u32;
-    // SAFETY: the caller's; p the live plugin, active.
+    // SAFETY: the caller's; p active.
     let ok = unsafe { render(s, p, input, ni, output, no, frames, incoming, count, transport, silence, &mut acknowledged, start) };
     if acknowledged != 0 {
         s.pending_commands.fetch_sub(acknowledged, Release);
@@ -2550,11 +2564,11 @@ unsafe fn block(
 }
 
 /// # Safety
-/// As block; p the host's live plugin, active.
+/// As block; p the host's plugin, active.
 #[allow(clippy::too_many_arguments)]
 unsafe fn render(
     s: H,
-    p: *const clap_plugin,
+    p: Plugin,
     input: *const *const f32,
     ni: u32,
     output: *const *mut f32,
@@ -2689,8 +2703,7 @@ unsafe fn render(
     if s.panic.swap(false, SeqCst) {
         // Never leave a stuck gate after an event overflow. Reset is an audio-thread operation and covers every note
         // channel and port.
-        // SAFETY: the caller's: the live plugin, on its audio thread; its member checked at initialization.
-        unsafe { ((*p).reset.unwrap())(p) };
+        p.reset();
         // The block's parameter changes outlive the reset, which ends notes, not values: one dropped here stays
         // lost, the caller holding it as set (a restarted worker's restored value, its first block late).
         let mut kept = 0;
@@ -2751,8 +2764,7 @@ unsafe fn render(
         unsafe { (*mirror).store(0, Release) };
     }
     if !s.processing.load(SeqCst) {
-        // SAFETY: the live plugin, active, on its audio thread; its member checked at initialization.
-        if !unsafe { ((*p).start_processing.unwrap())(p) } {
+        if !p.start_processing() {
             s.failed.store(true, SeqCst);
             s.errors.fetch_add(1, SeqCst);
             silence();
@@ -2769,11 +2781,9 @@ unsafe fn render(
     }
     // oscairn.voice-budget: new limits before the block (an audio-thread call outside process()).
     if s.limits_waiting.get() {
-        // SAFETY: the live plugin's voice-budget table, checked complete at initialization; the limits the host's own.
-        if let Some(v) = unsafe { s.voice_budget.get().as_ref() } {
+        if let Some(v) = s.voice_budget.get() {
             let contexts = s.voice_contexts.with(|c| c.as_ptr());
-            // SAFETY: as above.
-            unsafe { v.set_limits.unwrap()(p, s.voice_limit.get(), contexts, s.voice_context_count.get()) };
+            p.call(v.set_limits, (s.voice_limit.get(), contexts, s.voice_context_count.get()));
             s.limits_waiting.set(false);
         }
     }
@@ -2852,13 +2862,10 @@ unsafe fn render(
         // The caller asks for the ring-out buffer by passing its channels after the ports'.
         if s.ring_out_channels.get() != 0 {
             let ring = if no as usize >= s.output_pointers.with(|v| v.len()) { s.ring_out_buffer.as_ptr().cast_const() } else { null() };
-            // SAFETY: the live plugin's sound-snapshots table, ring_out present (ring_out_channels says so); the buffer
-            // the host's own.
-            unsafe { (*s.sound_snapshots.get()).ring_out.unwrap()(p, ring) };
+            // ring_out present: ring_out_channels says so
+            p.call(s.sound_snapshots.get().expect("the plugin's sound snapshots").ring_out, (ring,));
         }
-        // SAFETY: the live plugin, processing, on its audio thread; its member checked at initialization; the block
-        // the host's own, its buffers and lists valid for the call.
-        let status = unsafe { ((*p).process.unwrap())(p, &process) };
+        let status = p.process(&process);
         if !(CLAP_PROCESS_CONTINUE..=CLAP_PROCESS_SLEEP).contains(&status) {
             s.failed.store(true, SeqCst);
             s.errors.fetch_add(1, SeqCst);
@@ -2898,13 +2905,10 @@ unsafe fn render(
         s.steady_time.set(s.steady_time.get() + i64::from(n));
         done += n;
     }
-    // SAFETY: the live plugin's voice-budget table, checked complete at initialization; the report's places the host's own.
-    if let Some(v) = unsafe { s.voice_budget.get().as_ref() } {
-        // SAFETY: as above.
-        s.active_voices.set(unsafe { v.active_voices.unwrap()(p, s.voice_cost.as_ptr()) });
+    if let Some(v) = s.voice_budget.get() {
+        s.active_voices.set(p.call(v.active_voices, (s.voice_cost.as_ptr(),)));
         let (notes, capacity) = s.voice_notes.with(|n| (n.as_mut_ptr(), n.len() as u32));
-        // SAFETY: as above.
-        s.voice_note_count.set(unsafe { v.notes.unwrap()(p, notes, capacity) }.min(capacity));
+        s.voice_note_count.set(p.call(v.notes, (notes, capacity)).min(capacity));
     }
     s.blocks.fetch_add(1, SeqCst);
     let us = start.elapsed().as_secs_f64() * 1e6;
@@ -2930,8 +2934,7 @@ fn harmony_eq(a: &oscairn_harmony_t, b: &oscairn_harmony_t) -> bool {
 }
 
 pub fn supports_state(s: &Host) -> bool {
-    // SAFETY: the live plugin's state table, as get_extension gave it.
-    unsafe { s.state.get().as_ref() }.is_some_and(|x| x.save.is_some() && x.load.is_some())
+    s.state.get().is_some_and(|x| x.save.is_some() && x.load.is_some())
 }
 pub fn exclusive_state(s: &Host) -> bool {
     s.exclusive_state.get()
@@ -2951,7 +2954,7 @@ impl Host {
     pub fn last_logged_error(&self) -> String {
         self.last_logged_error.with(|e| e.clone())
     }
-    pub fn asset_dependencies(&self) -> *const oscairn_plugin_asset_dependencies_t {
+    pub fn asset_dependencies(&self) -> Option<&oscairn_plugin_asset_dependencies_t> {
         self.asset_dependencies.get()
     }
     pub fn asset_optional(&self) -> bool {
@@ -2962,7 +2965,7 @@ impl Host {
     }
 }
 /// The plugin's state table: clap.state's, or its sound contexts' own.
-pub fn state(s: &Host) -> *const clap_plugin_state {
+pub fn state(s: &Host) -> Option<&clap_plugin_state> {
     s.state.get()
 }
 /// The main thread's.
@@ -2990,22 +2993,18 @@ pub fn flush_with(s: H, events: &[Event]) {
     s.chunk_events.with(|e| e[..events.len()].copy_from_slice(events));
     s.output_frame_offset.set(0);
     s.current_process_frames.set(1);
-    // SAFETY: the live plugin's params table, flush checked at initialization.
-    let Some(flush) = (unsafe { s.params.get().as_ref() }).and_then(|p| p.flush) else { return };
+    let Some(flush) = s.params.get().and_then(|p| p.flush) else { return };
     let _scope = AudioScope::new(s.ptr());
     let input = clap_input_events { ctx: s.ptr().cast(), size: Some(event_count), get: Some(event_get) };
     let output = clap_output_events { ctx: s.ptr().cast(), try_push: Some(output_push) };
-    // SAFETY: as above; the lists the host's own, for the call.
-    unsafe { flush(s.plugin.get(), &input, &output) };
+    s.live().call(flush, (&input, &output));
 }
 /// The parameters' values read back from the plugin (a rescan of values, a preset loaded). The main thread's.
 pub fn read_values(s: &Host) {
-    // SAFETY: the live plugin's params table, get_value checked at initialization.
-    let Some(get) = (unsafe { s.params.get().as_ref() }).and_then(|p| p.get_value) else { return };
+    let Some(get) = s.params.get().and_then(|p| p.get_value) else { return };
     for i in 0..s.param_info.with(|v| v.len()) {
         let mut value = 0.0;
-        // SAFETY: as above.
-        if unsafe { get(s.plugin.get(), s.param_info.with(|v| v[i].id), &mut value) } && value.is_finite() {
+        if s.live().call(get, (s.param_info.with(|v| v[i].id), &mut value)) && value.is_finite() {
             s.param_values.with(|v| f64_store(&v[i], value));
         }
     }

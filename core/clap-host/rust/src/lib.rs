@@ -167,7 +167,7 @@ host_fn! {
     fn rust_clap_supports_state(h) -> bool { supports_state(&h) }
     fn rust_clap_supports_sound_snapshot(h) -> bool { exclusive_state(&h) && supports_state(&h) }
     fn rust_clap_has_window(h) -> bool { !h.gui_api.get().is_null() }
-    fn rust_clap_voice_budget(h) -> bool { !h.voice_budget.get().is_null() }
+    fn rust_clap_voice_budget(h) -> bool { !h.voice_budget.is_null() }
     fn rust_clap_honors_volume(h) -> bool { h.honors_volume.get() }
     fn rust_clap_service(h) -> bool { service(h); true }
     fn rust_clap_reset(h) -> bool { reset(h); true }
@@ -210,12 +210,9 @@ host_fn! {
         1
     }
     fn rust_clap_effect_resources(h, resources: *mut oscairn_clap_sys::oscairn_effect_resources_t) -> c_int {
-        if h.plugin.get().is_null() { return 0 }
-        let p = h.plugin.get();
-        // SAFETY: the live plugin; get_extension checked at its initialization; the table as it gives it; the caller's resources.
-        let e = unsafe { ((*p).get_extension.unwrap())(p, oscairn_clap_sys::ids::OSCAIRN_EXT_EFFECT_CONTEXTS.as_ptr()).cast::<oscairn_clap_sys::oscairn_plugin_effect_contexts_t>() };
-        // SAFETY: as above.
-        c_int::from(unsafe { e.as_ref() }.and_then(|e| e.resources).is_some_and(|f| unsafe { f(p, resources) }))
+        let Some(p) = h.instance() else { return 0 };
+        let e = p.ext::<oscairn_clap_sys::oscairn_plugin_effect_contexts_t>(oscairn_clap_sys::ids::OSCAIRN_EXT_EFFECT_CONTEXTS);
+        c_int::from(e.and_then(|e| e.resources).is_some_and(|f| p.call(f, (resources,)))) // the caller's resources
     }
     fn rust_clap_parameter_value(h, id: u32) -> f64 {
         let i = param_index(&h, id);
@@ -256,10 +253,9 @@ host_fn! {
         unsafe { *out = o };
     }
     fn rust_clap_sound_context_capacity(h) -> u32 {
-        // SAFETY: the live plugin's sound-contexts table, checked complete at initialization.
-        unsafe { h.sounds.get().as_ref() }.map_or(0, |x| unsafe { x.capacity.unwrap()(h.plugin.get()) })
+        h.sounds.get().map_or(0, |x| h.live().call(x.capacity, ()))
     }
-    fn rust_clap_prepares_snapshots(h) -> bool { !h.sound_snapshots.get().is_null() }
+    fn rust_clap_prepares_snapshots(h) -> bool { !h.sound_snapshots.is_null() }
     fn rust_clap_saves_sounds(h) -> bool { more::saves_sounds(&h) }
     fn rust_clap_rings_out(h) -> bool { h.ring_out_channels.get() != 0 }
     fn rust_clap_process(h, inputs: *const *const f32, ni: u32, outputs: *const *mut f32, no: u32, frames: u32,

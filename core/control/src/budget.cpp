@@ -608,18 +608,21 @@ namespace oscairn
                 if(const auto d = declaredBy(host); d && total(*d) != m.declared) { m.declared = total(*d); measurementsChanged_ = true; }
             // How many parts an instance of it carried at most (its free room and what it holds now): a Performance not open counts
             // the parts of such a plugin beyond that many as sharing instances, as they do when it opens (estimate).
-            // Its room asks the worker, which may have died since the failure was read: the supervisor's to handle (as declaredBy).
-            if(const auto* shared = dynamic_cast<const SoundContext*>(&host))
+            // Its sounds are asked of its worker once for the instance, by its lead node, with its memory (memoryNow): not each tick
+            // for each part, which undid RFC 0045's one shared ask (a request a tick for every part). Each figure comes from a fresh
+            // answer; the room changes only as its sounds do. The worker may have died since the failure was read: the
+            // supervisor's to handle (as declaredBy).
+            if(const auto* shared = dynamic_cast<const SoundContext*>(&host); shared && memoryNow && shared->leads())
                 try
                 {
                     const auto& e = *shared->engine();
-                    const auto carries = SoundContext::room(e) + uint32_t(std::popcount(e.buses));
+                    const auto held = e.host->soundContexts().size();
+                    const auto carries = SoundContext::room(e, held) + uint32_t(std::popcount(e.buses));
                     if(carries != m.contexts) { m.contexts = carries; measurementsChanged_ = true; }
                     // An instance holding several sounds: what each past the first adds to its memory with one, the most seen (an
-                    // under-declaring plugin's further parts are priced at it: estimate). Its lead node reads the instance's memory, the others 0.
-                    if(const auto bytes = memoryNow && m.memory ? host.residentBytes() : 0; bytes > m.memory)
-                        if(const auto held = e.host->soundContexts().size(); held > 1)
-                            if(const auto each = (bytes - m.memory) / (held - 1); each > m.perContext) { m.perContext = each; measurementsChanged_ = true; }
+                    // under-declaring plugin's further parts are priced at it: estimate). Its lead node reads the instance's memory.
+                    if(const auto bytes = m.memory ? host.residentBytes() : 0; bytes > m.memory && held > 1)
+                        if(const auto each = (bytes - m.memory) / (held - 1); each > m.perContext) { m.perContext = each; measurementsChanged_ = true; }
                 }
                 catch(const std::exception&) {}
             if(memoryNow && sounds == 1)

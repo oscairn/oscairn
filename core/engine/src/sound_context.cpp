@@ -27,13 +27,13 @@ namespace oscairn
         return CLAP_INVALID_ID;
     }
 
-    uint32_t SoundContext::room(const Engine& e)
+    uint32_t SoundContext::room(const Engine& e, std::optional<size_t> held)
     {
         const auto& h = *e.host;
         const auto bus = std::find_if(h.parameters().begin(), h.parameters().end(), [&](const auto& p) { return p.id == e.busParameter; });
         const auto ports = bus == h.parameters().end() ? 0u : std::min<uint32_t>(uint32_t(h.outputPorts().size()), uint32_t(bus->maximum) + 1);
         const auto buses = uint32_t(std::popcount(e.buses)), channels = uint32_t(std::popcount(e.channels));
-        const auto sounds = uint32_t(h.soundContexts().size()), capacity = h.soundContextCapacity();
+        const auto sounds = uint32_t(held ? *held : h.soundContexts().size()), capacity = h.soundContextCapacity();
         return std::min({ports > buses ? ports - buses : 0u, 16 - channels, capacity > sounds ? capacity - sounds : 0u});
     }
 

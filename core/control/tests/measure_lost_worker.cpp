@@ -12,10 +12,12 @@
 #include "../../plugin-host/src/StateFiles.h"
 
 #include <array>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <thread>
 #include <vector>
 #include <unistd.h>
 
@@ -77,11 +79,18 @@ int main(int argc, char** argv)
         s.setBudget({.5, 0}); // measured: the budget's learning runs at each service
         s.loadPerformance(file.string());
         render(s, 40);
+        // At rest, measuring asks the shared instance's worker only with its memory (every 200 ticks), not every tick for each
+        // part: the control thread asks workers no more than their service does (RFC 0045). A second of ticks every 5 ms.
+        const auto asked = workerRequests();
+        for(int i = 0; i < 200; ++i) { s.service(); std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
+        const auto quiet = workerRequests() - asked;
+        std::printf("requests to workers in a quiet second of 200 ticks: %llu\n", (unsigned long long)quiet);
+        check(quiet <= 20, "measuring asks a shared instance's worker far less than every tick: " + std::to_string(quiet) + " requests in 200 ticks");
         const auto pids = workers();
         check(!pids.empty(), "the Performance plays in a worker");
         for(const auto pid : pids) ::kill(pid, SIGSTOP);
         std::string thrown;
-        for(int i = 0; i < 3 && thrown.empty(); ++i)
+        for(int i = 0; i < 201 && thrown.empty(); ++i) // one of them measures its memory, asking the worker
             try { s.service(); } catch(const std::exception& e) { thrown = e.what(); }
         for(const auto pid : pids) ::kill(pid, SIGCONT);
         check(thrown.empty(), "service goes on past a worker that stopped answering: " + thrown);

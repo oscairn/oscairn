@@ -144,7 +144,7 @@ enum Stop {
 }
 
 /// The role of a node, as PartsModel.cpp's roleOf names it (what a chip is colored by).
-fn role_of(node: &Value) -> &'static str {
+pub(crate) fn role_of(node: &Value) -> &'static str {
     let channels = |key: &str| node[key].as_array().map_or(0, |p| p.iter().map(|p| p["channels"].as_u64().unwrap_or(0)).sum::<u64>());
     let (i, o) = (channels("audioInputs"), channels("audioOutputs"));
     let (ni, no) = (node["noteInputs"].as_u64().unwrap_or(0), node["noteOutputs"].as_u64().unwrap_or(0));
@@ -160,6 +160,15 @@ fn role_of(node: &Value) -> &'static str {
         "Analyzer"
     } else {
         "Notes"
+    }
+}
+
+/// The color class of a plugin's role in a list: 1 an instrument, 2 an effect, 3 the rest (notes, sequencers and the like).
+pub(crate) fn role_color(role: &str) -> i32 {
+    match role {
+        "Instrument" => 1,
+        "Effect" => 2,
+        _ => 3,
     }
 }
 

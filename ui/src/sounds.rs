@@ -125,8 +125,8 @@ impl Screen {
     }
 
     fn info(&self) -> Vec<InfoLine> {
-        let head = |t: &str| InfoLine { head: true, text: t.into() };
-        let line = |t: String| InfoLine { head: false, text: t.into() };
+        let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
+        let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
         let mut lines = vec![head("Sound of this part")];
         match self.part().and_then(|p| p["from"]["name"].as_str()) {
             Some(n) => lines.push(line(format!("From “{n}”{}", if self.part().is_some_and(|p| p["from"]["modified"] == true) { ", edited" } else { "" }))),

@@ -18,7 +18,7 @@
 use crate::browser::{Browser, Nav};
 use crate::menu::Item;
 use crate::nav::Action;
-use crate::play::is_instrument;
+use crate::parts::{role_color, role_of};
 use crate::scan::Plugin;
 use crate::{InfoLine, SettingData, Shell};
 use serde_json::{json, Value};
@@ -77,6 +77,17 @@ enum Row {
     Nothing,
 }
 
+/// What a split of that kind is called.
+fn split_kind(kind: &str) -> &'static str {
+    match kind {
+        "leftRight" => "left / right",
+        "midSide" => "mid / side",
+        "bands" => "frequency bands",
+        "ports" => "output ports",
+        _ => "layers",
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Entry {
     Node(u64),
@@ -95,12 +106,16 @@ pub struct Screen {
     /// The scene controls menu of a node, ready for the shell to open, and what its choices are.
     ready_menu: Option<(String, Vec<Item>)>,
     picks: Vec<(u64, u64)>,
+    /// The engine's refusal of the last edit, said until the next.
+    error: String,
+    /// The plugins that failed and are silent (node, name, reason), from `session.status`.
+    failures: Vec<(u64, String, String)>,
     pub out: Vec<Out>,
 }
 
 impl Screen {
     pub fn new(ui: &Shell) -> Screen {
-        Screen { b: Browser::new(ui), graph: Value::Null, id: 0, mode: Mode::List, plugins: vec![], scanning: true, windows: HashMap::new(), ready_menu: None, picks: vec![], out: vec![] }
+        Screen { b: Browser::new(ui), graph: Value::Null, id: 0, mode: Mode::List, plugins: vec![], scanning: true, windows: HashMap::new(), ready_menu: None, picks: vec![], error: String::new(), failures: vec![], out: vec![] }
     }
 
     pub fn at_top(&self) -> bool {
@@ -111,7 +126,7 @@ impl Screen {
         self.id = id as u64;
         self.mode = Mode::List;
         self.b.reset();
-        self.b.say("");
+        self.say("");
         self.show();
     }
 
@@ -127,6 +142,34 @@ impl Screen {
         self.show();
     }
 
+    /// What the line under the list says: an edit that was refused, else a plugin that failed.
+    fn say(&mut self, text: &str) {
+        self.error = text.to_string();
+        self.b.say(&self.message());
+    }
+
+    fn message(&self) -> String {
+        match (self.error.is_empty(), self.failures.first()) {
+            (false, _) => self.error.clone(),
+            (true, Some((_, name, reason))) => format!("{name} is silent: {reason}"),
+            _ => String::new(),
+        }
+    }
+
+    /// `session.status`: the plugins that failed, outlined and named wherever they show.
+    pub fn status(&mut self, status: &Value) {
+        let Some(list) = status["failures"].as_array() else { return };
+        let failures: Vec<(u64, String, String)> = list.iter().map(|f| (f["node"].as_u64().unwrap_or(0), f["name"].as_str().unwrap_or_default().into(), f["reason"].as_str().unwrap_or_default().into())).collect();
+        if failures != self.failures {
+            self.failures = failures;
+            self.show();
+        }
+    }
+
+    fn failed(&self, node: u64) -> bool {
+        node != 0 && self.failures.iter().any(|f| f.0 == node)
+    }
+
     fn part(&self) -> Option<&Value> {
         self.graph["parts"].as_array().and_then(|p| p.iter().find(|p| p["id"].as_u64() == Some(self.id)))
     }
@@ -135,14 +178,27 @@ impl Screen {
         self.graph["nodes"].as_array().and_then(|n| n.iter().find(|n| n["id"].as_u64() == Some(id)))
     }
 
-    /// The chain's entries in order: a plugin, or a split (its lanes' plugins are not listed here).
+    /// The entries of a chain in order: a plugin, or a split.
+    fn entries_of(chain: &Value) -> Vec<Entry> {
+        chain.as_array().into_iter().flatten().filter_map(|e| e.as_u64().map(Entry::Node).or_else(|| e["split"].as_u64().map(Entry::Split))).collect()
+    }
+
+    /// The part's chain in order: a plugin, or a split (its lanes' plugins are in `lane_entries`).
     fn entries(&self) -> Vec<Entry> {
-        self.part()
-            .and_then(|p| p["chain"].as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|e| e.as_u64().map(Entry::Node).or_else(|| e["split"].as_u64().map(Entry::Split)))
-            .collect()
+        self.part().map(|p| Self::entries_of(&p["chain"])).unwrap_or_default()
+    }
+
+    fn split(&self, id: u64) -> Option<&Value> {
+        self.part().and_then(|p| p["splits"].as_array()).and_then(|l| l.iter().find(|x| x["id"].as_u64() == Some(id)))
+    }
+
+    fn lane_count(&self, split: u64) -> usize {
+        self.split(split).and_then(|x| x["lanes"].as_array()).map_or(0, Vec::len)
+    }
+
+    /// The entries of a split's lane.
+    fn lane_entries(&self, split: u64, lane: usize) -> Vec<Entry> {
+        self.split(split).map(|s| Self::entries_of(&s["lanes"][lane]["chain"])).unwrap_or_default()
     }
 
     fn name_of(&self, node: u64) -> String {
@@ -151,6 +207,12 @@ impl Screen {
 
     fn rows(&self) -> Vec<(Row, SettingData)> {
         let row = |label: String, value: String, kind: i32| SettingData { label: label.into(), value: value.into(), kind, ..Default::default() };
+        let boxed = |label: String, node: u64| {
+            let n = self.node(node);
+            let off = n.is_some_and(|n| n["enabled"] == false);
+            let role = n.map_or("Notes", role_of);
+            SettingData { label: label.into(), value: format!("{role}{} ›", if off { " (off)" } else { "" }).into(), kind: 2, role: role_color(role), off, failed: self.failed(node), ..Default::default() }
+        };
         let entries = self.entries();
         match self.mode {
             Mode::List => {
@@ -159,13 +221,10 @@ impl Screen {
                     rows.push((Row::Insert(i), row("+ Insert plugin here".into(), String::new(), 2)));
                     match entries.get(i) {
                         Some(Entry::Node(n)) => {
-                            let node = self.node(*n);
-                            let role = if node.is_some_and(is_instrument) { "Instrument" } else { "Effect" };
-                            let off = if node.is_some_and(|n| n["enabled"] == false) { " (off)" } else { "" };
-                            rows.push((Row::Node(i), row(format!("{}. {}", i + 1, self.name_of(*n)), format!("{role}{off} ›"), 2)));
+                            rows.push((Row::Node(i), boxed(format!("{}. {}", i + 1, self.name_of(*n)), *n)));
                         }
                         Some(Entry::Split(s)) => {
-                            let lanes = self.part().and_then(|p| p["splits"].as_array()).and_then(|l| l.iter().find(|x| x["id"].as_u64() == Some(*s))).and_then(|x| x["lanes"].as_array()).map_or(0, Vec::len);
+                            let lanes = self.lane_count(*s);
                             rows.push((Row::Split(i), row(format!("{}. Split", i + 1), format!("{lanes} lanes (not editable here yet)"), 4)));
                         }
                         None => {}
@@ -200,26 +259,60 @@ impl Screen {
         }
     }
 
+    /// The part's signal path in the read-only panel, as the reference draws it left to right: In, each plugin
+    /// or split, Out; a split's lanes under it, a lane without plugins "Dry".
     fn info(&self) -> Vec<InfoLine> {
-        let head = |t: &str| InfoLine { head: true, text: t.into() };
-        let line = |t: String| InfoLine { head: false, text: t.into() };
-        let mut lines = vec![head("Chain")];
+        let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
+        let plain = |t: String| InfoLine { text: t.into(), ..Default::default() };
+        let boxed = |text: String, node: u64| {
+            let n = self.node(node);
+            InfoLine { text: text.into(), role: role_color(n.map_or("Notes", role_of)), off: n.is_some_and(|n| n["enabled"] == false), failed: self.failed(node), ..Default::default() }
+        };
+        let mut lines = vec![head("Chain"), plain("In".into())];
         let entries = self.entries();
         if entries.is_empty() {
-            lines.push(line("Empty: the sound goes straight through".into()));
+            lines.push(plain("Empty: the sound goes straight through".into()));
         }
         for (i, e) in entries.iter().enumerate() {
-            lines.push(line(match e {
-                Entry::Node(n) => format!("{}. {}", i + 1, self.name_of(*n)),
-                Entry::Split(_) => format!("{}. Split", i + 1),
-            }));
+            match e {
+                Entry::Node(n) => lines.push(boxed(format!("{}. {}", i + 1, self.name_of(*n)), *n)),
+                Entry::Split(s) => {
+                    lines.push(plain(format!("{}. Split: {}", i + 1, split_kind(self.split(*s).and_then(|x| x["kind"].as_str()).unwrap_or("copy")))));
+                    for k in 0..self.lane_count(*s) {
+                        let inside = self.lane_entries(*s, k);
+                        if inside.is_empty() {
+                            lines.push(plain(format!("    {}: Dry", self.lane_label(*s, k))));
+                        }
+                        for (j, x) in inside.iter().enumerate() {
+                            let label = if j == 0 { format!("    {}: ", self.lane_label(*s, k)) } else { "        ".into() };
+                            lines.push(match x {
+                                Entry::Node(n) => boxed(format!("{label}{}", self.name_of(*n)), *n),
+                                Entry::Split(_) => plain(format!("{label}Split")),
+                            });
+                        }
+                    }
+                }
+            }
         }
+        lines.push(plain("Out".into()));
         if let Mode::Actions(i) = self.mode {
             if let Some(Entry::Node(n)) = entries.get(i) {
-                lines.extend([head("Plugin"), line(self.node(*n).and_then(|x| x["plugin"]["name"].as_str()).unwrap_or_default().to_string())]);
+                lines.extend([head("Plugin"), plain(self.node(*n).and_then(|x| x["plugin"]["name"].as_str()).unwrap_or_default().to_string())]);
             }
         }
         lines
+    }
+
+    /// What a lane is called: Left and Right, Mid and Side, Band n; "Lane n" for the layers of a copy.
+    fn lane_label(&self, split: u64, lane: usize) -> String {
+        match (self.split(split).and_then(|x| x["kind"].as_str()).unwrap_or("copy"), lane) {
+            ("leftRight", 0) => "Left".into(),
+            ("leftRight", _) => "Right".into(),
+            ("midSide", 0) => "Mid".into(),
+            ("midSide", _) => "Side".into(),
+            ("bands", k) => format!("Band {}", k + 1),
+            (_, k) => format!("Lane {}", k + 1),
+        }
     }
 
     fn show(&mut self) {
@@ -234,6 +327,7 @@ impl Screen {
         };
         let rows = self.rows().into_iter().map(|r| r.1).collect();
         let info = self.info();
+        self.b.say(&self.message()); // an edit the engine refused, else the plugin that failed (the reference's message line)
         let noun = match self.mode {
             Mode::List => "Chain",
             Mode::Actions(_) => "Actions",
@@ -255,11 +349,11 @@ impl Screen {
                 // The JUCE insertPlugin takes the node out again when the insert is refused.
                 self.out.push((Request::Edit, "graph.remove", json!({"node": node})));
                 self.out.push((Request::Edit, "graph.commit", json!({})));
-                self.b.say(&format!("The engine refused: {}", e.message));
+                self.say(&format!("The engine refused: {}", e.message));
                 return true;
             }
             (Request::Add(_) | Request::Edit, Err(e)) if e.code != 0 => {
-                self.b.say(&format!("The engine refused: {}", e.message));
+                self.say(&format!("The engine refused: {}", e.message));
                 return true;
             }
             (Request::List(node), Ok(r)) => self.scene_controls(node, &r),
@@ -308,12 +402,12 @@ impl Screen {
             None => list.push(here),
         }
         let parameters: Vec<Value> = list.iter().map(|(node, param)| json!({"node": node, "param": param})).collect();
-        self.b.say("");
+        self.say("");
         self.out.push((Request::Edit, "scenes.untouched", json!({"parameters": parameters})));
     }
 
     fn edit(&mut self, method: &'static str, params: Value) {
-        self.b.say("");
+        self.say("");
         self.out.push((Request::Edit, method, params));
         self.out.push((Request::Edit, "graph.commit", json!({})));
     }
@@ -382,7 +476,7 @@ impl Screen {
             (Row::Choose(p), Mode::Plugins(index)) => {
                 if let Some(plugin) = self.plugins.get(p).cloned() {
                     let name = self.unique_name(&plugin.name);
-                    self.b.say("");
+                    self.say("");
                     self.out.push((Request::Add(index), "graph.add", json!({"name": name, "path": plugin.path, "pluginId": plugin.id})));
                     self.mode = Mode::List;
                     self.b.reset_cursor();

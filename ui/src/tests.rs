@@ -1082,6 +1082,7 @@ mod scene;
 mod part;
 mod keyboard;
 mod pages;
+mod chain;
 mod piano;
 mod shellpages;
 mod envelope;

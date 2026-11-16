@@ -3,7 +3,7 @@
 // the left (each its name and value; a cursor is a focus border, a value being changed with the
 // dial an accent one), what the part is made of on the right, read only.
 
-import { Theme, Section, Button, Cursor } from "theme.slint";
+import { Theme, Section, Button, Cursor, FitText } from "theme.slint";
 
 export struct SettingData {
     label: string,
@@ -13,11 +13,17 @@ export struct SettingData {
     cursor: bool,
     editing: bool,
     switch: bool, // a kind 1 row drawn as a switch
+    role: int, // a plugin's role: 1 an instrument, 2 an effect, 3 the rest, 0 not a plugin (the value's color)
+    off: bool, // a plugin switched off: faint
+    failed: bool, // a plugin that failed and is silent: outlined in the danger color
 }
 
 export struct InfoLine {
     head: bool,
     text: string,
+    role: int,
+    off: bool,
+    failed: bool,
 }
 
 export global PartState {
@@ -49,30 +55,25 @@ component Row inherits Section {
     property <length> switch-room: 56px;
     property <length> buttons: data.kind == 0 ? 2 * Theme.touch + Theme.pad-tight : data.kind == 1 && data.switch ? root.switch-room : 0px;
     fill: data.editing ? Theme.accent.with-alpha(Theme.wash-light) : Theme.surface;
+    opacity: data.off ? Theme.dim : 1;
     TouchArea {
         clicked => { root.tapped(); }
     }
-    Text {
+    FitText {
         x: Theme.pad;
         width: parent.width * 0.4 - Theme.pad;
         height: parent.height;
         text: data.label;
-        color: Theme.text;
-        font-size: Theme.body;
-        overflow: elide;
-        vertical-alignment: center;
+        align: TextHorizontalAlignment.left;
     }
-    Text {
+    FitText {
         x: parent.width * 0.4;
         width: parent.width * 0.6 - Theme.pad - root.buttons;
         height: parent.height;
         text: data.value;
-        color: data.editing || data.on ? Theme.accent : Theme.text;
-        font-size: Theme.body;
-        font-weight: 700;
-        overflow: elide;
-        horizontal-alignment: right;
-        vertical-alignment: center;
+        ink: data.editing || data.on ? Theme.accent : data.role == 1 ? Theme.accent : data.role == 2 ? Theme.positive : data.role == 3 ? Theme.wire-notes : Theme.text;
+        bold: true;
+        align: TextHorizontalAlignment.right;
     }
     if data.kind == 1 && data.switch: Rectangle {
         x: parent.width - root.switch-width - Theme.pad;
@@ -104,6 +105,11 @@ component Row inherits Section {
         height: parent.height;
         text: "+";
         clicked => { root.step(1); }
+    }
+    if data.failed: Rectangle {
+        border-width: Theme.cursor-width;
+        border-color: Theme.danger;
+        border-radius: Theme.section-radius;
     }
     Cursor {
         shown: data.cursor;
@@ -169,7 +175,8 @@ export component Part inherits Rectangle {
             y: Theme.pad-narrow + i * root.line;
             width: parent.width - 2 * Theme.pad;
             text: line.text;
-            color: line.head ? Theme.muted : Theme.text;
+            opacity: line.off ? Theme.dim : 1;
+            color: line.head ? Theme.muted : line.failed ? Theme.danger : line.role == 1 ? Theme.accent : line.role == 2 ? Theme.positive : line.role == 3 ? Theme.wire-notes : Theme.text;
             font-size: line.head ? Theme.small : Theme.body;
             font-weight: line.head ? 700 : 400;
             overflow: elide;

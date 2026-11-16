@@ -515,7 +515,7 @@ impl Screen {
             Item::Effects => ("Insert effects".into(), "›".into(), 2, false),
             Item::Remove => ("Remove part".into(), if self.removing { "Press again to remove" } else { "Press twice" }.into(), 2, self.removing),
         };
-        SettingData { label: label.into(), value: value.into(), kind, on, cursor: false, editing: false, switch: false }
+        SettingData { label: label.into(), value: value.into(), kind, on, cursor: false, editing: false, switch: false, ..Default::default() }
     }
 
     /// The part's sound as the panel names it: the first instrument.
@@ -551,8 +551,8 @@ impl Screen {
         chain_nodes(&self.part["chain"], &self.part["splits"], 0, &mut flat);
         let instrument = flat.iter().copied().find(|n| nodes.get(n).is_some_and(|n| is_instrument(n)));
         let text = |n: Option<&&Value>, key: &str| n.and_then(|n| n[key].as_str()).unwrap_or_default().to_string();
-        let head = |t: &str| InfoLine { head: true, text: t.into() };
-        let line = |t: String| InfoLine { head: false, text: t.into() };
+        let head = |t: &str| InfoLine { head: true, text: t.into(), ..Default::default() };
+        let line = |t: String| InfoLine { head: false, text: t.into(), ..Default::default() };
         let mut lines = vec![head("Sound")];
         lines.push(line(instrument.map(|i| text(nodes.get(&i), "name")).unwrap_or_else(|| "No instrument".into())));
         if let Some(from) = self.part["from"]["name"].as_str().filter(|n| !n.is_empty()) {

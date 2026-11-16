@@ -618,6 +618,7 @@ impl App {
         self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
         self.on_parts(|p| p.status(status)); // and the devices and failures the Parts list says
         self.on_mixer(|m| m.status(status));
+        self.on_chain(|c| c.status(status));
         self.on_routing(|r| r.status(status));
         if self.on_piano(|p| !p.status(status)) == Some(true) {
             self.close_piano(); // its input was unplugged

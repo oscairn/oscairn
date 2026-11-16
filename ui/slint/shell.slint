@@ -123,10 +123,16 @@ export component Shell inherits Window {
         color: Theme.muted;
         text: root.hands-over ? "Opening " + root.opening + "..." : root.opening + " is not in this UI yet: open it in the Oscairn app. Escape goes back.";
     }
-    if KeyboardState.open: Keyboard {
+    // The screen above the overlay takes no touch while the keyboard is open.
+    if KeyboardState.open: TouchArea {
         y: Theme.bar-height;
         width: parent.width;
         height: parent.height - Theme.bar-height;
+    }
+    if KeyboardState.open: Keyboard {
+        width: parent.width;
+        height: KeyboardState.keys-shown ? min(KeyboardState.overlay-height, parent.height - Theme.bar-height) : parent.height - Theme.bar-height;
+        y: parent.height - self.height;
     }
     if PianoState.open: Piano {
         y: Theme.bar-height;

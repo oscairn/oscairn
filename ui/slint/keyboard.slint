@@ -26,6 +26,9 @@ export global KeyboardState {
     in property <float> line; // the text's share of the top row
     in property <bool> keys-shown: true; // false: a typing keyboard does the typing
     in property <[KeyData]> keys;
+    // The overlay on a screen with no typing keyboard (the reference's, TextKeyboard.cpp: the lower part of the screen):
+    // a caption line, then five rows of keys each a touch target tall.
+    out property <length> overlay-height: Theme.pad-narrow + (Theme.body + Theme.pad-narrow) + Theme.gap + 5 * Theme.touch + 4 * Theme.gap + Theme.margin;
     callback pressed(int); // a tap types at once, as the JUCE keys are triggered on mouse down
     callback released();
     callback cancel();
@@ -34,25 +37,29 @@ export global KeyboardState {
 export component Keyboard inherits Rectangle {
     property <length> gutter: Theme.gap;
     property <length> row-width: self.width - 2 * Theme.margin;
-    // Large targets for the stage: as tall as the screen allows, to twice a touch target.
-    property <length> key-height: min(2 * Theme.touch, (self.height - 2 * Theme.margin - Theme.touch - 6 * gutter) / 5);
+    // The caption (what is being typed) over the rows: in the overlay a line of the body type, with a typing keyboard
+    // (a whole screen, the top row only) a touch target.
+    property <length> caption: KeyboardState.keys-shown ? Theme.body + Theme.pad-narrow : Theme.touch;
+    property <length> top: (KeyboardState.keys-shown ? Theme.pad-narrow : Theme.margin) + root.caption + root.gutter;
+    // A touch target tall each, as the reference's; with a typing keyboard as tall as the screen allows.
+    property <length> key-height: KeyboardState.keys-shown ? Theme.touch : min(2 * Theme.touch, (self.height - 2 * Theme.margin - Theme.touch - 6 * gutter) / 5);
     background: Theme.surface;
     // Takes every tap while it is open, so nothing under it is pressed.
     TouchArea { }
     Text {
         x: Theme.margin;
-        y: Theme.margin;
+        y: KeyboardState.keys-shown ? Theme.pad-narrow : Theme.margin;
         width: parent.width - 2 * Theme.margin;
-        height: Theme.touch;
+        height: root.caption;
         text: KeyboardState.title;
         color: Theme.muted;
-        font-size: Theme.body;
+        font-size: KeyboardState.keys-shown ? Theme.small : Theme.body;
         overflow: elide;
         vertical-alignment: center;
     }
     Field {
         x: Theme.margin;
-        y: Theme.margin + Theme.touch + root.gutter;
+        y: root.top;
         width: KeyboardState.line * root.row-width - root.gutter;
         height: root.key-height;
         fill: Theme.background;
@@ -71,7 +78,7 @@ export component Keyboard inherits Rectangle {
     // A key is a button as the theme draws them: its corners, edge and shadow.
     for key[i] in KeyboardState.keys: Rectangle {
         x: Theme.margin + key.x / key.total * root.row-width;
-        y: Theme.margin + Theme.touch + root.gutter + (key.row == 0 ? 0px : (key.row) * (root.key-height + root.gutter));
+        y: root.top + (key.row == 0 ? 0px : (key.row) * (root.key-height + root.gutter));
         width: key.w / key.total * root.row-width - root.gutter;
         height: root.key-height;
         opacity: key.disabled ? Theme.disabled : 1;

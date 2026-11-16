@@ -149,3 +149,26 @@ fn keyboard_draws_in_every_theme() {
     }
     at_fantom_scale(&mut s, "keyboard", || ());
 }
+
+// On a screen with no typing keyboard the keyboard is an overlay on the lower part of the screen (the reference's): the
+// screen's top stays in view above it, at the keyboard's 826 x 465 and at 800 x 480 and a large window.
+#[test]
+fn the_keyboard_is_an_overlay_on_the_lower_part_of_the_screen() {
+    for (w, h, scale) in [(1280, 720, 1.55), (800, 480, 1.0), (1920, 1080, 1.0)] {
+        let mut s = Screen::sized(w, h);
+        s.set_scale(scale);
+        let _k = Keyboard::open(&s.ui, "Name of the part", "Keys", true);
+        s.ui.set_screen(4);
+        s.frame();
+        s.frame();
+        let want = s.ui.global::<crate::KeyboardState>().get_overlay_height();
+        let screen = h as f32 / scale;
+        let bar = s.ui.global::<crate::Theme>().get_bar_height();
+        eprintln!("keyboard overlay {want} of {screen} at {w}x{h}@{scale}");
+        assert!(want <= screen - bar, "the overlay fits under the bar: {want} of {screen}");
+        if screen >= 465. {
+            assert!(want < screen * 0.62, "the screen's top stays in view: {want} of {screen}");
+        }
+        shot(&s, &format!("keyboard-overlay-{w}x{h}@{scale}"));
+    }
+}

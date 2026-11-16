@@ -1076,6 +1076,8 @@ mod shots;
 mod views;
 mod parts;
 mod mixer;
+mod wires;
+mod routing;
 mod controls;
 mod layout;
 

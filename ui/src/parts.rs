@@ -2,8 +2,8 @@
 //! The Parts list: page 0 of the JUCE Edit view (hosts/standalone/PartsView.cpp, PartsModel.cpp's
 //! readParts), on the shell. A row per part, then the buses ("Shared buses") and the plugins several
 //! parts are wired into in Routing; each part and bus has its name and sound, where it plays from, its
-//! chain, a level, a mute and (parts) a send per bus. Under the list: Mixer, Controls and Routing (their
-//! screens are not in the shell yet: the buttons say so), + Part and + Bus.
+//! chain, a level, a mute and (parts) a send per bus. Under the list: Mixer, Controls and Routing (the
+//! pages of the JUCE Edit view), + Part and + Bus.
 //!
 //! Without touch the cursor has two dimensions, as the grid's: the dial moves along the cells of a
 //! row (the part, its level, its mute, each send) and on to the next row, then the buttons under the
@@ -125,10 +125,6 @@ impl Page {
         }
     }
 
-    /// Whether the shell has the screen yet.
-    fn built(self) -> bool {
-        matches!(self, Page::Mixer | Page::Controls)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -168,7 +164,7 @@ fn role_of(node: &Value) -> &'static str {
 }
 
 /// The name a lane gives a split's box: its instrument, else its last box, else its own name ("Dry" for a copy).
-fn lane_name(kind: &str, k: usize, boxes: &[Chip]) -> String {
+pub(crate) fn lane_name(kind: &str, k: usize, boxes: &[Chip]) -> String {
     if let Some(b) = boxes.iter().find(|b| b.role == Role::Instrument) {
         return b.name.clone();
     }
@@ -186,7 +182,7 @@ fn lane_name(kind: &str, k: usize, boxes: &[Chip]) -> String {
 }
 
 /// A chain's boxes in order; a split is one box named after its lanes, as readParts makes it.
-fn boxes(chain: &Value, part: &Value, nodes: &HashMap<u64, &Value>, depth: usize) -> Vec<Chip> {
+pub(crate) fn boxes(chain: &Value, part: &Value, nodes: &HashMap<u64, &Value>, depth: usize) -> Vec<Chip> {
     let mut out = Vec::new();
     for entry in chain.as_array().into_iter().flatten() {
         if let Some(n) = entry.as_u64() {
@@ -685,7 +681,7 @@ impl Screen {
                         Tool::AddPart => "+ Part".into(),
                         Tool::AddBus => "+ Bus".into(),
                     },
-                    enabled: !matches!(t, Tool::Page(p) if !p.built()),
+                    enabled: true,
                     cursor: tool_at == Some(i),
                 })
                 .collect(),
@@ -805,7 +801,6 @@ impl Screen {
         match TOOLS.get(t) {
             Some(Tool::AddPart) => self.add(false),
             Some(Tool::AddBus) => self.add(true),
-            Some(Tool::Page(p)) if !p.built() => self.said = format!("{} is not in this shell yet.", p.name()),
             Some(Tool::Page(p)) => return Outcome::Page(*p),
             _ => {}
         }
@@ -817,12 +812,7 @@ impl Screen {
         match stop {
             Stop::Tool(t) => return self.press_tool(t),
             Stop::Cell(at, cell) => match (&self.entries[at], cell) {
-                (Entry::Shared(s), _) => {
-                    if Page::Routing.built() {
-                        return Outcome::Routing(s.node);
-                    }
-                    self.said = "Routing is not in this shell yet.".into();
-                }
+                (Entry::Shared(s), _) => return Outcome::Routing(s.node),
                 (Entry::Row(r), 0) => return Outcome::Open(r.id),
                 (Entry::Row(_), 2) => self.toggle_mute(at),
                 _ => self.editing = !self.editing, // a press, then the dial
@@ -939,11 +929,7 @@ impl Screen {
         self.editing = false;
         let outcome = match self.entries.get(self.at(row)) {
             Some(Entry::Row(r)) => Outcome::Open(r.id),
-            Some(Entry::Shared(s)) if Page::Routing.built() => Outcome::Routing(s.node),
-            Some(Entry::Shared(_)) => {
-                self.said = "Routing is not in this shell yet.".into();
-                Outcome::Stay
-            }
+            Some(Entry::Shared(s)) => Outcome::Routing(s.node),
             None => Outcome::Stay,
         };
         self.show();

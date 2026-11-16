@@ -46,7 +46,6 @@ impl Item {
     pub fn head(label: impl Into<String>) -> Item {
         Item { label: label.into(), tick: None, enabled: false, kind: Kind::Head }
     }
-    #[cfg(test)]
     pub fn off(mut self) -> Item {
         self.enabled = false;
         self

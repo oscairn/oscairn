@@ -286,3 +286,15 @@ Branch `rust-app-parts` (from `rust-app` 79a277ee; baseline 101 tests, clippy cl
   control for the key.
 - Seen, not fixed: the top bar at 800 px wide with a take recording and all five actions of Play (Undo, Redo, Save, Scene, Edit) is
   wider than the window (the resource section is cut); with four it already was.
+
+Branch `rust-app-pages` (from `rust-app-parts` 1130dce5; baseline 115 tests, clippy clean): the Parts list's three pages, H, G and I of the inventory.
+- Mixer (H1, H2): src/mixer.rs, slint/mixer.slint. The JUCE page is strips, so strips are built (name, fader and meter bars, dB, M, S, pan, a send per bus,
+  the master pinned at the right); the grid's tiles are not used. Meter moved into theme.slint (Play's copy in play.slint stays: that file is the grid agent's).
+- Controls (G1 to G4, G6) and the menu list the JUCE popup menus become (src/menu.rs, slint/menu.slint, shared with Routing): src/controls.rs,
+  slint/controls.slint; Now... is a port of `setRangeToPresent`.
+- Routing (I1 to I6, G5): src/wires.rs is a port of the layout (PartsModel.cpp) with the JUCE test's properties; src/routing.rs the screen; the wires are
+  `fit: preserve` Paths from the layout's own points and a pixel test measures that they meet their ports (it fails without `fit: preserve`). Chain actions
+  gained "Routing..." (D11) and "Scene controls..." (D10, `scenes.untouched`).
+- Not verified: nothing here was run on a unit or against the real engine (fake engine only); Routing's layout was ported by reading, not compared with the C++
+  output on the same graph.
+

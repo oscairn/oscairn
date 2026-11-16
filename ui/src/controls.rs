@@ -166,7 +166,7 @@ pub struct Target {
 }
 
 impl Target {
-    fn new(kind: Kind) -> Target {
+    pub(crate) fn new(kind: Kind) -> Target {
         Target { kind, start: 0., end: 1., curve: Curve::default(), relative: false, base: 0., off_in: vec![] }
     }
 

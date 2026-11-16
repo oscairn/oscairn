@@ -16,6 +16,7 @@
 //! then the Part screen); the right knob scrolls the read-only panel.
 
 use crate::browser::{Browser, Nav};
+use crate::menu::Item;
 use crate::nav::Action;
 use crate::play::is_instrument;
 use crate::scan::Plugin;
@@ -33,6 +34,8 @@ pub enum Request {
     Insert(u64),
     /// window.info for a node.
     Window(u64),
+    /// params.list of a node, for the scene controls menu.
+    List(u64),
 }
 
 pub type Out = (Request, &'static str, Value);
@@ -44,6 +47,8 @@ pub enum Outcome {
     Back,
     /// A plugin's parameter pages: its node and name.
     Params(u64, String),
+    /// The plugin in Routing.
+    Routing(u64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,6 +70,8 @@ enum Row {
     Earlier,
     Later,
     Remove,
+    Routing,
+    SceneControls,
     View,
     Choose(usize),
     Nothing,
@@ -85,12 +92,15 @@ pub struct Screen {
     scanning: bool,
     /// Which nodes have a window of their own, as window.info said.
     windows: HashMap<u64, bool>,
+    /// The scene controls menu of a node, ready for the shell to open, and what its choices are.
+    ready_menu: Option<(String, Vec<Item>)>,
+    picks: Vec<(u64, u64)>,
     pub out: Vec<Out>,
 }
 
 impl Screen {
     pub fn new(ui: &Shell) -> Screen {
-        Screen { b: Browser::new(ui), graph: Value::Null, id: 0, mode: Mode::List, plugins: vec![], scanning: true, windows: HashMap::new(), out: vec![] }
+        Screen { b: Browser::new(ui), graph: Value::Null, id: 0, mode: Mode::List, plugins: vec![], scanning: true, windows: HashMap::new(), ready_menu: None, picks: vec![], out: vec![] }
     }
 
     pub fn at_top(&self) -> bool {
@@ -174,6 +184,8 @@ impl Screen {
                     rows.push((Row::Later, row("Move later".into(), String::new(), 2)));
                 }
                 rows.push((Row::Remove, row("Remove".into(), String::new(), 2)));
+                rows.push((Row::Routing, row("Routing...".into(), "›".into(), 2)));
+                rows.push((Row::SceneControls, row("Scene controls...".into(), "›".into(), 2)));
                 if self.windows.get(&n).copied().unwrap_or(false) {
                     rows.push((Row::View, row("Plugin view".into(), "not available in this shell yet".into(), 4)));
                 }
@@ -250,6 +262,7 @@ impl Screen {
                 self.b.say(&format!("The engine refused: {}", e.message));
                 return true;
             }
+            (Request::List(node), Ok(r)) => self.scene_controls(node, &r),
             (Request::Window(node), Ok(r)) => {
                 self.windows.insert(node, r["available"].as_bool().unwrap_or(false));
                 self.show();
@@ -257,6 +270,46 @@ impl Screen {
             _ => {}
         }
         false
+    }
+
+    /// A menu ready for the shell to open.
+    pub fn take_menu(&mut self) -> Option<(String, Vec<Item>)> {
+        self.ready_menu.take()
+    }
+
+    /// The plugin's parameters, ticked where scenes touch them (every automatable one but those set aside);
+    /// choosing one sets it aside or takes it back (`sceneControlsMenu`).
+    fn scene_controls(&mut self, node: u64, list: &Value) {
+        let untouched: Vec<(u64, u64)> = self.graph["sceneUntouched"].as_array().into_iter().flatten().map(|u| (u["node"].as_u64().unwrap_or(0), u["param"].as_u64().unwrap_or(0))).collect();
+        self.picks.clear();
+        let mut items = vec![];
+        for p in list["parameters"].as_array().into_iter().flatten() {
+            let (id, flags) = (p["id"].as_u64().unwrap_or(0), p["flags"].as_u64().unwrap_or(0));
+            let can = flags & (1 << 5) != 0 && flags & (1 << 3) == 0; // automatable, not read only
+            self.picks.push((node, id));
+            let mut item = Item::ticked(p["name"].as_str().unwrap_or_default(), self.picks.len() - 1, can && !untouched.contains(&(node, id)));
+            item.enabled = can;
+            items.push(item);
+        }
+        if items.is_empty() {
+            items.push(Item::choice("No parameters", 0).off());
+        }
+        self.ready_menu = Some(("Scene controls".into(), items));
+    }
+
+    /// A choice of that menu: the parameter set aside from scenes, or taken back.
+    pub fn chosen(&mut self, id: usize) {
+        let Some(here) = self.picks.get(id).copied() else { return };
+        let mut list: Vec<(u64, u64)> = self.graph["sceneUntouched"].as_array().into_iter().flatten().map(|u| (u["node"].as_u64().unwrap_or(0), u["param"].as_u64().unwrap_or(0))).collect();
+        match list.iter().position(|x| *x == here) {
+            Some(at) => {
+                list.remove(at);
+            }
+            None => list.push(here),
+        }
+        let parameters: Vec<Value> = list.iter().map(|(node, param)| json!({"node": node, "param": param})).collect();
+        self.b.say("");
+        self.out.push((Request::Edit, "scenes.untouched", json!({"parameters": parameters})));
     }
 
     fn edit(&mut self, method: &'static str, params: Value) {
@@ -305,6 +358,16 @@ impl Screen {
                 self.edit("parts.move", json!({"part": self.id, "from": i, "to": to}));
                 self.mode = Mode::Actions(to);
                 self.b.reset_cursor();
+            }
+            (Row::Routing, Mode::Actions(i)) => {
+                if let Some(Entry::Node(n)) = entries.get(i) {
+                    return Outcome::Routing(*n);
+                }
+            }
+            (Row::SceneControls, Mode::Actions(i)) => {
+                if let Some(Entry::Node(n)) = entries.get(i) {
+                    self.out.push((Request::List(*n), "params.list", json!({"node": n})));
+                }
             }
             (Row::Remove, Mode::Actions(i)) => {
                 if let Some(Entry::Node(n)) = entries.get(i) {

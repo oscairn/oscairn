@@ -70,10 +70,10 @@ fn chain_actions_and_requests() {
     // Chorus: its actions; window.info asked; no view row until it says there is one.
     assert_eq!(press(&mut c, 1), crate::chain::Outcome::Stay);
     assert_eq!(sent(&mut c.out), [("window.info", json!({"node": 2}))]);
-    assert_eq!(labels(ui), ["Parameters", "Turn on", "Move later", "Remove"], "the first of the chain cannot move earlier");
+    assert_eq!(labels(ui), ["Parameters", "Turn on", "Move later", "Remove", "Routing...", "Scene controls..."], "the first of the chain cannot move earlier");
     c.reply(crate::chain::Request::Window(2), Ok(json!({"available": true})));
     let r = rows(ui);
-    assert_eq!((r[4].0.as_str(), r[4].1.as_str(), r[4].2), ("Plugin view", "not available in this shell yet", 4), "labeled, disabled");
+    assert_eq!((r[6].0.as_str(), r[6].1.as_str(), r[6].2), ("Plugin view", "not available in this shell yet", 4), "labeled, disabled");
     // Turn on: off turns it on, as the JUCE button.
     c.act(Action::Move { pane: None, by: 1 });
     c.act(Action::Move { pane: None, by: 1 });
@@ -86,7 +86,31 @@ fn chain_actions_and_requests() {
     let mut moved = graph();
     moved["parts"][0]["chain"] = json!([1, 2]);
     c.graph(&moved); // as the engine's graph.get then says
-    assert_eq!(labels(ui), ["Parameters", "Turn on", "Move earlier", "Remove", "Plugin view"], "now the last: it can move earlier");
+    assert_eq!(labels(ui), ["Parameters", "Turn on", "Move earlier", "Remove", "Routing...", "Scene controls...", "Plugin view"], "now the last: it can move earlier");
+    // Routing... opens the plugin in Routing (D11); Scene controls... lists its parameters ticked where scenes touch them,
+    // choosing one sets it aside (`scenes.untouched`, the others kept), again takes it back (D10).
+    c.act(Action::Move { pane: None, by: -10 });
+    c.act(Action::Move { pane: None, by: 4 });
+    assert_eq!(c.act(Action::Confirm(None)), crate::chain::Outcome::Routing(2));
+    c.act(Action::Move { pane: None, by: 1 });
+    assert_eq!(c.act(Action::Confirm(None)), crate::chain::Outcome::Stay);
+    assert_eq!(sent(&mut c.out), [("params.list", json!({"node": 2}))]);
+    let mut with_untouched = moved.clone();
+    with_untouched["sceneUntouched"] = json!([{"node": 2, "param": 9}, {"node": 1, "param": 4}]);
+    c.graph(&with_untouched);
+    c.reply(crate::chain::Request::List(2), Ok(json!({"parameters": [
+        {"id": 7, "name": "Rate", "flags": 32}, {"id": 8, "name": "Meter", "flags": 32 | 8}, {"id": 9, "name": "Depth", "flags": 32}, {"id": 10, "name": "Bypass", "flags": 0}]})));
+    let (title, items) = c.take_menu().expect("the menu is ready");
+    assert_eq!(title, "Scene controls");
+    assert_eq!(items.iter().map(|i| (i.label.as_str(), i.tick, i.enabled)).collect::<Vec<_>>(), [("Rate", Some(true), true), ("Meter", Some(false), false), ("Depth", Some(false), true), ("Bypass", Some(false), false)], "automatable ones ticked unless set aside");
+    let id = |label: &str| match items.iter().find(|i| i.label == label).unwrap().kind {
+        crate::menu::Kind::Choice(id) => id,
+        _ => panic!(),
+    };
+    c.chosen(id("Rate"));
+    assert_eq!(sent(&mut c.out), [("scenes.untouched", json!({"parameters": [{"node": 2, "param": 9}, {"node": 1, "param": 4}, {"node": 2, "param": 7}]}))]);
+    c.chosen(id("Depth"));
+    assert_eq!(sent(&mut c.out), [("scenes.untouched", json!({"parameters": [{"node": 1, "param": 4}]}))], "taken back: the others kept");
     // The parameters open its pages.
     c.act(Action::Move { pane: None, by: -10 });
     assert_eq!(c.act(Action::Confirm(None)), crate::chain::Outcome::Params(2, "Chorus".into()));

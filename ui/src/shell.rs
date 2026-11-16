@@ -26,11 +26,12 @@ use crate::parts;
 use crate::piano;
 use crate::sounds;
 use crate::play;
+use crate::routing;
 use crate::profile::Profile;
 use crate::scene;
 use crate::setlist;
 use crate::topbar::{self, Level, Meter, MeterSettings};
-use crate::{Bar, BarAction, GridState, HomeState, ControlsState, KeyboardState, MenuState, MixerState, PartState, PartsState, PianoState, PlayState, SetlistState, Shell, TileData};
+use crate::{Bar, BarAction, GridState, HomeState, ControlsState, KeyboardState, MenuState, MixerState, RoutingState, PartState, PartsState, PianoState, PlayState, SetlistState, Shell, TileData};
 use serde_json::{json, Value};
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 use std::cell::RefCell;
@@ -69,6 +70,7 @@ pub enum Request {
     Parts(parts::Request),
     Mixer(mixer::Request),
     Controls(controls::Request),
+    Routing(routing::Request),
     Chain(chain::Request),
     Sounds(sounds::Request),
     Params(params::Request),
@@ -130,6 +132,8 @@ pub enum Screen {
     Mixer = 10,
     /// The controls and their targets (controls.rs), opened from the Parts list.
     Controls = 11,
+    /// The real graph and its wires (routing.rs), opened from the Parts list.
+    Routing = 12,
 }
 
 pub struct App {
@@ -159,6 +163,7 @@ pub struct App {
     parts: parts::Screen,
     mixer: mixer::Screen,
     controls: controls::Screen,
+    routing: routing::Screen,
     /// A menu over the screen that asked for it (menu.rs).
     menu: Option<(Screen, menu::Menu)>,
     chain: chain::Screen,
@@ -213,7 +218,7 @@ fn with_app(f: impl FnOnce(&mut App)) {
 
 /// The Performance app's screens, which carry the top bar's actions (undo, redo, save).
 fn has_actions(screen: Screen) -> bool {
-    matches!(screen, Screen::Play | Screen::Part | Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene)
+    matches!(screen, Screen::Play | Screen::Part | Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing | Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene)
 }
 
 /// The screens that follow levels and mutes moved live (controls.changed).
@@ -339,6 +344,16 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     ctl.on_tool(|i| with_app(|a| a.controls_act(|c| c.tap_tool(i))));
     ctl.on_turn_columns(|by| with_app(|a| a.on_controls(|c| c.turn_columns(by))));
     ctl.on_resized(|| with_app(|a| a.on_controls(controls::Screen::shown)));
+    let rt = ui.global::<RoutingState>();
+    rt.on_back(|| with_app(|a| a.go(Screen::Parts)));
+    rt.on_tapped(|kind, i| with_app(|a| a.routing_act(|r| r.tap(kind, i))));
+    rt.on_chevron(|kind, i| with_app(|a| a.on_routing(|r| r.tap_chevron(kind, i))));
+    rt.on_tool(|i| with_app(|a| a.on_routing(|r| r.tap_tool(i))));
+    rt.on_panel_press(|row, cell| with_app(|a| a.routing_act(|r| r.tap_cell(row, cell))));
+    rt.on_panel_moved(|row, cell, f| with_app(|a| a.on_routing(|r| r.level(row, cell, f))));
+    rt.on_panel_held(|row, cell, down| with_app(|a| a.on_routing(|r| r.hold(row, cell, down))));
+    rt.on_turn_panel(|by| with_app(|a| a.on_routing(|r| r.turn_panel(by))));
+    rt.on_resized(|| with_app(|a| a.on_routing(routing::Screen::shown)));
     let menu = ui.global::<MenuState>();
     menu.on_tapped(|i| with_app(|a| a.menu_tap(i)));
     menu.on_back(|| with_app(|a| a.menu_back()));
@@ -393,6 +408,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             parts: parts::Screen::new(ui),
             mixer: mixer::Screen::new(ui),
             controls: controls::Screen::new(ui),
+            routing: routing::Screen::new(ui),
             menu: None,
             chain: chain::Screen::new(ui),
             sounds: sounds::Screen::new(ui),
@@ -418,6 +434,8 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             saving: None,
         };
         app.part.keys = profile.on_screen_keyboard;
+        app.routing.offer_keyboard(profile.on_screen_keyboard);
+        app.routing.set_collapsed(crate::settings::routing_collapsed());
         app.play.offer_keyboard(profile.on_screen_keyboard, crate::settings::keyboard_hint_dismissed());
         app.play.knobs(profile.controls.clone());
         app.show_home();
@@ -592,6 +610,7 @@ impl App {
         self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
         self.on_parts(|p| p.status(status)); // and the devices and failures the Parts list says
         self.on_mixer(|m| m.status(status));
+        self.on_routing(|r| r.status(status));
         if self.on_piano(|p| !p.status(status)) == Some(true) {
             self.close_piano(); // its input was unplugged
         }
@@ -628,6 +647,13 @@ impl App {
             }
             Request::Mixer(r) => {
                 if self.on_mixer(|m| m.reply(r, result)) {
+                    self.ask_performance();
+                    self.stale = true;
+                }
+                return;
+            }
+            Request::Routing(r) => {
+                if self.on_routing(|x| x.reply(r, result)) {
                     self.ask_performance();
                     self.stale = true;
                 }
@@ -718,6 +744,7 @@ impl App {
                 self.on_parts(|p| p.graph(&r));
                 self.on_mixer(|m| m.graph(&r));
                 self.on_controls(|c| c.graph(&r));
+                self.on_routing(|x| x.graph(&r));
                 self.on_chain(|c| c.graph(&r));
                 self.on_sounds(|c| c.graph(&r));
                 self.on_scene(|c| c.graph(&r));
@@ -738,7 +765,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Routing(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) => {}
         }
     }
 
@@ -882,6 +909,7 @@ impl App {
             (Screen::Part, _) => self.part_act(|p| p.act(action)),
             (Screen::Parts, _) => self.parts_act(|p| p.act(action)),
             (Screen::Controls, _) => self.controls_act(|c| c.act(action)),
+            (Screen::Routing, _) => self.routing_act(|r| r.act(action)),
             (Screen::Mixer, _) => {
                 if self.on_mixer(|m| m.act(action)) == mixer::Outcome::Back {
                     self.go(Screen::Parts);
@@ -924,7 +952,7 @@ impl App {
     /// The top bar's actions for the screen shown and the cursor on them, each row set only when it changed.
     fn show_bar(&mut self) {
         let learn = (self.screen == Screen::Play && self.play.can_learn()).then(|| self.play.learning());
-        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer | Screen::Controls), learn)) } else { vec![] };
+        self.bar_list = if has_actions(self.screen) { topbar::actions(&self.history, topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing), learn)) } else { vec![] };
         if self.bar_at.is_some_and(|a| a >= self.bar_stops()) {
             self.bar_at = None;
         }
@@ -1046,6 +1074,7 @@ impl App {
             Screen::Parts => self.parts.at_top(),
             Screen::Mixer => self.mixer.at_top(),
             Screen::Controls => self.controls.at_top(),
+            Screen::Routing => self.routing.at_top(),
             Screen::Chain => self.chain.at_top(),
             Screen::Sounds => self.sounds.at_top(),
             Screen::Scene => self.scene.at_top(),
@@ -1170,6 +1199,37 @@ impl App {
         r
     }
 
+    /// Something for Routing, then what it asks the engine sent, a menu it has ready opened, and the wires'
+    /// meters' timer started or stopped as Meters is switched.
+    fn on_routing<R>(&mut self, f: impl FnOnce(&mut routing::Screen) -> R) -> R {
+        let r = f(&mut self.routing);
+        for (request, method, params) in std::mem::take(&mut self.routing.out) {
+            self.send(Request::Routing(request), method, params);
+        }
+        if let Some((title, items)) = self.routing.take_menu() {
+            self.open_menu(Screen::Routing, &title, items);
+        }
+        if self.screen == Screen::Routing {
+            if self.routing.metering() && !self.meters.running() {
+                self.meters.start(slint::TimerMode::Repeated, routing::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+            } else if !self.routing.metering() && self.meters.running() {
+                self.meters.stop();
+            }
+        }
+        r
+    }
+
+    /// A navigation action or tap for Routing, and where it takes the shell.
+    fn routing_act(&mut self, f: impl FnOnce(&mut routing::Screen) -> routing::Outcome) {
+        match self.on_routing(f) {
+            routing::Outcome::Back => self.go(Screen::Parts),
+            routing::Outcome::OpenPart(id) => self.open_part(id),
+            routing::Outcome::Keys(input) => self.open_piano(&input),
+            routing::Outcome::Controls => self.go(Screen::Controls),
+            routing::Outcome::Stay => {}
+        }
+    }
+
     /// A navigation action or tap for the Controls page, and where it takes the shell.
     fn controls_act(&mut self, f: impl FnOnce(&mut controls::Screen) -> controls::Outcome) {
         match self.on_controls(f) {
@@ -1227,6 +1287,12 @@ impl App {
                 if screen == Some(Screen::Controls) {
                     self.on_controls(|c| c.chosen(id));
                 }
+                if screen == Some(Screen::Routing) {
+                    self.on_routing(|r| r.chosen(id));
+                }
+                if screen == Some(Screen::Chain) {
+                    self.on_chain(|c| c.chosen(id));
+                }
             }
             Some(menu::Outcome::Close) => self.menu = None,
             _ => {}
@@ -1238,10 +1304,19 @@ impl App {
         match self.on_parts(f) {
             parts::Outcome::Back => self.go(Screen::Play),
             parts::Outcome::Open(id) => self.open_part(id),
-            parts::Outcome::Routing(_) => {} // the list says Routing is not in this shell yet
+            parts::Outcome::Routing(node) => {
+                self.routing.opened();
+                self.routing.choose_node(node);
+                self.start_scan();
+                self.go(Screen::Routing);
+            }
             parts::Outcome::Page(parts::Page::Mixer) => self.go(Screen::Mixer),
             parts::Outcome::Page(parts::Page::Controls) => self.go(Screen::Controls),
-            parts::Outcome::Page(_) => {} // the list says these are not in this shell yet
+            parts::Outcome::Page(parts::Page::Routing) => {
+                self.routing.opened();
+                self.start_scan();
+                self.go(Screen::Routing);
+            }
             parts::Outcome::Stay => {}
         }
     }
@@ -1306,6 +1381,9 @@ impl App {
         for (request, method, params) in std::mem::take(&mut self.chain.out) {
             self.send(Request::Chain(request), method, params);
         }
+        if let Some((title, items)) = self.chain.take_menu() {
+            self.open_menu(Screen::Chain, &title, items);
+        }
         r
     }
 
@@ -1331,6 +1409,12 @@ impl App {
             chain::Outcome::Params(node, name) => {
                 self.params.open(node, &name);
                 self.go(Screen::Params);
+            }
+            chain::Outcome::Routing(node) => {
+                self.routing.opened();
+                self.routing.choose_node(node);
+                self.start_scan();
+                self.go(Screen::Routing);
             }
             chain::Outcome::Stay => {}
         }
@@ -1377,6 +1461,7 @@ impl App {
             Screen::Scene => self.on_scene(scene::Screen::shown),
             Screen::Mixer => self.on_mixer(mixer::Screen::shown),
             Screen::Controls => self.on_controls(controls::Screen::shown),
+            Screen::Routing => self.on_routing(routing::Screen::shown),
             _ => {}
         }
     }
@@ -1386,7 +1471,7 @@ impl App {
         match self.screen {
             Screen::Part => self.go(self.part_from),
             Screen::Parts => self.go(Screen::Play),
-            Screen::Mixer | Screen::Controls => self.go(Screen::Parts),
+            Screen::Mixer | Screen::Controls | Screen::Routing => self.go(Screen::Parts),
             Screen::Chain | Screen::Sounds => self.go(Screen::Part),
             Screen::Scene => self.go(Screen::Play),
             Screen::Params => self.go(Screen::Chain),
@@ -1435,7 +1520,7 @@ impl App {
         let (dir, helper) = (crate::scan::plugin_dir(PLUGIN_DIR.with(|d| d.borrow().clone()).as_deref()), crate::scan::scanner());
         std::thread::spawn(move || {
             let found = crate::scan::scan(&dir, &helper, crate::scan::TIMEOUT);
-            let _ = weak.upgrade_in_event_loop(move |_| with_app(|a| a.on_chain(|c| c.plugins(found))));
+            let _ = weak.upgrade_in_event_loop(move |_| with_app(|a| { a.on_routing(|r| r.plugins(found.clone())); a.on_chain(|c| c.plugins(found)) }));
         });
     }
 
@@ -1507,7 +1592,7 @@ impl App {
 
     /// A part selected in Play: its settings.
     fn open_part(&mut self, id: u32) {
-        self.part_from = if self.screen == Screen::Parts { Screen::Parts } else { Screen::Play };
+        self.part_from = if matches!(self.screen, Screen::Parts | Screen::Routing) { self.screen } else { Screen::Play };
         self.part.open(id);
         self.go(Screen::Part);
     }
@@ -1520,7 +1605,11 @@ impl App {
 
     /// The meters, asked unless the last answer is still out: a slow engine never piles them up.
     fn poll_meters(&mut self) {
-        if self.screen == Screen::Mixer {
+        if self.screen == Screen::Routing {
+            if self.client.waiting(|r| matches!(r, Request::Routing(routing::Request::Meters))).is_none() {
+                self.send(Request::Routing(routing::Request::Meters), "wires.meters", json!({}));
+            }
+        } else if self.screen == Screen::Mixer {
             if self.client.waiting(|r| matches!(r, Request::Mixer(mixer::Request::Meters))).is_none() {
                 self.send(Request::Mixer(mixer::Request::Meters), "parts.meters", json!({}));
             }
@@ -1563,6 +1652,10 @@ impl App {
             }
             if self.screen == Screen::Controls {
                 self.on_controls(controls::Screen::hidden);
+            }
+            if self.screen == Screen::Routing {
+                self.on_routing(routing::Screen::hidden);
+                self.meters.stop();
             }
             if self.screen == Screen::Part {
                 self.on_part(part::Screen::hidden);
@@ -1607,6 +1700,7 @@ impl App {
                 Screen::Parts => "Edit".into(),
                 Screen::Mixer => "Mixer".into(),
                 Screen::Controls => "Controls".into(),
+                Screen::Routing => "Routing".into(),
                 Screen::Params => "Parameters".into(),
                 Screen::Opening => ui.get_opening(),
             });
@@ -1622,7 +1716,7 @@ impl App {
         if screen == Screen::Scene {
             self.on_scene(scene::Screen::shown);
         }
-        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene | Screen::Parts | Screen::Mixer | Screen::Controls) {
+        if matches!(screen, Screen::Chain | Screen::Sounds | Screen::Params | Screen::Scene | Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing) {
             self.ask_performance();
         }
         if screen == Screen::Parts {
@@ -1636,6 +1730,10 @@ impl App {
         }
         if screen == Screen::Controls {
             self.on_controls(controls::Screen::shown);
+        }
+        if screen == Screen::Routing {
+            self.send(Request::Routing(routing::Request::Status), "session.status", json!({}));
+            self.on_routing(routing::Screen::shown);
         }
         if screen == Screen::Chain {
             self.on_chain(chain::Screen::shown);

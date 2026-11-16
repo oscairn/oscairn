@@ -373,6 +373,41 @@ By scene swaps the rows for a table of every mapping against every scene.
   + Target menu), `params.get` (Now...). The JUCE page sends no `graph.commit` after these, and neither does
   this. Now... is a port of `setRangeToPresent` (core/control/src/parts.cpp).
 
+## Routing
+
+`wires.rs`, `routing.rs`, `slint/routing.slint`: the routing page of the JUCE Edit view (PartsView.cpp,
+`routingShown`, and PartsModel.cpp's `readRouting`, `inputsOf`, `layoutRouting`), opened by the Routing button under
+the Parts list, a shared row of it, or "Routing..." among a plugin's actions in the chain. The real graph as boxes in
+columns by signal flow (the keys and MIDI and each audio input first, the outputs last), its wires between them, and
+a panel under it for what is chosen.
+
+- **Drawing:** `wires.rs` is pure (graph.get's JSON to pixels from (0, 0)), a port of the JUCE layout: columns by rank, a
+  slot in each column a wire crosses, eight sweeps ordering each column to cross fewer wires, each wire its own place
+  on a box's edge, an expanded part a frame whose plugins are laid out the same way inside it, a wire back to an
+  earlier column going below everything, control lines (a plugin's lane to a control or a parameter, the control to
+  the plugins it drives) routed in right angles around the boxes by a shortest-path search. The screen fits it to
+  the canvas (scale at most 1, as the JUCE view) and gives the component one set of points: wires are `Path`s with
+  `fit: preserve` in the canvas's pixels, boxes sit at the same points, so a wire meets its port wherever the window
+  is (`src/tests/routing.rs` measures it in rendered pixels at five sizes and scales; without `fit: preserve` it
+  fails). The theme's wire properties are used as the JUCE view uses them: `audio` and `notes` for enabled wires,
+  `disabled` and `draining` (dashed), `unconnected` for a wire that no longer fits its ports, `control` for the control
+  lines; a wire a user drew is thicker; a bus is a line per channel, eight at most; with Meters on a wire that carries
+  sound (above -60 dB) takes the level's color: positive, `warning` from -12 dB, `danger` from -3.
+- **Panel:** for a plugin: Connect audio to..., Connect notes to..., Keyboard (the keys and MIDI, where the profile
+  offers the on-screen keyboard), Connect lane to..., Turn off or on, Open part or Remove, a disabled "Plugin view" when
+  it has a window of its own; a row per lane that reaches a control or a parameter with Disconnect; each input with
+  sources and a row per source: On, level, M, S, Disconnect (wires drawn by hand), and the channel of notes from the
+  keys. For a part: Open part, Expand or Collapse. Cells wrap onto more rows by the width and the rows are paged.
+- **Without touch:** the left knob moves the cursor over the boxes (frames, parts, plugins and ends, then the control
+  pills, in columns from the left; the arrows cross columns), the right knob over the panel's cells, the dial over the
+  buttons, the boxes and the panel in one list; a press chooses (again lets go) or does what a cell says, a slider or
+  the channel is changed by the dial after a press; Cancel ends a change, drops the cursor, then goes back.
+- **Requests:** `graph.get`, `session.status` (a plugin that failed is outlined), `wires.meters` every 50 ms while
+  Meters is on, `params.list`, `window.info`, and `graph.connect`, `wires.disconnect`, `wires.mix`, `wires.enable`,
+  `wires.zones`, `graph.enable`, `graph.add`, `graph.remove`, `graph.unmap`, `controls.add`, `controls.source`,
+  `controls.targets`, `controls.set`, each edit followed by `graph.commit`. None new. The choice of "Parts collapsed" is kept
+  in `routing-view.txt` beside the theme choice, as the JUCE app keeps it.
+
 ## Part
 
 `part.rs` and `slint/part.slint`: the JUCE Part page (PartsView.cpp, PartsModel.cpp's `partFields`)

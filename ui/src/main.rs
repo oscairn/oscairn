@@ -25,6 +25,7 @@ mod row;
 mod parts;
 mod play;
 mod profile;
+mod routing;
 mod scan;
 mod scene;
 mod sounds;
@@ -34,6 +35,7 @@ mod shell;
 mod theme;
 mod topbar;
 mod views;
+mod wires;
 #[cfg(test)]
 mod tests;
 

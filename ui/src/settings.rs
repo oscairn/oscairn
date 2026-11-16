@@ -62,6 +62,20 @@ pub fn dismiss_keyboard_hint() -> std::io::Result<()> {
     std::fs::write(dir.join("keyboard.txt"), format!("hint dismissed\n{rest}"))
 }
 
+/// Whether Routing shows parts collapsed: the line of routing-view.txt, which the JUCE app's Routing
+/// page keeps beside the theme choice (PartsView.cpp, `routingPreference`); collapsed unless it says "expanded".
+pub fn routing_collapsed() -> bool {
+    read("routing-view.txt").is_none_or(|t| t.trim() != "expanded")
+}
+
+/// Keeps the choice of Routing's "Parts collapsed" as the JUCE app writes it.
+pub fn keep_routing_collapsed(collapsed: bool) {
+    let Some(dir) = config_dir() else { return };
+    if std::fs::create_dir_all(&dir).is_ok() {
+        let _ = std::fs::write(dir.join("routing-view.txt"), if collapsed { "collapsed\n" } else { "expanded\n" });
+    }
+}
+
 /// The profile's meter settings with the user's over them, each of `cpu` and `ram` on its own.
 pub fn top_bar(profile: MeterSettings) -> MeterSettings {
     let Some(doc) = read("top-bar.json").and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return profile };

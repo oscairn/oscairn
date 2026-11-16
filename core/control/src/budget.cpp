@@ -143,20 +143,28 @@ namespace oscairn
     // with no limit, or before its voices are measured, the busiest block seen. A build asked for
     // without a declaration (a Performance not open) counts at the most of what its declarations
     // were measured at; one without a digest (not here), at the most of that version's builds.
-    Control::Cost Session::costOf(const std::string& key, const std::string& name, const std::string& plugin, uint32_t limit, const std::string& path) const
+    std::optional<Session::Measurement> Session::measurementFor(const std::string& key) const
     {
-        Measurement m; bool found = false;
-        if(const auto it = measured_.find(key); it != measured_.end()) { m = it->second; found = true; }
-        else if(key.find('#') == std::string::npos)
+        if(const auto it = measured_.find(key); it != measured_.end()) return it->second;
+        std::optional<Measurement> m;
+        if(key.find('#') == std::string::npos)
             for(auto it = measured_.lower_bound(key); it != measured_.end() && it->first.compare(0, key.size(), key) == 0; ++it)
             {
                 const char next = it->first.size() > key.size() ? it->first[key.size()] : 0;
                 if(next != '#' && (next != ' ' || key.find(' ') != std::string::npos)) continue;
-                found = true;
                 const auto& x = it->second;
-                m = {std::max(m.cpu, x.cpu), std::max(m.rest, x.rest), std::max(m.voice, x.voice), std::max(m.voices, x.voices), std::max(m.memory, x.memory), std::max(m.samples, x.samples), std::max(m.declared, x.declared)};
+                if(!m) { m = x; continue; }
+                const auto contexts = x.contexts && (!m->contexts || x.contexts < m->contexts) ? x.contexts : m->contexts; // the fewest seen: never more sharing than was
+                m = Measurement{std::max(m->cpu, x.cpu), std::max(m->rest, x.rest), std::max(m->voice, x.voice), std::max(m->voices, x.voices), std::max(m->memory, x.memory), std::max(m->samples, x.samples), std::max(m->declared, x.declared), contexts};
             }
+        return m;
+    }
+
+    Control::Cost Session::costOf(const std::string& key, const std::string& name, const std::string& plugin, uint32_t limit, const std::string& path) const
+    {
+        const auto found = measurementFor(key);
         if(!found) return declaredCost(key, name, plugin, path, 0);
+        const auto& m = *found;
         // Its CPU forgotten, or none sampled yet: the guess, with the memory as measured.
         if(m.cpu <= 0 && m.rest <= 0 && m.voice <= 0)
         {
@@ -235,8 +243,9 @@ namespace oscairn
                     const auto* v = detail::member(e->value, key);
                     return v && v->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(v->payload)->number, nullptr) : 0.0;
                 };
-                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples"), declared = number("declared");
+                const double cpu = number("cpu"), rest = number("rest"), voice = number("voice"), voices = number("voices"), memory = number("memory"), samples = number("samples"), declared = number("declared"), contexts = number("contexts");
                 if(!std::isfinite(memory) || memory < 0 || memory > double(1ull << 40)) continue;
+                const uint32_t shares = std::isfinite(contexts) && contexts >= 0 && contexts <= 32 ? uint32_t(contexts) : 0;
                 const auto said = std::isfinite(declared) && declared >= 0 && declared <= double(1ull << 40) ? uint64_t(declared) : 0;
                 // An impossible cost (a share above the audio time itself, negative, not a number) is
                 // dropped and measured again; the memory stands (of this version).
@@ -244,7 +253,7 @@ namespace oscairn
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
                 const std::string key(e->name->string, e->name->string_size);
                 const uint64_t kept = keepMemory ? uint64_t(memory) : 0;
-                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), kept, uint32_t(std::clamp(samples, 0.0, 1e9)), said} : Measurement{0, 0, 0, 0, kept, 0, said};
+                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), kept, uint32_t(std::clamp(samples, 0.0, 1e9)), said, shares} : Measurement{0, 0, 0, 0, kept, 0, said, shares};
                 if(possible) setPluginCost(key.substr(0, key.find('@')), cpu); // RFC 0045, before its instances play: as last measured here
             }
         }
@@ -258,7 +267,7 @@ namespace oscairn
         bool first = true;
         for(const auto& [key, m] : measured_)
         {
-            char numbers[240]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u,\"declared\":%llu}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples, static_cast<unsigned long long>(m.declared));
+            char numbers[270]; std::snprintf(numbers, sizeof(numbers), "{\"cpu\":%.6g,\"rest\":%.6g,\"voice\":%.6g,\"voices\":%u,\"memory\":%llu,\"samples\":%u,\"declared\":%llu,\"contexts\":%u}", m.cpu, m.rest, m.voice, m.voices, static_cast<unsigned long long>(m.memory), m.samples, static_cast<unsigned long long>(m.declared), m.contexts);
             text += std::string(first ? "" : ",") + detail::quote(key) + ":" + numbers; first = false;
         }
         text += "}}\n";
@@ -596,6 +605,14 @@ namespace oscairn
             // instance, not an effect context (whose share is its context's).
             if(graph_.effectSource(node) == node)
                 if(const auto d = declaredBy(host); d && total(*d) != m.declared) { m.declared = total(*d); measurementsChanged_ = true; }
+            // How many parts an instance of it carried at most (its free room and what it holds now): a Performance not open counts
+            // the parts of such a plugin beyond that many as sharing instances, as they do when it opens (estimate).
+            if(const auto* shared = dynamic_cast<const SoundContext*>(&host))
+            {
+                const auto& e = *shared->engine();
+                const auto carries = SoundContext::room(e) + uint32_t(std::popcount(e.buses));
+                if(carries != m.contexts) { m.contexts = carries; measurementsChanged_ = true; }
+            }
             if(memoryNow && sounds == 1)
             {
                 auto bytes = host.residentBytes();
@@ -782,15 +799,39 @@ namespace oscairn
                         if(const auto* lanes = detail::member(s->value, "lanes"); lanes && lanes->type == json_type_array)
                             for(auto* l = static_cast<const json_array_s*>(lanes->payload)->start; l; l = l->next) chain(detail::member(l->value, "chain"));
             }
+        // Which nodes share an instance when it opens (performance.cpp): saved sharing (an engine of another node's key), and the nodes of a
+        // plugin that carries several parts, `contexts` of them an instance, in the order saved. An instance's first node counts the
+        // memory its measurement holds; each other node what its plugin declared, a part's sound alone (as an open Performance counts it).
+        std::map<std::string, uint32_t> engines; // nodes by their saved engine
+        std::set<std::string> offMain; // nodes with an audio wire from another of their outputs than the main one
+        std::map<std::string, const json_value_s*> definitions;
+        for(auto* e = static_cast<const json_array_s*>(nodes->payload)->start; e; e = e->next) { ++engines[text(detail::member(e->value, "engine"))]; definitions[text(detail::member(e->value, "key"))] = e->value; }
+        if(const auto* wires = detail::member(doc.get(), "wires"); wires && wires->type == json_type_array)
+            for(auto* w = static_cast<const json_array_s*>(wires->payload)->start; w; w = w->next)
+            {
+                const auto from = text(detail::member(w->value, "from"));
+                const auto* outputs = definitions.count(from) ? detail::member(definitions.at(from), "outputs") : nullptr;
+                if(text(detail::member(w->value, "kind")) != "audio" || !outputs || outputs->type != json_type_array) continue;
+                for(auto* o = static_cast<const json_array_s*>(outputs->payload)->start; o; o = o->next)
+                    if(number(detail::member(o->value, "id")) == number(detail::member(w->value, "fromPort")) && !(uint32_t(number(detail::member(o->value, "flags"))) & CLAP_AUDIO_PORT_IS_MAIN)) offMain.insert(from);
+            }
+        std::map<std::string, uint32_t> formed; // per plugin build: the nodes that form instances on their own so far
         std::vector<Cost> coming;
         for(auto* e = static_cast<const json_array_s*>(nodes->payload)->start; e; e = e->next)
         {
             const auto* plugin = detail::member(e->value, "plugin");
             const auto id = text(detail::member(plugin, "id")), key = text(detail::member(e->value, "key"));
             const auto digest = buildDigest(text(detail::member(plugin, "pathHint"))); // the build it will load, where it is here
-            coming.push_back(costOf(id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest), text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0,
-                                    text(detail::member(plugin, "pathHint"))));
+            const auto measuredKey = id + "@" + text(detail::member(plugin, "version")) + (digest.empty() ? std::string() : " " + digest);
+            coming.push_back(costOf(measuredKey, text(detail::member(e->value, "name")), id, limits.count(key) ? limits.at(key) : 0, text(detail::member(plugin, "pathHint"))));
             if(partOf.count(key)) coming.back().part = partOf.at(key); // a node sharing an instance counts its own sound's CPU (RFC 0045)
+            const auto engine = text(detail::member(e->value, "engine"));
+            const auto* sound = detail::member(e->value, "sound");
+            const auto seen = measurementFor(measuredKey);
+            bool shares = engine != key; // saved sharing an engine's
+            if(!shares && SoundContext::sharesOnItsOwn() && engines[engine] == 1 && !offMain.count(key) && (!sound || sound->type == json_type_null) && seen && seen->contexts > 1)
+                shares = formed[measuredKey]++ % seen->contexts != 0;
+            if(shares && seen && seen->declared) coming.back().memory = std::min(coming.back().memory, seen->declared);
         }
         return estimateOf(coming, playing, its);
     }

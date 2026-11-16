@@ -327,6 +327,15 @@ target_compile_definitions(oscairn-plugin-check-content-test PRIVATE OSCAIRN_SAM
 add_dependencies(oscairn-plugin-check-content-test samplepack_cli oscairn-sample-fixture oscairn-plugin-check)
 add_test(NAME control-plugin-check-content COMMAND oscairn-plugin-check-content-test $<TARGET_FILE:oscairn-plugin-check> $<TARGET_FILE:oscairn-sample-fixture> "${SAMPLEPACK_CLI}")
 set_tests_properties(control-plugin-check-content PROPERTIES TIMEOUT 180)
+# Several sampler parts on one pack: the Performance opens in workers and its estimate counts each copy and is not below what the workers hold.
+add_library(oscairn-pack-holder MODULE control/tests/pack_holder.cpp)
+target_link_libraries(oscairn-pack-holder PRIVATE oscairn_clap_headers)
+set_target_properties(oscairn-pack-holder PROPERTIES PREFIX "" SUFFIX ".clap" CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+add_executable(oscairn-multi-sampler-load-test control/tests/multi_sampler_load.cpp)
+target_link_libraries(oscairn-multi-sampler-load-test PRIVATE oscairn_control)
+add_dependencies(oscairn-multi-sampler-load-test samplepack_cli oscairn-pack-holder oscairn_basic_synth kick-clap-fixture-normal oscairn-plugin-worker)
+add_test(NAME control-multi-sampler-load COMMAND oscairn-multi-sampler-load-test $<TARGET_FILE:oscairn-plugin-worker> $<TARGET_FILE:oscairn-pack-holder> $<TARGET_FILE:oscairn_basic_synth> $<TARGET_FILE:kick-clap-fixture-normal> "${SAMPLEPACK_CLI}")
+set_tests_properties(control-multi-sampler-load PROPERTIES TIMEOUT 120)
 # An archive of samples far larger than the bound installs in bounded memory, locked and resident.
 add_executable(oscairn-install-memory-test control/tests/install_memory.cpp)
 target_link_libraries(oscairn-install-memory-test PRIVATE oscairn_control)

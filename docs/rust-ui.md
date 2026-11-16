@@ -349,6 +349,30 @@ and type scale decide; the header has paging buttons for touch when something is
 - The fader, marks and meter are Play's strip widgets drawn again (`Meter` moved to theme.slint for it;
   Play's own copy in play.slint still stands until that file is next edited).
 
+## Controls
+
+`controls.rs`, `slint/controls.slint`, `menu.rs`, `slint/menu.slint`: the controls page of the JUCE Edit view
+(PartsView.cpp, `controlsShown`), opened by the Controls button under the Parts list. A control is a
+knob (0 to 1) that drives targets: a plugin's parameter, a part's level, mute or send, another control,
+or a morph between two scenes, each with a range (start and end sliders, the end below the start reverses
+it), a curve (linear, exponential, logarithmic, S-curve, fader dB, power), Relative and the scenes it works
+in. A row per control (name, fader, + Target, Remove), a row under it per target (what it drives, the two
+sliders, curve, Relative, Now..., Scenes..., Remove: in one line, or two or three when the width is short).
+By scene swaps the rows for a table of every mapping against every scene.
+
+- **Menus** (menu.rs, shared with Routing): the JUCE popup menus are lists over the screen: a row is a
+  choice (ticked or not), a submenu or a heading; the cursor starts on the first row that can be chosen and
+  nothing is chosen until a press; Cancel goes up a level and closes at the first; how many rows show is what
+  fills the height. The screen that opened a menu gets the choice (`chosen`).
+- **Without touch:** the cursor is two-dimensional as the Parts list's (dial cell by cell, left knob along a
+  row, right knob down the rows); a press on a name asks the text keyboard for the new one, on a fader or a
+  slider starts a change the dial makes (a fortieth a click), on a button or Relative does it, on the curve,
+  Now..., Scenes... or + Target opens a menu. Touch: sliders drag, the rest tap.
+- **Requests** (none new): `controls.set` (live), `controls.add`, `controls.name`, `controls.remove`,
+  `controls.targets` (the control's whole list again, as `setTargets` sends it), `params.list` (names and the
+  + Target menu), `params.get` (Now...). The JUCE page sends no `graph.commit` after these, and neither does
+  this. Now... is a port of `setRangeToPresent` (core/control/src/parts.cpp).
+
 ## Part
 
 `part.rs` and `slint/part.slint`: the JUCE Part page (PartsView.cpp, PartsModel.cpp's `partFields`)

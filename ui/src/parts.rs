@@ -127,7 +127,7 @@ impl Page {
 
     /// Whether the shell has the screen yet.
     fn built(self) -> bool {
-        matches!(self, Page::Mixer)
+        matches!(self, Page::Mixer | Page::Controls)
     }
 }
 

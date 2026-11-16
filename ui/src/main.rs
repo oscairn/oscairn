@@ -10,10 +10,12 @@
 mod browser;
 mod chain;
 mod client;
+mod controls;
 mod grid;
 mod home;
 mod keyboard;
 mod knobs;
+mod menu;
 mod mixer;
 mod nav;
 mod params;

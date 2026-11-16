@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// A menu over the screen (src/menu.rs): the JUCE popup menus of the Edit view's pages (a control's
+// targets, a curve, the scenes a mapping works in, Routing's connections) as a list with a border
+// cursor. A row is a choice (ticked or not), a submenu (opens the next list), or a heading. The
+// dial and the knobs move the cursor, a press chooses or opens, Cancel goes up a level and closes at
+// the first. How many rows show is what fills the height, so it follows the window, the spacing and
+// the type scale.
+
+import { Theme, Section, Button, Cursor } from "theme.slint";
+
+export struct MenuRow {
+    label: string,
+    tick: int, // -1 no tick, 0 unticked, 1 ticked
+    enabled: bool,
+    sub: bool, // opens another list
+    head: bool, // a heading: not chosen
+    cursor: bool,
+}
+
+export global MenuState {
+    in property <bool> open;
+    in property <string> title; // the path to the list: "Plugin parameter › Synth"
+    in property <[MenuRow]> rows;
+    in property <string> view; // "1–8 of 30"
+    in property <bool> more; // some rows are out of this view
+    in property <bool> up; // a submenu is open: Back goes up a level
+    // How many rows fit: set by the component.
+    in-out property <int> rows-per-view: 1;
+    callback resized();
+    callback tapped(int); // a row of the view
+    callback back(); // up a level, or closes at the first
+    callback close();
+    callback turn(int); // a view towards the start (-1) or the end (1)
+}
+
+component Entry inherits Section {
+    in property <MenuRow> data;
+    callback tapped();
+    opacity: data.enabled || data.head ? 1 : Theme.disabled;
+    fill: data.head ? Theme.background : Theme.surface;
+    if !data.head: TouchArea {
+        clicked => { if (root.data.enabled) { root.tapped(); } }
+    }
+    Text {
+        x: Theme.pad;
+        width: parent.width - 2 * Theme.pad - Theme.touch;
+        height: parent.height;
+        text: data.label;
+        color: data.head ? Theme.muted : Theme.text;
+        font-size: data.head ? Theme.small : Theme.body;
+        font-weight: data.head ? 700 : 400;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Text {
+        x: parent.width - Theme.pad - Theme.touch;
+        width: Theme.touch;
+        height: parent.height;
+        text: data.sub ? "›" : data.tick == 1 ? "✓" : "";
+        color: data.tick == 1 ? Theme.accent : Theme.muted;
+        font-size: Theme.body;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    Cursor {
+        shown: data.cursor;
+        always: true;
+    }
+}
+
+export component Menu inherits Rectangle {
+    property <length> gap: Theme.gap-between(Theme.gap);
+    property <length> header: Theme.touch;
+    property <length> footer: Theme.small + 2 * Theme.pad-tight;
+    property <length> panel-width: min(Theme.overlay-width, self.width - 2 * Theme.margin);
+    property <length> available: self.height - 2 * Theme.margin - header - footer - 2 * Theme.gap;
+    property <int> per-view: max(1, floor((available + gap) / (Theme.touch + gap)));
+    property <int> shown: min(MenuState.rows.length, per-view);
+    property <length> panel-height: header + footer + 2 * Theme.gap + max(1, shown) * Theme.touch + max(0, shown - 1) * gap;
+    changed per-view => { MenuState.rows-per-view = per-view; MenuState.resized(); }
+    init => {
+        MenuState.rows-per-view = per-view;
+        MenuState.resized();
+    }
+    background: Theme.scrim;
+    // A tap outside the list closes it; one inside is the list's own.
+    TouchArea {
+        clicked => { MenuState.close(); }
+    }
+    Section {
+        x: (parent.width - root.panel-width) / 2;
+        y: (parent.height - root.panel-height) / 2;
+        width: root.panel-width;
+        height: root.panel-height;
+        fill: Theme.raised;
+        TouchArea { }
+        Button {
+            x: Theme.pad-tight;
+            y: Theme.pad-tight;
+            width: Theme.touch * 1.6;
+            height: root.header - 2 * Theme.pad-tight;
+            text: MenuState.up ? "‹ Back" : "Close";
+            clicked => { MenuState.back(); }
+        }
+        Text {
+            x: Theme.touch * 1.6 + Theme.pad;
+            y: 0;
+            width: parent.width - self.x - Theme.pad - (MenuState.more ? 2 * (Theme.touch + Theme.pad-tight) : 0px);
+            height: root.header;
+            text: MenuState.title;
+            color: Theme.muted;
+            font-size: Theme.body;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+        if MenuState.more: Button {
+            x: parent.width - 2 * Theme.touch - Theme.pad-tight;
+            y: Theme.pad-tight;
+            width: Theme.touch;
+            height: root.header - 2 * Theme.pad-tight;
+            text: "▲";
+            clicked => { MenuState.turn(-1); }
+        }
+        if MenuState.more: Button {
+            x: parent.width - Theme.touch - Theme.pad-tight;
+            y: Theme.pad-tight;
+            width: Theme.touch;
+            height: root.header - 2 * Theme.pad-tight;
+            text: "▼";
+            clicked => { MenuState.turn(1); }
+        }
+        for row[i] in MenuState.rows: Entry {
+            x: Theme.pad-tight;
+            y: root.header + root.gap + i * (Theme.touch + root.gap);
+            width: parent.width - 2 * Theme.pad-tight;
+            height: Theme.touch;
+            data: row;
+            tapped => { MenuState.tapped(i); }
+        }
+        Text {
+            x: Theme.pad;
+            y: parent.height - root.footer;
+            width: parent.width - 2 * Theme.pad;
+            height: root.footer;
+            text: MenuState.view;
+            color: Theme.muted;
+            font-size: Theme.small;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+}

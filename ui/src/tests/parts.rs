@@ -215,13 +215,13 @@ fn a_press_opens_a_part_changes_a_level_or_a_send_and_toggles_mute() {
 }
 
 // + Part and + Bus are named as the JUCE view names them: "Part N" (N the parts after it), "Bus A" and on; the
-// input a part or a bus starts with; Controls and Routing say they are not in this shell yet, Mixer opens.
+// input a part or a bus starts with; Routing says it is not in this shell yet, Mixer and Controls open.
 #[test]
 fn the_buttons_add_parts_and_buses_and_say_which_pages_are_not_built() {
     let mut s = Screen::new();
     let mut p = parts_screen(&mut s, &parts_graph());
     let ui = &s.ui;
-    assert_eq!(tools(ui).iter().map(|t| (t.0.as_str(), t.1)).collect::<Vec<_>>(), [("Mixer", true), ("Controls", false), ("Routing", false), ("+ Part", true), ("+ Bus", true)]);
+    assert_eq!(tools(ui).iter().map(|t| (t.0.as_str(), t.1)).collect::<Vec<_>>(), [("Mixer", true), ("Controls", true), ("Routing", false), ("+ Part", true), ("+ Bus", true)]);
     p.act(Action::End(1));
     p.act(Action::Confirm(None)); // + Bus, the last
     let sent = std::mem::take(&mut p.out);
@@ -235,10 +235,11 @@ fn the_buttons_add_parts_and_buses_and_say_which_pages_are_not_built() {
     p.tap_tool(4);
     assert_eq!(edits(&mut p)[0].1["name"], json!("Bus C"));
     // A page not built says so, and sends nothing; one that is built is gone to.
-    assert_eq!(p.tap_tool(1), Outcome::Stay);
-    assert_eq!(ui.global::<PartsState>().get_message().as_str(), "Controls is not in this shell yet.");
+    assert_eq!(p.tap_tool(2), Outcome::Stay);
+    assert_eq!(ui.global::<PartsState>().get_message().as_str(), "Routing is not in this shell yet.");
     assert!(edits(&mut p).is_empty());
     assert_eq!(p.tap_tool(0), Outcome::Page(crate::parts::Page::Mixer));
+    assert_eq!(p.tap_tool(1), Outcome::Page(crate::parts::Page::Controls));
     p.act(Action::End(1));
     mv(&mut p, Some(0), -1);
     assert_eq!(ui.global::<PartsState>().get_message().as_str(), "", "what was said goes with the next move");

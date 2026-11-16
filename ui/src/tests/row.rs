@@ -128,7 +128,7 @@ fn the_knobs_show_the_performances_controls_and_the_engine_is_told_what_they_fol
     let shown: Vec<(i32, String, String)> = tiles.iter().map(|t| (t.kind, t.name.to_string(), t.value.to_string())).collect();
     assert_eq!(shown[0], (1, "Super".into(), "50%".into()));
     assert_eq!(shown[1], (1, "Swell".into(), "25%".into()));
-    assert_eq!(shown[2], (6, "No control".into(), String::new()));
+    assert_eq!(shown[2], (6, "–".into(), String::new()));
     assert!((tiles[0].norm - 0.5).abs() < 1e-6 && (tiles[1].norm - 0.25).abs() < 1e-6);
     assert_eq!(rig.s.ui.global::<crate::PlayState>().get_knob_bank().as_str(), "Controls 1\u{2013}6");
     assert!(rig.buttons().is_empty(), "one bank and no part selected: no buttons");
@@ -165,7 +165,7 @@ fn a_part_has_its_banks_and_the_bank_button_pages_them() {
     }
     rig.serve(&[(1, 7, 0.25), (1, 99, 40.)]);
     let tiles = rig.tiles();
-    assert_eq!((tiles[0].name.as_str(), tiles[0].value.as_str(), tiles[1].name.as_str(), tiles[1].value.as_str()), ("Rhodes: Gain", "0.25", "Rhodes: Tune", "40.00"));
+    assert_eq!((tiles[0].name.as_str(), tiles[0].value.as_str(), tiles[1].name.as_str(), tiles[1].value.as_str()), ("Gain", "0.25", "Tune", "40.00"));
     assert_eq!(rig.s.ui.global::<crate::PlayState>().get_knob_bank().as_str(), "Assign 1\u{2013}6");
     assert_eq!(rig.buttons(), [("Performance".into(), false), ("Keys".into(), true), ("Bank 1/2".into(), false)]);
     // The next bank: the chorus's main control, the first that is not the stepped Mode.
@@ -173,7 +173,7 @@ fn a_part_has_its_banks_and_the_bank_button_pages_them() {
     let asked = rig.asked();
     assert_eq!(views(&asked), [json!({"part": 10, "positions": [{"group": screen_group(), "position": 1}]})]);
     rig.frame();
-    assert_eq!((rig.tiles()[0].name.as_str(), rig.s.ui.global::<crate::PlayState>().get_knob_bank().as_str()), ("Chorus: Depth", "Effects 1\u{2013}6"));
+    assert_eq!((rig.tiles()[0].name.as_str(), rig.s.ui.global::<crate::PlayState>().get_knob_bank().as_str()), ("Depth", "Effects 1\u{2013}6"));
     assert_eq!(rig.buttons()[2].0, "Bank 2/2");
     // Back to the Performance's controls: part 0, page 0.
     rig.play.knob_button(0);
@@ -395,4 +395,128 @@ fn learn_and_the_cursor_are_drawn() {
         rig.frame();
         shot(&rig.s, &format!("play-knobs-learn-{}@1.55", t.id));
     }
+}
+
+// Play's areas at the keyboard's scale and the other sizes: the reference (PlayView.cpp, `tight`) gives a screen
+// 826 across, less the top bar, 44 to the scenes, a quarter of its height to the knob row (the buttons in a column
+// beside the tiles, not a row of their own) and the rest to the strips, with no line under them. Here nothing
+// overlaps, each area keeps what it is given, the faders keep a travel, no scene name of eight characters is cut
+// and the knobs that play nothing say a dash.
+
+/// The least a part strip's fader travels, in logical pixels, with nothing but the strips below the knob row (the
+/// roomy theme, whose paddings are 1.6 times larger, is the tightest case at the keyboard's size: 78).
+const FADER_TRAVEL: f32 = 72.;
+/// The same with one of the no-MIDI line, Learn's line and the line under the strips shown as well (two of them at
+/// once take what is left: 15 in the roomy theme at the keyboard's size).
+const FADER_TRAVEL_WITH_A_LINE: f32 = 36.;
+
+fn big_graph(parts: usize) -> serde_json::Value {
+    let mut g = graph();
+    g["parts"] = (0..parts).map(|i| json!({"id": 10 + i, "name": format!("Part {}", i + 1), "level": 0.5, "mute": false, "solo": false, "chain": [], "input": {"kind": "none"}})).collect();
+    g["scenes"] = ["Verse", "Chorus 2", "Bridge", "Outro", "Intro", "Solo", "Break", "Coda"].iter().enumerate().map(|(i, n)| json!({"id": i + 1, "name": n})).collect();
+    g
+}
+
+#[test]
+fn play_divides_the_keyboards_screen_and_the_others_without_overlap() {
+    let sizes = [((1280, 720), 1.55), ((1280, 720), 1.), ((800, 480), 1.)];
+    let (mut plain_least, mut line_least) = (f32::MAX, f32::MAX);
+    for (size, scale) in sizes {
+        for hint in [false, true] {
+            for (state, parts, learn) in [("plain", 4, false), ("part", 5, false), ("paged", 14, false), ("learn", 5, true)] {
+                fit_to_window();
+                let mut s = Screen::sized(size.0, size.1);
+                s.set_scale(scale);
+                let mut play = crate::play::Screen::new(&s.ui);
+                s.ui.set_screen(3);
+                play.knobs(groups());
+                play.offer_keyboard(true, false);
+                if hint {
+                    play.status(&json!({"midiInputs": []}));
+                }
+                s.frame();
+                play.shown();
+                play.graph(&big_graph(parts));
+                if state != "plain" {
+                    play.tap_open(0);
+                }
+                if state == "part" {
+                    play.knob_button(1);
+                }
+                answer(&mut play, &[(1, 7, 0.25), (1, 99, 40.)]);
+                if learn {
+                    play.learn_toggle();
+                }
+                s.frame();
+                play.shown();
+                s.frame();
+                for t in &all_themes() {
+                    theme::apply(&s.ui, t);
+                    s.frame();
+                    play.shown();
+                    s.frame();
+                    if state == "paged" {
+                        s.ui.global::<crate::PlayState>().set_message("The engine refused: a long reason that fills the line".into());
+                        s.frame();
+                    }
+                    let what = format!("{state} hint {hint} at {size:?}@{scale} in {}", t.id);
+                    let ui = &s.ui;
+                    let l = ui.global::<crate::PlayState>().get_layout();
+                    let margin = ui.global::<crate::Theme>().get_margin();
+                    let line = |y: f32, h: f32| (y, y + h);
+                    let areas = [
+                        ("scenes", line(margin, l.scenes_height)),
+                        ("hint", line(l.hint_y, l.hint_height)),
+                        ("knobs", line(l.knobs_y, l.knob_height)),
+                        ("banner", line(l.banner_y, l.banner_height)),
+                        ("strips", line(l.strips_y, l.strips_height)),
+                        ("footer", line(l.footer_y, l.footer_height)),
+                    ];
+                    let mut at = 0.;
+                    for (name, (top, bottom)) in areas {
+                        assert!(top >= at - 0.01 || bottom - top < 0.01, "{what}: the {name} starts at {top} over what ends at {at}");
+                        assert!(bottom <= l.height + 0.01, "{what}: the {name} ends at {bottom} past the screen's {}", l.height);
+                        if bottom - top > 0.01 {
+                            at = bottom;
+                        }
+                    }
+                    assert!(l.strips_height > 0., "{what}: strips");
+                    // The scene tiles: eight across the width.
+                    let scenes = ui.global::<crate::PlayState>().get_scenes().row_count();
+                    assert_eq!(scenes, 8, "{what}");
+                    assert!(8. * l.scene_width <= l.width - 2. * margin + 0.01, "{what}: scene tiles {} wide", l.scene_width);
+                    // A scene's name is whole, or shrunk, never cut.
+                    assert_eq!(play.scene_cuts().len(), 8, "{what}: every tile says whether its name fits");
+                    assert!(!play.scene_cuts().iter().any(|c| *c), "{what}: a scene name is cut: {:?}", play.scene_cuts());
+                    // The fader's travel.
+                    let lines = usize::from(hint) + usize::from(learn) + usize::from(l.footer_height > 0.);
+                    let least = if lines > 0 { FADER_TRAVEL_WITH_A_LINE } else { FADER_TRAVEL };
+                    if lines < 2 {
+                        let seen = if lines > 0 { &mut line_least } else { &mut plain_least };
+                        *seen = seen.min(l.fader_travel);
+                        assert!(l.fader_travel >= least, "{what}: the faders travel {} (at least {least})", l.fader_travel);
+                    }
+                    // The knobs that play nothing say a dash, not cut words.
+                    if state == "plain" || state == "part" {
+                        let tiles: Vec<crate::GridTile> = ui.global::<crate::PlayState>().get_knobs().iter().collect();
+                        assert!(tiles.iter().all(|t| t.name.as_str() != "No control"), "{what}");
+                    }
+                    shot(&s, &format!("play-fit-{state}{}-{}-{}x{}@{scale}", if hint { "-hint" } else { "" }, t.id, size.0, size.1));
+                }
+            }
+        }
+    }
+    eprintln!("fader travel, least seen: {plain_least} plain, {line_least} with a line");
+}
+
+// The test above can fail: a name too long for its tile, even at 70% of its size, is said to be cut.
+#[test]
+fn a_scene_name_too_long_is_said_to_be_cut() {
+    let mut rig = Rig::new();
+    let mut g = big_graph(2);
+    g["scenes"][1]["name"] = json!("A scene named at great length");
+    rig.play.graph(&g);
+    rig.frame();
+    let cuts = rig.play.scene_cuts();
+    assert_eq!((cuts[0], cuts[1]), (false, true));
 }

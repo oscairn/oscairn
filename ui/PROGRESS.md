@@ -298,3 +298,17 @@ Branch `rust-app-pages` (from `rust-app-parts` 1130dce5; baseline 115 tests, cli
 - Not verified: nothing here was run on a unit or against the real engine (fake engine only); Routing's layout was ported by reading, not compared with the C++
   output on the same graph.
 
+
+Branch `rust-app-all` (`rust-app` 3cbfb25f, then `rust-app-pages`' seven commits cherry-picked; conflicts in play.slint, shell.slint, main.rs,
+shell.rs, topbar.rs, tests.rs, tests/bar.rs, tests/part.rs and the three docs, each resolved keeping both sides: the bar's Play actions are
+Undo, Redo, Save, Scene, Learn (where the device has knobs), Edit; Play's footer button and recording mark are gone; `lists` is false on Play
+and the parameter pages; the Parts work's `Theme.bar-cursor` stays): 208 tests after the join, clippy clean.
+- Play at the keyboard's scale (826x465 logical). The reference's `resized()` for a dense screen: scenes 44, the knob row a quarter of the
+  height with its buttons in a column beside the tiles, no footer. Before: the knob row spent a button line plus its tiles, the footer a row,
+  the faders traveled 38 px, scene names had 41 px ("Ver..."), empty knobs read "No con...". Now: scenes 98 wide with the name across the
+  tile (`FitText`: 70% before a cut), the knob row 104 with its buttons beside it, empty knobs a dash, the line under the strips only when it
+  says something, faders travel 131. tests/row.rs checks, in the built-in themes and the two odd ones at 1280x720 at 1 and 1.55 and at 800x480,
+  that nothing overlaps, no scene name of 8 characters or fewer is cut, and the faders travel at least 72 (36 with one more line: the no-MIDI
+  line, Learn's or the one under the strips; with two at once, 15 in the roomy theme at 1.55: not improved).
+- Seen, not fixed (grid.slint is another branch's): a knob tile 92 wide puts the parameter's name without its plugin's (`Knob::narrow`, as the
+  reference at that width), and the grid's tile cuts a long value ("40...") there.

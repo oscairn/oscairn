@@ -227,6 +227,9 @@ pub struct Screen {
     follow: bool,
     tiles: Rc<VecModel<SceneData>>,
     rows: Rc<VecModel<StripData>>,
+    /// Which scene tiles show a name cut after shrinking (the tiles say so as they are laid out).
+    #[cfg(test)]
+    cuts: Rc<std::cell::RefCell<Vec<bool>>>,
     /// Requests for the shell to send.
     pub out: Vec<Out>,
 }
@@ -243,6 +246,21 @@ impl Screen {
         state.set_knobs(ModelRc::from(row_tiles.clone()));
         state.set_knob_buttons(ModelRc::from(row_buttons.clone()));
         state.set_knob_tile(crate::grid::KNOB_ROW);
+        #[cfg(test)]
+        let cuts = Rc::new(std::cell::RefCell::new(vec![]));
+        #[cfg(test)]
+        state.on_scene_fit({
+            let cuts = cuts.clone();
+            move |i, cut| {
+                let mut cuts = cuts.borrow_mut();
+                if cuts.len() <= i as usize {
+                    cuts.resize(i as usize + 1, false);
+                }
+                cuts[i as usize] = cut;
+            }
+        });
+        #[cfg(not(test))]
+        state.on_scene_fit(|_, _| {});
         Screen {
             ui: window.as_weak(),
             scenes: vec![],
@@ -268,8 +286,16 @@ impl Screen {
             follow: false,
             tiles,
             rows,
+            #[cfg(test)]
+            cuts,
             out: vec![],
         }
+    }
+
+    /// Whether each scene tile's name is cut (after shrinking to 70%).
+    #[cfg(test)]
+    pub fn scene_cuts(&self) -> Vec<bool> {
+        self.cuts.borrow().clone()
     }
 
     /// graph.get: the scenes, the scene playing, the parts and the master. The meters shown stay.
@@ -481,7 +507,8 @@ impl Screen {
             state.set_master(StripData { name: "Master".into(), detail: "Performance".into(), fraction: fraction(level, 2.), cursor: self.master_cursor, editing: self.master_editing, ..Default::default() });
         }
         state.set_can_step(self.follow);
-        let view: SharedString = if self.parts.is_empty() { SharedString::new() } else { format!("Parts {}–{} of {}", first + 1, end, self.parts.len()).into() };
+        // Said only when some parts are out of view: the strips already show how many there are.
+        let view: SharedString = if self.parts.is_empty() || (first == 0 && end == self.parts.len()) { SharedString::new() } else { format!("Parts {}–{} of {}", first + 1, end, self.parts.len()).into() };
         state.set_view(view);
         let hint = self.hint_shown();
         if !hint {
@@ -504,7 +531,7 @@ impl Screen {
         let want = self.row.tiles(state.get_knob_width(), state.get_knob_height(), gap, &self.parts, self.scene);
         update(&self.row_tiles, want);
         let cursor = self.row.cursor;
-        let buttons: Vec<KnobButton> = self.row.buttons(&self.parts).into_iter().map(|(stop, text, on)| KnobButton { text: text.into(), on, cursor: cursor == Some(stop) }).collect();
+        let buttons: Vec<KnobButton> = self.row.buttons(&self.parts).into_iter().map(|(stop, text, on)| KnobButton { text: text.into(), on, cursor: cursor == Some(stop), bank: stop == Stop::Page }).collect();
         update(&self.row_buttons, buttons);
         state.set_knob_bank(self.row.bank().into());
         state.set_learning(self.row.learning());

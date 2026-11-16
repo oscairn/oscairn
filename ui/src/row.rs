@@ -432,7 +432,7 @@ impl Row {
                 let (norm, value) = self.standing(slot.target, parts, scene);
                 let label = if narrow { slot.label.rsplit(": ").next().unwrap_or(&slot.label) } else { &slot.label };
                 let name = if slot.layer == Layer::Override { format!("{label} \u{b7} Override") } else { label.to_string() };
-                let (name, value) = if slot.target == Target::None { ("No control".to_string(), String::new()) } else { (name, value) };
+                let (name, value) = if slot.target == Target::None { ("–".to_string(), String::new()) } else { (name, value) };
                 let control = Row::control_of(slot.target);
                 let mut tile = grid::row_tile(*rect, &Face { control, name: &name, value: &value, norm, on: norm >= 0.5, cursor: self.cursor == Some(Stop::Tile(i)), editing: self.editing == Some(i) || (learning && slot.target != Target::None) });
                 tile.choices = self.no_choices.clone();

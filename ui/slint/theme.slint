@@ -193,6 +193,34 @@ export component Section inherits Rectangle {
     }
 }
 
+// A text in a box: as drawFittedText with a least scale of 0.7, a text too wide for its box shrinks to 70%
+// before it is cut (`cut` says it still does not fit then).
+export component FitText inherits Rectangle {
+    in property <string> text;
+    in property <color> ink: Theme.text;
+    in property <length> size: Theme.body;
+    in property <bool> bold;
+    in property <TextHorizontalAlignment> align: TextHorizontalAlignment.center;
+    out property <bool> cut: measure.preferred-width * 0.7 > self.width + 0.5px;
+    measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: root.size;
+        font-weight: root.bold ? 700 : 400;
+    }
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.ink;
+        font-size: root.size * max(0.7, min(1.0, root.width / max(1px, measure.preferred-width)));
+        font-weight: root.bold ? 700 : 400;
+        horizontal-alignment: root.align;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
 // A cursor or a value being changed: the border round a control, in its own corners.
 export component Cursor inherits Rectangle {
     in property <bool> shown;

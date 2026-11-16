@@ -5,7 +5,7 @@
 // channel, mute and solo), the master pinned at the right. A cursor is a focus border; the scene
 // playing is an accent fill and edge. Colors, corners, edges, sliders and marks are the theme's.
 
-import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle } from "theme.slint";
+import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle, FitText } from "theme.slint";
 import { TileRow, GridTile } from "grid.slint";
 
 export struct SceneData {
@@ -37,6 +37,26 @@ export struct KnobButton {
     text: string,
     on: bool,
     cursor: bool,
+    bank: bool, // the bank button, not one of the two that choose what the knobs follow
+}
+
+// Where Play puts its areas, in the screen's own pixels: published by the screen so the tests can check what each is given.
+export struct PlayLayout {
+    width: length,
+    height: length,
+    scene-width: length,
+    scenes-height: length,
+    hint-y: length,
+    hint-height: length,
+    knobs-y: length,
+    knob-height: length,
+    banner-y: length,
+    banner-height: length,
+    strips-y: length,
+    strips-height: length,
+    fader-travel: length, // the part strips' faders' travel
+    footer-y: length,
+    footer-height: length,
 }
 
 export global PlayState {
@@ -83,6 +103,8 @@ export global PlayState {
     callback level(int, float); // a strip's row (-1 the master) and the fader's new place
     callback held(int, bool); // a finger on a fader or off it
     callback step(int);
+    in-out property <PlayLayout> layout;
+    callback scene-fit(int, bool); // a scene tile's name does not fit it (cut after shrinking to 70%), or fits
 }
 
 component Meter inherits Rectangle {
@@ -130,29 +152,33 @@ component Strip inherits Section {
     property <length> meter-pitch: 10px; // from one meter to the next
     property <length> meter-gap: Theme.pad-wide; // fader to meters
     property <length> meter-inset: Theme.pad-narrow; // the meters' ends from the fader's
-    property <length> top: Theme.pad-narrow + Theme.body + Theme.small + 2 * Theme.pad;
-    property <length> bottom: root.is-master ? Theme.pad : Theme.touch + Theme.pad-narrow + Theme.pad;
+    // The name and sound over the fader, the marks under it (their sides the screen's, smaller on a short strip).
+    in property <length> top;
+    in property <length> marks;
+    property <length> bottom: root.is-master ? Theme.pad : root.marks + Theme.pad-narrow + Theme.pad-tight;
     property <length> pair-width: root.fader-width + root.meter-gap + root.meter-pitch + root.meter-width;
     Rectangle {
         opacity: data.dim ? Theme.dim : 1;
-        Text {
+        FitText {
             x: Theme.pad;
             y: Theme.pad-narrow;
             width: parent.width - 2 * Theme.pad;
+            height: Theme.body + Theme.pad-tight;
             text: data.name;
-            color: Theme.text;
-            font-size: Theme.body;
-            font-weight: 700;
-            overflow: elide;
+            ink: Theme.text;
+            size: Theme.body;
+            bold: true;
+            align: left;
         }
-        Text {
+        FitText {
             x: Theme.pad;
             y: Theme.pad-narrow + Theme.body + Theme.pad-tight;
             width: parent.width - 2 * Theme.pad;
+            height: Theme.small + Theme.pad-tight;
             text: data.detail;
-            color: Theme.muted;
-            font-size: Theme.small;
-            overflow: elide;
+            ink: Theme.muted;
+            size: Theme.small;
+            align: left;
         }
         if !root.is-master: TouchArea {
             height: root.top - Theme.pad-tight;
@@ -197,10 +223,10 @@ component Strip inherits Section {
             value: data.peak-b;
         }
         if !root.is-master: Mark {
-            x: root.width / 2 - Theme.touch - Theme.pad-tight;
-            y: root.height - Theme.touch - Theme.pad-narrow;
-            width: Theme.touch;
-            height: Theme.touch;
+            x: root.width / 2 - root.marks - Theme.pad-tight;
+            y: root.height - root.marks - Theme.pad-narrow;
+            width: root.marks;
+            height: root.marks;
             letter: "M";
             tint: Theme.danger;
             on: data.mute;
@@ -208,9 +234,9 @@ component Strip inherits Section {
         }
         if !root.is-master: Mark {
             x: root.width / 2 + Theme.pad-tight;
-            y: root.height - Theme.touch - Theme.pad-narrow;
-            width: Theme.touch;
-            height: Theme.touch;
+            y: root.height - root.marks - Theme.pad-narrow;
+            width: root.marks;
+            height: root.marks;
             letter: "S";
             tint: Theme.accent;
             on: data.solo;
@@ -222,11 +248,11 @@ component Strip inherits Section {
         editing: data.editing;
     }
     if data.mark-cursor: Cursor {
-        x: root.width / 2 - Theme.touch - Theme.pad-tight;
-        y: root.height - Theme.touch - Theme.pad-narrow;
-        width: Theme.touch;
-        height: Theme.touch;
-        corner: Theme.mark-radius(Theme.touch);
+        x: root.width / 2 - root.marks - Theme.pad-tight;
+        y: root.height - root.marks - Theme.pad-narrow;
+        width: root.marks;
+        height: root.marks;
+        corner: Theme.mark-radius(root.marks);
         shown: true;
     }
 }
@@ -259,8 +285,8 @@ component HintLink inherits Rectangle {
 export component Play inherits Rectangle {
     // The sections' gap (none in a theme whose sections join).
     property <length> gap: Theme.gap-between(Theme.gap);
-    property <length> scenes-height: Theme.touch;
-    property <length> footer: Theme.touch;
+    // A touch target tall; taller when the theme's type is large enough that the number and the name would not fit stacked.
+    property <length> scenes-height: max(Theme.touch, Theme.small + Theme.button * 1.25 + 2 * Theme.pad-tight);
     property <length> strip-min: Theme.button-width;
     property <length> strips-x: Theme.margin;
     property <length> strips-width: self.width - 2 * Theme.margin;
@@ -270,17 +296,53 @@ export component Play inherits Rectangle {
     // The line offering the on-screen keyboard when no MIDI device is connected, over the strips.
     property <length> hint-y: Theme.margin + scenes-height + Theme.gap;
     property <length> hint-height: PlayState.hint ? Theme.touch + Theme.gap : 0px;
-    // The knob row: its buttons' line, then the tiles (the grid's height, less on a short screen: a fifth of it, never under 70%), then Learn's line.
+    // The knob row, as PlayView.cpp gives it: a quarter of the screen (the grid's tile height at most, 70% of it at
+    // least), the tiles side by side and the buttons that choose what they follow in a column at the right.
     property <length> knobs-y: hint-y + hint-height;
-    property <length> knob-head: PlayState.has-knobs ? Theme.touch + Theme.gap : 0px;
-    property <length> knob-row: PlayState.has-knobs ? min(PlayState.knob-tile, max(PlayState.knob-tile * 0.7, self.height / 5)) : 0px;
-    property <length> knob-w: self.width - 2 * Theme.margin;
-    property <length> strips-y: knobs-y + knob-head + knob-row + (PlayState.has-knobs ? gap : 0px);
-    property <length> strips-height: self.height - strips-y - footer - Theme.margin - Theme.gap;
-    property <length> knob-button-width: Theme.button-width * 1.3;
+    property <length> knob-row: PlayState.has-knobs ? min(PlayState.knob-tile, max(PlayState.knob-tile * 0.7, self.height / 4)) : 0px;
+    property <int> buttons: PlayState.knob-buttons.length;
+    property <bool> has-bank: buttons > 0 && PlayState.knob-buttons[buttons - 1].bank;
+    property <bool> has-column: buttons - (has-bank ? 1 : 0) > 0;
+    property <length> column-width: Theme.button-width;
+    property <length> bank-width: Theme.button-width * 0.8;
+    property <length> column-x: self.width - Theme.margin - column-width;
+    property <length> bank-x: (has-column ? column-x - gap : self.width - Theme.margin) - bank-width;
+    property <length> side-width: (has-column ? column-width + gap : 0px) + (has-bank ? bank-width + gap : 0px);
+    property <length> knob-w: self.width - 2 * Theme.margin - side-width;
+    property <length> pair-height: min(Theme.touch, (knob-row - gap) / 2);
+    // Learn's line, over the strips, while it waits for a target.
+    property <length> banner-y: knobs-y + knob-row + (PlayState.has-knobs ? Theme.gap : 0px);
+    property <length> banner-height: PlayState.learning ? Theme.touch + Theme.gap : 0px;
+    property <length> strips-y: banner-y + banner-height;
+    // The line under the strips: the engine's refusals and which parts show, only when it has something to say.
+    property <length> footer: (PlayState.message != "" || PlayState.view != "") ? Theme.small + 2 * Theme.pad-tight : 0px;
+    property <length> footer-y: self.height - Theme.margin - footer;
+    property <length> strips-height: max(0px, self.height - strips-y - Theme.margin - (footer > 0px ? footer + Theme.gap : 0px));
+    // A strip: its name and sound over the fader, the marks (a touch target, less on a short strip) under it.
+    property <length> strip-top: Theme.pad-narrow + Theme.body + Theme.pad-tight + Theme.small + Theme.pad-tight;
+    property <length> marks: strips-height >= 4 * Theme.touch + 2 * Theme.pad ? Theme.touch : Theme.touch * 0.75;
+    property <length> fader-travel: max(0px, strips-height - strip-top - marks - Theme.pad-narrow - Theme.pad-tight - Theme.thumb);
     property <length> step-width: PlayState.can-step ? Theme.button-width + Theme.gap : 0px;
     property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * gap) / 8;
+    property <PlayLayout> layout: {
+        width: self.width,
+        height: self.height,
+        scene-width: scene-width,
+        scenes-height: scenes-height,
+        hint-y: hint-y,
+        hint-height: hint-height - (PlayState.hint ? Theme.gap : 0px),
+        knobs-y: knobs-y,
+        knob-height: knob-row,
+        banner-y: banner-y,
+        banner-height: banner-height - (PlayState.learning ? Theme.gap : 0px),
+        strips-y: strips-y,
+        strips-height: strips-height,
+        fader-travel: fader-travel,
+        footer-y: footer-y,
+        footer-height: footer,
+    };
     changed across => { PlayState.strips-per-view = across - 1; PlayState.resized(); }
+    changed layout => { PlayState.layout = self.layout; }
     changed knob-w => {
         PlayState.knob-width = self.knob-w;
         PlayState.knob-resized();
@@ -293,6 +355,7 @@ export component Play inherits Rectangle {
         PlayState.strips-per-view = across - 1;
         PlayState.knob-width = self.knob-w;
         PlayState.knob-height = self.knob-row;
+        PlayState.layout = self.layout;
     }
 
     if PlayState.can-step: Button {
@@ -327,20 +390,20 @@ export component Play inherits Rectangle {
             color: Theme.muted;
             font-size: Theme.small;
         }
-        // Centered in what is left of the tile after the number's column on both sides, so a long name
-        // elides before it reaches the number (at a large type scale too).
-        Text {
-            x: Theme.pad-narrow + Theme.small * 1.6;
-            width: parent.width - 2 * (Theme.pad-narrow + Theme.small * 1.6);
-            height: parent.height;
+        // The name across the tile under its number: whole when it fits, 70% of its size before it is cut.
+        name := FitText {
+            x: Theme.pad-narrow;
+            y: Theme.small;
+            width: parent.width - 2 * Theme.pad-narrow;
+            height: parent.height - Theme.small;
             text: scene.add ? "+ Scene" : scene.name;
-            color: scene.on ? Theme.accent : scene.add ? Theme.muted : Theme.text;
-            font-size: scene.add ? Theme.small : Theme.button;
-            font-weight: scene.add ? 400 : 700;
-            overflow: elide;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+            ink: scene.on ? Theme.accent : scene.add ? Theme.muted : Theme.text;
+            size: scene.add ? Theme.small : Theme.button;
+            bold: !scene.add;
         }
+        property <bool> cut: name.cut;
+        changed cut => { PlayState.scene-fit(i, self.cut); }
+        init => { PlayState.scene-fit(i, self.cut); }
         Cursor {
             shown: scene.cursor;
         }
@@ -376,24 +439,12 @@ export component Play inherits Rectangle {
         }
     }
 
-    // The knob row: the bank, the buttons that choose what the knobs follow, and a tile for each knob.
-    if PlayState.has-knobs && !PlayState.learning: Text {
-        x: Theme.margin;
-        y: root.knobs-y;
-        width: max(0px, root.width - 2 * Theme.margin - PlayState.knob-buttons.length * (root.knob-button-width + root.gap));
-        height: Theme.touch;
-        text: PlayState.knob-bank;
-        color: Theme.muted;
-        font-size: Theme.small;
-        font-weight: 700;
-        overflow: elide;
-        vertical-alignment: center;
-    }
+    // The knob row: a tile for each knob, and at the right the buttons that choose what they follow (the bank's beside).
     for b[i] in PlayState.knob-buttons: Button {
-        x: root.width - Theme.margin - (PlayState.knob-buttons.length - i) * root.knob-button-width - (PlayState.knob-buttons.length - 1 - i) * root.gap;
-        y: root.knobs-y;
-        width: root.knob-button-width;
-        height: Theme.touch;
+        x: b.bank ? root.bank-x : root.column-x;
+        y: root.knobs-y + (b.bank ? (root.knob-row - self.height) / 2 : (root.knob-row - 2 * root.pair-height - root.gap) / 2 + i * (root.pair-height + root.gap));
+        width: b.bank ? root.bank-width : root.column-width;
+        height: b.bank ? min(Theme.touch, root.knob-row) : root.pair-height;
         text: b.text;
         on: b.on;
         clicked => { PlayState.knob-button(i); }
@@ -404,7 +455,7 @@ export component Play inherits Rectangle {
     }
     if PlayState.has-knobs: TileRow {
         x: Theme.margin;
-        y: root.knobs-y + root.knob-head;
+        y: root.knobs-y;
         width: root.knob-w;
         height: root.knob-row;
         tiles: PlayState.knobs;
@@ -415,7 +466,7 @@ export component Play inherits Rectangle {
     }
     if PlayState.learning: Rectangle {
         x: Theme.margin;
-        y: root.knobs-y;
+        y: root.banner-y;
         width: root.width - 2 * Theme.margin;
         height: Theme.touch;
         background: Theme.accent.with-alpha(Theme.wash-light);
@@ -462,6 +513,8 @@ export component Play inherits Rectangle {
         width: root.cell;
         height: root.strips-height;
         data: strip;
+        top: root.strip-top;
+        marks: root.marks;
         open-tapped => { PlayState.part-tapped(i); }
         mute-tapped => { PlayState.mute-tapped(i); }
         solo-tapped => { PlayState.solo-tapped(i); }
@@ -474,6 +527,8 @@ export component Play inherits Rectangle {
         width: root.cell;
         height: root.strips-height;
         is-master: true;
+        top: root.strip-top;
+        marks: root.marks;
         data: PlayState.master;
         level(f) => { PlayState.level(-1, f); }
         held(down) => { PlayState.held(-1, down); }
@@ -490,15 +545,15 @@ export component Play inherits Rectangle {
         vertical-alignment: center;
     }
 
-    Text {
+    if root.footer > 0px: Text {
         x: Theme.margin;
-        y: root.height - Theme.margin - root.footer;
+        y: root.footer-y;
         width: root.width - 2 * Theme.margin;
         height: root.footer;
         vertical-alignment: center;
         overflow: elide;
         font-size: Theme.small;
         color: Theme.muted;
-        text: PlayState.message == "" ? PlayState.view : PlayState.message + "   " + PlayState.view;
+        text: PlayState.message == "" ? PlayState.view : PlayState.view == "" ? PlayState.message : PlayState.message + "   " + PlayState.view;
     }
 }

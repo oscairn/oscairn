@@ -172,7 +172,7 @@ width, so a changing figure never moves anything.
 
 A take recording (the hardware REC button, or any app's) shows between the Performance and the
 tempo on every screen: a dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger
-color, and on Play's footer too. It is what the JUCE record buttons show (`RecordButtons`), read as
+color (once: Play has no mark of its own). It is what the JUCE record buttons show (`RecordButtons`), read as
 they read it: `record.takes` every 250 ms (here asked with the `status` notifications, which come
 at most four a second, so nothing wakes at rest), the first take `waiting` or `recording`, its
 `frames` over its `sampleRate`. The Record and Capture buttons themselves are not built.
@@ -269,6 +269,18 @@ opened from); Edit, the last action of the top bar, opens the Parts list (below)
   "No MIDI device" line with its two links (the keyboard, Dismiss, kept in the JUCE app's
   `keyboard.txt`), shown where the profile offers the on-screen keyboard; a take recording, in the
   top bar only (the JUCE Launcher draws it once over every app).
+- **Layout** (`slint/play.slint`, reflowing for any window and theme): as PlayView.cpp divides a dense
+  screen. The scenes take a touch target's height (more where the theme's type is large) and eight tiles across,
+  each name across the tile under its number, shrunk to 70% before it is cut (`FitText`); the knob row takes a
+  quarter of the height (the grid's knob tile at most, 70% of it at least) with its tiles side by side and the
+  buttons in a column at its right (Performance and the part stacked, the bank button beside them), not a row
+  of their own; a knob that plays nothing shows a dash. Under the knob row come the no-MIDI line and Learn's
+  line when they apply, then the strips, and a line under them only when it has something to say (the engine's
+  refusal, or "Parts 1-6 of 14" when some parts are out of view). A strip's name and sound shrink to 70% before
+  they are cut; its marks are a touch target tall, three quarters of that on a short strip. At the FANTOM-07's
+  826x465 logical pixels (1280x720 at 1.55) the scenes are 98 wide, the knob row 104 and a strip's fader travels
+  131 (before: 38; the tests: at least 72 in every theme at 1280x720 at 1 and 1.55 and 800x480, 36 with one of the
+  lines shown; with two at once, only what is left). `PlayState.layout` publishes the areas for the tests.
 - **The knob row** (`row.rs`, `knobs.rs`, drawn by the grid's tiles: `grid::row_layout`, `TileRow`): a
   tile for each knob of the profile's screen group (else the first assign group, else a computer's
   four), showing what the engine plays on it. The engine has no request that returns that, so the

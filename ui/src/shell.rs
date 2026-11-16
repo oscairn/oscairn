@@ -1465,6 +1465,7 @@ impl App {
         if screen == Screen::Part {
             self.ask_performance();
             self.send(Request::Part(part::Request::Status), "session.status", json!({}));
+            self.send(Request::Part(part::Request::Harmony), "harmony.get", json!({}));
             self.on_part(part::Screen::shown);
         }
         if was != Screen::Play && screen == Screen::Play {

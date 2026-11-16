@@ -281,5 +281,8 @@ Branch `rust-app-parts` (from `rust-app` 79a277ee; baseline 101 tests, clippy cl
 - Parts list (B1 to B3, B5, B6, B9, B10) and Edit (A14, J3): src/parts.rs, slint/parts.slint, tests/parts.rs. Edit is the last action of
   Play's top bar, the footer's handover button is gone; the list's Play action goes back. B4 (a press on a shared row opens Routing)
   and B8 (Mixer, Controls and Routing buttons) are built but disabled until I, H and G exist: `Page::built()` in parts.rs.
+- Part page (C): C16 the Engine is shown, "replace instrument" is not on the JUCE Part page (PluginBrowser's, the Plugins app), C17 n/a
+  (the JUCE Part page lists no controls: G1), C20 built (Key and Scale rows, `harmony.get` and `harmony.set`) though the JUCE app has no
+  control for the key.
 - Seen, not fixed: the top bar at 800 px wide with a take recording and all five actions of Play (Undo, Redo, Save, Scene, Edit) is
   wider than the window (the resource section is cut); with four it already was.

@@ -103,11 +103,11 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | C13 | MIDI out (devices list: Off, connected outputs, rules not connected) and MIDI out channel (own, 1..16) | `parts.midiOut`, `session.status` (`midiOutputs`) | - | list, press ticks | [x] |
 | C14 | Open the on-screen playing keyboard (K2) of the input that plays the part | `notes.send` (K2) | - | action on the part | [x] (Part screen's "Keyboard" row; hidden when the profile's onScreenKeyboard is false) |
 | C15 | Sound: choose from the library (D1/E) | see E | - | action | [x] |
-| C16 | Engine (the instrument's plugin) shown; replace instrument | `graph.get`; replace: `graph.replace` | - | action | [ ] |
-| C17 | Part controls (a part's own macros) listed with targets | `graph.get` (`controls`) | - | see G | [ ] |
+| C16 | Engine (the instrument's plugin) shown; replace instrument | `graph.get`; replace: `graph.replace` | - | action | [x] the Engine (the first instrument's plugin) is a line of the Part screen's panel. CORRECTION: the JUCE Part page has no "replace instrument": it is PluginBrowser's ("Replace instrument" / "Reload with preset", `Engine::replacePlugin` on a named slot such as "synth"), a page of the Plugins app, not of the Performance app; nothing built for it here (the preset half is E6) |
+| C17 | Part controls (a part's own macros) listed with targets | `graph.get` (`controls`) | - | see G | n/a: the JUCE Part page lists no controls (PartsView.cpp: `macros_` is read by the Controls page only, G1 lists a part's own beside the Performance's) |
 | C18 | Remove part | `parts.remove` | - | action, confirm | [x] |
 | C19 | The handover row "Oscairn app" | removed | - | - | [x] |
-| C20 | Key (harmony) of the part | `harmony.set` (`part` key) | - | press then dial | [ ] |
+| C20 | Key (harmony) of the part | `harmony.set` (`part` key) | - | press then dial | [x] src/part.rs: "Key" (follows the Performance's, named from `harmony.get`, or a root of its own, in the scale it had) and, with a key of its own, "Scale" (the names `harmony.get` gives); each step `harmony.set` with the part then `graph.commit`, the dial back before the first root follows again. NOT in the JUCE app (hosts/standalone has no control for the key), built from RFC 0033 and the protocol: an addition, to be confirmed by the owner |
 
 ## D. Chain, insert effects, splits and lanes
 

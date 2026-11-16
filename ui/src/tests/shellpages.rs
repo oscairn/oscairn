@@ -42,6 +42,7 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
             "graph.get" => graph.clone(),
             "session.status" => json!({"midiInputs": []}),
+            "harmony.get" => json!({"key": {"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}, "parts": [], "scales": ["Major", "Minor"]}),
             "params.text" => json!({"text": "t"}),
             "controllers.view" => json!({"accepted": true}),
             "unsubscribe" | "subscribe" => json!({}),
@@ -52,11 +53,11 @@ fn part_to_chain_parameters_and_sounds_on_the_shell() {
     };
     ui.global::<crate::PlayState>().invoke_part_tapped(0);
     assert_eq!(ui.get_screen(), 4);
-    // The last view of the Part list: Insert effects, Name, Remove part.
+    // The last view of the Part list: Sound, Insert effects, Name, Remove part.
     shell::act(Action::End(1));
     shell::act(Action::End(1));
     shell::act(Action::Move { pane: None, by: -2 });
-    assert_eq!(rows(&ui)[0].0, "Insert effects");
+    assert_eq!(rows(&ui)[1].0, "Insert effects");
     shell::act(Action::Confirm(None));
     assert_eq!((ui.get_screen(), ui.global::<Bar>().get_where().as_str()), (5, "Insert effects"));
     assert_eq!(rows(&ui)[1].0, "1. Chorus");

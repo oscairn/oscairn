@@ -79,7 +79,7 @@ fn part_cursor_edits_and_requests() {
     let list: Vec<(&str, &str)> = list.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     assert_eq!(
         list,
-        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Input channel", "Any channel"), ("Lowest velocity", "0"), ("Highest velocity", "127"), ("Notes at once", "Any"), ("Reserved notes", "None"), ("Priority", "0 (gives way first)"), ("Plays to", "Main"), ("MIDI out", "Off ›"), ("MIDI out channel", "Own channels"), ("Send to Reverb", "−6.0 dB"), ("Keyboard", "plays this part ›"), ("Sound", "Rhodes ›"), ("Insert effects", "›"), ("Name", "Keys ›"), ("Remove part", "Press twice")]
+        [("Level", "−6.0 dB"), ("Pan", "R 25"), ("Mute", "Off"), ("Solo", "Off"), ("Plays from", "Any device ›"), ("Lowest key", "C2"), ("Highest key", "C7"), ("Transpose", "−12"), ("Sustain pedal", "None"), ("Sostenuto pedal", "Every pedal"), ("Soft pedal", "Every pedal"), ("Input channel", "Any channel"), ("Lowest velocity", "0"), ("Highest velocity", "127"), ("Notes at once", "Any"), ("Reserved notes", "None"), ("Priority", "0 (gives way first)"), ("Plays to", "Main"), ("Key", "Performance's"), ("MIDI out", "Off ›"), ("MIDI out channel", "Own channels"), ("Send to Reverb", "−6.0 dB"), ("Keyboard", "plays this part ›"), ("Sound", "Rhodes ›"), ("Insert effects", "›"), ("Name", "Keys ›"), ("Remove part", "Press twice")]
     );
     assert_eq!(
         info_lines(ui),
@@ -97,7 +97,7 @@ fn part_cursor_edits_and_requests() {
     part.act(Action::Arrow { dx: 0, dy: -1 });
     assert_eq!(cursor_at(ui), Some(1));
     part.act(Action::End(1));
-    assert_eq!(cursor_at(ui), Some(25), "End: the last");
+    assert_eq!(cursor_at(ui), Some(26), "End: the last");
     part.act(Action::End(-1));
     assert_eq!(cursor_at(ui), Some(0));
     assert!(edits(&mut part).is_empty(), "moving the cursor sends nothing");
@@ -218,19 +218,19 @@ fn part_cursor_edits_and_requests() {
     part.not_entered();
     part.act(Action::Move { pane: None, by: 1 });
     assert_eq!(part.act(Action::Confirm(None)), Stay);
-    assert_eq!(rows(ui)[25].1, "Press again to remove");
+    assert_eq!(rows(ui)[26].1, "Press again to remove");
     part.act(Action::Move { pane: None, by: -1 });
     part.act(Action::Move { pane: None, by: 1 });
-    assert_eq!(rows(ui)[25].1, "Press twice", "moving away undoes the first press");
+    assert_eq!(rows(ui)[26].1, "Press twice", "moving away undoes the first press");
     assert!(requests(&mut part).is_empty());
     // A bus has the fader's settings and where it plays to; an audio part no keys.
     let _bus = part_screen(&s, &part_graph(), 12);
-    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "Sound", "Insert effects", "Name", "Remove part"]);
+    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "Key", "Sound", "Insert effects", "Name", "Remove part"]);
     assert_eq!(info_lines(ui), ["Sound", "No instrument", "Plays to", "Main", "Sends", "None", "Insert effects", "Hall"]);
     let mut audio = part_graph();
     audio["parts"][1]["input"] = json!({"kind": "audio", "port": 0});
     let _audio = part_screen(&s, &audio, 11);
-    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "MIDI out", "MIDI out channel", "Send to Reverb", "Keyboard", "Sound", "Insert effects", "Name", "Remove part"]);
+    assert_eq!(rows(ui).iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Level", "Pan", "Mute", "Solo", "Plays to", "Key", "MIDI out", "MIDI out channel", "Send to Reverb", "Keyboard", "Sound", "Insert effects", "Name", "Remove part"]);
     assert_eq!(info_lines(ui)[5], "Reverb", "plays through a bus");
 }
 
@@ -303,6 +303,7 @@ fn part_on_the_shell() {
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
             "graph.get" => graph.borrow().clone(),
             "session.status" => json!({"midiInputs": []}),
+            "harmony.get" => json!({"key": {"root": 2, "scale": [0, 2, 3, 5, 7, 8, 10], "name": "Minor"}, "parts": [], "scales": ["Major", "Minor"]}),
             "unsubscribe" | "subscribe" | "controllers.view" => json!({}),
             "edit.history" => json!({"undo": "", "redo": ""}),
             "graph.commit" => json!({"revision": 1}),
@@ -384,7 +385,7 @@ fn part_on_the_shell() {
     assert_eq!(rows(&ui).len(), 11);
     shell::act(Action::End(1));
     shell::act(Action::End(1));
-    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Insert effects", false), ("Name", false), ("Remove part", true)], "the cursor turned the view");
+    assert_eq!(rows(&ui).iter().map(|r| (r.0.as_str(), r.2)).collect::<Vec<_>>(), [("Sound", false), ("Insert effects", false), ("Name", false), ("Remove part", true)], "the cursor turned the view");
     // Rename from the shell: a press on Name opens the keyboard over the list; typing goes to it
     // alone (End finds Done), Done sends parts.name and the commit; Cancel closes it with nothing sent.
     shell::act(Action::Move { pane: None, by: -1 });
@@ -485,4 +486,102 @@ fn part_info_scrolls_by_the_right_knob() {
     assert_ne!(info_lines(ui)[0], "Sound");
     part.act(Action::Move { pane: Some(1), by: 1000 });
     assert_eq!(info_lines(ui).last().unwrap(), "Fx 9", "the end of the list");
+}
+
+// The Key and Scale rows drawn, the Key being changed: a long value ("Performance's (D Minor)") fits or elides.
+#[test]
+fn part_key_rows_are_drawn() {
+    fit_to_window();
+    let mut s = Screen::new();
+    let mut part = part_screen(&s, &part_graph(), 10);
+    harmony(&mut part, minor(), &["Major", "Minor"]);
+    mv(&mut part, 1);
+    mv(&mut part, 18);
+    assert_eq!(rows(&s.ui).iter().find(|r| r.2).map(|r| r.0.as_str()), Some("Key"));
+    press(&mut part);
+    s.ui.set_screen(4);
+    assert!(s.frame().is_some());
+    png(&s, "part-key-follows");
+    mv(&mut part, 1);
+    assert!(s.frame().is_some());
+    png(&s, "part-key-own");
+    let mut other = Screen::sized(800, 480);
+    let mut narrow = part_screen(&other, &part_graph(), 10);
+    harmony(&mut narrow, minor(), &["Major", "Minor"]);
+    mv(&mut narrow, 1);
+    mv(&mut narrow, 18);
+    other.ui.set_screen(4);
+    assert!(other.frame().is_some());
+    png(&other, "part-key-800");
+}
+
+fn harmony(part: &mut crate::part::Screen, key: serde_json::Value, scales: &[&str]) {
+    let refused = part.reply(crate::part::Request::Harmony, Ok(json!({"key": key, "parts": [], "scales": scales})));
+    assert!(!refused);
+}
+
+fn minor() -> serde_json::Value {
+    json!({"root": 2, "scale": [0, 2, 3, 5, 7, 8, 10], "name": "Minor"})
+}
+
+// The part's key (C20: RFC 0033, `harmony.set`; the JUCE app has no control for it): it follows the Performance's
+// (harmony.get names it) until the dial gives it a root of its own, in the scale the Performance has; the scale row
+// then appears and steps through the scales' names; the dial back to the start follows the Performance again.
+// Each step is `harmony.set` with the part, then `graph.commit`.
+#[test]
+fn part_key_follows_the_performance_or_has_its_own_root_and_scale() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut part = part_screen(&s, &part_graph(), 10);
+    let key_row = |ui: &Shell| rows(ui).into_iter().find(|r| r.0 == "Key").map(|r| r.1);
+    assert_eq!(key_row(ui).as_deref(), Some("Performance's"), "until harmony.get answers");
+    harmony(&mut part, minor(), &["Major", "Minor", "Dorian"]);
+    assert_eq!(key_row(ui).as_deref(), Some("Performance's (D Minor)"));
+    assert!(!rows(ui).iter().any(|r| r.0 == "Scale"), "no scale of its own while it follows");
+    let at = rows(ui).iter().position(|r| r.0 == "Key").unwrap();
+    mv(&mut part, 1);
+    mv(&mut part, at as i32);
+    assert_eq!(cursor_at(ui), Some(at));
+    press(&mut part);
+    mv(&mut part, 1);
+    let sent = std::mem::take(&mut part.out);
+    assert_eq!(sent.iter().map(|o| o.1).collect::<Vec<_>>(), ["harmony.set", "graph.commit"]);
+    assert_eq!(sent[0].2, json!({"part": 10, "key": {"root": 0, "scale": "Minor"}}), "the first root, in the Performance's scale");
+    assert_eq!(key_row(ui).as_deref(), Some("C"));
+    assert_eq!(rows(ui).iter().find(|r| r.0 == "Scale").map(|r| r.1.clone()).as_deref(), Some("Minor"), "its scale shows now");
+    mv(&mut part, 3);
+    assert_eq!(edits(&mut part).last().unwrap().1["key"], json!({"root": 3, "scale": "Minor"}));
+    assert_eq!(key_row(ui).as_deref(), Some("D♯"));
+    part.act(Action::Cancel(None));
+    mv(&mut part, 1); // on to Scale
+    press(&mut part);
+    mv(&mut part, 1);
+    assert_eq!(edits(&mut part), [("harmony.set", json!({"part": 10, "key": {"root": 3, "scale": "Dorian"}}))]);
+    mv(&mut part, 5);
+    assert!(edits(&mut part).is_empty(), "no further than the last scale");
+    // The graph says its own key with no name for the scale: it shows as custom, the first step names one.
+    let mut graph = part_graph();
+    graph["parts"][0]["key"] = json!({"root": 7, "scale": [0, 2, 7], "name": null});
+    let mut other = part_screen(&s, &graph, 10);
+    harmony(&mut other, json!({"root": 0, "scale": [0, 2, 4, 5, 7, 9, 11], "name": "Major"}), &["Major", "Minor"]);
+    assert_eq!(rows(ui).iter().find(|r| r.0 == "Scale").map(|r| r.1.clone()).as_deref(), Some("Custom (0 2 7)"));
+    let at = rows(ui).iter().position(|r| r.0 == "Scale").unwrap();
+    mv(&mut other, 1);
+    mv(&mut other, at as i32);
+    press(&mut other);
+    mv(&mut other, 1);
+    assert_eq!(edits(&mut other), [("harmony.set", json!({"part": 10, "key": {"root": 7, "scale": "Major"}}))]);
+    // Back to following: the dial down from the first root.
+    let mut back = part_screen(&s, &part_graph(), 10);
+    harmony(&mut back, minor(), &["Major", "Minor"]);
+    let at = rows(ui).iter().position(|r| r.0 == "Key").unwrap();
+    mv(&mut back, 1);
+    mv(&mut back, at as i32);
+    press(&mut back);
+    mv(&mut back, 1);
+    edits(&mut back);
+    mv(&mut back, -1);
+    assert_eq!(edits(&mut back), [("harmony.set", json!({"part": 10, "key": null}))]);
+    assert_eq!(key_row(ui).as_deref(), Some("Performance's (D Minor)"));
+    assert!(!rows(ui).iter().any(|r| r.0 == "Scale"));
 }

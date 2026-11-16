@@ -370,6 +370,11 @@ list. Back returns to the one it was opened from; Play's Cancel goes to where Pl
   as each JUCE setter commits: before this the Part screen sent `parts.input` alone, which the
   engine only stages, so those edits were not compiled until something else committed. Level,
   pan, mute and solo are live and are not committed.
+- **Key** (the JUCE app has no control for it; RFC 0033, `harmony.get` and `harmony.set`, asked on
+  opening): the part follows the Performance's key (shown named, "Performance's (D Minor)") or has a
+  root of its own, the dial stepping from "Performance's" through C to B; with a key of its own a
+  Scale row steps through the scales' names (a scale with no name shows as "Custom (0 2 7)"). Each step
+  is `harmony.set` with the part, then `graph.commit`.
 - **Still handed over:** nothing in this screen: the handover row is gone. Not yet built here (the
   checklist is ui/PERFORMANCE-APP.md): splits and lanes, scenes editing, the knob row and Learn,
   Controls, Mixer and Routing (the Parts list has their buttons, disabled, saying so).

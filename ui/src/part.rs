@@ -25,6 +25,9 @@
 //! bus, and Remove part (a second press confirms). Every edit that the engine stages (the input, MIDI
 //! out, output, sends, name, removal) is followed by `graph.commit`, as the JUCE page's setters commit.
 //!
+//! The part's key (RFC 0033; the JUCE app has no control for it): "Key" follows the Performance's (named from
+//! `harmony.get`) or is a root of its own, then "Scale" names its scale; `harmony.set` with the part.
+//!
 //! Not here yet: choosing the sound, the chain's plugins and splits (ui/PERFORMANCE-APP.md, C15 to D12).
 
 use crate::nav::{Action, Cursor};
@@ -40,6 +43,8 @@ use std::rc::Rc;
 pub enum Request {
     /// session.status: the MIDI inputs the devices list offers.
     Status,
+    /// harmony.get: the Performance's key and the names of the scales.
+    Harmony,
     /// Any edit: its refusal is said.
     Edit,
 }
@@ -70,6 +75,8 @@ enum Item {
     Mute,
     Solo,
     Output,
+    Key,
+    Scale,
     Devices,
     Channel,
     LowKey,
@@ -103,6 +110,19 @@ const PEDAL_NAMES: [&str; 3] = ["Sustain pedal", "Sostenuto pedal", "Soft pedal"
 /// A pedal's receive as the file says it and the JUCE page words it.
 const RECEIVE: [(&str, &str); 3] = [("all", "Every pedal"), ("none", "None"), ("own", "Its devices' pedals")];
 const TRANSPOSE: i64 = 24;
+/// The twelve roots, as the pad editor names them.
+const ROOTS: [&str; 12] = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+/// A key with no scale name (the Performance's before harmony.get answers): major.
+const MAJOR: [i64; 7] = [0, 2, 4, 5, 7, 9, 11];
+
+/// A key as the pad editor names it: "D Minor", else "D, custom" for a scale with no name.
+fn key_text(key: &Value) -> String {
+    let root = ROOTS[key["root"].as_u64().unwrap_or(0) as usize % 12];
+    match key["name"].as_str() {
+        Some(name) => format!("{root} {name}"),
+        None => format!("{root}, custom"),
+    }
+}
 
 /// A level in dB, as the JUCE page's label has it.
 fn db(level: f64) -> String {
@@ -143,6 +163,9 @@ pub struct Screen {
     /// session.status's midiInputs and midiOutputs.
     inputs: Vec<Value>,
     outputs: Vec<Value>,
+    /// harmony.get: the Performance's key (`root`, `scale`, `name`; null until read) and the scales' names.
+    perf_key: Value,
+    scales: Vec<String>,
     cursor: Cursor,
     /// The dial changes the value under the cursor.
     editing: bool,
@@ -171,7 +194,7 @@ impl Screen {
         let state = window.global::<PartState>();
         state.set_rows(ModelRc::from(rows.clone()));
         state.set_info(ModelRc::from(info.clone()));
-        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], outputs: vec![], removing: false, asking: false, active: false, cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, keys: true, out: vec![] }
+        Screen { ui: window.as_weak(), graph: Value::Null, id: 0, part: Value::Null, inputs: vec![], outputs: vec![], perf_key: Value::Null, scales: vec![], removing: false, asking: false, active: false, cursor: Cursor::new(0, 1), editing: false, menu: None, info_cursor: Cursor::new(0, 1), rows, info, keys: true, out: vec![] }
     }
 
     /// The input that plays this part, for its keyboard: the first device rule that names a connected
@@ -251,6 +274,11 @@ impl Screen {
     pub fn reply(&mut self, request: Request, result: Result<Value, crate::client::Error>) -> bool {
         match (request, result) {
             (Request::Status, Ok(r)) => self.endpoints(&r),
+            (Request::Harmony, Ok(r)) => {
+                self.perf_key = r["key"].clone();
+                self.scales = r["scales"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)).collect();
+                self.show();
+            }
             (Request::Edit, Err(e)) if e.code != 0 => {
                 self.say(format!("The engine refused: {}", e.message));
                 return true;
@@ -290,6 +318,11 @@ impl Screen {
             ]);
         }
         items.push(Item::Output);
+        // Its own key and scale (RFC 0033), or the Performance's; the scale only with a key of its own.
+        items.push(Item::Key);
+        if self.part["key"].is_object() {
+            items.push(Item::Scale);
+        }
         if self.part["input"]["kind"] != "bus" {
             items.extend([Item::MidiOut, Item::MidiChannel]);
         }
@@ -400,6 +433,13 @@ impl Screen {
             Item::Priority => ((0..=10).collect(), self.input_number("priority")),
             Item::MidiChannel => ((0..=16).collect(), self.part["midiOut"]["channel"].as_i64().unwrap_or(0)),
             Item::Output => (std::iter::once(0).chain(self.buses().into_iter().map(|(id, _)| id as i64)).collect(), self.part["bus"].as_i64().unwrap_or(0)),
+            // Follow the Performance's key (-1), or a root.
+            Item::Key => (std::iter::once(-1).chain(0..12).collect(), self.part["key"]["root"].as_i64().unwrap_or(-1)),
+            // The scales by name; -1 stands for the one it has now when that is none of them.
+            Item::Scale => {
+                let at = self.scales.iter().position(|n| self.part["key"]["name"].as_str() == Some(n));
+                (if at.is_none() { std::iter::once(-1).chain(0..self.scales.len() as i64).collect() } else { (0..self.scales.len() as i64).collect() }, at.map_or(-1, |a| a as i64))
+            }
             _ => return None,
         })
     }
@@ -418,6 +458,13 @@ impl Screen {
                 n => n.to_string(),
             },
             Item::MidiChannel => channel("Own channels"),
+            Item::Key if value < 0 => match self.perf_key["root"].as_u64() {
+                Some(_) => format!("Performance's ({})", key_text(&self.perf_key)),
+                None => "Performance's".into(),
+            },
+            Item::Key => ROOTS[value as usize % 12].into(),
+            Item::Scale if value < 0 => format!("Custom ({})", self.part["key"]["scale"].as_array().into_iter().flatten().filter_map(Value::as_i64).map(|n| n.to_string()).collect::<Vec<_>>().join(" ")),
+            Item::Scale => self.scales.get(value as usize).cloned().unwrap_or_default(),
             Item::Output if value == 0 => "Main".into(),
             Item::Output => self.buses().into_iter().find(|(id, _)| *id as i64 == value).map_or_else(|| "a bus".into(), |b| b.1),
             _ => String::new(),
@@ -444,6 +491,8 @@ impl Screen {
             Item::Mute => ("Mute".into(), if flag("mute") { "On" } else { "Off" }.into(), 1, flag("mute")),
             Item::Solo => ("Solo".into(), if flag("solo") { "On" } else { "Off" }.into(), 1, flag("solo")),
             Item::Output => ("Plays to".into(), choice(item), 0, false),
+            Item::Key => ("Key".into(), choice(item), 0, false),
+            Item::Scale => ("Scale".into(), choice(item), 0, false),
             Item::Devices => ("Plays from".into(), devices_name(&self.part["input"]["devices"]) + " ›", 3, false),
             Item::Channel => ("Input channel".into(), choice(item), 0, false),
             Item::LowKey => ("Lowest key".into(), note_name(low), 0, false),
@@ -724,7 +773,7 @@ impl Screen {
                     self.send_input();
                 }
             }
-            Item::Channel | Item::MaxNotes | Item::Reserve | Item::Priority | Item::MidiChannel | Item::Output => self.dial_choice(item, by),
+            Item::Channel | Item::MaxNotes | Item::Reserve | Item::Priority | Item::MidiChannel | Item::Output | Item::Key | Item::Scale => self.dial_choice(item, by),
             Item::Send(bus) => {
                 let was = self.send_level_of(bus);
                 let level = stepped_level(was, by);
@@ -778,6 +827,28 @@ impl Screen {
             Item::MidiChannel if !self.rules(Menu::MidiOut).is_empty() => {
                 self.part["midiOut"]["channel"] = json!(to);
                 self.send_midi_out();
+            }
+            Item::Key if to < 0 => {
+                self.part["key"] = Value::Null; // follows the Performance's again
+                self.edit("harmony.set", json!({"part": self.id, "key": null}));
+            }
+            Item::Key => {
+                // A root of its own, in the scale it had (else the Performance's, else major).
+                let own = self.part["key"].is_object();
+                let was = if own { self.part["key"].clone() } else { self.perf_key.clone() };
+                let scale = match was["name"].as_str() {
+                    Some(name) => json!(name),
+                    None => was["scale"].as_array().filter(|a| !a.is_empty()).map_or_else(|| json!(MAJOR), |a| json!(a)),
+                };
+                let key = json!({"root": to, "scale": scale});
+                self.part["key"] = json!({"root": to, "scale": was["scale"].clone(), "name": was["name"].clone()});
+                self.edit("harmony.set", json!({"part": self.id, "key": key}));
+            }
+            Item::Scale => {
+                let Some(name) = self.scales.get(to.max(0) as usize).cloned() else { return };
+                let root = self.part["key"]["root"].as_i64().unwrap_or(0);
+                self.part["key"] = json!({"root": root, "scale": [], "name": name});
+                self.edit("harmony.set", json!({"part": self.id, "key": {"root": root, "scale": name}}));
             }
             Item::Output => {
                 self.part["bus"] = json!(to);

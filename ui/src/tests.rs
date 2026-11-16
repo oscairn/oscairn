@@ -304,11 +304,11 @@ fn the_top_bar_follows_the_engine() {
     assert!(f.screen.ui.get_engine().starts_with("lost"));
 }
 
-// A take recording is said in the top bar (every screen) and on Play, with the time it has run,
+// A take recording is said in the top bar (every screen, once: Play adds no mark of its own), with the time it has run,
 // as the JUCE record buttons say it: learned by reading record.takes with the status notifications
 // at most every 250 ms (the JUCE poll's period), and gone when the take ends or the engine is lost.
 #[test]
-fn a_take_recording_is_shown_in_the_top_bar_and_on_play() {
+fn a_take_recording_is_shown_in_the_top_bar_once() {
     let mut f = Fixture::new("record");
     f.engine.answer(); // session.hello
     f.pump();
@@ -336,12 +336,14 @@ fn a_take_recording_is_shown_in_the_top_bar_and_on_play() {
     status(&mut f);
     f.answer("record.takes", json!({"takes": [{"take": 2, "state": "recording", "frames": 48000 * 68, "sampleRate": 48000, "behind": true}]}));
     assert_eq!(state(&f), (true, "1:08".into(), true));
-    // On Play, in the footer as well.
+    // On Play the top bar says it and the footer does not: the bottom of Play looks the same without a take.
     f.screen.ui.global::<HomeState>().invoke_tapped(0);
     assert_eq!(f.screen.ui.get_screen(), 3);
     f.screen.frame();
     png(&f.screen, "play-recording");
     shot(&f.screen, "play-recording");
+    let footer = |s: &Screen| s.pixels[(H - 60) * W..].to_vec();
+    let with_take = footer(&f.screen);
     // The take ends: the mark goes.
     std::thread::sleep(std::time::Duration::from_millis(260));
     status(&mut f);
@@ -355,6 +357,8 @@ fn a_take_recording_is_shown_in_the_top_bar_and_on_play() {
         }
     }
     assert_eq!(state(&f), (false, String::new(), false));
+    f.screen.frame();
+    assert!(footer(&f.screen) == with_take, "Play's footer carries no recording mark");
 }
 
 /// Home's tile `n` in the window, as home.slint lays it out (margin 6, gap 4, 120 tall).

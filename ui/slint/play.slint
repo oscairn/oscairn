@@ -6,7 +6,6 @@
 // playing is an accent fill and edge. Colors, corners, edges, sliders and marks are the theme's.
 
 import { Theme, Section, Button, Cursor, Mark, SliderBar, SectionStyle } from "theme.slint";
-import { Bar, RecordingMark } from "topbar.slint";
 
 export struct SceneData {
     number: int,
@@ -237,8 +236,6 @@ export component Play inherits Rectangle {
     property <length> strips-height: self.height - strips-y - footer - Theme.margin - Theme.gap;
     property <length> step-width: PlayState.can-step ? Theme.button-width + Theme.gap : 0px;
     property <length> scene-width: (self.width - 2 * Theme.margin - 2 * step-width - 7 * gap) / 8;
-    // Where the recording mark stands: left of Edit, in the footer.
-    property <length> rec-x: root.width - Theme.margin - root.edit-width - Theme.gap - Bar.recording-width;
     changed across => { PlayState.strips-per-view = across - 1; }
     init => { PlayState.strips-per-view = across - 1; }
 
@@ -357,16 +354,10 @@ export component Play inherits Rectangle {
         vertical-alignment: center;
     }
 
-    // A take is recording (the hardware REC button or any app's): said here as well as in the top bar.
-    if Bar.recording: RecordingMark {
-        x: root.rec-x;
-        y: root.height - Theme.margin - root.footer;
-        height: root.footer;
-    }
     Text {
         x: Theme.margin;
         y: root.height - Theme.margin - root.footer;
-        width: min((root.width - 2 * Theme.margin) / 2, root.rec-x - Theme.gap - Theme.margin);
+        width: min((root.width - 2 * Theme.margin) / 2, root.width - Theme.margin - root.edit-width - Theme.gap - Theme.margin);
         height: root.footer;
         vertical-alignment: center;
         overflow: elide;

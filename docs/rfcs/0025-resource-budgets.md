@@ -169,9 +169,22 @@ never write the user's data folder.
   core" above): at each service tick, every plugin's last block as a share of the block's time
   (at most 1), per plugin build (ID, version and the digest of its files, so a rebuild without a
   new version is measured again), skipping its first 32 blocks and a tick in which it ran no block;
-  memory every second, a worker's share of its process's resident memory or, in the engine's
-  process, what the process grew by while the plugin loaded. Kept in `measurements.json` in the
-  data folder (`{"version":2,"plugins":{...}}`), saved every 30 seconds when changed and when the
+  memory every second, a worker's share of its process's own memory or, in the engine's
+  process, what the process grew by while the plugin loaded. A worker's own memory (2026-11-16)
+  is on Linux its resident memory less the file pages it held when it started, before any plugin:
+  its binary and the libraries the binary links, which a locked worker holds whole and every
+  worker shares (one copy in RAM). Those pages are counted once instead: the libraries are the
+  engine's too, in the system's share, and the binary's loadable segments are reserved beside it
+  (in the flat budget, taken off it). Counting them in each worker charged the same megabytes once
+  per worker: the Rust CLAP host's 1 MB larger binary refused a 14-worker Performance on the
+  FANTOM-07 that the C++ host opened, with the same private memory and PSS. Its anonymous memory,
+  its shared blocks and the plugin's own file pages stay its own, so with the engine's own resident
+  memory the sum is at least the engine's and its workers' PSS (Linux container, 10 workers:
+  42.6 MB counted, 37.6 MB PSS on the C++ host; 44.6 and 39.6 on the Rust host). On macOS it is the physical footprint, which leaves clean code out
+  already.
+  Kept in `measurements.json` in the
+  data folder (`{"version":6,"plugins":{...}}`; a file of version 5 or before keeps its CPU figures
+  where they stand, never its memory), saved every 30 seconds when changed and when the
   session ends. One sample a tick can miss a rare spike between ticks. The figures are means, not
   high-water marks, so one stall or burst cannot set them for good:
   - A sample of a plugin in a worker is held to the CPU time the worker's audio thread used for the

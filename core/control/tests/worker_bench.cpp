@@ -23,6 +23,7 @@
 #include <ctime>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -120,6 +121,21 @@ int main(int argc, char** argv)
     uint64_t memory = 0; size_t live = 0;
     for(const auto& h : processes) if(h.pid > 0 && !h.plugins.empty()) { memory += oscairn::residentBytes(h.pid); ++live; }
     std::printf("PROCESSES workers=%zu resident_mb=%.1f engine_mb=%.1f\n", live, double(memory) / (1 << 20), double(oscairn::residentBytes()) / (1 << 20));
+    // RFC 0025: their memory as the budget counts it (each plugin's share of its worker's own, and the worker binary's code
+    // once) beside what the kernel holds for them (Linux: the sum of their Pss, which shares the pages they map in common).
+    // The engine's own resident memory holds the libraries the workers share with it (RFC 0025: in the system's share).
+    auto pssOf = [](const std::string& pid) {
+        uint64_t n = 0; std::ifstream rollup("/proc/" + pid + "/smaps_rollup");
+        for(std::string line; std::getline(rollup, line);) if(line.starts_with("Pss:")) n += std::strtoull(line.c_str() + 4, nullptr, 10) << 10;
+        return n;
+    };
+    uint64_t own = 0, pss = 0;
+    for(const auto& w : session.sessionStatus().workers) own += w.memory;
+    for(const auto& h : processes) if(h.pid > 0 && !h.plugins.empty()) pss += pssOf(std::to_string(h.pid));
+    const auto code = oscairn::workerCodeBytes(argv[1]), engine = oscairn::residentBytes();
+    auto mb = [](uint64_t b) { return double(b) / (1 << 20); };
+    std::printf("MEMORY own_mb=%.1f code_mb=%.1f workers_pss_mb=%.1f engine_mb=%.1f engine_pss_mb=%.1f all_counted_mb=%.1f all_pss_mb=%.1f\n", mb(own), mb(code), mb(pss),
+                mb(engine), mb(pssOf("self")), mb(engine + own + code), mb(pss + pssOf("self")));
     // A run, not a judgment: only that every plugin played in a worker and was timed.
     return t.workers.size() == (small ? 2u : 10u) && c.count() > 0 ? 0 : 1;
 }

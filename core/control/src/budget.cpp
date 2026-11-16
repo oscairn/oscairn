@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #ifdef __linux__
@@ -56,8 +57,17 @@ namespace oscairn
         // certain (admission takes it as it is) once certainBlocks blocks were measured.
         constexpr double restBlocks = 4000, fastBlocks = 400, fallBlocks = 60000, quietSeconds = .5;
         constexpr uint32_t enoughSamples = 100, seedSamples = 4, warmupBlocks = 32, certainBlocks = 8000;
-        constexpr int measurementsVersion = 5; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops, its memory kept; 3: a shared instance's CPU all its sounds', its memory kept; 4: one block's wall time a tick, a shared instance's unbounded and rest taken during release tails, its memory kept
+        constexpr int measurementsVersion = 6; // 1: the old estimator's, a high-water mark of wall times, discarded; 2: bounded by histogram buckets' tops; 3: a shared instance's CPU all its sounds'; 4: one block's wall time a tick, a shared instance's unbounded and rest taken during release tails (2 to 4's CPU discarded); 5: a worker's memory its whole resident memory on Linux, the code every worker shares counted in each (memory discarded, CPU kept)
         fs::path measurementsFile() { return dataHome() / "measurements.json"; }
+        // The worker binary's code, which every worker holds and shares: counted once, beside the plugins, since a
+        // worker's measurement leaves it out (workerOwnBytes).
+        uint64_t workerCode()
+        {
+            static std::mutex mutex; static std::string program; static uint64_t bytes = 0; // read once per worker program
+            std::lock_guard lock(mutex);
+            if(const auto& w = placementPolicy().worker; w != program) { program = w; bytes = w.empty() ? 0 : workerCodeBytes(w); }
+            return bytes;
+        }
         std::string percent(double share) { char text[32]; std::snprintf(text, sizeof(text), "%.0f%%", share * 100); return text; }
     }
 
@@ -213,8 +223,10 @@ namespace oscairn
             const std::unique_ptr<json_value_s, decltype(&std::free)> doc{json_parse(bytes.data(), bytes.size()), &std::free};
             const auto* version = detail::member(doc.get(), "version");
             const double read = version && version->type == json_type_number ? std::strtod(static_cast<const json_number_s*>(version->payload)->number, nullptr) : 0;
-            if(read != measurementsVersion && read != 4 && read != 3 && read != 2) return;
-            const bool memoryOnly = read != measurementsVersion; // versions 2 to 4's CPU figures were overstated (see measurementsVersion): measured again; the memory stands
+            if(read != measurementsVersion && read != 5 && read != 4 && read != 3 && read != 2) return;
+            // Versions 2 to 4's CPU figures were overstated, and before 6 a worker's memory counted the code all workers
+            // share (see measurementsVersion): measured again, each in the meantime the guess for one not measured.
+            const bool memoryOnly = read != measurementsVersion && read != 5, keepMemory = read == measurementsVersion;
             const auto* plugins = detail::member(doc.get(), "plugins");
             if(!plugins || plugins->type != json_type_object) return;
             for(auto* e = static_cast<const json_object_s*>(plugins->payload)->start; e; e = e->next)
@@ -227,11 +239,12 @@ namespace oscairn
                 if(!std::isfinite(memory) || memory < 0 || memory > double(1ull << 40)) continue;
                 const auto said = std::isfinite(declared) && declared >= 0 && declared <= double(1ull << 40) ? uint64_t(declared) : 0;
                 // An impossible cost (a share above the audio time itself, negative, not a number) is
-                // dropped and measured again; the memory stands.
+                // dropped and measured again; the memory stands (of this version).
                 const bool possible = !memoryOnly && std::isfinite(cpu) && cpu >= 0 && cpu <= 1 && std::isfinite(rest) && rest >= 0 && rest <= 1 &&
                                       std::isfinite(voice) && voice >= 0 && voice <= 1 && std::isfinite(voices) && voices >= 0 && voices <= 4096;
                 const std::string key(e->name->string, e->name->string_size);
-                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), uint64_t(memory), uint32_t(std::clamp(samples, 0.0, 1e9)), said} : Measurement{0, 0, 0, 0, uint64_t(memory), 0, said};
+                const uint64_t kept = keepMemory ? uint64_t(memory) : 0;
+                measured_[key] = possible ? Measurement{cpu, rest, voice, uint32_t(voices), kept, uint32_t(std::clamp(samples, 0.0, 1e9)), said} : Measurement{0, 0, 0, 0, kept, 0, said};
                 if(possible) setPluginCost(key.substr(0, key.find('@')), cpu); // RFC 0045, before its instances play: as last measured here
             }
         }
@@ -277,10 +290,11 @@ namespace oscairn
         if(memoryClasses()) evictOpportunistic();
     }
 
-    // Memory classes (RFC 0025, "Admission's arithmetic"). An app counts once, running or always available.
+    // Memory classes (RFC 0025, "Admission's arithmetic"). An app counts once, running or always available; the
+    // workers' shared code once, as the system's.
     uint64_t Session::reservedMemory(bool closedAlwaysAvailable) const
     {
-        uint64_t n = budget_.system + shell_;
+        uint64_t n = budget_.system + shell_ + workerCode();
         for(const auto& a : running_) n += a.reserve;
         if(closedAlwaysAvailable)
             for(const auto& a : alwaysAvailable_)
@@ -290,7 +304,7 @@ namespace oscairn
 
     uint64_t Session::memoryCeiling() const
     {
-        if(!memoryClasses()) return budget_.memory;
+        if(!memoryClasses()) { const auto code = budget_.memory ? workerCode() : 0; return budget_.memory > code ? budget_.memory - code : budget_.memory ? 1 : 0; }
         const auto held = reservedMemory() + budget_.margin;
         return held < budget_.device ? budget_.device - held : 1; // 1 byte: nothing fits
     }

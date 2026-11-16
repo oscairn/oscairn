@@ -23,6 +23,7 @@
 #include <libproc.h>
 #endif
 #ifdef __linux__
+#include <elf.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/mman.h>
@@ -378,6 +379,41 @@ namespace oscairn
         uint64_t pages = 0, resident = 0;
         if(!(statm >> pages >> resident)) return 0;
         return resident * uint64_t(sysconf(_SC_PAGESIZE));
+#endif
+    }
+
+    uint64_t workerOwnBytes(std::string_view statm, uint64_t startFile, uint64_t pageSize)
+    {
+        uint64_t size = 0, resident = 0, shared = 0; // pages; shared: file-backed and shared memory
+        std::istringstream in{std::string(statm)};
+        if(!(in >> size >> resident >> shared) || !pageSize) return 0;
+        return (resident - std::min({resident, shared, startFile / pageSize})) * pageSize;
+    }
+
+    uint64_t residentFileBytes(std::string_view status)
+    {
+        const auto at = status.find("RssFile:");
+        return at == status.npos ? 0 : std::strtoull(std::string(status.substr(at + 8, 32)).c_str(), nullptr, 10) * 1024; // "RssFile:  6725 kB"
+    }
+
+    uint64_t workerCodeBytes(const std::string& program)
+    {
+#ifdef __linux__
+        std::ifstream f(program, std::ios::binary);
+        Elf64_Ehdr h{};
+        if(!f.read(reinterpret_cast<char*>(&h), sizeof h) || std::memcmp(h.e_ident, ELFMAG, SELFMAG) != 0 || h.e_ident[EI_CLASS] != ELFCLASS64 || h.e_phentsize != sizeof(Elf64_Phdr)) return 0;
+        const uint64_t page = uint64_t(sysconf(_SC_PAGESIZE));
+        uint64_t bytes = 0;
+        for(uint16_t i = 0; i < h.e_phnum; ++i)
+        {
+            Elf64_Phdr p{};
+            if(!f.seekg(std::streamoff(h.e_phoff + uint64_t(i) * sizeof p)) || !f.read(reinterpret_cast<char*>(&p), sizeof p)) return 0;
+            if(p.p_type == PT_LOAD && p.p_filesz) bytes += (p.p_offset + p.p_filesz + page - 1) / page * page - p.p_offset / page * page;
+        }
+        return bytes;
+#else
+        (void)program;
+        return 0;
 #endif
     }
 

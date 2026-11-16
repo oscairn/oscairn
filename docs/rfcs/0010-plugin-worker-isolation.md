@@ -391,8 +391,9 @@ Limits implemented 2026-11-01 in `WorkerHost.cpp` and `worker_main.cpp`; sandbox
   activating add their declared context bytes each, the limit raised before the plugin prepares
   them (2026-11-07: a shared Oscairn Analog instance filling with sounds was stopped at its 9th,
   at the limit its activation set). The supervisor reads the worker's memory
-  every 10 ms, its physical footprint on macOS (compressed pages included) and resident memory
-  on Linux, and a worker over the limit is failed like a crash: "Plugin used too much memory:
+  every 10 ms, its physical footprint on macOS (compressed pages included) and on Linux its resident
+  memory less the file pages it held at its start (its binary and libraries, which every worker
+  shares; RFC 0025, "Measured"), and a worker over the limit is failed like a crash: "Plugin used too much memory:
   132 MB, over its limit of 128 MB", killed, restarted with its recovery record, and given up
   after 3 restarts a minute. Between checks a plugin can overshoot by what it allocates in
   10 ms.

@@ -38,11 +38,16 @@ OSCAIRN_CONFIG_HOME=/tmp/oscairn-root/config OSCAIRN_REAL_ENGINE=/path/to/oscair
 --nocapture` (with `CARGO_HOME` and `RUSTUP_HOME` kept at their real places). Not covered: the plugin folder is read from where
 `OSCAIRN_REAL_PLUGINS` says (read only), and the engine's own plugins may write where their own code says.
 
-First runs under the guard (2026-11-16, engine built from main e16f7e4d, `--audio null`): `real_settings` for `desktop` and for
-`fantom-07`: 0 findings, no request refused, no process left. `real_library` and `real_engine` started, verified the engine and
-sent requests with none refused, but stopped on their own seeds: the library harness expects a small library (Brass Hall and
-others) and `real_engine` the Performance "Real Engine Check", both made by hand in earlier runs and not by the harness, so
-neither ran to the end. Seeding them from the harness is not done.
+**Seeds.** Each harness makes its own data in its engine, through the engine's requests (`src/tests/real_engine/seed.rs`),
+with invented names: `real_engine` the Performance "Real Engine Check" (Lead, Groovebox, Split with two lanes, Empty, Bus A,
+scenes Verse and Chorus, a control with two targets) and `real_library` Brass Hall, Glass Choir and Night Strings, the Sound
+Soft Felt and the setlist Friday Set. They use the plugins in `OSCAIRN_REAL_PLUGINS` (a folder with the built
+`oscairn-basic-synth.clap`, `oscairn-delay.clap`, `oscairn-transpose.clap` and the rest of `build/plugins/*.clap`; the engine
+also starts from it). Nothing depends on an earlier run.
+
+Runs under the guard (2026-11-16, engine built from main e16f7e4d, `--audio null`, each in a fresh root): `real_settings` for
+`desktop` and `fantom-07`: 0 findings; `real_library`: 0 findings; `real_engine`: 1 finding, the engine's known "Presets are being
+listed; ask again" (the screen asks again). No request was refused by the guard and no process was left.
 
 ---
 

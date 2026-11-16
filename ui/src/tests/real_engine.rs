@@ -154,10 +154,12 @@ struct Real {
 }
 
 impl Real {
-    fn start() -> Option<Real> {
+    fn start(seed: seed::Seed) -> Option<Real> {
         let binary = std::path::PathBuf::from(std::env::var_os("OSCAIRN_REAL_ENGINE")?);
         let (path, trace, engine, child) = start_engine(&binary, std::env::var("OSCAIRN_REAL_PLUGINS").ok().as_deref(), Some("fantom-07"));
         let mut engine = engine;
+        // The seed of this harness, made in the engine of this run (seed.rs), from nothing.
+        seed::make(&mut engine, seed, std::env::var("OSCAIRN_REAL_PLUGINS").ok().as_deref());
         // The Performance built for the check (ui/REAL-ENGINE.md), opened again so each run starts from it.
         let found = engine.call("library.query", json!({"text": "Real Engine Check", "kind": "performance"}));
         if let Some(id) = found["items"][0]["id"].as_str() {
@@ -1521,6 +1523,7 @@ fn short(v: &Value) -> String {
 mod engine;
 mod guard;
 mod library;
+mod seed;
 
 // The Library app against the same engine, with a small library of its own (ui/LIBRARY-APP.md): the shell reaches
 // it with the switch the tests use. The engine the harness starts has the run's OSCAIRN_DATA_HOME (the state file of
@@ -1528,7 +1531,7 @@ mod library;
 #[test]
 #[ignore = "needs an engine binary: OSCAIRN_REAL_ENGINE"]
 fn real_library() {
-    let Some(mut r) = Real::start() else {
+    let Some(mut r) = Real::start(seed::Seed::Library) else {
         eprintln!("real_library: OSCAIRN_REAL_ENGINE is not set");
         return;
     };
@@ -1557,7 +1560,7 @@ fn real_settings() {
 #[test]
 #[ignore = "needs an engine binary: OSCAIRN_REAL_ENGINE"]
 fn real_engine() {
-    let Some(mut r) = Real::start() else {
+    let Some(mut r) = Real::start(seed::Seed::Check) else {
         eprintln!("real_engine: OSCAIRN_REAL_ENGINE is not set");
         return;
     };

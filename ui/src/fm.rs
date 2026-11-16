@@ -535,10 +535,9 @@ pub fn diagram(flow: &Flow, count: usize, area: Area, small: f32, routed: bool, 
     let bus_x = if centered { right[columns - 1] + final_room - half } else { area.2 - half };
     // Where each wire arrives at its box: spread along the box's left edge in the order of where they come from.
     let mut entry: Vec<Option<f32>> = vec![None; flow.chains.len()];
-    for n in 0..count {
+    for (n, &b) in d.boxes.iter().enumerate().take(count) {
         let mut arriving: Vec<(f32, usize)> = flow.chains.iter().enumerate().filter(|(_, c)| c.target == Some(n)).map(|(k, c)| (rows_of(c.nodes[c.nodes.len() - 2]), k)).collect();
         arriving.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        let b = d.boxes[n];
         for (i, (_, k)) in arriving.iter().enumerate() {
             entry[*k] = Some(b.1 + height_of(b) * (i + 1) as f32 / (arriving.len() + 1) as f32);
         }
@@ -1033,8 +1032,8 @@ pub fn draw(f: &FmShape, c: &Ctx) -> Drawn {
         }
         // Dots: where each operator's most recent voice is on its line, a ring in the background under a dot in the operator's color.
         let radius = (g.small * 0.28).max(3.);
-        for n in 0..n_ops {
-            let (Some(line), Some(along)) = (&g.lines[n], c.positions.get(n).copied().flatten()) else { continue };
+        for (n, line) in g.lines.iter().enumerate().take(n_ops) {
+            let (Some(line), Some(along)) = (line, c.positions.get(n).copied().flatten()) else { continue };
             if let Some((x, y)) = point_along(&line.layout.points, along) {
                 d.shapes.push(Shape { ink: Ink::Background, fill: true, width: 0, commands: circle(x, y, radius + 1.5) });
                 d.shapes.push(Shape { ink: Ink::operator(n), fill: true, width: 0, commands: circle(x, y, radius) });

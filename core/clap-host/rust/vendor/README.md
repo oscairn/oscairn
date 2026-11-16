@@ -13,7 +13,8 @@ oscairn-clap-sys's bindings are written against.
   (`https://static.crates.io/crates/clap-sys/clap-sys-0.5.0.crate`, SHA-256
   `a76abbdb2907f6fd97fb6bc0b7be96b77d328f2dd9669d1075cc03369ed22154`), from
   `https://github.com/micahrj/clap-sys` at commit `25d7f53fdb6363ad63fbd80049cb7a42a97ac156`
-  (`.cargo_vcs_info.json`). Every file as published but the `.github` folder (its CI), left out.
+  (`.cargo_vcs_info.json`). Every file as published but the `.github` folder (its CI), left out, and one line changed: `src/id.rs`'s
+  `std::u32::MAX` is `u32::MAX` (the same value; Rust 1.100 warns that the module constant is deprecated).
 - **License:** MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`).
 - **Note:** it is CLAP 1.2.2's; Oscairn's headers (`core/clap-host/third_party/clap`) are 1.2.10. The extension IDs
   and structures the host uses are the same in both; the version the host announces is the headers'

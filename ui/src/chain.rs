@@ -209,6 +209,9 @@ pub struct Screen {
     graph: Value,
     id: u64,
     mode: Mode,
+    /// The plugin the actions or presets shown are for: they follow it when the chain changes
+    /// under them (an undo, another editor), as their place alone would name another plugin.
+    acting: Option<u64>,
     plugins: Vec<Plugin>,
     scanning: bool,
     /// Which nodes have a window of their own, as window.info said.
@@ -241,6 +244,7 @@ impl Screen {
             graph: Value::Null,
             id: 0,
             mode: Mode::List,
+            acting: None,
             plugins: vec![],
             scanning: true,
             windows: HashMap::new(),
@@ -642,6 +646,20 @@ impl Screen {
             Mode::Lane(s, k) if self.lane(s, k).is_none() => Mode::Split(s),
             Mode::Actions(p, _) | Mode::Plugins(p, _) | Mode::Presets(p, _) if gone(self, p) => Mode::List,
             m => m,
+        };
+        if let (Mode::Actions(p, i) | Mode::Presets(p, i), Some(n)) = (self.mode, self.acting) {
+            match self.entries_at(p).iter().position(|e| *e == Entry::Node(n)) {
+                Some(j) if j != i => self.mode = if matches!(self.mode, Mode::Actions(..)) { Mode::Actions(p, j) } else { Mode::Presets(p, j) },
+                Some(_) => {}
+                None => self.mode = Mode::List,
+            }
+        }
+        self.acting = match self.mode {
+            Mode::Actions(p, i) | Mode::Presets(p, i) => match self.entries_at(p).get(i) {
+                Some(Entry::Node(n)) => Some(*n),
+                _ => None,
+            },
+            _ => None,
         };
     }
 

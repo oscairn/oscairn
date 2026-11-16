@@ -54,6 +54,36 @@ fn plugin(name: &str, id: &str, features: &[&str]) -> Plugin {
     Plugin { path: format!("/p/{name}.clap"), id: id.into(), name: name.into(), vendor: String::new(), features: features.iter().map(|f| f.to_string()).collect() }
 }
 
+// A plugin's actions follow the plugin when the chain changes under them: found against the real
+// engine (ui/REAL-ENGINE.md), where after a move and its undo the actions still named the old place,
+// and Remove then removed the instrument beside it. Here the graph moves Chorus without the screen
+// asking; its actions say so, and Remove names Chorus. A plugin gone takes the screen back to the chain.
+#[test]
+fn a_plugins_actions_follow_it_when_the_chain_changes() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut c = chain_screen(&s);
+    press(&mut c, 1); // Chorus, the first
+    sent(&mut c.out);
+    assert_eq!(labels(ui)[3], "Move later");
+    let mut moved = graph();
+    moved["parts"][0]["chain"] = json!([1, 2]); // an undo, or another editor, puts it last
+    c.graph(&moved);
+    assert_eq!(labels(ui)[3], "Move earlier", "the actions are Chorus's at its new place");
+    c.act(Action::Move { pane: None, by: -10 });
+    c.act(Action::Move { pane: None, by: 4 });
+    c.act(Action::Confirm(None));
+    let out = sent(&mut c.out);
+    assert_eq!(out[0], ("parts.removeNode", json!({"part": 10, "node": 2})), "Chorus removed, not Rhodes: {out:?}");
+    press(&mut c, 3); // Chorus again, now the second
+    sent(&mut c.out);
+    assert_eq!(labels(ui)[3], "Move earlier");
+    let mut gone = graph();
+    gone["parts"][0]["chain"] = json!([1]);
+    c.graph(&gone);
+    assert_eq!(labels(ui), ["+ Insert plugin here", "1. Rhodes", "+ Insert plugin here"], "its plugin gone: the chain again");
+}
+
 // The chain lists its plugins with an insert row before each and after the last; a press on one opens
 // its actions (window.info is asked, a plugin view shown disabled when it has one); turn off or on,
 // move, remove, each its requests and a commit; the parameters open its pages; Cancel goes back a layer.

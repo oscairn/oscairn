@@ -490,6 +490,9 @@ int main(int argc, char** argv)
             bool failed = false;
             try { s.loadPerformance(refusing.string()); } catch(const std::exception& e) { failed = std::string(e.what()).find("instrument 1-3") != std::string::npos; }
             check(failed, "the load fails on the fourth instrument");
+            // Off while this thread renders, as before the other comparisons: a budget keeps the load guard on whatever OSCAIRN_LOAD_GUARD says,
+            // and a block descheduled on a loaded machine gives a note up in the one Session and not in the fresh one.
+            s.setBudget({});
             compare(s, a, "a load refused after taking instances over"); quiet(s);
         }
         s.setBudget({});

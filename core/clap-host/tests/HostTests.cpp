@@ -311,9 +311,14 @@ int main(int argc, char** argv) {
         const auto errorsBefore = h.statistics().processErrors;
         std::atomic<uint32_t> word{0};
         std::atomic<bool> going{true};
-        std::thread audio([&] { while (going.load()) { render(h, out, 128); h.restful(); } });
-        std::thread waker([&] { while (going.load()) h.enqueue(note); });
-        for (int i = 0; i < 100; ++i) {
+        std::atomic<bool> audioRan{false}, wakerRan{false};
+        // Each thread has done one pass before the first save, so all three overlap in every iteration. A save waits up
+        // to 100 ms for the commands the waker keeps queuing, so the iteration count sets the duration: 100 took 17 s
+        // under GCC's ThreadSanitizer here (5.6 s for the whole test before it) and ran past the 30 s limit on CI.
+        std::thread audio([&] { do { render(h, out, 128); h.restful(); audioRan.store(true); } while (going.load()); });
+        std::thread waker([&] { do { h.enqueue(note); wakerRan.store(true); } while (going.load()); });
+        while (!audioRan.load() || !wakerRan.load()) std::this_thread::yield();
+        for (int i = 0; i < 20; ++i) {
             h.mirrorWake(&word);
             check(h.saveState(saved) && h.loadState(saved), "state while another thread wakes and rests the plugin");
             h.mirrorWake(nullptr);

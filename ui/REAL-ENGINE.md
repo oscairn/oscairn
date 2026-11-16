@@ -1,20 +1,48 @@
 # How to run the harnesses (required: a root of their own)
 
 `real_engine`, `real_library` and `real_settings` are ignored by default and drive a real engine. They write files (the Library's
-exports and installs, a chosen theme, the setlist state file), so they **refuse to start** (a panic naming the reason, before any
-request or file) unless the environment names one directory for the run:
+exports and installs, a chosen theme, the setlist state file) and the engine they drive saves, deletes and installs (Performances,
+Sounds, recordings, packages, keys), so they follow two rules.
+
+**The harness starts its own engine and never connects to another.** (Until 2026-11-16 a harness connected to an engine named by
+`OSCAIRN_REAL_SOCKET`, which the guard could not see: if that engine ran on the owner's real data home, every save, delete and
+import the harness sent landed there. `OSCAIRN_REAL_SOCKET` set now stops the run.) It needs `OSCAIRN_REAL_ENGINE`, the
+`oscairn-engine` binary, and starts it as a child in a process group of its own with `--audio null --buffer-frames 128`
+(`--device-profile fantom-07`; `real_settings` the profile it runs, none for `desktop`), `--plugins` from `OSCAIRN_REAL_PLUGINS`
+and its socket in a private folder under the root (`engine-run/sock`; the whole path must be under 100 characters, so keep the
+root short). Its environment is built from nothing (`engine::child_env`): `PATH`, `HOME`, `OSCAIRN_DATA_HOME` and
+`OSCAIRN_CONFIG_HOME` as given for the run, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`,
+`XDG_RUNTIME_DIR` and `TMPDIR` in `engine-run/`, all inside the root; nothing else is inherited (these are all the variables
+the engine and its workers read to find data, config, plugins and temporary files: `core/control/src/library.cpp` `dataHome`,
+`core/plugin-host/src/assets.cpp`, `core/clap-host/src/Discovery.cpp` for `CLAP_PATH` and `HOME`). Before the first request
+the harness checks the engine is using the root (`engine::verify`): the engine has written into the run's data home (it does at
+start), and every `path` of `library.query`, `library.libraries` and `assets.libraries` is inside the root. (The engine has no
+request that reports its data folder.) Every request that names a path (`library.export`, `library.install`,
+`library.addFolder`, `performance.import` and the rest of the engine's table of path arguments), from the shell through the
+proxy or from the harness, is checked by `Root::inside` before it is sent: outside the root, relative, a `..` or a symlink out
+is not sent and stops the run. When the harness ends, however it ends, the child and its workers are killed (`killpg`).
+
+**The root.** The environment of the test run names one directory:
 
 - `OSCAIRN_TEST_ROOT`: an existing directory that is empty (the harness then writes `.oscairn-test-root` in it) or already has that
   marker, and that is not the real home folder (read from the password database, not `$HOME`) nor a parent of it;
-- `HOME`, `OSCAIRN_DATA_HOME` and `OSCAIRN_CONFIG_HOME`: all set, all inside that directory, none the real home. Start the engine under
-  the same three, with `--audio null` and a socket in a private folder in /tmp.
+- `HOME`, `OSCAIRN_DATA_HOME` and `OSCAIRN_CONFIG_HOME`: all set, all inside that directory, none the real home. The engine is
+  started with the same three.
 
 Everything the harnesses make goes to folders of the run inside the root (the file pages are pointed at `documents-PID` there, never
 at the default `~/Documents`, which the product's chooser starts in), and every delete goes through `guard::Root` (src/tests/
 real_engine/guard.rs): it refuses a path outside the root, a `..`, a symlink out, the root itself, and anything the harness did not
-make itself. The guard has tests that are not ignored. Example: `OSCAIRN_TEST_ROOT=/tmp/oscairn-root HOME=/tmp/oscairn-root/home
-OSCAIRN_DATA_HOME=/tmp/oscairn-root/data OSCAIRN_CONFIG_HOME=/tmp/oscairn-root/config OSCAIRN_REAL_SOCKET=/tmp/x/engine.sock
-cargo test real_library -- --ignored --nocapture` (with `CARGO_HOME` and `RUSTUP_HOME` kept at their real places).
+make itself. The guard and the engine's environment, verification, path check and kill have tests that are not ignored.
+Example: `OSCAIRN_TEST_ROOT=/tmp/oscairn-root HOME=/tmp/oscairn-root/home OSCAIRN_DATA_HOME=/tmp/oscairn-root/data
+OSCAIRN_CONFIG_HOME=/tmp/oscairn-root/config OSCAIRN_REAL_ENGINE=/path/to/oscairn-engine cargo test real_library -- --ignored
+--nocapture` (with `CARGO_HOME` and `RUSTUP_HOME` kept at their real places). Not covered: the plugin folder is read from where
+`OSCAIRN_REAL_PLUGINS` says (read only), and the engine's own plugins may write where their own code says.
+
+First runs under the guard (2026-11-16, engine built from main e16f7e4d, `--audio null`): `real_settings` for `desktop` and for
+`fantom-07`: 0 findings, no request refused, no process left. `real_library` and `real_engine` started, verified the engine and
+sent requests with none refused, but stopped on their own seeds: the library harness expects a small library (Brass Hall and
+others) and `real_engine` the Performance "Real Engine Check", both made by hand in earlier runs and not by the harness, so
+neither ran to the end. Seeding them from the harness is not done.
 
 ---
 

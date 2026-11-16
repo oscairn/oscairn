@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The Performance app against a running real engine (ui/REAL-ENGINE.md): ignored unless asked for,
-//! as it needs an engine started by hand with the null audio device and a Performance built in it.
+//! The Performance app against a real engine (ui/REAL-ENGINE.md): ignored unless asked for. The harness starts the engine
+//! itself, as a child with the null audio device, an environment built from nothing and every folder in the root of the run
+//! (`engine.rs`); it never connects to an engine somebody else started.
 //!
-//! `OSCAIRN_REAL_SOCKET=/path/engine.sock OSCAIRN_REAL_PLUGINS=/the/engine's/plugins
+//! `OSCAIRN_REAL_ENGINE=/build/.../oscairn-engine OSCAIRN_REAL_PLUGINS=/the/engine's/plugins
 //! OSCAIRN_REAL_SCANNER=/build/core/oscairn-plugin-scan cargo test real_engine -- --ignored --nocapture`
-//! (`OSCAIRN_REAL_ONLY=part,chain` for some sections only).
+//! with the root of the run set as ui/REAL-ENGINE.md says (`OSCAIRN_REAL_ONLY=part,chain` for some sections only).
 //!
 //! The shell talks to the engine through a recording proxy, so every request it sends, every answer
 //! and every notification is in the trace; the engine's state is read again on a connection of the
@@ -25,10 +26,13 @@ enum Line {
 }
 
 type Trace = Arc<Mutex<Vec<Line>>>;
+
+/// Requests the guard refused to send (a path outside the root): the run stops at its next step.
+static REFUSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 use serde_json::Value;
 
 /// Listens at `path` and passes each connection's lines to the engine at `engine` and back, noting them.
-fn proxy(path: &std::path::Path, engine: std::path::PathBuf, trace: Trace) {
+fn proxy(path: &std::path::Path, engine: std::path::PathBuf, trace: Trace, root: Arc<guard::Root>) {
     // (A path of this process's own: nothing is deleted; one that is there is a stranger's and stops the run.)
     assert!(!path.exists(), "{} exists already", path.display());
     let listener = UnixListener::bind(path).unwrap();
@@ -37,17 +41,24 @@ fn proxy(path: &std::path::Path, engine: std::path::PathBuf, trace: Trace) {
             let Ok(ui) = ui else { continue };
             let Ok(up) = UnixStream::connect(&engine) else { continue };
             let (ui_r, up_w, up_r, ui_w) = (ui.try_clone().unwrap(), up.try_clone().unwrap(), up, ui);
+            let (t, r) = (trace.clone(), Some(root.clone()));
+            std::thread::spawn(move || copy(ui_r, up_w, t, r));
             let t = trace.clone();
-            std::thread::spawn(move || copy(ui_r, up_w, t, true));
-            let t = trace.clone();
-            std::thread::spawn(move || copy(up_r, ui_w, t, false));
+            std::thread::spawn(move || copy(up_r, ui_w, t, None));
         }
     });
 }
 
-fn copy(from: UnixStream, mut to: UnixStream, trace: Trace, upward: bool) {
+/// `root` is given for the lines going up to the engine: a request that names a path outside it is not sent.
+fn copy(from: UnixStream, mut to: UnixStream, trace: Trace, root: Option<Arc<guard::Root>>) {
+    let upward = root.is_some();
     for line in std::io::BufReader::new(from).lines() {
         let Ok(line) = line else { break };
+        if let Some(Err(e)) = root.as_ref().map(|r| engine::check_request(r, &line)) {
+            eprintln!("REFUSED {e}");
+            REFUSED.lock().unwrap().push(e);
+            break;
+        }
         if let Ok(doc) = serde_json::from_str::<Value>(&line) {
             let id = doc["id"].as_u64().unwrap_or(u64::MAX);
             let entry = if upward {
@@ -83,7 +94,11 @@ impl Direct {
     /// The whole answer: `result` or `error`.
     fn raw(&mut self, method: &str, params: Value) -> Value {
         self.next += 1;
-        writeln!(self.writer, "{}", json!({"jsonrpc": "2.0", "id": self.next, "method": method, "params": params})).unwrap();
+        let line = json!({"jsonrpc": "2.0", "id": self.next, "method": method, "params": params}).to_string();
+        if let Err(e) = engine::check_request(&guard::root_or_stop(), &line) {
+            panic!("the harness would send a path outside its root: {e}");
+        }
+        writeln!(self.writer, "{line}").unwrap();
         loop {
             let mut line = String::new();
             self.reader.read_line(&mut line).unwrap();
@@ -105,12 +120,28 @@ impl Direct {
     }
 }
 
+/// Before anything else: the root of the run, the engine started in it and checked to be using it, the proxy's socket and a
+/// connection of the harness's own. A harness never reaches an engine it did not start.
+fn start_engine(binary: &std::path::Path, plugins: Option<&str>, profile: Option<&str>) -> (std::path::PathBuf, Trace, Direct, engine::ChildEngine) {
+    let root = Arc::new(guard::root_or_stop()); // before an engine is started or a file touched
+    let child = engine::ChildEngine::start(&root, binary, plugins, profile);
+    let mut direct = Direct::new(&child.socket);
+    engine::verify(&root, &mut |m, p| direct.call(m, p)).unwrap_or_else(|e| panic!("the real-engine harness refuses to go on: {e}"));
+    let trace: Trace = Arc::default();
+    let path = std::env::temp_dir().join(format!("oscairn-ui-real-{}.sock", std::process::id()));
+    proxy(&path, child.socket.clone(), trace.clone(), root);
+    fit_to_window();
+    (path, trace, direct, child)
+}
+
 /// The shell on a headless window, the proxy and a direct connection.
 struct Real {
     screen: Screen,
     events: mpsc::Receiver<Event<Request>>,
     trace: Trace,
     engine: Direct,
+    /// The engine this harness started (killed with its workers when this is dropped).
+    _child: engine::ChildEngine,
     /// What went wrong or looked wrong, said in the report at the end.
     findings: Vec<String>,
     /// Where the trace was when the last step began.
@@ -124,13 +155,9 @@ struct Real {
 
 impl Real {
     fn start() -> Option<Real> {
-        let socket = std::path::PathBuf::from(std::env::var_os("OSCAIRN_REAL_SOCKET")?);
-        let _root = guard::root_or_stop(); // before an engine is asked anything or a file touched
-        let trace: Trace = Arc::default();
-        let path = std::env::temp_dir().join(format!("oscairn-ui-real-{}.sock", std::process::id()));
-        proxy(&path, socket.clone(), trace.clone());
-        fit_to_window();
-        let mut engine = Direct::new(&socket);
+        let binary = std::path::PathBuf::from(std::env::var_os("OSCAIRN_REAL_ENGINE")?);
+        let (path, trace, engine, child) = start_engine(&binary, std::env::var("OSCAIRN_REAL_PLUGINS").ok().as_deref(), Some("fantom-07"));
+        let mut engine = engine;
         // The Performance built for the check (ui/REAL-ENGINE.md), opened again so each run starts from it.
         let found = engine.call("library.query", json!({"text": "Real Engine Check", "kind": "performance"}));
         if let Some(id) = found["items"][0]["id"].as_str() {
@@ -150,11 +177,12 @@ impl Real {
         if let (Some(dir), Ok(helper)) = (plugins, std::env::var("OSCAIRN_REAL_SCANNER")) {
             shell::plugins_found(crate::scan::scan(std::path::Path::new(&dir), std::path::Path::new(&helper), crate::scan::TIMEOUT));
         }
-        Some(Real { screen, events, trace, engine, findings: vec![], mark: 0, frames: 0, figures: 0, shown_figures: (-1, -1) })
+        Some(Real { screen, events, trace, engine, _child: child, findings: vec![], mark: 0, frames: 0, figures: 0, shown_figures: (-1, -1) })
     }
 
     /// Hands the shell its events and runs its timers for `ms`.
     fn run(&mut self, ms: u64) {
+        assert!(REFUSED.lock().unwrap().is_empty(), "the guard refused a request: {:?}", REFUSED.lock().unwrap());
         let until = Instant::now() + Duration::from_millis(ms);
         while Instant::now() < until {
             // Everything that has arrived, then one frame (a window draws once per frame, however many events came).
@@ -1490,17 +1518,18 @@ fn short(v: &Value) -> String {
     if s.len() > 160 { format!("{}...", &s[..160]) } else { s }
 }
 
+mod engine;
 mod guard;
 mod library;
 
 // The Library app against the same engine, with a small library of its own (ui/LIBRARY-APP.md): the shell reaches
-// it with the switch the tests use. Run with OSCAIRN_DATA_HOME at the engine's data folder (the state file of
+// it with the switch the tests use. The engine the harness starts has the run's OSCAIRN_DATA_HOME (the state file of
 // "Add to setlist" is written there).
 #[test]
-#[ignore = "needs a running engine: OSCAIRN_REAL_SOCKET"]
+#[ignore = "needs an engine binary: OSCAIRN_REAL_ENGINE"]
 fn real_library() {
     let Some(mut r) = Real::start() else {
-        eprintln!("real_library: OSCAIRN_REAL_SOCKET is not set");
+        eprintln!("real_library: OSCAIRN_REAL_ENGINE is not set");
         return;
     };
     shell::library_in_rust(true);
@@ -1514,11 +1543,11 @@ mod settings;
 // The Settings app against the same engine (ui/SETTINGS-APP.md): `OSCAIRN_REAL_PROFILE` is the shell's profile (a built-in's id,
 // or `desktop` for a computer's, the default), run once for each kind against an engine of its own with `--audio null`.
 #[test]
-#[ignore = "needs a running engine: OSCAIRN_REAL_SOCKET"]
+#[ignore = "needs an engine binary: OSCAIRN_REAL_ENGINE"]
 fn real_settings() {
     let profile = std::env::var("OSCAIRN_REAL_PROFILE").ok().filter(|p| p != "desktop");
     let Some((mut r, config)) = settings::start_on(profile.as_deref()) else {
-        eprintln!("real_settings: OSCAIRN_REAL_SOCKET is not set");
+        eprintln!("real_settings: OSCAIRN_REAL_ENGINE is not set");
         return;
     };
     settings::settings(&mut r, &config, profile.as_deref());
@@ -1526,10 +1555,10 @@ fn real_settings() {
 }
 
 #[test]
-#[ignore = "needs a running engine: OSCAIRN_REAL_SOCKET"]
+#[ignore = "needs an engine binary: OSCAIRN_REAL_ENGINE"]
 fn real_engine() {
     let Some(mut r) = Real::start() else {
-        eprintln!("real_engine: OSCAIRN_REAL_SOCKET is not set");
+        eprintln!("real_engine: OSCAIRN_REAL_ENGINE is not set");
         return;
     };
     r.step("connect");

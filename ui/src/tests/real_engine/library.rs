@@ -297,7 +297,7 @@ pub(super) fn library(r: &mut Real) {
     let setlists = items(r, "setlist");
     let id = setlists.first().map(|s| s.1.clone()).unwrap_or_default();
     let root = super::guard::root_or_stop();
-    let dir = std::path::PathBuf::from(std::env::var("OSCAIRN_DATA_HOME").unwrap_or_default()).join("AppData/oscairn.setlist");
+    let dir = root.data_home().join("AppData/oscairn.setlist");
     root.create_dir_all(&dir).unwrap();
     root.write(&dir.join("state.json"), json!({"setlist": id}).to_string().as_bytes()).unwrap();
     shell::goto(shell::Screen::Home);

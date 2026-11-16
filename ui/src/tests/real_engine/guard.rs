@@ -55,6 +55,8 @@ pub fn resolve(path: &Path) -> Result<PathBuf, String> {
 /// The directory a run is confined to, and what the harness made in it.
 pub struct Root {
     dir: PathBuf,
+    /// `HOME`, `OSCAIRN_DATA_HOME` and `OSCAIRN_CONFIG_HOME` of the run, resolved: the engine started for it gets these.
+    folders: [PathBuf; 3],
     made: Mutex<Vec<PathBuf>>,
 }
 
@@ -87,19 +89,32 @@ impl Root {
         } else if !root.join(MARKER).is_file() {
             return Err(format!("OSCAIRN_TEST_ROOT {} is not empty and has no {MARKER}: it is not a folder of the harness", root.display()));
         }
-        let root = Root { dir: root, made: Mutex::new(Vec::new()) };
-        for name in ["HOME", "OSCAIRN_DATA_HOME", "OSCAIRN_CONFIG_HOME"] {
+        let mut root = Root { dir: root, folders: Default::default(), made: Mutex::new(Vec::new()) };
+        for (i, name) in ["HOME", "OSCAIRN_DATA_HOME", "OSCAIRN_CONFIG_HOME"].into_iter().enumerate() {
             let value = var(name).filter(|v| !v.is_empty()).ok_or_else(|| format!("{name} is not set: the run's folders must be inside OSCAIRN_TEST_ROOT"))?;
             let inside = root.inside(Path::new(&value)).map_err(|e| format!("{name}: {e}"))?;
             if real_home.starts_with(&inside) {
                 return Err(format!("{name} {} is the real home folder or a part of it", inside.display()));
             }
+            root.folders[i] = inside;
         }
         Ok(root)
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    pub fn home(&self) -> &Path {
+        &self.folders[0]
+    }
+
+    pub fn data_home(&self) -> &Path {
+        &self.folders[1]
+    }
+
+    pub fn config_home(&self) -> &Path {
+        &self.folders[2]
     }
 
     /// `path` resolved, if it is strictly inside the root.

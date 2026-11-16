@@ -10,13 +10,9 @@ use crate::{KeyboardState, MenuState, NoticeState, SettingsState};
 
 /// The shell on `profile` (a built-in's id; none: a computer's), with folders of its own for the choices it keeps.
 pub fn start_on(profile: Option<&str>) -> Option<(Real, std::path::PathBuf)> {
-    let socket = std::path::PathBuf::from(std::env::var_os("OSCAIRN_REAL_SOCKET")?);
+    let binary = std::path::PathBuf::from(std::env::var_os("OSCAIRN_REAL_ENGINE")?);
     let root = super::guard::root_or_stop(); // before anything is touched
-    let trace: Trace = Arc::default();
-    let path = std::env::temp_dir().join(format!("oscairn-ui-real-settings-{}.sock", std::process::id()));
-    proxy(&path, socket.clone(), trace.clone());
-    fit_to_window();
-    let engine = Direct::new(&socket);
+    let (path, trace, engine, child) = start_engine(&binary, None, profile);
     let screen = Screen::new();
     let (tx, events) = mpsc::channel();
     shell::start(&screen.ui, path, &crate::profile::Profile::load(profile).unwrap(), false, move |e| {
@@ -27,7 +23,7 @@ pub fn start_on(profile: Option<&str>) -> Option<(Real, std::path::PathBuf)> {
     let config = root.dir().join(format!("settings-config-{}", std::process::id()));
     root.create_dir_all(&config).unwrap();
     shell::settings_folders(Some(config.clone()), crate::theme::Places { built_in: None, installed: Some(config.join("themes")) });
-    Some((Real { screen, events, trace, engine, findings: vec![], mark: 0, frames: 0, figures: 0, shown_figures: (-1, -1) }, config))
+    Some((Real { screen, events, trace, engine, _child: child, findings: vec![], mark: 0, frames: 0, figures: 0, shown_figures: (-1, -1) }, config))
 }
 
 /// A finding when `ok` is not so, the message made from what the shell shows then.

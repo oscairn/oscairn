@@ -8,7 +8,7 @@ use super::*;
 
 type P = (f64, f64);
 
-fn pixel_theme() -> theme::Loaded {
+pub(super) fn pixel_theme() -> theme::Loaded {
     theme_of(json!({"version": 7, "id": "pixels", "name": "Pixels", "fontScale": 1, "radius": 6,
         "font": {"regular": "fonts/Inter-Regular.ttf", "license": "fonts/OFL.txt"},
         "colors": {"background": "#000000", "surface": "#202020", "raised": "#303030", "border": "#808080", "text": "#FFFFFF", "muted": "#A0A0A0", "accent": "#00FF00",
@@ -18,7 +18,7 @@ fn pixel_theme() -> theme::Loaded {
 }
 
 /// The vertices of a path "M x y L x y ...".
-fn vertices(path: &str) -> Vec<P> {
+pub(super) fn vertices(path: &str) -> Vec<P> {
     let n: Vec<f64> = path.split_whitespace().filter_map(|t| t.parse().ok()).collect();
     n.chunks(2).map(|c| (c[0], c[1])).collect()
 }

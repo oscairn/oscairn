@@ -96,7 +96,7 @@ key map, FM operators.
 |---|---|---|---|---|
 | Envelope | `Envelope` L478-570 | a node: time across, level up | views.rs `draw_envelope`, grid.rs `envelope_layout` | done (names: ADSR only; DX7 and FM-X names not ported) |
 | Filter response | `Filter` L359-415 | none (a preview) | | not yet |
-| LFO waveform | `Lfo` L419-473 | none (a preview) | | not yet |
+| LFO waveform | `Lfo` L419-473 | none (a preview) | views.rs `draw_lfo`, `lfo_of`, `wave_named`; pixel test tests/views.rs | done |
 | Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | | not yet |
 | FM operators | `Operators` L731-916 | algorithm, level bars, ratio | | not yet |
 
@@ -117,7 +117,7 @@ Control kinds:
 - [ ] key or velocity map view (used by the FM and sample engines)
 - [ ] FM operator view with algorithm diagram (FM, VA's and PCM's FM-style views)
 - [ ] filter response view (recognized by name: Cutoff + Resonance + Type)
-- [ ] LFO waveform view (recognized by name: Wave/Shape + Rate/Speed)
+- [x] LFO waveform view (recognized by name: Wave/Shape + Rate/Speed; a preview, its tiles edit it)
 - [x] dragging an envelope's points (touch: a node within 24 px is taken, its time across and its level up
       and down are set inside gestures; the reference's non-touch editing is the stages' tiles, as here,
       and the node the cursor's tile sets is marked; src/views.rs, tests/views.rs)

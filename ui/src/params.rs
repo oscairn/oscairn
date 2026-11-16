@@ -387,10 +387,12 @@ impl Screen {
             (theme.get_font_scale(), theme.get_spacing())
         });
         let norm = |i: usize| self.params[i].norm(self.value(&self.params[i]));
+        let text = |i: usize| self.value_text(&self.params[i]);
         let ctx = views::Ctx {
             params: &self.params,
             members: &panel.params,
             norm: &norm,
+            text: &text,
             focus: self.cursor.and_then(|c| self.laid.tiles.get(c)).map(|t| t.param),
             w: panel.rect.w,
             h: panel.rect.h,

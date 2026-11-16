@@ -6,7 +6,7 @@
 //! card, heading and view panel goes, the cursor's moves over tiles in two dimensions, and an
 //! envelope's curve. The widgets are slint/grid.slint; a screen on it is params.rs.
 
-use crate::views::View;
+use crate::views::{self, View};
 use serde_json::Value;
 
 pub const FLAG_HIDDEN: u64 = 1 << 2;
@@ -21,7 +21,9 @@ pub const SECTION_GAP: f32 = 6.;
 const TILE: f32 = 84.;
 const KNOB_EXTRA: f32 = 36.;
 const HEADING: f32 = 30.;
+/// The views' heights in touch mode (ParameterGrid.cpp build): envelope, LFO, filter, key map, FM operators.
 const ENVELOPE: f32 = 180.;
+const LFO: f32 = 140.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
@@ -264,9 +266,9 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
                 keys.push((p.view, p.index));
             }
         }
-        let panel = |out: &mut Laid, y: &mut f32, envelope: Envelope, list: Vec<usize>| {
-            out.panels.push(Panel { rect: Rect { x: 0., y: *y, w: width, h: ENVELOPE }, view: View::Envelope(envelope), params: list });
-            *y += ENVELOPE + gap;
+        let panel = |out: &mut Laid, y: &mut f32, view: View, high: f32, list: Vec<usize>| {
+            out.panels.push(Panel { rect: Rect { x: 0., y: *y, w: width, h: high }, view, params: list });
+            *y += high + gap;
         };
         for (view, index) in keys {
             let list: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == view && params[i].index == index && is_envelope(&params[i].field)).collect();
@@ -276,14 +278,21 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
                 continue;
             }
             described.push(linked_order(&shape).into_iter().map(|k| list[k]).collect());
-            panel(&mut out, &mut y, shape, list);
+            panel(&mut out, &mut y, View::Envelope(shape), ENVELOPE, list);
         }
+        // Among the parameters in no view, by name: an LFO, then an envelope.
         let plain: Vec<usize> = members.iter().copied().filter(|&i| params[i].view == 0).collect();
         let names: Vec<&str> = plain.iter().map(|&i| params[i].name.as_str()).collect();
+        let mut recognized: Vec<Vec<usize>> = Vec::new();
+        let lfo = views::lfo_of(&names);
+        if !lfo.empty() {
+            recognized.push(lfo.linked_order().into_iter().map(|k| plain[k]).collect());
+            panel(&mut out, &mut y, View::Lfo(lfo), LFO, plain.clone());
+        }
         let named = envelope_of_names(&names);
         if !named.points.is_empty() {
             described.push(linked_order(&named).into_iter().map(|k| plain[k]).collect());
-            panel(&mut out, &mut y, named, plain.clone());
+            panel(&mut out, &mut y, View::Envelope(named), ENVELOPE, plain.clone());
         }
         // Runs: the plugin's groups, then each envelope's stages not already in one; others alone.
         let mut linked: Vec<Vec<usize>> = Vec::new();
@@ -297,7 +306,7 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
                 None => linked.push(vec![i]),
             }
         }
-        for order in &described {
+        for order in described.iter().chain(&recognized) {
             let next: Vec<usize> = order.iter().copied().filter(|&i| params[i].group == 0 && members.contains(&i)).collect();
             if next.len() > 1 {
                 linked.push(next);

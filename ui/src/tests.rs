@@ -1059,6 +1059,7 @@ mod piano;
 mod shellpages;
 mod envelope;
 mod grid;
+mod shots;
 mod views;
 
 // `apply` puts every property of a theme in the window's `Theme` global: the nine colors and the

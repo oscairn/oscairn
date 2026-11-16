@@ -299,7 +299,7 @@ fn the_top_bar_follows_the_engine() {
     let mut f = Fixture::new("topbar");
     f.engine.answer(); // session.hello
     f.pump();
-    assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed", "controllers", "record"]));
+    assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed", "controllers", "record", "transport"]));
     assert_eq!(f.engine.request()["params"], json!({"lists": true}));
     let shell = f.engine.request();
     assert!(shell["method"] == "memory.shell" && shell["params"]["bytes"].as_u64().unwrap() > 1 << 20, "its own memory: {shell}");
@@ -312,7 +312,7 @@ fn the_top_bar_follows_the_engine() {
     f.answer("library.query", json!({"items": [], "total": 0})); // and Performances
     f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.42, "audioDevice": "null"}})));
     f.pump();
-    f.answer("record.takes", json!({"takes": []}));
+    f.answer("record.get", json!({"takes": []}));
     f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
     f.answer("transport.get", json!({"tempo": 96.5, "playing": false}));
     let bar = f.screen.ui.global::<Bar>();
@@ -347,7 +347,7 @@ fn an_unchanged_status_costs_no_request_and_no_frame() {
         f.pump();
     };
     status(&mut f, 0.042);
-    f.answer("record.takes", json!({"takes": []})); // a first status asks for the takes and the meters
+    f.answer("record.get", json!({"takes": []})); // a first status asks for the takes and the meters
     f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
     f.answer("transport.get", json!({"tempo": 120, "playing": false}));
     f.screen.frame();
@@ -360,11 +360,15 @@ fn an_unchanged_status_costs_no_request_and_no_frame() {
     }
     assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
     assert_eq!(f.screen.frame(), None, "an unchanged status drew a frame");
-    // A changed one is acted on, after the meters' interval.
+    // A changed load moves the bar's figure and asks nothing (the status carries it).
     status(&mut f, 0.5);
+    assert!(f.engine.try_request(std::time::Duration::from_millis(900)).is_none(), "a changed load asked for something");
+    assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 50);
+    // Something else changed in it (the engine's figures that move every time do not count): RAM and the tempo are read.
+    f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": 0.5, "audioDevice": "other", "sampleRate": 48000, "workers": [{"cpu": 1.0, "memory": 3u64 << 20}]}})));
+    f.pump();
     let r = f.engine.try_request(std::time::Duration::from_secs(2)).expect("a changed status asks for the meters");
     assert_eq!(r["method"], "memory.state");
-    assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 50);
 }
 
 // A take recording is said in the top bar (every screen, once: Play adds no mark of its own), with the time it has run,
@@ -387,7 +391,7 @@ fn a_take_recording_is_shown_in_the_top_bar_once() {
     };
     assert_eq!(state(&f), (false, String::new(), false), "nothing recording until the engine says so");
     status(&mut f);
-    f.answer("record.takes", json!({"takes": [{"take": 1, "state": "done", "frames": 96000, "sampleRate": 48000}, {"take": 2, "state": "recording", "frames": 48000 * 67, "sampleRate": 48000, "behind": false}]}));
+    f.answer("record.get", json!({"takes": [{"take": 1, "state": "done", "frames": 96000, "sampleRate": 48000}, {"take": 2, "state": "recording", "frames": 48000 * 67, "sampleRate": 48000, "behind": false}]}));
     f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
     f.answer("transport.get", json!({"tempo": 120, "playing": false}));
     assert_eq!(state(&f), (true, "1:07".into(), false));

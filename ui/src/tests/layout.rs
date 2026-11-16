@@ -73,9 +73,9 @@ fn only_one_cursor_shows_the_bars_or_the_screens() {
     // The roomy theme's type folds the actions into "More" at this width: Edit is the last row of its menu.
     if ui.global::<crate::Bar>().get_more() {
         ui.global::<crate::Bar>().invoke_more_tapped();
-        ui.global::<crate::MenuState>().invoke_tapped(bar as i32 - 1);
+        ui.global::<crate::MenuState>().invoke_tapped(bar as i32 - 3);
     } else {
-        ui.global::<crate::Bar>().invoke_action(bar as i32 - 1);
+        ui.global::<crate::Bar>().invoke_action(bar as i32 - 3);
     }
     assert_eq!(ui.get_screen(), 9);
     shell::act(Action::Move { pane: Some(0), by: 1 });

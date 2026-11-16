@@ -125,6 +125,10 @@ pub enum Do {
     Edit,
     /// The Parts list's way back to Play.
     Play,
+    /// Record: starts a take of Main and the notes, or ends the one recording (the JUCE RecordButtons').
+    Record,
+    /// Capture: saves the last seconds of the retroactive buffer as a take.
+    Capture,
     /// The screen's own action `n` (`Tool`): Search, Routing's three buttons, the Mixer's pagers.
     Tool(usize),
 }
@@ -220,11 +224,13 @@ pub fn then(play: bool, parts: bool, learn: Option<bool>) -> Vec<(Do, String)> {
 /// is behind (`behind`: the disk is slow).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Recording {
+    /// The take recording: what Record ends.
+    pub take: u64,
     pub time: String,
     pub behind: bool,
 }
 
-/// record.takes' answer: the first take `waiting` or `recording` (Engine::recordingTake), its time
+/// record.get's or record.takes' answer: the first take `waiting` or `recording` (Engine::recordingTake), its time
 /// from the frames written and the sample rate (a take with no rate is 0:00); None for no take.
 pub fn recording(takes: &Value) -> Option<Recording> {
     let take = takes["takes"].as_array()?.iter().find(|t| matches!(t["state"].as_str(), Some("recording" | "waiting")))?;
@@ -232,7 +238,7 @@ pub fn recording(takes: &Value) -> Option<Recording> {
         (Some(frames), Some(rate)) if rate > 0. => (frames / rate).floor().max(0.) as u64,
         _ => 0,
     };
-    Some(Recording { time: format!("{}:{:02}", seconds / 60, seconds % 60), behind: take["behind"].as_bool().unwrap_or(false) })
+    Some(Recording { take: take["take"].as_u64().unwrap_or(0), time: format!("{}:{:02}", seconds / 60, seconds % 60), behind: take["behind"].as_bool().unwrap_or(false) })
 }
 
 #[cfg(test)]
@@ -275,8 +281,8 @@ mod tests {
             {"take": 1, "state": "done", "frames": 480000, "sampleRate": 48000},
             {"take": 2, "state": "recording", "frames": 48000 * 75 + 100, "sampleRate": 48000, "behind": true},
         ]});
-        assert_eq!(recording(&takes), Some(Recording { time: "1:15".into(), behind: true }));
-        assert_eq!(recording(&json!({"takes": [{"take": 3, "state": "waiting"}]})), Some(Recording { time: "0:00".into(), behind: false }));
+        assert_eq!(recording(&takes), Some(Recording { take: 2, time: "1:15".into(), behind: true }));
+        assert_eq!(recording(&json!({"takes": [{"take": 3, "state": "waiting"}]})), Some(Recording { take: 3, time: "0:00".into(), behind: false }));
         assert_eq!(recording(&json!({"takes": [{"take": 1, "state": "finishing", "frames": 5}, {"take": 2, "state": "failed"}]})), None, "a take finishing is not recording");
         assert_eq!((recording(&json!({"takes": []})), recording(&json!({}))), (None, None));
     }

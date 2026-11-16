@@ -378,11 +378,11 @@ fn edit_opens_the_list_and_a_part_goes_back_to_it() {
     let none = json!({"undo": "", "redo": ""});
     let graph = parts_graph();
     let labels = |ui: &Shell| ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>();
-    assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Scene", "Learn", "Edit"]);
+    assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Scene", "Learn", "Edit", "Record", "Capture"]);
     ui.global::<Bar>().invoke_action(5);
     assert_eq!((ui.get_screen(), shell::handover(), title(&ui)), (9, None, "Parts".to_string()));
     assert_eq!(ui.global::<PartsState>().get_title().as_str(), "Grand", "the Performance's name");
-    assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Play"], "the toggle back");
+    assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Play", "Record", "Capture"], "the toggle back");
     let r = request_in(&mut f, "session.status", &none, &graph);
     f.reply(&r, json!({"result": {"midiInputs": [{"kind": "builtIn", "name": "Built in", "source": 0}], "failures": [{"node": 4, "name": "Bass", "reason": "gone"}]}}));
     assert_eq!(ui.global::<PartsState>().get_title().as_str(), "Grand");

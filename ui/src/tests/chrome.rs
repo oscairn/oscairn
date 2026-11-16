@@ -233,7 +233,7 @@ fn quiet(f: &mut Fixture, graph: &serde_json::Value) {
             "parts.meters" | "wires.meters" => json!({"meters": []}),
             "memory.state" => json!({"systemAvailable": 496u64 << 20, "device": 0}),
             "transport.get" => json!({"tempo": 120, "playing": false}),
-            "record.takes" => json!({"takes": []}),
+            "record.get" => json!({"takes": []}),
             _ => json!({}),
         };
         f.reply(&r, json!({"result": result}));

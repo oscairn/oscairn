@@ -51,8 +51,10 @@ pub enum Request {
     Graph,
     Transport,
     Memory,
-    /// record.takes: whether a take is recording, and for how long.
+    /// record.get: whether a take is recording and for how long, and how many seconds Capture keeps.
     Record,
+    /// record.start or record.stop from the top bar's Record and Capture: the answer says whether it was done.
+    RecordDo(&'static str),
     /// edit.history, edit.undo, edit.redo: what undo and redo would now do.
     History,
     /// library.save, from the top bar.
@@ -90,6 +92,10 @@ impl Request {
 }
 
 const METER_INTERVAL: Duration = Duration::from_millis(500);
+
+/// How long the screens' meters keep being asked after the last signal: a tail dies away in less (they hold and fall),
+/// and after it the polling stops until something that may make a sound wakes it (`wake_meters`).
+const QUIET_AFTER: Duration = Duration::from_secs(2);
 
 /// What the top bar shows now, so only a change reaches the window.
 #[derive(Clone, Default, PartialEq)]
@@ -144,6 +150,18 @@ pub struct App {
     last_status: Option<Value>,
     /// A changed status whose meters wait for the next METER_INTERVAL.
     pending_status: Option<Value>,
+    /// The last status without its load: what changed in it besides the figure the bar shows.
+    last_other: Option<Value>,
+    /// RAM and the tempo are asked again at the next meters: the status said something besides its load.
+    state_stale: bool,
+    /// Since when the meters of the screen have answered nothing but silence, and whether their polling is stopped.
+    quiet_since: Option<Instant>,
+    meters_asleep: bool,
+    meter_every: Duration,
+    /// How many seconds the retroactive buffer keeps (record.get's `retro`): Capture is off when none.
+    retro: f64,
+    /// The transport is playing (the `transport` topic): the meters are asked while it does.
+    playing: bool,
     flush: slint::Timer,
     /// performance.info and graph.get refused while the engine was busy: asked again at the next meters.
     stale: bool,
@@ -232,6 +250,16 @@ fn has_actions(screen: Screen) -> bool {
 /// The screens that follow levels and mutes moved live (controls.changed).
 fn live(screen: Screen) -> bool {
     matches!(screen, Screen::Play | Screen::Part | Screen::Parts | Screen::Mixer | Screen::Controls)
+}
+
+/// Whether a request is the meters of a screen (its answer says whether a signal is there).
+fn is_meters(request: &Request) -> bool {
+    matches!(request, Request::Play(play::Request::Meters) | Request::Parts(parts::Request::Meters) | Request::Mixer(mixer::Request::Meters) | Request::Routing(routing::Request::Meters))
+}
+
+/// Whether sending this may make a sound or move a meter: the meters are asked again for a while after it.
+fn wakes_meters(method: &str) -> bool {
+    method != "parts.meters" && ["notes.", "scenes.", "controls.", "parts.", "master.", "params.set", "edit.", "library.load", "performance.", "audition.", "record.start"].iter().any(|p| method.starts_with(p))
 }
 
 fn level(m: Meter) -> i32 {
@@ -395,6 +423,13 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             last_meters: None,
             last_status: None,
             pending_status: None,
+            last_other: None,
+            state_stale: false,
+            quiet_since: None,
+            meters_asleep: false,
+            meter_every: Duration::from_millis(100),
+            playing: false,
+            retro: 0.,
             flush: slint::Timer::default(),
             stale: false,
             watchdog: slint::Timer::default(),
@@ -514,6 +549,9 @@ impl App {
     }
 
     fn send(&mut self, request: Request, method: &str, params: Value) {
+        if wakes_meters(method) {
+            self.wake_meters();
+        }
         let waited = request.waited_on();
         if self.client.send(request, method, params) && waited && !self.watchdog.running() {
             // Runs only while something is out, so the shell does not wake at rest.
@@ -551,9 +589,10 @@ impl App {
                 }
                 self.last_meters = None;
                 self.last_status = None;
+                self.last_other = None;
                 self.pending_status = None;
                 self.totals.forget();
-                self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed", "controllers", "record"]}));
+                self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed", "controllers", "record", "transport"]}));
                 self.send_view();
                 // The session's setup is the engine's, from the profile (docs/rust-ui.md, "Session
                 // setup"); only this UI's own memory is the UI's to send.
@@ -575,6 +614,7 @@ impl App {
             Event::Lost(why) => {
                 self.show(|s| s.recording = None); // what the engine is doing is not known now
                 self.last_status = None;
+                self.last_other = None;
                 self.pending_status = None;
                 if let Some(ui) = self.ui() {
                     ui.set_engine(format!("lost: {why}").into());
@@ -586,7 +626,16 @@ impl App {
                     let takes = topbar::recording(&params);
                     self.show(|s| s.recording = takes)
                 }
+                "transport" => {
+                    // The tempo as it is (nothing is asked after a status); a transport that plays keeps the meters going.
+                    self.playing = params["playing"].as_bool().unwrap_or(false);
+                    if self.playing {
+                        self.wake_meters();
+                    }
+                    self.show(|s| s.tempo = topbar::tempo(&params))
+                }
                 "graph.changed" => {
+                    self.wake_meters();
                     self.ask_performance();
                     if has_actions(self.screen) {
                         self.ask(Request::History, "edit.history"); // an edit: what undo names changed
@@ -603,6 +652,7 @@ impl App {
                     }
                 }
                 "controls.changed" => {
+                    self.wake_meters();
                     // A live level, pan or master (parts.level, parts.pan, master.set) is an edit
                     // with no graph.changed: what undo names is asked here.
                     let moved = ["parts", "master"].iter().any(|k| params[k].as_array().is_some_and(|a| !a.is_empty()) || params[k].is_object());
@@ -618,6 +668,7 @@ impl App {
                 // Read always, so the totals stay current; acted on only by the screen shown, and
                 // by none while the display goes to the JUCE app (act drops them then).
                 "controllers" => {
+                    self.wake_meters();
                     self.on_play(|p| p.controllers(&params)); // the control moved last, for Learn
                     for action in self.totals.read(&params["navigation"]) {
                         self.act(action);
@@ -640,14 +691,25 @@ impl App {
         }
     }
 
-    /// What a status says to the bar and the screens: the whole of it, but for the load, which is the whole percent
-    /// the bar shows. Two that agree here change nothing anyone can see.
+    /// What a status says to the bar and the screens: what the shell reads of it (the inputs and outputs, the failures,
+    /// the keys held, the audio device, the memory the workers hold in whole MiB) and its load as the whole percent the
+    /// bar shows. The engine's status carries figures that move every time (each worker's CPU and block times): two
+    /// that agree here change nothing anyone can see.
     fn status_key(status: &Value) -> Value {
-        let mut key = status.clone();
-        if let Some(load) = key.get_mut("cpuLoad") {
-            *load = topbar::cpu(status).0.map_or(Value::Null, Value::from);
+        let mut key = serde_json::Map::new();
+        for field in ["audioDevice", "midiInputs", "midiOutputs", "failures", "heldNotes"] {
+            if let Some(v) = status.get(field) {
+                key.insert(field.into(), v.clone());
+            }
         }
-        key
+        if let Some(workers) = status["workers"].as_array() {
+            let bytes: u64 = workers.iter().filter_map(|w| w["memory"].as_u64()).sum();
+            key.insert("workerMemory".into(), Value::from(bytes >> 20));
+        }
+        if status.get("cpuLoad").is_some() {
+            key.insert("cpuLoad".into(), topbar::cpu(status).0.map_or(Value::Null, Value::from));
+        }
+        Value::Object(key)
     }
 
     /// A status. One that says what the last said costs nothing (nothing is asked, no screen is touched, no frame
@@ -656,7 +718,17 @@ impl App {
         let key = App::status_key(status);
         if self.last_status.as_ref() != Some(&key) {
             if self.last_status.is_none() {
-                self.ask(Request::Record, "record.takes"); // the first status of a connection: a take may be running already
+                self.ask(Request::Record, "record.get"); // the first status of a connection: a take may be running already
+            }
+            let mut other = key.clone();
+            if let Some(o) = other.as_object_mut() {
+                o.remove("cpuLoad");
+            }
+            if self.last_other.as_ref() != Some(&other) {
+                // Something besides the load: memory and the tempo are read again, and a sound may follow (keys held).
+                self.last_other = Some(other);
+                self.state_stale = true;
+                self.wake_meters();
             }
             self.last_status = Some(key);
             self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
@@ -693,11 +765,17 @@ impl App {
             s.cpu = topbar::cpu(&status);
             s.audio_device = device;
         });
-        self.ask(Request::Memory, "memory.state");
-        self.ask(Request::Transport, "transport.get");
+        if std::mem::take(&mut self.state_stale) {
+            self.ask(Request::Memory, "memory.state");
+            self.ask(Request::Transport, "transport.get");
+        }
     }
 
     fn reply(&mut self, request: Request, result: Result<Value, Error>) {
+        if let (true, Ok(answer)) = (is_meters(&request), &result) {
+            let signal = answer["meters"].as_array().is_some_and(|m| m.iter().any(|x| x["peak"].as_f64().unwrap_or(0.) > 0.001));
+            self.meters_answered(signal);
+        }
         let request = match request {
             Request::Setlist(r) => return self.on_setlist(|s| s.reply(r, result)),
             Request::Play(r) => {
@@ -775,6 +853,10 @@ impl App {
                 }
                 match request {
                     Request::Save if e.code != 0 => self.say(&format!("Not saved: {}", e.message)),
+                    Request::RecordDo(what) if e.code != 0 => {
+                        self.say(&format!("{}: {}", if what == "capture" { "Not captured" } else { "Not recorded" }, e.message));
+                        self.ask(Request::Record, "record.get");
+                    }
                     Request::History if e.code != 0 => self.say(&format!("The engine refused: {}", e.message)),
                     Request::Reopen if e.code != 0 => eprintln!("oscairn-ui: performance.reopen: {}", e.message),
                     Request::Shell if e.code != 0 => eprintln!("oscairn-ui: memory.shell: {}", e.message),
@@ -820,7 +902,17 @@ impl App {
                 self.show(|s| s.scene = topbar::scene(&r))
             }
             Request::Transport => self.show(|s| s.tempo = topbar::tempo(&r)),
-            Request::Record => self.show(|s| s.recording = topbar::recording(&r)),
+            Request::Record => {
+                self.retro = r["retro"]["seconds"].as_f64().unwrap_or(0.);
+                self.show(|s| s.recording = topbar::recording(&r));
+                self.show_bar();
+            }
+            Request::RecordDo(what) => {
+                if what == "capture" {
+                    self.say("Captured to Recordings");
+                }
+                self.ask(Request::Record, "record.get");
+            }
             Request::Memory => {
                 let ram = topbar::ram(&r, self.device_memory);
                 self.show(|s| s.ram = ram)
@@ -1110,6 +1202,10 @@ impl App {
             let then = topbar::then(self.screen == Screen::Play, matches!(self.screen, Screen::Parts | Screen::Mixer | Screen::Controls | Screen::Routing), learn);
             list.extend(topbar::actions(&self.history, then).into_iter().map(|(what, label, enabled)| topbar::Act { what, label, enabled, on: false }));
         }
+        // Record and Capture, on every screen as the JUCE bar has them over every app: icons, and in More as words.
+        let recording = self.shown.recording.clone();
+        list.push(topbar::Act { what: topbar::Do::Record, label: if recording.is_some() { "Stop recording" } else { "Record" }.into(), enabled: true, on: recording.is_some() });
+        list.push(topbar::Act { what: topbar::Do::Capture, label: "Capture".into(), enabled: self.retro > 0., on: false });
         self.bar_list = list;
         let path = topbar::path_options(&self.path());
         let (back, field, home) = (self.back_shown(), self.screen == Screen::Play, self.screen != Screen::Home);
@@ -1132,6 +1228,8 @@ impl App {
                 icon: match a.what {
                     topbar::Do::Undo => 1,
                     topbar::Do::Redo => 2,
+                    topbar::Do::Record => 3,
+                    topbar::Do::Capture => 4,
                     _ => 0,
                 },
             })
@@ -1192,6 +1290,16 @@ impl App {
             topbar::Do::Undo => self.send(Request::History, "edit.undo", json!({})),
             topbar::Do::Redo => self.send(Request::History, "edit.redo", json!({})),
             topbar::Do::Save => self.save(false),
+            topbar::Do::Record => match self.shown.recording.as_ref().map(|r| r.take) {
+                Some(take) => self.send(Request::RecordDo("stop"), "record.stop", json!({"take": take})),
+                None => self.send(Request::RecordDo("start"), "record.start", json!({})),
+            },
+            topbar::Do::Capture => {
+                // The last 30 seconds at most, or what the buffer keeps; named for the Performance, as the reference does.
+                let name = if self.performance_name.is_empty() { "Untitled".to_string() } else { self.performance_name.clone() };
+                let seconds = self.retro.min(30.);
+                self.send(Request::RecordDo("capture"), "record.start", json!({"name": format!("{name} capture"), "from": {"secondsAgo": seconds}}));
+            }
             topbar::Do::Learn => self.on_play(|p| p.learn_toggle()),
             topbar::Do::Edit => self.go(Screen::Parts),
             topbar::Do::Play => self.go(Screen::Play),
@@ -1452,7 +1560,7 @@ impl App {
         }
         if self.screen == Screen::Routing {
             if self.routing.metering() && !self.meters.running() {
-                self.meters.start(slint::TimerMode::Repeated, routing::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+                self.start_meters(routing::METER_INTERVAL);
             } else if !self.routing.metering() && self.meters.running() {
                 self.meters.stop();
             }
@@ -1882,6 +1990,46 @@ impl App {
         self.play.follow(on);
     }
 
+    /// Starts asking the meters of the screen shown every `every`, awake.
+    fn start_meters(&mut self, every: Duration) {
+        self.meter_every = every;
+        self.meters_asleep = false;
+        self.quiet_since = None;
+        self.meters.start(slint::TimerMode::Repeated, every, || with_app(|a| a.poll_meters()));
+    }
+
+    /// Whether the screen shown draws meters.
+    fn meters_shown(&self) -> bool {
+        match self.screen {
+            Screen::Play | Screen::Parts | Screen::Mixer => true,
+            Screen::Routing => self.routing.metering(),
+            _ => false,
+        }
+    }
+
+    /// Something that may sound or move a meter happened (a key held, a change, a request that plays, the transport):
+    /// the meters are asked again, from now, and while the answers carry a signal and for QUIET_AFTER after the last.
+    fn wake_meters(&mut self) {
+        self.quiet_since = None;
+        if self.meters_asleep && self.meters_shown() {
+            self.start_meters(self.meter_every);
+        }
+    }
+
+    /// An answer of the meters: silence for QUIET_AFTER stops the asking (nothing at rest costs a request) until
+    /// something wakes it. A transport that plays is never silent: a sequence may sound at any time.
+    fn meters_answered(&mut self, signal: bool) {
+        if signal || self.playing {
+            self.quiet_since = None;
+            return;
+        }
+        let since = *self.quiet_since.get_or_insert_with(Instant::now);
+        if since.elapsed() >= QUIET_AFTER && self.meters.running() {
+            self.meters.stop();
+            self.meters_asleep = true;
+        }
+    }
+
     /// The meters, asked unless the last answer is still out: a slow engine never piles them up.
     fn poll_meters(&mut self) {
         if self.screen == Screen::Routing {
@@ -1984,11 +2132,11 @@ impl App {
         if screen == Screen::Parts {
             self.send(Request::Parts(parts::Request::Status), "session.status", json!({}));
             self.on_parts(parts::Screen::shown);
-            self.meters.start(slint::TimerMode::Repeated, parts::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+            self.start_meters(parts::METER_INTERVAL);
         }
         if screen == Screen::Mixer {
             self.on_mixer(mixer::Screen::shown);
-            self.meters.start(slint::TimerMode::Repeated, mixer::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+            self.start_meters(mixer::METER_INTERVAL);
         }
         if screen == Screen::Controls {
             self.on_controls(controls::Screen::shown);
@@ -2017,7 +2165,7 @@ impl App {
             self.ask_performance();
             self.follow();
             self.play.shown();
-            self.meters.start(slint::TimerMode::Repeated, play::METER_INTERVAL, || with_app(|a| a.poll_meters()));
+            self.start_meters(play::METER_INTERVAL);
         }
         self.show_bar();
         if has_actions(screen) {

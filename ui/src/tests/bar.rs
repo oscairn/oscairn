@@ -36,7 +36,7 @@ pub fn request_in(f: &mut Fixture, want: &str, history: &serde_json::Value, grap
             "edit.history" => history.clone(),
             "performance.info" => json!({"id": "p1", "name": "Grand", "unsaved": false}),
             "graph.get" => graph.clone(),
-            "subscribe" | "unsubscribe" | "controllers.view" | "record.takes" | "memory.state" | "transport.get" => json!({}),
+            "subscribe" | "unsubscribe" | "controllers.view" | "record.get" | "memory.state" | "transport.get" => json!({}),
             _ => return r,
         };
         f.reply(&r, json!({"result": result}));
@@ -59,7 +59,7 @@ fn undo_redo_and_save_on_the_top_bar() {
     let mut f = play_on_the_shell("bar", json!({"id": "p1", "name": "Grand", "unsaved": true}), play_graph());
     let ui = f.screen.ui.clone_strong();
     let none = json!({"undo": "", "redo": ""});
-    assert_eq!(labels(&f), [("Undo Volume of Keys".into(), true, false), ("Redo".into(), false, false), ("Save".into(), true, false), ("Scene".into(), true, false), ("Learn".into(), true, false), ("Edit".into(), true, false)]);
+    assert_eq!(labels(&f), [("Undo Volume of Keys".into(), true, false), ("Redo".into(), false, false), ("Save".into(), true, false), ("Scene".into(), true, false), ("Learn".into(), true, false), ("Edit".into(), true, false), ("Record".into(), true, false), ("Capture".into(), false, false)]);
     f.screen.frame();
     f.screen.save("bar-actions");
     png(&f.screen, "bar-actions");
@@ -67,7 +67,7 @@ fn undo_redo_and_save_on_the_top_bar() {
     ui.global::<Bar>().invoke_action(0);
     let r = request(&mut f, "edit.undo", &none);
     f.reply(&r, json!({"result": {"undo": "", "redo": "Volume of Keys"}}));
-    assert_eq!(labels(&f), [("Undo".into(), false, false), ("Redo Volume of Keys".into(), true, false), ("Save".into(), true, false), ("Scene".into(), true, false), ("Learn".into(), true, false), ("Edit".into(), true, false)]);
+    assert_eq!(labels(&f), [("Undo".into(), false, false), ("Redo Volume of Keys".into(), true, false), ("Save".into(), true, false), ("Scene".into(), true, false), ("Learn".into(), true, false), ("Edit".into(), true, false), ("Record".into(), true, false), ("Capture".into(), false, false)]);
     // A disabled one does nothing.
     ui.global::<Bar>().invoke_action(0);
     // The third pane enters the bar at Back; the cursor then goes to the name (Save As New) and along the actions.
@@ -76,7 +76,7 @@ fn undo_redo_and_save_on_the_top_bar() {
     shell::act(Action::Move { pane: None, by: 1 });
     assert!(ui.global::<Bar>().get_pill_cursor() && !ui.global::<Bar>().get_back_cursor());
     shell::act(Action::Move { pane: None, by: 1 });
-    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [true, false, false, false, false, false]);
+    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [true, false, false, false, false, false, false, false]);
     shell::act(Action::Move { pane: None, by: 1 });
     shell::act(Action::Confirm(None)); // Redo
     let r = request(&mut f, "edit.redo", &none);
@@ -94,12 +94,14 @@ fn undo_redo_and_save_on_the_top_bar() {
     shell::act(Action::Move { pane: None, by: 1 }); // Scene
     shell::act(Action::Move { pane: None, by: 1 }); // Learn
     shell::act(Action::Move { pane: None, by: 1 }); // Edit
+    shell::act(Action::Move { pane: None, by: 1 }); // Record
+    shell::act(Action::Move { pane: None, by: 1 }); // Capture
     shell::act(Action::Move { pane: None, by: 1 });
     assert!(labels(&f).iter().all(|l| !l.2));
     // The dial moving up out of the first scene reaches the last stop; Tab reaches the first and gives it back.
     shell::act(Action::Move { pane: Some(0), by: 1 });
     shell::act(Action::Move { pane: None, by: -1 });
-    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [false, false, false, false, false, true]);
+    assert_eq!(labels(&f).iter().map(|l| l.2).collect::<Vec<_>>(), [false, false, false, false, false, false, false, true]);
     assert!(shell::key("\t") && labels(&f).iter().all(|l| !l.2));
     assert!(shell::key("\t") && ui.global::<Bar>().get_back_cursor(), "Tab enters at the first stop, Back");
     shell::act(Action::Move { pane: None, by: 1 });
@@ -295,6 +297,54 @@ fn more_opens_a_menu_of_the_actions_by_the_dial_and_by_touch() {
     assert!(ui.global::<crate::MenuState>().get_open());
     shell::act(Action::Cancel(None));
     assert!(!ui.global::<crate::MenuState>().get_open());
+}
+
+// Record and Capture, the JUCE record buttons, are the last two actions of every screen's bar (Home's included): Record starts
+// a take (and, while one records, ends it by its number), Capture saves the last seconds the buffer keeps (off while it
+// keeps none) as a take named for the Performance.
+#[test]
+fn record_and_capture_are_on_the_bar() {
+    let mut f = play_on_the_shell("bar-record", json!({"id": "p1", "name": "Grand", "unsaved": false}), play_graph());
+    let ui = f.screen.ui.clone_strong();
+    let index = |f: &Fixture, label: &str| labels(f).iter().position(|l| l.0.starts_with(label)).unwrap_or_else(|| panic!("{label} in {:?}", labels(f)));
+    let none = json!({"undo": "", "redo": ""});
+    let last = labels(&f).len();
+    assert_eq!((index(&f, "Record"), index(&f, "Capture")), (last - 2, last - 1));
+    assert!(!labels(&f)[last - 1].1, "Capture is off while the buffer keeps nothing");
+    ui.global::<Bar>().invoke_action(index(&f, "Capture") as i32); // does nothing while off
+    ui.global::<Bar>().invoke_action(index(&f, "Record") as i32);
+    let r = request(&mut f, "record.start", &none);
+    assert_eq!(r["params"], json!({}));
+    f.reply(&r, json!({"result": {"take": 4}}));
+    let r = request(&mut f, "record.get", &none);
+    f.reply(&r, json!({"result": {"recording": 4, "retro": {"seconds": 45}, "takes": [{"take": 4, "state": "recording", "frames": 0, "sampleRate": 48000}]}}));
+    assert!(ui.global::<Bar>().get_recording());
+    assert_eq!(labels(&f)[last - 2].0, "Stop recording");
+    assert!(labels(&f)[last - 1].1, "Capture is on now");
+    ui.global::<Bar>().invoke_action(index(&f, "Stop recording") as i32);
+    let r = request(&mut f, "record.stop", &none);
+    assert_eq!(r["params"], json!({"take": 4}));
+    f.reply(&r, json!({"result": {"accepted": true}}));
+    let r = request(&mut f, "record.get", &none);
+    f.reply(&r, json!({"result": {"recording": 0, "retro": {"seconds": 45}, "takes": [{"take": 4, "state": "done"}]}}));
+    assert!(!ui.global::<Bar>().get_recording());
+    // Capture: the last 30 seconds at most, named for the Performance.
+    ui.global::<Bar>().invoke_action(index(&f, "Capture") as i32);
+    let r = request(&mut f, "record.start", &none);
+    assert_eq!(r["params"], json!({"name": "Grand capture", "from": {"secondsAgo": 30.0}}));
+    f.reply(&r, json!({"result": {"take": 5}}));
+    assert_eq!(ui.global::<Bar>().get_notice().as_str(), "Captured to Recordings");
+    let r = request(&mut f, "record.get", &none);
+    f.reply(&r, json!({"result": {"recording": 0, "retro": {"seconds": 45}, "takes": []}}));
+    // A refusal is said in the name's place.
+    ui.global::<Bar>().invoke_action(index(&f, "Record") as i32);
+    let r = request(&mut f, "record.start", &none);
+    f.reply(&r, json!({"error": {"code": -32007, "message": "A take is recording"}}));
+    assert_eq!(ui.global::<Bar>().get_notice().as_str(), "Not recorded: A take is recording");
+    f.screen.frame();
+    f.screen.frame();
+    shot(&f.screen, "bar-record");
+    png(&f.screen, "bar-record");
 }
 
 // A short title leaves its room to the actions: the bar folds them into More only when they do not fit with the title as

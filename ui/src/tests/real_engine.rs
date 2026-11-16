@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 enum Line {
     Request { id: u64, method: String, params: Value },
     Reply { id: u64, result: Option<Value>, error: Option<Value> },
-    Note { method: String },
+    Note { method: String, params: Value },
 }
 
 type Trace = Arc<Mutex<Vec<Line>>>;
@@ -52,7 +52,7 @@ fn copy(from: UnixStream, mut to: UnixStream, trace: Trace, upward: bool) {
             let entry = if upward {
                 Line::Request { id, method: doc["method"].as_str().unwrap_or("").into(), params: doc["params"].clone() }
             } else if let Some(m) = doc["method"].as_str() {
-                Line::Note { method: m.into() }
+                Line::Note { method: m.into(), params: doc["params"].clone() }
             } else {
                 Line::Reply { id, result: doc.get("result").cloned(), error: doc.get("error").cloned() }
             };
@@ -114,6 +114,11 @@ struct Real {
     findings: Vec<String>,
     /// Where the trace was when the last step began.
     mark: usize,
+    /// How many frames the window drew while the shell ran (a frame is drawn only when something changed).
+    frames: usize,
+    /// How many times the figures the top bar shows for the CPU and RAM changed (a frame for each is no waste).
+    figures: usize,
+    shown_figures: (i32, i32),
 }
 
 impl Real {
@@ -143,17 +148,29 @@ impl Real {
         if let (Some(dir), Ok(helper)) = (plugins, std::env::var("OSCAIRN_REAL_SCANNER")) {
             shell::plugins_found(crate::scan::scan(std::path::Path::new(&dir), std::path::Path::new(&helper), crate::scan::TIMEOUT));
         }
-        Some(Real { screen, events, trace, engine, findings: vec![], mark: 0 })
+        Some(Real { screen, events, trace, engine, findings: vec![], mark: 0, frames: 0, figures: 0, shown_figures: (-1, -1) })
     }
 
     /// Hands the shell its events and runs its timers for `ms`.
     fn run(&mut self, ms: u64) {
         let until = Instant::now() + Duration::from_millis(ms);
         while Instant::now() < until {
+            // Everything that has arrived, then one frame (a window draws once per frame, however many events came).
             if let Ok(e) = self.events.recv_timeout(Duration::from_millis(10)) {
                 shell::dispatch(e);
+                while let Ok(e) = self.events.try_recv() {
+                    shell::dispatch(e);
+                }
             }
-            self.screen.frame();
+            let bar = self.screen.ui.global::<Bar>();
+            let figures = (bar.get_cpu(), bar.get_ram());
+            if figures != self.shown_figures {
+                self.shown_figures = figures;
+                self.figures += 1;
+            }
+            if self.screen.frame().is_some() {
+                self.frames += 1;
+            }
         }
     }
 
@@ -213,7 +230,7 @@ impl Real {
 
     /// The requests of the step that are not polls, each with what came back; refusals noted as findings.
     fn sent(&mut self, what: &str) -> Vec<(String, Value, Option<Value>, Option<Value>)> {
-        let polls = ["parts.meters", "wires.meters", "record.takes", "memory.state", "transport.get", "controllers.view", "edit.history", "performance.info", "graph.get", "session.status"];
+        let polls = ["parts.meters", "wires.meters", "record.takes", "record.get", "memory.state", "transport.get", "controllers.view", "edit.history", "performance.info", "graph.get", "session.status"];
         let all = self.since(self.mark);
         for (m, p, _, e) in &all {
             if let Some(e) = e {
@@ -222,7 +239,16 @@ impl Real {
                 self.findings.push(f);
             }
         }
-        let notes: Vec<String> = self.lines().iter().skip(self.mark).filter_map(|l| if let Line::Note { method } = l { Some(method.clone()) } else { None }).filter(|m| m != "status" && m != "controllers").collect();
+        let notes: Vec<String> = self.lines().iter().skip(self.mark).filter_map(|l| if let Line::Note { method, .. } = l { Some(method.clone()) } else { None }).filter(|m| m != "status" && m != "controllers").collect();
+        if std::env::var_os("OSCAIRN_REAL_NOTES").is_some() {
+            for l in self.lines().iter().skip(self.mark) {
+                if let Line::Note { method, params } = l {
+                    if method == "params.changed" {
+                        eprintln!("   note params.changed {}", short(params));
+                    }
+                }
+            }
+        }
         let asked: Vec<&str> = all.iter().filter(|(m, ..)| m == "graph.get" || m == "performance.info").map(|x| x.0.as_str()).collect();
         let history: Vec<String> = all.iter().filter(|(m, ..)| m == "edit.history").map(|x| x.2.as_ref().map_or("-".into(), |v| format!("{}/{}", v["undo"], v["redo"]))).collect();
         if !history.is_empty() {
@@ -430,8 +456,7 @@ fn part(r: &mut Real) {
         let list = r.rows_all();
         eprintln!("   MIDI out list {list:?}");
         r.png("13-part-midi-out");
-        r.act(Action::Cancel(None));
-        r.act(Action::Cancel(None));
+        r.act(Action::Cancel(None)); // EXIT leaves the list in one step
     }
     r.on(4, "Part: after MIDI out");
     r.edit("Part: Mute", true, |r| {
@@ -446,7 +471,6 @@ fn part(r: &mut Real) {
             let list = r.rows_all();
             eprintln!("   devices list {list:?}");
             r.press("Built in");
-            r.act(Action::Cancel(None));
             r.act(Action::Cancel(None));
         }
     });
@@ -512,9 +536,7 @@ fn chain(r: &mut Real) {
             r.run(1500);
         });
     }
-    r.act(Action::Cancel(None));
-    r.act(Action::Cancel(None));
-    r.act(Action::Cancel(None));
+    back_until(r, "+ Insert plugin here");
     eprintln!("   screen {} rows {:?}", r.screen_no(), r.rows_all());
 
     r.step("Chain: insert a plugin after the last");
@@ -545,12 +567,24 @@ fn chain(r: &mut Real) {
     r.press("Parameters");
     let node = r.state()["parts"][0]["chain"][0].as_u64().unwrap_or(0);
     params_page(r, node, "Basic Synth");
-    r.act(Action::Cancel(None));
-    r.act(Action::Cancel(None));
+    r.act(Action::Cancel(None)); // the parameter page's search or list first, if open
+    if r.screen_no() == 7 {
+        r.act(Action::Cancel(None));
+    }
     r.on(5, "back from the parameters");
-    r.act(Action::Cancel(None));
-    r.act(Action::Cancel(None));
+    back_until(r, "+ Insert plugin here");
     eprintln!("   screen {} rows {:?}", r.screen_no(), r.rows_all());
+}
+
+/// EXIT, one step each, until the first rows shown are the ones starting `label` (at most five steps).
+fn back_until(r: &mut Real, label: &str) {
+    for _ in 0..5 {
+        if r.rows().iter().any(|x| x.0.starts_with(label)) {
+            return;
+        }
+        r.act(Action::Cancel(None));
+    }
+    r.note(format!("back: never reached {label:?}; rows {:?}", r.rows()));
 }
 
 /// From Play, the Part screen of the strip `strip`, then its Insert effects.
@@ -606,8 +640,7 @@ fn splits(r: &mut Real) {
     r.edit("Lane: plugin Turn off", true, |r| {
         r.press("Turn off");
     });
-    r.act(Action::Cancel(None));
-    r.act(Action::Cancel(None));
+    r.act(Action::Cancel(None)); // the plugin's actions: back to the lane
     eprintln!("   back to {:?}", r.rows_all().first());
     r.edit("Lane: insert Delay after its plugin", true, |r| {
         r.act(Action::End(-1));
@@ -627,8 +660,7 @@ fn splits(r: &mut Real) {
     eprintln!("   now {} {:?}", r.screen_no(), r.rows_all());
     r.edit("Split: Remove split", true, |r| {
         if !r.rows_all().iter().any(|x| x.0 == "Remove split") {
-            r.act(Action::Cancel(None));
-            r.act(Action::Cancel(None));
+            r.act(Action::Cancel(None)); // the lane's list: back to the split's
         }
         r.press("Remove split");
     });
@@ -800,8 +832,7 @@ fn sounds(r: &mut Real) {
         eprintln!("   parts.saveSound: {}", got["error"]);
         r.run(200);
     }
-    r.act(Action::Cancel(None));
-    r.act(Action::Cancel(None));
+    r.act(Action::Cancel(None)); // EXIT: back to the Part screen
     r.press("Sound");
     r.on(6, "Sounds again");
     r.run(500);
@@ -871,8 +902,7 @@ fn sounds(r: &mut Real) {
         r.sent("filter favorites");
         r.png("53-sounds-filters");
         r.press("Favorites");
-        r.act(Action::Cancel(None));
-        r.act(Action::Cancel(None));
+        r.act(Action::Cancel(None)); // the filters' list: back to the Sounds
     }
     r.step("Sounds: search");
     if r.press("Search") {
@@ -1476,6 +1506,7 @@ fn real_engine() {
     r.settle();
     r.png("01-home");
     r.sent("connect");
+    idle(&mut r, "Home", 20);
     let home: Vec<String> = r.screen.ui.global::<HomeState>().get_tiles().iter().map(|t| format!("{}: {}", t.name, t.line)).collect();
     eprintln!("   home tiles {home:?}");
     // OSCAIRN_REAL_ONLY=part,chain runs only those sections (Play's opening always runs).
@@ -1507,6 +1538,39 @@ fn real_engine() {
     eprintln!("\nFINDINGS ({}):\n{}", r.findings.len(), r.findings.join("\n"));
 }
 
+/// The shell at rest on the screen shown: for `seconds`, nothing touched, how many requests it sent and frames it drew
+/// (every notification the engine sent counted too). At rest the answer must be none of either: the engine's status
+/// notifications that say what the last said, and the meters' figures that did not change, cost nothing.
+fn idle(r: &mut Real, what: &str, seconds: u64) {
+    r.step(&format!("Idle on {what} for {seconds} s"));
+    r.settle();
+    r.run(4000); // what a load or a connect leaves to ask, asked
+    let (mark, frames, figures) = (r.lines().len(), r.frames, r.figures);
+    r.run(seconds * 1000);
+    let lines = r.lines();
+    let mut asked: Vec<String> = vec![];
+    let (mut notes, mut statuses) = (0, 0);
+    for l in lines.iter().skip(mark) {
+        match l {
+            Line::Request { method, .. } => asked.push(method.clone()),
+            Line::Note { method, .. } if method == "status" => statuses += 1,
+            Line::Note { .. } => notes += 1,
+            _ => {}
+        }
+    }
+    let (drawn, changed) = (r.frames - frames, r.figures - figures);
+    let mut by_method: Vec<(String, usize)> = vec![];
+    for m in &asked {
+        match by_method.iter_mut().find(|x| &x.0 == m) {
+            Some(x) => x.1 += 1,
+            None => by_method.push((m.clone(), 1)),
+        }
+    }
+    eprintln!("   IDLE {what}: {} requests in {seconds} s ({:.2}/s) {by_method:?}; {drawn} frames ({:.2}/s), {changed} changes of the CPU or RAM figure; {statuses} status and {notes} other notifications", asked.len(), asked.len() as f64 / seconds as f64, drawn as f64 / seconds as f64);
+    r.check(asked.is_empty(), || format!("idle on {what}: {} requests in {seconds} s at rest: {by_method:?}", asked.len()));
+    r.check(drawn <= changed, || format!("idle on {what}: {drawn} frames drawn in {seconds} s at rest, {changed} figures changed"));
+}
+
 fn part_of<'a>(g: &'a Value, name: &str) -> &'a Value {
     g["parts"].as_array().unwrap().iter().find(|p| p["name"] == name).unwrap_or(&Value::Null)
 }
@@ -1529,6 +1593,7 @@ fn play(r: &mut Real) {
     r.check(ui.get_screen() == 3, || format!("Play: the screen is {}", ui.get_screen()));
     r.png("02-play");
     r.sent("Play open");
+    idle(r, "Play", 20);
     let scenes: Vec<String> = ui.global::<crate::PlayState>().get_scenes().iter().map(|s| format!("{}{}", s.name, if s.on { "*" } else { "" })).collect();
     eprintln!("   scenes {scenes:?}\n   strips {:?}\n   knobs {:?}\n   buttons {:?} bank {:?}", strips(&ui), knobs(&ui), ui.global::<crate::PlayState>().get_knob_buttons().iter().map(|b| b.text.to_string()).collect::<Vec<_>>(), ui.global::<crate::PlayState>().get_knob_bank());
     eprintln!("   bar: {:?} {:?} actions {:?}", ui.global::<Bar>().get_performance(), ui.global::<Bar>().get_scene(), ui.global::<Bar>().get_actions().iter().map(|a| (a.label.to_string(), a.enabled)).collect::<Vec<_>>());

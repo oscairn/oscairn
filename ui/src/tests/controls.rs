@@ -666,7 +666,7 @@ fn controls_open_from_the_parts_list_and_a_menu_choice_reaches_the_engine() {
     assert_eq!((tools_.row_data(1).unwrap().label.as_str(), tools_.row_data(1).unwrap().enabled), ("Controls", true), "the button is on");
     ui.global::<PartsState>().invoke_tool(1);
     assert_eq!((ui.get_screen(), crate::tests::title(&ui)), (11, "Parts › Controls".to_string()));
-    assert_eq!(ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>(), ["Undo Volume of Keys", "Redo", "Save", "Play"]);
+    assert_eq!(ui.global::<Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>(), ["Undo Volume of Keys", "Redo", "Save", "Play", "Record", "Capture"]);
     // The page asks the parameters of the node its first target drives.
     let r = request_in(&mut f, "params.list", &none, &g);
     assert_eq!(r["params"]["node"], json!(1));

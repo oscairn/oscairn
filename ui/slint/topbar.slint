@@ -184,7 +184,8 @@ component ActionButton inherits Rectangle {
     in property <BarAction> data;
     in property <length> cap: Columns.action-max; // the widest it gets, a long edit's name elided
     in property <bool> compact; // an icon in place of the words where it has one
-    property <bool> icon-only: root.compact && root.data.icon > 0;
+    // Record (3) and Capture (4) are icons always; Undo and Redo only in a narrow bar.
+    property <bool> icon-only: (root.compact && root.data.icon > 0) || root.data.icon >= 3;
     callback clicked();
     width: root.icon-only ? Columns.action : min(measure.preferred-width + 2 * Theme.pad-wide, root.cap);
     measure := Text {
@@ -201,12 +202,24 @@ component ActionButton inherits Rectangle {
         on: root.data.on;
         clicked => { root.clicked(); }
     }
-    if root.icon-only: Image {
+    // Record: a ring in the danger color, filled while a take records.
+    if root.data.icon == 3: Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: Columns.icon * 0.6;
+        height: self.width;
+        border-radius: self.width / 2;
+        border-width: Theme.cursor-width;
+        border-color: Theme.danger;
+        background: root.data.on ? Theme.danger : transparent;
+        opacity: root.data.enabled ? 1 : Theme.disabled;
+    }
+    if root.icon-only && root.data.icon != 3: Image {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         width: Columns.icon * 0.85;
         height: Columns.icon * 0.85;
-        source: root.data.icon == 1 ? @image-url("../../hosts/standalone/icons/undo-2.svg") : @image-url("../../hosts/standalone/icons/redo-2.svg");
+        source: root.data.icon == 1 ? @image-url("../../hosts/standalone/icons/undo-2.svg") : root.data.icon == 2 ? @image-url("../../hosts/standalone/icons/redo-2.svg") : @image-url("../../hosts/standalone/icons/history.svg");
         colorize: Theme.text;
         opacity: root.data.enabled ? 1 : Theme.disabled;
     }

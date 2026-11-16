@@ -703,7 +703,7 @@ fn routing_opens_from_the_parts_list_and_its_actions_reach_the_engine() {
     assert_eq!((tools.row_data(2).unwrap().label.as_str(), tools.row_data(2).unwrap().enabled), ("Routing", true), "the button is on");
     ui.global::<PartsState>().invoke_tool(2);
     assert_eq!((ui.get_screen(), title(&ui)), (12, "Parts › Routing".to_string()));
-    assert_eq!(ui.global::<crate::Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>(), ["+ Plugin", "Parts collapsed", "Meters", "Undo Volume of Keys", "Redo", "Save", "Play"], "the screen's own actions first");
+    assert_eq!(ui.global::<crate::Bar>().get_actions().iter().map(|a| a.label.to_string()).collect::<Vec<_>>(), ["+ Plugin", "Parts collapsed", "Meters", "Undo Volume of Keys", "Redo", "Save", "Play", "Record", "Capture"], "the screen's own actions first");
     // The graph is asked and drawn; nothing is chosen.
     want(&mut f, "graph.get", &none, &shared);
     f.screen.frame();

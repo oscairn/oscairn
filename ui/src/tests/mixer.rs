@@ -386,7 +386,7 @@ fn the_mixer_opens_from_the_parts_list_and_goes_back_to_it() {
     assert_eq!((tools.row_data(0).unwrap().label.as_str(), tools.row_data(0).unwrap().enabled), ("Mixer", true), "the button is on");
     ui.global::<PartsState>().invoke_tool(0);
     assert_eq!((ui.get_screen(), title(&ui)), (10, "Parts › Mixer".to_string()));
-    assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Play"]);
+    assert_eq!(labels(&ui), ["Undo Volume of Keys", "Redo", "Save", "Play", "Record", "Capture"]);
     request_in(&mut f, "graph.get", &none, &g);
     // The meters are asked every 50 ms while shown.
     f.screen.frame();

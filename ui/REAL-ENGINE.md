@@ -1,3 +1,23 @@
+# How to run the harnesses (required: a root of their own)
+
+`real_engine`, `real_library` and `real_settings` are ignored by default and drive a real engine. They write files (the Library's
+exports and installs, a chosen theme, the setlist state file), so they **refuse to start** (a panic naming the reason, before any
+request or file) unless the environment names one directory for the run:
+
+- `OSCAIRN_TEST_ROOT`: an existing directory that is empty (the harness then writes `.oscairn-test-root` in it) or already has that
+  marker, and that is not the real home folder (read from the password database, not `$HOME`) nor a parent of it;
+- `HOME`, `OSCAIRN_DATA_HOME` and `OSCAIRN_CONFIG_HOME`: all set, all inside that directory, none the real home. Start the engine under
+  the same three, with `--audio null` and a socket in a private folder in /tmp.
+
+Everything the harnesses make goes to folders of the run inside the root (the file pages are pointed at `documents-PID` there, never
+at the default `~/Documents`, which the product's chooser starts in), and every delete goes through `guard::Root` (src/tests/
+real_engine/guard.rs): it refuses a path outside the root, a `..`, a symlink out, the root itself, and anything the harness did not
+make itself. The guard has tests that are not ignored. Example: `OSCAIRN_TEST_ROOT=/tmp/oscairn-root HOME=/tmp/oscairn-root/home
+OSCAIRN_DATA_HOME=/tmp/oscairn-root/data OSCAIRN_CONFIG_HOME=/tmp/oscairn-root/config OSCAIRN_REAL_SOCKET=/tmp/x/engine.sock
+cargo test real_library -- --ignored --nocapture` (with `CARGO_HOME` and `RUSTUP_HOME` kept at their real places).
+
+---
+
 # The three apps against the real engine: the joined branch (2026-11-16, third run)
 
 Branch `rust-ui-main`: the Performance app, the Library app, the FM operators view and the Settings app on main 40003f71.

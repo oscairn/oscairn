@@ -36,7 +36,7 @@ fn param_ids(sent: &[(&str, serde_json::Value)]) -> Vec<u64> {
 }
 
 fn set_ids(sent: &[(&str, serde_json::Value)]) -> Vec<u64> {
-    sent.iter().filter(|o| o.0 == "params.set").map(|o| o.1["values"].as_array().unwrap().iter().map(|v| v["param"].as_u64().unwrap()).collect::<Vec<_>>()).flatten().collect()
+    sent.iter().filter(|o| o.0 == "params.set").flat_map(|o| o.1["values"].as_array().unwrap().iter().map(|v| v["param"].as_u64().unwrap()).collect::<Vec<_>>()).collect()
 }
 
 #[test]

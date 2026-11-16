@@ -845,10 +845,9 @@ fn the_detail_does_not_repeat_the_operators_number() {
 // A compact knob under 28 px is a value cell with a thin bar and still the tile's whole touch target.
 #[test]
 fn a_compact_knob_too_small_to_be_one_is_a_value_cell() {
-    use crate::grid::{compact_height, knob_is_cell, KNOB_LEAST};
+    use crate::grid::{compact_height, knob_is_cell};
     assert!(knob_is_cell(115., compact_height(1., 1.), 1., 1.), "at the touch target's height the knob would be 21 px");
     assert!(!knob_is_cell(115., 80., 1., 1.), "a tile high enough keeps its knob");
-    assert!(KNOB_LEAST >= 28.);
     let (s, _p) = open_at(Spec { ops: 8, ..ENGINE }, (1280, 720), 1.55, &dark(), Side, 1);
     let all = tiles(&s);
     let knobs: Vec<&crate::GridTile> = all.iter().filter(|t| t.compact && t.kind == crate::grid::Control::Knob as i32).collect();

@@ -296,9 +296,10 @@ pub(super) fn library(r: &mut Real) {
     r.step("Library: add to a setlist");
     let setlists = items(r, "setlist");
     let id = setlists.first().map(|s| s.1.clone()).unwrap_or_default();
+    let root = super::guard::root_or_stop();
     let dir = std::path::PathBuf::from(std::env::var("OSCAIRN_DATA_HOME").unwrap_or_default()).join("AppData/oscairn.setlist");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("state.json"), json!({"setlist": id}).to_string()).unwrap();
+    root.create_dir_all(&dir).unwrap();
+    root.write(&dir.join("state.json"), json!({"setlist": id}).to_string().as_bytes()).unwrap();
     shell::goto(shell::Screen::Home);
     shell::goto(shell::Screen::Library);
     r.settle();
@@ -313,7 +314,7 @@ pub(super) fn library(r: &mut Real) {
     let line = said(r);
     r.check(line == "Added to Friday Set", || format!("Add to setlist: the line says {line:?}"));
     // With no setlist open and none called "Setlist": one is made.
-    std::fs::remove_file(dir.join("state.json")).unwrap();
+    root.remove_file(&dir.join("state.json")).unwrap();
     shell::goto(shell::Screen::Home);
     shell::goto(shell::Screen::Library);
     r.settle();
@@ -336,16 +337,13 @@ fn said_is(ui: &Shell, text: &str) -> bool {
 pub(super) fn library_second(r: &mut Real) {
     let ui = r.screen.ui.clone_strong();
     shell::set_text_on_screen(false);
-    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default());
-    let out = home.join("Documents");
-    std::fs::create_dir_all(&out).unwrap();
-    let _ = std::fs::remove_dir_all(out.join("Samples"));
-    std::fs::create_dir_all(out.join("Samples")).unwrap();
-    for f in std::fs::read_dir(&out).unwrap().flatten() {
-        if f.path().extension().is_some_and(|e| e == "olib") {
-            let _ = std::fs::remove_file(f.path());
-        }
-    }
+    // A folder of this run's own, new, inside its root (never the user's Documents, which the file pages start in): the file
+    // pages are pointed at it as a user would pick it; the guard's helper is the only way it is removed.
+    let root = super::guard::root_or_stop();
+    let out = root.dir().join(format!("documents-{}", std::process::id()));
+    root.create_dir_all(&out).unwrap();
+    root.create_dir_all(&out.join("Samples")).unwrap();
+    shell::library_files_dir(out.clone());
     shell::goto(shell::Screen::Home);
     shell::goto(shell::Screen::Library);
     r.settle();

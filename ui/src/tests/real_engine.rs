@@ -29,7 +29,8 @@ use serde_json::Value;
 
 /// Listens at `path` and passes each connection's lines to the engine at `engine` and back, noting them.
 fn proxy(path: &std::path::Path, engine: std::path::PathBuf, trace: Trace) {
-    let _ = std::fs::remove_file(path);
+    // (A path of this process's own: nothing is deleted; one that is there is a stranger's and stops the run.)
+    assert!(!path.exists(), "{} exists already", path.display());
     let listener = UnixListener::bind(path).unwrap();
     std::thread::spawn(move || {
         for ui in listener.incoming() {
@@ -124,6 +125,7 @@ struct Real {
 impl Real {
     fn start() -> Option<Real> {
         let socket = std::path::PathBuf::from(std::env::var_os("OSCAIRN_REAL_SOCKET")?);
+        let _root = guard::root_or_stop(); // before an engine is asked anything or a file touched
         let trace: Trace = Arc::default();
         let path = std::env::temp_dir().join(format!("oscairn-ui-real-{}.sock", std::process::id()));
         proxy(&path, socket.clone(), trace.clone());
@@ -1488,6 +1490,7 @@ fn short(v: &Value) -> String {
     if s.len() > 160 { format!("{}...", &s[..160]) } else { s }
 }
 
+mod guard;
 mod library;
 
 // The Library app against the same engine, with a small library of its own (ui/LIBRARY-APP.md): the shell reaches

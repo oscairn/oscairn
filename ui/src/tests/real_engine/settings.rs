@@ -11,6 +11,7 @@ use crate::{KeyboardState, MenuState, NoticeState, SettingsState};
 /// The shell on `profile` (a built-in's id; none: a computer's), with folders of its own for the choices it keeps.
 pub fn start_on(profile: Option<&str>) -> Option<(Real, std::path::PathBuf)> {
     let socket = std::path::PathBuf::from(std::env::var_os("OSCAIRN_REAL_SOCKET")?);
+    let root = super::guard::root_or_stop(); // before anything is touched
     let trace: Trace = Arc::default();
     let path = std::env::temp_dir().join(format!("oscairn-ui-real-settings-{}.sock", std::process::id()));
     proxy(&path, socket.clone(), trace.clone());
@@ -22,9 +23,9 @@ pub fn start_on(profile: Option<&str>) -> Option<(Real, std::path::PathBuf)> {
         let _ = tx.send(e);
     })
     .unwrap();
-    let config = std::env::temp_dir().join(format!("oscairn-ui-real-settings-config-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&config);
-    std::fs::create_dir_all(&config).unwrap();
+    // The choices the app keeps (a theme chosen or installed, the top bar) go to a folder of this run's own, new, in its root.
+    let config = root.dir().join(format!("settings-config-{}", std::process::id()));
+    root.create_dir_all(&config).unwrap();
     shell::settings_folders(Some(config.clone()), crate::theme::Places { built_in: None, installed: Some(config.join("themes")) });
     Some((Real { screen, events, trace, engine, findings: vec![], mark: 0, frames: 0, figures: 0, shown_figures: (-1, -1) }, config))
 }

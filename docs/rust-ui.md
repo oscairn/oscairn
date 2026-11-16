@@ -197,9 +197,11 @@ with a slow disk: it overflows there (tested only from 1200 across).
 A take recording (the hardware REC button, or any app's) shows between the Performance and the
 tempo on every screen: a dot, "REC m:ss" and "disk slow" when the writer is behind, in the danger
 color (once: Play has no mark of its own). It is what the JUCE record buttons show (`RecordButtons`), read as
-they read it: `record.takes` every 250 ms (here asked with the `status` notifications, which come
-at most four a second, so nothing wakes at rest), the first take `waiting` or `recording`, its
-`frames` over its `sampleRate`. The Record and Capture buttons themselves are not built.
+they read it: `record.takes` once with the first `status` of a connection, then the engine's `record`
+topic (a take's state or time changed: at most ten a second while one runs, none at rest), the first take
+`waiting` or `recording`, its `frames` over its `sampleRate`. A `status` that says what the last said (its `cpuLoad`
+compared as the whole percent the bar shows) asks nothing and draws nothing; one that changed asks `memory.state` and
+`transport.get`, at most twice a second. The Record and Capture buttons themselves are not built.
 
 On the Performance app's screens (Play, Part, the chain, the sound chooser, the parameter pages, the
 scene's setup) the bar also has the screen's actions after the Performance's name: "Undo <edit>" and

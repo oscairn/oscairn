@@ -123,7 +123,7 @@ The release desktop shell opened a 1280x752-point window (CGWindowList), connect
 shell asks. At rest on Home over 20 s it used 4.8% of a core (3.7% over another 10 s) and sent 8 requests
 a second: record.takes 4/s, memory.state and transport.get 2/s each, carried by the null device's `status`
 notifications, which come 4 times a second because its load figure changes. It was ended with SIGTERM.
-**Not done:** no screenshot (this session has no screen recording permission: `screencapture -l` and `-R`
+**Since fixed (2026-11-16):** a `status` that says what the last said costs no request and no frame (`record.takes` now comes from the engine's `record` topic, `memory.state` and `transport.get` only after a changed status); tested against the fake engine, not re-measured against the real one. **Not done:** no screenshot (this session has no screen recording permission: `screencapture -l` and `-R`
 both failed with "could not create image") and no navigation in the window (keys and clicks posted to the
 process did nothing; it was not the key window and was not activated), so neither Play nor a parameter
 page was shown in the real window; the headless pictures are the only pictures.

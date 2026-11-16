@@ -299,7 +299,7 @@ fn the_top_bar_follows_the_engine() {
     let mut f = Fixture::new("topbar");
     f.engine.answer(); // session.hello
     f.pump();
-    assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed", "controllers"]));
+    assert_eq!(f.engine.request()["params"]["topics"], json!(["status", "graph.changed", "controllers", "record"]));
     assert_eq!(f.engine.request()["params"], json!({"lists": true}));
     let shell = f.engine.request();
     assert!(shell["method"] == "memory.shell" && shell["params"]["bytes"].as_u64().unwrap() > 1 << 20, "its own memory: {shell}");
@@ -333,9 +333,44 @@ fn the_top_bar_follows_the_engine() {
     assert!(f.screen.ui.get_engine().starts_with("lost"));
 }
 
+// A performance instrument's UI costs nothing when nothing changes: a status that says what the last said (the load
+// as the whole percent the bar shows, the rest identical) asks the engine nothing and draws no frame; one that changed
+// asks for the meters; the first of a connection reads the takes.
+#[test]
+fn an_unchanged_status_costs_no_request_and_no_frame() {
+    let mut f = Fixture::new("idle");
+    f.engine.answer(); // session.hello
+    f.pump();
+    f.serve(10, &json!({}));
+    let status = |f: &mut Fixture, load: f64| {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "status", "params": {"cpuLoad": load, "audioDevice": "null", "sampleRate": 48000}})));
+        f.pump();
+    };
+    status(&mut f, 0.042);
+    f.answer("record.takes", json!({"takes": []})); // a first status asks for the takes and the meters
+    f.answer("memory.state", json!({"systemAvailable": 496u64 << 20, "device": 0}));
+    f.answer("transport.get", json!({"tempo": 120, "playing": false}));
+    f.screen.frame();
+    f.screen.frame();
+    assert_eq!(f.screen.frame(), None, "at rest");
+    // Twenty more, the load wobbling inside the same whole percent: no request, no frame.
+    for i in 0..20 {
+        status(&mut f, 0.0420 + 0.0001 * (i % 4) as f64);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    assert!(f.engine.try_request(std::time::Duration::from_millis(700)).is_none(), "an unchanged status asked for something");
+    assert_eq!(f.screen.frame(), None, "an unchanged status drew a frame");
+    // A changed one is acted on, after the meters' interval.
+    status(&mut f, 0.5);
+    let r = f.engine.try_request(std::time::Duration::from_secs(2)).expect("a changed status asks for the meters");
+    assert_eq!(r["method"], "memory.state");
+    assert_eq!(f.screen.ui.global::<Bar>().get_cpu(), 50);
+}
+
 // A take recording is said in the top bar (every screen, once: Play adds no mark of its own), with the time it has run,
-// as the JUCE record buttons say it: learned by reading record.takes with the status notifications
-// at most every 250 ms (the JUCE poll's period), and gone when the take ends or the engine is lost.
+// as the JUCE record buttons say it: record.takes read with the first status of a connection (a take may be
+// running already), then each `record` notification (a take's state or time changed: the engine sends them at most
+// ten a second, none at rest), and gone when the take ends or the engine is lost.
 #[test]
 fn a_take_recording_is_shown_in_the_top_bar_once() {
     let mut f = Fixture::new("record");
@@ -359,11 +394,12 @@ fn a_take_recording_is_shown_in_the_top_bar_once() {
     f.screen.frame();
     f.screen.save("topbar-recording");
     png(&f.screen, "topbar-recording");
-    // Within 250 ms of the last read nothing is asked; after it the take's time moves.
-    status(&mut f);
-    std::thread::sleep(std::time::Duration::from_millis(260));
-    status(&mut f);
-    f.answer("record.takes", json!({"takes": [{"take": 2, "state": "recording", "frames": 48000 * 68, "sampleRate": 48000, "behind": true}]}));
+    // The take's time moves with the engine's `record` notifications; a status asks nothing about takes.
+    let record = |f: &mut Fixture, takes: serde_json::Value| {
+        f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "method": "record", "params": {"takes": takes}})));
+        f.pump();
+    };
+    record(&mut f, json!([{"take": 2, "state": "recording", "frames": 48000 * 68, "sampleRate": 48000, "behind": true}]));
     assert_eq!(state(&f), (true, "1:08".into(), true));
     // On Play the top bar says it and the footer does not: the bottom of Play looks the same without a take.
     f.screen.ui.global::<HomeState>().invoke_tapped(0);
@@ -374,17 +410,7 @@ fn a_take_recording_is_shown_in_the_top_bar_once() {
     let footer = |s: &Screen| s.pixels[(H - 60) * W..].to_vec();
     let with_take = footer(&f.screen);
     // The take ends: the mark goes.
-    std::thread::sleep(std::time::Duration::from_millis(260));
-    status(&mut f);
-    loop {
-        let r = f.engine.request();
-        let take = r["method"] == "record.takes";
-        let result = if take { json!({"takes": [{"take": 2, "state": "done", "frames": 48000 * 70, "sampleRate": 48000}]}) } else { json!({}) };
-        f.reply(&r, json!({"result": result}));
-        if take {
-            break;
-        }
-    }
+    record(&mut f, json!([{"take": 2, "state": "done", "frames": 48000 * 70, "sampleRate": 48000}]));
     assert_eq!(state(&f), (false, String::new(), false));
     f.screen.frame();
     assert!(footer(&f.screen) == with_take, "Play's footer carries no recording mark");

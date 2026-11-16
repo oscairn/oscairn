@@ -2,13 +2,14 @@
 //! The shell: one connection to the engine, the top bar it feeds, and the screens. Runs on the
 //! UI thread; the client's events reach it through the event loop.
 //!
-//! What it asks the engine and when: on connecting, `subscribe` to `status` and
-//! `graph.changed`, `memory.shell` (its own memory; the rest of the session's setup is the
+//! What it asks the engine and when: on connecting, `subscribe` to `status`,
+//! `graph.changed`, `controllers` and `record`, `memory.shell` (its own memory; the rest of the session's setup is the
 //! engine's, docs/rust-ui.md "Session setup"), `performance.reopen` (the Performance last open, as the JUCE app asks at its
-//! start), `performance.info` and `graph.get`. Each `status` (at most 4 a second) moves the
-//! meters at most twice a second and then asks `memory.state` and `transport.get`; each
-//! `graph.changed` asks `performance.info` and `graph.get` again; a status also asks `record.takes`
-//! (at most every 250 ms, the JUCE record buttons' poll) for the top bar's recording mark. Nothing else wakes it at rest.
+//! start), `performance.info` and `graph.get`; the first `status` of a connection asks `record.takes`. A `status` (at most 4 a second) that says what the
+//! last said (its load as a whole percent, the figure the bar shows, is compared, not the fraction) costs nothing:
+//! no request, no screen asked, no frame. One that changed moves the meters at most twice a second and then asks
+//! `memory.state` and `transport.get`; each `graph.changed` asks `performance.info` and `graph.get` again; a `record`
+//! notification (a take's state changed, at most 10 a second, none at rest) is the top bar's recording mark. Nothing else wakes it at rest.
 //! While Play is shown it also subscribes to `controls.changed` and asks `parts.meters` every
 //! 100 ms (one at a time); leaving Play ends both.
 
@@ -89,9 +90,6 @@ impl Request {
 }
 
 const METER_INTERVAL: Duration = Duration::from_millis(500);
-/// How often the takes are read: the JUCE record buttons' poll (Engine::takes, 250 ms), here
-/// carried by the status notifications, so a shell at rest wakes for nothing more.
-const RECORD_INTERVAL: Duration = Duration::from_millis(250);
 
 /// What the top bar shows now, so only a change reaches the window.
 #[derive(Clone, Default, PartialEq)]
@@ -142,7 +140,11 @@ pub struct App {
     device_memory: u64,
     shown: Shown,
     last_meters: Option<Instant>,
-    last_record: Option<Instant>,
+    /// The last status that was acted on, by what the bar and the screens read of it: an identical one costs nothing.
+    last_status: Option<Value>,
+    /// A changed status whose meters wait for the next METER_INTERVAL.
+    pending_status: Option<Value>,
+    flush: slint::Timer,
     /// performance.info and graph.get refused while the engine was busy: asked again at the next meters.
     stale: bool,
     watchdog: slint::Timer,
@@ -391,7 +393,9 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             device_memory: profile.memory,
             shown: Shown::default(),
             last_meters: None,
-            last_record: None,
+            last_status: None,
+            pending_status: None,
+            flush: slint::Timer::default(),
             stale: false,
             watchdog: slint::Timer::default(),
             screen: Screen::Home,
@@ -546,9 +550,10 @@ impl App {
                     ui.set_engine(SharedString::new());
                 }
                 self.last_meters = None;
-                self.last_record = None;
+                self.last_status = None;
+                self.pending_status = None;
                 self.totals.forget();
-                self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed", "controllers"]}));
+                self.send(Request::Subscribe, "subscribe", json!({"topics": ["status", "graph.changed", "controllers", "record"]}));
                 self.send_view();
                 // The session's setup is the engine's, from the profile (docs/rust-ui.md, "Session
                 // setup"); only this UI's own memory is the UI's to send.
@@ -569,12 +574,18 @@ impl App {
             }
             Event::Lost(why) => {
                 self.show(|s| s.recording = None); // what the engine is doing is not known now
+                self.last_status = None;
+                self.pending_status = None;
                 if let Some(ui) = self.ui() {
                     ui.set_engine(format!("lost: {why}").into());
                 }
             }
             Event::Notification { method, params } => match method.as_str() {
                 "status" => self.status(&params),
+                "record" => {
+                    let takes = topbar::recording(&params);
+                    self.show(|s| s.recording = takes)
+                }
                 "graph.changed" => {
                     self.ask_performance();
                     if has_actions(self.screen) {
@@ -629,29 +640,57 @@ impl App {
         }
     }
 
-    /// The meters, at most every METER_INTERVAL: the CPU from this status, RAM and the tempo asked.
+    /// What a status says to the bar and the screens: the whole of it, but for the load, which is the whole percent
+    /// the bar shows. Two that agree here change nothing anyone can see.
+    fn status_key(status: &Value) -> Value {
+        let mut key = status.clone();
+        if let Some(load) = key.get_mut("cpuLoad") {
+            *load = topbar::cpu(status).0.map_or(Value::Null, Value::from);
+        }
+        key
+    }
+
+    /// A status. One that says what the last said costs nothing (nothing is asked, no screen is touched, no frame
+    /// follows); one that changed goes to the screens, and its meters follow at most every METER_INTERVAL.
     fn status(&mut self, status: &Value) {
-        self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
-        self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
-        self.on_parts(|p| p.status(status)); // and the devices and failures the Parts list says
-        self.on_mixer(|m| m.status(status));
-        self.on_chain(|c| c.status(status));
-        self.on_routing(|r| r.status(status));
-        if self.on_piano(|p| !p.status(status)) == Some(true) {
-            self.close_piano(); // its input was unplugged
+        let key = App::status_key(status);
+        if self.last_status.as_ref() != Some(&key) {
+            if self.last_status.is_none() {
+                self.ask(Request::Record, "record.takes"); // the first status of a connection: a take may be running already
+            }
+            self.last_status = Some(key);
+            self.on_part(|p| p.endpoints(status)); // the inputs, whenever they change
+            self.on_play(|p| p.status(status)); // and whether a MIDI device is connected, for Play's hint
+            self.on_parts(|p| p.status(status)); // and the devices and failures the Parts list says
+            self.on_mixer(|m| m.status(status));
+            self.on_chain(|c| c.status(status));
+            self.on_routing(|r| r.status(status));
+            if self.on_piano(|p| !p.status(status)) == Some(true) {
+                self.close_piano(); // its input was unplugged
+            }
+            self.pending_status = Some(status.clone());
         }
+        self.flush_status();
+    }
+
+    /// The meters of the status that changed: the CPU from it, RAM and the tempo asked; a read the engine refused
+    /// as busy asked again. Waits out METER_INTERVAL since the last, on a timer, as no later status may come.
+    fn flush_status(&mut self) {
         let now = Instant::now();
-        if self.last_record.is_none_or(|t| now.duration_since(t) >= RECORD_INTERVAL) {
-            self.last_record = Some(now);
-            self.ask(Request::Record, "record.takes");
-        }
-        if self.last_meters.is_some_and(|t| now.duration_since(t) < METER_INTERVAL) {
+        if let Some(last) = self.last_meters.filter(|t| now.duration_since(*t) < METER_INTERVAL) {
+            if self.pending_status.is_some() {
+                self.flush.start(slint::TimerMode::SingleShot, METER_INTERVAL - now.duration_since(last), || with_app(|a| a.flush_status()));
+            }
             return;
         }
+        if self.stale {
+            self.ask_performance();
+        }
+        let Some(status) = self.pending_status.take() else { return };
         self.last_meters = Some(now);
         let device = status["audioDevice"].as_str().unwrap_or_default().to_string();
         self.show(|s| {
-            s.cpu = topbar::cpu(status);
+            s.cpu = topbar::cpu(&status);
             s.audio_device = device;
         });
         self.ask(Request::Memory, "memory.state");

@@ -314,7 +314,7 @@ impl Screen {
         lines.push(line(format!("{} of {} Sound{}", self.items.len(), self.total, if self.total == 1 { "" } else { "s" })));
         if self.total == 0 && !self.narrowed() {
             // The reference's empty state; an instrument's own presets are on its plugin's actions here.
-            lines.push(line("No Sounds yet. An instrument's own presets are on the plugin's Presets action in the chain, not here.".into()));
+            lines.extend(["No Sounds yet. An instrument's own", "presets are on the plugin's Presets", "action in the chain, not here."].map(|t| line(t.into())));
         }
         if !self.auditioning.is_empty() {
             lines.push(line("Auditioning".into()));

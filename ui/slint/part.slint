@@ -181,16 +181,17 @@ export component Part inherits Rectangle {
         width: root.width - self.x - Theme.margin;
         height: root.list-height;
         clip: true;
-        for line[i] in PartState.info: Text {
+        for line[i] in PartState.info: FitText {
             x: Theme.pad;
             y: Theme.pad-narrow + i * root.line;
             width: parent.width - 2 * Theme.pad;
+            height: root.line;
             text: line.text;
             opacity: line.off ? Theme.dim : 1;
-            color: line.head ? Theme.muted : line.failed ? Theme.danger : line.role == 1 ? Theme.accent : line.role == 2 ? Theme.positive : line.role == 3 ? Theme.wire-notes : Theme.text;
-            font-size: line.head ? Theme.small : Theme.body;
-            font-weight: line.head ? 700 : 400;
-            overflow: elide;
+            ink: line.head ? Theme.muted : line.failed ? Theme.danger : line.role == 1 ? Theme.accent : line.role == 2 ? Theme.positive : line.role == 3 ? Theme.wire-notes : Theme.text;
+            size: line.head ? Theme.small : Theme.body;
+            bold: line.head;
+            align: TextHorizontalAlignment.left;
         }
         if PartState.info-more: Button {
             x: parent.width - 2 * Theme.touch - Theme.pad-narrow;

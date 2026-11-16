@@ -70,27 +70,27 @@ fn chain_actions_and_requests() {
     // Chorus: its actions; window.info asked; no view row until it says there is one.
     assert_eq!(press(&mut c, 1), crate::chain::Outcome::Stay);
     assert_eq!(sent(&mut c.out), [("window.info", json!({"node": 2}))]);
-    assert_eq!(labels(ui), ["Parameters", "Turn on", "Move later", "Remove", "Routing...", "Scene controls..."], "the first of the chain cannot move earlier");
+    assert_eq!(labels(ui), ["Parameters", "Turn on", "Presets...", "Move later", "Remove", "Routing...", "Scene controls..."], "the first of the chain cannot move earlier");
     c.reply(crate::chain::Request::Window(2), Ok(json!({"available": true})));
     let r = rows(ui);
-    assert_eq!((r[6].0.as_str(), r[6].1.as_str(), r[6].2), ("Plugin view", "not available in this shell yet", 4), "labeled, disabled");
+    assert_eq!((r[7].0.as_str(), r[7].1.as_str(), r[7].2), ("Plugin view", "not available in this shell yet", 4), "labeled, disabled");
     // Turn on: off turns it on, as the JUCE button.
     c.act(Action::Move { pane: None, by: 1 });
     c.act(Action::Move { pane: None, by: 1 });
     c.act(Action::Confirm(None));
     assert_eq!(sent(&mut c.out), [("graph.enable", json!({"node": 2, "enabled": true})), ("graph.commit", json!({}))]);
     // Move later: parts.move and the commit; the actions follow the plugin to its new place.
-    c.act(Action::Move { pane: None, by: 1 });
+    c.act(Action::Move { pane: None, by: 2 });
     c.act(Action::Confirm(None));
     assert_eq!(sent(&mut c.out), [("parts.move", json!({"part": 10, "from": 0, "to": 1})), ("graph.commit", json!({}))]);
     let mut moved = graph();
     moved["parts"][0]["chain"] = json!([1, 2]);
     c.graph(&moved); // as the engine's graph.get then says
-    assert_eq!(labels(ui), ["Parameters", "Turn on", "Move earlier", "Remove", "Routing...", "Scene controls...", "Plugin view"], "now the last: it can move earlier");
+    assert_eq!(labels(ui), ["Parameters", "Turn on", "Presets...", "Move earlier", "Remove", "Routing...", "Scene controls...", "Plugin view"], "now the last: it can move earlier");
     // Routing... opens the plugin in Routing (D11); Scene controls... lists its parameters ticked where scenes touch them,
     // choosing one sets it aside (`scenes.untouched`, the others kept), again takes it back (D10).
     c.act(Action::Move { pane: None, by: -10 });
-    c.act(Action::Move { pane: None, by: 4 });
+    c.act(Action::Move { pane: None, by: 5 });
     assert_eq!(c.act(Action::Confirm(None)), crate::chain::Outcome::Routing(2));
     c.act(Action::Move { pane: None, by: 1 });
     assert_eq!(c.act(Action::Confirm(None)), crate::chain::Outcome::Stay);
@@ -115,7 +115,7 @@ fn chain_actions_and_requests() {
     c.act(Action::Move { pane: None, by: -10 });
     assert_eq!(c.act(Action::Confirm(None)), crate::chain::Outcome::Params(2, "Chorus".into()));
     // Remove: the node leaves the part, then the graph with its wires reconnected, then a commit.
-    c.act(Action::Move { pane: None, by: 3 });
+    c.act(Action::Move { pane: None, by: 4 });
     c.act(Action::Confirm(None));
     assert_eq!(
         sent(&mut c.out),

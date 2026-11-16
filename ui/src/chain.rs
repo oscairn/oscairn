@@ -69,6 +69,10 @@ pub enum Request {
     NewSplit,
     /// params.get of a band split's crossovers.
     Crossovers,
+    /// presets.list of a node.
+    Presets(u64),
+    /// graph.replace of a node with one of its presets.
+    Replace,
 }
 
 pub type Out = (Request, &'static str, Value);
@@ -103,6 +107,8 @@ enum Mode {
     Actions(Place, usize),
     /// What to insert at this place in a chain.
     Plugins(Place, usize),
+    /// The presets of the plugin at this place in a chain.
+    Presets(Place, usize),
 }
 
 impl Mode {
@@ -110,7 +116,7 @@ impl Mode {
     fn place(self) -> Place {
         match self {
             Mode::Lane(s, l) => Place::Lane(s, l),
-            Mode::Actions(p, _) | Mode::Plugins(p, _) => p,
+            Mode::Actions(p, _) | Mode::Plugins(p, _) | Mode::Presets(p, _) => p,
             _ => Place::Part,
         }
     }
@@ -136,6 +142,9 @@ enum Row {
     RemoveLane,
     Parameters,
     Power,
+    Presets,
+    Preset(usize),
+    AskAgain,
     Earlier,
     Later,
     Remove,
@@ -217,6 +226,11 @@ pub struct Screen {
     pending: Option<Pending>,
     /// A band split's crossovers as the engine said them, by node and parameter.
     crossovers: HashMap<(u64, u64), f64>,
+    /// The presets of the plugin whose presets show (uri and name), or why they could not be listed.
+    presets: Vec<(String, String)>,
+    presets_error: String,
+    /// The preset a plugin is being reloaded with.
+    reloading: String,
     pub out: Vec<Out>,
 }
 
@@ -237,6 +251,9 @@ impl Screen {
             placing: Place::Part,
             pending: None,
             crossovers: HashMap::new(),
+            presets: vec![],
+            presets_error: String::new(),
+            reloading: String::new(),
             out: vec![],
         }
     }
@@ -516,7 +533,7 @@ impl Screen {
                 let entries = self.entries_at(place);
                 let Some(Entry::Node(n)) = entries.get(i).copied() else { return vec![] };
                 let off = self.node(n).is_some_and(|n| n["enabled"] == false);
-                let mut rows = vec![(Row::Parameters, row("Parameters".into(), "›".into(), 2)), (Row::Power, row(if off { "Turn on" } else { "Turn off" }.into(), String::new(), 2))];
+                let mut rows = vec![(Row::Parameters, row("Parameters".into(), "›".into(), 2)), (Row::Power, row(if off { "Turn on" } else { "Turn off" }.into(), String::new(), 2)), (Row::Presets, row("Presets...".into(), "›".into(), 2))];
                 if i > 0 {
                     rows.push((Row::Earlier, row("Move earlier".into(), String::new(), 2)));
                 }
@@ -530,6 +547,15 @@ impl Screen {
                     rows.push((Row::View, row("Plugin view".into(), "not available in this shell yet".into(), 4)));
                 }
                 rows
+            }
+            Mode::Presets(..) => {
+                if !self.presets_error.is_empty() {
+                    return vec![(Row::Nothing, row(self.presets_error.clone(), String::new(), 4)), (Row::AskAgain, row("Ask again".into(), String::new(), 2))];
+                }
+                if self.presets.is_empty() {
+                    return vec![(Row::Nothing, row("No presets listed".into(), String::new(), 4))];
+                }
+                self.presets.iter().enumerate().map(|(i, (_, name))| (Row::Preset(i), row(name.clone(), String::new(), 2))).collect()
             }
             Mode::Plugins(place, _) => {
                 let mut rows = Vec::new();
@@ -591,10 +617,15 @@ impl Screen {
             }
         }
         lines.push(plain("Out".into()));
-        if let Mode::Actions(place, i) = self.mode {
+        if let Mode::Actions(place, i) | Mode::Presets(place, i) = self.mode {
             if let Some(Entry::Node(n)) = self.entries_at(place).get(i) {
                 lines.extend([head("Plugin"), plain(self.node(*n).and_then(|x| x["plugin"]["name"].as_str()).unwrap_or_default().to_string())]);
             }
+        }
+        if matches!(self.mode, Mode::Presets(..)) {
+            // The reference's hint over its preset button.
+            lines.push(head("Reload with a preset"));
+            lines.extend(["Replacing stops its notes and tails,", "removes its prepared sounds;", "a load that fails keeps the plugin."].map(|t| plain(t.into())));
         }
         lines
     }
@@ -609,7 +640,7 @@ impl Screen {
             Mode::Split(s) if self.split(s).is_none() => Mode::List,
             Mode::Lane(s, _) if self.split(s).is_none() => Mode::List,
             Mode::Lane(s, k) if self.lane(s, k).is_none() => Mode::Split(s),
-            Mode::Actions(p, _) | Mode::Plugins(p, _) if gone(self, p) => Mode::List,
+            Mode::Actions(p, _) | Mode::Plugins(p, _) | Mode::Presets(p, _) if gone(self, p) => Mode::List,
             m => m,
         };
     }
@@ -626,6 +657,10 @@ impl Screen {
                 _ => String::new(),
             },
             Mode::Plugins(..) => "Insert: choose a plugin".to_string(),
+            Mode::Presets(place, i) => match self.entries_at(place).get(i) {
+                Some(Entry::Node(n)) => format!("{}: presets", self.name_of(*n)),
+                _ => String::new(),
+            },
         };
         let rows = self.rows().into_iter().map(|r| r.1).collect();
         let info = self.info();
@@ -636,6 +671,7 @@ impl Screen {
             Mode::Lane(..) => "Lane",
             Mode::Actions(..) => "Actions",
             Mode::Plugins(..) => "Plugins",
+            Mode::Presets(..) => "Presets",
         };
         self.b.show(&name, &title, noun, rows, info);
     }
@@ -699,6 +735,26 @@ impl Screen {
                 self.windows.insert(node, r["available"].as_bool().unwrap_or(false));
                 self.show();
             }
+            (Request::Presets(node), Ok(r)) if self.presets_node(node) => {
+                self.presets = r["presets"].as_array().into_iter().flatten().filter_map(|p| Some((p["uri"].as_str()?.to_string(), p["name"].as_str().unwrap_or_default().to_string()))).collect();
+                self.presets_error.clear();
+                self.show();
+            }
+            // The engine never waits for the scan helper: a refusal is "ask again".
+            (Request::Presets(node), Err(e)) if self.presets_node(node) => {
+                self.presets.clear();
+                self.presets_error = e.message;
+                self.show();
+            }
+            (Request::Replace, Ok(_)) => {
+                let name = std::mem::take(&mut self.reloading);
+                self.say(&format!("Reloaded with “{name}”"));
+            }
+            (Request::Replace, Err(e)) => {
+                self.reloading.clear();
+                self.say(&format!("The engine refused: {}", e.message));
+                return true;
+            }
             (Request::Crossovers, Ok(r)) => {
                 for v in r["values"].as_array().into_iter().flatten() {
                     if let (Some(node), Some(param), Some(value)) = (v["node"].as_u64(), v["param"].as_u64(), v["value"].as_f64()) {
@@ -710,6 +766,14 @@ impl Screen {
             _ => {}
         }
         false
+    }
+
+    /// Whether the presets shown are of this node.
+    fn presets_node(&self, node: u64) -> bool {
+        match self.mode {
+            Mode::Presets(place, i) => self.entries_at(place).get(i) == Some(&Entry::Node(node)),
+            _ => false,
+        }
     }
 
     /// A split that could not be made: the nodes added for it come out again, and the refusal is said.
@@ -920,6 +984,27 @@ impl Screen {
                     self.edit("graph.enable", json!({"node": n, "enabled": on}));
                 }
             }
+            (Row::Presets | Row::AskAgain, Mode::Actions(p, i) | Mode::Presets(p, i)) => {
+                if let Some(Entry::Node(n)) = self.entries_at(p).get(i) {
+                    self.presets.clear();
+                    self.presets_error.clear();
+                    self.mode = Mode::Presets(p, i);
+                    self.b.reset_cursor();
+                    self.out.push((Request::Presets(*n), "presets.list", json!({"node": n})));
+                }
+            }
+            (Row::Preset(k), Mode::Presets(p, i)) => {
+                // The plugin reloaded with the preset: its own file and ID, as `replacePlugin` is given them.
+                if let (Some(Entry::Node(n)), Some((uri, name))) = (self.entries_at(p).get(i).copied(), self.presets.get(k).cloned()) {
+                    if let Some(plugin) = self.node(n).map(|n| n["plugin"].clone()) {
+                        self.reloading = name.clone();
+                        self.say(&format!("Reloading with “{name}”..."));
+                        self.out.push((Request::Replace, "graph.replace", json!({"node": n, "path": plugin["path"], "pluginId": plugin["id"], "preset": uri})));
+                        self.mode = Mode::Actions(p, i);
+                        self.b.reset_cursor();
+                    }
+                }
+            }
             (Row::Earlier | Row::Later, Mode::Actions(p, i)) => {
                 let to = if row == Row::Earlier { i - 1 } else { i + 1 };
                 let mut params = json!({"part": self.id, "from": i, "to": to});
@@ -1010,6 +1095,7 @@ impl Screen {
                 _ => {
                     self.mode = match self.mode {
                         Mode::Lane(s, _) => Mode::Split(s),
+                        Mode::Presets(p, i) => Mode::Actions(p, i),
                         Mode::Actions(Place::Lane(s, k), _) | Mode::Plugins(Place::Lane(s, k), _) => Mode::Lane(s, k),
                         _ => Mode::List,
                     };

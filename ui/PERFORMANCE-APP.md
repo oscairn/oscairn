@@ -148,7 +148,7 @@ Items needing a new request: **0** (so no change in core/control or docs/control
 | E3 | New part from a sound | `parts.fromSound` | - | action | [x] |
 | E4 | Save the part as a sound (name, as new) | `parts.saveSound` | - | action, keyboard | [x] |
 | E5 | Audition a sound | `audition.start`, `audition.stop`, `audition.get` | - | action | [x] |
-| E6 | Preset of the plugin / reload with a preset | `presets.list`, `graph.replace` | - | list | [ ] |
+| E6 | Preset of the plugin / reload with a preset | `presets.list`, `graph.replace` | - | list | [x] src/chain.rs: the plugin's actions (in the part's chain or a lane) have Presets..., which asks `presets.list` for the node and lists the names; a press is `graph.replace` with the plugin's own `path` and `pluginId` from `graph.get` and the preset's `uri` (PluginBrowser's "Reload with preset" gives `replacePlugin` the same), no `graph.commit` (the request commits itself), the reference's hint in the panel, "Reloading with ..." then "Reloaded with ..." or the engine's refusal said; the engine's "ask again" while the scan helper is not done is a row saying so and an Ask again row. The reference has this on the Plugins app's PluginBrowser, a slot ("synth", "effect") at a time; here it is on any plugin of a part. Tests: tests/chain_presets.rs |
 
 (Request names checked against docs/control-protocol.md "Sounds", "Library" and `RemoteControl`.)
 

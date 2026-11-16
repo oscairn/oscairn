@@ -512,7 +512,9 @@ panel; `Nav` turns an action into a press, a dial step, the right knob or back).
   moved and removed with `split` and `lane` in the request) and its settings (lowest and highest key, level, pan,
   mute, solo: `parts.lane` with the whole lane, as `editLane`) and Remove lane (`parts.removeLane`, then
   `graph.remove` of its nodes). Like the reference, none of the removals asks first; Undo (`edit.undo`) takes them back.
-  Their tests are `src/tests/chain.rs` and `chain_splits.rs`.
+  A plugin's actions also have Presets...: `presets.list` for the node, and a press on one is `graph.replace`
+  with the plugin's own `path`, `pluginId` and the preset's `uri` (no commit follows: the request commits).
+  Their tests are `src/tests/chain.rs`, `chain_splits.rs` and `chain_presets.rs`.
 - **The plugin scanner** (`scan.rs`): as the JUCE app finds plugins, the helper `oscairn-plugin-scan`
   beside the program run once per plugin file (`--worker FILE`, 5 s, 4 MiB) over `--plugins DIR`
   (else `plugins` beside the program, else `../lib/clap`), CLAP then LV2, started the first time the

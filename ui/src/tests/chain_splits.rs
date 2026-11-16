@@ -8,11 +8,11 @@ use super::*;
 use crate::chain::{Outcome, Request, Screen as Chain};
 use crate::client::Error;
 
-fn sent(out: &mut Vec<crate::chain::Out>) -> Vec<(&'static str, serde_json::Value)> {
+pub(super) fn sent(out: &mut Vec<crate::chain::Out>) -> Vec<(&'static str, serde_json::Value)> {
     std::mem::take(out).into_iter().map(|(_, m, p)| (m, p)).collect()
 }
 
-fn labels(ui: &Shell) -> Vec<String> {
+pub(super) fn labels(ui: &Shell) -> Vec<String> {
     rows(ui).into_iter().map(|r| r.label.to_string()).collect()
 }
 
@@ -36,7 +36,7 @@ fn press_at(c: &mut Chain, ui: &Shell, target: usize) -> Outcome {
 }
 
 /// Presses the first row with that label.
-fn press_row(c: &mut Chain, ui: &Shell, label: &str) -> Outcome {
+pub(super) fn press_row(c: &mut Chain, ui: &Shell, label: &str) -> Outcome {
     let at = labels(ui).iter().position(|l| l == label).unwrap_or_else(|| panic!("{label} in {:?}", labels(ui)));
     press_at(c, ui, at)
 }
@@ -266,14 +266,14 @@ fn lanes_and_splits_are_added_and_removed() {
     // The Pad's actions: it is the first of two, so it can move later, not earlier.
     press_row(&mut c, ui, "1. Pad");
     assert_eq!(sent(&mut c.out), [("window.info", json!({"node": 4}))]);
-    assert_eq!(labels(ui), ["Parameters", "Turn off", "Move later", "Remove", "Routing...", "Scene controls..."]);
+    assert_eq!(labels(ui), ["Parameters", "Turn off", "Presets...", "Move later", "Remove", "Routing...", "Scene controls..."]);
     press_row(&mut c, ui, "Move later");
     assert_eq!(sent(&mut c.out), [("parts.move", json!({"part": 10, "from": 0, "to": 1, "split": 5, "lane": 1})), ("graph.commit", json!({}))]);
     // The engine's graph now has it moved; the Pad is the second.
     let mut moved = split_graph("bands", 3);
     moved["parts"][0]["splits"][0]["lanes"][1]["chain"] = json!([{"split": 6}, 4]);
     c.graph(&moved);
-    assert_eq!(labels(ui), ["Parameters", "Turn off", "Move earlier", "Remove", "Routing...", "Scene controls..."], "the last of the lane cannot move later");
+    assert_eq!(labels(ui), ["Parameters", "Turn off", "Presets...", "Move earlier", "Remove", "Routing...", "Scene controls..."], "the last of the lane cannot move later");
     press_row(&mut c, ui, "Remove");
     assert_eq!(
         sent(&mut c.out),

@@ -215,6 +215,7 @@ endif()
 # For third-party plugins (tested here on two of ours): a plugin through the library, an archive and the store.
 add_executable(oscairn-plugin-check tests/plugin_check.cpp)
 target_link_libraries(oscairn-plugin-check PRIVATE oscairn_control)
+target_compile_definitions(oscairn-plugin-check PRIVATE OSCAIRN_SAMPLE_TYPES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/types/org.oscairn.sample-types")
 # A note effect is checked for the notes it sends, an audio effect for sound.
 add_test(NAME control-plugin-check-note-effect COMMAND oscairn-plugin-check $<TARGET_FILE:oscairn_transpose> org.oscairn.transpose effect)
 # RFC 0025's CPU estimates: a stall or a burst does not spoil them, and a spoiled one can be forgotten.

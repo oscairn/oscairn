@@ -316,6 +316,12 @@ foreach(placement IN ITEMS engine worker)
     set_tests_properties(control-sample-packs-${placement} PROPERTIES TIMEOUT 120)
 endforeach()
 set_tests_properties(control-sample-packs-worker PROPERTIES ENVIRONMENT "OSCAIRN_PLUGIN_WORKER=$<TARGET_FILE:oscairn-plugin-worker>;OSCAIRN_PLUGIN_SCAN=$<TARGET_FILE:oscairn-plugin-scan>;OSCAIRN_WORKER_BUDGET_US=50000")
+# oscairn-plugin-check on an instrument silent until it has content: --state and --asset.
+add_executable(oscairn-plugin-check-content-test control/tests/plugin_check_content.cpp)
+target_link_libraries(oscairn-plugin-check-content-test PRIVATE oscairn_plugin_host)
+add_dependencies(oscairn-plugin-check-content-test samplepack_cli oscairn-sample-fixture oscairn-plugin-check)
+add_test(NAME control-plugin-check-content COMMAND oscairn-plugin-check-content-test $<TARGET_FILE:oscairn-plugin-check> $<TARGET_FILE:oscairn-sample-fixture> "${SAMPLEPACK_CLI}")
+set_tests_properties(control-plugin-check-content PROPERTIES TIMEOUT 180)
 # An archive of samples far larger than the bound installs in bounded memory, locked and resident.
 add_executable(oscairn-install-memory-test control/tests/install_memory.cpp)
 target_link_libraries(oscairn-install-memory-test PRIVATE oscairn_control)

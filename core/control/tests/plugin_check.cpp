@@ -6,6 +6,7 @@
 // stops after the export). Opt-in, for plugins not in this repository:
 //   oscairn-plugin-check PLUGIN ID synth|effect [--param ID=VALUE] [--juce-state NAME=VALUE]
 //                        [--add-build PLATFORM=PATH] [--keep-archive FILE]
+//                        [--state FILE] [--asset NAME=FILE] [--library FILE] [--sound ITEM]
 //   oscairn-plugin-check --install FILE synth|effect
 // --add-build adds another platform's build before the export; --keep-archive keeps the export,
 // for --install on that platform: installed fresh there, it must open from the store and play.
@@ -13,6 +14,19 @@
 // program in its window would; Airwindows Consolidated picks its effect this way
 // (currentProcessorName=Chorus). Each build is checked for libraries it loads from outside the
 // system and its bundle, as oscairn-sign refuses them. Prints one line per check and the renders' levels.
+// --state and --asset are for an instrument that is silent until it has content (the Sampler plays
+// nothing with no sound): FILE is the plugin's state, as it saves one (CLAP state, any bytes), and each
+// --asset is a sample (NAME.osp, a one-record Oscairn Sample Pack named by its sample id) or waveform
+// (.owf) the state names, "sample:<id>" or "waveform:<id>" in the plugin's asset dependencies. The
+// samples are installed as a sample package is, with the item types that declare them, before the
+// plugin is loaded; once it is in its part the state is put in the saved Performance's snapshot and the
+// Performance opened, so the state reaches the plugin through the path a saved sound takes. The first
+// render, the edits, the save, the export (which carries the samples and waveforms the plugin lists as
+// its dependencies, and the types) and the install on a fresh device all follow with that content, and
+// the audio check is not relaxed: with content and still silent it fails, saying so. NAME is for
+// the report only; an item is known by its content. An installed archive (--install) holds the content.
+// --library FILE installs a library archive (as a locked library) and --sound ITEM makes the part from
+// that Sound, as the library does; it opens only with the plugin here at the version it names.
 // A note effect (CLAP feature note-effect, or notes in and out with no audio output) makes no
 // sound: it is played notes, as a synth is, and checked for notes out instead, through its part's MIDI out.
 #include "oscairn/session.h"
@@ -33,6 +47,7 @@ namespace
 {
     int failures = 0;
     void check(bool ok, const std::string& what) { std::printf("%s: %s\n", ok ? "ok" : "FAIL", what.c_str()); if(!ok) ++failures; }
+    bool content = false; // --state or --asset given: a silent render says the content made no sound
     std::string read(const fs::path& f) { std::ifstream in(f, std::ios::binary); std::ostringstream out; out << in.rdbuf(); return out.str(); }
     void write(const fs::path& f, const std::string& text) { std::ofstream(f, std::ios::binary | std::ios::trunc) << text; }
     void device(const fs::path& home) { fs::create_directories(home); ::setenv("OSCAIRN_DATA_HOME", home.c_str(), 1); }
@@ -84,6 +99,7 @@ namespace
     void plays(const std::vector<float>& r, bool noteEffect, const std::string& what)
     {
         if(noteEffect) check(notesOut > 0, what + " (transforms notes): " + std::to_string(notesOut) + " note ons out");
+        else if(content && finite(r) && rms(r) <= 1e-6) check(false, what + ": the content (state and assets) did not produce sound: rms " + std::to_string(rms(r)));
         else check(finite(r) && rms(r) > 1e-6, what + ": rms " + std::to_string(rms(r)));
     }
     // A MIDI output for a part's MIDI out to reach, so a note effect's notes can be seen.
@@ -102,6 +118,22 @@ namespace
         const uint32_t size = uint32_t(xml.size() + 1);
         state = "VC2!" + std::string(reinterpret_cast<const char*>(&size), 4) + xml + '\0';
         return true;
+    }
+    // The sample item types as a library package declares them (core/control/types), so the samples install as any package's do.
+    void sampleArchive(const fs::path& archive, const std::vector<std::pair<std::string, std::string>>& assets, const fs::path& stage)
+    {
+        fs::create_directories(stage / "Types");
+        fs::copy(OSCAIRN_SAMPLE_TYPES_DIR, stage / "Types" / "org.oscairn.sample-types", fs::copy_options::recursive);
+        Package p; p.id = "check-content"; p.name = "Check content"; p.kind = "library";
+        for(const auto& [name, file] : assets)
+        {
+            const fs::path f = file;
+            if(f.extension() != ".osp" && f.extension() != ".owf") throw std::runtime_error("--asset " + name + ": only samples (.osp) and waveforms (.owf) are supported, not " + f.filename().string());
+            const auto entry = std::string(f.extension() == ".osp" ? "Samples/" : "Waveforms/") + f.filename().string();
+            fs::create_directories((stage / entry).parent_path()); fs::copy_file(f, stage / entry);
+            p.contents.push_back(entry);
+        }
+        writePackage(archive, p, stage);
     }
     // Opened without a stand-in: the plugin itself, not a silent placeholder.
     void opened(Session& s, const std::string& what)
@@ -161,24 +193,31 @@ int main(int argc, char** argv)
         std::printf("%s\n", failures ? "FAILED" : "PASSED");
         return failures ? 1 : 0;
     }
-    if(argc < 4) { std::fprintf(stderr, "usage: %s PLUGIN ID synth|effect [--param ID=VALUE] [--juce-state NAME=VALUE] [--add-build PLATFORM=PATH] [--keep-archive FILE]\n       %s --install FILE synth|effect\n", argv[0], argv[0]); return 2; }
+    if(argc < 4) { std::fprintf(stderr, "usage: %s PLUGIN ID synth|effect [--param ID=VALUE] [--juce-state NAME=VALUE] [--add-build PLATFORM=PATH] [--keep-archive FILE] [--state FILE] [--asset NAME=FILE] [--library FILE] [--sound ITEM]\n       %s --install FILE synth|effect\n", argv[0], argv[0]); return 2; }
     const std::string plugin = fs::absolute(argv[1]).string(), id = argv[2];
     bool synth = std::string(argv[3]) == "synth";
     const bool lv2 = fs::path(plugin).extension() == ".lv2";
     std::vector<std::pair<uint32_t, double>> params;
-    std::vector<std::pair<std::string, std::string>> juce, builds;
-    fs::path keep;
+    std::vector<std::pair<std::string, std::string>> juce, builds, assets;
+    std::vector<fs::path> libraries;
+    std::string sound;
+    fs::path keep, stateFile;
     for(int i = 4; i + 1 < argc; i += 2)
     {
         const std::string option = argv[i], value = argv[i + 1];
         if(option == "--keep-archive") { keep = fs::absolute(value); continue; }
+        if(option == "--library") { libraries.push_back(fs::absolute(value)); continue; }
+        if(option == "--sound") { sound = value; continue; }
+        if(option == "--state") { stateFile = fs::absolute(value); continue; }
         const auto eq = value.find('=');
         if(eq == std::string::npos) { std::fprintf(stderr, "%s needs NAME=VALUE\n", option.c_str()); return 2; }
         if(option == "--param") params.push_back({uint32_t(std::stoul(value.substr(0, eq))), std::stod(value.substr(eq + 1))});
         else if(option == "--juce-state") juce.push_back({value.substr(0, eq), value.substr(eq + 1)});
+        else if(option == "--asset") assets.push_back({value.substr(0, eq), fs::absolute(value.substr(eq + 1)).string()});
         else if(option == "--add-build") builds.push_back({value.substr(0, eq), fs::absolute(value.substr(eq + 1)).string()});
         else { std::fprintf(stderr, "unknown option %s\n", option.c_str()); return 2; }
     }
+    content = !stateFile.empty() || !assets.empty() || !libraries.empty() || !sound.empty();
     try
     {
         // Libraries from outside the system and the bundle are not on a device (docs/library-archive.md).
@@ -202,15 +241,52 @@ int main(int argc, char** argv)
             Session a(rate, block, {}, stereoIn);
             a.setBudget({64, 0}); // measured as it plays (RFC 0025), never refused: 64 blocks' time
             midiOutput(a);
-            const auto node = a.add("plugin", plugin, id);
-            stored = a.graphState().topology.nodes.at(0).plugin.path;
-            noteEffect = isNoteEffect(a);
-            if(noteEffect) { synth = true; std::printf("a note effect: checked for the notes it sends, not sound\n"); }
-            const auto part = a.addPart("Part", synth ? PartInput{} : PartInput{PartInput::Kind::Audio, 0});
-            a.insertIntoPart(part, 0, node);
+            if(!assets.empty())
+            {
+                const auto made = temp.path / "content.olib";
+                sampleArchive(made, assets, temp.path / "content.stage");
+                const auto done = a.installArchive(made.string(), false, {}, true);
+                check(done.notes.empty(), "the assets install as a sample package does: " + std::to_string(assets.size()) + " files");
+            }
+            for(const auto& library : libraries)
+            {
+                const auto done = a.installArchive(library.string(), true, {}, true); // as a locked library, its items keeping their IDs
+                check(done.notes.empty(), "the library installs: " + library.filename().string() + (done.notes.empty() ? std::string() : " " + done.notes[0]));
+            }
+            NodeId node = 0;
+            if(sound.empty())
+            {
+                node = a.add("plugin", plugin, id);
+                stored = a.graphState().topology.nodes.at(0).plugin.path;
+                noteEffect = isNoteEffect(a);
+                if(noteEffect) { synth = true; std::printf("a note effect: checked for the notes it sends, not sound\n"); }
+            }
+            // --sound: the part the library makes from that Sound, as opening it from the library does.
+            const auto part = sound.empty() ? a.addPart("Part", synth ? PartInput{} : PartInput{PartInput::Kind::Audio, 0}) : a.partFromSound(sound);
+            if(sound.empty()) a.insertIntoPart(part, 0, node);
+            else
+            {
+                node = a.graphState().topology.nodes.at(0).id;
+                stored = a.graphState().topology.nodes.at(0).plugin.path;
+            }
             if(noteEffect) a.setPartMidiOut(part, {{{DeviceRule::Kind::All}}, 0});
             a.commit();
             check(a.sessionStatus().failures.empty(), "loads in a part");
+            if(!stateFile.empty())
+            {
+                // The state, put in the saved Performance's snapshot and opened: the path a saved sound's state takes to the plugin.
+                const auto stateItem = a.savePerformanceToLibrary("Check");
+                const auto item = fs::path(a.libraryQuery({}).items.front().path);
+                int replaced = 0;
+                // Each snapshot of the node (nodes/<key>/<stamp>/state/state.clap) holds the state as the plugin saved it.
+                for(const auto& f : fs::recursive_directory_iterator(item / "nodes"))
+                    if(f.is_regular_file() && f.path().filename() == "state.clap") { write(f.path(), read(stateFile)); ++replaced; }
+                check(replaced > 0, "the plugin saves a state, replaced by " + stateFile.filename().string());
+                a.libraryRescan();
+                a.loadPerformanceFromLibrary(stateItem);
+                opened(a, "opens with that state");
+                node = a.graphState().topology.nodes.at(0).id;
+            }
             const auto first = render(a, synth);
             plays(first, noteEffect, "plays");
             // RFC 0025 step 5: what it cost here, for its plugin package's estimate on this platform.
@@ -272,7 +348,7 @@ int main(int argc, char** argv)
             }
             check(notes.empty(), "exported with nothing left out");
             const auto packed = readPackage(archive, {});
-            check(packed.plugins.size() == 1 && packed.plugins[0].builds.size() == 1 + builds.size(), "the archive carries the plugin's builds: " + std::to_string(packed.plugins[0].builds.size()));
+            check(packed.plugins.size() == 1 && packed.plugins[0].builds.size() == 1 + builds.size(), "the archive carries the plugin's builds: " + std::to_string(packed.plugins.empty() ? 0 : packed.plugins[0].builds.size()));
             if(!keep.empty()) fs::copy_file(archive, keep, fs::copy_options::overwrite_existing);
         }
         const auto there = installAndOpen(archive, temp.path / "b", stored, synth, &savedValues);

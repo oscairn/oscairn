@@ -7,10 +7,13 @@
 // names, after "pid <its process>": "<sample id> <frames> <FNV-1a 64 of the block's first channel>", or "failed <ref> <reason>".
 // A new instance takes its references from OSCAIRN_SAMPLE_FIXTURE_REFS (comma-separated), resolving
 // none until a state is loaded, as the host's asset store is set after a plugin is activated.
+// Like a Sampler with no sound it is silent until content is loaded: once a state resolved and
+// decoded a sample, a held note sounds a tone; a state naming a sample the store lacks leaves it silent.
 #include <clap/clap.h>
 #include <oscairn-clap/assets.h>
 #include <samplepack.h>
 #include <cinttypes>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -45,57 +48,65 @@ namespace
         clap_plugin_t api{};
         const clap_host_t* host;
         std::vector<std::string> refs;
+        bool ready = false;      // a sample decoded and none failed: held notes sound
+        int held = 0;            // note ons without their note off
+        uint64_t phase = 0;
         std::unique_ptr<sp_flac_scratch> scratch = std::make_unique<sp_flac_scratch>();
 
         // As a sampler loads one: where the record is, then its first block decoded from a read-only mapping of the pack.
-        void decode(const oscairn_host_assets_t* assets, const std::string& id)
+        bool decode(const oscairn_host_assets_t* assets, const std::string& id)
         {
             oscairn_asset_ref_t ref{};
             std::snprintf(ref.path, sizeof ref.path, "sample:%s", id.c_str());
             char path[4096], why[512] = "";
             oscairn_sample_location_t at{};
-            if(!assets->resolve_sample || !assets->resolve_sample(host, &ref, path, sizeof path, &at, why, sizeof why)) { report("failed sample:" + id + " " + why); return; }
+            if(!assets->resolve_sample || !assets->resolve_sample(host, &ref, path, sizeof path, &at, why, sizeof why)) { report("failed sample:" + id + " " + why); return false; }
             const int fd = ::open(path, O_RDONLY);
             struct stat info{};
-            if(fd < 0 || ::fstat(fd, &info) != 0) { report("failed sample:" + id + " cannot open " + path); if(fd >= 0) ::close(fd); return; }
+            if(fd < 0 || ::fstat(fd, &info) != 0) { report("failed sample:" + id + " cannot open " + path); if(fd >= 0) ::close(fd); return false; }
             void* map = ::mmap(nullptr, size_t(info.st_size), PROT_READ, MAP_SHARED, fd, 0);
             ::close(fd);
-            if(map == MAP_FAILED) { report("failed sample:" + id + " cannot map"); return; }
+            if(map == MAP_FAILED) { report("failed sample:" + id + " cannot map"); return false; }
             sp_index_entry entry{{}, at.offset, at.length, at.preload};
             unhex(id, entry.id);
             std::vector<int16_t> ch0(SP_FLAC_MAX_BLOCK), ch1(SP_FLAC_MAX_BLOCK);
             uint64_t frames = 0;
             const auto s = sp_record_decode(static_cast<const uint8_t*>(map), size_t(info.st_size), &entry, 0, 1, 0, scratch.get(), ch0.data(), ch1.data(), ch0.size(), &frames);
             ::munmap(map, size_t(info.st_size));
-            if(s != SP_OK) { report("failed sample:" + id + " decode " + std::to_string(s)); return; }
+            if(s != SP_OK) { report("failed sample:" + id + " decode " + std::to_string(s)); return false; }
             uint64_t h = 1469598103934665603ull;
             for(uint64_t i = 0; i < frames; ++i) for(int b = 0; b < 2; ++b) { h ^= uint8_t(uint16_t(ch0[i]) >> (8 * b)); h *= 1099511628211ull; }
             char line[160];
             std::snprintf(line, sizeof line, "%s %" PRIu64 " %016" PRIx64, id.c_str(), frames, h);
             report(line);
+            return true;
         }
         void load()
         {
             const auto* assets = static_cast<const oscairn_host_assets_t*>(host->get_extension(host, OSCAIRN_EXT_ASSETS));
             if(!assets) { report("failed all no oscairn.assets draft 4"); return; }
             report("pid " + std::to_string(::getpid())); // which process it runs in: the engine's or a worker's
+            ready = false;
+            bool failed = false, any = false;
+            auto one = [&](const std::string& id) { const bool ok = decode(assets, id); any = any || ok; failed = failed || !ok; };
             for(const auto& r : refs)
             {
-                if(r.rfind("sample:", 0) == 0) { decode(assets, r.substr(7)); continue; }
+                if(r.rfind("sample:", 0) == 0) { one(r.substr(7)); continue; }
                 oscairn_asset_ref_t ref{};
                 std::snprintf(ref.path, sizeof ref.path, "%s", r.c_str());
                 char path[4096], why[512] = "";
-                if(!assets->resolve(host, &ref, path, sizeof path, why, sizeof why)) { report("failed " + r + " " + why); continue; }
+                if(!assets->resolve(host, &ref, path, sizeof path, why, sizeof why)) { report("failed " + r + " " + why); failed = true; continue; }
                 // A waveform: its samples, by the library's reading of the file.
                 std::vector<uint8_t> bytes(SP_WAVEFORM_MAX_BYTES);
                 FILE* f = std::fopen(path, "rb");
                 const size_t n = f ? std::fread(bytes.data(), 1, bytes.size(), f) : 0;
                 if(f) std::fclose(f);
                 size_t samples = 0, banks = 0;
-                if(sp_waveform_check(bytes.data(), n, &samples, &banks) != SP_OK) { report("failed " + r + " not a waveform"); continue; }
+                if(sp_waveform_check(bytes.data(), n, &samples, &banks) != SP_OK) { report("failed " + r + " not a waveform"); failed = true; continue; }
                 uint8_t id[32];
-                for(size_t i = 0; i < samples; ++i) if(sp_waveform_sample(bytes.data(), n, i, id) == SP_OK) decode(assets, hex(id));
+                for(size_t i = 0; i < samples; ++i) if(sp_waveform_sample(bytes.data(), n, i, id) == SP_OK) one(hex(id));
             }
+            ready = any && !failed;
         }
 
         explicit Plugin(const clap_host_t* h) : host(h)
@@ -115,8 +126,18 @@ namespace
             api.start_processing = [](const clap_plugin_t*) { return true; };
             api.stop_processing = [](const clap_plugin_t*) {};
             api.reset = [](const clap_plugin_t*) {};
-            api.process = [](const clap_plugin_t*, const clap_process_t* b) -> clap_process_status {
+            api.process = [](const clap_plugin_t* p, const clap_process_t* b) -> clap_process_status {
+                auto& self = get(p);
+                for(uint32_t i = 0; b->in_events && i < b->in_events->size(b->in_events); ++i)
+                {
+                    const auto* e = b->in_events->get(b->in_events, i);
+                    if(e->type == CLAP_EVENT_NOTE_ON) ++self.held;
+                    else if((e->type == CLAP_EVENT_NOTE_OFF || e->type == CLAP_EVENT_NOTE_CHOKE) && self.held > 0) --self.held;
+                }
                 for(uint32_t o = 0; o < b->audio_outputs_count; ++o) for(uint32_t c = 0; c < b->audio_outputs[o].channel_count; ++c) std::memset(b->audio_outputs[o].data32[c], 0, b->frames_count * sizeof(float));
+                if(self.ready && self.held > 0 && b->audio_outputs_count)
+                    for(uint32_t i = 0; i < b->frames_count; ++i, ++self.phase)
+                        for(uint32_t c = 0; c < b->audio_outputs[0].channel_count; ++c) b->audio_outputs[0].data32[c][i] = float(.2 * std::sin(double(self.phase) * 6.283185307179586 * 220 / 48000));
                 return CLAP_PROCESS_CONTINUE;
             };
             api.get_extension = [](const clap_plugin_t*, const char* id) -> const void* {
@@ -125,6 +146,13 @@ namespace
                     [](const clap_plugin_t*, uint32_t i, bool input, clap_audio_port_info_t* p) -> bool {
                         if(input || i) return false;
                         *p = {}; p->id = 1; std::strcpy(p->name, "Main"); p->flags = CLAP_AUDIO_PORT_IS_MAIN; p->channel_count = 2; p->port_type = CLAP_PORT_STEREO; p->in_place_pair = CLAP_INVALID_ID;
+                        return true;
+                    }};
+                static const clap_plugin_note_ports_t notes{
+                    [](const clap_plugin_t*, bool input) -> uint32_t { return input ? 1 : 0; },
+                    [](const clap_plugin_t*, uint32_t i, bool input, clap_note_port_info_t* p) -> bool {
+                        if(!input || i) return false;
+                        *p = {}; p->id = 1; std::strcpy(p->name, "Notes"); p->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI; p->preferred_dialect = CLAP_NOTE_DIALECT_CLAP;
                         return true;
                     }};
                 static const clap_plugin_state_t state{
@@ -152,6 +180,7 @@ namespace
                     },
                     nullptr};
                 if(!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &ports;
+                if(!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &notes;
                 if(!std::strcmp(id, CLAP_EXT_STATE)) return &state;
                 if(!std::strcmp(id, OSCAIRN_EXT_ASSET_DEPENDENCIES)) return &dependencies;
                 return nullptr;

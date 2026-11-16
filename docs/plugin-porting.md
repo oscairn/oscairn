@@ -1094,7 +1094,7 @@ and the same tests with the plugin in a worker process (the `*-workers` tests). 
 under AddressSanitizer and ThreadSanitizer. Two checks run on a plugin as built, without
 writing tests:
 
-- `oscairn-plugin-check PLUGIN ID synth|effect [--param ID=VALUE]` (built as
+- `oscairn-plugin-check PLUGIN ID synth|effect [--param ID=VALUE] [--state FILE] [--asset NAME=FILE]` (built as
   `build/core/control/oscairn-plugin-check`): the path a musician's sound takes. The plugin
   plays in a part, is saved to the library and opened again with every parameter as saved, is
   exported in an archive with its build, and is installed on a fresh device, where it opens
@@ -1107,6 +1107,26 @@ writing tests:
   its part's MIDI out, instead of making sound. It prints one line per check, and what the
   plugin cost while it played (its busiest 256-frame block at 48 kHz as a share of the block's
   time, and its memory) as the `--estimate` for `oscairn-sign plugin-package`.
+  **An instrument that is silent until it has content** (the Sampler with no sound) fails
+  "plays" as any silent plugin does; the check has no allowance for it. Give it content:
+  `--state FILE` is the plugin's state as it saves one (a CLAP state; for a plugin with sound
+  contexts, a sound's `state.clap` from a library's `Sounds/.../nodes/<key>/state/`), and each
+  `--asset NAME=FILE` is a sample (`.osp`, a one-record Oscairn Sample Pack named by its sample
+  id) or waveform (`.owf`) that state names as `sample:<id>` or `waveform:<id>`. The check
+  installs the files as a sample package installs them (with the sample item types), puts the
+  state in the plugin's saved snapshot and opens it, so the state reaches the plugin as a saved
+  Sound's does, before the first render. Every later step then runs with the content: the
+  Performance is saved with the state, the export carries the samples and waveforms the plugin
+  lists as its asset dependencies (so it must list them, `oscairn.asset-dependencies`), and
+  "plays there" is on a fresh device that has only the archive. A state that names a sample not
+  given fails with "the content (state and assets) did not produce sound". Only samples and
+  waveforms are supported as assets, found through `resolve_sample` or `resolve` with an empty
+  library; a plugin that reads files from an asset library by path is not covered.
+  `--library FILE --sound ITEM` installs a library archive as a locked library and opens its
+  Sound in the part as the library does; the sound opens only when the plugin it names is
+  here at the version it names (found by its `pathHint` from the working folder, or in the
+  plugin store), else it is a stand-in and the check fails saying so. An archive checked with
+  `--install` needs no content options: it holds the content.
 - `core/lv2-host/tests/production/run.py PROBE OUT --case NAME,PATH,ID,synth|effect,PARAM,VALUE`:
   renders at 44.1 and 48 kHz, 37- and 512-frame blocks, offline and realtime, a fresh-instance
   repeat and a parameter edit that must change the sound

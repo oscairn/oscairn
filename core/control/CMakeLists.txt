@@ -439,6 +439,11 @@ target_link_libraries(oscairn-scene-save-test PRIVATE oscairn_control)
 add_test(NAME control-scene-save COMMAND oscairn-scene-save-test $<TARGET_FILE:oscairn_step_sequencer> $<TARGET_FILE:oscairn_basic_synth>)
 set_tests_properties(control-scene-save PROPERTIES TIMEOUT 60)
 
+add_executable(oscairn-edit-steps-test tests/edit_steps.cpp)
+target_link_libraries(oscairn-edit-steps-test PRIVATE oscairn_control_json)
+add_test(NAME control-edit-steps COMMAND oscairn-edit-steps-test $<TARGET_FILE:oscairn_basic_synth>)
+set_tests_properties(control-edit-steps PROPERTIES TIMEOUT 60)
+
 add_executable(oscairn-recording-test tests/recording.cpp)
 target_include_directories(oscairn-recording-test PRIVATE ../clap-host/tests)
 target_link_libraries(oscairn-recording-test PRIVATE oscairn_control_json)

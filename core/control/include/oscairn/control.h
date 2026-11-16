@@ -709,6 +709,9 @@ namespace oscairn
         // history keeps at most 8 removed or replaced plugins alive; older steps go.
         struct History { std::string undo, redo; };
         virtual History history() const = 0;
+        // The step for what changed that needs no commit, taken now, not at the next tick: a request that
+        // reads the history asks first. A session over a connection has the engine's.
+        virtual void recordEdits() {}
         virtual bool undo() = 0; // false: nothing to undo
         virtual bool redo() = 0;
         // Each part's and bus's recent peak after its fader, held and falling, for the Mixer.

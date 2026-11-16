@@ -1570,6 +1570,7 @@ namespace oscairn
             {
                 if( method == "edit.undo" ) c.undo();
                 if( method == "edit.redo" ) c.redo();
+                if( method == "edit.history" ) c.recordEdits(); // an edit that needs no commit is a step when answered, not at the tick
                 const auto h = c.history();
                 return "{\"undo\":" + quote(h.undo) + ",\"redo\":" + quote(h.redo) + '}';
             }

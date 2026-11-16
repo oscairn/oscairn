@@ -197,6 +197,7 @@ namespace oscairn
         void setMaster(double level, double pan) override;
         void setNodeRole(NodeId node, const std::string& role) override;
         History history() const override;
+        void recordEdits() override { if(!staged_) record(); }
         bool undo() override;
         bool redo() override;
         /// Forgets every step, as opening a Performance does; a host calls it once its startup

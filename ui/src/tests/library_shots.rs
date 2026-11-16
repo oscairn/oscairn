@@ -138,6 +138,7 @@ fn pictures_of_the_library() {
             let step = s.f.engine.request(); // performance.info: the engine is busy with another load
             s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": step["id"], "error": {"code": -32009, "message": "busy", "data": {"busy": "library.load", "ms": 2600}}})));
             s.f.pump();
+            s.f.pump(); // the busy answer is heard (Event::Busy), then its reply
             s.f.screen.frame();
             s.f.screen.frame();
             png(&s.f.screen, &format!("library-{window}-{theme_name}-loading"));

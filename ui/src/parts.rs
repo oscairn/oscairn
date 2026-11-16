@@ -517,7 +517,7 @@ impl Screen {
             (Request::Meters, Ok(r)) => self.meters(&r),
             (Request::Status, Ok(r)) => self.status(&r),
             (Request::Edit, Err(e)) if e.code != 0 => {
-                self.said = format!("The engine refused: {}", e.message);
+                self.said = crate::client::refusal(&e);
                 self.show();
                 return true;
             }

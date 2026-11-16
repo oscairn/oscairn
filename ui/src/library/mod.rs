@@ -810,7 +810,7 @@ impl Screen {
                         let params = self.filters.params(self.kind);
                         self.push_after(Duration::from_millis(500), Request::Query(self.generation), "library.query", params);
                     }
-                    Err(e) if e.code != 0 && generation == self.generation => self.say(format!("The engine refused: {}", e.message)),
+                    Err(e) if e.code != 0 && generation == self.generation => self.say(crate::client::refusal(&e)),
                     _ => {}
                 }
                 false
@@ -1154,6 +1154,12 @@ impl Screen {
         if !self.auditioning.id.is_empty() {
             self.push(Request::Audition(open::Aud::Get), "audition.get", json!({}));
         }
+    }
+
+    /// The Performance the engine is opening for this screen, for the top bar's loading chip: none while the question about
+    /// unsaved changes is open (nothing has been asked of the engine yet; nothing switches until it is answered).
+    pub fn opening_name(&self) -> Option<String> {
+        self.job.as_ref().filter(|_| self.notice_for != Some(NoticeFor::SaveFirst)).map(|j| j.name.clone())
     }
 
     /// Elapsed time on what the engine is busy with, said on the line under the list.

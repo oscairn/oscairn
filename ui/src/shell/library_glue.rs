@@ -40,6 +40,7 @@ impl App {
         if self.screen == Screen::Library {
             self.show_bar();
         }
+        self.refresh_wait();
         if self.library.take_scan() {
             self.library_scan();
         }

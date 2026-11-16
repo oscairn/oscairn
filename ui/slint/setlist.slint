@@ -4,6 +4,7 @@
 // Next under them. Each pane's cursor is a border; the slot playing is marked apart from it.
 
 import { Theme, Section, Button, Cursor, RowMark, RowStyle } from "theme.slint";
+import { Loading } from "loading.slint";
 
 export struct ListRow {
     name: string,
@@ -20,6 +21,7 @@ export struct SlotData {
     empty: bool,
     opens: bool,
     playing: bool,
+    opening: bool, // the engine is opening it now: a bar along the tile's foot
     cursor: bool,
 }
 
@@ -136,6 +138,11 @@ export component Setlist inherits Rectangle {
             overflow: elide;
             horizontal-alignment: SetlistState.grid ? center : left;
             vertical-alignment: center;
+        }
+        if slot.opening: Loading {
+            x: Theme.pad-wide;
+            y: parent.height - self.height - Theme.pad-tight;
+            width: parent.width - 2 * Theme.pad-wide;
         }
         TouchArea {
             clicked => { SetlistState.tapped-slot(i); }

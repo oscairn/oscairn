@@ -109,6 +109,7 @@ fn a_load_that_takes_seconds_leaves_the_screen_alive() {
     assert_eq!(step["method"], "performance.info");
     s.f.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": step["id"], "error": {"code": -32009, "message": "busy", "data": {"busy": "library.load", "ms": 800}}})));
     s.f.pump();
+    s.f.pump(); // the busy answer is heard (Event::Busy), then its reply
     assert_eq!(footer(&ui).0, "Opening Brass Corner...");
     assert_eq!(value_of(&ui, "Brass Corner"), "Opening  ·  brass  ·  warm");
     shell::act(Action::Move { pane: None, by: 1 });

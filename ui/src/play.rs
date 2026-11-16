@@ -442,7 +442,7 @@ impl Screen {
             (Request::Meters, Ok(r)) => self.meters(&r),
             (Request::Scenes, Ok(_)) => return true,
             (Request::Edit | Request::Scenes, Err(e)) if e.code != 0 => {
-                self.say(format!("The engine refused: {}", e.message));
+                self.say(crate::client::refusal(&e));
                 self.show();
             }
             (Request::Knobs(r), result) => {

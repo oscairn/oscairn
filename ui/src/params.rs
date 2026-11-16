@@ -438,7 +438,7 @@ impl Screen {
                 }
             }
             (Request::Set | Request::List, Err(e)) if e.code != 0 => {
-                self.message = format!("The engine refused: {}", e.message);
+                self.message = crate::client::refusal(&e);
                 self.show();
                 return true;
             }

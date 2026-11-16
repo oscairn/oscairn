@@ -28,8 +28,11 @@ export component Shell inherits Window {
     preferred-height: 720px;
     background: Theme.background;
     default-font-family: Theme.font-family;
-    // Empty while the engine answers; else what is wrong ("busy 3.2 s", "lost: ...").
+    // Empty while the engine is as it should be; else a sentence for what is wrong and unexplained (no answer, a wait far past
+    // its usual, the connection lost): a banner. An expected wait (a Performance opening) is never this: it is the top bar's
+    // loading chip (Bar.loading). `engine-lost` is the connection gone (danger); else a warning.
     in property <string> engine;
+    in property <bool> engine-lost;
     // The screen shown: 0 Home; 1 Setlist; 2 a JUCE screen opening; 3 Play, 4 Part, 5 chain, 6 sounds, 7 a grid page, 8 a scene's setup, 9 the Parts list, 10 the Mixer, 11 the Controls page, 12 Routing, 13 the Library, 14 the Settings app (`opening` names a JUCE screen).
     in property <int> screen;
     in property <string> opening;
@@ -173,7 +176,7 @@ export component Shell inherits Window {
         y: Theme.bar-height + Theme.gap;
         width: parent.width - 2 * Theme.margin;
         height: Theme.touch;
-        fill: Theme.danger;
+        fill: root.engine-lost ? Theme.danger : Theme.warning;
         Text {
             x: Theme.pad-wide;
             width: parent.width - 2 * Theme.pad-wide;
@@ -181,7 +184,7 @@ export component Shell inherits Window {
             overflow: elide;
             font-size: Theme.body;
             color: Theme.background;
-            text: "Engine " + root.engine;
+            text: root.engine;
         }
     }
 }

@@ -521,7 +521,7 @@ impl Screen {
                 }
             }
             (Request::Edit | Request::Live | Request::Value(..), Err(e)) if e.code != 0 => {
-                self.said = format!("The engine refused: {}", e.message);
+                self.said = crate::client::refusal(&e);
                 self.show();
                 return true;
             }

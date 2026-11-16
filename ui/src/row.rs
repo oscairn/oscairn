@@ -315,7 +315,7 @@ impl Row {
                     self.seen = self.touches;
                 }
             }
-            (Request::Set | Request::Assign, Err(e)) if e.code != 0 => self.message = format!("The engine refused: {}", e.message),
+            (Request::Set | Request::Assign, Err(e)) if e.code != 0 => self.message = crate::client::refusal(&e),
             (Request::Assign, Ok(_)) => self.out.push((Request::Assignments, "assignments.get", json!({}))),
             _ => {}
         }

@@ -248,6 +248,33 @@ The resource section shows two meters, CPU over RAM:
   rectangle inside the section and that no pixel outside it changes, and that nothing is drawn at
   rest.
 
+## Waits
+
+The rule: **an expected wait shows the loading indicator; the banner is for unexplained faults.** Opening a Performance is a
+normal wait (a fraction of a second to a few seconds; 4 to 20 s for a big one on the FANTOM, docs/control-protocol.md,
+"Long requests"), so it never reads as a fault.
+
+- **The indicator** is `slint/loading.slint`, one component with a text and an optional progress (0..1; negative: none,
+  and the bar sweeps), drawn in the theme's colors, its thickness and sweep period the theme's (`Theme.loading-bar`,
+  `loading-segment`, `loading-period`; a test reads the file for a literal). Others use it as is (a library opening, a package
+  install, an export). It sweeps through `animation-tick()`, so the window redraws only while it exists: the shell makes it
+  while a wait lasts and removes it when it ends, and a test holds that no frame follows (`tests/loading.rs`).
+- **Where:** the top bar's title area, as a chip at its right edge, "Loading NAME", beside the Performance that is still
+  shown (the title's room shortens for it, never to under half). On the Setlist the slot being opened also has the bar along
+  its foot. Nothing covers the screen, nothing blocks Back, EXIT or the dial.
+- **What names it** (`shell/wait_glue.rs`): the name the UI itself asked for (the Setlist's slot, the Library's row: not while
+  the question about unsaved changes is open, as nothing has been asked of the engine); "Loading the last Performance" for
+  `performance.reopen`; "Loading a Performance" when the engine's busy answer names a load another client asked for
+  (`data.busy`, then `engine.busy` ends it: the engine tells no name); "Working" for another long request. The engine reports
+  no progress, so the bar sweeps. A protocol addition that tells the name and progress is wanted (see ui/PROGRESS.md).
+- **Busy answers** during a load are never errors: reads and steps are asked again as before, and a screen that shows a refusal
+  says "Still opening a Performance. Try again in a moment." (`client::refusal`), not the engine's text. An edit refused during a
+  load is not retried: it would land on the Performance that opens next.
+- **The banner** under the bar stays for three cases and says what is happening in plain words: the connection lost (danger
+  color), a wait far past its usual (30 s, half as long again as the slowest measured load; warning color: "Opening X is taking
+  much longer than usual. Wait for it, or restart the instrument if it never ends."), and a request that is no load, no
+  install, with no answer after 2 s (reading a setlist: "The sound engine is slow to answer...").
+
 ## The Setlist
 
 `setlist.rs` and `slint/setlist.slint`, from the prototype: the setlists on the left (pane 0, E1 on
@@ -625,7 +652,7 @@ set `OSCAIRN_UI_LIBRARY=0`** (any other non-empty value opens the Rust one whate
 - **Opening a Performance** is the JUCE job's chain, `performance.info` (a question about unsaved changes, `notice.rs`),
   `budget.estimate`, `performance.prepare` when it fits beside the open one, `library.load`. The engine answers every
   other request as busy (-32009) while one of them runs, so each step is asked again after 100 ms; the line under the list
-  says "Opening X... N s", the row says "Opening", the top bar says the engine is busy past 400 ms, and the screen keeps
+  says "Opening X... N s", the row says "Opening", the top bar shows "Loading X" (see "Waits" below), and the screen keeps
   answering the dial. A Performance chosen meanwhile waits and replaces any waiting.
 - **A question over the screen** (`notice.rs`, `slint/notice.slint`): the JUCE app's alert window as a title, a wrapping
   message and buttons down a panel; the border cursor starts nowhere, a press chooses, Cancel closes with no choice.

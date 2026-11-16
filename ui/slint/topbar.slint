@@ -5,6 +5,7 @@
 // an update repaints its own digits and bar and nothing else (src/tests.rs proves it).
 
 import { Theme, Field, Button, Cursor, FitText } from "theme.slint";
+import { Loading } from "loading.slint";
 
 // The section's columns, from the theme's small type: whole pixels, fixed for a theme.
 global Columns {
@@ -237,6 +238,10 @@ export global Bar {
     in property <[BarAction]> actions; // what the screen shown offers
     in property <bool> pill-cursor; // the cursor is on the Performance's name (Save As New)
     in property <string> notice; // what the last action said ("Saved"), in the name's place for a while
+    // A wait the player expects ("Loading Dusk Choir"): a chip at the title's right edge while it lasts, with the engine's
+    // progress when it reports one (0..1; negative: none, the bar sweeps). The name beside it stays.
+    in property <string> loading;
+    in property <float> loading-progress: -1;
     callback action(int);
     // A bar too narrow for its actions folds them into one "More" (a menu of them): set by the bar, which the shell reads.
     in-out property <bool> more;
@@ -325,6 +330,9 @@ export component TopBar inherits Rectangle {
     pure function room-for(actions: length, meters: length, rec: length) -> length {
         return root.width - Theme.margin - Theme.pad - (Bar.home-button ? Theme.touch : 0px) - back-w - actions - rec - tempo-width - meters - (items - 1) * gap;
     }
+    // The wait's chip: as wide as its words, never more than half the title's room; the title gives it that room.
+    property <length> chip-width: Bar.loading == "" ? 0px : min(chip-measure.preferred-width, pill.width * 0.5);
+    property <length> chip-room: Bar.loading == "" ? 0px : chip-width + Theme.pad-wide;
     height: Theme.bar-height;
     background: Theme.background;
     changed actions-mode => { Bar.more = self.actions-mode == 2; Bar.more-changed(); }
@@ -334,6 +342,11 @@ export component TopBar inherits Rectangle {
         font-size: Bar.title-field ? Theme.small : Theme.body;
         font-weight: Bar.title-field ? 400 : 700;
         text: Bar.path.length > 0 ? Bar.path[0] : "";
+    }
+    chip-measure := Text {
+        visible: false;
+        font-size: Theme.small;
+        text: Bar.loading;
     }
     back-measure := Text {
         visible: false;
@@ -411,13 +424,20 @@ export component TopBar inherits Rectangle {
             }
             title := PathTitle {
                 x: Bar.title-field ? Theme.pad-wide : 0px;
-                width: parent.width - 2 * self.x;
+                width: parent.width - 2 * self.x - root.chip-room;
                 height: parent.height;
                 options: Bar.path;
                 notice: Bar.notice;
                 size: Bar.title-field ? Theme.small : Theme.body;
                 bold: !Bar.title-field;
                 ink: Bar.notice == "" ? Theme.text : Theme.accent;
+            }
+            if Bar.loading != "": Loading {
+                x: parent.width - self.width - (Bar.title-field ? Theme.pad-wide : 0px);
+                y: (parent.height - self.height) / 2;
+                width: root.chip-width;
+                text: Bar.loading;
+                progress: Bar.loading-progress;
             }
         }
         if root.n-actions > 0 && root.actions-mode < 2: HorizontalLayout {

@@ -46,6 +46,7 @@ use std::time::{Duration, Instant};
 
 mod library_glue;
 mod settings_glue;
+mod wait_glue;
 
 pub use settings_glue::theme_followed;
 #[cfg(test)]
@@ -188,6 +189,8 @@ pub struct App {
     /// performance.info and graph.get refused while the engine was busy: asked again at the next meters.
     stale: bool,
     watchdog: slint::Timer,
+    /// What the player waits on, and what is wrong (wait_glue.rs).
+    wait: wait_glue::Wait,
     screen: Screen,
     home: Home,
     tiles: Rc<VecModel<TileData>>,
@@ -477,6 +480,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             flush: slint::Timer::default(),
             stale: false,
             watchdog: slint::Timer::default(),
+            wait: wait_glue::Wait::default(),
             screen: Screen::Home,
             home,
             tiles,
@@ -558,6 +562,13 @@ pub fn library_in_rust(on: bool) {
     with_app(|a| a.library_in_rust = on)
 }
 
+/// Tests: how long a wait lasts before the banner says it is far past its usual, and how long a request nothing explains
+/// may be out before it says the engine is slow to answer (30 s and 2 s).
+#[cfg(test)]
+pub fn wait_limits(long: Duration, no_answer: Duration) {
+    with_app(|a| a.wait.limit(long, no_answer))
+}
+
 /// Tests: the memory the shell tells the engine it holds.
 #[cfg(test)]
 pub fn memory_override(bytes: Option<u64>) {
@@ -621,9 +632,8 @@ impl App {
             self.wake_meters();
         }
         let waited = request.waited_on();
-        if self.client.send(request, method, params) && waited && !self.watchdog.running() {
-            // Runs only while something is out, so the shell does not wake at rest.
-            self.watchdog.start(slint::TimerMode::Repeated, Duration::from_millis(250), || with_app(|a| a.watch()));
+        if self.client.send(request, method, params) && waited {
+            self.refresh_wait();
         }
     }
 
@@ -641,25 +651,13 @@ impl App {
 
     fn watch(&mut self) {
         self.on_library(library::Screen::tick);
-        let Some(ui) = self.ui() else { return };
-        match self.client.waiting(Request::waited_on) {
-            Some(out) if out >= Duration::from_millis(400) => ui.set_engine(format!("busy {:.1} s", out.as_secs_f32()).into()),
-            Some(_) => {}
-            None => {
-                self.watchdog.stop();
-                if self.client.connected() {
-                    ui.set_engine(SharedString::new());
-                }
-            }
-        }
+        self.refresh_wait();
     }
 
     fn event(&mut self, event: Event<Request>) {
         match event {
             Event::Connected => {
-                if let Some(ui) = self.ui() {
-                    ui.set_engine(SharedString::new());
-                }
+                self.connection(None);
                 self.last_meters = None;
                 self.last_status = None;
                 self.last_other = None;
@@ -690,12 +688,12 @@ impl App {
                 self.last_status = None;
                 self.last_other = None;
                 self.pending_status = None;
-                if let Some(ui) = self.ui() {
-                    ui.set_engine(format!("lost: {why}").into());
-                }
+                self.connection(Some(why));
             }
+            Event::Busy { method } => self.busy_with(method),
             Event::Notification { method, params } => match method.as_str() {
                 "status" => self.status(&params),
+                "engine.busy" => self.busy_over(),
                 "record" => {
                     let takes = topbar::recording(&params);
                     self.show(|s| s.recording = takes)
@@ -850,6 +848,16 @@ impl App {
     }
 
     fn reply(&mut self, request: Request, result: Result<Value, Error>) {
+        // A long request of this UI's own that the engine ran to its end: it was not busy with another client's then (the
+        // `engine.busy` that says so may not have come yet, or at all).
+        if result.is_ok() && request.expected() {
+            self.wait.forget_busy();
+        }
+        self.answered(request, result);
+        self.refresh_wait();
+    }
+
+    fn answered(&mut self, request: Request, result: Result<Value, Error>) {
         if let (true, Ok(answer)) = (is_meters(&request), &result) {
             let signal = answer["meters"].as_array().is_some_and(|m| m.iter().any(|x| x["peak"].as_f64().unwrap_or(0.) > 0.001));
             self.meters_answered(signal);
@@ -951,12 +959,13 @@ impl App {
                     self.stale = true;
                 }
                 match request {
+                    Request::Save if e.code == BUSY => self.say(&e.message),
                     Request::Save if e.code != 0 => self.say(&format!("Not saved: {}", e.message)),
                     Request::RecordDo(what) if e.code != 0 => {
                         self.say(&format!("{}: {}", if what == "capture" { "Not captured" } else { "Not recorded" }, e.message));
                         self.ask(Request::Record, "record.get");
                     }
-                    Request::History if e.code != 0 => self.say(&format!("The engine refused: {}", e.message)),
+                    Request::History if e.code != 0 => self.say(&crate::client::refusal(&e)),
                     Request::Reopen if e.code != 0 => eprintln!("oscairn-ui: performance.reopen: {}", e.message),
                     Request::Shell if e.code != 0 => eprintln!("oscairn-ui: memory.shell: {}", e.message),
                     _ => {}
@@ -1594,6 +1603,7 @@ impl App {
             self.send(Request::Setlist(request), method, params);
         }
         self.follow();
+        self.refresh_wait();
     }
 
     /// Something for Play, then what it asks the engine sent.

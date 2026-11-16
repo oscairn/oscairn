@@ -25,6 +25,9 @@ pub enum Event<R> {
     Connected,
     Lost(String),
     Reply { request: R, result: Result<Value, Error> },
+    /// The engine refused a request as busy (-32009) and named the long request it is busy with (`data.busy`:
+    /// `library.load`, `performance.prepare`, ...): sent just before that request's own `Reply`.
+    Busy { method: String },
     /// A subscription's notification (`status`, `graph.changed`, ...).
     Notification { method: String, params: Value },
 }
@@ -37,6 +40,22 @@ pub struct Error {
 
 /// The engine is busy with a long request and refused this one (docs/control-protocol.md, "Long requests").
 pub const BUSY: i64 = -32009;
+
+/// The long requests that open a Performance: while one runs, the engine is busy with a load.
+pub fn is_load(method: &str) -> bool {
+    ["library.load", "performance.load", "performance.prepare", "performance.reopen"].contains(&method)
+}
+
+/// What a screen says when the engine refused its request as busy: in the words of the player's wait, not the engine's
+/// (which names a method).
+fn busy_message(method: &str) -> String {
+    if is_load(method) { "Still opening a Performance. Try again in a moment.".into() } else { "The engine is busy. Try again in a moment.".into() }
+}
+
+/// What a screen says of a request the engine refused: a busy answer in its own calm words, any other the engine's reason.
+pub fn refusal(e: &Error) -> String {
+    if e.code == BUSY { e.message.clone() } else { format!("The engine refused: {}", e.message) }
+}
 
 struct Pending<R> {
     request: R,
@@ -111,6 +130,14 @@ impl<R: Send + 'static> Client<R> {
             }
             let Some(p) = lock(&self.pending).remove(&id) else { continue };
             let result = match doc.get("error") {
+                Some(e) if e["code"].as_i64() == Some(BUSY) => {
+                    let method = e["data"]["busy"].as_str().unwrap_or_default().to_string();
+                    let message = busy_message(&method);
+                    if !method.is_empty() {
+                        on_event(Event::Busy { method });
+                    }
+                    Err(Error { code: BUSY, message })
+                }
                 Some(e) => Err(Error { code: e["code"].as_i64().unwrap_or(0), message: e["message"].as_str().unwrap_or("error").into() }),
                 None => Ok(doc["result"].take()),
             };
@@ -149,6 +176,7 @@ impl<R: Send + 'static> Client<R> {
         lock(&self.pending).values().filter(|p| counts(&p.request)).map(|p| p.sent.elapsed()).max()
     }
 
+    #[cfg(test)]
     pub fn connected(&self) -> bool {
         lock(&self.writer).is_some()
     }
@@ -171,6 +199,7 @@ pub mod tests {
                 Event::Lost(_) => "lost".into(),
                 Event::Reply { request, result } => format!("{request}:{}", result.map(|_| "ok".to_string()).unwrap_or_else(|e| e.code.to_string())),
                 Event::Notification { method, .. } => method,
+                Event::Busy { method } => format!("busy:{method}"),
             });
         };
         (on, rx)
@@ -254,10 +283,26 @@ pub mod tests {
         engine.send("{\"jsonrpc\":\"2.0\",\"method\":\"status\",\"params\":7}\n");
         engine.send(&format!("{}\n", json!({"jsonrpc":"2.0","id":id,"error":{"code":-32009}}))); // busy, no message
         assert_eq!(rx.recv_timeout(WAIT).unwrap(), "status");
+        // (a busy answer that names nothing is only its reply)
         assert_eq!(rx.recv_timeout(WAIT).unwrap(), "real:-32009");
         assert!(client.send("after", "library.query", json!({})));
         engine.answer();
         assert_eq!(rx.recv_timeout(WAIT).unwrap(), "after:ok");
+    }
+
+    // A busy answer names the long request it is busy with, and a screen that shows it says it in the player's words.
+    #[test]
+    fn a_busy_answer_names_what_the_engine_is_busy_with() {
+        let (client, mut engine, rx, _l) = connected("busy");
+        assert!(client.send("edit", "scenes.select", json!({})));
+        let id = engine.request()["id"].clone();
+        engine.send(&format!("{}\n", json!({"jsonrpc":"2.0","id":id,"error":{"code":-32009,"message":"The engine is busy (library.load); this did not run. Ask again when it is done.","data":{"busy":"library.load","ms":800}}})));
+        assert_eq!(rx.recv_timeout(WAIT).unwrap(), "busy:library.load");
+        assert_eq!(rx.recv_timeout(WAIT).unwrap(), "edit:-32009");
+        assert!(is_load("library.load") && is_load("performance.prepare") && !is_load("packages.install"));
+        let busy = Error { code: BUSY, message: busy_message("library.load") };
+        assert_eq!(refusal(&busy), "Still opening a Performance. Try again in a moment.", "no \"refused\", no method name");
+        assert_eq!(refusal(&Error { code: -32602, message: "no room".into() }), "The engine refused: no room");
     }
 
     // The engine gone in the middle of a reply: the request out fails, then the connection is

@@ -879,7 +879,7 @@ impl Screen {
                 // The JUCE insertPlugin takes the node out again when the insert is refused.
                 self.out.push((Request::Edit, "graph.remove", json!({"node": node})));
                 self.out.push((Request::Edit, "graph.commit", json!({})));
-                self.say(&format!("The engine refused: {}", e.message));
+                self.say(&crate::client::refusal(&e));
                 return true;
             }
             (Request::Splitter, Ok(r)) => {
@@ -912,7 +912,7 @@ impl Screen {
             }
             (Request::Splitter | Request::Joiner | Request::NewSplit, Err(e)) => return self.split_failed(&e.message),
             (Request::Add(_) | Request::Edit, Err(e)) if e.code != 0 => {
-                self.say(&format!("The engine refused: {}", e.message));
+                self.say(&crate::client::refusal(&e));
                 return true;
             }
             (Request::List(node), Ok(r)) => self.scene_controls(node, &r),
@@ -937,7 +937,7 @@ impl Screen {
             }
             (Request::Replace, Err(e)) => {
                 self.reloading.clear();
-                self.say(&format!("The engine refused: {}", e.message));
+                self.say(&crate::client::refusal(&e));
                 return true;
             }
             (Request::Crossovers, Ok(r)) => {

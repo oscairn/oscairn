@@ -295,7 +295,7 @@ impl Screen {
                 false
             }
             (_, Err(e)) if e.code != 0 => {
-                self.say(format!("The engine refused: {}", e.message));
+                self.say(crate::client::refusal(&e));
                 false
             }
             _ => false,

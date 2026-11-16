@@ -101,6 +101,11 @@ impl Screen {
         repainted
     }
 
+    /// Whether something on the screen animates, as of its last frame (the platform would ask for the next one).
+    pub fn animating(&self) -> bool {
+        self.ui.window().has_active_animations()
+    }
+
     /// The window as a PPM picture in target/screens/NAME.ppm.
     pub fn save(&self, name: &str) {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/screens");
@@ -277,6 +282,20 @@ impl Fixture {
         Fixture { screen, engine, events, _listener: listener }
     }
 
+    /// Answers what the shell asked on connecting, up to and including performance.reopen (which an engine answers at once;
+    /// unanswered it is a load running, and the top bar shows it): for a test that wants the screen at rest.
+    fn reopened(&mut self) {
+        loop {
+            let request = self.engine.request();
+            let reopen = request["method"] == "performance.reopen";
+            self.engine.send(&format!("{}\n", json!({"jsonrpc": "2.0", "id": request["id"], "result": if reopen { json!({"notice": ""}) } else { json!({"accepted": true}) }})));
+            self.pump();
+            if reopen {
+                break;
+            }
+        }
+    }
+
     /// Hands the shell the client's next event.
     fn pump(&mut self) {
         shell::dispatch(self.events.recv_timeout(WAIT).unwrap());
@@ -336,7 +355,7 @@ fn the_top_bar_follows_the_engine() {
     f.pump();
     f.pump();
     f.pump();
-    assert!(f.screen.ui.get_engine().starts_with("lost"));
+    assert!(f.screen.ui.get_engine().starts_with("Lost contact with the sound engine") && f.screen.ui.get_engine_lost(), "{}", f.screen.ui.get_engine());
 }
 
 // A performance instrument's UI costs nothing when nothing changes: a status that says what the last said (the load
@@ -441,6 +460,7 @@ fn home_moves_by_keys_panel_and_touch() {
     let mut f = Fixture::new("home");
     f.engine.answer(); // session.hello
     f.pump();
+    f.reopened();
     let s = &mut f.screen;
     let names: Vec<String> = s.ui.global::<HomeState>().get_tiles().iter().map(|t| t.name.to_string()).collect();
     assert_eq!(names, ["Performance", "Library", "Setlist", "Groovebox", "Settings"]);
@@ -1195,6 +1215,7 @@ mod tabs;
 mod tabs_model;
 mod search;
 mod shots;
+mod loading;
 mod real_engine;
 mod views;
 mod parts;

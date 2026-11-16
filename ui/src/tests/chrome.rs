@@ -144,6 +144,7 @@ fn shown(f: &mut Fixture, parts: &[&str], logical: f32) -> (String, bool, bool) 
 #[test]
 fn a_long_path_is_shortened_from_the_left_shrunk_to_seventy_percent_and_then_cut() {
     let mut f = on("title-fit", S::Parts);
+    f.reopened();
     let deep = ["Rhodes Stage Piano", "Insert effects", "Split: frequency bands", "Band 2"];
     let whole = deep.join(" › ");
     let (at_1280, shrunk, cut) = shown(&mut f, &deep, 1280.);

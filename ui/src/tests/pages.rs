@@ -278,7 +278,7 @@ fn sound_chooser() {
     c.reply(crate::sounds::Request::Do("load"), Ok(json!({"accepted": true, "flagged": ["a wire"]})));
     assert_eq!(ui.global::<crate::PartState>().get_message().as_str(), "Loaded; 1 wires or targets were removed");
     assert!(c.reply(crate::sounds::Request::Do("load"), Err(Error { code: -32009, message: "graph edits are staged".into() })));
-    assert_eq!(ui.global::<crate::PartState>().get_message().as_str(), "The engine refused: graph edits are staged");
+    assert_eq!(ui.global::<crate::PartState>().get_message().as_str(), "graph edits are staged", "a busy answer (-32009) is said as the client words it, without \"refused\"");
     // Cancel: the cursor drops, then the actions close, then back.
     assert_eq!(c.act(Action::Cancel(None)), crate::sounds::Outcome::Stay);
     assert_eq!(c.act(Action::Cancel(None)), crate::sounds::Outcome::Stay);

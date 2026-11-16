@@ -268,7 +268,7 @@ fn given_up_notes_and_failed_plugins_are_shown() {
     p.act(Action::Confirm(None));
     p.act(Action::Move { pane: None, by: 1 });
     assert!(p.reply(crate::parts::Request::Edit, Err(crate::client::Error { code: -32009, message: "busy".into() })));
-    assert_eq!(ui.global::<PartsState>().get_message().as_str(), "The engine refused: busy");
+    assert_eq!(ui.global::<PartsState>().get_message().as_str(), "busy", "a busy answer is said as the client words it, without \"refused\"");
     p.act(Action::Cancel(None));
     assert_eq!(ui.global::<PartsState>().get_message().as_str(), "Pad is silent: it crashed");
     // Chips by role: an effect, an instrument, a split.

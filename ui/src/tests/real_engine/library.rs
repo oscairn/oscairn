@@ -215,8 +215,23 @@ pub(super) fn library(r: &mut Real) {
     r.run(100);
     let started = Instant::now();
     r.act(Action::Confirm(None));
-    r.until(|ui| ui.global::<Bar>().get_performance() == "Glass Choir");
+    // A normal switch is a wait the player expects: the top bar's chip names it all along, and no banner is ever raised.
+    let (mut chip, mut banner) = (String::new(), String::new());
+    r.until(|ui| {
+        let (c, b) = (ui.global::<Bar>().get_loading().to_string(), ui.get_engine().to_string());
+        if !c.is_empty() {
+            chip = c;
+        }
+        if !b.is_empty() {
+            banner = b;
+        }
+        ui.global::<Bar>().get_performance() == "Glass Choir"
+    });
     r.settle();
+    r.check(chip == "Loading Glass Choir", || format!("Open: the chip said {chip:?} during the switch"));
+    r.check(banner.is_empty(), || format!("Open: a banner was raised during a normal switch: {banner:?}"));
+    let after = r.screen.ui.global::<Bar>().get_loading().to_string();
+    r.check(after.is_empty(), || format!("Open: the chip stays after the switch: {after:?}"));
     let opened = started.elapsed();
     r.run(4000); // the engine's graph.changed for a load comes about three seconds after its reply
     let sent = r.sent("Open");

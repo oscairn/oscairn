@@ -129,6 +129,10 @@ export global Theme {
     out property <length> cursor-width: 2px;
     out property <length> key-cursor-width: 3px;
     out property <length> hair: 1px;
+    // A wait's bar (loading.slint): its thickness, the share of its track the sweep covers, and the sweep's period.
+    out property <length> loading-bar: 3px;
+    out property <float> loading-segment: 0.3;
+    out property <duration> loading-period: 1600ms;
     // A tab's fill from its box: room for the cursor's ring and a hair of gap.
     out property <length> tab-pad: cursor-width + hair;
     // A graph view's thin line (an operator's envelope, a routing wire) and a handle's diameter.

@@ -114,7 +114,7 @@ fn undo_redo_and_save_on_the_top_bar() {
     let r = request(&mut f, "library.save", &none);
     assert_eq!(r["params"], json!({"new": true, "name": "Grand"}));
     f.reply(&r, json!({"error": {"code": -32009, "message": "The engine is busy"}}));
-    assert_eq!(ui.global::<Bar>().get_notice().as_str(), "Not saved: The engine is busy");
+    assert_eq!(ui.global::<Bar>().get_notice().as_str(), "The engine is busy. Try again in a moment.", "a busy answer is said in the player's words, not as a failure to save");
     f.screen.frame();
     f.screen.save("bar-notice");
     png(&f.screen, "bar-notice");

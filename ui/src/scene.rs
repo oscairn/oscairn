@@ -177,7 +177,7 @@ impl Screen {
         self.unanswered = self.unanswered.saturating_sub(1);
         match (request, result) {
             (Request::Edit, Err(e)) if e.code != 0 => {
-                self.b.say(&format!("The engine refused: {}", e.message));
+                self.b.say(&crate::client::refusal(&e));
                 self.show();
                 true
             }

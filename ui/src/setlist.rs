@@ -149,6 +149,8 @@ pub struct Screen {
     touched: u8,
     current: Option<usize>,
     opening: bool,
+    /// The slot the engine is opening (`current` may already be a later one waiting).
+    opening_index: Option<usize>,
     queued: Option<usize>,
     names: Rc<VecModel<ListRow>>,
     rows: Rc<VecModel<SlotData>>,
@@ -203,6 +205,7 @@ impl Screen {
             touched: 1,
             current: None,
             opening: false,
+            opening_index: None,
             queued: None,
             names,
             rows,
@@ -243,6 +246,7 @@ impl Screen {
                 match request {
                     Request::Load(i) => {
                         self.opening = false;
+                        self.show();
                         if e.code == crate::client::BUSY && self.queued.is_none() {
                             // Another client's long request: this one waits its turn, as a newer press would.
                             self.queued = Some(i);
@@ -252,7 +256,7 @@ impl Screen {
                         self.next_queued();
                     }
                     Request::Prepare => {}
-                    _ => self.say(format!("The engine refused: {}", e.message)),
+                    _ => self.say(crate::client::refusal(&e)),
                 }
                 return;
             }
@@ -298,6 +302,7 @@ impl Screen {
             },
             Request::Load(_) => {
                 self.opening = false;
+                self.show();
                 if !self.next_queued() {
                     self.prepare_next();
                 }
@@ -315,6 +320,16 @@ impl Screen {
             }
             None => false,
         }
+    }
+
+    /// The slot the engine is opening now (asked for, not answered).
+    fn opening_at(&self) -> Option<usize> {
+        self.opening_index.filter(|_| self.opening)
+    }
+
+    /// What is opening, for the top bar's loading chip: the slot's title.
+    pub fn opening_name(&self) -> Option<String> {
+        self.opening_at().map(|i| self.title(i))
     }
 
     fn opens(&self, index: usize) -> bool {
@@ -345,6 +360,7 @@ impl Screen {
             empty: slot.empty,
             opens: self.opens(index),
             playing: self.current == Some(index),
+            opening: self.opening_at() == Some(index),
             cursor,
         }
     }
@@ -413,6 +429,7 @@ impl Screen {
             self.say(format!("{}. {} opens once the last one has.", index + 1, self.title(index)));
         } else {
             self.opening = true;
+            self.opening_index = Some(index);
             self.out.push((Request::Load(index), "library.load", json!({"id": slot.id})));
             self.say(format!("{}. {}", index + 1, self.title(index)));
         }

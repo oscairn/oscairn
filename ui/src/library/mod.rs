@@ -19,7 +19,7 @@ mod actions;
 mod catalog;
 mod catalog_flow;
 mod export;
-mod files;
+pub mod files;
 mod filters;
 mod import;
 mod install;
@@ -30,6 +30,7 @@ mod open;
 mod setlist;
 
 pub use filters::Installed;
+pub use install::fingerprint;
 pub use item::{count, empty_saying, library_line, wrap, Item, Kind, INFO_WIDTH};
 #[cfg(test)]
 pub use libraries::platform;

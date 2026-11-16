@@ -150,7 +150,7 @@ fn fields(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), Refused> 
     require(object.keys().all(|k| allowed.contains(&k.as_str())), "Unknown theme field")
 }
 
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().count() <= 64 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
@@ -395,7 +395,7 @@ pub fn load_folder(folder: &Path) -> Result<Loaded, Refused> {
 /// The theme `id` names: a built-in folder's if there is one (built-in IDs win, and a broken one is
 /// refused, not skipped), else an installed one's; with no built-in folder, the themes this
 /// program was built with.
-fn find(places: &Places, id: &str) -> Result<Loaded, Refused> {
+pub(crate) fn find(places: &Places, id: &str) -> Result<Loaded, Refused> {
     require(valid_id(id), "Invalid theme ID")?;
     match &places.built_in {
         Some(dir) if dir.join(id).is_dir() => return load_folder(&dir.join(id)),
@@ -410,7 +410,7 @@ fn find(places: &Places, id: &str) -> Result<Loaded, Refused> {
     load_folder(&places.installed.as_deref().unwrap_or(Path::new("/nonexistent")).join(id))
 }
 
-fn exists(places: &Places, id: &str) -> bool {
+pub(crate) fn exists(places: &Places, id: &str) -> bool {
     let built_in = match &places.built_in {
         Some(dir) => dir.join(id).is_dir(),
         None => THEMES.iter().any(|(t, _)| *t == id),
@@ -419,7 +419,7 @@ fn exists(places: &Places, id: &str) -> bool {
 }
 
 /// `Theme::defaultId`: the screen's theme if it exists, else `themes/default`'s, else Oscairn Dark.
-fn default_id(places: &Places, screen: &str) -> String {
+pub(crate) fn default_id(places: &Places, screen: &str) -> String {
     if valid_id(screen) && exists(places, screen) {
         return screen.into();
     }
@@ -513,6 +513,7 @@ pub fn section_gap(window: &Shell, separate: f32) -> f32 {
 pub fn apply(window: &Shell, theme: &Loaded) {
     let g = window.global::<Theme>();
     let d = &theme.data;
+    g.set_id(d.id.as_str().into());
     let c = |name: &str| d.ink(name);
     g.set_background(c("background"));
     g.set_surface(c("surface"));
@@ -584,7 +585,12 @@ pub fn follow(window: &Shell, places: Places, screen: String, timer: &slint::Tim
         }
         shown = choice;
         if let Some(window) = weak.upgrade() {
-            apply(&window, &chosen(&places, &shown, &screen));
+            // Already shown (the Settings app applies a choice at once, then writes it): nothing to do.
+            let loaded = chosen(&places, &shown, &screen);
+            if window.global::<Theme>().get_id() != loaded.id.as_str() {
+                apply(&window, &loaded);
+                crate::shell::theme_followed();
+            }
         }
     });
 }

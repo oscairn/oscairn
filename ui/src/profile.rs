@@ -38,6 +38,8 @@ pub struct Profile {
     pub panel_map: String,
     /// The device's control groups (`controls`): what the knob row follows (knobs.rs).
     pub controls: Vec<crate::knobs::Group>,
+    /// `audio.device`: the profile fixes the audio device and its channels, so Settings has no Audio page to offer.
+    pub audio_fixed: bool,
 }
 
 /// Profile.h's Screen::scale(): a touch target of 44 units at least 6.5 mm across, never below 1.
@@ -80,6 +82,7 @@ impl Profile {
             on_screen_keyboard: doc["onScreenKeyboard"].as_bool().unwrap_or_else(|| !doc["controls"].as_array().is_some_and(|c| c.iter().any(|c| c["kind"] == "keys" && c["role"] == "notes"))),
             panel_map: doc["panel"]["map"].as_str().unwrap_or_default().into(),
             controls: doc["controls"].as_array().into_iter().flatten().map(crate::knobs::Group::from_profile).collect(),
+            audio_fixed: doc["audio"]["device"].is_object(),
         })
     }
 

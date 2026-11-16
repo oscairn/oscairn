@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The Settings app (src/settings_app.rs): its pages (Appearance, Top bar, MIDI controllers, Audio, Package
+// repositories, Signing keys, About, those the profile has) in the shared tab family, which the theme's
+// tabPlacement puts in a strip or a rail. The list under them is the shared list screen (part.slint's Part, which
+// the shell lays in the area these tabs leave: content-x, content-y, content-width and content-height), so this
+// component draws nothing else.
+
+import { TabPages, TabLabel } from "theme.slint";
+
+export global SettingsState {
+    in property <[string]> pages;
+    in property <[TabLabel]> page-labels;
+    in property <string> page-heading;
+    in property <int> page;
+    in property <int> page-cursor: -1;
+    callback show-page(int);
+}
+
+export component Settings inherits Rectangle {
+    out property <length> content-x: tabs.content-x;
+    out property <length> content-y: tabs.content-y;
+    out property <length> content-width: tabs.content-width;
+    out property <length> content-height: tabs.content-height;
+    tabs := TabPages {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        pages: SettingsState.pages;
+        page-labels: SettingsState.page-labels;
+        page-heading: SettingsState.page-heading;
+        page: SettingsState.page;
+        page-cursor: SettingsState.page-cursor;
+        page-picked(i) => { SettingsState.show-page(i); }
+    }
+}

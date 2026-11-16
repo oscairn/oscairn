@@ -259,12 +259,17 @@ struct Fixture {
 
 impl Fixture {
     fn new(name: &str) -> Fixture {
+        Fixture::on(name, Some("fantom-07"))
+    }
+
+    /// The shell on a profile (a built-in's id; none: a computer's).
+    fn on(name: &str, profile: Option<&str>) -> Fixture {
         let screen = Screen::new();
         let path = std::env::temp_dir().join(format!("oscairn-ui-shell-{name}-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         let (tx, events) = mpsc::channel();
-        shell::start(&screen.ui, path, &crate::profile::Profile::load(Some("fantom-07")).unwrap(), true, move |e| {
+        shell::start(&screen.ui, path, &crate::profile::Profile::load(profile).unwrap(), true, move |e| {
             let _ = tx.send(e);
         })
         .unwrap();
@@ -1167,6 +1172,11 @@ mod library_catalog;
 mod library_import;
 mod library_shots;
 mod library_shell;
+mod settings_fake;
+mod settings;
+mod settings_second;
+mod settings_shell;
+mod settings_shots;
 mod piano;
 mod shellpages;
 mod envelope;

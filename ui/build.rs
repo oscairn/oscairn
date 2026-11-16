@@ -7,6 +7,9 @@ use std::path::Path;
 
 fn main() {
     slint_build::compile("slint/shell.slint").expect("Slint build failed");
+    // The release and the commit, which the Settings app's About page says (CMake gives them; a plain cargo build has neither).
+    println!("cargo:rerun-if-env-changed=OSCAIRN_RELEASE");
+    println!("cargo:rerun-if-env-changed=OSCAIRN_SOURCE_COMMIT");
     let mut code = String::new();
     // Each built-in by its id: a profile's file name, a theme's folder name.
     for (name, dir, file) in [("PROFILES", "../hosts/standalone/profiles", ""), ("THEMES", "../hosts/standalone/themes", "theme.json")] {

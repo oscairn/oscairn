@@ -101,6 +101,9 @@ impl App {
             if screen == Screen::Library {
                 self.library_act(|l| l.noticed(choice));
             }
+            if screen == Screen::Settings {
+                self.on_settings(|s| s.noticed(choice));
+            }
         }
     }
 }

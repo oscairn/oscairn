@@ -7,7 +7,8 @@ set(OSCAIRN_UI_VENDOR "" CACHE PATH "A cargo directory source with every crate u
 set(ui_dir "${CMAKE_BINARY_DIR}/ui-cargo")
 set(ui_features --no-default-features --features $<IF:$<BOOL:${OSCAIRN_ROLAND_FANTOM0}>,kms,desktop>)
 set(ui_options "")
-set(ui_env RUSTUP_AUTO_INSTALL=0)
+# The release and the commit the JUCE apps are built with, which the Settings app's About page says (src/settings_keys.rs).
+set(ui_env RUSTUP_AUTO_INSTALL=0 "OSCAIRN_RELEASE=${OSCAIRN_RELEASE}" "OSCAIRN_SOURCE_COMMIT=${OSCAIRN_SOURCE_COMMIT}")
 if(OSCAIRN_UI_VENDOR)
     list(APPEND ui_options --offline --config "source.crates-io.replace-with='oscairn-vendor'" --config "source.oscairn-vendor.directory='${OSCAIRN_UI_VENDOR}'")
 endif()

@@ -20,6 +20,7 @@ use crate::chain;
 use crate::controls;
 use crate::keyboard;
 use crate::library;
+use crate::settings_app;
 use crate::menu;
 use crate::notice;
 use crate::mixer;
@@ -44,6 +45,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod library_glue;
+mod settings_glue;
+
+pub use settings_glue::theme_followed;
+#[cfg(test)]
+pub use settings_glue::{settings_folders, settings_in_rust};
 
 /// What each request is for, so its answer goes where it belongs.
 pub enum Request {
@@ -83,6 +89,7 @@ pub enum Request {
     Params(params::Request),
     Scene(scene::Request),
     LibraryApp(library::Request),
+    SettingsApp(settings_app::Call),
 }
 
 impl Request {
@@ -92,6 +99,7 @@ impl Request {
             Request::Reopen => true,
             Request::Setlist(r) => setlist::Screen::waits(r),
             Request::LibraryApp(r) => library::Screen::waits(r),
+            Request::SettingsApp(c) => settings_app::Screen::waits(c),
             _ => false,
         }
     }
@@ -148,6 +156,8 @@ pub enum Screen {
     Routing = 12,
     /// The Library app (library/), opened from Home.
     Library = 13,
+    /// The Settings app (settings_app.rs), opened from Home.
+    Settings = 14,
 }
 
 pub struct App {
@@ -203,10 +213,13 @@ pub struct App {
     params: params::Screen,
     scene: scene::Screen,
     library: library::Screen,
+    settings: settings_app::Screen,
     /// A question over the screen that asked it (notice.rs).
     question: Option<(Screen, notice::Notice)>,
     /// The Library tile opens the Rust app (library_glue.rs: not yet, until every screen of it is built).
     library_in_rust: bool,
+    /// The Settings tile opens the Rust app (settings_glue.rs: not yet, until every page of it is built).
+    settings_in_rust: bool,
     /// Whether the plugin scanner has been started (the first time the chain is opened).
     scan_started: bool,
     /// The on-screen keyboard, open for the screen that asked for text.
@@ -409,6 +422,7 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
     menu.on_turn(|by| with_app(|a| a.menu_turn(by)));
     menu.on_resized(|| with_app(|a| a.menu_shown()));
     ui.global::<crate::LibraryState>().on_show_page(|i| with_app(|a| a.on_library(|l| l.tap_page(i.max(0) as usize))));
+    ui.global::<crate::SettingsState>().on_show_page(|i| with_app(|a| a.on_settings(|s| s.tap_page(i.max(0) as usize))));
     let notice = ui.global::<crate::NoticeState>();
     notice.on_tapped(|i| with_app(|a| a.notice_tap(i.max(0) as usize)));
     notice.on_close(|| with_app(|a| a.notice_act(Action::Cancel(None))));
@@ -481,8 +495,10 @@ pub fn start(ui: &Shell, socket: PathBuf, profile: &Profile, hands_over: bool, p
             params: params::Screen::new(ui),
             scene: scene::Screen::new(ui),
             library: library::Screen::new(ui),
+            settings: settings_app::Screen::new(ui, profile),
             question: None,
             library_in_rust: library_glue::in_rust(),
+            settings_in_rust: settings_glue::in_rust(),
             scan_started: false,
             keyboard: None,
             piano: None,
@@ -787,6 +803,9 @@ impl App {
             self.on_mixer(|m| m.status(status));
             self.on_chain(|c| c.status(status));
             self.on_routing(|r| r.status(status));
+            if self.screen == Screen::Settings {
+                self.on_settings(|s| s.status(status));
+            }
             if self.on_piano(|p| !p.status(status)) == Some(true) {
                 self.close_piano(); // its input was unplugged
             }
@@ -899,6 +918,10 @@ impl App {
                 }
                 return;
             }
+            Request::SettingsApp(call) => {
+                self.on_settings(|s| s.reply(call, result));
+                return;
+            }
             Request::LibraryApp(r) => {
                 let plugins = matches!(r, library::Request::Plugins);
                 if self.on_library(|l| l.reply(r, result)) {
@@ -997,7 +1020,7 @@ impl App {
                 let total = r["total"].as_u64();
                 self.show(|s| *if sounds { &mut s.sounds } else { &mut s.performances } = total)
             }
-            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Routing(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) | Request::LibraryApp(_) => {}
+            Request::Subscribe | Request::Shell | Request::View | Request::Notes | Request::Setlist(_) | Request::Play(_) | Request::Part(_) | Request::Parts(_) | Request::Mixer(_) | Request::Controls(_) | Request::Routing(_) | Request::Chain(_) | Request::Sounds(_) | Request::Params(_) | Request::Scene(_) | Request::LibraryApp(_) | Request::SettingsApp(_) => {}
         }
     }
 
@@ -1157,6 +1180,7 @@ impl App {
             (Screen::Sounds, _) => self.sounds_act(|c| c.act(action)),
             (Screen::Scene, _) => self.scene_act(|c| c.act(action)),
             (Screen::Library, _) => self.library_act(|c| c.act(action)),
+            (Screen::Settings, _) => self.settings_act(|c| c.act(action)),
             (Screen::Params, _) => self.params_act(|c| c.act(action)),
             (Screen::Setlist, _) => {
                 let mut back = false;
@@ -1255,6 +1279,7 @@ impl App {
             Screen::Controls => parts.extend(["Parts", "Controls"].map(String::from)),
             Screen::Routing => parts.extend(["Parts", "Routing"].map(String::from)),
             Screen::Library => parts.extend(self.library.path()),
+            Screen::Settings => parts.extend(self.settings.path()),
         }
         parts
     }
@@ -1266,6 +1291,7 @@ impl App {
             Screen::Mixer => self.mixer.bar_tools(),
             Screen::Params => self.params.bar_tools(),
             Screen::Library => self.library.bar_tools(),
+            Screen::Settings => self.settings.bar_tools(),
             _ => vec![],
         }
     }
@@ -1398,6 +1424,7 @@ impl App {
             Screen::Mixer => self.on_mixer(|m| m.bar_tool(i)),
             Screen::Params => self.params_act(|p| p.search_tap()),
             Screen::Library => self.library_act(|l| l.tool(i)),
+            Screen::Settings => self.settings_act(|s| s.tool(i)),
             _ => {}
         }
     }
@@ -1498,6 +1525,7 @@ impl App {
             Screen::Scene => self.scene.at_top(),
             Screen::Params => self.params.at_top(),
             Screen::Library => self.library.at_top(),
+            Screen::Settings => self.settings.at_top(),
             _ => false,
         }
     }
@@ -1736,6 +1764,12 @@ impl App {
                 if screen == Some(Screen::Library) {
                     self.library_act(|l| l.chosen(id));
                 }
+                if screen == Some(Screen::Settings) {
+                    self.settings_act(|s| {
+                        s.chosen(id);
+                        settings_app::Outcome::Stay
+                    });
+                }
             }
             Some(menu::Outcome::Close) => {
                 self.menu = None;
@@ -1923,6 +1957,7 @@ impl App {
             Screen::Controls => self.on_controls(controls::Screen::shown),
             Screen::Routing => self.on_routing(routing::Screen::shown),
             Screen::Library => self.on_library(library::Screen::show),
+            Screen::Settings => self.on_settings(settings_app::Screen::show),
             _ => {}
         }
     }
@@ -1949,6 +1984,7 @@ impl App {
             Screen::Sounds => self.sounds_act(|c| c.back()),
             Screen::Scene => self.go(Screen::Play),
             Screen::Library => self.library_act(|l| l.back()),
+            Screen::Settings => self.settings_act(|s| s.back()),
             Screen::Params => self.params_act(|p| p.back()),
         }
     }
@@ -1960,6 +1996,7 @@ impl App {
             Screen::Sounds => self.sounds_act(|c| c.tap(i)),
             Screen::Scene => self.scene_act(|c| c.tap(i)),
             Screen::Library => self.library_act(|c| c.tap(i)),
+            Screen::Settings => self.settings_act(|c| c.tap(i)),
             _ => {}
         }
     }
@@ -1971,6 +2008,7 @@ impl App {
             Screen::Sounds => self.on_sounds(|c| c.step_row(i, by)),
             Screen::Scene => self.on_scene(|c| c.step_row(i, by)),
             Screen::Library => self.on_library(|c| c.step_row(i, by)),
+            Screen::Settings => self.on_settings(|c| c.step_row(i, by)),
             _ => {}
         }
     }
@@ -1982,6 +2020,7 @@ impl App {
             Screen::Sounds => self.on_sounds(|c| c.scroll_info(by)),
             Screen::Scene => self.on_scene(|c| c.scroll_info(by)),
             Screen::Library => self.on_library(|c| c.scroll_info(by)),
+            Screen::Settings => self.on_settings(|c| c.scroll_info(by)),
             _ => {}
         }
     }
@@ -2063,6 +2102,8 @@ impl App {
             (Screen::Scene, None) => self.on_scene(scene::Screen::not_entered),
             (Screen::Library, Some(text)) => self.on_library(|p| p.entered(&text)),
             (Screen::Library, None) => self.on_library(library::Screen::not_entered),
+            (Screen::Settings, Some(text)) => self.on_settings(|p| p.entered(&text)),
+            (Screen::Settings, None) => self.on_settings(settings_app::Screen::not_entered),
             (Screen::Params, Some(text)) => self.on_params(|p| p.entered(&text)),
             (Screen::Params, None) => self.on_params(params::Screen::not_entered),
             _ => {}
@@ -2151,8 +2192,12 @@ impl App {
             self.on_part(part::Screen::not_entered);
             self.on_sounds(sounds::Screen::not_entered);
             self.on_library(library::Screen::not_entered);
+            self.on_settings(settings_app::Screen::not_entered);
         }
         if self.screen != screen {
+            if self.screen == Screen::Settings {
+                self.on_settings(settings_app::Screen::hidden);
+            }
             if self.screen == Screen::Library {
                 self.on_library(library::Screen::hidden);
             }
@@ -2251,6 +2296,10 @@ impl App {
             self.on_library(library::Screen::open);
             self.on_library(library::Screen::shown);
         }
+        if screen == Screen::Settings && was != Screen::Settings {
+            self.on_settings(settings_app::Screen::open);
+            self.on_settings(settings_app::Screen::shown);
+        }
         if screen == Screen::Sounds {
             self.on_sounds(sounds::Screen::shown);
         }
@@ -2282,6 +2331,7 @@ impl App {
             "oscairn.setlist" => self.go(Screen::Setlist),
             "oscairn.performance" => self.go(Screen::Play),
             "oscairn.library" if self.library_in_rust => self.go(Screen::Library),
+            "oscairn.settings" if self.settings_in_rust => self.go(Screen::Settings),
             _ => self.hand_over(app),
         }
     }

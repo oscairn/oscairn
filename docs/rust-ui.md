@@ -638,6 +638,35 @@ a library uninstalled); the Catalog (`catalog.rs`, `catalog_flow.rs`: repositori
 by `packages.job`, tabs, a package's details, install and update, trust questions); importing parts and scenes
 (`import.rs`). Long requests go through `jobs.rs`, each asked again while the engine is busy.
 
+## Settings
+
+The Settings app (`ui/src/settings_app.rs` and `settings_*.rs`, `ui/slint/settings.slint`; `ui/SETTINGS-APP.md` is the
+checklist, 54 rows and 8 that are not in the app) is ported whole; **the tile still hands the display to the JUCE app**
+(`shell/settings_glue.rs` `PORTED`), and `OSCAIRN_UI_SETTINGS=1` opens the Rust one for development. It is the shared list
+screen under the shared tab family (a strip or a rail by the theme's `tabPlacement`), as the Library is, one page a tab, each
+page a `Page` that makes its rows and the panel's lines and takes a press, a menu's choice, a question's answer and the
+keyboard's text.
+
+- **Pages and where they show:** Appearance, Top bar, MIDI controllers, Package repositories, Signing keys and About on every
+  profile; **Audio** only where the profile does not fix the audio device (`audio.device` absent: a computer, and the devices
+  that leave the choice to the engine), so not on the keyboard, where the engine says `fixed`. A page for hardware a product
+  lacks is not there at all (the reference's Bluetooth, network, storage and date pages have no request and are not built).
+- **Kept outside the engine, in the configuration folder the JUCE app reads** (`OSCAIRN_CONFIG_HOME`, else
+  `~/Library/Application Support/Oscairn` or `~/.config/Oscairn`): `appearance.txt` (the theme chosen, replaced whole through a
+  temporary file, applied to every screen at once), `themes/<id>/` (an installed theme: Install... on the Appearance page copies
+  one in as `Theme::install` does) and `top-bar.json` (what the CPU and RAM meters show, shown at once). Everything else is the
+  engine's, by `audio.devices`/`audio.set`, `controllers.inputs`/`choose`/`ignore`, `packages.repositories`, `enableRepository`,
+  `removeRepository`, `addRepository`, `packages.list` and `packages.job` (a repository is read first, a root key trusted only
+  after the question with its fingerprint), `keys.list`/`keys.make` and `packages.preinstalled` (About's engine version).
+- **A page lists again only when the engine says its list changed** (the status's `audioDeviceList`, `audioDevice`,
+  `sampleRate`, `bufferSize`, `midiPortList`), never on a timer; a request refused as busy is asked again after 300 ms.
+- **No question before a change, as in the reference:** the engine opens the last audio device again if a new one does not open,
+  a fixed device cannot be changed, a controller choice is reversible on its row; a repository is removed only after a question
+  and a new one is trusted only by its fingerprint.
+- Tests: `src/tests/settings*.rs` against `settings_fake.rs`, a fake engine that answers as the real handlers do
+  (`ui/SETTINGS-APP.md` "Verified shapes"), and `real_settings` in `src/tests/real_engine.rs`, ignored unless an engine is given
+  (`OSCAIRN_REAL_SOCKET`, `OSCAIRN_REAL_PROFILE`).
+
 ## Adding a screen
 
 1. **The view:** `slint/foo.slint` with a global `FooState` holding what it shows (its models,

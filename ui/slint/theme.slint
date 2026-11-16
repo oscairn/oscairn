@@ -30,6 +30,8 @@ export enum SectionStyle { separate, joined }
 export enum RowStyle { left, right, dot, fill }
 
 export global Theme {
+    // The theme shown now, by its id (the Settings app and the choice's watcher compare it).
+    in property <string> id;
     // Colors by role.
     in property <color> background: #111317;
     in property <color> surface: #1D2127;

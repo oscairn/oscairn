@@ -99,8 +99,8 @@ component Row inherits Section {
         align: TextHorizontalAlignment.left;
     }
     if !root.in-columns: FitText {
-        x: parent.width * 0.4;
-        width: parent.width * 0.6 - Theme.pad - root.buttons - root.value-room;
+        x: parent.width * 0.4 + Theme.pad;
+        width: parent.width * 0.6 - 2 * Theme.pad - root.buttons - root.value-room;
         height: parent.height;
         text: data.value;
         ink: data.editing || data.on ? Theme.accent : data.role == 1 ? Theme.accent : data.role == 2 ? Theme.positive : data.role == 3 ? Theme.wire-notes : Theme.text;

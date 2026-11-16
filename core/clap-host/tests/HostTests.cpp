@@ -304,6 +304,24 @@ int main(int argc, char** argv) {
     auto before = h.statistics().blocks;
     check(render(h, out, 128) && h.statistics().blocks == before, "sleep skips idle DSP");
     check(h.enqueue(note) && render(h, out, 128) && left[0] == .5f, "event wakes sleeping plugin");
+    {
+        // The wake mirror and the carried-event count are read off the control thread (the worker's audio thread, the
+        // plugin's own threads) while it sets and writes them; ThreadSanitizer is the judge.
+        check(render(h, out, 128), "sleeping plugin again before the cross-thread reads");
+        const auto errorsBefore = h.statistics().processErrors;
+        std::atomic<uint32_t> word{0};
+        std::atomic<bool> going{true};
+        std::thread audio([&] { while (going.load()) { render(h, out, 128); h.restful(); } });
+        std::thread waker([&] { while (going.load()) h.enqueue(note); });
+        for (int i = 0; i < 100; ++i) {
+            h.mirrorWake(&word);
+            check(h.saveState(saved) && h.loadState(saved), "state while another thread wakes and rests the plugin");
+            h.mirrorWake(nullptr);
+        }
+        going.store(false); audio.join(); waker.join();
+        check(h.statistics().processErrors == errorsBefore, "cross-thread wake and carry reads stay valid");
+        check(h.load(catalog.plugins[5], 48000, 128) && render(h, out, 128), "sleep fixture reloaded after the cross-thread reads");
+    }
     check(!h.load(catalog.plugins[6], 48000, 128) && !h.loaded(), "failed activation cleans up");
     check(h.load(catalog.plugins[7], 48000, 128) && !render(h, out, 128), "failed start faults safely");
     check(h.load(catalog.plugins[11], 48000, 128), "load transport-driven instrument");

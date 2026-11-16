@@ -186,3 +186,26 @@ Checked in renders only on the Rust side (the odd themes: "Odd" spacing 1.6, "Od
   `drawListRow` bands (alternate row lift, the colored row only where a theme has a row color).
   Tabs are drawn on the grid only; marks on Play only. The reference's hover shades are drawn on
   buttons; text boxes and the Settings widgets do not exist in the Rust UI yet.
+
+## 3. Operator colors (the FM view)
+
+The FM operator view needs eight colors a player can tell apart, one per operator, the same for operator n in a theme
+every time. The theme format has six wire colors (one is a gray, and a theme may repeat them) and one accent, which is
+too few distinct usable colors, so the palette is derived (`ui/src/palette.rs`, the `Theme.operators` and
+`Theme.operators-on` properties `theme::apply` sets; no theme file key, nothing stored):
+
+- Space: OKLCH (lightness, chroma, hue as the eye ranks them). Operator 1 takes the accent's hue; operator n the hue
+  turned by 45 degrees times n - 1, so the eight are evenly spaced round the wheel.
+- Chroma: the accent's, at least 0.12 (a gray accent still gives colors), reduced where sRGB cannot hold it.
+- Lightness: the accent's, kept in 0.3 to 0.86 (past that hues stop differing). Every second operator is 0.07
+  toward the text's side of the panel (lighter on a dark panel, darker on a light one; away from it when the accent is
+  already at the end of the range), so neighbors on the wheel differ in lightness too. Then each color is moved
+  toward the text until it has 3 to 1 against the panel (the surface) and 4.5 to 1 against the text drawn on it, as
+  far as the range allows.
+- The text on a fill (`operators-on`): the theme's text or background, whichever contrasts more.
+- Dimmed (an operator at level 0): the color at the theme's dim alpha (0.45).
+
+Measured by `tests/palette.rs` in the built-in themes and the two odd ones (OKLab distance between the two nearest
+colors, least contrast against the panel, least text on a fill; the test fails under 0.07, 3 and 4.5): least distance
+0.113 (block), 0.115 (classic), 0.113 (dark), 0.080 (light), 0.100 (odd), 0.090 (odd joined); least contrast on the panel
+7.91, 5.96, 7.49, 5.12, 4.85, 7.19; least text on a fill 8.61, 6.89, 8.61, 4.52, 10.00, 6.24 (run 2026-11-15). Color is never the only mark: every box, cell and line end carries the number.

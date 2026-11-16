@@ -18,6 +18,7 @@ mod knobs;
 mod menu;
 mod mixer;
 mod nav;
+mod palette;
 mod params;
 mod piano;
 mod part;

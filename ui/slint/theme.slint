@@ -44,6 +44,9 @@ export global Theme {
     in property <color> focus: accent;
     // Text on the accent (JUCE's `contrasting`): black on a bright accent, white on a dark one.
     in property <color> on-accent: #000000;
+    // The FM view's eight operator colors and the text that reads on each (src/palette.rs).
+    in property <[color]> operators: [accent, accent, accent, accent, accent, accent, accent, accent];
+    in property <[color]> operators-on: [on-accent, on-accent, on-accent, on-accent, on-accent, on-accent, on-accent, on-accent];
     // A background of perceived brightness under one half (JUCE's `darkTheme`).
     in property <bool> dark: true;
     // The lighter and the darker of the text and surface colors (the piano keys' two inks).

@@ -1070,6 +1070,7 @@ mod pages;
 mod piano;
 mod shellpages;
 mod envelope;
+mod palette;
 mod grid;
 mod search;
 mod shots;

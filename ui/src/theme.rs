@@ -277,7 +277,7 @@ impl ThemeData {
         Ok(ThemeData { id, name, font, font_scale, spacing, radius, colors: ink, warning, focus, style, wires, splash })
     }
 
-    fn ink(&self, name: &str) -> Color {
+    pub fn ink(&self, name: &str) -> Color {
         self.colors[INKS.iter().position(|n| *n == name).unwrap_or_default()]
     }
 }
@@ -521,6 +521,9 @@ pub fn apply(window: &Shell, theme: &Loaded) {
     g.set_focus(d.focus.unwrap_or(c("accent")));
     g.set_dark(dark(c("background")));
     g.set_on_accent(contrasting(c("accent")));
+    let operators = crate::palette::operators(c("accent"), c("surface"), c("background"), c("text"));
+    g.set_operators(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.fill).collect::<Vec<_>>())));
+    g.set_operators_on(slint::ModelRc::new(slint::VecModel::from(operators.iter().map(|o| o.on).collect::<Vec<_>>())));
     let (text, surface) = (c("text"), c("surface"));
     let brighter = |a: Color, b: Color| brightness(a) > brightness(b);
     g.set_key_light(if brighter(text, surface) { text } else { surface });

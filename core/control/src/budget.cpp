@@ -607,12 +607,15 @@ namespace oscairn
                 if(const auto d = declaredBy(host); d && total(*d) != m.declared) { m.declared = total(*d); measurementsChanged_ = true; }
             // How many parts an instance of it carried at most (its free room and what it holds now): a Performance not open counts
             // the parts of such a plugin beyond that many as sharing instances, as they do when it opens (estimate).
+            // Its room asks the worker, which may have died since the failure was read: the supervisor's to handle (as declaredBy).
             if(const auto* shared = dynamic_cast<const SoundContext*>(&host))
-            {
-                const auto& e = *shared->engine();
-                const auto carries = SoundContext::room(e) + uint32_t(std::popcount(e.buses));
-                if(carries != m.contexts) { m.contexts = carries; measurementsChanged_ = true; }
-            }
+                try
+                {
+                    const auto& e = *shared->engine();
+                    const auto carries = SoundContext::room(e) + uint32_t(std::popcount(e.buses));
+                    if(carries != m.contexts) { m.contexts = carries; measurementsChanged_ = true; }
+                }
+                catch(const std::exception&) {}
             if(memoryNow && sounds == 1)
             {
                 auto bytes = host.residentBytes();

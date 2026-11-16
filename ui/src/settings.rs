@@ -62,6 +62,23 @@ pub fn dismiss_keyboard_hint() -> std::io::Result<()> {
     std::fs::write(dir.join("keyboard.txt"), format!("hint dismissed\n{rest}"))
 }
 
+/// How the sound chooser lists: library-view.txt, which the JUCE app's library pane keeps beside the theme choice
+/// (LibraryPane.cpp, `viewPreference`): the words "compact" or "comfortable" and "pills" or "list". The second word is
+/// kept as it is read.
+pub fn library_view() -> (bool, bool) {
+    let text = read("library-view.txt").unwrap_or_default();
+    let words: Vec<&str> = text.split_whitespace().collect();
+    (words.contains(&"compact"), words.contains(&"pills"))
+}
+
+/// Keeps the compact choice, with the pills word as it was.
+pub fn keep_library_view(compact: bool) -> std::io::Result<()> {
+    let Some(dir) = config_dir() else { return Ok(()) };
+    let (_, pills) = library_view();
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("library-view.txt"), format!("{}{}", if compact { "compact" } else { "comfortable" }, if pills { " pills" } else { " list" }))
+}
+
 /// Whether Routing shows parts collapsed: the line of routing-view.txt, which the JUCE app's Routing
 /// page keeps beside the theme choice (PartsView.cpp, `routingPreference`); collapsed unless it says "expanded".
 pub fn routing_collapsed() -> bool {

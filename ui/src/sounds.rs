@@ -51,6 +51,16 @@ enum Row {
     Tags,
     Source(usize),
     Tag(usize),
+    Compact,
+    TagOptions,
+    HiddenTags,
+    /// A tag of the list to hide or color, by its place in it.
+    Pick(usize),
+    HideTag,
+    ColorTag,
+    Color(usize),
+    /// A hidden tag, shown again.
+    Hidden(usize),
     Load,
     NewPart,
     Audition,
@@ -69,6 +79,12 @@ enum Mode {
     Filters,
     Sources,
     Tags,
+    /// Which tag to hide or color.
+    TagPick,
+    /// What to do to the tag picked.
+    TagMenu,
+    TagColors,
+    Hidden,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -76,6 +92,19 @@ enum Asking {
     Search,
     SaveNew,
 }
+
+/// The colors offered for tags and Performances (the reference's performanceColors).
+const COLORS: [(&str, &str); 9] = [
+    ("Red", "#e5484d"),
+    ("Orange", "#f76b15"),
+    ("Yellow", "#ffc53d"),
+    ("Green", "#46a758"),
+    ("Teal", "#12a594"),
+    ("Blue", "#3e63dd"),
+    ("Purple", "#8e4ec6"),
+    ("Pink", "#d6409f"),
+    ("Gray", "#8b8d98"),
+];
 
 /// The reference's separator between the parts of a Sound's detail.
 const SEPARATOR: &str = "  ·  ";
@@ -98,6 +127,13 @@ pub struct Screen {
     source: String,
     /// The tags chosen: all must match.
     chosen: Vec<String>,
+    /// The colors the user gave tags (tag, "#rrggbb") and the tags hidden, as the engine gave them.
+    tag_colors: Vec<(String, String)>,
+    hidden: Vec<String>,
+    /// The tag being hidden or colored.
+    picked: String,
+    /// One line a Sound (library-view.txt, as the JUCE library pane keeps it).
+    compact: bool,
     /// The Sound being tried, while it is.
     auditioning: String,
     asking: Option<Asking>,
@@ -114,6 +150,10 @@ impl Screen {
             items: vec![],
             total: 0,
             tags: vec![],
+            tag_colors: vec![],
+            hidden: vec![],
+            picked: String::new(),
+            compact: crate::settings::library_view().0,
             libraries: vec![],
             search: String::new(),
             favorites: false,
@@ -217,6 +257,11 @@ impl Screen {
         tags
     }
 
+    /// The user's color for a tag, or empty.
+    fn tag_color(&self, tag: &str) -> String {
+        self.tag_colors.iter().find(|(t, _)| t == tag).map(|(_, c)| c.clone()).unwrap_or_default()
+    }
+
     /// A Sound's detail as the reference writes it: its tags and description, behind what is said first.
     fn detail(&self, s: &Value) -> String {
         let tags: Vec<&str> = s["tags"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
@@ -253,8 +298,12 @@ impl Screen {
                 rows.extend(self.items.iter().enumerate().map(|(i, s)| {
                     let name = s["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("Untitled");
                     let tint = s["color"].as_str().and_then(color);
-                    (Row::Sound(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..row(name.into(), self.detail(s), 2) })
+                    (Row::Sound(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..row(name.into(), if self.compact { String::new() } else { self.detail(s) }, 2) })
                 }));
+                if self.items.is_empty() && self.total == 0 && !self.narrowed() {
+                    // No Sound yet: the part can be the first (the actions of a Sound, which carry the save, need one to open).
+                    rows.push((Row::SaveNew, row("Save this part as the first Sound".into(), "name ›".into(), 2)));
+                }
                 rows
             }
             Mode::Filters => vec![
@@ -262,6 +311,7 @@ impl Screen {
                 (Row::Recent, toggle("Recent", self.recent)),
                 (Row::Library, row("Library".into(), format!("{} ›", self.source_name(&self.source)), 2)),
                 (Row::Tags, row("Tags".into(), format!("{} ›", if self.chosen.is_empty() { "none".to_string() } else { self.chosen.join(", ") }), 2)),
+                (Row::Compact, toggle("One line a Sound", self.compact)),
             ],
             Mode::Sources => self
                 .sources()
@@ -275,17 +325,48 @@ impl Screen {
                 .collect(),
             Mode::Tags => {
                 let tags = self.tag_list();
-                if tags.is_empty() {
-                    return vec![(Row::Nothing, row("No tags".into(), String::new(), 4))];
-                }
-                tags.into_iter()
+                let mut rows: Vec<(Row, SettingData)> = tags
+                    .into_iter()
                     .enumerate()
                     .map(|(i, (tag, count))| {
                         let on = self.chosen.contains(&tag);
-                        (Row::Tag(i), SettingData { value: if on { format!("✓ {count}") } else { count.to_string() }.into(), on, ..toggle(&tag, on) })
+                        let tint = color(&self.tag_color(&tag));
+                        (Row::Tag(i), SettingData { value: if on { format!("✓ {count}") } else { count.to_string() }.into(), on, tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..toggle(&tag, on) })
                     })
-                    .collect()
+                    .collect();
+                if rows.is_empty() {
+                    rows.push((Row::Nothing, row("No tags".into(), String::new(), 4)));
+                } else {
+                    rows.push((Row::TagOptions, row("Hide a tag or give it a color".into(), "›".into(), 2)));
+                }
+                if !self.hidden.is_empty() {
+                    rows.push((Row::HiddenTags, row("Show a hidden tag".into(), format!("{} ›", self.hidden.len()), 2)));
+                }
+                rows
             }
+            Mode::TagPick => self
+                .tag_list()
+                .into_iter()
+                .enumerate()
+                .map(|(i, (tag, _))| {
+                    let tint = color(&self.tag_color(&tag));
+                    (Row::Pick(i), SettingData { tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..row(tag, "›".into(), 2) })
+                })
+                .collect(),
+            Mode::TagMenu => {
+                let named = COLORS.iter().find(|c| c.1 == self.tag_color(&self.picked)).map_or("None", |c| c.0);
+                vec![(Row::HideTag, row("Hide from the tag list".into(), String::new(), 2)), (Row::ColorTag, row("Color".into(), format!("{named} ›"), 2))]
+            }
+            Mode::TagColors => {
+                let current = self.tag_color(&self.picked);
+                let mut rows = vec![(Row::Color(0), SettingData { on: current.is_empty(), ..row("None".into(), if current.is_empty() { "Chosen".into() } else { String::new() }, 2) })];
+                rows.extend(COLORS.iter().enumerate().map(|(i, (name, hex))| {
+                    let tint = color(hex);
+                    (Row::Color(i + 1), SettingData { on: current == *hex, tint: tint.unwrap_or_default(), tinted: tint.is_some(), ..row((*name).into(), if current == *hex { "Chosen".into() } else { String::new() }, 2) })
+                }));
+                rows
+            }
+            Mode::Hidden => self.hidden.iter().enumerate().map(|(i, t)| (Row::Hidden(i), row(t.clone(), "Show".into(), 2))).collect(),
             Mode::Actions(i) => {
                 let from = self.part().is_some_and(|p| p["from"].is_object());
                 let favorite = self.items.get(i).is_some_and(|s| s["favorite"] == true);
@@ -338,6 +419,10 @@ impl Screen {
             Mode::Filters => "Sound: filters".into(),
             Mode::Sources => "Sound: library".into(),
             Mode::Tags => "Sound: tags".into(),
+            Mode::TagPick => "Sound: choose a tag".into(),
+            Mode::TagMenu => format!("Sound: tag {}", self.picked),
+            Mode::TagColors => format!("Sound: color of {}", self.picked),
+            Mode::Hidden => "Sound: hidden tags".into(),
         };
         let rows = self.rows().into_iter().map(|r| r.1).collect();
         let info = self.info();
@@ -347,6 +432,9 @@ impl Screen {
             Mode::Filters => "Filters",
             Mode::Sources => "Libraries",
             Mode::Tags => "Tags",
+            Mode::TagPick | Mode::Hidden => "Tags",
+            Mode::TagMenu => "Actions",
+            Mode::TagColors => "Colors",
         };
         self.b.show(&name, &title, noun, rows, info);
     }
@@ -358,6 +446,8 @@ impl Screen {
                 self.items = r["items"].as_array().cloned().unwrap_or_default();
                 self.total = r["total"].as_u64().unwrap_or(self.items.len() as u64);
                 self.tags = r["tags"].as_array().into_iter().flatten().filter_map(|t| Some((t["tag"].as_str()?.to_string(), t["count"].as_u64().unwrap_or(0)))).collect();
+                self.tag_colors = r["tagColors"].as_array().into_iter().flatten().filter_map(|t| Some((t["tag"].as_str()?.to_string(), t["color"].as_str()?.to_string()))).collect();
+                self.hidden = r["hiddenTags"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(String::from)).collect();
             }
             (Request::Libraries, Ok(r)) => {
                 self.libraries = r["libraries"].as_array().into_iter().flatten().filter_map(|l| Some((l["id"].as_str()?.to_string(), l["name"].as_str().unwrap_or_default().to_string(), l["items"].as_u64().unwrap_or(0)))).collect();
@@ -371,7 +461,7 @@ impl Screen {
                 let flagged = r["flagged"].as_array().map_or(0, Vec::len);
                 match (what, flagged) {
                     ("audition", _) => {}
-                    ("favorite", _) => self.query(), // the star shows at once: looked at again, as the reference's refresh
+                    ("favorite" | "tag", _) => self.query(), // the star or the tag shows at once: looked at again, as the reference's refresh
                     _ => {}
                 }
                 self.b.say(&match (what, flagged) {
@@ -421,6 +511,52 @@ impl Screen {
             (Row::Tags, _) => {
                 self.mode = Mode::Tags;
                 self.b.reset_cursor();
+            }
+            (Row::Compact, _) => {
+                self.compact = !self.compact;
+                let _ = crate::settings::keep_library_view(self.compact);
+            }
+            (Row::TagOptions, _) => {
+                self.mode = Mode::TagPick;
+                self.b.reset_cursor();
+            }
+            (Row::HiddenTags, _) => {
+                self.mode = Mode::Hidden;
+                self.b.reset_cursor();
+            }
+            (Row::Pick(i), _) => {
+                if let Some((tag, _)) = self.tag_list().get(i).cloned() {
+                    self.picked = tag;
+                    self.mode = Mode::TagMenu;
+                    self.b.reset_cursor();
+                }
+            }
+            (Row::HideTag, _) => {
+                // A hidden tag chosen as a filter stops filtering; its color is kept.
+                let tag = self.picked.clone();
+                self.chosen.retain(|t| *t != tag);
+                let color = self.tag_color(&tag);
+                self.out.push((Request::Do("tag"), "library.tag", json!({"tag": tag, "hidden": true, "color": color})));
+                self.mode = Mode::Tags;
+                self.b.reset_cursor();
+            }
+            (Row::ColorTag, _) => {
+                self.mode = Mode::TagColors;
+                self.b.reset_cursor();
+            }
+            (Row::Color(i), _) => {
+                let hex = if i == 0 { "" } else { COLORS.get(i - 1).map_or("", |c| c.1) };
+                self.out.push((Request::Do("tag"), "library.tag", json!({"tag": self.picked, "hidden": false, "color": hex})));
+                self.mode = Mode::TagMenu;
+                self.b.reset_cursor();
+            }
+            (Row::Hidden(i), _) => {
+                if let Some(tag) = self.hidden.get(i).cloned() {
+                    let color = self.tag_color(&tag);
+                    self.out.push((Request::Do("tag"), "library.tag", json!({"tag": tag, "hidden": false, "color": color})));
+                    self.mode = Mode::Tags;
+                    self.b.reset_cursor();
+                }
             }
             (Row::Source(i), _) => {
                 if let Some((id, _, _)) = self.sources().get(i) {
@@ -522,6 +658,9 @@ impl Screen {
                 _ => {
                     self.mode = match self.mode {
                         Mode::Sources | Mode::Tags => Mode::Filters,
+                        Mode::TagPick | Mode::Hidden => Mode::Tags,
+                        Mode::TagMenu => Mode::TagPick,
+                        Mode::TagColors => Mode::TagMenu,
                         _ => Mode::List,
                     };
                     self.b.reset_cursor();

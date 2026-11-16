@@ -107,7 +107,7 @@ fn the_filters_make_the_query() {
     assert_eq!(value_of(ui, "Filters"), "none ›");
     press_row(&mut c, ui, "Filters");
     assert_eq!(ui.global::<crate::PartState>().get_title().as_str(), "Sound: filters");
-    assert_eq!(labels(ui), ["Favorites", "Recent", "Library", "Tags"]);
+    assert_eq!(labels(ui), ["Favorites", "Recent", "Library", "Tags", "One line a Sound"]);
     assert_eq!(rows(ui).iter().map(|r| (r.kind, r.on)).collect::<Vec<_>>()[..2], [(1, false), (1, false)]);
     assert_eq!((value_of(ui, "Library").as_str(), value_of(ui, "Tags").as_str()), ("Everything ›", "none ›"));
     // Favorites, Recent: each a switch that asks again.
@@ -130,11 +130,11 @@ fn the_filters_make_the_query() {
     assert_eq!(sent(&mut c.out).pop().unwrap().1["source"], "mine");
     // Tags: the chosen first, then the most used; each press chooses or lets go, and asks again.
     press_row(&mut c, ui, "Tags");
-    assert_eq!(labels(ui), ["keys", "bass", "pad", "warm"]);
+    assert_eq!(labels(ui), ["keys", "bass", "pad", "warm", "Hide a tag or give it a color"]);
     assert_eq!(value_of(ui, "keys"), "2");
     press_row(&mut c, ui, "pad");
     assert_eq!(sent(&mut c.out).pop().unwrap().1["tags"], json!(["pad"]));
-    assert_eq!(labels(ui), ["pad", "keys", "bass", "warm"], "the chosen one first");
+    assert_eq!(labels(ui), ["pad", "keys", "bass", "warm", "Hide a tag or give it a color"], "the chosen one first");
     assert_eq!((value_of(ui, "pad").as_str(), rows(ui)[0].on), ("✓ 1", true));
     press_row(&mut c, ui, "keys");
     assert_eq!(sent(&mut c.out).pop().unwrap().1["tags"], json!(["pad", "keys"]), "all must match");
@@ -218,6 +218,74 @@ fn pictures(name: &str, setup: &dyn Fn(&mut Sounds, &Shell)) {
             png(&s, &format!("{name}-{id}-{size}"));
         }
     }
+}
+
+// With no Sound in the library the list offers saving the part as the first one (the save is in a Sound's actions, and
+// there is none to open); a search that finds nothing does not offer it.
+#[test]
+fn an_empty_library_offers_the_first_sound() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut c = open(&s);
+    c.reply(Request::Query, Ok(json!({"items": [], "total": 0, "tags": []})));
+    assert_eq!(labels(ui), ["Search", "Filters", "Save this part as the first Sound"]);
+    let out = press_row(&mut c, ui, "Save this part as the first Sound");
+    assert!(matches!(out, Outcome::Prompt(..)), "the name is asked on the keyboard");
+    c.entered("Lead");
+    assert_eq!(sent(&mut c.out).last().unwrap().0, "parts.saveSound");
+    // Narrowed by a search, an empty list is only that.
+    press_row(&mut c, ui, "Search");
+    c.entered("zzz");
+    c.reply(Request::Query, Ok(json!({"items": [], "total": 0, "tags": []})));
+    assert_eq!(labels(ui), ["Search", "Filters"]);
+}
+
+// Tags: a color shows on the tag's row, a tag is hidden (and stops filtering) or shown again, and the Sounds go to
+// one line each, kept in library-view.txt, all by the cursor and a press.
+#[test]
+fn tags_have_colors_and_can_be_hidden_and_sounds_one_line() {
+    let s = Screen::new();
+    let ui = &s.ui;
+    let mut c = open(&s);
+    let mut list = sounds();
+    list["tagColors"] = json!([{"tag": "keys", "color": "#46a758"}]);
+    list["hiddenTags"] = json!(["old"]);
+    c.reply(Request::Query, Ok(list));
+    press_row(&mut c, ui, "Filters");
+    press_row(&mut c, ui, "Tags");
+    let r = rows(ui);
+    assert_eq!((r[0].label.as_str(), r[0].tinted), ("keys", true), "the colored tag first, with its color");
+    assert!(!r[1].tinted);
+    assert_eq!(labels(ui).last().unwrap(), "Show a hidden tag");
+    // Choose keys to color: Hide a tag or give it a color > keys > Color > Blue.
+    press_row(&mut c, ui, "Hide a tag or give it a color");
+    press_row(&mut c, ui, "keys");
+    assert_eq!(labels(ui), ["Hide from the tag list", "Color"]);
+    assert_eq!(value_of(ui, "Color"), "Green ›");
+    press_row(&mut c, ui, "Color");
+    assert_eq!(labels(ui)[..3], ["None", "Red", "Orange"]);
+    press_row(&mut c, ui, "Blue");
+    let sent_now = sent(&mut c.out);
+    assert_eq!(sent_now.last().unwrap(), &("library.tag", json!({"tag": "keys", "hidden": false, "color": "#3e63dd"})));
+    // Hide it: the choice of it as a filter ends, its color is kept.
+    press_row(&mut c, ui, "Hide from the tag list");
+    assert_eq!(sent(&mut c.out).last().unwrap(), &("library.tag", json!({"tag": "keys", "hidden": true, "color": "#46a758"})));
+    // A hidden one comes back.
+    press_row(&mut c, ui, "Show a hidden tag");
+    assert_eq!(labels(ui), ["old"]);
+    press_row(&mut c, ui, "old");
+    assert_eq!(sent(&mut c.out).last().unwrap().1["hidden"], false);
+    // EXIT goes up one level each time: tags, filters, the list.
+    assert!(matches!(c.back(), Outcome::Stay));
+    assert_eq!(labels(ui)[0], "Favorites");
+    // One line a Sound, kept for the next time.
+    press_row(&mut c, ui, "One line a Sound");
+    assert!(crate::settings::library_view().0);
+    c.back();
+    assert_eq!(value_of(ui, "Warm Rhodes"), "");
+    press_row(&mut c, ui, "Filters");
+    press_row(&mut c, ui, "One line a Sound");
+    assert!(!crate::settings::library_view().0);
 }
 
 #[test]

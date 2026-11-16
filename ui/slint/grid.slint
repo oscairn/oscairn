@@ -434,7 +434,7 @@ component ViewPanel inherits Section {
     property <length> last;
     // The theme's color for a view's ink (src/views.rs `Ink`).
     pure function ink(i: int) -> color {
-        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : Theme.accent.with-alpha(Theme.wash-light);
+        return i == 0 ? Theme.accent : i == 1 ? Theme.muted : i == 2 ? Theme.border : i == 3 ? Theme.text : i == 4 ? Theme.raised : i == 5 ? Theme.track : i == 6 ? Theme.background : i == 7 ? Theme.accent.with-alpha(Theme.wash-light) : i == 8 ? Theme.keys-white : i == 9 ? Theme.wash-color : Theme.zone-faint;
     }
     pure function stroke(w: int) -> length {
         return w == 0 ? Theme.hair : w == 1 ? Theme.thin : Theme.cursor-width;

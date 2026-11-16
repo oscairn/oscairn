@@ -19,11 +19,18 @@ pub const REACH: f32 = 24.;
 pub enum Ink {
     Accent = 0,
     Muted = 1,
-    // 2 to 4: border, text, raised; 6: background (slint/grid.slint `ViewPanel.ink`).
+    Border = 2,
+    // 3, 4: text, raised (slint/grid.slint `ViewPanel.ink`).
     /// The border faintly: a plot's frame and baselines.
     Frame = 5,
+    Background = 6,
     /// The accent lightly: what a curve encloses.
     AccentWash = 7,
+    /// A key map's white keys.
+    Keys = 8,
+    /// The zone a key map is for, and the others.
+    Zone = 9,
+    ZoneFaint = 10,
 }
 
 /// A path in the panel's pixels: stroked (`width`: 0 a hairline, 1 thin, 2 the cursor's) or filled.
@@ -84,6 +91,8 @@ pub enum View {
     Envelope(Envelope),
     Filter(FilterShape),
     Lfo(LfoShape),
+    /// A key or velocity map, and the index (zone, element) it is for.
+    Map(MapShape, u64),
 }
 
 /// What a view reads: the grid's parameters and their values, the panel's size, and the parameter the
@@ -127,6 +136,7 @@ pub fn draw(view: &View, c: &Ctx) -> Drawn {
         View::Envelope(e) => draw_envelope(e, c),
         View::Filter(f) => draw_filter(f, c),
         View::Lfo(l) => draw_lfo(l, c),
+        View::Map(m, index) => draw_map(m, *index, c),
     }
 }
 
@@ -134,7 +144,7 @@ pub fn draw(view: &View, c: &Ctx) -> Drawn {
 /// previews (a filter's response, an LFO's wave) have none.
 pub fn grab(view: &View, c: &Ctx, at: (f32, f32)) -> Option<Held> {
     match view {
-        View::Envelope(_) => nearest(&draw(view, c).handles, at).map(Held::Node),
+        View::Envelope(_) | View::Map(..) => nearest(&draw(view, c).handles, at).map(Held::Node),
         View::Filter(_) | View::Lfo(_) => None,
     }
 }
@@ -150,6 +160,7 @@ pub fn touched(view: &View, c: &Ctx, held: &Held) -> Vec<usize> {
 pub fn drag(view: &View, c: &Ctx, held: &Held, at: (f32, f32)) -> Vec<(usize, f64)> {
     match (view, held) {
         (View::Envelope(e), Held::Node(k)) => envelope_drag(e, c, *k, at),
+        (View::Map(m, index), Held::Node(k)) => map_drag(m, *index, c, *k, at),
         _ => vec![],
     }
 }
@@ -166,6 +177,263 @@ fn centered(text: &str, (l, t, r, b): (f32, f32, f32, f32)) -> Label {
 /// A one-pixel row or column of a frame sits on a pixel: `v` to the pixel's middle.
 fn crisp(v: f32) -> f32 {
     v.floor() + 0.5
+}
+
+// The key and velocity map (ParameterGrid::KeyMap): the zones as rectangles over the keys (across) and the
+// velocities (up), the one this index owns in the accent; its level scaling across the keys from the
+// breakpoint; and velocity's effect on level in a box at the right. Drag a zone's edge, the breakpoint, a
+// scaling end or the velocity line to set its parameter.
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Zone {
+    pub index: u64,
+    pub key_low: Option<usize>,
+    pub key_high: Option<usize>,
+    pub velocity_low: Option<usize>,
+    pub velocity_high: Option<usize>,
+}
+
+/// A key or velocity map a plugin describes: its zones' key and velocity ranges (one per index), and one
+/// index's level scaling across the keys and by velocity. Indexes are the grid's parameters'.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MapShape {
+    pub zones: Vec<Zone>,
+    pub breakpoint: Option<usize>,
+    pub left_depth: Option<usize>,
+    pub right_depth: Option<usize>,
+    pub left_curve: Option<usize>,
+    pub right_curve: Option<usize>,
+    pub velocity_depth: Option<usize>,
+    pub velocity_curve: Option<usize>,
+}
+
+impl MapShape {
+    pub fn empty(&self) -> bool {
+        self.zones.is_empty() && self.breakpoint.is_none() && self.velocity_depth.is_none()
+    }
+}
+
+pub fn is_map_field(field: &str) -> bool {
+    matches!(field, "keyLow" | "keyHigh" | "velocityLow" | "velocityHigh" | "breakpoint" | "leftDepth" | "rightDepth" | "leftCurve" | "rightCurve" | "velocityDepth" | "velocityCurve")
+}
+
+/// The map of `view` as `index` sees it: every index's zone, and that index's scaling.
+pub fn map_of(params: &[Param], view: u64, index: u64) -> MapShape {
+    let mut m = MapShape::default();
+    if view == 0 {
+        return m;
+    }
+    for (i, p) in params.iter().enumerate().filter(|(_, p)| p.view == view) {
+        if matches!(p.field.as_str(), "keyLow" | "keyHigh" | "velocityLow" | "velocityHigh") {
+            let at = match m.zones.iter().position(|z| z.index == p.index) {
+                Some(at) => at,
+                None => {
+                    m.zones.push(Zone { index: p.index, ..Default::default() });
+                    m.zones.len() - 1
+                }
+            };
+            let z = &mut m.zones[at];
+            match p.field.as_str() {
+                "keyLow" => z.key_low = Some(i),
+                "keyHigh" => z.key_high = Some(i),
+                "velocityLow" => z.velocity_low = Some(i),
+                _ => z.velocity_high = Some(i),
+            }
+        }
+        if p.index != index {
+            continue;
+        }
+        match p.field.as_str() {
+            "breakpoint" => m.breakpoint = Some(i),
+            "leftDepth" => m.left_depth = Some(i),
+            "rightDepth" => m.right_depth = Some(i),
+            "leftCurve" => m.left_curve = Some(i),
+            "rightCurve" => m.right_curve = Some(i),
+            "velocityDepth" => m.velocity_depth = Some(i),
+            "velocityCurve" => m.velocity_curve = Some(i),
+            _ => {}
+        }
+    }
+    m.zones.sort_by_key(|z| z.index);
+    m
+}
+
+/// What dragging a map's handle sets: a key, a velocity, a scaling depth, velocity's depth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pull {
+    Across,
+    Up,
+    Depth,
+    Velocity,
+}
+
+type Area = (f32, f32, f32, f32);
+
+struct MapGeometry {
+    plane: Area,
+    keys: Area,
+    velocity: Option<Area>,
+    /// The handles: where, the parameter (the grid's), what dragging sets.
+    handles: Vec<((f32, f32), usize, Pull)>,
+}
+
+fn width_of(a: Area) -> f32 {
+    a.2 - a.0
+}
+
+fn height_of(a: Area) -> f32 {
+    a.3 - a.1
+}
+
+/// A map's parameter as 0 to 1, or `otherwise` without one.
+fn map_value(c: &Ctx, p: Option<usize>, otherwise: f64) -> f64 {
+    p.map_or(otherwise, |p| (c.norm)(p))
+}
+
+fn map_at(c: &Ctx, plane: Area, p: Option<usize>) -> f32 {
+    plane.0 + map_value(c, p, 0.) as f32 * width_of(plane)
+}
+
+/// A zone's rectangle: left, top, right, bottom.
+fn zone_rect(c: &Ctx, plane: Area, z: &Zone) -> Area {
+    let left = plane.0 + map_value(c, z.key_low, 0.) as f32 * width_of(plane);
+    let right = plane.0 + map_value(c, z.key_high, 1.) as f32 * width_of(plane);
+    let top = plane.3 - map_value(c, z.velocity_high, 1.) as f32 * height_of(plane);
+    let bottom = plane.3 - map_value(c, z.velocity_low, 0.) as f32 * height_of(plane);
+    (left.min(right), top.min(bottom), left.max(right), top.max(bottom))
+}
+
+/// The scaled level at `x`, from the middle: up or down by each side's depth, straight or curved as its
+/// curve's value text says ("-LIN", "+EXP"; a minus lowers it).
+fn map_scaled(m: &MapShape, c: &Ctx, plane: Area, x: f32) -> f32 {
+    let b = map_at(c, plane, m.breakpoint);
+    let left = x < b;
+    let (depth, curve) = if left { (m.left_depth, m.left_curve) } else { (m.right_depth, m.right_curve) };
+    let span = if left { b - plane.0 } else { plane.2 - b };
+    let mut t = if span > 0. { (x - b).abs() / span } else { 0. };
+    let shape = curve.map(|k| (c.text)(k).to_uppercase()).unwrap_or_default();
+    if shape.contains("EXP") {
+        t *= t;
+    }
+    let sign = if shape.starts_with('-') { -1. } else { 1. };
+    (plane.1 + plane.3) / 2. - sign * t * map_value(c, depth, 0.) as f32 * height_of(plane) / 2.
+}
+
+/// Where the velocity line starts: the level at the softest velocity.
+fn map_quiet(m: &MapShape, c: &Ctx, velocity: Area) -> f32 {
+    velocity.1 + map_value(c, m.velocity_depth, 0.) as f32 * height_of(velocity)
+}
+
+fn map_geometry(m: &MapShape, index: u64, c: &Ctx) -> MapGeometry {
+    let (left, top, right, bottom) = plot(c);
+    let mut keys = (left, bottom - 14., right, bottom);
+    let mut plane = (left, top, right, bottom - 14.);
+    let velocity = m.velocity_depth.map(|_| {
+        let width = 90f32.min(width_of(plane) / 4.);
+        let v = (plane.2 - width + 12., plane.1, plane.2, plane.3);
+        plane.2 -= width;
+        v
+    });
+    if let Some(v) = velocity {
+        keys.2 = v.0 - 12.;
+    }
+    let mut handles = Vec::new();
+    for z in m.zones.iter().filter(|z| z.index == index) {
+        let r = zone_rect(c, plane, z);
+        let (mid_x, mid_y) = ((r.0 + r.2) / 2., (r.1 + r.3) / 2.);
+        if let Some(p) = z.key_low {
+            handles.push(((r.0, mid_y), p, Pull::Across));
+        }
+        if let Some(p) = z.key_high {
+            handles.push(((r.2, mid_y), p, Pull::Across));
+        }
+        if let Some(p) = z.velocity_high {
+            handles.push(((mid_x, r.1), p, Pull::Up));
+        }
+        if let Some(p) = z.velocity_low {
+            handles.push(((mid_x, r.3), p, Pull::Up));
+        }
+    }
+    if let Some(b) = m.breakpoint {
+        handles.push(((map_at(c, plane, Some(b)), (plane.1 + plane.3) / 2.), b, Pull::Across));
+        if let Some(p) = m.left_depth {
+            handles.push(((plane.0, map_scaled(m, c, plane, plane.0)), p, Pull::Depth));
+        }
+        if let Some(p) = m.right_depth {
+            handles.push(((plane.2, map_scaled(m, c, plane, plane.2)), p, Pull::Depth));
+        }
+    }
+    if let (Some(v), Some(p)) = (velocity, m.velocity_depth) {
+        handles.push(((v.0, map_quiet(m, c, v)), p, Pull::Velocity));
+    }
+    MapGeometry { plane, keys, velocity, handles }
+}
+
+/// A rectangle drawn inside its edge, `stroke` wide.
+fn inner_rect(a: Area, stroke: f32) -> String {
+    rect_path(a.0 + stroke / 2., a.1 + stroke / 2., width_of(a) - stroke, height_of(a) - stroke)
+}
+
+fn small_label(x: f32, y: f32, w: f32, text: String, align: i32) -> Label {
+    Label { x, y, w, h: 14., text, ink: Ink::Muted, bold: false, align }
+}
+
+fn draw_map(m: &MapShape, index: u64, c: &Ctx) -> Drawn {
+    let g = map_geometry(m, index, c);
+    let mut d = Drawn { title: "Key map".into(), ..Default::default() };
+    // The keys under the plane, an octave's black keys where a keyboard has them.
+    d.shapes.push(Shape { ink: Ink::Keys, fill: true, width: 2, commands: rect_path(g.keys.0, g.keys.1, width_of(g.keys), height_of(g.keys)) });
+    let mut black = String::new();
+    for note in 0..128 {
+        if matches!(note % 12, 1 | 3 | 6 | 8 | 10) {
+            let w = width_of(g.keys) / 128.;
+            black += &(rect_path(g.keys.0 + width_of(g.keys) * note as f32 / 128., g.keys.1, w, height_of(g.keys) * 0.6) + " ");
+        }
+    }
+    d.shapes.push(Shape { ink: Ink::Background, fill: true, width: 2, commands: black });
+    d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: inner_rect(g.plane, 1.) });
+    for z in &m.zones {
+        let r = zone_rect(c, g.plane, z);
+        let mine = z.index == index;
+        d.shapes.push(Shape { ink: if mine { Ink::Zone } else { Ink::ZoneFaint }, fill: true, width: 2, commands: rect_path(r.0, r.1, width_of(r), height_of(r)) });
+        d.shapes.push(Shape { ink: if mine { Ink::Accent } else { Ink::Muted }, fill: false, width: if mine { 1 } else { 0 }, commands: inner_rect(r, if mine { 1.5 } else { 1. }) });
+        if m.zones.len() > 1 {
+            d.labels.push(small_label(r.0 + 4., r.1 + 2., (width_of(r) - 8.).max(0.), z.index.to_string(), 0));
+        }
+    }
+    if let Some(b) = m.breakpoint {
+        let x = map_at(c, g.plane, Some(b)).floor() + 0.5;
+        d.shapes.push(Shape { ink: Ink::Border, fill: false, width: 0, commands: format!("M {x:.2} {:.2} L {x:.2} {:.2}", g.plane.1, g.plane.3) });
+        let mut points = Vec::new();
+        let mut x = g.plane.0;
+        while x <= g.plane.2 {
+            points.push((x, map_scaled(m, c, g.plane, x)));
+            x += 2.;
+        }
+        d.shapes.push(Shape { ink: Ink::Accent, fill: false, width: 2, commands: poly(&points) });
+        d.labels.push(small_label(map_at(c, g.plane, Some(b)) + 4., g.plane.1 + 2., 80., (c.text)(b), 0));
+    }
+    if let (Some(v), Some(_)) = (g.velocity, m.velocity_depth) {
+        d.shapes.push(Shape { ink: Ink::Frame, fill: false, width: 0, commands: inner_rect(v, 1.) });
+        d.shapes.push(Shape { ink: Ink::Accent, fill: false, width: 2, commands: poly(&[(v.0, map_quiet(m, c, v)), (v.2, v.1)]) });
+        d.labels.push(Label { x: v.0, y: g.keys.1, w: width_of(v), h: height_of(g.keys), text: "Velocity".into(), ink: Ink::Muted, bold: false, align: 1 });
+    }
+    d.handles = g.handles.iter().map(|(at, p, _)| Handle { at: *at, params: vec![*p] }).collect();
+    d
+}
+
+fn map_drag(m: &MapShape, index: u64, c: &Ctx, k: usize, at: (f32, f32)) -> Vec<(usize, f64)> {
+    let g = map_geometry(m, index, c);
+    let Some(&(_, param, pull)) = g.handles.get(k) else { return vec![] };
+    let across = ((at.0 - g.plane.0) / width_of(g.plane)).clamp(0., 1.);
+    let up = ((g.plane.3 - at.1) / height_of(g.plane)).clamp(0., 1.);
+    let v = match pull {
+        Pull::Across => across,
+        Pull::Up => up,
+        Pull::Depth => ((at.1 - (g.plane.1 + g.plane.3) / 2.).abs() / (height_of(g.plane) / 2.)).clamp(0., 1.),
+        Pull::Velocity => g.velocity.map_or(0., |v| ((at.1 - v.1) / height_of(v)).clamp(0., 1.)),
+    };
+    vec![(param, c.params[param].denorm(f64::from(v)))]
 }
 
 // The filter (ParameterGrid::Filter): its response across the audio range, from its cutoff (across) and

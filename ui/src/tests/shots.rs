@@ -97,9 +97,11 @@ pub(super) fn view_shot(list: &serde_json::Value, values: &[(u32, f64)], text: &
         }
     }
     let expected = (f64::from(panel.h) * k).round() as usize;
-    let same: Vec<&(usize, usize)> = bands.iter().filter(|b| b.1.abs_diff(expected) <= 2).collect();
+    // A panel may be several bands (a key map's black keys leave its lower rows less lit): bands that together
+    // span the panel's height from the first one's top.
+    let same: Vec<usize> = (0..bands.len()).filter(|&i| bands[i..].iter().any(|b| (b.0 + b.1 - bands[i].0).abs_diff(expected) <= 2)).map(|i| bands[i].0).collect();
     let before = panels(&s.ui)[..which].iter().filter(|q| (q.h - panel.h).abs() < 0.5).count();
-    let (y0, _) = **same.get(before).unwrap_or_else(|| panic!("{w}x{h}@{scale}: the panel's rows (wanted {expected} tall) in {bands:?}"));
+    let y0 = *same.get(before).unwrap_or_else(|| panic!("{w}x{h}@{scale}: the panel's rows (wanted {expected} tall) in {bands:?}"));
     let x0 = (0..w).find(|&x| lit(x, y0 + expected / 2)).expect("the panel's left edge");
     (Shot { s, panel, origin: (x0 as f64, y0 as f64), k }, p)
 }
@@ -146,6 +148,7 @@ pub(super) fn line_offsets(shot: &Shot, path: &str) -> (usize, f64) {
         }
         along += len;
     }
+    let handles: Vec<(f64, f64)> = shot.panel.points.iter().map(|p| shot.screen((f64::from(p.x), f64::from(p.y)))).collect();
     let (mut count, mut worst) = (0, 0f64);
     for j in 2..at.len().saturating_sub(2) {
         let (a, b, c) = (at[j - 2], at[j], at[j + 2]);
@@ -153,6 +156,9 @@ pub(super) fn line_offsets(shot: &Shot, path: &str) -> (usize, f64) {
         let (l1, l2) = (d1.0.hypot(d1.1), d2.0.hypot(d2.1));
         if l1 < 1e-6 || l2 < 1e-6 || (d1.0 * d2.0 + d1.1 * d2.1) / (l1 * l2) < 0.98 {
             continue; // a corner or a step: the line is not straight here
+        }
+        if handles.iter().any(|h| (h.0 - b.0).hypot(h.1 - b.1) < 9. * shot.k) {
+            continue; // under a handle's ring
         }
         let t = (c.0 - a.0, c.1 - a.1);
         let tl = t.0.hypot(t.1);

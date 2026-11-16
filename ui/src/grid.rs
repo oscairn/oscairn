@@ -25,6 +25,7 @@ const HEADING: f32 = 30.;
 const ENVELOPE: f32 = 180.;
 const LFO: f32 = 140.;
 const FILTER: f32 = 160.;
+const MAP: f32 = 180.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
@@ -261,10 +262,15 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
         // The envelopes the plugin describes, each a panel across the row, then one recognized by name.
         let mut described: Vec<Vec<usize>> = Vec::new();
         let mut keys: Vec<(u64, u64)> = Vec::new();
+        let mut maps: Vec<(u64, u64)> = Vec::new(); // views and indexes of key and velocity maps
         for &i in members {
             let p = &params[i];
-            if p.view != 0 && is_envelope(&p.field) && !keys.contains(&(p.view, p.index)) {
-                keys.push((p.view, p.index));
+            if p.view == 0 {
+                continue;
+            }
+            let list = if is_envelope(&p.field) { &mut keys } else { &mut maps };
+            if (is_envelope(&p.field) || views::is_map_field(&p.field)) && !list.contains(&(p.view, p.index)) {
+                list.push((p.view, p.index));
             }
         }
         let panel = |out: &mut Laid, y: &mut f32, view: View, high: f32, list: Vec<usize>| {
@@ -280,6 +286,12 @@ pub fn layout(params: &[Param], groups: &[(String, Vec<usize>)], width: f32, gap
             }
             described.push(linked_order(&shape).into_iter().map(|k| list[k]).collect());
             panel(&mut out, &mut y, View::Envelope(shape), ENVELOPE, list);
+        }
+        for (view, index) in maps {
+            let shape = views::map_of(params, view, index);
+            if !shape.empty() {
+                panel(&mut out, &mut y, View::Map(shape, index), MAP, vec![]);
+            }
         }
         // Among the parameters in no view, by name: a filter, an LFO, then an envelope (their tiles' runs
         // go envelope, LFO, filter).

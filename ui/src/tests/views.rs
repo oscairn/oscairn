@@ -235,6 +235,150 @@ fn the_filter_response_follows_the_reference() {
     assert_eq!(filter_db(R::LowPass, 2, 1., 80.), 24., "clamped at +24 dB");
 }
 
+/// A parameter that is part of a view: its number, its field's name and the zone or element it is of.
+#[allow(clippy::too_many_arguments)]
+fn viewed(id: u32, name: &str, max: f64, stepped: bool, view: u32, field: &str, index: u32) -> serde_json::Value {
+    let mut p = plugin_param(id, name, max, stepped, "auto", 0, 0);
+    p["view"] = json!(view);
+    p["field"] = json!(field);
+    p["index"] = json!(index);
+    p
+}
+
+// A sampler-like key map: two zones (the first is the one shown, kept in the top left away from the
+// scaling line), the first's level scaling about a breakpoint with a depth and a curve a side, and
+// velocity's depth.
+fn map_plugin() -> serde_json::Value {
+    json!({"parameters": [
+        viewed(1, "Low key 1", 127., true, 1, "keyLow", 1),
+        viewed(2, "High key 1", 127., true, 1, "keyHigh", 1),
+        viewed(3, "Low velocity 1", 127., true, 1, "velocityLow", 1),
+        viewed(4, "High velocity 1", 127., true, 1, "velocityHigh", 1),
+        viewed(5, "Low key 2", 127., true, 1, "keyLow", 2),
+        viewed(6, "High key 2", 127., true, 1, "keyHigh", 2),
+        viewed(7, "Breakpoint", 127., true, 1, "breakpoint", 1),
+        viewed(8, "Left depth", 99., false, 1, "leftDepth", 1),
+        viewed(9, "Right depth", 99., false, 1, "rightDepth", 1),
+        viewed(10, "Left curve", 3., true, 1, "leftCurve", 1),
+        viewed(11, "Right curve", 3., true, 1, "rightCurve", 1),
+        viewed(12, "Velocity depth", 7., false, 1, "velocityDepth", 1),
+    ]})
+}
+
+fn map_text(id: u32, v: f64) -> String {
+    match id {
+        10 | 11 => ["-LIN", "-EXP", "+EXP", "+LIN"].get(v as usize).copied().unwrap_or("?").into(),
+        7 => format!("C{}", (v as i64) / 12 - 1),
+        _ => format!("{v:.0}"),
+    }
+}
+
+fn map_values() -> Vec<(u32, f64)> {
+    vec![(1, 10.), (2, 40.), (3, 90.), (4, 127.), (5, 50.), (6, 100.), (7, 64.), (8, 39.6), (9, 69.3), (10, 1.), (11, 3.), (12, 3.5)]
+}
+
+/// The plane of a key map as it was drawn: from its frame (the third shape, a rectangle drawn inside its edge).
+fn plane_of(panel: &crate::GridPanel) -> (f32, f32, f32, f32) {
+    let v = super::envelope::vertices(&panel.shapes.row_data(2).unwrap().commands);
+    ((v[0].0 - 0.5) as f32, (v[0].1 - 0.5) as f32, (v[2].0 + 0.5) as f32, (v[2].1 + 0.5) as f32)
+}
+
+// A map is drawn for each zone's index that the page carries (its own zone and scaling in the accent), at
+// the reference's height, with a handle for each edge, the breakpoint, the depths and the velocity line.
+#[test]
+fn a_key_map_is_described_by_the_plugin_and_drawn_per_index() {
+    let mut s = Screen::new();
+    let ui = &s.ui.clone_strong();
+    let _p = open_with(&mut s, map_plugin(), &map_values(), &map_text);
+    let all = panels(ui);
+    assert_eq!(all.len(), 2, "one map per index");
+    assert!(all.iter().all(|p| p.title.as_str() == "Key map" && p.h == 180.));
+    assert_eq!((all[0].points.row_count(), all[1].points.row_count()), (8, 2), "4 zone edges, breakpoint, 2 depths, velocity; 2 key edges of the other zone");
+    let labels: Vec<String> = all[0].labels.iter().map(|l| l.text.to_string()).collect();
+    assert_eq!(labels, ["1", "2", "C4", "Velocity"], "the zones numbered, the breakpoint's text, the velocity box");
+    // The scaling at the plane's ends: the left depth is down (a minus curve) by its depth at the plane's
+    // end, the right is up by its depth (a plus curve); the breakpoint handle is on the middle line.
+    let (l, t, r, b) = plane_of(&all[0]);
+    let mid = (t + b) / 2.;
+    let handle = |k: usize| {
+        let q = all[0].points.row_data(k).unwrap();
+        (q.x, q.y)
+    };
+    let (bp, left, right) = (handle(4), handle(5), handle(6));
+    assert!((bp.1 - mid).abs() < 0.01 && (bp.0 - (l + 64. / 127. * (r - l))).abs() < 0.01);
+    assert!((left.0 - l).abs() < 0.01 && (left.1 - (mid + 0.4 * (b - t) / 2.)).abs() < 0.01, "-EXP: lowered by .4 of the half height at the end: {left:?}");
+    assert!((right.0 - r).abs() < 0.01 && (right.1 - (mid - 0.7 * (b - t) / 2.)).abs() < 0.01, "+LIN: raised by .7: {right:?}");
+}
+
+// Touch on a map's handle sets its parameter inside a gesture: a zone's edge across or up, the breakpoint
+// across, a depth by its distance from the middle line, the velocity's depth down the box; at the edges of
+// the plane the values stop; a touch away from every handle takes nothing.
+#[test]
+fn a_key_map_is_dragged_by_touch() {
+    let mut s = Screen::new();
+    let ui = &s.ui.clone_strong();
+    let mut p = open_with(&mut s, map_plugin(), &map_values(), &map_text);
+    sent(&mut p.out);
+    let at = |k: usize| {
+        let q = panels(ui)[0].points.row_data(k).unwrap();
+        (q.x, q.y)
+    };
+    let (l, t, r, b) = plane_of(&panels(ui)[0]);
+    let mid = (t + b) / 2.;
+    assert!(!p.view_down(0, l + 3., t - 12.), "away from every handle");
+    // The first zone's low key (handle 0): across, to the plane's far left and right.
+    let (x, y) = at(0);
+    assert!(p.view_down(0, x + 2., y + 1.));
+    p.view_move(0, l - 500., y);
+    p.view_move(0, r + 500., y);
+    p.view_up(0);
+    let out = sent(&mut p.out);
+    assert_eq!(out.iter().filter(|o| o.0 == "params.set").map(|o| o.1.clone()).collect::<Vec<_>>(), [set(1, 0.).1, set(1, 127.).1]);
+    assert_eq!((out.first().unwrap(), out.last().unwrap()), (&gesture(1, true), &gesture(1, false)));
+    // Its high velocity (handle 2): up, to the top and the bottom of the plane.
+    let (x, y) = at(2);
+    assert!(p.view_down(0, x, y));
+    p.view_move(0, x, b + 500.);
+    p.view_move(0, x, t - 500.);
+    p.view_up(0);
+    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
+    assert_eq!(sets, [set(4, 0.).1, set(4, 127.).1]);
+    // The left depth (handle 5): the middle line is none, the top or bottom of the plane the most.
+    let (x, y) = at(5);
+    assert!(p.view_down(0, x + 1., y));
+    p.view_move(0, x, mid);
+    p.view_move(0, x, t);
+    p.view_up(0);
+    let sets: Vec<f64> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1["values"][0]["value"].as_f64().unwrap()).collect();
+    assert!(sets.len() == 2 && sets[0] == 0. && (sets[1] - 99.).abs() < 1e-3, "{sets:?}");
+    // The velocity line's soft end (handle 7): down the box.
+    let (x, y) = at(7);
+    assert!(p.view_down(0, x + 1., y));
+    p.view_move(0, x, t - 500.);
+    p.view_move(0, x, b + 500.);
+    p.view_up(0);
+    let sets: Vec<serde_json::Value> = sent(&mut p.out).into_iter().filter(|o| o.0 == "params.set").map(|o| o.1).collect();
+    assert_eq!(sets, [set(12, 0.).1, set(12, 7.).1]);
+    // The breakpoint marks its tile when the cursor is on it.
+    assert!(panels(ui)[0].points.iter().all(|q| !q.lit));
+}
+
+// The scaling line of a key map is drawn from its own points, unscaled, as the others are.
+#[test]
+fn the_key_map_scaling_line_is_drawn_where_its_path_is() {
+    let mut list = map_plugin();
+    // The shown zone in the top left, the other muted: away from the scaling line, whose ends sit about the middle.
+    list["parameters"].as_array_mut().unwrap().retain(|p| p["id"].as_u64().unwrap() != 5 && p["id"].as_u64().unwrap() != 6);
+    let mut values = map_values();
+    values.retain(|v| v.0 != 5 && v.0 != 6);
+    values[1].1 = 30.; // the high key
+    values[2].1 = 100.; // the low velocity
+    // Right depth and curves: a straight right and a curved left.
+    // Shapes: the keys, the black keys, the frame, the zone (fill and edge), the breakpoint, the scaling line.
+    let report = check_line("scaling", &list, &values, &map_text, 0, 6);
+    println!("{report}");
+}
+
 /// A page's picture under the default theme at 1 and at the FANTOM's 1.55 (target/screens) and under the odd
 /// theme (target/theme-shots), as NAME, NAME@1.55 and NAME-odd.
 fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &dyn Fn(u32, f64) -> String) {
@@ -256,6 +400,7 @@ fn pictures(name: &str, list: serde_json::Value, values: &[(u32, f64)], text: &d
 fn view_pictures() {
     pictures("grid-lfo", lfo_plugin(), &lfo_values(0.), &lfo_text);
     pictures("grid-filter", filter_plugin(), &filter_values(1.), &filter_text);
+    pictures("grid-keymap", map_plugin(), &map_values(), &map_text);
 }
 
 // The wave's line is drawn from its own points, unscaled: the pixels of the line lie on the path at two

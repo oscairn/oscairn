@@ -97,7 +97,7 @@ key map, FM operators.
 | Envelope | `Envelope` L478-570 | a node: time across, level up | views.rs `draw_envelope`, grid.rs `envelope_layout` | done (names: ADSR only; DX7 and FM-X names not ported) |
 | Filter response | `Filter` L359-415 | none (a preview) | views.rs `draw_filter`, `filter_of`, `filter_named`, `filter_db`; pixel test tests/views.rs | done |
 | LFO waveform | `Lfo` L419-473 | none (a preview) | views.rs `draw_lfo`, `lfo_of`, `wave_named`; pixel test tests/views.rs | done |
-| Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | | not yet |
+| Key / velocity map | `KeyMap` L594-724 | zone edges, breakpoint, depths, velocity | views.rs `draw_map`, `map_of`, `map_drag`; tests/views.rs | done |
 | FM operators | `Operators` L731-916 | algorithm, level bars, ratio | | not yet |
 
 ## Checklist (shell)
@@ -114,7 +114,7 @@ Control kinds:
 - [x] range (two-sided; dial moves the low end, a second press the high end)
 - [x] value display: read-only and every tile's plugin text
 - [x] envelope view (named stages and points)
-- [ ] key or velocity map view (used by the FM and sample engines)
+- [x] key or velocity map view (used by the FM and sample engines; touch: zone edges, the breakpoint, the depths and the velocity line are dragged)
 - [ ] FM operator view with algorithm diagram (FM, VA's and PCM's FM-style views)
 - [x] filter response view (recognized by name: Cutoff + Resonance + Type; a preview, its tiles edit it)
 - [x] LFO waveform view (recognized by name: Wave/Shape + Rate/Speed; a preview, its tiles edit it)
